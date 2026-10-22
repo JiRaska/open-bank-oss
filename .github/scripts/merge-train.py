@@ -3386,22 +3386,28 @@ def self_test() -> int:
             # A fix behind main is never merged untested against main (#13517 merged it without update):
             # it is update-branched first, holds main while CI runs on the COMBINED head, and merges only
             # once that head verifies — fix set green, every other context green or red on main too.
-            def fix_behind(combined=None, main_also_red=()):
-                """pW (#35, red on MR) + the fix pW2 (#36, green over base0 red on MR) behind a red main.
-                Settles once (update-branch), gives the combined head `combined` checks (None = still
-                running), settles again. Returns (first settle, second settle)."""
-                open_only("pW", "pW2")
+            def fix_behind(combined=None, main_also_red=(), fix="pW2", fix_head=None, tamper=None):
+                """pW (#35, red on MR) + the fix `fix` (default pW2 #36, green over base0 red on MR) behind
+                a red main. Settles once (update-branch), gives the combined head `combined` checks (None =
+                still running), settles again. Returns (first settle, second settle). `fix_head`: checks
+                on the fix's own head before the update; `tamper(pr)`: edits the fix PR before settling."""
+                fn = numbers[fix]
+                open_only("pW", fix)
+                if tamper:
+                    tamper(gh.prs[fn])
                 main_breaks(base_red=True)
                 for c in main_also_red:
                     gh.head_checks[gh.main_sha()][c] = "failure"
                 gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
+                if fix_head is not None:
+                    gh.head_checks[gh.prs[fn]["head"]["sha"]] = fix_head
                 first = settle_now()
-                if gh.updates != [36]:
+                if gh.updates != [fn]:
                     return first, None
                 if combined is None:
-                    gh.pending_shas.add(gh.prs[36]["head"]["sha"])
+                    gh.pending_shas.add(gh.prs[fn]["head"]["sha"])
                 else:
-                    gh.head_checks[gh.prs[36]["head"]["sha"]] = combined
+                    gh.head_checks[gh.prs[fn]["head"]["sha"]] = combined
                 return first, settle_now()
 
             s1, s2 = fix_behind(None)
@@ -3433,6 +3439,28 @@ def self_test() -> int:
             check("main red: a combined fix head green everywhere merges",
                   gh.merged == [36] and s1.get("waiting", []) == [35], f"merged={gh.merged} {s1} {s2}")
             main_red_done()
+
+            # The fix path takes manual-lane paths exactly as the strict lane does (pW2 touches
+            # .github/scripts — the merge above), and refuses everything strict_lane_state refuses.
+            for label, kw in [
+                    ("adds a symlink", {"fix": "pS"}),
+                    ("is a draft", {"tamper": lambda p: p.update(draft=True)}),
+                    ("is from a fork", {"tamper": lambda p: p["head"].update(repo={"full_name": "fork/r"})}),
+                    ("is refused by agent-pr-guard", {"fix_head": {"gates / agent-pr-guard": "failure"}})]:
+                s1, s2 = fix_behind({}, **kw)
+                fn = numbers[kw.get("fix", "pW2")]
+                check(f"main red: a fix that {label} is neither updated nor merged",
+                      gh.merged == [] and fn not in gh.updates and not strict_desc(fn)[0],
+                      f"merged={gh.merged} updates={gh.updates} {s1} {s2} status={strict_desc(fn)}")
+                main_red_done()
+            def no_git(*_a, **_k):
+                raise AssertionError("fix_head_state reached git for an unsafe path")
+            try:
+                ctl = fix_head_state(gh, no_git, "b", {"files": ["a\nb"], "head_sha": "h"}, [MR], {}, None, [],
+                                     {MR: "m"})
+            except AssertionError as e:
+                ctl = (e,)
+            check("fix path: a control-character path is refused before any git call", ctl[0] is None, str(ctl))
 
             # Main red: a green PR whose CI ran over a GREEN base is not a fix — no update-branch onto
             # the red tip (it would only manufacture main-caused red), and no merge.
