@@ -1,0 +1,59 @@
+{
+  "irVersion": 1,
+  "productCode": "SAV-FIXED",
+  "currency": "EUR",
+  "interest": {
+    "ruleId": "interest.base",
+    "rateType": "FIXED",
+    "rate": "0.0250",
+    "dayCount": "ACT_365_FIXED",
+    "accrualCadence": "DAILY",
+    "capitalisationCadence": "MONTHLY",
+    "accrualRounding": "INTEREST_ACCRUAL",
+    "postingRounding": "LEDGER_POSTING",
+    "bonus": {
+      "ruleId": "interest.bonus",
+      "rate": "0.0100",
+      "predicate": {
+        "type": "and",
+        "operands": [
+          { "type": "noEvents", "kind": "WITHDRAWAL", "window": { "days": 30 } },
+          { "type": "balanceMin", "window": { "days": 30 }, "operator": "GTE", "amount": "1000.00" }
+        ]
+      }
+    }
+  },
+  "fees": [
+    {
+      "ruleId": "fee.maintenance",
+      "feeCode": "MAINT",
+      "amount": "5.00",
+      "cadence": "MONTHLY",
+      "accountingClass": "FEE_INCOME",
+      "waiver": { "type": "comparison", "attribute": "BALANCE", "operator": "GTE", "threshold": "50000.00", "currency": "EUR" }
+    }
+  ],
+  "hooks": {
+    "onOpen": [
+      { "ruleId": "open.schedule-accrual", "action": { "type": "SCHEDULE", "hook": "scheduled", "tag": "ACCRUAL", "cadence": "DAILY" } },
+      { "ruleId": "open.schedule-capitalisation", "action": { "type": "SCHEDULE", "hook": "scheduled", "tag": "CAPITALISATION", "cadence": "MONTHLY" } },
+      { "ruleId": "open.schedule-fee", "action": { "type": "SCHEDULE", "hook": "scheduled", "tag": "FEE_MAINT", "cadence": "MONTHLY" } },
+      { "ruleId": "open.welcome", "action": { "type": "NOTIFY", "templateId": "savings-welcome", "variables": { "productCode": "SAV-FIXED" } } }
+    ],
+    "prePosting": [
+      {
+        "ruleId": "posting.no-overdraft",
+        "when": { "type": "postingComparison", "attribute": "PROJECTED_BALANCE", "operator": "LT", "threshold": "0.00" },
+        "action": { "type": "REJECT", "reasonCode": "INSUFFICIENT_FUNDS" }
+      }
+    ],
+    "scheduled": [
+      { "ruleId": "scheduled.accrue", "trigger": "ACCRUAL", "action": { "type": "ACCRUE_INTEREST" } },
+      { "ruleId": "scheduled.capitalise", "trigger": "CAPITALISATION", "action": { "type": "CAPITALISE_INTEREST" } },
+      { "ruleId": "scheduled.fee", "trigger": "FEE_MAINT", "action": { "type": "CHARGE_FEE", "feeRuleId": "fee.maintenance" } }
+    ],
+    "onParameterChange": [
+      { "ruleId": "reprice.notify", "action": { "type": "NOTIFY", "templateId": "rate-changed", "variables": { "productCode": "SAV-FIXED" } } }
+    ]
+  }
+}

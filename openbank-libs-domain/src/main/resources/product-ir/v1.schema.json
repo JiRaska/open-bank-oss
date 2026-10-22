@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openbank.example/schemas/product-ir/v1.schema.json",
+  "title": "OpenBank Product IR v1",
+  "description": "ADR-0352 product IR v1 (deposit products) under the ADR-0258 trusted profile: additionalProperties false everywhere, closed enums, local $ref only, no scripts. Hard run limits (ADR-0352 section 2) are stated here as maxItems/maximum and repeated in com.openbank.libs.product.ir.IrLimits: maxInstructionsPerEvaluation = 64 (held by the interpreter at runtime), tiers <= 16, fees <= 32, predicate depth <= 8 (the schema's $ref recursion is bounded by the parser), rules per hook <= 32, notify variables <= 16, ruleId <= 64 chars, termMonths <= 600, window days <= 3660. Decimals are authored as JSON numbers or decimal strings; a rate or fraction carries at most 10 decimal places and an amount or threshold at most 4 (their canonical scales). ruleId is an explicit identifier, unique within the revision, never an index.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["irVersion", "productCode", "currency", "hooks"],
+  "properties": {
+    "irVersion": { "type": "integer", "const": 1 },
+    "productCode": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "interest": { "$ref": "#/$defs/interest" },
+    "fees": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/fee" } },
+    "termDeposit": { "$ref": "#/$defs/termDeposit" },
+    "hooks": { "$ref": "#/$defs/hooks" }
+  },
+  "$defs": {
+    "ruleId": { "type": "string", "pattern": "^[a-z][a-z0-9-]*(\\.[a-z0-9-]+)*$", "maxLength": 64 },
+    "rate": {
+      "description": "A rate or fraction: a decimal with at most 10 decimal places (canonical scale 10).",
+      "type": ["number", "string"],
+      "pattern": "^-?[0-9]+(\\.[0-9]{1,10})?$"
+    },
+    "amount": {
+      "description": "An amount or threshold: a decimal with at most 4 decimal places (canonical scale 4).",
+      "type": ["number", "string"],
+      "pattern": "^-?[0-9]+(\\.[0-9]{1,4})?$"
+    },
+    "cadence": { "type": "string", "enum": ["DAILY", "MONTHLY", "QUARTERLY", "ANNUALLY", "AT_MATURITY", "ON_EVENT"] },
+    "dayCount": { "type": "string", "enum": ["ACT_365_FIXED", "ACT_360", "ACT_ACT", "THIRTY_360_BOND_BASIS"] },
+    "operator": { "type": "string", "enum": ["GT", "GTE", "LT", "LTE", "EQ", "NEQ"] },
+    "eventKind": { "type": "string", "enum": ["DEPOSIT", "WITHDRAWAL", "CARD_PAYMENT", "TRANSFER_OUT", "TRANSFER_IN", "FEE", "INTEREST"] },
+    "roundingPolicy": {
+      "description": "A com.openbank.libs.domain.money.RoundingPolicy name (ADR-0318).",
+      "type": "string",
+      "enum": ["MONEY_SCALE", "LEDGER_POSTING", "INTEREST_DAILY_RATE", "INTEREST_ACCRUAL", "FX_RATE", "FX_AMOUNT", "FEE", "TAX_WITHHOLDING", "DISPLAY", "RATIO_PERCENT", "RATE_PERCENT", "TREASURY_AMOUNT", "TREASURY_INTEREST_WORK"]
+    },
+    "accountingClass": { "type": "string", "enum": ["CUSTOMER_DEPOSIT", "ACCRUED_INTEREST_PAYABLE", "INTEREST_EXPENSE", "FEE_INCOME", "PENALTY_INCOME", "SETTLEMENT"] },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["days"],
+      "properties": { "days": { "type": "integer", "minimum": 1, "maximum": 3660 } }
+    },
+    "predicate": {
+      "description": "The closed predicate language. Nesting depth is limited to 8 by the parser.",
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "attribute", "operator"],
+          "properties": {
+            "type": { "const": "comparison" },
+            "attribute": { "type": "string", "enum": ["BALANCE", "MONTHLY_TURNOVER", "AGGREGATE_POCKET_BALANCE", "SEGMENT", "CURRENCY"] },
+            "operator": { "$ref": "#/$defs/operator" },
+            "threshold": { "$ref": "#/$defs/amount" },
+            "textValue": { "type": "string", "minLength": 1 },
+            "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "attribute", "operator", "threshold"],
+          "properties": {
+            "type": { "const": "postingComparison" },
+            "attribute": { "type": "string", "enum": ["POSTING_AMOUNT", "PROJECTED_BALANCE"] },
+            "operator": { "$ref": "#/$defs/operator" },
+            "threshold": { "$ref": "#/$defs/amount" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "kind", "window"],
+          "properties": {
+            "type": { "const": "noEvents" },
+            "kind": { "$ref": "#/$defs/eventKind" },
+            "window": { "$ref": "#/$defs/window" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "kind", "window", "operator", "count"],
+          "properties": {
+            "type": { "const": "countEvents" },
+            "kind": { "$ref": "#/$defs/eventKind" },
+            "window": { "$ref": "#/$defs/window" },
+            "operator": { "$ref": "#/$defs/operator" },
+            "count": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "kind", "window", "operator", "amount"],
+          "properties": {
+            "type": { "const": "sumEvents" },
+            "kind": { "$ref": "#/$defs/eventKind" },
+            "window": { "$ref": "#/$defs/window" },
+            "operator": { "$ref": "#/$defs/operator" },
+            "amount": { "$ref": "#/$defs/amount" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "window", "operator", "amount"],
+          "properties": {
+            "type": { "const": "balanceMin" },
+            "window": { "$ref": "#/$defs/window" },
+            "operator": { "$ref": "#/$defs/operator" },
+            "amount": { "$ref": "#/$defs/amount" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "operands"],
+          "properties": {
+            "type": { "type": "string", "enum": ["and", "or"] },
+            "operands": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "$ref": "#/$defs/predicate" } }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "operand"],
+          "properties": {
+            "type": { "const": "not" },
+            "operand": { "$ref": "#/$defs/predicate" }
+          }
+        }
+      ]
+    },
+    "tier": {
+      "type": "object", "additionalProperties": false,
+      "required": ["from", "rate"],
+      "properties": {
+        "from": { "$ref": "#/$defs/amount" },
+        "to": { "$ref": "#/$defs/amount" },
+        "rate": { "$ref": "#/$defs/rate" }
+      }
+    },
+    "interest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ruleId", "rateType", "dayCount", "accrualCadence", "capitalisationCadence", "accrualRounding", "postingRounding"],
+      "properties": {
+        "ruleId": { "$ref": "#/$defs/ruleId" },
+        "rateType": { "type": "string", "enum": ["FIXED", "TIERED"] },
+        "rate": { "$ref": "#/$defs/rate" },
+        "tiers": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/tier" } },
+        "dayCount": { "$ref": "#/$defs/dayCount" },
+        "accrualCadence": { "$ref": "#/$defs/cadence" },
+        "capitalisationCadence": { "$ref": "#/$defs/cadence" },
+        "accrualRounding": { "$ref": "#/$defs/roundingPolicy" },
+        "postingRounding": { "$ref": "#/$defs/roundingPolicy" },
+        "bonus": {
+          "type": "object", "additionalProperties": false,
+          "required": ["ruleId", "rate", "predicate"],
+          "properties": {
+            "ruleId": { "$ref": "#/$defs/ruleId" },
+            "rate": { "$ref": "#/$defs/rate" },
+            "predicate": { "$ref": "#/$defs/predicate" }
+          }
+        }
+      },
+      "oneOf": [
+        { "properties": { "rateType": { "const": "FIXED" } }, "required": ["rate"], "not": { "required": ["tiers"] } },
+        { "properties": { "rateType": { "const": "TIERED" } }, "required": ["tiers"], "not": { "required": ["rate"] } }
+      ]
+    },
+    "fee": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ruleId", "feeCode", "amount", "cadence", "accountingClass"],
+      "properties": {
+        "ruleId": { "$ref": "#/$defs/ruleId" },
+        "feeCode": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "amount": { "$ref": "#/$defs/amount" },
+        "cadence": { "$ref": "#/$defs/cadence" },
+        "accountingClass": { "$ref": "#/$defs/accountingClass" },
+        "waiver": { "$ref": "#/$defs/predicate" }
+      }
+    },
+    "termDeposit": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ruleId", "termMonths", "maturityAction"],
+      "properties": {
+        "ruleId": { "$ref": "#/$defs/ruleId" },
+        "termMonths": { "type": "integer", "minimum": 1, "maximum": 600 },
+        "maturityAction": { "type": "string", "enum": ["CAPITALISE", "PAY_OUT", "ROLL_OVER"] },
+        "earlyWithdrawal": {
+          "type": "object", "additionalProperties": false,
+          "required": ["ruleId", "kind"],
+          "properties": {
+            "ruleId": { "$ref": "#/$defs/ruleId" },
+            "kind": { "type": "string", "enum": ["RATE", "FORFEITED_INTEREST_FRACTION"] },
+            "rate": { "$ref": "#/$defs/rate" },
+            "fraction": { "$ref": "#/$defs/rate" }
+          },
+          "oneOf": [
+            { "properties": { "kind": { "const": "RATE" } }, "required": ["rate"], "not": { "required": ["fraction"] } },
+            { "properties": { "kind": { "const": "FORFEITED_INTEREST_FRACTION" } }, "required": ["fraction"], "not": { "required": ["rate"] } }
+          ]
+        }
+      }
+    },
+    "action": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "hook", "tag", "cadence"],
+          "properties": {
+            "type": { "const": "SCHEDULE" },
+            "hook": { "type": "string", "enum": ["scheduled", "onClose"] },
+            "tag": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,31}$" },
+            "cadence": { "$ref": "#/$defs/cadence" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "type": "string", "enum": ["ACCRUE_INTEREST", "CAPITALISE_INTEREST", "MATURE", "EARLY_WITHDRAWAL_PENALTY"] } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "feeRuleId"],
+          "properties": { "type": { "const": "CHARGE_FEE" }, "feeRuleId": { "$ref": "#/$defs/ruleId" } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "reasonCode"],
+          "properties": { "type": { "const": "REJECT" }, "reasonCode": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "templateId"],
+          "properties": {
+            "type": { "const": "NOTIFY" },
+            "templateId": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "variables": {
+              "type": "object",
+              "maxProperties": 16,
+              "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]{0,31}$" },
+              "additionalProperties": { "type": "string" }
+            }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "parameter", "value"],
+          "properties": {
+            "type": { "const": "REPRICE" },
+            "parameter": { "type": "string", "enum": ["interest.rate", "interest.bonus.rate"] },
+            "value": { "$ref": "#/$defs/rate" }
+          }
+        }
+      ]
+    },
+    "hookRule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ruleId", "action"],
+      "properties": {
+        "ruleId": { "$ref": "#/$defs/ruleId" },
+        "trigger": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,31}$" },
+        "when": { "$ref": "#/$defs/predicate" },
+        "action": { "$ref": "#/$defs/action" }
+      }
+    },
+    "hookRules": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/hookRule" } },
+    "hooks": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "onOpen": { "$ref": "#/$defs/hookRules" },
+        "prePosting": { "$ref": "#/$defs/hookRules" },
+        "postPosting": { "$ref": "#/$defs/hookRules" },
+        "scheduled": { "$ref": "#/$defs/hookRules" },
+        "onParameterChange": { "$ref": "#/$defs/hookRules" },
+        "onClose": { "$ref": "#/$defs/hookRules" }
+      }
+    }
+  }
+}
