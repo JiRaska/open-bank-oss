@@ -161,3 +161,54 @@ test('documentation collection stops at its aggregate source budget before readi
   } }), /sources exceed size limit/)
   assert.ok(calls < 40)
 })
+
+
+test('platform declaration publication is opt-in and legacy content stays valid', () => {
+  const legacy = JSON.parse(collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA }))
+  assert.equal(Object.hasOwn(legacy.content, 'platformVersions'), false)
+  assert.ok(isAdminUiContentSnapshot(legacy))
+  const extended = JSON.parse(collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA, includePlatformDeclarations: true }))
+  assert.equal(extended.content.platformVersions.schema, 'openbank.platform-versions/v1')
+  const platform = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `import { derivePlatformVersions } from './openbank-admin-ui/scripts/lib/platform-versions.mjs'; process.stdout.write(JSON.stringify(derivePlatformVersions(process.cwd())))`], { cwd: ROOT, encoding: 'utf8' }))
+  assert.deepEqual(extended.content.platformVersions, platform)
+  assert.ok(extended.content.platformVersions.inventory.gitops.applications.length > 0)
+  assert.ok(isAdminUiContentSnapshot(extended))
+  const rootGap = structuredClone(extended)
+  rootGap.content.platformVersions.inventory.iac.moduleTraversalGaps = [{ environment: 'sandbox', modulePath: '', reason: 'unresolved-local-module' }]
+  assert.ok(isAdminUiContentSnapshot(rootGap))
+  for (const mutate of [
+    value => { value.content.platformVersions.inventory.gitops.applications[0].sourceFile = '../private' },
+    value => { value.content.platformVersions.nodeGroup.desiredSize = -1 },
+    value => { value.content.platformVersions.components.kafka = { version: '1', source: '/secret' } },
+    value => { value.content.platformVersions.runtimeHealthy = true },
+    value => { value.content.platformVersions.inventory.gitops.applications[0].sourceFile = 'normal' + String.fromCharCode(0) + 'path.yaml' },
+    value => { value.content.platformVersions.inventory.gitops.applications[0].sourceFile = 'normal' + String.fromCharCode(92) + 'path.yaml' },
+  ]) {
+    const copy = structuredClone(extended)
+    mutate(copy)
+    assert.equal(isAdminUiContentSnapshot(copy), false)
+  }
+})
+
+
+test('legacy, platform-only, documentation-only and combined content remain compatible', () => {
+  const combined = JSON.parse(collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA,
+    includePlatformDeclarations: true, includeRepositoryDocumentation: true }))
+  assert.ok(combined.content.platformVersions)
+  assert.ok(combined.content.repositoryDocumentation)
+  for (const [platform, documentation] of [[false, false], [true, false], [false, true], [true, true]]) {
+    const payload = structuredClone(combined)
+    if (!platform) delete payload.content.platformVersions
+    if (!documentation) delete payload.content.repositoryDocumentation
+    assert.equal(Object.keys(payload.content).length, 8 + Number(platform) + Number(documentation))
+    assert.ok(isAdminUiContentSnapshot(payload), `platform=${platform}, documentation=${documentation}`)
+  }
+  const invalid = structuredClone(combined)
+  invalid.content.unknownDataset = {}
+  assert.equal(isAdminUiContentSnapshot(invalid), false)
+  for (const field of ['platformVersions', 'repositoryDocumentation']) {
+    const malformed = structuredClone(combined)
+    malformed.content[field] = null
+    assert.equal(isAdminUiContentSnapshot(malformed), false)
+  }
+})

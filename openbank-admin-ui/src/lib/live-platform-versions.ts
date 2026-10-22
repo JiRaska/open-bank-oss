@@ -13,7 +13,8 @@ import {
   type PlatformView,
   type VersionItem,
 } from '@/lib/platform-view'
-import { platformVersions, type EksLifecycle } from '@/lib/platform-versions'
+import { readAdminUiContentSnapshot, contentSourceMetadata } from '@/lib/evidence/contentSource'
+import { platformVersions, type PlatformVersions, type EksLifecycle } from '@/lib/platform-versions'
 
 export const PROM_TIMEOUT_MS = 3000
 export const LIVE_CACHE_MS = 60_000
@@ -357,8 +358,7 @@ export async function getEksLifecycle(fetchImpl: FetchLike = fetch, nowMs: numbe
 
 const minor = (v: string): string => v.split('.').slice(0, 2).join('.')
 
-export function buildView(live: LiveSnapshot, eksSource: PlatformView['eksLifecycleSource']): PlatformView {
-  const pv = platformVersions
+export function buildView(live: LiveSnapshot, eksSource: PlatformView['eksLifecycleSource'], pv: PlatformVersions | null = platformVersions): PlatformView {
   const declaredFor: Record<string, { v: string | null; src: string | null }> = {
     kubernetes: { v: pv?.kubernetesVersion ?? null, src: pv?.sources.kubernetesVersion ?? null },
     loki: { v: pv?.loki.appVersion ?? null, src: pv?.sources.loki ?? null },
@@ -415,6 +415,11 @@ export function buildView(live: LiveSnapshot, eksSource: PlatformView['eksLifecy
 }
 
 export async function getPlatformView(fetchImpl: FetchLike = fetch): Promise<PlatformView> {
-  const [live, eol] = await Promise.all([getLiveSnapshot(fetchImpl), getEksLifecycle(fetchImpl)])
-  return buildView(live, eol?.source ?? 'snapshot')
+  const [live, eol, content] = await Promise.all([getLiveSnapshot(fetchImpl), getEksLifecycle(fetchImpl), readAdminUiContentSnapshot()])
+  const declared = content.snapshot?.content.platformVersions
+  const provenance = declared ? content : { status: 'unavailable' as const, snapshot: null, provenance: null, error: content.error ?? 'Published content has no platform declarations' }
+  return {
+    ...buildView(live, eol?.source ?? 'snapshot', declared ?? platformVersions),
+    declarationSource: contentSourceMetadata(provenance, { imageFallbackAvailable: platformVersions !== null }),
+  }
 }
