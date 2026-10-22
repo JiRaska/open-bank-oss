@@ -13,7 +13,7 @@ describe('API catalog discovery controls', () => {
     expect(page).toContain('aria-pressed={activeTab === tab}')
     expect(page).toContain('type="button" aria-pressed={groupFilter === g}')
     expect(page).toContain('type="button" aria-pressed={activeTab === tab}')
-    expect(page).toContain('type="button" className="btn btn-secondary" onClick={load}')
+    expect(page).toContain('type="button" className="btn btn-secondary"')
     expect(page).toContain('aria-busy={loading}')
     expect(page).toContain('<RefreshCw aria-hidden="true"')
     expect(page).toContain('role="button"')

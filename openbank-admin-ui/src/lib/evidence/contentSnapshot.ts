@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Reviewed repository content, published independently from the Admin UI image.
+import { isRepositoryDocumentation, type RepositoryDocumentation } from './repositoryDocumentation.ts'
 import { parse as parseYaml } from 'yaml'
 import { createEvidenceSnapshotReader, type EvidenceSnapshotReaderOptions } from './publishedSnapshot.ts'
 import { parseBcpPolicy } from '../bcp/continuityModel.ts'
@@ -10,6 +11,7 @@ export interface AdminUiContentSnapshot {
   sourceSha: string
   collectedAt: string
   content: {
+    repositoryDocumentation?: RepositoryDocumentation
     catalog: Record<string, unknown>
     serviceGraph: Record<string, unknown>
     governance: Record<string, unknown>
@@ -21,7 +23,7 @@ export interface AdminUiContentSnapshot {
   }
 }
 
-export const ADMIN_UI_CONTENT_MAX_BYTES = 1024 * 1024
+export const ADMIN_UI_CONTENT_MAX_BYTES = 8 * 1024 * 1024
 const SOURCE_SHA = /^[0-9a-f]{40}$/
 const ISO_UTC = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/
 const MAX_FILE_BYTES = 256 * 1024
@@ -273,7 +275,7 @@ function validLibDocs(items: unknown): items is AdminUiContentSnapshot['content'
 export function isAdminUiContentSnapshot(value: unknown, nowMs = Date.now()): value is AdminUiContentSnapshot {
   if (!record(value) || !hasExactKeys(value, ['schemaVersion', 'sourceSha', 'collectedAt', 'content'])
     || value.schemaVersion !== 1 || typeof value.sourceSha !== 'string' || !SOURCE_SHA.test(value.sourceSha)
-    || !validTimestamp(value.collectedAt, nowMs) || !record(value.content) || !hasExactKeys(value.content, CONTENT_KEYS)) return false
+    || !validTimestamp(value.collectedAt, nowMs) || !record(value.content) || !hasExactKeys(value.content, Object.hasOwn(value.content, 'repositoryDocumentation') ? [...CONTENT_KEYS, 'repositoryDocumentation'] : CONTENT_KEYS)) return false
 
   const content = value.content
   if (!validCatalog(content.catalog)
@@ -285,6 +287,14 @@ export function isAdminUiContentSnapshot(value: unknown, nowMs = Date.now()): va
     || typeof content.complianceControlsYaml !== 'string' || Buffer.byteLength(content.complianceControlsYaml, 'utf8') > MAX_FILE_BYTES
     || !validComplianceYaml(content.complianceControlsYaml)
     || !validBpmn(content.bpmnManifests) || !validLibDocs(content.libsDocs)) return false
+
+  if (Object.hasOwn(content, 'repositoryDocumentation')) {
+    const services = (content.catalog as { services: Array<{ name: string; moneyPath: boolean }> }).services
+    const moneyPath = new Set(services.filter(service => service.moneyPath).map(service => service.name.replace(/^openbank-/, '')))
+    if (!isRepositoryDocumentation(content.repositoryDocumentation, moneyPath)) return false
+    const known = new Set(services.map(service => service.name.replace(/^openbank-/, '')))
+    if (content.repositoryDocumentation.featureFlags.some(flag => !known.has(flag.service.replace(/^openbank-/, '')))) return false
+  }
 
   try {
     return Buffer.byteLength(JSON.stringify(value), 'utf8') <= ADMIN_UI_CONTENT_MAX_BYTES
