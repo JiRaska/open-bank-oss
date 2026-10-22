@@ -12,6 +12,7 @@ import { MarkdownView } from '@/components/docs/MarkdownView'
 import { MermaidEnhancer } from '@/components/docs/MermaidEnhancer'
 import { loadThreatModel } from '@/lib/governance/docs'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
 export const dynamic = 'force-dynamic'
@@ -29,6 +30,7 @@ export default async function ThreatModelDetailPage({ params }: PageProps) {
 
   return (
     <div className="docs-printable">
+      <ContentSourceNote source={model?.contentSource} />
       <DocsPageHeader
         crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>

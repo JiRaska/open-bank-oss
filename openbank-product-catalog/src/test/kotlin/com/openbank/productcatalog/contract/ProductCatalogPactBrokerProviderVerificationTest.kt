@@ -17,6 +17,7 @@ import com.openbank.productcatalog.domain.ProductSeed
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
@@ -62,6 +63,9 @@ import org.junit.jupiter.api.extension.ExtendWith
 class ProductCatalogPactBrokerProviderVerificationTest {
 
     @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
+    @Inject
     lateinit var catalogFixtures: CatalogPactProviderFixtures
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -75,7 +79,9 @@ class ProductCatalogPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        context?.verifyInteraction()
+        withCatalogPactConsumerIdentity(testIdentityAssociation, context?.consumer?.name) {
+            context?.verifyInteraction()
+        }
     }
 
     /**

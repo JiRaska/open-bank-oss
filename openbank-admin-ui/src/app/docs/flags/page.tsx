@@ -11,8 +11,9 @@
 import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { ChevronLeft, Flag, ShieldAlert } from 'lucide-react'
-import { loadFlagCatalog, type FlagMeta } from '@/lib/governance/flags'
+import { loadFlagCatalogContent, type FlagMeta } from '@/lib/governance/flags'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +21,7 @@ export default async function FlagsRegistryPage() {
   const lang = (await cookies()).get('openbank-admin-lang')?.value === 'cs' ? 'cs' : 'en'
   const t = (cs: string, en: string) => (lang === 'cs' ? cs : en)
 
-  const flags = await loadFlagCatalog()
+  const { items: flags, contentSource } = await loadFlagCatalogContent()
 
   const byService = new Map<string, FlagMeta[]>()
   for (const f of flags) {
@@ -40,6 +41,7 @@ export default async function FlagsRegistryPage() {
 
   return (
     <div>
+      <ContentSourceNote source={contentSource} />
       <DocsPageHeader
         crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
@@ -49,8 +51,8 @@ export default async function FlagsRegistryPage() {
           </>}
         title={t('Registr feature flagů', 'Feature Flag Registry')}
         subtitle={t(
-              'Flagy na všech službách, odvozené z flag-as-code v GitOpsu (ADR-0067). Zdroj pravdy je git; přepínání je změna v gitu, ne zápis z UI.',
-              'Flags across the fleet, derived from flag-as-code in GitOps (ADR-0067). Git is the source of truth; flipping is a git change, not a UI write.',
+              'Deklarované flagy napříč službami z GitOpsu (ADR-0067). Jde o záměr v repozitáři, nikoli běhové vyhodnocení flagd; změny procházejí gitem.',
+              'Declared flags across the fleet, derived from GitOps (ADR-0067). This is repository intent, not a runtime flagd evaluation; changes go through Git.',
             )}
         icon={<Flag aria-hidden="true" size={20} />}
         actions={<Link href="/docs" className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -86,6 +88,7 @@ export default async function FlagsRegistryPage() {
                 <h2 style={{ fontSize: '13px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {service}
                   {isMoneyPath && <span className="badge badge-danger" style={{ textTransform: 'none' }}>money-path · four-eyes</span>}
+                  {serviceFlags[0]?.classification === 'unknown' && <span className="badge" style={{ textTransform: 'none' }}>{t('klasifikace neznámá', 'classification unknown')}</span>}
                 </h2>
                 <div className="card" style={{ overflow: 'hidden' }}>
                   <table className="table" style={{ margin: 0 }}>

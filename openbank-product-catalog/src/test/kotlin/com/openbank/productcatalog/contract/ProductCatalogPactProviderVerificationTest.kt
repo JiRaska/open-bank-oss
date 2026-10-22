@@ -14,9 +14,6 @@ import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.productcatalog.domain.ProductIds
 import com.openbank.productcatalog.domain.ProductSeed
-import io.mockk.every
-import io.mockk.mockk
-import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -25,7 +22,6 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
-import org.eclipse.microprofile.jwt.JsonWebToken
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -87,30 +83,9 @@ class ProductCatalogPactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        // Match the scoped machine caller only for its Pact; restore the operator for other consumers.
-        // Real token authentication and scope mapping are covered by CatalogPensionOidcApprovalIT.
-        val originalIdentity = testIdentityAssociation.testIdentity
-        try {
-            if (context?.consumer?.name == "openbank-pension-service") {
-                testIdentityAssociation.setTestIdentity(pensionIdentity())
-            }
+        withCatalogPactConsumerIdentity(testIdentityAssociation, context?.consumer?.name) {
             context?.verifyInteraction()
-        } finally {
-            testIdentityAssociation.setTestIdentity(originalIdentity)
         }
-    }
-
-    private fun pensionIdentity(): QuarkusSecurityIdentity {
-        val token = mockk<JsonWebToken>()
-        every { token.name } returns "service-account-openbank-pension"
-        every { token.subject } returns "pact-pension-service"
-        every { token.getClaim<String>("azp") } returns "openbank-pension"
-        every { token.getClaim<String>("preferred_username") } returns "service-account-openbank-pension"
-        return QuarkusSecurityIdentity.builder()
-            .setPrincipal(token)
-            .addRole("ROLE_API")
-            .addRole("CATALOG_SCOPE_READ")
-            .build()
     }
 
     /**

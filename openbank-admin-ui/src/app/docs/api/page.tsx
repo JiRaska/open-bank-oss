@@ -50,6 +50,16 @@ interface EventTopic {
   color: string
 }
 
+function validEventTopic(value: unknown): value is EventTopic {
+  if (!value || typeof value !== 'object') return false
+  const row = value as Record<string, unknown>
+  return typeof row.channel === 'string' && row.channel.length > 0 && typeof row.topic === 'string' && row.topic.length > 0
+    && (row.description === null || typeof row.description === 'string')
+    && Array.isArray(row.publishers) && row.publishers.every(item => typeof item === 'string')
+    && Array.isArray(row.consumers) && row.consumers.every(item => typeof item === 'string')
+    && typeof row.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(row.color)
+}
+
 // Title-case a k8s short name for display, e.g. `lending-service` → `Lending Service`.
 function prettyName(short: string): string {
   return short
@@ -556,18 +566,33 @@ export default function ApiCatalogPage() {
   // application.yaml (scripts/generate-events.mjs), replacing a hand-maintained
   // array that drifted the same way the AsyncAPI document itself drifted (#4761:
   // 15 of ~23 topic names were fiction). Falls back to an empty, honest list.
-  const [events, setEvents] = useState<EventTopic[]>([])
+  const [eventContent, setEventContent] = useState<{ topics: EventTopic[]; source: ContentSourceMetadata | null }>({ topics: [], source: null })
+  const events = eventContent.topics
+  const eventsSource = eventContent.source
+  const [eventsRevision, setEventsRevision] = useState(0)
   useEffect(() => {
     let alive = true
     fetch('/api/events', { cache: 'no-store' })
-      .then(r => r.ok ? r.json() : null)
+      .then(r => { if (!r.ok) throw new Error(`Event source HTTP ${r.status}`); return r.json() })
       .then(data => {
-        if (!alive || !data?.available || !Array.isArray(data.topics)) return
-        setEvents(data.topics)
+        if (!alive) return
+        const source = data?.contentSource
+        if (data?.available !== true || !Array.isArray(data.topics) || !data.topics.every(validEventTopic)
+          || !source || !['published', 'image-baked', 'unavailable'].includes(source.source)
+          || !['ready', 'stale', 'unavailable'].includes(source.status)
+          || !(source.sourceSha === null || typeof source.sourceSha === 'string')
+          || !(source.sourceCollectedAt === null || typeof source.sourceCollectedAt === 'string')
+          || typeof source.fetchedAt !== 'string') throw new Error('Event source response is unusable')
+        setEventContent({ topics: data.topics, source })
       })
-      .catch(() => { /* events snapshot absent — async tab shows the empty state */ })
+      .catch(() => {
+        if (alive) setEventContent(previous => ({ ...previous, source: previous.source
+          ? { ...previous.source, status: 'stale', detail: 'Event source refresh failed' }
+          : { source: 'unavailable', status: 'unavailable', sourceSha: null, sourceCollectedAt: null,
+            imageBuiltAt: null, fetchedAt: new Date().toISOString(), detail: 'Event source refresh failed' } }))
+      })
     return () => { alive = false }
-  }, [])
+  }, [eventsRevision])
 
   // Editorial cards first (rich metadata, port-ordered), catalog-derived extras last.
   const allServices = services
@@ -596,7 +621,7 @@ export default function ApiCatalogPage() {
         title={t('API Katalog', 'API Catalog')}
         subtitle={t(`Swagger/OpenAPI dokumentace ${allServices.length} služeb · live status · proklik na Swagger UI`, `Swagger/OpenAPI documentation for ${allServices.length} services · live status · link to Swagger UI`)}
         icon={<FileCode aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
-        actions={<button type="button" className="btn btn-secondary" onClick={load} disabled={loading} aria-busy={loading}>
+        actions={<button type="button" className="btn btn-secondary" onClick={() => { setEventsRevision(revision => revision + 1); void load() }} disabled={loading} aria-busy={loading}>
             <RefreshCw aria-hidden="true" size={13} className={loading ? 'animate-spin' : ''} />
             {t('Obnovit', 'Refresh')}
           </button>}
@@ -938,6 +963,7 @@ export default function ApiCatalogPage() {
 
       {activeTab === 'async' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <ContentSourceNote source={eventsSource} />
           <div className="card" style={{ padding: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
               <Zap size={16} style={{ color: '#7c3aed' }} />
@@ -959,8 +985,8 @@ export default function ApiCatalogPage() {
             {events.length === 0 && (
               <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
                 {t(
-                  'Tabulka topics se generuje z docs/asyncapi/openbank-events.yaml při buildu — v tomto prostředí není k dispozici.',
-                  'The topic table is generated from docs/asyncapi/openbank-events.yaml at build time — not bundled in this environment.',
+                  'Tabulka topics se odvozuje z revidovaného zdroje AsyncAPI — v tomto prostředí není k dispozici.',
+                  'The topic table is derived from reviewed AsyncAPI source — it is unavailable in this environment.',
                 )}
               </p>
             )}
