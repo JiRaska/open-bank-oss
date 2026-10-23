@@ -98,6 +98,19 @@ openbank:
       # Machine clients that may read approval evidence: azp -> service-account username.
       evidence-readers:
         openbank-pension: service-account-openbank-pension
+    # ADR-0352 §4: the publish-path signature over an IR-bearing revision's canonical hash.
+    # `hmac` is DEV/TEST ONLY (a shared secret proves nothing about who signed) and logs a boot-time
+    # warning; a deployment sets mode=openbao and grants this service's OpenBao role `update` on
+    # transit/sign/<key-id> and nothing else — consumers get transit/verify/<key-id> only.
+    ir-signing:
+      mode: ${CATALOG_IR_SIGNING_MODE:hmac}
+      key-id: ${CATALOG_IR_SIGNING_KEY_ID:product-ir-publish}
+      hmac-secret: ${CATALOG_IR_SIGNING_HMAC_SECRET:CHANGE_ME_LOCAL_DEV_ONLY_32_BYTES}
+      openbao:
+        address: ${CATALOG_IR_SIGNING_OPENBAO_ADDRESS:https://openbao.vault.svc:8200}
+        transit-mount: ${CATALOG_IR_SIGNING_OPENBAO_TRANSIT_MOUNT:transit}
+        role: ${CATALOG_IR_SIGNING_OPENBAO_ROLE:product-catalog-ir-signing}
+        sa-token-path: ${CATALOG_IR_SIGNING_OPENBAO_SA_TOKEN_PATH:/var/run/secrets/kubernetes.io/serviceaccount/token}
   api:
     # API-contract major, independent of version.txt (ADR-0048); newest served contract is /api/v2.
     version: "2"

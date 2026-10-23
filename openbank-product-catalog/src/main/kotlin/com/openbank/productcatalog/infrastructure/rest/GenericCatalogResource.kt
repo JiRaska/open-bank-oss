@@ -46,6 +46,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
 import com.openbank.productcatalog.generated.model.CatalogSchema as GeneratedCatalogSchema
+import com.openbank.productcatalog.generated.model.IrSignature as GeneratedIrSignature
 import com.openbank.productcatalog.generated.model.MarketContext as GeneratedMarketContext
 import com.openbank.productcatalog.generated.model.Offering as GeneratedOffering
 import com.openbank.productcatalog.generated.model.ProductRevision as GeneratedProductRevision
@@ -225,6 +226,24 @@ class GenericCatalogResource(
         return Response.ok(revisionResponse(published)).tag(EntityTag(published.revision.toString())).build()
     }
 
+    /**
+     * ADR-0352 §7: publishing an IR-bearing revision is its own four-eyes action (`catalog.publish-ir`,
+     * `rules.yaml: four_eyes.actions`), distinct from `catalog.publish`, because it also produces the
+     * publish-path signature over the IR's canonical hash. Same roles, same maker != checker rule.
+     */
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.PUBLISH)
+    @Authorize(action = "catalog.publish-ir", resource = "#offeringId")
+    override suspend fun publishOfferingRevisionIrV2(
+        offeringId: UUID,
+        revisionId: UUID,
+        ifMatch: String,
+        request: PublishRequest,
+    ): Response {
+        requireRevisionOwner(service.findRevision(revisionId), offeringId)
+        val published = service.publishIr(revisionId, requiredRevision(ifMatch), actor(), request.reason)
+        return Response.ok(revisionResponse(published)).tag(EntityTag(published.revision.toString())).build()
+    }
+
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
     @Authorize(action = "catalog.read", resource = "#offeringId")
     override suspend fun getPublishedProductV2(offeringId: UUID, effectiveAt: java.time.OffsetDateTime?): Response =
@@ -277,6 +296,10 @@ class GenericCatalogResource(
         }
         val attributesNode = mapper.valueToTree<JsonNode>(attributes)
         schemaProfile.requireValidInstance(attributesNode)
+        // Product IR (ADR-0352): the trusted-profile check bounds the document; ProductIrParser validates
+        // it fully in the service before the draft is written.
+        val behaviourNode = behaviour?.let { mapper.valueToTree<JsonNode>(it) }
+        behaviourNode?.let { schemaProfile.requireValidInstance(it) }
         eligibility.forEach { schemaProfile.requireValidInstance(mapper.valueToTree(it.expected)) }
         eligibility.flatMap { it.explanation.values }.forEach {
             require(it.length <= MAX_LOCALIZED_TEXT_LENGTH) {
@@ -320,6 +343,7 @@ class GenericCatalogResource(
                 OfferingRelationship(RelationshipKind.valueOf(it.kind.value), it.targetOfferingId)
             },
             documentCodes = documentCodes.toList(),
+            behaviour = behaviourNode?.let { catalogJson.toObject(it) },
         )
     }
 
@@ -393,6 +417,15 @@ class GenericCatalogResource(
         // Deprecated wire aliases of the two fields above (#13429); removed with the compatibility window.
         pensionApprovalDigest = revision.approvalDigest,
         pensionApprovedEffectiveTo = revision.approvedEffectiveTo?.atOffset(ZoneOffset.UTC),
+        irSignature = revision.irSignature?.let {
+            GeneratedIrSignature(
+                revisionHash = it.revisionHash,
+                keyId = it.keyId,
+                algorithm = it.algorithm,
+                signature = it.signature,
+                signedAt = it.signedAt.atOffset(ZoneOffset.UTC),
+            )
+        },
     )
 
     private fun requiredRevision(ifMatch: String?): Long {

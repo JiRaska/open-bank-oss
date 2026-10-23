@@ -6,7 +6,11 @@ info:
   # API-contract version is independent of version.txt (ADR-0048); newest URL major is /api/v2.
   # 2.4.0 -> 2.5.0 (ADR-0341): additive GET /api/v2/legacy-products/{productId}/published-revision, the
   # revision a contract pins when it still knows a product only by its v1 id.
-  version: 2.7.0
+  # 2.7.0 -> 2.8.0 (ADR-0352 phase 2): additive. RevisionRequest/RevisionContent gain an optional
+  # `behaviour` (product IR v1), ProductRevision gains an optional `irSignature`, and
+  # POST .../revisions/{revisionId}/publish-ir publishes an IR-bearing revision signed (four-eyes
+  # action catalog.publish-ir). The plain publish refuses an IR-bearing revision with 409.
+  version: 2.8.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -599,6 +603,42 @@ paths:
         '428': { $ref: '#/components/responses/PreconditionRequired' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/offerings/{offeringId}/revisions/{revisionId}/publish-ir:
+    post:
+      tags: [Catalog V2]
+      summary: Publish an IR-bearing revision, signing its canonical revisionHash (ADR-0352)
+      description: >-
+        Four-eyes action `catalog.publish-ir`, distinct from `catalog.publish`. The revision's
+        `content.behaviour` is validated as product IR v1, hashed over its canonical form and signed
+        by the publish path; the detached signature is stored with the revision and returned as
+        `irSignature`. A revision without `behaviour` is refused with 409; the plain publish refuses
+        a revision WITH `behaviour` with 409, so an IR-bearing revision is never published unsigned.
+      operationId: publishOfferingRevisionIrV2
+      parameters:
+        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IfMatchRequired' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PublishRequest' }
+      responses:
+        '200':
+          description: Published, signed immutable revision
+          headers:
+            ETag: { $ref: '#/components/headers/RevisionETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductRevision' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422': { $ref: '#/components/responses/CatalogValidation' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/offerings/{offeringId}/revisions/{revisionId}/approvals:
     get:
       tags: [Revision Approvals]
@@ -1081,6 +1121,12 @@ components:
           maxItems: 256
           uniqueItems: true
           items: { type: string, minLength: 1, maxLength: 128 }
+        behaviour:
+          type: [object, 'null']
+          additionalProperties: true
+          description: >-
+            Product IR v1 document (ADR-0352): the revision's executable behaviour, validated by the
+            IR parser on every write. Absent for a revision with no behaviour.
         effectiveFrom: { type: [string, 'null'], format: date-time }
         effectiveTo: { type: [string, 'null'], format: date-time }
       required: [schemaRef, name, attributes]
@@ -1116,6 +1162,12 @@ components:
           maxItems: 256
           uniqueItems: true
           items: { type: string, minLength: 1, maxLength: 128 }
+        behaviour:
+          type: [object, 'null']
+          additionalProperties: true
+          description: >-
+            Product IR v1 document (ADR-0352): the revision's executable behaviour, validated by the
+            IR parser on every write. Absent for a revision with no behaviour.
       required: [name, attributes, prices, eligibility, relationships, documentCodes]
     ProductRevision:
       type: object
@@ -1154,6 +1206,14 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         revision: { type: integer, format: int64, minimum: 0 }
+        irSignature:
+          oneOf:
+            - { $ref: '#/components/schemas/IrSignature' }
+            - { type: 'null' }
+          description: >-
+            Publish-path signature over the product IR's canonical revisionHash (ADR-0352 §4). Present
+            on a single-revision read of a revision published through publish-ir; null otherwise and
+            on list responses.
       required:
         - id
         - offeringId
@@ -1191,6 +1251,19 @@ components:
       properties:
         reason: { type: string, minLength: 1 }
       required: [reason]
+    IrSignature:
+      type: object
+      additionalProperties: false
+      description: >-
+        Detached signature over a product revision's canonical `revisionHash` (ADR-0352 §4). A
+        consumer's pinned-revision loader verifies it before the revision is evaluated.
+      properties:
+        revisionHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        keyId: { type: string, minLength: 1, maxLength: 128 }
+        algorithm: { type: string, minLength: 1, maxLength: 64, description: 'openbao-transit or hmac-sha256 (dev/test only)' }
+        signature: { type: string, minLength: 1 }
+        signedAt: { type: string, format: date-time }
+      required: [revisionHash, keyId, algorithm, signature, signedAt]
     Fee:
       type: object
       properties:

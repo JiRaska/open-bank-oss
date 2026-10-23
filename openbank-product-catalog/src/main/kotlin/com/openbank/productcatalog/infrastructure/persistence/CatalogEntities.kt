@@ -315,3 +315,23 @@ class BankV1ProductMappingEntity {
         const val UNINITIALISED_DRAFT_REVISION = -2L
     }
 }
+
+/** ADR-0352 §4: the publish-path signature over an IR-bearing revision's canonical hash (V15). */
+@Entity
+@Table(name = "catalog_revision_ir_signatures")
+class CatalogRevisionIrSignatureEntity {
+    @Id
+    @Column(name = "revision_id")
+    lateinit var revisionId: UUID
+
+    @Column(name = "revision_hash")
+    lateinit var revisionHash: String
+
+    @Column(name = "key_id")
+    lateinit var keyId: String
+    lateinit var algorithm: String
+    lateinit var signature: String
+
+    @Column(name = "signed_at")
+    lateinit var signedAt: Instant
+}
