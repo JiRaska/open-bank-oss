@@ -220,7 +220,7 @@ records the original value date; only a refusal of TODAY stays a failure. The da
 that reports this step to the ledger close is phase 4. **Residual:** a CHANGED flow already SETTLED keeps its
 settled payment; the cash difference is posted by the delta journals and settled by a new
 instruction outside this flow.
-## Revaluation, internal rate sheets and cash-flow analysis (ADR-0344 phase 3) — V25, V26
+## Revaluation, internal rate sheets and cash-flow analysis (ADR-0344 phase 3) — V26, V27
 
 FX_FORWARD, FX_SWAP, BILL_OF_EXCHANGE and LOAN join `ProductType.DELIVERED`: they are drafted and
 settle, accrue, pay and mature through the posting-rule matrix that phase 2a delivered, each held to
@@ -241,7 +241,7 @@ an independent-oracle parity fixture and to the original golden journals (no new
 - **STRIDE-T (integrity of the figure):** treasury never prices. A deal the engine did not value,
   valued as unpriced, without a clean value or in another currency, or an unreachable engine, is a
   reported DATA GAP: nothing posts and no row is written — never a zero.
-- **STRIDE-R (ordering and idempotency):** ledger key `treasury:<deal>:revaluation:<date>`; V25
+- **STRIDE-R (ordering and idempotency):** ledger key `treasury:<deal>:revaluation:<date>`; V26
   `deal_revaluations` is unique on (deal, date). Per deal, dates are strictly increasing: the row is
   claimed under a per-deal advisory lock before the ledger is asked; an earlier date that is not an
   exact replay is refused 409 `REVALUATION_OUT_OF_ORDER` and never back-filled. A claimed row whose
@@ -253,7 +253,7 @@ an independent-oracle parity fixture and to the original golden journals (no new
 - **Internal rate sheets (contract 8.5).** `GET/POST /api/v1/treasury/market-data/internal-rate-sheets`
   and `/{id}/approve|reject` reuse `treasury.marketdata.read|import|approve`. Four-eyes: a sheet is
   PENDING until a DIFFERENT human decides it (422 `FOUR_EYES_VIOLATION` for the proposer, 403 for an
-  agent or machine; V26 repeats `decided_by <> proposed_by`). A decision locks the row (a second is
+  agent or machine; V27 repeats `decided_by <> proposed_by`). A decision locks the row (a second is
   409 `RATE_SHEET_STALE`); approval supersedes the ACTIVE sheet of the same name in one transaction,
   and a partial unique index allows one ACTIVE per name. 1..200 rates, labels ≤ 64, values within
   ±100 % at ≤ 6 dp. Nothing posts or prices from a sheet yet.
@@ -265,8 +265,8 @@ an independent-oracle parity fixture and to the original golden journals (no new
   `ANALYSIS_TOO_LARGE`, counted before loading), ≤ 2,000 drill-down rows.
 - **Residual:** a deal in another currency than the engine's reporting currency is always a gap until
   the engine reports per-deal currency. The REVALUATION day step and the close's due steps arrive with
-  phase 4. Rollback: switch `OPENBANK_TREASURY_REVALUATION_ENABLED` off and remove the routes; V25 and
-  V26 are additive (drop the tables); posted journals stay in the ledger.
+  phase 4. Rollback: switch `OPENBANK_TREASURY_REVALUATION_ENABLED` off and remove the routes; V26 and
+  V27 are additive (drop the tables); posted journals stay in the ledger.
 
 ## STRIDE analysis
 
@@ -317,4 +317,4 @@ minimum reserves (D8), and real market connectivity (D9).
 - **2026-10-23** — **ADR-0344 phase 1b: own-account payments and the institution-transfer rail (#13647).** Adds `treasury_payments`, `treasury_payment_flows` (V21), the transfer rail and intermediary BIC (V22) and a payment key reusable after cancel (V23); the `/payments` surface; role `ROLE_TREASURY_PAYMENT_RELEASER` (realm, OPA, admin-ui); the `openbank.treasury.payments` producer and the `institution-transfer-status-in` consumer with its DLQ; the nostro receipt matcher; the limit-line lock on submit and approve. Controls are in the section above. Rollback: revert; V21–V23 are additive while no payment row exists.
 - **2026-10-23** — **ADR-0344 phase 2a: the posting-rule matrix (#13667).** IRS and FRA settle, accrue, pay and mature through `PostingMatrix`; V24 widens the `deal_journals` event CHECK; a SENT payment posts its outflow journals; `GET /posting-rules` (`treasury.reference.read`, no new OPA action). Ledger V35 seeds the instrument accounts the matrix posts to. Controls are in the section above. Rollback: revert; V24 is a CHECK widening, reversible while no matrix journal row exists.
 - **2026-10-23** — **ADR-0344 phase 2b: securities, repos and four-eyes corrections (#13667).** BOND, TREASURY_BILL, REPO and REVERSE_REPO are drafted, settled, accrued, paid and matured through the matrix (their parity fixtures and golden journal rows pinned). New `deal_corrections` (V25) and `/deals/{id}/corrections` (list, get, propose, approve, override-limit, reject; every POST requires `Idempotency-Key`); new OPA actions `treasury.deal.correction.propose` (dealer, back office), `.approve`/`.reject` (approver), `.override-limit` (senior) — machines and AI agents denied (must-DENY tests). New event `treasury.deal.corrected.v1` (asyncapi 1.10.0). Controls are in the Corrections section above. Rollback: revert; V25 is additive (drop the table) while no correction was approved — once one was, its deal versions stay and only the record of their cause is lost.
-- **2026-10-23** — **ADR-0344 phase 3: FX forwards and swaps, bills of exchange, loans, revaluation, internal rate sheets and cash-flow analysis.** The four products are delivered through the phase-2a matrix; revaluation off the risk engine's valuation (V25), internal rate sheets (V26) and the cash-flow analysis read; OPA `treasury.revaluation.read|run` and the treasury m2m `risk.snapshot.read` grant. Controls are in the section above. Rollback: revert; V25 and V26 are additive.
+- **2026-10-23** — **ADR-0344 phase 3: FX forwards and swaps, bills of exchange, loans, revaluation, internal rate sheets and cash-flow analysis.** The four products are delivered through the phase-2a matrix; revaluation off the risk engine's valuation (V26), internal rate sheets (V27) and the cash-flow analysis read; OPA `treasury.revaluation.read|run` and the treasury m2m `risk.snapshot.read` grant. Controls are in the section above. Rollback: revert; V26 and V27 are additive.
