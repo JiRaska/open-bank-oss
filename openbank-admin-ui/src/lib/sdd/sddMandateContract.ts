@@ -34,7 +34,6 @@ const STATUSES = new Set<string>(SDD_MANDATE_STATUSES)
 // that the service's UUID persistence layer does not validate.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const IBAN = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$/
-const CREDITOR_ID = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{4,31}$/
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -93,6 +92,7 @@ function parseMandate(value: unknown): SddMandate {
   const id = requiredString(value, 'id', 36)
   const accountId = requiredString(value, 'accountId', 36)
   const debtorIban = requiredString(value, 'debtorIban', 34)
+  // The service read contract exposes an opaque string, not a format-certified SEPA identifier.
   const creditorIdentifier = requiredString(value, 'creditorIdentifier', 35)
   const scheme = requiredString(value, 'scheme', 8)
   const sequenceType = requiredString(value, 'sequenceType', 8)
@@ -103,7 +103,6 @@ function parseMandate(value: unknown): SddMandate {
   if (!STATUSES.has(status)) throw new Error('Invalid SDD status')
   if (!UUID.test(id) || !UUID.test(accountId)) throw new Error('Invalid SDD identity')
   if (!isValidIban(debtorIban)) throw new Error('Invalid SDD debtorIban')
-  if (!CREDITOR_ID.test(creditorIdentifier)) throw new Error('Invalid SDD creditorIdentifier')
   if (typeof value.b2bConfirmed !== 'boolean') throw new Error('Invalid SDD b2bConfirmed')
   if (!RFC3339.test(createdAt) || Number.isNaN(Date.parse(createdAt))) throw new Error('Invalid SDD createdAt')
   if (!Array.isArray(value.amendments)) throw new Error('Invalid SDD amendments')
