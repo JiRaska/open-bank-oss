@@ -20,6 +20,7 @@ import com.openbank.productcatalog.domain.catalog.OfferingRelationship
 import com.openbank.productcatalog.domain.catalog.PriceCadence
 import com.openbank.productcatalog.domain.catalog.PriceComponent
 import com.openbank.productcatalog.domain.catalog.PriceKind
+import com.openbank.productcatalog.domain.catalog.PriceRole
 import com.openbank.productcatalog.domain.catalog.ProductOffering
 import com.openbank.productcatalog.domain.catalog.ProductRevision
 import com.openbank.productcatalog.domain.catalog.ProductSpecification
@@ -306,6 +307,7 @@ class GenericCatalogResource(
                     it.taxTreatment?.value?.let(TaxTreatment::valueOf) ?: TaxTreatment.UNSPECIFIED,
                     it.effectiveFrom?.toInstant(),
                     it.effectiveTo?.toInstant(),
+                    it.role?.value?.let(PriceRole::valueOf),
                 )
             },
             eligibility = eligibility.map {

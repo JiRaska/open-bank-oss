@@ -133,6 +133,45 @@ class TransactionCompletionTest {
     }
 
     @Test
+    fun `typed uncertainty distinguishes FAILED from noncompleted and unreadable responses`() {
+        listOf("FAILED", "PENDING", null).forEach { state ->
+            val response = response(state)
+            every { api.initiateTransaction(request) } returns Uni.createFrom().item(response)
+            assertThatThrownBy { client.initiate(request).await().indefinitely() }
+                .isInstanceOfSatisfying(TransactionCompletionUncertainException::class.java) {
+                    val expected = if (state == "FAILED") {
+                        TransactionCompletionFailure.FAILED
+                    } else {
+                        TransactionCompletionFailure.UNPROVEN
+                    }
+                    assertThat(it.completionFailure).isEqualTo(expected)
+                    assertThat(it.status).isEqualTo(201)
+                }
+        }
+        val response = response("COMPLETED")
+        every { response.hasEntity() } returns false
+        every { api.reverseTransaction(id, reversal) } returns Uni.createFrom().item(response)
+        assertThatThrownBy { client.reverse(id, reversal).await().indefinitely() }
+            .isInstanceOfSatisfying(TransactionCompletionUncertainException::class.java) {
+                assertThat(it.completionFailure).isEqualTo(TransactionCompletionFailure.UNPROVEN)
+            }
+    }
+
+    @Test
+    fun `legacy uncertainty constructors preserve status cause message and unproven classification`() {
+        val cause = IllegalStateException("fixture private payload")
+        val explicit = TransactionCompletionUncertainException(201, cause)
+        val defaultCause = TransactionCompletionUncertainException(202)
+        assertThat(explicit.status).isEqualTo(201)
+        assertThat(explicit.cause).isSameAs(cause)
+        assertThat(explicit.message).isEqualTo("transaction-service completion is unproven (HTTP 201)")
+        assertThat(explicit.completionFailure).isEqualTo(TransactionCompletionFailure.UNPROVEN)
+        assertThat(defaultCause.status).isEqualTo(202)
+        assertThat(defaultCause.cause).isNull()
+        assertThat(defaultCause.completionFailure).isEqualTo(TransactionCompletionFailure.UNPROVEN)
+    }
+
+    @Test
     fun `listing has no mutation completion requirement`() {
         val response = response(null, 200)
         val page = TransactionPage(

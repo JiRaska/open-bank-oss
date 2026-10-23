@@ -1660,6 +1660,7 @@
       "fullScopeAllowed": false,
       "defaultClientScopes": [
         "basic",
+        "profile",
         "catalog:read"
       ],
       "optionalClientScopes": [],
