@@ -93,6 +93,14 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
+    # NOT drift — the wire spelling of an ABSENT value (ADR-0344 D4). A stored cash-flow row whose
+    # floating rate is not known yet has no rate source: `rateSource` is null in the domain, exactly
+    # as libs-finance's own `ProjectedCashFlow.rateSource`, and is published and stored as MISSING
+    # (treasury `RateSourceWire`). MISSING is not a source a rate can come from, so it is not a
+    # value of libs-finance's `RateSource`; the spec is right to carry it.
+    "openbank-treasury-service:FIXED,MISSING,OBSERVED,PROJECTED,RATE_UNTIL_FIRST_FIXING":
+        "ADR-0344 D4 — cash-flow `rateSource`: NOT drift. MISSING is the wire form of no rate yet "
+        "(null RateSource), treasury RateSourceWire.",
     # NOT drift — a DELIBERATE SUBSET (ADR-0344). The legacy counterparty list response
     # (GET /api/v1/treasury/counterparties) returns only BANK and CENTRAL_BANK rows; CORPORATE and
     # ISSUER counterparties live in reference data and are listed by GET /reference/counterparty,

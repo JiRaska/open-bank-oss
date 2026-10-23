@@ -10,6 +10,7 @@ import com.openbank.libs.security.Roles
 import com.openbank.treasury.application.port.`in`.ProposeReferenceCommand
 import com.openbank.treasury.application.port.`in`.ReferenceActivity
 import com.openbank.treasury.application.port.`in`.ReferenceDataUseCase
+import com.openbank.treasury.application.port.`in`.ReferenceDependant
 import com.openbank.treasury.application.port.`in`.ReferenceHistory
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.reference.ReferenceKind
@@ -240,6 +241,18 @@ class ReferenceResource {
             "installedOn" to row[2]?.toString(),
         )
     }
+
+    @GET
+    @Path("/dependencies/{kind}/{key}")
+    @Operation(summary = "What references this record: deals and other reference records")
+    @Authorize(action = "treasury.reference.read")
+    suspend fun dependencies(
+        @PathParam("kind") kind: String,
+        @PathParam("key") key: String,
+    ): ReferenceDependenciesResponse {
+        val k = ReferenceKind.fromWire(kind)
+        return ReferenceDependenciesResponse(k.wire, key, references.dependencies(k, key))
+    }
 }
 
 data class ReferenceProposalRequest(
@@ -307,3 +320,5 @@ data class ReferenceHistoryResponse(
         )
     }
 }
+
+data class ReferenceDependenciesResponse(val kind: String, val key: String, val dependants: List<ReferenceDependant>)

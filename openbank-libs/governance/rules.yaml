@@ -4891,6 +4891,8 @@ security_sensitive_paths:
   openbank-treasury-service:
     auth_crypto_payment:
       - "src/main/kotlin/**/ApprovalResource.kt"
+      # ADR-0344: the leg schedule hash.
+      - "src/main/kotlin/**/domain/model/Legs.kt"
       - "src/main/kotlin/**/approval/**"
       - "src/main/kotlin/**/security/**"
       - "src/main/kotlin/**/filter/**"

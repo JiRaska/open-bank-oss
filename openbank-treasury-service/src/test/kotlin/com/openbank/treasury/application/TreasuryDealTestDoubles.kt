@@ -54,10 +54,30 @@ internal class InMemoryDeals : DealRepository {
 
     val commands = mutableMapOf<String, CommandKey>()
 
-    override suspend fun save(deal: Deal, journal: LedgerJournalRef?, event: DealEvent?, command: CommandKey?): Deal {
+    val schedules = mutableListOf<com.openbank.treasury.application.port.out.ScheduleWrite>()
+
+    override suspend fun save(
+        deal: Deal,
+        journal: LedgerJournalRef?,
+        event: DealEvent?,
+        command: CommandKey?,
+        schedule: com.openbank.treasury.application.port.out.ScheduleWrite?,
+        extraEvents: List<DealEvent>,
+        limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
+    ): Deal {
+        limitGuard?.let { g ->
+            val others = exposure(g.counterpartyId, g.currency, deal.id)
+            if (others > g.maxOthers) {
+                throw com.openbank.treasury.application.port.out.CorrectionLimitBreachedException(
+                    "${g.counterpartyId} ${g.currency}: $others exceeds ${g.maxOthers}",
+                )
+            }
+        }
         rows[deal.id] = deal
         journal?.let { journals += it }
         event?.let { events += it }
+        events += extraEvents
+        schedule?.let { schedules += it }
         command?.let { commands[it.key] = it }
         return deal
     }

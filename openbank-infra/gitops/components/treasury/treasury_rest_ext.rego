@@ -15,10 +15,15 @@
 #   treasury.deal.override-limit              — ROLE_TREASURY_SENIOR_APPROVER only (ADR-0315 D4)
 #   treasury.nostro.read                      — treasury dealers, approvers and admins (#10896)
 #   treasury.reference.read                   — treasury staff, and the reference editor (ADR-0344 D3)
+#   treasury.cashflow.read, treasury.calendar.read — treasury staff, never the reference editor (ADR-0344 D4)
 #   treasury.reference.propose, .import       — ROLE_TREASURY_REFERENCE_EDITOR or ROLE_TREASURY_BACK_OFFICE
 #   treasury.reference.approve                — ROLE_TREASURY_APPROVER; for kind `counterparty` (limits)
 #                                               ROLE_TREASURY_SENIOR_APPROVER only
 #   treasury.reference.reject, .verify        — ROLE_TREASURY_APPROVER
+#   treasury.cashflow.override.propose, treasury.position.close — ROLE_TREASURY_BACK_OFFICE
+#   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
+#   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
+#   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
 #                                               balance; it is still back-office evidence, #10896)
 #   treasury.portfolio.inspect                — treasury dealers, approvers and admins, and
@@ -82,8 +87,10 @@ allowed_reasons contains "treasury-staff-read" if {
 		"treasury.portfolio.inspect",
 		# ADR-0315 D9: the simulated counterparties' SYNTHETIC quotes (GET /quotes).
 		"treasury.quote.read",
-		# ADR-0344 D3: effective-dated reference data.
+		# ADR-0344: reference data, the cash-flow ledger and the event calendar.
 		"treasury.reference.read",
+		"treasury.cashflow.read",
+		"treasury.calendar.read",
 	}
 }
 
@@ -101,9 +108,9 @@ allowed_reasons contains "treasury-dealer-write" if {
 	input.action in {"treasury.deal.draft", "treasury.deal.submit", "treasury.deal.cancel"}
 }
 
-# ADR-0344 D3: back office and the reference editor PROPOSE; the approver DECIDES. No role here both
-# writes and activates. The domain additionally refuses the proposer as decider and any non-human as
-# decider; AI agents get nothing from this file (their charter is the one grant).
+# ADR-0344 D3/D4/D10: back office and the reference editor PROPOSE; the approver DECIDES. No role
+# here both writes and activates. The domain additionally refuses the proposer as decider and any
+# non-human as decider; AI agents get nothing from this file (their charter is the one grant).
 allowed_reasons contains "treasury-reference-propose" if {
 	treasury_staff
 	some role in {"ROLE_TREASURY_REFERENCE_EDITOR", "ROLE_TREASURY_BACK_OFFICE"}
@@ -137,6 +144,35 @@ allowed_reasons contains "treasury-reference-approve-counterparty" if {
 }
 
 reference_kind_is_counterparty if input.resource.id == "counterparty"
+
+allowed_reasons contains "treasury-back-office-write" if {
+	treasury_staff
+	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
+	input.action in {
+		"treasury.cashflow.override.propose",
+		"treasury.deal.send-confirmation",
+		"treasury.position.close",
+	}
+}
+
+allowed_reasons contains "treasury-approver-cashflow" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action in {
+		"treasury.cashflow.override.approve",
+		"treasury.cashflow.override.reject",
+		"treasury.deal.send-confirmation",
+	}
+}
+
+# Schedule preview runs the schedule engine: real work per call, so only the roles that build or
+# check a ticket (dealer, back office) may ask for it — not every reader.
+allowed_reasons contains "treasury-schedule-preview" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_BACK_OFFICE"}
+	role in input.principal.roles
+	input.action == "treasury.deal.preview"
+}
 
 allowed_reasons contains "treasury-approver-cancel" if {
 	treasury_staff

@@ -6,8 +6,10 @@ package com.openbank.treasury.application.port.out
 
 import com.openbank.treasury.domain.reference.ReferenceKind
 import com.openbank.treasury.domain.reference.ReferenceRecord
+import com.openbank.treasury.domain.reference.ReferenceRef
 import com.openbank.treasury.domain.reference.ReferenceStatus
 import java.time.LocalDate
+import java.util.UUID
 
 /** A reference command's `Idempotency-Key`, stored with the change it produced (same transaction). */
 data class ReferenceCommandKey(
@@ -31,6 +33,12 @@ interface ReferenceRepository {
     /** Every version of one record, oldest first. */
     suspend fun versions(kind: ReferenceKind, key: String): List<ReferenceRecord>
 
+    /** Every PENDING or ACTIVE record of every kind (the dependency graph is small by nature). */
+    suspend fun live(): List<ReferenceRecord>
+
+    /** The subset of [refs] with no ACTIVE version effective on [on]. */
+    suspend fun notEffective(refs: Collection<ReferenceRef>, on: LocalDate): List<ReferenceRef>
+
     /** A NEW version (prior status null) and its command key, in one transaction. */
     suspend fun save(writes: List<ReferenceWrite>, command: ReferenceCommandKey?)
 
@@ -50,4 +58,10 @@ interface ReferenceRepository {
     ): List<ReferenceRecord>
 
     suspend fun findCommand(key: String): ReferenceCommandKey?
+}
+
+/** What a deal names, for the reference dependency query. */
+fun interface DealReferenceLookup {
+    /** Deals (any state) whose terms name [ref]: counterparty, book, calendar, index or security. */
+    suspend fun dealsReferencing(ref: ReferenceRef): List<UUID>
 }

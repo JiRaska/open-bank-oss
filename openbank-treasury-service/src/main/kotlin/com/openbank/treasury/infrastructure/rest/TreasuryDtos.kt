@@ -48,6 +48,41 @@ data class DraftDealRequest(
     val buyCurrency: String? = null,
     /** FX_SPOT only: the currency the bank sells. */
     val sellCurrency: String? = null,
+    // ADR-0344 (openapi 1.19.0), all optional and additive.
+    val kind: com.openbank.treasury.domain.model.DealKind? = null,
+    val bookId: String? = null,
+    val calendars: List<String>? = null,
+    val businessDayConvention: String? = null,
+    val rollDirection: com.openbank.treasury.domain.model.RollDirection? = null,
+    val legs: List<LegSpecDto>? = null,
+    val securityIsin: String? = null,
+    val nominal: BigDecimal? = null,
+    val cleanPrice: BigDecimal? = null,
+    val yield: BigDecimal? = null,
+    val linkedDealIds: List<UUID>? = null,
+    val collateral: CollateralDto? = null,
+    val regulatory: RegulatoryDto? = null,
+    val legalEntityId: String? = null,
+    val counterpartyReference: String? = null,
+    val channel: DealChannelDto? = null,
+    val tradeDateTime: Instant? = null,
+    val effectiveDate: LocalDate? = null,
+    val validFrom: LocalDate? = null,
+    val validTo: LocalDate? = null,
+    val jurisdiction: String? = null,
+    val fixedConvention: Boolean? = null,
+    val notionalExchange: Boolean? = null,
+    val singleCurrency: Boolean? = null,
+    val note: String? = null,
+    val settlementAccounts: SettlementAccountsDto? = null,
+    val documents: List<DealDocumentDto>? = null,
+    val fees: List<DealFeeDto>? = null,
+    val linkedDeals: List<LinkedDealDto>? = null,
+    val originalDealId: UUID? = null,
+    val securityTerms: SecurityTermsDto? = null,
+    val fxTerms: FxDealTermsDto? = null,
+    val fraTerms: FraTermsDto? = null,
+    val depositLoanTerms: com.openbank.treasury.domain.model.DepositLoanTerms? = null,
 )
 
 data class ReasonRequest(val reason: String? = null)
@@ -103,6 +138,38 @@ data class LimitOverrideResponse(
 
 data class JournalRefResponse(val event: String, val idempotencyKey: String, val journalId: UUID, val postedAt: Instant)
 
+/** One posting-rule matrix row; `ifrs9Category` null = every category. */
+data class PostingRuleDto(
+    val product: ProductType,
+    val event: String,
+    val ifrs9Category: String?,
+    val recognition: String,
+    val flowKind: String?,
+    val flowDirection: String?,
+    val lines: List<PostingRuleLineDto>,
+    val version: Int,
+) {
+    companion object {
+        fun from(r: com.openbank.treasury.domain.model.PostingRule) = PostingRuleDto(
+            product = r.product,
+            event = r.event.name,
+            ifrs9Category = r.ifrs9Category?.name,
+            recognition = r.recognition.name,
+            flowKind = r.selector.kind?.name,
+            flowDirection = r.selector.direction?.name,
+            lines = r.lines.map { PostingRuleLineDto(it.side.name, it.accountingClass, it.role.name, it.amount.name) },
+            version = r.version,
+        )
+    }
+}
+
+data class PostingRuleLineDto(
+    val side: String,
+    val accountingClass: String,
+    val accountingRole: String,
+    val amountExpression: String,
+)
+
 data class DealResponse(
     val dealId: UUID,
     val product: ProductType,
@@ -133,8 +200,48 @@ data class DealResponse(
     val updatedAt: Instant,
     val history: List<TransitionResponse>,
     val journals: List<JournalRefResponse>,
+    // ADR-0344 (1.19.0)
+    val kind: String,
+    val bookId: String?,
+    val legs: List<LegSpecDto>,
+    val scheduleVersion: Int,
+    val scheduleHash: String?,
+    val version: Int,
+    val securityIsin: String?,
+    val regulatory: com.openbank.treasury.domain.model.RegulatoryTerms?,
+    val linkedDealIds: List<UUID>,
+    val collateral: CollateralDto?,
+    val legalEntityId: String?,
+    val counterpartyReference: String?,
+    val channel: String?,
+    val tradeDateTime: Instant?,
+    val effectiveDate: LocalDate?,
+    val validFrom: LocalDate?,
+    val validTo: LocalDate?,
+    val jurisdiction: String?,
+    val calendars: List<String>,
+    val businessDayConvention: String?,
+    val rollDirection: String,
+    val fixedConvention: Boolean,
+    val notionalExchange: Boolean?,
+    val singleCurrency: Boolean?,
+    val note: String?,
+    val settlementAccounts: SettlementAccountsDto?,
+    val documents: List<DealDocumentDto>,
+    val fees: List<DealFeeDto>,
+    val linkedDeals: List<LinkedDealDto>,
+    val originalDealId: UUID?,
+    val securityTerms: SecurityTermsDto?,
+    val fxTerms: FxDealTermsDto?,
+    val fraTerms: FraTermsDto?,
+    val depositLoanTerms: com.openbank.treasury.domain.model.DepositLoanTerms?,
+    val notional: BigDecimal,
+    val lastChangedAt: Instant,
+    val lastChangedBy: String,
+    val counterpartyName: String? = null,
 ) {
     companion object {
+        @Suppress("LongMethod") // a flat field-by-field mapping of the response contract
         fun from(d: Deal, journals: List<LedgerJournalRef> = emptyList()) = DealResponse(
             dealId = d.id,
             product = d.product,
@@ -176,6 +283,43 @@ data class DealResponse(
                 )
             },
             journals = journals.map { JournalRefResponse(it.event.key, it.idempotencyKey, it.journalId, it.postedAt) },
+            kind = d.kind.name,
+            bookId = d.bookId,
+            legs = d.legs.map(LegSpecDto::from),
+            scheduleVersion = d.scheduleVersion,
+            scheduleHash = d.scheduleHash,
+            version = d.version,
+            securityIsin = d.header.securityTerms?.securityIsin,
+            regulatory = d.header.regulatory,
+            linkedDealIds = d.header.linkedDeals.map { it.dealId },
+            collateral = d.header.collateral,
+            legalEntityId = d.header.legalEntityId,
+            counterpartyReference = d.header.counterpartyReference,
+            channel = d.header.channel?.name,
+            tradeDateTime = d.header.tradeDateTime,
+            effectiveDate = d.header.effectiveDate,
+            validFrom = d.header.validFrom,
+            validTo = d.header.validTo,
+            jurisdiction = d.header.jurisdiction,
+            calendars = d.header.calendars,
+            businessDayConvention = d.header.businessDayConvention,
+            rollDirection = d.header.rollDirection.name,
+            fixedConvention = d.header.fixedConvention,
+            notionalExchange = d.header.notionalExchange,
+            singleCurrency = d.header.singleCurrency,
+            note = d.header.note,
+            settlementAccounts = d.header.settlementAccounts,
+            documents = d.header.documents,
+            fees = d.header.fees,
+            linkedDeals = d.header.linkedDeals,
+            originalDealId = d.header.originalDealId,
+            securityTerms = d.header.securityTerms,
+            fxTerms = d.header.fxTerms,
+            fraTerms = d.header.fraTerms,
+            depositLoanTerms = d.header.depositLoanTerms,
+            notional = d.legs.firstOrNull()?.notional ?: d.principal,
+            lastChangedAt = d.updatedAt,
+            lastChangedBy = d.history.lastOrNull()?.actor?.id ?: d.createdBy.id,
         )
     }
 }

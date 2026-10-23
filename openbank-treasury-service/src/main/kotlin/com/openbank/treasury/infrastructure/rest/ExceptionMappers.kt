@@ -16,6 +16,7 @@ import com.openbank.treasury.domain.model.ProductLimitBreachedException
 import com.openbank.treasury.domain.model.QuoteUnavailableException
 import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
 import com.openbank.treasury.domain.reference.ReferenceBackdatedException
+import com.openbank.treasury.domain.reference.ReferenceNotEffectiveException
 import com.openbank.treasury.domain.reference.ReferenceNotFoundException
 import com.openbank.treasury.domain.reference.SeniorApprovalRequiredException
 import jakarta.ws.rs.core.Response
@@ -41,6 +42,16 @@ class ExceptionMappers {
     fun referenceNotFound(e: ReferenceNotFoundException): Response =
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
 
+    /** ADR-0344 D3: a deal names reference data not ACTIVE on its trade date; each missing ref listed. */
+    @ServerExceptionMapper
+    fun referenceNotEffective(e: ReferenceNotEffectiveException): Response = Response.status(UNPROCESSABLE).entity(
+        mapOf(
+            "error" to "REFERENCE_NOT_EFFECTIVE",
+            "message" to e.message,
+            "missingReferences" to e.missing.map { it.toString() },
+        ),
+    ).build()
+
     @ServerExceptionMapper
     fun referenceBackdated(e: ReferenceBackdatedException): Response =
         error(UNPROCESSABLE, "REFERENCE_BACKDATED", e.message)
@@ -57,6 +68,14 @@ class ExceptionMappers {
     @ServerExceptionMapper
     fun staleState(e: org.hibernate.StaleObjectStateException): Response =
         error(Response.Status.CONFLICT.statusCode, "INVALID_STATE", e.message)
+
+    @ServerExceptionMapper
+    fun cashFlowNotFound(e: com.openbank.treasury.application.usecase.CashFlowNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun scheduleEngine(e: com.openbank.treasury.domain.cashflow.ScheduleEngineUnavailableException): Response =
+        error(UNPROCESSABLE, "SCHEDULE_ENGINE_UNAVAILABLE", e.message)
 
     @ServerExceptionMapper
     fun statementNotFound(e: StatementNotFoundException): Response =
@@ -110,8 +129,25 @@ class ExceptionMappers {
     ).build()
 
     @ServerExceptionMapper
+    fun flowNotOverridable(e: com.openbank.treasury.domain.cashflow.FlowNotOverridableException): Response =
+        error(Response.Status.CONFLICT.statusCode, "FLOW_NOT_OVERRIDABLE", e.message)
+
+    @ServerExceptionMapper
+    fun flowConflict(e: com.openbank.treasury.application.port.out.CashFlowConflictException): Response =
+        error(Response.Status.CONFLICT.statusCode, "FLOW_CHANGED", e.message)
+
+    @ServerExceptionMapper
     fun notPermitted(e: ActorNotPermittedException): Response =
         error(Response.Status.FORBIDDEN.statusCode, "ACTOR_NOT_PERMITTED", e.message)
+
+    /** ADR-0315 D4: a derivative or repo whose credit measure needs reference data that is not effective. */
+    @ServerExceptionMapper
+    fun creditMeasureMissing(e: com.openbank.treasury.domain.model.CreditMeasureMissingException): Response =
+        error(UNPROCESSABLE, e.code, e.message)
+
+    @ServerExceptionMapper
+    fun correctionLimit(e: com.openbank.treasury.application.port.out.CorrectionLimitBreachedException): Response =
+        error(UNPROCESSABLE, "LIMIT_BREACHED", e.message)
 
     private fun error(status: Int, code: String, message: String?): Response =
         Response.status(status).entity(mapOf("error" to code, "message" to message)).build()

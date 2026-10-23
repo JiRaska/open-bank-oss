@@ -144,7 +144,7 @@
       },
       {
         "name": "ROLE_TREASURY_BACK_OFFICE",
-        "description": "Treasury back office: proposes reference-data changes; never approves them (ADR-0344 D3)."
+        "description": "Treasury back office: proposes cash-flow overrides and reference-data changes, records sent confirmations and position closes; never approves any of them (ADR-0344 D4/D10)."
       },
       {
         "name": "ROLE_TREASURY_REFERENCE_EDITOR",

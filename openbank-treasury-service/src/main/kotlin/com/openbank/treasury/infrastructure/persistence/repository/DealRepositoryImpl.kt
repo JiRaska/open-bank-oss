@@ -4,31 +4,45 @@
 
 package com.openbank.treasury.infrastructure.persistence.repository
 
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
+import com.openbank.treasury.application.port.out.DealReferenceLookup
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.ReferenceRepository
+import com.openbank.treasury.application.port.out.ScheduleWrite
 import com.openbank.treasury.application.port.out.TreasuryOutboxRepository
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
 import com.openbank.treasury.domain.model.Deal
+import com.openbank.treasury.domain.model.DealHeader
+import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.DealTransition
 import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.FxTerms
+import com.openbank.treasury.domain.model.LegSpec
+import com.openbank.treasury.domain.model.LegacyLegs
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.LimitOverride
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.reference.CounterpartyPayload
 import com.openbank.treasury.domain.reference.ReferenceKind
+import com.openbank.treasury.domain.reference.ReferenceRef
 import com.openbank.treasury.domain.reference.ReferenceStatus
+import com.openbank.treasury.infrastructure.cashflow.CashFlowConflictEntity
+import com.openbank.treasury.infrastructure.cashflow.CashFlowEntity
+import com.openbank.treasury.infrastructure.cashflow.CashFlowOverrideEntity
+import com.openbank.treasury.infrastructure.cashflow.DealVersionEntity
+import com.openbank.treasury.infrastructure.cashflow.fill
 import com.openbank.treasury.infrastructure.persistence.entity.CounterpartyEntity
 import com.openbank.treasury.infrastructure.persistence.entity.DealCommandEntity
 import com.openbank.treasury.infrastructure.persistence.entity.DealEntity
@@ -54,6 +68,18 @@ class DealJournalPanacheRepository : PanacheRepository<DealJournalEntity>
 
 @ApplicationScoped
 class DealCommandPanacheRepository : PanacheRepository<DealCommandEntity>
+
+@ApplicationScoped
+class DealVersionPanacheRepository : PanacheRepository<DealVersionEntity>
+
+@ApplicationScoped
+class CashFlowPanacheRepository : PanacheRepository<CashFlowEntity>
+
+@ApplicationScoped
+class CashFlowOverridePanacheRepository : PanacheRepository<CashFlowOverrideEntity>
+
+@ApplicationScoped
+class CashFlowConflictPanacheRepository : PanacheRepository<CashFlowConflictEntity>
 
 /**
  * ADR-0344 D3: the counterparty master is the reference store's ACTIVE `counterparty` record
@@ -94,51 +120,231 @@ class CounterpartyRepositoryImpl(private val references: ReferenceRepository, pr
 }
 
 @ApplicationScoped
-@Suppress("TooManyFunctions")
+// LongParameterList: the deal aggregate spans these tables and they commit in ONE transaction;
+// splitting the adapter would split the transaction.
+@Suppress("TooManyFunctions", "LongParameterList", "LargeClass")
 class DealRepositoryImpl(
     private val outbox: TreasuryOutboxRepository,
     private val transitions: DealTransitionPanacheRepository,
     private val journals: DealJournalPanacheRepository,
     private val commands: DealCommandPanacheRepository,
     private val clock: Clock,
+    private val objectMapper: ObjectMapper,
+    private val versions: DealVersionPanacheRepository,
+    private val cashFlows: CashFlowPanacheRepository,
+    private val overrideRepo: CashFlowOverridePanacheRepository,
+    private val conflictRepo: CashFlowConflictPanacheRepository,
 ) : DealRepository,
+    DealReferenceLookup,
     PanacheRepository<DealEntity> {
+
+    /** ADR-0344 D3: deals whose terms name [ref] (any state; a dependency query, not a filter). */
+    override suspend fun dealsReferencing(ref: ReferenceRef): List<UUID> {
+        val rows = Panache.withSession {
+            when (ref.kind) {
+                ReferenceKind.COUNTERPARTY -> find("counterpartyId = ?1", ref.key).list()
+                ReferenceKind.BOOK -> find("bookId = ?1", ref.key).list()
+                ReferenceKind.SECURITY -> find("securityIsin = ?1", ref.key).list()
+                // Named inside the JSON documents: a coarse LIKE, then an exact check on the decoded terms.
+                ReferenceKind.INDEX, ReferenceKind.CALENDAR ->
+                    find("legsJson like ?1 or headerJson like ?1", "%\"${ref.key}\"%").list()
+                else -> Uni.createFrom().item(emptyList())
+            }
+        }.awaitSuspending()
+        return rows.filter { row ->
+            when (ref.kind) {
+                ReferenceKind.INDEX -> legsOf(row).any { it.rate.index == ref.key }
+                ReferenceKind.CALENDAR -> ref.key in headerOf(row).calendars ||
+                    legsOf(row).any { ref.key in it.paymentCalendars }
+                else -> true
+            }
+        }.map { it.dealId }
+    }
 
     /**
      * Deal row, its NEW timeline entries, the journal reference and the outbox event — one
      * transaction (ADR-0003). Timeline rows already stored are counted and skipped, so the table
      * stays append-only.
      */
-    override suspend fun save(deal: Deal, journal: LedgerJournalRef?, event: DealEvent?, command: CommandKey?): Deal {
+    override suspend fun save(
+        deal: Deal,
+        journal: LedgerJournalRef?,
+        event: DealEvent?,
+        command: CommandKey?,
+        schedule: ScheduleWrite?,
+        extraEvents: List<DealEvent>,
+        limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
+    ): Deal {
+        val actor = deal.history.lastOrNull()?.actor?.id ?: deal.createdBy.id
         Panache.withTransaction {
-            find("dealId", deal.id).firstResult().flatMap { existing ->
+            val row = lockedRow(deal.id, limitGuard)
+            row.flatMap { existing ->
                 val entity = existing ?: DealEntity().apply {
                     dealId = deal.id
                     createdAt = deal.createdAt
                 }
                 entity.fill(deal)
+                entity.lastChangedBy = actor
                 val persisted: Uni<*> = if (existing == null) persist(entity) else Uni.createFrom().item(entity)
                 persisted
                     .flatMap { transitions.count("dealId", deal.id) }
                     .flatMap { stored -> appendTransitions(deal, stored.toInt()) }
                     .flatMap { journal?.let { persistJournal(it) } ?: Uni.createFrom().voidItem() }
                     .flatMap { command?.let { persistCommand(it) } ?: Uni.createFrom().voidItem() }
+                    .flatMap { versionRow(deal, actor) }
+                    .flatMap { schedule?.let { scheduleRows(it) } ?: Uni.createFrom().voidItem() }
                     .flatMap {
-                        event?.let {
-                            outbox.persistInTransaction(
-                                OutboxMessage(
-                                    aggregateId = deal.id,
-                                    eventType = it.eventType,
-                                    payload = it.payload,
-                                    createdAt = clock.instant(),
-                                ),
-                            )
-                        } ?: Uni.createFrom().voidItem()
+                        listOfNotNull(event).plus(extraEvents).fold(Uni.createFrom().voidItem()) { chain, e ->
+                            chain.flatMap {
+                                outbox.persistInTransaction(
+                                    OutboxMessage(
+                                        aggregateId = deal.id,
+                                        eventType = e.eventType,
+                                        payload = e.payload,
+                                        createdAt = clock.instant(),
+                                    ),
+                                )
+                            }
+                        }
                     }
             }
         }.awaitSuspending()
         return deal
     }
+
+    /**
+     * The deal row, locked when the change consumes a limit line. Lock order everywhere: the deal
+     * row, then the limit line, so two writes on one line never deadlock.
+     */
+    private fun lockedRow(
+        dealId: UUID,
+        limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
+    ): Uni<DealEntity?> {
+        if (limitGuard == null) return find("dealId", dealId).firstResult()
+        return find("dealId", dealId).withLock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE).firstResult()
+            .flatMap { locked ->
+                limitGuard?.let { g ->
+                    Panache.getSession().flatMap { exposureUnderLock(it, dealId, g) }.map { locked }
+                }
+                    ?: Uni.createFrom().item(locked)
+            }
+    }
+
+    /** One `deal_versions` row per terms version; the schedule columns follow the latest generation. */
+    private fun versionRow(deal: Deal, actor: String): Uni<Void> =
+        versions.find("dealId = ?1 and version = ?2", deal.id, deal.version).firstResult().flatMap { row ->
+            if (row == null) {
+                versions.persist(
+                    DealVersionEntity().apply {
+                        dealId = deal.id
+                        version = deal.version
+                        termsJson = objectMapper.writeValueAsString(terms(deal))
+                        scheduleVersion = deal.scheduleVersion.takeIf { it > 0 }
+                        scheduleHash = deal.scheduleHash
+                        createdBy = actor
+                        createdAt = clock.instant()
+                        changes = if (deal.version == 1) "created" else null
+                    },
+                ).replaceWithVoid()
+            } else {
+                row.scheduleVersion = deal.scheduleVersion.takeIf { it > 0 }
+                row.scheduleHash = deal.scheduleHash
+                Uni.createFrom().voidItem()
+            }
+        }
+
+    /** The economic terms a version is made of (what a later version would be diffed against). */
+    private fun terms(deal: Deal) = mapOf(
+        "product" to deal.product.name,
+        "kind" to deal.kind.name,
+        "counterpartyId" to deal.counterpartyId,
+        "currency" to deal.currency,
+        "principal" to deal.principal,
+        "rate" to deal.rate,
+        "tradeDate" to deal.tradeDate,
+        "valueDate" to deal.valueDate,
+        "maturityDate" to deal.maturityDate,
+        "legs" to deal.legs,
+        "header" to deal.header.copy(confirmationsSent = emptyList()),
+    )
+
+    /**
+     * The headroom a limit-consuming write (submit, approve) was vetted against,
+     * re-measured inside its transaction under a transaction-scoped lock on the (counterparty, limit
+     * currency) line — ONE key for every such write, so two writes on one line serialise and cannot
+     * jointly breach — by the same [lineExposure] query [exposure] answers with. A breach meanwhile
+     * is a 422, never a committed breach.
+     */
+    private fun exposureUnderLock(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        dealId: java.util.UUID,
+        g: com.openbank.treasury.application.port.out.ExposureGuard,
+    ): Uni<Void> = session.createNativeQuery<Any>("select pg_advisory_xact_lock(hashtext(:line))")
+        .setParameter("line", "treasury-limit:${g.counterpartyId}:${g.currency}").singleResult
+        .flatMap { lineExposure(session, g.counterpartyId, g.currency, dealId) }
+        .map { exposure ->
+            if (exposure > g.maxOthers) {
+                throw com.openbank.treasury.application.port.out.CorrectionLimitBreachedException(
+                    "counterparty ${g.counterpartyId} ${g.currency}: other exposure $exposure exceeds the " +
+                        "${g.maxOthers} headroom the change was vetted against",
+                )
+            }
+        }.replaceWithVoid()
+
+    /**
+     * The limit-consuming exposure of one (counterparty, LIMIT currency) line, [excludeDealId] aside:
+     * the sum of each ACTUAL deal's stored credit exposure (`limit_deal_amount`, the
+     * [com.openbank.treasury.domain.model.CreditExposure] its own submission or approval measured)
+     * over the deals in a consuming state — FX spots until settlement, every other line-consuming
+     * product while live. The pre-trade check adds the new deal's figure from the SAME function, so
+     * the two cannot measure a deal differently. A legacy row without a stored figure falls back to
+     * the pre-ADR-0344 rule (principal of an asset, the CZK leg of an FX spot).
+     */
+    private fun lineExposure(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        counterpartyId: String,
+        currency: String,
+        excludeDealId: UUID?,
+    ): Uni<BigDecimal> {
+        val q = session.createNativeQuery<Any>(
+            "select coalesce(sum(coalesce(limit_deal_amount, case when product = 'FX_SPOT' then fx_counter_amount " +
+                "when product in (:assets) then principal else 0 end)), 0) from deals " +
+                "where counterparty_id = :cp and kind = 'ACTUAL' and deal_id <> :d " +
+                "and (case when product in (:czkLine) then 'CZK' else currency end) = :ccy " +
+                "and ((product = 'FX_SPOT' and state in (:fxStates)) " +
+                "or (product in (:consuming) and state in (:states)))",
+        ).setParameter("cp", counterpartyId).setParameter("ccy", currency)
+            .setParameter("d", excludeDealId ?: NO_DEAL)
+            .setParameter("states", LIMIT_CONSUMING_STATE_NAMES)
+            .setParameter("fxStates", Deal.FX_LIMIT_CONSUMING_STATES.map { it.name })
+            .setParameter("assets", ASSET_PRODUCT_NAMES)
+            .setParameter("consuming", LINE_CONSUMING_PRODUCT_NAMES)
+            .setParameter("czkLine", com.openbank.treasury.domain.model.CreditMeasure.CZK_LINE_PRODUCTS.map { it.name })
+        return q.singleResult.map { BigDecimal(it.toString()) }
+    }
+
+    private fun scheduleRows(s: ScheduleWrite): Uni<Void> {
+        val flows = s.flows.map { CashFlowEntity().fill(it) }
+        val conflicts = s.conflicts.map { CashFlowConflictEntity().fill(it) }
+        val touched = (s.carried + s.conflicted).associateBy { it.overrideId }
+        return cashFlows.persist(flows)
+            .flatMap { if (conflicts.isEmpty()) Uni.createFrom().voidItem() else conflictRepo.persist(conflicts) }
+            .flatMap {
+                if (touched.isEmpty()) {
+                    Uni.createFrom().voidItem()
+                } else {
+                    overrideRepo.find("overrideId in ?1", touched.keys.toList()).list().map { rows ->
+                        rows.forEach { row -> touched[row.overrideId]?.let { row.fill(it) } }
+                    }.replaceWithVoid()
+                }
+            }
+    }
+
+    private fun legsOf(row: DealEntity): List<LegSpec> =
+        row.legsJson?.let { objectMapper.readValue(it, LEGS_TYPE) } ?: emptyList()
+
+    private fun headerOf(row: DealEntity): DealHeader =
+        row.headerJson?.let { objectMapper.readValue(it, DealHeader::class.java) } ?: DealHeader.EMPTY
 
     private fun appendTransitions(deal: Deal, stored: Int): Uni<Void> {
         val fresh = deal.history.drop(stored).mapIndexed { i, t ->
@@ -156,7 +362,7 @@ class DealRepositoryImpl(
         return if (fresh.isEmpty()) Uni.createFrom().voidItem() else transitions.persist(fresh).replaceWithVoid()
     }
 
-    private fun persistJournal(ref: LedgerJournalRef): Uni<Void> = journals.persist(
+    internal fun persistJournal(ref: LedgerJournalRef): Uni<Void> = journals.persist(
         DealJournalEntity().apply {
             dealId = ref.dealId
             event = ref.event.name
@@ -198,7 +404,13 @@ class DealRepositoryImpl(
 
     override suspend fun dueForSettlement(today: LocalDate, states: Set<DealState>): List<Deal> = withHistories(
         Panache.withSession {
-            find("state in ?1 and valueDate <= ?2 order by valueDate asc", states.map { it.name }, today).list()
+            find(
+                "state in ?1 and valueDate <= ?2 and kind = ?3 and product in ?4 order by valueDate asc",
+                states.map { it.name },
+                today,
+                DealKind.ACTUAL.name,
+                POSTABLE_PRODUCT_NAMES,
+            ).list()
         }.awaitSuspending(),
     )
 
@@ -206,37 +418,20 @@ class DealRepositoryImpl(
         Panache.withSession {
             // An FX spot is final once SETTLED (maturityDate == valueDate); it never matures.
             find(
-                "state = ?1 and maturityDate <= ?2 and product <> ?3 order by maturityDate asc",
+                "state = ?1 and maturityDate <= ?2 and product <> ?3 and kind = ?4 and product in ?5 order by maturityDate asc",
                 DealState.SETTLED.name,
                 today,
                 ProductType.FX_SPOT.name,
+                DealKind.ACTUAL.name,
+                POSTABLE_PRODUCT_NAMES,
             ).list()
         }.awaitSuspending(),
     )
 
-    override suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal {
-        val rows = Panache.withSession {
-            find(
-                "counterpartyId = ?1 and currency = ?2 and state in ?3 and product in ?4",
-                counterpartyId,
-                currency,
-                LIMIT_CONSUMING_STATE_NAMES,
-                LIMIT_CONSUMING_PRODUCT_NAMES,
-            ).list()
+    override suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal =
+        Panache.withSession {
+            Panache.getSession().flatMap { lineExposure(it, counterpartyId, currency, excludeDealId) }
         }.awaitSuspending()
-        val placed = rows.filter { it.dealId != excludeDealId }.sumOf { it.principal }
-        if (currency != Deal.CZK) return placed
-        // #10896: an unsettled FX spot carries settlement risk on its CZK equivalent until it settles.
-        val fx = Panache.withSession {
-            find(
-                "counterpartyId = ?1 and product = ?2 and state in ?3",
-                counterpartyId,
-                ProductType.FX_SPOT.name,
-                Deal.FX_LIMIT_CONSUMING_STATES.map { it.name },
-            ).list()
-        }.awaitSuspending()
-        return placed + fx.filter { it.dealId != excludeDealId }.sumOf { it.fxCounterAmount ?: BigDecimal.ZERO }
-    }
 
     /**
      * Deals currently PENDING_APPROVAL that carry a senior limit override (ADR-0315 D4, #10896).
@@ -335,6 +530,17 @@ class DealRepositoryImpl(
         fxMidRate = deal.fx?.midRate
         fxRateFlag = deal.fx?.rateFlag
         updatedAt = deal.updatedAt
+        kind = deal.kind.name
+        bookId = deal.bookId
+        // The legacy products derive their legs from the flat fields on read: nothing stored that could drift.
+        legsJson = if (deal.product.legacy) null else objectMapper.writeValueAsString(deal.legs)
+        legSchemaVersion = if (deal.product.legacy) null else LegSpec.SCHEMA_VERSION
+        headerJson = if (deal.header == DealHeader.EMPTY) null else objectMapper.writeValueAsString(deal.header)
+        headerSchemaVersion = if (deal.header == DealHeader.EMPTY) null else DealHeader.SCHEMA_VERSION
+        dealVersion = deal.version
+        scheduleVersion = deal.scheduleVersion
+        scheduleHash = deal.scheduleHash
+        securityIsin = deal.header.securityTerms?.securityIsin ?: deal.header.collateral?.securityIsin
     }
 
     /** Senior overrides are always human (the domain refuses any other actor). */
@@ -362,7 +568,7 @@ class DealRepositoryImpl(
                 rateFlag = fxRateFlag,
             )
         }
-        val limitCurrency = if (productType == ProductType.FX_SPOT) Deal.CZK else currency
+        val limitCurrency = com.openbank.treasury.domain.model.CreditExposure.limitCurrency(productType, currency)
         return Deal(
             id = dealId,
             product = productType,
@@ -389,12 +595,33 @@ class DealRepositoryImpl(
             limitOverride = overrideOrNull(),
             fx = fx,
             history = history,
-        )
+            kind = DealKind.valueOf(kind),
+            legs = legsOf(this),
+            header = headerOf(this),
+            version = dealVersion,
+            scheduleVersion = scheduleVersion,
+            scheduleHash = scheduleHash,
+        ).let { d -> if (d.product.legacy) d.copy(legs = LegacyLegs.derive(d)) else d }
     }
 
     private companion object {
         /** Derived from [Deal.LIMIT_CONSUMING_STATES] — never a second, independently-typed literal list. */
         val LIMIT_CONSUMING_STATE_NAMES = Deal.LIMIT_CONSUMING_STATES.map { it.name }
-        val LIMIT_CONSUMING_PRODUCT_NAMES = ProductType.entries.filter { it.isAsset }.map { it.name }
+
+        /** No deal excluded: a UUID no deal carries, so `deal_id <> :d` binds a typed value. */
+        val NO_DEAL: UUID = UUID(0L, 0L)
+        val ASSET_PRODUCT_NAMES = ProductType.entries.filter { it.isAsset }.map { it.name }
+
+        /** Every product but FX spot (its own states) whose [CreditMeasure] consumes a line. */
+        val LINE_CONSUMING_PRODUCT_NAMES = ProductType.entries.filter {
+            it != ProductType.FX_SPOT &&
+                com.openbank.treasury.domain.model.CreditMeasure.of(it) !=
+                com.openbank.treasury.domain.model.CreditMeasure.NONE
+        }.map { it.name }
+
+        /** The products with posting rules today: the only ones the simulated market moves. */
+        val POSTABLE_PRODUCT_NAMES = ProductType.entries.filter { it.legacy }.map { it.name }
+
+        val LEGS_TYPE = object : TypeReference<List<LegSpec>>() {}
     }
 }

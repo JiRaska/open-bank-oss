@@ -8,12 +8,15 @@ import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.application.port.`in`.ProposeReferenceCommand
 import com.openbank.treasury.application.port.`in`.ReferenceActivity
 import com.openbank.treasury.application.port.`in`.ReferenceDataUseCase
+import com.openbank.treasury.application.port.`in`.ReferenceDependant
 import com.openbank.treasury.application.port.`in`.ReferenceHistory
+import com.openbank.treasury.application.port.out.DealReferenceLookup
 import com.openbank.treasury.application.port.out.ReferenceCommandKey
 import com.openbank.treasury.application.port.out.ReferenceRepository
 import com.openbank.treasury.application.port.out.ReferenceWrite
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.reference.ReferenceKind
+import com.openbank.treasury.domain.reference.ReferenceNotEffectiveException
 import com.openbank.treasury.domain.reference.ReferenceNotFoundException
 import com.openbank.treasury.domain.reference.ReferenceRecord
 import com.openbank.treasury.domain.reference.ReferenceRef
@@ -28,7 +31,11 @@ import java.time.LocalDate
  * prior status of every row it rewrites so a concurrent decision is refused, never overwritten.
  */
 @Suppress("TooManyFunctions") // one use case per steward operation, plus its load/replay helpers
-class ReferenceDataService(private val records: ReferenceRepository, private val clock: Clock) : ReferenceDataUseCase {
+class ReferenceDataService(
+    private val records: ReferenceRepository,
+    private val deals: DealReferenceLookup,
+    private val clock: Clock,
+) : ReferenceDataUseCase {
 
     override suspend fun list(kind: ReferenceKind, status: ReferenceStatus?, asOf: LocalDate?) =
         records.list(kind, status, asOf)
@@ -128,6 +135,16 @@ class ReferenceDataService(private val records: ReferenceRepository, private val
         }.single()
     }
 
+    override suspend fun dependencies(kind: ReferenceKind, key: String): List<ReferenceDependant> {
+        val target = ReferenceRef(kind, key)
+        val fromRecords = records.live()
+            .filter { r -> target in r.payload.references() }
+            .map { ReferenceDependant(it.kind.wire, it.key, "${it.kind.wire}@v${it.version}") }
+            .distinct()
+        val fromDeals = deals.dealsReferencing(target).map { ReferenceDependant("deal", it.toString(), kind.wire) }
+        return fromRecords + fromDeals
+    }
+
     override suspend fun importProposals(
         kind: ReferenceKind,
         commands: List<ProposeReferenceCommand>,
@@ -185,6 +202,12 @@ class ReferenceDataService(private val records: ReferenceRepository, private val
                 }
             }
         }.filter { since == null || !it.at.isBefore(since) }.sortedByDescending { it.at }
+
+    /** Throws [ReferenceNotEffectiveException] listing every ref with no ACTIVE version on [on]. */
+    suspend fun requireEffective(refs: Collection<ReferenceRef>, on: LocalDate) {
+        val missing = records.notEffective(refs.distinct(), on)
+        if (missing.isNotEmpty()) throw ReferenceNotEffectiveException(missing, on)
+    }
 
     private fun List<ReferenceRecord>.find(kind: ReferenceKind, recordKey: String, version: Int) =
         firstOrNull { it.version == version }

@@ -127,7 +127,9 @@ class PostingRulesTest {
             principal = "10000000.00",
             rate = "5.75",
             maturity = null,
-            valueDate = DealFixtures.FRIDAY,
+            // A week after DealFixtures.FRIDAY: that Friday's Monday (2026-09-28) is a CERTIS holiday,
+            // which would make this a four-day loan (#11670); this case is the plain weekend.
+            valueDate = DealFixtures.FRIDAY.plusDays(7),
         )
         assertThat(PostingRules.settlement(l).render())
             .containsExactly("D 1001 10000000.00 CZK", "C 2320 10000000.00 CZK")

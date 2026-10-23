@@ -175,6 +175,14 @@ class ReferenceDataApiIT {
     }
 
     @Test
+    @Order(6)
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `6 - the dependency query lists the indices fixing on a calendar and deals facing a counterparty`() {
+        given().`when`().get("/api/v1/treasury/reference/dependencies/calendar/CERTIS").then().statusCode(200)
+            .body("dependants.id", hasItem("PRIBOR_3M")).body("dependants.id", hasItem("CZEONIA"))
+    }
+
+    @Test
     @Order(7)
     @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
     fun `7 - two concurrent approvals of one version - exactly one wins, the other is a 409`() {
@@ -207,7 +215,7 @@ class ReferenceDataApiIT {
     }
 
     /**
-     * The `reference_records.kind` CHECK (V20) and [com.openbank.treasury.domain.reference.ReferenceKind]
+     * The `reference_records.kind` CHECK (V20, widened by V22) and [com.openbank.treasury.domain.reference.ReferenceKind]
      * are kept in lockstep by nothing the compiler sees: a kind in the enum the CHECK refuses would be
      * a 500 at flush. Store one proposal of EVERY shipped kind; a kind added to the enum without a
      * payload here fails the `containsOnlyKeys` check before it can reach a deployment.
@@ -249,7 +257,11 @@ class ReferenceDataApiIT {
                     """{"label":"30+","fromDays":30}]}"""
                 ),
             "regulatory-code" to ("CNB:IT1" to """{"list":"CNB","code":"IT1","label":"IT code"}"""),
-        )
+            "product-type" to ("IT-PT" to """{"code":"IT-PT","permitted":false}"""),
+        ) + com.openbank.treasury.domain.reference.ReferenceKind.entries.filter { it.generic }.associate { k ->
+            // The catalogue kinds (V22): generic records, a code and a name.
+            k.wire to ("IT-${k.ordinal}" to """{"code":"IT-${k.ordinal}","name":"IT ${k.wire}"}""")
+        }
         assertThat(payloads).containsOnlyKeys(
             com.openbank.treasury.domain.reference.ReferenceKind.entries.map { it.wire },
         )

@@ -343,7 +343,51 @@ test_reference_machines_and_agents_get_nothing if {
 		not allowed(p, "treasury.reference.propose")
 		not allowed_on(p, "treasury.reference.approve", "calendar")
 		not allowed_on(p, "treasury.reference.approve", "counterparty")
+		not allowed(p, "treasury.cashflow.override.approve")
 	}
+}
+
+# --- ADR-0344 D4 the cash-flow ledger: must-DENY first ---
+
+test_override_split_between_back_office_and_approver if {
+	allowed(back_office, "treasury.cashflow.override.propose")
+	not allowed(back_office, "treasury.cashflow.override.approve")
+	allowed(approver, "treasury.cashflow.override.approve")
+	not allowed(approver, "treasury.cashflow.override.propose")
+	not allowed(dealer, "treasury.cashflow.override.propose")
+}
+
+test_schedule_preview_is_dealer_and_back_office_only if {
+	not allowed(approver, "treasury.deal.preview")
+	not allowed(nobody, "treasury.deal.preview")
+	not allowed(agent, "treasury.deal.preview")
+	not allowed(shared_sa, "treasury.deal.preview")
+	allowed(dealer, "treasury.deal.preview")
+	allowed(back_office, "treasury.deal.preview")
+}
+
+test_confirmation_and_position_close_are_back_office_writes if {
+	every p in [dealer, editor, agent, shared_sa, renamed_sa, nobody] {
+		not allowed(p, "treasury.deal.send-confirmation")
+		not allowed(p, "treasury.position.close")
+		not allowed(p, "treasury.cashflow.override.reject")
+	}
+	not allowed(approver, "treasury.position.close")
+	allowed(back_office, "treasury.deal.send-confirmation")
+	allowed(approver, "treasury.deal.send-confirmation")
+	allowed(back_office, "treasury.position.close")
+	allowed(approver, "treasury.cashflow.override.reject")
+}
+
+test_cash_flow_and_calendar_reads_are_staff_reads if {
+	every p in [agent, nobody] {
+		not allowed(p, "treasury.cashflow.read")
+		not allowed(p, "treasury.calendar.read")
+	}
+	not allowed(editor, "treasury.cashflow.read")
+	not allowed(editor, "treasury.calendar.read")
+	allowed(dealer, "treasury.cashflow.read")
+	allowed(back_office, "treasury.calendar.read")
 }
 
 # Least privilege: the reference editor reads reference data and NOTHING else. Known-negative for

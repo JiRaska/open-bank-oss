@@ -144,3 +144,5 @@ openbank-pension-fund-service POST /api/v1/strategies/{strategyId}/changes  # ba
 openbank-pension-fund-service POST /api/v1/strategy-changes/{changeId}/approve  # lifecycle/action endpoint on an addressed resource — replay refused 409 by StrategyChange state — ADR-0334
 openbank-pension-fund-service POST /api/v1/strategy-changes/{changeId}/reject  # lifecycle/action endpoint on an addressed resource — replay refused 409 by StrategyChange state — ADR-0334
 openbank-pension-fund-service POST /api/v1/strategy-changes/{changeId}/apply  # lifecycle/action endpoint on an addressed resource — replay refused 409 by StrategyChange state — ADR-0334
+openbank-treasury-service POST /api/v1/treasury/deals/{id}/schedule-preview  # read-only preview; persists nothing, replay is harmless — ADR-0344 contract 8.1 exception
+openbank-treasury-service POST /api/v1/treasury/views/deal-filters  # per-user saved view, upsert by (user, name); not money-moving — ADR-0344 contract 8.2 exception

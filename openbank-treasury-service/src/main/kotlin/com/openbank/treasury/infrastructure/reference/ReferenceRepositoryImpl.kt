@@ -14,6 +14,7 @@ import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.reference.CounterpartyPayload
 import com.openbank.treasury.domain.reference.ReferenceKind
 import com.openbank.treasury.domain.reference.ReferenceRecord
+import com.openbank.treasury.domain.reference.ReferenceRef
 import com.openbank.treasury.domain.reference.ReferenceStatus
 import com.openbank.treasury.infrastructure.persistence.entity.CounterpartyEntity
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -64,6 +65,23 @@ class ReferenceRepositoryImpl(
     override suspend fun versions(kind: ReferenceKind, key: String): List<ReferenceRecord> = Panache.withSession {
         find("kind = ?1 and recordKey = ?2 order by version asc", kind.wire, key).list()
     }.awaitSuspending().map { it.toDomain() }
+
+    override suspend fun live(): List<ReferenceRecord> = Panache.withSession {
+        find("status in ?1", listOf(ReferenceStatus.PENDING.name, ReferenceStatus.ACTIVE.name)).list()
+    }.awaitSuspending().map { it.toDomain() }
+
+    override suspend fun notEffective(refs: Collection<ReferenceRef>, on: LocalDate): List<ReferenceRef> {
+        if (refs.isEmpty()) return emptyList()
+        val active = Panache.withSession {
+            find(
+                "status = ?1 and kind in ?2 and recordKey in ?3",
+                ReferenceStatus.ACTIVE.name,
+                refs.map { it.kind.wire }.distinct(),
+                refs.map { it.key }.distinct(),
+            ).list()
+        }.awaitSuspending().map { it.toDomain() }
+        return refs.filter { ref -> active.none { it.ref == ref && it.isEffectiveOn(on) } }
+    }
 
     override suspend fun save(writes: List<ReferenceWrite>, command: ReferenceCommandKey?) {
         val today = AccountingClock.bank(clock).today()
