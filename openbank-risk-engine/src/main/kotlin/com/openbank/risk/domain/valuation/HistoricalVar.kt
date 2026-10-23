@@ -62,9 +62,20 @@ object HistoricalVar {
         return VarFigures(losses[k - 1], es)
     }
 
-    /** Today's [base] moved by the change between [from] and [to], or null when a needed input is absent. */
-    fun shocked(base: MarketState, from: HistoricalMarket, to: HistoricalMarket): MarketState? {
+    /**
+     * Today's [base] moved by the change between [from] and [to], or null when an input used by the
+     * prepared book is absent. Unused curves and FX rates remain at base rather than discarding a
+     * valid scenario for an unrelated market gap.
+     */
+    fun shocked(
+        base: MarketState,
+        from: HistoricalMarket,
+        to: HistoricalMarket,
+        requiredCurves: Set<CurveIndex> = base.curves.keys,
+        requiredFx: Set<String> = base.fxToReporting.keys,
+    ): MarketState? {
         val curves = base.curves.mapValues { (index, curve) ->
+            if (index !in requiredCurves) return@mapValues curve
             val a = from.curves[index] ?: return null
             val b = to.curves[index] ?: return null
             curve.shifted(
@@ -75,6 +86,7 @@ object HistoricalVar {
             )
         }
         val fx = base.fxToReporting.mapValues { (ccy, rate) ->
+            if (ccy !in requiredFx) return@mapValues rate
             val r0 = from.fxToReporting[ccy] ?: return null
             val r1 = to.fxToReporting[ccy] ?: return null
             rate.multiply(r1, PRICING_MC).divide(r0, PRICING_MC)

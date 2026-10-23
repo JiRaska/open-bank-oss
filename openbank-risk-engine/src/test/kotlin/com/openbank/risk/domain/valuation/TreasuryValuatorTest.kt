@@ -168,6 +168,47 @@ class TreasuryValuatorTest {
     }
 
     @Test
+    fun `empty stored set without legs is unpriced instead of a zero-value deal`() {
+        val id = UUID.randomUUID()
+        val deal = ValuableDeal(id, "BOOK-1", DealKind.ACTUAL, emptyList(), StoredFlowSet(id, 1, "h", emptyList()))
+        assertThat(valuator.prepare(deal)).isInstanceOf(TreasuryValuator.Preparation.Unpriced::class.java)
+    }
+
+    @Test
+    fun `stored flows with a different currency cannot replace or create a leg`() {
+        val leg = LegTemplates.moneyMarket(
+            PayReceive.RECEIVE,
+            DealTerms(CurrencyCode.of("CZK"), notional, asOf, asOf.plusMonths(3), czk),
+            BigDecimal("0.05"),
+        )
+        val fact = StoredCashFlow(
+            legIndex = 0,
+            periodIndex = 0,
+            kind = CashFlowKind.INTEREST,
+            direction = FlowDirection.IN,
+            currency = "EUR",
+            paymentDate = asOf.plusMonths(3),
+            accrualStart = asOf,
+            accrualEnd = asOf.plusMonths(3),
+            amount = BigDecimal("100"),
+            rateSource = "OBSERVED",
+            state = "FIXED",
+        )
+        val id = UUID.randomUUID()
+        val withLeg = ValuableDeal(id, "BOOK-1", DealKind.ACTUAL, listOf(leg), StoredFlowSet(id, 1, "h", listOf(fact)))
+        assertThat(valuator.prepare(withLeg)).isInstanceOf(TreasuryValuator.Preparation.Unpriced::class.java)
+
+        val storedOnly = ValuableDeal(
+            id,
+            "BOOK-1",
+            DealKind.ACTUAL,
+            emptyList(),
+            StoredFlowSet(id, 2, "h", listOf(fact, fact.copy(periodIndex = 1, currency = "CZK"))),
+        )
+        assertThat(valuator.prepare(storedOnly)).isInstanceOf(TreasuryValuator.Preparation.Unpriced::class.java)
+    }
+
+    @Test
     fun `a deal on a currency or index without a curve is unpriced, never priced on another curve`() {
         val usd = LegTemplates.moneyMarket(
             PayReceive.RECEIVE,

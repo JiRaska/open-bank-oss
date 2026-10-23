@@ -210,9 +210,17 @@ class TreasuryValuationService(
             HistoricalMarket(set.asOf, set.curves, fixings.inEffect(currencies, set.asOf).mapValues { it.value.rate })
         }
         val basePv = book.valuator.bookPv(book.prepared, book.market)
+        val neededCurves = book.prepared.flatMap { prepared ->
+            prepared.slots.flatMap { slot ->
+                listOfNotNull(CurveIndex.discountingFor(slot.currency), slot.projectionIndex)
+            }
+        }.toSet()
+        val neededFx = book.prepared.flatMap { prepared ->
+            prepared.slots.map { it.currency }
+        }.filter { it != book.market.reportingCurrency }.toSet()
         var skipped = 0
         val pnl = HistoricalVar.pairs(history, horizonDays).mapNotNull { (a, b) ->
-            val shocked = HistoricalVar.shocked(book.market, a, b)
+            val shocked = HistoricalVar.shocked(book.market, a, b, neededCurves, neededFx)
             if (shocked == null) skipped++
             shocked?.let { book.valuator.bookPv(book.prepared, it).subtract(basePv, PRICING_MC) }
         }

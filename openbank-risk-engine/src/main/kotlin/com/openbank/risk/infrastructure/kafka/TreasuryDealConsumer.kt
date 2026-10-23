@@ -112,11 +112,7 @@ class TreasuryDealConsumer {
         // A product outside the snapshot's instrument set is still VALUED when it publishes legs
         // (ADR-0344 D8); without legs there is nothing this engine can do with it.
         if (event.product !in TreasuryInstrumentMapper.SUPPORTED_PRODUCTS && event.legsJson == null) {
-            log.infof(
-                "[treasury-deal-in] product '%s' is not modelled by this engine, not stored: %.200s",
-                event.product,
-                payload,
-            )
+            log.info("[treasury-deal-in] product is not modelled by this engine, not stored")
             count(OUTCOME_UNSUPPORTED_PRODUCT)
             return
         }
@@ -127,7 +123,7 @@ class TreasuryDealConsumer {
             throw e
         }
         if (event.legsError != null) {
-            log.warnf("[treasury-deal-in] deal %s stored as UNVALUABLE: %s", event.dealId, event.legsError)
+            log.warn("[treasury-deal-in] deal stored as UNVALUABLE")
             count(OUTCOME_STORED_UNVALUABLE)
         }
         count(if (changed) OUTCOME_STORED else OUTCOME_UNCHANGED)
@@ -182,40 +178,40 @@ class TreasuryDealConsumer {
     ): Triple<UUID, Int, List<com.openbank.risk.domain.valuation.StoredCashFlow>>? = try {
         val node = objectMapper.readTree(payload)
         val flows = node.get("flows")?.takeIf { it.isArray && it.size() in 1..MAX_FIXED_FLOWS }
-            ?: return malformedFlows("flows", payload)
+            ?: return malformedFlows("flows")
         val parsed = objectMapper.convertValue(flows, object : TypeReference<List<CashFlowDto>>() {})
             .mapIndexed(CashFlowJson::toDomain)
-        if (parsed.any { it.state != "FIXED" || it.amount == null }) return malformedFlows("flows[].state", payload)
+        if (parsed.any { it.state != "FIXED" || it.amount == null }) return malformedFlows("flows[].state")
         Triple(
-            UUID.fromString(node.text("dealId") ?: return malformedFlows("dealId", payload)),
+            UUID.fromString(node.text("dealId") ?: return malformedFlows("dealId")),
             node.get("dealVersion")?.takeIf { it.canConvertToInt() }?.intValue()
-                ?: return malformedFlows("dealVersion", payload),
+                ?: return malformedFlows("dealVersion"),
             parsed,
         )
     } catch (e: Exception) {
-        log.warnf("[treasury-deal-in] malformed treasury.cashflow.fixed: %s", e.message)
+        log.warnf("[treasury-deal-in] malformed treasury.cashflow.fixed (%s), acked", e.javaClass.simpleName)
         null
     }
 
     @Suppress("TooGenericExceptionCaught", "ReturnCount")
     internal fun parseCashFlows(payload: String): StoredFlowSet? = try {
         val node = objectMapper.readTree(payload)
-        val flows = node.get("flows")?.takeIf { it.isArray } ?: return malformedFlows("flows", payload)
+        val flows = node.get("flows")?.takeIf { it.isArray } ?: return malformedFlows("flows")
         StoredFlowSet(
-            dealId = UUID.fromString(node.text("dealId") ?: return malformedFlows("dealId", payload)),
+            dealId = UUID.fromString(node.text("dealId") ?: return malformedFlows("dealId")),
             dealVersion = node.get("dealVersion")?.takeIf { it.canConvertToInt() }?.intValue()
-                ?: return malformedFlows("dealVersion", payload),
-            scheduleHash = node.text("scheduleHash") ?: return malformedFlows("scheduleHash", payload),
+                ?: return malformedFlows("dealVersion"),
+            scheduleHash = node.text("scheduleHash") ?: return malformedFlows("scheduleHash"),
             flows = objectMapper.convertValue(flows, object : TypeReference<List<CashFlowDto>>() {})
                 .mapIndexed(CashFlowJson::toDomain),
         )
     } catch (e: Exception) {
-        log.errorf(e, "[treasury-deal-in] malformed cash-flow event, acked: %.200s", payload)
+        log.errorf("[treasury-deal-in] malformed cash-flow event (%s), acked", e.javaClass.simpleName)
         null
     }
 
-    private fun <T> malformedFlows(field: String, payload: String): T? {
-        log.warnf("[treasury-deal-in] cash-flow event without a valid %s, acked: %.200s", field, payload)
+    private fun <T> malformedFlows(field: String): T? {
+        log.warnf("[treasury-deal-in] cash-flow event without a valid %s, acked", field)
         return null
     }
 
@@ -229,30 +225,38 @@ class TreasuryDealConsumer {
      * raw legs and the reason, and every valuation read reports it as a data gap — never dropped.
      */
     @Suppress("TooGenericExceptionCaught") // every leg defect is the same "unvaluable" outcome
-    private fun publishedLegs(node: JsonNode, header: LegDefaults): PublishedLegs? {
+    private fun publishedLegs(node: JsonNode, header: LegDefaults, rollDirection: String?): PublishedLegs? {
         val legs = node.get("legs")?.takeIf { it.isArray && it.size() > 0 } ?: return null
         return try {
+            val defaults = header.copy(rollDirection = LegDefaults.parseRollDirection(rollDirection))
             val dtos = objectMapper.convertValue(legs, object : TypeReference<List<LegDto>>() {})
-            LegSpecJson.toLegs(dtos, header, LegBounds.BOOKED).forEach { ScheduleGenerator.generate(it) }
+            LegSpecJson.toLegs(dtos, defaults, LegBounds.BOOKED).forEach { ScheduleGenerator.generate(it) }
             val resolved = dtos.map {
                 // Bake the resolved stub: the stored legs are re-read without the deal header, so a
                 // FROM_START deal must not fall back to the FROM_END default later.
                 it.copy(
-                    stub = StubType.resolve(LegDefaults.parseStub(it.stub), header.rollDirection).name,
-                    paymentCalendars = it.paymentCalendars ?: header.calendars,
-                    businessDayConvention = it.businessDayConvention ?: header.businessDayConvention,
+                    stub = StubType.resolve(LegDefaults.parseStub(it.stub), defaults.rollDirection).name,
+                    paymentCalendars = it.paymentCalendars ?: defaults.calendars,
+                    businessDayConvention = it.businessDayConvention ?: defaults.businessDayConvention,
                 )
             }
             PublishedLegs(objectMapper.writeValueAsString(resolved), null)
         } catch (e: Exception) {
-            PublishedLegs(legs.toString(), "legs cannot be built: ${e.message}")
+            // Parser messages can contain invalid caller-supplied fields. This reason is stored and
+            // later returned in valuation dataGap, so keep only a bounded, known-safe diagnosis.
+            val reason = if (e.message?.contains("exceeds 2000 periods") == true) {
+                "schedule exceeds 2000 periods per leg"
+            } else {
+                "invalid published leg specification"
+            }
+            PublishedLegs(legs.toString(), "legs cannot be built: $reason")
         }
     }
 
     /** The event as the book needs it, or null (malformed: logged, counted and acked). */
     @Suppress("TooGenericExceptionCaught", "ReturnCount") // any parse defect is the same malformed outcome
     internal fun parse(type: String?, payload: String): TreasuryDealEvent? {
-        val state = STATE_BY_TYPE[type] ?: return malformed("ce-type '$type'", payload)
+        val state = STATE_BY_TYPE[type] ?: return malformed("ce-type")
         return try {
             val node = objectMapper.readTree(payload)
             val published = publishedLegs(
@@ -260,17 +264,17 @@ class TreasuryDealConsumer {
                 LegDefaults(
                     calendars = node.get("calendars")?.takeIf { it.isArray && it.size() > 0 }?.map { it.asText() },
                     businessDayConvention = node.text("businessDayConvention"),
-                    rollDirection = LegDefaults.parseRollDirection(node.text("rollDirection")),
                 ),
+                node.text("rollDirection"),
             )
             TreasuryDealEvent(
                 state = state,
-                dealId = UUID.fromString(node.text("dealId") ?: return malformed("dealId", payload)),
-                product = node.text("product") ?: return malformed("product", payload),
-                counterpartyId = node.text("counterpartyId") ?: return malformed("counterpartyId", payload),
-                currency = node.text("currency") ?: return malformed("currency", payload),
+                dealId = UUID.fromString(node.text("dealId") ?: return malformed("dealId")),
+                product = node.text("product") ?: return malformed("product"),
+                counterpartyId = node.text("counterpartyId") ?: return malformed("counterpartyId"),
+                currency = node.text("currency") ?: return malformed("currency"),
                 principal = node.get("principal")?.takeIf { it.isNumber }?.decimalValue()
-                    ?: return malformed("principal", payload),
+                    ?: return malformed("principal"),
                 rate = node.get("rate")?.takeIf { it.isNumber }?.decimalValue(),
                 valueDate = node.text("valueDate")?.let(LocalDate::parse),
                 maturityDate = node.text("maturityDate")?.let(LocalDate::parse),
@@ -281,7 +285,7 @@ class TreasuryDealConsumer {
                 legsError = published?.error,
             )
         } catch (e: Exception) {
-            log.errorf(e, "[treasury-deal-in] malformed deal event, acked: %.200s", payload)
+            log.errorf("[treasury-deal-in] malformed deal event (%s), acked", e.javaClass.simpleName)
             null
         }
     }
@@ -295,8 +299,8 @@ class TreasuryDealConsumer {
         false // unparseable JSON is judged — and counted malformed — by [parse]
     }
 
-    private fun malformed(field: String, payload: String): TreasuryDealEvent? {
-        log.warnf("[treasury-deal-in] deal event without a valid %s, acked: %.200s", field, payload)
+    private fun malformed(field: String): TreasuryDealEvent? {
+        log.warnf("[treasury-deal-in] deal event without a valid %s, acked", field)
         return null
     }
 

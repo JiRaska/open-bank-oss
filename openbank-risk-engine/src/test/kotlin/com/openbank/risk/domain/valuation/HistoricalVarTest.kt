@@ -4,6 +4,7 @@
 
 package com.openbank.risk.domain.valuation
 
+import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.curve.ReferenceCurveSet
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -66,5 +67,34 @@ class HistoricalVarTest {
             HistoricalVar.pairs(listOf(a, b, HistoricalMarket(today, base.curves, base.fxToReporting)), 1),
         ).hasSize(2)
         assertThat(HistoricalVar.pairs(listOf(a, b), 2)).isEmpty()
+    }
+
+    @Test
+    fun `unrelated market curves and FX do not discard a book scenario`() {
+        val d0 = LocalDate.parse("2026-09-28")
+        val d1 = d0.plusDays(1)
+        val today = d1.plusDays(1)
+        val base = MarketState(
+            today,
+            ReferenceCurveSet.build(today, Instant.EPOCH).curves,
+            "CZK",
+            mapOf("EUR" to BigDecimal("25")),
+        )
+        val czk = CurveIndex.CZEONIA
+        val from = HistoricalMarket(
+            d0,
+            mapOf(czk to ReferenceCurveSet.build(d0, Instant.EPOCH).curves.getValue(czk)),
+            emptyMap(),
+        )
+        val to = HistoricalMarket(
+            d1,
+            mapOf(czk to ReferenceCurveSet.build(d1, Instant.EPOCH).curves.getValue(czk)),
+            emptyMap(),
+        )
+        val shocked = HistoricalVar.shocked(base, from, to, setOf(czk), emptySet())
+        assertThat(shocked).isNotNull
+        assertThat(shocked!!.curves.getValue(CurveIndex.ESTR)).isSameAs(base.curves.getValue(CurveIndex.ESTR))
+        assertThat(shocked.fxToReporting).isEqualTo(base.fxToReporting)
+        assertThat(HistoricalVar.shocked(base, from, to, setOf(czk, CurveIndex.ESTR), emptySet())).isNull()
     }
 }
