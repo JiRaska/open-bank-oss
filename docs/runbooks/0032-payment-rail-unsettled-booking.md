@@ -10,6 +10,7 @@ deterministic answer comes back the same on every retry. These alerts name that 
 | `SepaPaymentBookingUnsettled` | `SEPA` | `PROCESSING` | `sepa-settlement-<paymentId>` | 30m |
 | `SepaPaymentRefundUnsettled` | `SEPA` (`operation="refund"`) | `PROCESSING`/`COMPLETED` + open return intent | `sepa-reversal-<paymentId>` | 1h |
 | `DomesticPaymentBookingUnsettled` | `DOMESTIC_CZK` | `SENT_TO_CLEARING` | `domestic-settlement-<paymentId>` | 1h |
+| `SwiftBookingUnsettled` | `SWIFT` | `SENT` | `swift-settlement-<messageId>` | 30m |
 
 The rule file is `openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`; why
 each SLA is what it is sits next to each rule. Three rules hold for every section below:
@@ -24,7 +25,7 @@ each SLA is what it is sits next to each rule. Three rules hold for every sectio
 
 ```promql
 # Which outcome is accumulating (attempts, not unique payments):
-sum by (rail, outcome) (increase(openbank_payment_unsettled_total{rail=~"SEPA|DOMESTIC_CZK"}[1h]))
+sum by (rail, outcome) (increase(openbank_payment_unsettled_total{rail=~"SEPA|DOMESTIC_CZK|SWIFT"}[1h]))
 ```
 
 Find the payments behind the age (read-only). SEPA, on `sepa-payment-db`:
@@ -66,6 +67,27 @@ ORDER BY booking_first_due_at
 LIMIT 20;
 ```
 
+SWIFT, on `swift-service-db`:
+
+```bash
+kubectl cnpg psql swift-service-db -n payments -- -d openbank_swift
+```
+
+```sql
+-- amount_minor_units is in the currency's minor units (12.34 EUR = 1234).
+SELECT id AS message_id, status, message_type, currency, amount_minor_units, value_date,
+       ordering_customer_account_id, booking_first_due_at, now() - booking_first_due_at AS waiting
+FROM swift_messages
+WHERE message_type = 'MT103' AND booking_first_due_at IS NOT NULL AND booking_proven_at IS NULL
+ORDER BY booking_first_due_at
+LIMIT 20;
+```
+
+The gauge reads the same set (MT103, any status), so a message an operator acknowledged or rejected
+still counts. A SWIFT row with `ordering_customer_account_id IS NULL` never called transaction-service, and the
+counter does not count it. Neither does a stored value date that no longer parses. Both hold the clock
+open, so the age alert is the only thing that sees them. Step 1 then finds no row.
+
 ## 1. Query transaction-service by key
 
 transaction-service has no REST lookup by idempotency key, so read its database. Read-only:
@@ -75,7 +97,7 @@ kubectl cnpg psql transaction-db -n payments -- -d openbank_transactions
 ```
 
 ```sql
-\set key 'sepa-settlement-<paymentId>'   -- or sepa-reversal-<paymentId> / domestic-settlement-<paymentId>
+\set key 'sepa-settlement-<paymentId>'   -- or sepa-reversal-<paymentId> / domestic-settlement-<paymentId> / swift-settlement-<messageId>
 SELECT t.id, t.status, t.type, t.source_account_id, t.target_account_id, t.amount, t.currency_code,
        t.rail, t.instruction_type, t.value_date, t.booking_date, t.completed_at, t.failure_reason
 FROM transaction_idempotency_keys k
@@ -89,8 +111,10 @@ Compare the row with the payment row from step 0. The rail sends:
 |---|---|---|---|---|---|
 | sepa-payment | `TRANSFER` | `debtor_account_id` | none | `SEPA_CT` (SCT) / `SEPA_INST` (SCT_INST) | `ONE_OFF` |
 | domestic-payment | `DEBIT` | `debtor_account_id` | payee account for an in-house payee, else none | `DOMESTIC` | `ONE_OFF` |
+| swift-service | `DEBIT` | `ordering_customer_account_id` | none | `SWIFT` | `ONE_OFF` |
 
-Amount and currency must equal the payment's exactly; `value_date` may legitimately be later.
+Amount and currency must equal the payment's exactly (for SWIFT, `amount_minor_units` divided by the
+currency's minor-unit factor); `value_date` may legitimately be later.
 
 ## 2. Decide
 
@@ -182,6 +206,26 @@ EVENT=$($T workflow show --workflow-id "domestic-payment-$ID" --output json \
       | $e[$i-1].eventId' | tail -1)
 $T workflow reset --workflow-id "domestic-payment-$ID" --event-id "$EVENT" --reason "#13623 re-drive settlement"
 ```
+
+### SWIFT outbound booking
+
+**swift-service has no re-drive.** It books once, right after scheme acceptance, with a single
+transaction-service call: no retry, no Temporal workflow, no scheduler. None of the operator actions
+settle a held message:
+
+- re-posting the original send returns the stored message;
+- `POST /api/v1/swift/{id}/ack` and `/reject` change the business status only, and leave the clock open.
+
+Tracked in #13686. Until it lands, the remedy depends on step 1:
+
+| Step 1 for `swift-settlement-<messageId>` | Remedy |
+|---|---|
+| No row: transport error/timeout, no `ordering_customer_account_id`, unparseable value date | Nothing can be re-sent in-band. Escalate to finance: the MT103 has left, so the debit is booked by a ledger correction, and the message is closed as below ("Closing a corrected payment"). Fix the data cause first (missing account id, bad value date) so the next message does not repeat it. |
+| `COMPLETED`, every field matches | Booked; only the proof is missing. **Reconcile** (section 4): record it as booked, close as below. Do not reverse and do not rebook. |
+| `COMPLETED`, money differs / `FAILED` | Same as the shared table in step 2: **reverse** a wrong booking, or a finance correction for `FAILED`. |
+
+Do **not** use `ack` or `reject` to make the alert stop: they do not touch the booking clock, so the
+alert keeps firing, and a `REJECTED` status on a message the scheme accepted misstates what happened.
 
 ## 4. Reverse, reconcile
 
