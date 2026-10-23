@@ -28,11 +28,11 @@ def fixture(selected=None, event='pull_request', ref='refs/pull/1/merge', module
             active = branch == lane and module in selected
             needs[graph.job_id(module, branch)] = {
                 'result': 'success' if active else 'skipped',
-                'outputs': {'platform_results': json.dumps({
+                'outputs': {'platform_results': json.dumps({name: result for name, result in {
                     'build': {'result': 'success', 'outputs': {}},
                     'contract': {'result': 'success' if event in {'push', 'workflow_dispatch'} and ref == 'refs/heads/main' else 'skipped', 'outputs': {}},
                     'publish-evidence': {'result': 'success' if event == 'push' and ref == 'refs/heads/main' else 'skipped', 'outputs': {}},
-                })} if active else {},
+                }.items() if name == 'build' or branch != 'pr'})} if active else {},
             }
     return needs
 
@@ -128,6 +128,27 @@ class ResultsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             json.loads('{"result":"failure","result":"success"}', object_pairs_hook=results.unique_object)
 
+    def test_each_lane_requires_its_exact_native_child_roster(self):
+        for event, ref, lane in [('pull_request', 'refs/pull/1/merge', 'pr'),
+                                 ('push', 'refs/heads/main', 'other')]:
+            with self.subTest(event=event):
+                needs = fixture(event=event, ref=ref)
+                record = needs[graph.job_id(MODULES[0], lane)]
+                body = json.loads(record['outputs']['platform_results'])
+                self.assertEqual(set(body), {'build'} if lane == 'pr' else {'build', 'contract', 'publish-evidence'})
+                body['build'] = {}
+                record['outputs']['platform_results'] = json.dumps(body)
+                self.assertTrue(self.check(needs, event=event, ref=ref))
+                body.pop('build')
+                record['outputs']['platform_results'] = json.dumps(body)
+                self.assertTrue(self.check(needs, event=event, ref=ref))
+        needs = fixture()
+        record = needs[graph.job_id(MODULES[0], 'pr')]
+        body = json.loads(record['outputs']['platform_results'])
+        body['contract'] = {'result': 'skipped', 'outputs': {}}
+        record['outputs']['platform_results'] = json.dumps(body)
+        self.assertTrue(self.check(needs))
+
     def test_unknown_event_rejects(self):
         self.assertTrue(self.check(fixture(), event='unknown'))
 
@@ -219,6 +240,42 @@ class GraphTest(unittest.TestCase):
         self.assertEqual(len(policy.grant_drift(
             policy.write_grants('services-ci.yml', {'jobs': changed}), expected)), 1)
 
+    def test_exact_pr_projection_and_forbidden_drift(self):
+        import yaml
+        graph.validate_callee(graph.ROOT)
+        full_path = graph.ROOT / graph.CALLEES['other']
+        pr_path = graph.ROOT / graph.CALLEES['pr']
+        full = yaml.safe_load(full_path.read_text())
+        projected = yaml.safe_load(pr_path.read_text())
+        self.assertEqual(set(projected['jobs']), {'build'})
+        self.assertEqual(projected['jobs']['build'], full['jobs']['build'])
+        self.assertEqual(projected.get('on', projected.get(True)), full.get('on', full.get(True)))
+        self.assertEqual(projected['permissions'], full['permissions'])
+        for mutation in ['timeout', 'runner', 'permissions', 'steps', 'extra-job', 'output']:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                directory = root / '.github/workflows'
+                directory.mkdir(parents=True)
+                (root / graph.CALLEES['other']).write_text(full_path.read_text())
+                candidate = copy.deepcopy(projected)
+                build = candidate['jobs']['build']
+                if mutation == 'timeout':
+                    build['timeout-minutes'] = 1
+                elif mutation == 'runner':
+                    build['runs-on'] = 'untrusted-runner'
+                elif mutation == 'permissions':
+                    build['permissions']['id-token'] = 'write'
+                elif mutation == 'steps':
+                    build['steps'].pop()
+                elif mutation == 'extra-job':
+                    candidate['jobs']['foreign'] = {'runs-on': 'ubuntu-latest'}
+                else:
+                    trigger = candidate.get('on', candidate.get(True))
+                    trigger['workflow_call']['outputs']['platform_results']['value'] = 'success'
+                (root / graph.CALLEES['pr']).write_text(yaml.safe_dump(candidate))
+                with self.assertRaises(ValueError):
+                    graph.validate_callee(root)
+
     def test_full_canonical_inventory(self):
         modules = graph.inventory(graph.ROOT)
         self.assertEqual(results.verify(modules, fixture(modules=modules), 'pull_request', 'refs/pull/1/merge', modules), [])
@@ -236,6 +293,7 @@ class GraphTest(unittest.TestCase):
                 job = jobs[graph.job_id(module, branch)]
                 self.assertIn('!cancelled()', job['if'])
                 self.assertEqual(job['with']['service'], module)
+                self.assertEqual(job['uses'], './' + graph.CALLEES[branch])
                 wanted = ['changes', 'publication-ready'] + ([graph.job_id(modules[i-width], branch)] if i >= width else [])
                 self.assertEqual(job['needs'], wanted)
                 self.assertIn("|| 'Not selected (", job['name'])

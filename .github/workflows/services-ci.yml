@@ -192,7 +192,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-account-service
     secrets:
@@ -205,7 +205,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-agent-service
     secrets:
@@ -218,7 +218,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-aml-service
     secrets:
@@ -231,7 +231,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-anacredit-service
     secrets:
@@ -244,7 +244,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-analytics-sink
     secrets:
@@ -257,7 +257,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-ap2-service
     secrets:
@@ -270,7 +270,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-audit-service
     secrets:
@@ -283,7 +283,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-authz-policy-auditor
     secrets:
@@ -296,7 +296,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-balance-service
     secrets:
@@ -309,7 +309,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-billing-service
     secrets:
@@ -322,7 +322,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-campaign-service
     secrets:
@@ -335,7 +335,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-card-issuance-service
     secrets:
@@ -348,7 +348,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-card-processing-service
     secrets:
@@ -361,7 +361,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-case-coordinator-agent
     secrets:
@@ -374,7 +374,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-clearing-service
     secrets:
@@ -387,7 +387,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-clearing-simulator
     secrets:
@@ -400,7 +400,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-client-product-catalog
     secrets:
@@ -413,7 +413,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-client-transaction
     secrets:
@@ -426,7 +426,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-communication-service
     secrets:
@@ -439,7 +439,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-consent-service
     secrets:
@@ -452,7 +452,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-context-service
     secrets:
@@ -465,7 +465,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-control-liveness-sentinel
     secrets:
@@ -478,7 +478,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-copilot-service
     secrets:
@@ -491,7 +491,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-customer-edge
     secrets:
@@ -504,7 +504,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-delegation-service
     secrets:
@@ -517,7 +517,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-devops-agent
     secrets:
@@ -530,7 +530,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-dispute-service
     secrets:
@@ -543,7 +543,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-docs-truth-agent
     secrets:
@@ -556,7 +556,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-document-service
     secrets:
@@ -569,7 +569,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-domestic-payment
     secrets:
@@ -582,7 +582,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-engagement-service
     secrets:
@@ -595,7 +595,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-finops-agent
     secrets:
@@ -608,7 +608,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-finrep-service
     secrets:
@@ -621,7 +621,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-flaky-test-hunter
     secrets:
@@ -634,7 +634,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-fraud-service
     secrets:
@@ -647,7 +647,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-fx-service
     secrets:
@@ -660,7 +660,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-governance-auditor
     secrets:
@@ -673,7 +673,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-incentive-service
     secrets:
@@ -686,7 +686,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-interest-service
     secrets:
@@ -699,7 +699,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-kyb-service
     secrets:
@@ -712,7 +712,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-kyc-service
     secrets:
@@ -725,7 +725,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-ledger-service
     secrets:
@@ -738,7 +738,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-lending-service
     secrets:
@@ -751,7 +751,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-libs
     secrets:
@@ -764,7 +764,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-libs-benchmarks
     secrets:
@@ -777,7 +777,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-libs-detekt-rules
     secrets:
@@ -790,7 +790,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-libs-domain
     secrets:
@@ -803,7 +803,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-libs-finance
     secrets:
@@ -816,7 +816,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-libs-iso20022
     secrets:
@@ -829,7 +829,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-libs-lending
     secrets:
@@ -842,7 +842,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-libs-runtime
     secrets:
@@ -855,7 +855,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-libs-temporal
     secrets:
@@ -868,7 +868,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-libs-testing
     secrets:
@@ -881,7 +881,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-loyalty-service
     secrets:
@@ -894,7 +894,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-mcp-service
     secrets:
@@ -907,7 +907,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-notification-service
     secrets:
@@ -920,7 +920,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-onboarding-service
     secrets:
@@ -933,7 +933,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-party-service
     secrets:
@@ -946,7 +946,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-pension-fund-service
     secrets:
@@ -959,7 +959,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-pension-service
     secrets:
@@ -972,7 +972,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-pid-service
     secrets:
@@ -985,7 +985,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-product-catalog
     secrets:
@@ -998,7 +998,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-psd2-service
     secrets:
@@ -1011,7 +1011,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-referral-service
     secrets:
@@ -1024,7 +1024,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-release-steward
     secrets:
@@ -1037,7 +1037,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-risk-engine
     secrets:
@@ -1050,7 +1050,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-sanctions-service
     secrets:
@@ -1063,7 +1063,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-sca-service
     secrets:
@@ -1076,7 +1076,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-sdd-service
     secrets:
@@ -1089,7 +1089,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-security-scanner
     secrets:
@@ -1102,7 +1102,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-sepa-instant
     secrets:
@@ -1115,7 +1115,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-sepa-payment
     secrets:
@@ -1128,7 +1128,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-settlement-service
     secrets:
@@ -1141,7 +1141,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-simulation
     secrets:
@@ -1154,7 +1154,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-standing-order-service
     secrets:
@@ -1167,7 +1167,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-statement-service
     secrets:
@@ -1180,7 +1180,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-swift-service
     secrets:
@@ -1193,7 +1193,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-tax-reporting-service
     secrets:
@@ -1206,7 +1206,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-tpp-registry-service
     secrets:
@@ -1219,7 +1219,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-transaction-service
     secrets:
@@ -1232,7 +1232,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-treasury-service
     secrets:
@@ -1245,7 +1245,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-vop-service
     secrets:
@@ -1258,7 +1258,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/_service-ci.yml
+    uses: ./.github/workflows/_service-ci-pr.yml
     with:
       service: openbank-wealth-service
     secrets:

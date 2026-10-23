@@ -60,7 +60,7 @@ def verify(services, needs, event, ref, modules=None):
             except (ValueError, TypeError):
                 problems.append(f'{key}: unavailable or malformed platform result object')
                 continue
-            expected_jobs = {'build', 'contract', 'publish-evidence'}
+            expected_jobs = {'build'} if branch == 'pr' else {'build', 'contract', 'publish-evidence'}
             if not isinstance(jobs, dict) or set(jobs) != expected_jobs:
                 problems.append(f'{key}: platform job roster does not match the reusable workflow')
                 continue
@@ -76,9 +76,10 @@ def verify(services, needs, event, ref, modules=None):
                 continue
             if jobs['build']['result'] != 'success':
                 problems.append(f'{key}: individual build has no successful verdict')
-            wanted_contract = 'success' if contract_required else 'skipped'
-            if jobs['contract']['result'] != wanted_contract:
-                problems.append(f'{key}: individual contract result must be {wanted_contract}')
+            if branch != 'pr':
+                wanted_contract = 'success' if contract_required else 'skipped'
+                if jobs['contract']['result'] != wanted_contract:
+                    problems.append(f'{key}: individual contract result must be {wanted_contract}')
     return problems
 
 

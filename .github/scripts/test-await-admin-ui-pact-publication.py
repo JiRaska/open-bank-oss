@@ -139,8 +139,6 @@ class PublicationWaitTest(unittest.TestCase):
                     "result": "success" if active else "skipped",
                     "outputs": {"platform_results": json.dumps({
                         "build": {"result": "success", "outputs": {}},
-                        "contract": {"result": "skipped", "outputs": {}},
-                        "publish-evidence": {"result": "skipped", "outputs": {}},
                     })} if active else {},
                 }
         self.assertEqual(results.verify(modules, needs, "pull_request", "refs/pull/1/merge", modules), [])
