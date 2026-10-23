@@ -1,12 +1,12 @@
 # ADR-0344 D7 golden: the posting-rule matrix journals of every matrix parity fixture, rendered in GL
 # codes by the matrix as it stood BEFORE postings named accounting class + role (ADR-0341 D3).
 # Generated once from that code (fe3e990b74); never regenerate it from the code under test.
-# Phases 2a (#13667) and 3 keep only the rows of the fixtures on this branch (IRS, FRA, FX forwards and
-# swaps, bills of exchange, loans), revaluation rows included. The J and A rows are a filtered subset of
-# the original golden; the sha256-all line below is re-pinned over today's render of those fixtures,
-# since the accrual amounts it covers are not stored line by line. The phases that add fixtures restore
-# their rows.
-sha256-all 0a338dd93f48f11e02968ccb688fb9fbcf74da16924fc01bfd0684088b9e5490 5953
+# Phases 2a (#13667), 2b and 3 keep only the rows of the fixtures on this branch (IRS, FRA, bonds,
+# T-bills, repos, FX forwards and swaps, bills of exchange, loans), revaluation rows included. The J
+# and A rows are a filtered subset of the original golden; the sha256-all line below is re-pinned
+# over today's render of those fixtures, since the accrual amounts it covers are not stored line by
+# line. The phases that add fixtures restore their rows.
+sha256-all PENDING 0
 J bill-of-exchange-czk-001 [AMORTISED_COST] treasury:D:settlement:2026-11-02 :: DEBIT 1600 3000000.00 CZK | CREDIT 1630 63102.51 CZK | CREDIT 1001 2936897.49 CZK
 J bill-of-exchange-czk-001 [AMORTISED_COST] treasury:D:maturity:2027-05-03 :: DEBIT 1001 3000000.00 CZK | CREDIT 1600 3000000.00 CZK
 J bill-of-exchange-czk-001 [FVOCI] treasury:D:settlement:2026-11-02 :: DEBIT 1610 3000000.00 CZK | CREDIT 1630 63102.51 CZK | CREDIT 1001 2936897.49 CZK
@@ -17,6 +17,47 @@ J bill-of-exchange-czk-001 [FVTPL] treasury:D:settlement:2026-11-02 :: DEBIT 162
 J bill-of-exchange-czk-001 [FVTPL] treasury:D:maturity:2027-05-03 :: DEBIT 1001 3000000.00 CZK | CREDIT 1620 3000000.00 CZK
 J bill-of-exchange-czk-001 [FVTPL] treasury:D:revaluation:2026-12-31 :: DEBIT 1620 1500.00 CZK | CREDIT 4310 1500.00 CZK
 J bill-of-exchange-czk-001 [FVTPL] treasury:D:revaluation:2026-12-31 :: DEBIT 5310 200.00 CZK | CREDIT 1620 200.00 CZK
+J bond-czk-short-first-coupon-001 [AMORTISED_COST] treasury:D:settlement:2026-11-16 :: DEBIT 1600 10000000.00 CZK | CREDIT 1630 15000.00 CZK | CREDIT 1001 9985000.00 CZK
+J bond-czk-short-first-coupon-001 [AMORTISED_COST] treasury:D:payment:F1 :: DEBIT 1001 132222.22 CZK | CREDIT 1640 132222.22 CZK
+J bond-czk-short-first-coupon-001 [AMORTISED_COST] treasury:D:payment:F2 :: DEBIT 1001 400000.00 CZK | CREDIT 1640 400000.00 CZK
+J bond-czk-short-first-coupon-001 [AMORTISED_COST] treasury:D:payment:F3 :: DEBIT 1001 400000.00 CZK | CREDIT 1640 400000.00 CZK
+J bond-czk-short-first-coupon-001 [AMORTISED_COST] treasury:D:payment:F5 :: DEBIT 1001 400000.00 CZK | CREDIT 1640 400000.00 CZK
+J bond-czk-short-first-coupon-001 [AMORTISED_COST] treasury:D:maturity:2030-03-15 :: DEBIT 1001 10000000.00 CZK | CREDIT 1600 10000000.00 CZK
+J bond-czk-short-first-coupon-001 [FVOCI] treasury:D:settlement:2026-11-16 :: DEBIT 1610 10000000.00 CZK | CREDIT 1630 15000.00 CZK | CREDIT 1001 9985000.00 CZK
+J bond-czk-short-first-coupon-001 [FVOCI] treasury:D:payment:F1 :: DEBIT 1001 132222.22 CZK | CREDIT 1640 132222.22 CZK
+J bond-czk-short-first-coupon-001 [FVOCI] treasury:D:payment:F2 :: DEBIT 1001 400000.00 CZK | CREDIT 1640 400000.00 CZK
+J bond-czk-short-first-coupon-001 [FVOCI] treasury:D:payment:F3 :: DEBIT 1001 400000.00 CZK | CREDIT 1640 400000.00 CZK
+J bond-czk-short-first-coupon-001 [FVOCI] treasury:D:payment:F5 :: DEBIT 1001 400000.00 CZK | CREDIT 1640 400000.00 CZK
+J bond-czk-short-first-coupon-001 [FVOCI] treasury:D:maturity:2030-03-15 :: DEBIT 1001 10000000.00 CZK | CREDIT 1610 10000000.00 CZK
+J bond-czk-short-first-coupon-001 [FVOCI] treasury:D:revaluation:2026-12-31 :: DEBIT 1610 1500.00 CZK | CREDIT 3100 1500.00 CZK
+J bond-czk-short-first-coupon-001 [FVOCI] treasury:D:revaluation:2026-12-31 :: DEBIT 3100 200.00 CZK | CREDIT 1610 200.00 CZK
+J bond-czk-short-first-coupon-001 [FVTPL] treasury:D:settlement:2026-11-16 :: DEBIT 1620 10000000.00 CZK | CREDIT 1630 15000.00 CZK | CREDIT 1001 9985000.00 CZK
+J bond-czk-short-first-coupon-001 [FVTPL] treasury:D:payment:F1 :: DEBIT 1001 132222.22 CZK | CREDIT 1640 132222.22 CZK
+J bond-czk-short-first-coupon-001 [FVTPL] treasury:D:payment:F2 :: DEBIT 1001 400000.00 CZK | CREDIT 1640 400000.00 CZK
+J bond-czk-short-first-coupon-001 [FVTPL] treasury:D:payment:F3 :: DEBIT 1001 400000.00 CZK | CREDIT 1640 400000.00 CZK
+J bond-czk-short-first-coupon-001 [FVTPL] treasury:D:payment:F5 :: DEBIT 1001 400000.00 CZK | CREDIT 1640 400000.00 CZK
+J bond-czk-short-first-coupon-001 [FVTPL] treasury:D:maturity:2030-03-15 :: DEBIT 1001 10000000.00 CZK | CREDIT 1620 10000000.00 CZK
+J bond-czk-short-first-coupon-001 [FVTPL] treasury:D:revaluation:2026-12-31 :: DEBIT 1620 1500.00 CZK | CREDIT 4310 1500.00 CZK
+J bond-czk-short-first-coupon-001 [FVTPL] treasury:D:revaluation:2026-12-31 :: DEBIT 5310 200.00 CZK | CREDIT 1620 200.00 CZK
+J bond-eur-secondary-accrued-002 [AMORTISED_COST] treasury:D:settlement:2026-11-20 :: DEBIT 1601 2000000.00 EUR | DEBIT 1631 25000.00 EUR | DEBIT 1641 28136.99 EUR | CREDIT 1002 2053136.99 EUR
+J bond-eur-secondary-accrued-002 [AMORTISED_COST] treasury:D:payment:F2 :: DEBIT 1002 65000.00 EUR | CREDIT 1641 65000.00 EUR
+J bond-eur-secondary-accrued-002 [AMORTISED_COST] treasury:D:payment:F3 :: DEBIT 1002 65097.31 EUR | CREDIT 1641 65097.31 EUR
+J bond-eur-secondary-accrued-002 [AMORTISED_COST] treasury:D:payment:F5 :: DEBIT 1002 64902.69 EUR | CREDIT 1641 64902.69 EUR
+J bond-eur-secondary-accrued-002 [AMORTISED_COST] treasury:D:maturity:2029-06-15 :: DEBIT 1002 2000000.00 EUR | CREDIT 1601 2000000.00 EUR
+J bond-eur-secondary-accrued-002 [FVOCI] treasury:D:settlement:2026-11-20 :: DEBIT 1611 2000000.00 EUR | DEBIT 1631 25000.00 EUR | DEBIT 1641 28136.99 EUR | CREDIT 1002 2053136.99 EUR
+J bond-eur-secondary-accrued-002 [FVOCI] treasury:D:payment:F2 :: DEBIT 1002 65000.00 EUR | CREDIT 1641 65000.00 EUR
+J bond-eur-secondary-accrued-002 [FVOCI] treasury:D:payment:F3 :: DEBIT 1002 65097.31 EUR | CREDIT 1641 65097.31 EUR
+J bond-eur-secondary-accrued-002 [FVOCI] treasury:D:payment:F5 :: DEBIT 1002 64902.69 EUR | CREDIT 1641 64902.69 EUR
+J bond-eur-secondary-accrued-002 [FVOCI] treasury:D:maturity:2029-06-15 :: DEBIT 1002 2000000.00 EUR | CREDIT 1611 2000000.00 EUR
+J bond-eur-secondary-accrued-002 [FVOCI] treasury:D:revaluation:2026-12-31 :: DEBIT 1611 1500.00 EUR | CREDIT 3101 1500.00 EUR
+J bond-eur-secondary-accrued-002 [FVOCI] treasury:D:revaluation:2026-12-31 :: DEBIT 3101 200.00 EUR | CREDIT 1611 200.00 EUR
+J bond-eur-secondary-accrued-002 [FVTPL] treasury:D:settlement:2026-11-20 :: DEBIT 1621 2000000.00 EUR | DEBIT 1631 25000.00 EUR | DEBIT 1641 28136.99 EUR | CREDIT 1002 2053136.99 EUR
+J bond-eur-secondary-accrued-002 [FVTPL] treasury:D:payment:F2 :: DEBIT 1002 65000.00 EUR | CREDIT 1641 65000.00 EUR
+J bond-eur-secondary-accrued-002 [FVTPL] treasury:D:payment:F3 :: DEBIT 1002 65097.31 EUR | CREDIT 1641 65097.31 EUR
+J bond-eur-secondary-accrued-002 [FVTPL] treasury:D:payment:F5 :: DEBIT 1002 64902.69 EUR | CREDIT 1641 64902.69 EUR
+J bond-eur-secondary-accrued-002 [FVTPL] treasury:D:maturity:2029-06-15 :: DEBIT 1002 2000000.00 EUR | CREDIT 1621 2000000.00 EUR
+J bond-eur-secondary-accrued-002 [FVTPL] treasury:D:revaluation:2026-12-31 :: DEBIT 1621 1500.00 EUR | CREDIT 4311 1500.00 EUR
+J bond-eur-secondary-accrued-002 [FVTPL] treasury:D:revaluation:2026-12-31 :: DEBIT 5311 200.00 EUR | CREDIT 1621 200.00 EUR
 J fra-czk-3x6-receive-001 [AMORTISED_COST] treasury:D:trade:2026-11-02 :: DEBIT 9000 100000000.00 CZK | CREDIT 9100 100000000.00 CZK
 J fra-czk-3x6-receive-001 [AMORTISED_COST] treasury:D:payment:F0 :: DEBIT 1001 53906.46 CZK | CREDIT 4300 53906.46 CZK
 J fra-czk-3x6-receive-001 [AMORTISED_COST] treasury:D:maturity:2027-05-04 :: DEBIT 9100 100000000.00 CZK | CREDIT 9000 100000000.00 CZK
@@ -133,12 +174,110 @@ J loan-eur-actact-leap-003 [AMORTISED_COST] treasury:D:payment:F1 :: DEBIT 1002 
 J loan-eur-actact-leap-003 [AMORTISED_COST] treasury:D:payment:F2 :: DEBIT 1002 60001.80 EUR | CREDIT 1651 60001.80 EUR
 J loan-eur-actact-leap-003 [AMORTISED_COST] treasury:D:payment:F4 :: DEBIT 1002 59672.13 EUR | CREDIT 1651 59672.13 EUR
 J loan-eur-actact-leap-003 [AMORTISED_COST] treasury:D:maturity:2028-12-30 :: DEBIT 1002 4000000.00 EUR | CREDIT 1661 4000000.00 EUR
+J repo-czk-1w-001 [AMORTISED_COST] treasury:D:settlement:2026-11-03 :: DEBIT 1001 96775000.00 CZK | CREDIT 2430 96775000.00 CZK | DEBIT 9020 100000000.00 CZK | CREDIT 9120 100000000.00 CZK
+J repo-czk-1w-001 [AMORTISED_COST] treasury:D:payment:F2 :: DEBIT 2420 65860.76 CZK | CREDIT 1001 65860.76 CZK
+J repo-czk-1w-001 [AMORTISED_COST] treasury:D:maturity:2026-11-10 :: DEBIT 2430 96775000.00 CZK | CREDIT 1001 96775000.00 CZK | DEBIT 9120 100000000.00 CZK | CREDIT 9020 100000000.00 CZK
+J reverse-repo-czk-2w-001 [AMORTISED_COST] treasury:D:settlement:2026-11-04 :: DEBIT 1680 49045625.00 CZK | CREDIT 1001 49045625.00 CZK | DEBIT 9010 50000000.00 CZK | CREDIT 9110 50000000.00 CZK
+J reverse-repo-czk-2w-001 [AMORTISED_COST] treasury:D:payment:F2 :: DEBIT 1001 65802.88 CZK | CREDIT 1685 65802.88 CZK
+J reverse-repo-czk-2w-001 [AMORTISED_COST] treasury:D:maturity:2026-11-18 :: DEBIT 1001 49045625.00 CZK | CREDIT 1680 49045625.00 CZK | DEBIT 9110 50000000.00 CZK | CREDIT 9010 50000000.00 CZK
+J tbill-czk-3m-001 [AMORTISED_COST] treasury:D:settlement:2026-11-04 :: DEBIT 1600 10000000.00 CZK | CREDIT 1630 81777.78 CZK | CREDIT 1001 9918222.22 CZK
+J tbill-czk-3m-001 [AMORTISED_COST] treasury:D:maturity:2027-02-04 :: DEBIT 1001 10000000.00 CZK | CREDIT 1600 10000000.00 CZK
+J tbill-czk-3m-001 [FVOCI] treasury:D:settlement:2026-11-04 :: DEBIT 1610 10000000.00 CZK | CREDIT 1630 81777.78 CZK | CREDIT 1001 9918222.22 CZK
+J tbill-czk-3m-001 [FVOCI] treasury:D:maturity:2027-02-04 :: DEBIT 1001 10000000.00 CZK | CREDIT 1610 10000000.00 CZK
+J tbill-czk-3m-001 [FVOCI] treasury:D:revaluation:2026-12-31 :: DEBIT 1610 1500.00 CZK | CREDIT 3100 1500.00 CZK
+J tbill-czk-3m-001 [FVOCI] treasury:D:revaluation:2026-12-31 :: DEBIT 3100 200.00 CZK | CREDIT 1610 200.00 CZK
+J tbill-czk-3m-001 [FVTPL] treasury:D:settlement:2026-11-04 :: DEBIT 1620 10000000.00 CZK | CREDIT 1630 81777.78 CZK | CREDIT 1001 9918222.22 CZK
+J tbill-czk-3m-001 [FVTPL] treasury:D:maturity:2027-02-04 :: DEBIT 1001 10000000.00 CZK | CREDIT 1620 10000000.00 CZK
+J tbill-czk-3m-001 [FVTPL] treasury:D:revaluation:2026-12-31 :: DEBIT 1620 1500.00 CZK | CREDIT 4310 1500.00 CZK
+J tbill-czk-3m-001 [FVTPL] treasury:D:revaluation:2026-12-31 :: DEBIT 5310 200.00 CZK | CREDIT 1620 200.00 CZK
+J tbill-czk-6m-holiday-002 [AMORTISED_COST] treasury:D:settlement:2026-11-06 :: DEBIT 1600 5000000.00 CZK | CREDIT 1630 80937.50 CZK | CREDIT 1001 4919062.50 CZK
+J tbill-czk-6m-holiday-002 [AMORTISED_COST] treasury:D:maturity:2027-05-08 :: DEBIT 1001 5000000.00 CZK | CREDIT 1600 5000000.00 CZK
+J tbill-czk-6m-holiday-002 [FVOCI] treasury:D:settlement:2026-11-06 :: DEBIT 1610 5000000.00 CZK | CREDIT 1630 80937.50 CZK | CREDIT 1001 4919062.50 CZK
+J tbill-czk-6m-holiday-002 [FVOCI] treasury:D:maturity:2027-05-08 :: DEBIT 1001 5000000.00 CZK | CREDIT 1610 5000000.00 CZK
+J tbill-czk-6m-holiday-002 [FVOCI] treasury:D:revaluation:2026-12-31 :: DEBIT 1610 1500.00 CZK | CREDIT 3100 1500.00 CZK
+J tbill-czk-6m-holiday-002 [FVOCI] treasury:D:revaluation:2026-12-31 :: DEBIT 3100 200.00 CZK | CREDIT 1610 200.00 CZK
+J tbill-czk-6m-holiday-002 [FVTPL] treasury:D:settlement:2026-11-06 :: DEBIT 1620 5000000.00 CZK | CREDIT 1630 80937.50 CZK | CREDIT 1001 4919062.50 CZK
+J tbill-czk-6m-holiday-002 [FVTPL] treasury:D:maturity:2027-05-08 :: DEBIT 1001 5000000.00 CZK | CREDIT 1620 5000000.00 CZK
+J tbill-czk-6m-holiday-002 [FVTPL] treasury:D:revaluation:2026-12-31 :: DEBIT 1620 1500.00 CZK | CREDIT 4310 1500.00 CZK
+J tbill-czk-6m-holiday-002 [FVTPL] treasury:D:revaluation:2026-12-31 :: DEBIT 5310 200.00 CZK | CREDIT 1620 200.00 CZK
 A bill-of-exchange-czk-001 [AMORTISED_COST] accrual :: DEBIT 346.71 CZK | CREDIT 346.71 CZK
 A bill-of-exchange-czk-001 [AMORTISED_COST] accrual :: DEBIT 346.72 CZK | CREDIT 346.72 CZK
 A bill-of-exchange-czk-001 [FVOCI] accrual :: DEBIT 346.71 CZK | CREDIT 346.71 CZK
 A bill-of-exchange-czk-001 [FVOCI] accrual :: DEBIT 346.72 CZK | CREDIT 346.72 CZK
 A bill-of-exchange-czk-001 [FVTPL] accrual :: DEBIT 346.71 CZK | CREDIT 346.71 CZK
 A bill-of-exchange-czk-001 [FVTPL] accrual :: DEBIT 346.72 CZK | CREDIT 346.72 CZK
+A bond-czk-short-first-coupon-001 [AMORTISED_COST] accrual :: DEBIT 1092.89 CZK | CREDIT 1092.89 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [AMORTISED_COST] accrual :: DEBIT 1092.89 CZK | CREDIT 1092.89 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [AMORTISED_COST] accrual :: DEBIT 1092.90 CZK | CREDIT 1092.90 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [AMORTISED_COST] accrual :: DEBIT 1092.90 CZK | CREDIT 1092.90 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [AMORTISED_COST] accrual :: DEBIT 1095.89 CZK | CREDIT 1095.89 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [AMORTISED_COST] accrual :: DEBIT 1095.89 CZK | CREDIT 1095.89 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [AMORTISED_COST] accrual :: DEBIT 1095.90 CZK | CREDIT 1095.90 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [AMORTISED_COST] accrual :: DEBIT 1095.90 CZK | CREDIT 1095.90 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [AMORTISED_COST] accrual :: DEBIT 1111.11 CZK | CREDIT 1111.11 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [AMORTISED_COST] accrual :: DEBIT 1111.11 CZK | CREDIT 1111.11 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [AMORTISED_COST] accrual :: DEBIT 1111.12 CZK | CREDIT 1111.12 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [AMORTISED_COST] accrual :: DEBIT 1111.12 CZK | CREDIT 1111.12 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [FVOCI] accrual :: DEBIT 1092.89 CZK | CREDIT 1092.89 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [FVOCI] accrual :: DEBIT 1092.89 CZK | CREDIT 1092.89 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [FVOCI] accrual :: DEBIT 1092.90 CZK | CREDIT 1092.90 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [FVOCI] accrual :: DEBIT 1092.90 CZK | CREDIT 1092.90 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [FVOCI] accrual :: DEBIT 1095.89 CZK | CREDIT 1095.89 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [FVOCI] accrual :: DEBIT 1095.89 CZK | CREDIT 1095.89 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [FVOCI] accrual :: DEBIT 1095.90 CZK | CREDIT 1095.90 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [FVOCI] accrual :: DEBIT 1095.90 CZK | CREDIT 1095.90 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [FVOCI] accrual :: DEBIT 1111.11 CZK | CREDIT 1111.11 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [FVOCI] accrual :: DEBIT 1111.11 CZK | CREDIT 1111.11 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [FVOCI] accrual :: DEBIT 1111.12 CZK | CREDIT 1111.12 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [FVOCI] accrual :: DEBIT 1111.12 CZK | CREDIT 1111.12 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [FVTPL] accrual :: DEBIT 1092.89 CZK | CREDIT 1092.89 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [FVTPL] accrual :: DEBIT 1092.89 CZK | CREDIT 1092.89 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [FVTPL] accrual :: DEBIT 1092.90 CZK | CREDIT 1092.90 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [FVTPL] accrual :: DEBIT 1092.90 CZK | CREDIT 1092.90 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [FVTPL] accrual :: DEBIT 1095.89 CZK | CREDIT 1095.89 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [FVTPL] accrual :: DEBIT 1095.89 CZK | CREDIT 1095.89 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [FVTPL] accrual :: DEBIT 1095.90 CZK | CREDIT 1095.90 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [FVTPL] accrual :: DEBIT 1095.90 CZK | CREDIT 1095.90 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [FVTPL] accrual :: DEBIT 1111.11 CZK | CREDIT 1111.11 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [FVTPL] accrual :: DEBIT 1111.11 CZK | CREDIT 1111.11 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-czk-short-first-coupon-001 [FVTPL] accrual :: DEBIT 1111.12 CZK | CREDIT 1111.12 CZK | DEBIT 12.34 CZK | CREDIT 12.34 CZK
+A bond-czk-short-first-coupon-001 [FVTPL] accrual :: DEBIT 1111.12 CZK | CREDIT 1111.12 CZK | DEBIT 12.35 CZK | CREDIT 12.35 CZK
+A bond-eur-secondary-accrued-002 [AMORTISED_COST] accrual :: DEBIT 177.81 EUR | CREDIT 177.81 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [AMORTISED_COST] accrual :: DEBIT 177.81 EUR | CREDIT 177.81 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [AMORTISED_COST] accrual :: DEBIT 177.82 EUR | CREDIT 177.82 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [AMORTISED_COST] accrual :: DEBIT 177.82 EUR | CREDIT 177.82 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [AMORTISED_COST] accrual :: DEBIT 177.86 EUR | CREDIT 177.86 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [AMORTISED_COST] accrual :: DEBIT 177.86 EUR | CREDIT 177.86 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [AMORTISED_COST] accrual :: DEBIT 177.87 EUR | CREDIT 177.87 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [AMORTISED_COST] accrual :: DEBIT 177.87 EUR | CREDIT 177.87 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [AMORTISED_COST] accrual :: DEBIT 178.08 EUR | CREDIT 178.08 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [AMORTISED_COST] accrual :: DEBIT 178.08 EUR | CREDIT 178.08 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [AMORTISED_COST] accrual :: DEBIT 178.09 EUR | CREDIT 178.09 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [AMORTISED_COST] accrual :: DEBIT 178.09 EUR | CREDIT 178.09 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [FVOCI] accrual :: DEBIT 177.81 EUR | CREDIT 177.81 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [FVOCI] accrual :: DEBIT 177.81 EUR | CREDIT 177.81 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [FVOCI] accrual :: DEBIT 177.82 EUR | CREDIT 177.82 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [FVOCI] accrual :: DEBIT 177.82 EUR | CREDIT 177.82 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [FVOCI] accrual :: DEBIT 177.86 EUR | CREDIT 177.86 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [FVOCI] accrual :: DEBIT 177.86 EUR | CREDIT 177.86 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [FVOCI] accrual :: DEBIT 177.87 EUR | CREDIT 177.87 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [FVOCI] accrual :: DEBIT 177.87 EUR | CREDIT 177.87 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [FVOCI] accrual :: DEBIT 178.08 EUR | CREDIT 178.08 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [FVOCI] accrual :: DEBIT 178.08 EUR | CREDIT 178.08 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [FVOCI] accrual :: DEBIT 178.09 EUR | CREDIT 178.09 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [FVOCI] accrual :: DEBIT 178.09 EUR | CREDIT 178.09 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [FVTPL] accrual :: DEBIT 177.81 EUR | CREDIT 177.81 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [FVTPL] accrual :: DEBIT 177.81 EUR | CREDIT 177.81 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [FVTPL] accrual :: DEBIT 177.82 EUR | CREDIT 177.82 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [FVTPL] accrual :: DEBIT 177.82 EUR | CREDIT 177.82 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [FVTPL] accrual :: DEBIT 177.86 EUR | CREDIT 177.86 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [FVTPL] accrual :: DEBIT 177.86 EUR | CREDIT 177.86 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [FVTPL] accrual :: DEBIT 177.87 EUR | CREDIT 177.87 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [FVTPL] accrual :: DEBIT 177.87 EUR | CREDIT 177.87 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [FVTPL] accrual :: DEBIT 178.08 EUR | CREDIT 178.08 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [FVTPL] accrual :: DEBIT 178.08 EUR | CREDIT 178.08 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
+A bond-eur-secondary-accrued-002 [FVTPL] accrual :: DEBIT 178.09 EUR | CREDIT 178.09 EUR | DEBIT 26.65 EUR | CREDIT 26.65 EUR
+A bond-eur-secondary-accrued-002 [FVTPL] accrual :: DEBIT 178.09 EUR | CREDIT 178.09 EUR | DEBIT 26.66 EUR | CREDIT 26.66 EUR
 A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK
 A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK | DEBIT 10027.77 CZK | CREDIT 10027.77 CZK
 A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK | DEBIT 10027.78 CZK | CREDIT 10027.78 CZK
@@ -221,3 +360,18 @@ A loan-eur-actact-leap-003 [AMORTISED_COST] accrual :: DEBIT 327.87 EUR | CREDIT
 A loan-eur-actact-leap-003 [AMORTISED_COST] accrual :: DEBIT 327.88 EUR | CREDIT 327.88 EUR
 A loan-eur-actact-leap-003 [AMORTISED_COST] accrual :: DEBIT 328.76 EUR | CREDIT 328.76 EUR
 A loan-eur-actact-leap-003 [AMORTISED_COST] accrual :: DEBIT 328.77 EUR | CREDIT 328.77 EUR
+A repo-czk-1w-001 [AMORTISED_COST] accrual :: DEBIT 9408.68 CZK | CREDIT 9408.68 CZK
+A reverse-repo-czk-2w-001 [AMORTISED_COST] accrual :: DEBIT 4700.20 CZK | CREDIT 4700.20 CZK
+A reverse-repo-czk-2w-001 [AMORTISED_COST] accrual :: DEBIT 4700.21 CZK | CREDIT 4700.21 CZK
+A tbill-czk-3m-001 [AMORTISED_COST] accrual :: DEBIT 888.88 CZK | CREDIT 888.88 CZK
+A tbill-czk-3m-001 [AMORTISED_COST] accrual :: DEBIT 888.89 CZK | CREDIT 888.89 CZK
+A tbill-czk-3m-001 [FVOCI] accrual :: DEBIT 888.88 CZK | CREDIT 888.88 CZK
+A tbill-czk-3m-001 [FVOCI] accrual :: DEBIT 888.89 CZK | CREDIT 888.89 CZK
+A tbill-czk-3m-001 [FVTPL] accrual :: DEBIT 888.88 CZK | CREDIT 888.88 CZK
+A tbill-czk-3m-001 [FVTPL] accrual :: DEBIT 888.89 CZK | CREDIT 888.89 CZK
+A tbill-czk-6m-holiday-002 [AMORTISED_COST] accrual :: DEBIT 442.28 CZK | CREDIT 442.28 CZK
+A tbill-czk-6m-holiday-002 [AMORTISED_COST] accrual :: DEBIT 442.29 CZK | CREDIT 442.29 CZK
+A tbill-czk-6m-holiday-002 [FVOCI] accrual :: DEBIT 442.28 CZK | CREDIT 442.28 CZK
+A tbill-czk-6m-holiday-002 [FVOCI] accrual :: DEBIT 442.29 CZK | CREDIT 442.29 CZK
+A tbill-czk-6m-holiday-002 [FVTPL] accrual :: DEBIT 442.28 CZK | CREDIT 442.28 CZK
+A tbill-czk-6m-holiday-002 [FVTPL] accrual :: DEBIT 442.29 CZK | CREDIT 442.29 CZK

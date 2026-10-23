@@ -44,6 +44,12 @@ data class ExposureGuard(val counterpartyId: String, val currency: String, val m
 /** The counterparty exposure grew past the vetted headroom between the vetting and the lock (422 LIMIT_BREACHED). */
 class LimitLineBreachedException(message: String) : RuntimeException(message)
 
+/**
+ * The ledger refused a posting because its accounting day no longer accepts postings (`409
+ * ACCOUNTING_DAY_CLOSED`, ADR-0342 D4): a close outcome, never a retryable error.
+ */
+class AccountingDayClosedException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
 /** Raised when a deal names a counterparty not in the master. Mapped to 400 via IllegalArgumentException. */
 class UnknownCounterpartyException(id: String) : IllegalArgumentException("unknown counterparty '$id'")
 

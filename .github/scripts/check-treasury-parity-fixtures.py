@@ -48,6 +48,7 @@ SOURCES = {"independent-oracle", "hand-computed", "published-example"}
 # ADR-0344 delivery phases: the products whose cash-flow ledger is on main. Every one needs a
 # fixture; a later phase adds its products here in the same PR that adds their fixtures.
 REQUIRED_PRODUCTS = ("MM_PLACEMENT", "MM_BORROWING", "CNB_DEPOSIT_FACILITY", "CNB_LOMBARD", "FX_SPOT", "IRS", "FRA",
+                     "BOND", "TREASURY_BILL", "REPO", "REVERSE_REPO",
                      "FX_FORWARD", "FX_SWAP", "BILL_OF_EXCHANGE", "LOAN")
 REQUIRED = ("id", "product", "source", "sourceNote", "deal", "expected", "tolerance")
 FLOW_KEYS = ("legIndex", "periodIndex", "kind", "paymentDate", "notional", "rate", "amount")

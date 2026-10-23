@@ -9,8 +9,14 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Treasury Service — deal events
-  version: 1.9.0
+  version: 1.10.0
   description: |
+    1.10.0 (additive, ADR-0344 phase 2b, D7): `treasury.deal.corrected.v1` on the deal topic — a
+    four-eyes correction of a booked deal was approved; the new terms version and its cash-flow
+    ledger committed in the same transaction, `fullUnwind` says whether the deal ended REVERSED,
+    and `deltaJournals` journals are owed to the ledger under `treasury:<dealId>:correction:*`.
+    BOND, TREASURY_BILL, REPO and REVERSE_REPO are now booked, settled and matured.
+
     1.9.0 (additive, ADR-0344 phase 1b, contract 9): the bank-own payment rail. Release is ASYNC
     and ATOMIC: `treasury.payment.released.v1` is written on the NEW channel
     `openbank.treasury.payments` in the same transaction that moves the payment to RELEASED (rail
@@ -88,6 +94,8 @@ channels:
         $ref: '#/components/messages/DealMatured'
       DealReversed:
         $ref: '#/components/messages/DealReversed'
+      DealCorrected:
+        $ref: '#/components/messages/DealCorrected'
       NostroBreakAged:
         $ref: '#/components/messages/NostroBreakAged'
       CashFlowGenerated:
@@ -149,6 +157,11 @@ components:
       summary: "A booked, confirmed or settled deal was undone; a settled one by an offsetting journal."
       payload:
         $ref: '#/components/schemas/DealReversed'
+    DealCorrected:
+      name: treasury.deal.corrected.v1
+      summary: "A four-eyes correction of a booked deal was approved; its delta journals are owed to the ledger (ADR-0344 D7)."
+      payload:
+        $ref: '#/components/schemas/DealCorrected'
     NostroBreakAged:
       name: treasury.nostro.break-aged.v1
       summary: "An open nostro reconciliation break reached the alert age and amount (ADR-0315 D7). Nothing posted."
@@ -312,6 +325,27 @@ components:
         kind: { $ref: '#/components/schemas/DealKind' }
         fxSide: { $ref: '#/components/schemas/FxSide' }
         counterAmount: { $ref: '#/components/schemas/CounterAmount' }
+
+    DealCorrected:
+      type: object
+      description: "Constructor properties of `DealCorrected` in `TreasuryEventPayloads.kt`."
+      required: [dealId, correctionId, product, fromVersion, toVersion, scheduleVersion, fullUnwind, changedFlows, deltaJournals, effectiveFrom, reason, proposedBy, approvedBy, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        correctionId: { type: string, format: uuid }
+        product: { $ref: '#/components/schemas/ProductType' }
+        fromVersion: { type: integer }
+        toVersion: { type: integer }
+        scheduleVersion: { type: integer }
+        fullUnwind: { type: boolean, description: "True: the deal ended REVERSED and every posted journal is offset." }
+        changedFlows: { type: integer }
+        deltaJournals: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        reason: { type: string }
+        proposedBy: { type: string }
+        approvedBy: { type: string }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
 
     NostroBreakAged:
       type: object

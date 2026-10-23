@@ -153,9 +153,11 @@ come from the deal's stored cash-flow ledger, never from its flat fields. Keys a
 `treasury:<dealId>:<event>:<flowId|date>`: one journal per settlement, per accrual day, per paid
 flow and per maturity. V24 widens the `deal_journals` event CHECK to the matrix events. A leg names
 `(accountingClass, role, currency)`, and the ledger resolves it through `accounting_class_gl_map`
-(ledger V35 seeds the instrument accounts and their class rows). Phase 2a delivers IRS and FRA:
-`settle` and `mature` refuse every product outside `ProductType.DELIVERED`, so the rows for
-securities, loans, FX forwards, swaps and repos stay dormant until their phase lands. A SENT or
+(ledger V35 seeds the instrument accounts and their class rows). Phase 2a delivers IRS and FRA,
+phase 2b BOND, TREASURY_BILL, REPO and REVERSE_REPO (a security's lines take its book's IFRS 9
+category class): `draft`, `settle` and `mature` refuse every product outside
+`ProductType.DELIVERED`, so the rows for bills of exchange, loans, FX forwards and swaps stay
+dormant until their phase lands. A SENT or
 SETTLED outgoing payment posts its flows' PAYMENT journals at once, under the same per-flow keys
 the daily run uses. Derivatives are recognised on trade date as a commitment memo pair.
 **STRIDE-T (wrong account / unbalanced):** a flow with no matching row is refused
@@ -169,11 +171,55 @@ and a day's accrual under its date. The ledger deduplicates on the key. `CashFlo
 a past IRS through settle, accrue, pay and mature over real HTTP and Postgres and counts six
 payment keys; `PaymentRailIT` proves the outflow journal and the nostro credit after SENT.
 **Residual:** an unfixed floating flow cannot post until a fixing fixes it. A settled matrix deal
-cannot be reversed; a correction (phase 2b) is the route. If the ledger is down when a payment
+cannot be reversed; a full-unwind correction (below) is the route. If the ledger is down when a payment
 turns SENT, the outflow journals wait for the next replay or the daily run (counted by
 `openbank.treasury.payments.outflow.failed`); until then the funding check still counts the flows
 as unbooked, which errs towards refusing.
 
+## Corrections (ADR-0344 D7) — `deal_corrections` (V25)
+
+`POST /deals/{id}/corrections` proposes partial new terms (or a full unwind) of a BOOKED, CONFIRMED
+or SETTLED leg-described deal; `/approve` and `/reject` decide it. **STRIDE-E (self-approval):**
+the decider must be a human (`ActorNotPermittedException`, 403) who is not the proposer, the deal's
+creator, submitter, draft editors or the proposer of an earlier correction (`FourEyesViolationException`,
+422); the policy splits proposing (dealer, back office) from deciding (approver), and a database
+CHECK refuses `decided_by = proposed_by` and a non-human decider. A correction's terms version is
+recorded as authored by its PROPOSER, so the payment releaser rule (never a term author) covers it.
+**STRIDE-E (limit bypass by correction):** the corrected deal is built by the same constructor
+and invariants as any deal and vetted by the SAME function booking uses (`vetCorrection`: reference
+effectiveness, FX rate flag, product mandate — never overridable — and the counterparty limit on the
+corrected exposure) at proposal and again at approval; a counterparty breach is proposable only as
+a request for a senior's override (`/override-limit`, senior role, never a term author, never the
+later approver, DB CHECK against the proposer), and the approval re-measures the counterparty line
+inside its transaction under the deal lock and the same (counterparty, LIMIT currency) line lock a
+submission and a booking approval take (`ExposureGuard.of`, 422 LIMIT_BREACHED). `CorrectionLimitIT`
+holds each refusal by effect (sabotaging either the proposal vetting or the locked guard turns its
+steps red). **Residual:** FX spot, the only product the FX flag applies to, is not correctable (it
+is reversed and re-booked); every legacy product is reversed and re-booked, never corrected.
+**STRIDE-T (race with a payment release / a fixing):** approval commits in ONE transaction under the
+deal-row lock that release and fixing take too: the base schedule must still match the fingerprint
+read before the plan (Σ row_version + count — any fixing, override or payment link changes it; else
+409 FLOW_CHANGED), a payment whose status blocks a deal change (`PaymentStatus.blocksDealChange`)
+on a CHANGED flow refuses it (409 PAYMENT_RELEASED), PROPOSED payments of changed flows are
+withdrawn (scoped, guarded updates), and payments of unchanged flows are re-pointed onto the new
+version. A fixing that lands after the commit is refused because its rows are no longer on the
+current schedule; a release after it is refused stale. `CorrectionApiIT` races approval against a
+release and asserts exactly one wins with a typed 409, and drives both guards by effect.
+**STRIDE-T (wrong amounts):** delta journals are the matrix's re-derivation of every event the deal
+has reached under the new version minus the same under the old one, netted per (class, role,
+currency) and keyed `treasury:<dealId>:correction:<correctionId>:<event>:<flow-slot|date>`;
+`CorrectionDeltaTest` holds `old + delta == new` per account and `old + unwind == 0`. Stored observed
+fixings are re-supplied by their provenance hash, so an unchanged FIXED period stays FIXED with the
+same source and hash. **Repudiation / partial failure:** the new version commits first and the
+delta journals post afterwards under idempotent keys; an APPROVED correction whose journals are not
+all posted is finished by `CorrectionPostingScheduler` (hourly, workflow liveness
+`treasury-correction-posting`: a pass with any failure records no success, so a stuck correction
+goes stale on the liveness alert). A day the ledger has closed (`409 ACCOUNTING_DAY_CLOSED`, mapped by
+`LedgerPostingAdapter` to `AccountingDayClosedException`) moves the journal into today's open day and
+records the original value date; only a refusal of TODAY stays a failure. The day-completion record
+that reports this step to the ledger close is phase 4. **Residual:** a CHANGED flow already SETTLED keeps its
+settled payment; the cash difference is posted by the delta journals and settled by a new
+instruction outside this flow.
 ## Revaluation, internal rate sheets and cash-flow analysis (ADR-0344 phase 3) — V25, V26
 
 FX_FORWARD, FX_SWAP, BILL_OF_EXCHANGE and LOAN join `ProductType.DELIVERED`: they are drafted and
@@ -270,4 +316,5 @@ minimum reserves (D8), and real market connectivity (D9).
 - **2026-10-23** — **ADR-0344 phase 1a: fixings, the market-data quality gate, IRS and FRA cash flows (#13638).** Adds `observation_batches`, `index_observations`, `fixing_cases` and the fixing provenance columns (V20), the `/fixings` and `/market-data` surface, and the OPA rules for it; see the section above. IRS and FRA are drafted and fixed but not settled until phase 2. Rollback: revert the PR (V20 is additive).
 - **2026-10-23** — **ADR-0344 phase 1b: own-account payments and the institution-transfer rail (#13647).** Adds `treasury_payments`, `treasury_payment_flows` (V21), the transfer rail and intermediary BIC (V22) and a payment key reusable after cancel (V23); the `/payments` surface; role `ROLE_TREASURY_PAYMENT_RELEASER` (realm, OPA, admin-ui); the `openbank.treasury.payments` producer and the `institution-transfer-status-in` consumer with its DLQ; the nostro receipt matcher; the limit-line lock on submit and approve. Controls are in the section above. Rollback: revert; V21–V23 are additive while no payment row exists.
 - **2026-10-23** — **ADR-0344 phase 2a: the posting-rule matrix (#13667).** IRS and FRA settle, accrue, pay and mature through `PostingMatrix`; V24 widens the `deal_journals` event CHECK; a SENT payment posts its outflow journals; `GET /posting-rules` (`treasury.reference.read`, no new OPA action). Ledger V35 seeds the instrument accounts the matrix posts to. Controls are in the section above. Rollback: revert; V24 is a CHECK widening, reversible while no matrix journal row exists.
+- **2026-10-23** — **ADR-0344 phase 2b: securities, repos and four-eyes corrections (#13667).** BOND, TREASURY_BILL, REPO and REVERSE_REPO are drafted, settled, accrued, paid and matured through the matrix (their parity fixtures and golden journal rows pinned). New `deal_corrections` (V25) and `/deals/{id}/corrections` (list, get, propose, approve, override-limit, reject; every POST requires `Idempotency-Key`); new OPA actions `treasury.deal.correction.propose` (dealer, back office), `.approve`/`.reject` (approver), `.override-limit` (senior) — machines and AI agents denied (must-DENY tests). New event `treasury.deal.corrected.v1` (asyncapi 1.10.0). Controls are in the Corrections section above. Rollback: revert; V25 is additive (drop the table) while no correction was approved — once one was, its deal versions stay and only the record of their cause is lost.
 - **2026-10-23** — **ADR-0344 phase 3: FX forwards and swaps, bills of exchange, loans, revaluation, internal rate sheets and cash-flow analysis.** The four products are delivered through the phase-2a matrix; revaluation off the risk engine's valuation (V25), internal rate sheets (V26) and the cash-flow analysis read; OPA `treasury.revaluation.read|run` and the treasury m2m `risk.snapshot.read` grant. Controls are in the section above. Rollback: revert; V25 and V26 are additive.

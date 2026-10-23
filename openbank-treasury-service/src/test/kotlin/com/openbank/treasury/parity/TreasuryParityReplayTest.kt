@@ -141,7 +141,7 @@ class TreasuryParityReplayTest {
     private fun label(k: Key) = "leg ${k.leg ?: "deal"} period ${k.period ?: "-"} ${k.kind}"
 
     companion object {
-        private const val MIN_FIXTURES = 28
+        private const val MIN_FIXTURES = 34
 
         private fun JsonNode.textOrNull(field: String): String? = get(field)?.takeUnless { it.isNull }?.asText()
 
