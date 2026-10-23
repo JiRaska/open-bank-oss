@@ -14,6 +14,10 @@ import com.openbank.treasury.domain.model.LimitBreachedException
 import com.openbank.treasury.domain.model.ProductLimitBreachedException
 import com.openbank.treasury.domain.model.QuoteUnavailableException
 import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
+import com.openbank.treasury.domain.reference.ReferenceBackdatedException
+import com.openbank.treasury.domain.reference.ReferenceNotEffectiveException
+import com.openbank.treasury.domain.reference.ReferenceNotFoundException
+import com.openbank.treasury.domain.reference.SeniorApprovalRequiredException
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 
@@ -32,6 +36,44 @@ class ExceptionMappers {
     @ServerExceptionMapper
     fun notFound(e: DealNotFoundException): Response =
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun referenceNotFound(e: ReferenceNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun referenceNotEffective(e: ReferenceNotEffectiveException): Response = Response.status(UNPROCESSABLE).entity(
+        mapOf(
+            "error" to "REFERENCE_NOT_EFFECTIVE",
+            "message" to e.message,
+            "missingReferences" to e.missing.map { it.toString() },
+        ),
+    ).build()
+
+    @ServerExceptionMapper
+    fun referenceBackdated(e: ReferenceBackdatedException): Response =
+        error(UNPROCESSABLE, "REFERENCE_BACKDATED", e.message)
+
+    @ServerExceptionMapper
+    fun seniorRequired(e: SeniorApprovalRequiredException): Response =
+        error(Response.Status.FORBIDDEN.statusCode, "SENIOR_APPROVAL_REQUIRED", e.message)
+
+    /** A concurrent writer committed first (row_version moved under the lock-free path): a conflict, 409. */
+    @ServerExceptionMapper
+    fun optimisticLock(e: jakarta.persistence.OptimisticLockException): Response =
+        error(Response.Status.CONFLICT.statusCode, "INVALID_STATE", e.message)
+
+    @ServerExceptionMapper
+    fun staleState(e: org.hibernate.StaleObjectStateException): Response =
+        error(Response.Status.CONFLICT.statusCode, "INVALID_STATE", e.message)
+
+    @ServerExceptionMapper
+    fun cashFlowNotFound(e: com.openbank.treasury.application.usecase.CashFlowNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun scheduleEngine(e: com.openbank.treasury.domain.cashflow.ScheduleEngineUnavailableException): Response =
+        error(UNPROCESSABLE, "SCHEDULE_ENGINE_UNAVAILABLE", e.message)
 
     @ServerExceptionMapper
     fun statementNotFound(e: StatementNotFoundException): Response =
@@ -80,8 +122,47 @@ class ExceptionMappers {
     ).build()
 
     @ServerExceptionMapper
+    fun batchNotFound(e: com.openbank.treasury.application.port.out.ObservationBatchNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun flowInPayment(e: com.openbank.treasury.domain.cashflow.FlowAlreadyInPaymentException): Response =
+        error(Response.Status.CONFLICT.statusCode, "FLOW_ALREADY_IN_PAYMENT", e.message)
+
+    @ServerExceptionMapper
+    fun flowConflict(e: com.openbank.treasury.application.port.out.CashFlowConflictException): Response =
+        error(Response.Status.CONFLICT.statusCode, "FLOW_CHANGED", e.message)
+
+    @ServerExceptionMapper
     fun notPermitted(e: ActorNotPermittedException): Response =
         error(Response.Status.FORBIDDEN.statusCode, "ACTOR_NOT_PERMITTED", e.message)
+
+    // ── ADR-0344 phase 3: cash-flow analysis, internal rate sheets, revaluation ───────────
+
+    @ServerExceptionMapper
+    fun scenarioNotAvailable(e: com.openbank.treasury.application.usecase.ScenarioNotAvailableException): Response =
+        error(UNPROCESSABLE, "SCENARIO_NOT_AVAILABLE", e.message)
+
+    @ServerExceptionMapper
+    fun analysisTooLarge(e: com.openbank.treasury.application.port.out.AnalysisTooLargeException): Response =
+        error(UNPROCESSABLE, "ANALYSIS_TOO_LARGE", e.message)
+
+    @ServerExceptionMapper
+    fun rateSheetNotFound(e: com.openbank.treasury.infrastructure.marketdata.RateSheetNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun rateSheetStale(e: com.openbank.treasury.infrastructure.marketdata.RateSheetStaleException): Response =
+        error(Response.Status.CONFLICT.statusCode, "RATE_SHEET_STALE", e.message)
+
+    @ServerExceptionMapper
+    fun priorRevaluationUnposted(
+        e: com.openbank.treasury.application.port.out.PriorRevaluationUnpostedException,
+    ): Response = error(Response.Status.CONFLICT.statusCode, "PRIOR_REVALUATION_UNPOSTED", e.message)
+
+    @ServerExceptionMapper
+    fun revaluationOutOfOrder(e: com.openbank.treasury.application.port.out.RevaluationOutOfOrderException): Response =
+        error(Response.Status.CONFLICT.statusCode, "REVALUATION_OUT_OF_ORDER", e.message)
 
     private fun error(status: Int, code: String, message: String?): Response =
         Response.status(status).entity(mapOf("error" to code, "message" to message)).build()
@@ -89,4 +170,52 @@ class ExceptionMappers {
     private companion object {
         const val UNPROCESSABLE = 422
     }
+
+    // ── ADR-0344 D6: the payment chain ───────────────────────────────────────────────────
+
+    @ServerExceptionMapper
+    fun dealHasReleasedPayment(e: com.openbank.treasury.domain.payment.DealHasReleasedPaymentException): Response =
+        error(Response.Status.CONFLICT.statusCode, "PAYMENT_RELEASED", e.message)
+
+    @ServerExceptionMapper
+    fun paymentStale(e: com.openbank.treasury.domain.payment.PaymentStaleException): Response =
+        error(Response.Status.CONFLICT.statusCode, "PAYMENT_STALE", e.message)
+
+    @ServerExceptionMapper
+    fun ssiChanged(e: com.openbank.treasury.domain.payment.SsiChangedException): Response =
+        error(Response.Status.CONFLICT.statusCode, "SSI_CHANGED", e.message)
+
+    @ServerExceptionMapper
+    fun paymentNotFound(e: com.openbank.treasury.application.port.out.PaymentNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun fundingExceeded(e: com.openbank.treasury.domain.payment.FundingExceededException): Response =
+        error(UNPROCESSABLE, "FUNDING_EXCEEDED", e.message)
+
+    /** A limit-consuming write lost the line-lock race to another deal on the same line (422). */
+    @ServerExceptionMapper
+    fun limitLineBreached(e: com.openbank.treasury.application.port.out.LimitLineBreachedException): Response =
+        error(UNPROCESSABLE, "LIMIT_BREACHED", e.message)
+
+    // ── ADR-0344 D7: corrections ─────────────────────────────────────────────────────────
+
+    @ServerExceptionMapper
+    fun correctionNotFound(e: com.openbank.treasury.application.usecase.CorrectionNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun correctionStale(e: com.openbank.treasury.domain.model.CorrectionStaleException): Response =
+        error(Response.Status.CONFLICT.statusCode, "CORRECTION_STALE", e.message)
+
+    @ServerExceptionMapper
+    fun correctionBlocked(e: com.openbank.treasury.domain.model.CorrectionBlockedByPaymentException): Response =
+        Response.status(Response.Status.CONFLICT.statusCode).entity(
+            mapOf(
+                "error" to "PAYMENT_RELEASED",
+                "message" to e.message,
+                "paymentId" to e.paymentId,
+                "flowId" to e.flowId,
+            ),
+        ).build()
 }

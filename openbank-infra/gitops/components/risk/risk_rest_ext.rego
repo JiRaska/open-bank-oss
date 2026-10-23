@@ -67,3 +67,12 @@ allowed_reasons contains "treasury-m2m-risk-curve-set-read" if {
 	machine_named("service-account-openbank-treasury")
 	input.action == "risk.curve-set.read"
 }
+
+# ADR-0344 D8: treasury revalues its fair-value book off the risk engine's valuation of a TIED_OUT
+# snapshot (RevaluationService). Same machine, same principal-id keying; snapshot reads only — the
+# list and the per-snapshot valuation, both `risk.snapshot.read`. Never create.
+allowed_reasons contains "treasury-m2m-risk-snapshot-read" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-treasury")
+	input.action == "risk.snapshot.read"
+}

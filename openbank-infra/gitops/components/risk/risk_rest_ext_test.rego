@@ -176,7 +176,7 @@ test_finrep_m2m_is_denied_curve_set_create if {
 # Same ROLE_API, different machine: the grant is by identity, not by role.
 test_other_api_service_account_is_denied_read if {
 	not rest.allow with input as {
-		"principal": {"service_account": true, "client_id": "openbank-treasury", "type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-pricing", "type": "HUMAN", "id": "service-account-openbank-pricing", "roles": ["ROLE_API"]},
 		"action": "risk.snapshot.read",
 	}
 }
@@ -188,8 +188,13 @@ test_treasury_m2m_may_read_curve_sets if {
 	rest.allow with input as {"principal": treasury_m2m, "action": "risk.curve-set.read"}
 }
 
-test_treasury_m2m_is_denied_everything_but_the_curve_read if {
-	every a in {"risk.curve-set.create", "risk.snapshot.create", "risk.snapshot.read"} {
+# ADR-0344 D8: and reads snapshots (list + valuation) for the revaluation.
+test_treasury_m2m_may_read_snapshots if {
+	rest.allow with input as {"principal": treasury_m2m, "action": "risk.snapshot.read"}
+}
+
+test_treasury_m2m_is_denied_everything_but_the_curve_and_snapshot_reads if {
+	every a in {"risk.curve-set.create", "risk.snapshot.create"} {
 		not rest.allow with input as {"principal": treasury_m2m, "action": a}
 	}
 }

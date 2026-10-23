@@ -37,6 +37,7 @@ V1 seeds cash/deposit/interest/fee accounts (1000, 1001, 2000, 2001, 2002, 3000,
 | `V7__add_sub_account_id_to_journal_lines` | nullable `sub_account_id` + partial index (ADR-0039 Phase B) | documented in-file: drop index + column (backward-compatible) |
 | `V8__journal_partition_lifecycle` | pre-create 2027/2028 partitions, `partition_lifecycle_audit` table | drop partitions/table |
 | `V34__per_currency_fee_income_accounts` | fee income 4004 EUR / 4005 USD / 4006 GBP + `FEE_INCOME_ACCOUNT` map rows; aborts if fee-income and deposit-control currencies differ (#13226) | delete the map rows and accounts, only before any journal line references them |
+| `V35__treasury_instrument_accounts` | 66 treasury instrument accounts (33 per currency, CZK/EUR: securities by IFRS 9 category, premium/discount, accrued interest per family, loans, repos, derivative fair value, FVOCI reserve, realised/unrealised P&L, memo pairs) + 78 `accounting_class_gl_map` rows and 9 instrument roles for the treasury posting-rule matrix (ADR-0344 D7); aborts on a missing row or a currency mismatch (#13667) | delete the map rows, restore the role CHECK, delete the accounts, only before any journal line references them |
 
 **Never edit a migration after it is applied to a live DB** — Flyway checksum mismatch crashes startup (use `QUARKUS_FLYWAY_REPAIR_AT_START=true` as a temporary remedy, then remove).
 

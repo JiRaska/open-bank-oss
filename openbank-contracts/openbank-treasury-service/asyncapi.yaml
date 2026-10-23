@@ -9,8 +9,38 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Treasury Service — deal events
-  version: 1.6.0
+  version: 1.10.0
   description: |
+    1.10.0 (additive, ADR-0344 phase 2b, D7): `treasury.deal.corrected.v1` on the deal topic — a
+    four-eyes correction of a booked deal was approved; the new terms version and its cash-flow
+    ledger committed in the same transaction, `fullUnwind` says whether the deal ended REVERSED,
+    and `deltaJournals` journals are owed to the ledger under `treasury:<dealId>:correction:*`.
+    BOND, TREASURY_BILL, REPO and REVERSE_REPO are now booked, settled and matured.
+
+    1.9.0 (additive, ADR-0344 phase 1b, contract 9): the bank-own payment rail. Release is ASYNC
+    and ATOMIC: `treasury.payment.released.v1` is written on the NEW channel
+    `openbank.treasury.payments` in the same transaction that moves the payment to RELEASED (rail
+    from the SSI: CZK CERTIS, EUR TARGET2, other SWIFT). The rail's status events
+    (`openbank.swift.institution-transfers`, swift-service's contract) move it on, idempotent on
+    (paymentId, status). New on the deal topic: `treasury.payment.status-changed.v1`, an
+    own-account payment moved (PROPOSED, RELEASED, SENT, RAIL_NOT_SUPPORTED, SETTLED,
+    MANUALLY_SETTLED, RETURNED, FAILED, CANCELLED), keyed by the payment id.
+
+    1.8.0 (additive, ADR-0344 phase 1a): `treasury.cashflow.fixed.v1` on the same topic: floating
+    flows of one deal version moved PROJECTED/MISSING -> FIXED from an observed index value that
+    passed the quality gate, with the value, its source and SHA-256 provenance hash. `ProductType`
+    IRS and FRA are now booked (their cash flows only; they settle once the posting matrix lands).
+
+    1.7.0 (additive, ADR-0344 phase 0): `DealBooked` gains `kind` (ACTUAL | PLANNED — absent means
+    ACTUAL; a consumer that books exposure must ignore PLANNED), `bookId`, `legs`, `scheduleVersion`,
+    `scheduleHash`, `rollDirection` (FROM_START | FROM_END; absent = FROM_END), `calendars` and
+    `businessDayConvention` (the conventions a leg without its own inherits, so a consumer derives the
+    schedule treasury generated). `ProductType` lists the leg-described products of ADR-0344 (a
+    consumer must tolerate a product it does not model); treasury books only the five pre-existing
+    products until each later phase lands. New on the same topic: `treasury.cashflow.generated.v1`
+    (a cash-flow ledger version was stored; `flows` carries the stored rows) and
+    `treasury.cashflow.overridden.v1` (a four-eyes override was approved or rejected).
+
     Lifecycle of the bank's own money-market deals (ADR-0315): MM placements, MM borrowings, the
     ČNB overnight deposit facility and ČNB lombard (marginal lending) borrowings.
 
@@ -64,10 +94,36 @@ channels:
         $ref: '#/components/messages/DealMatured'
       DealReversed:
         $ref: '#/components/messages/DealReversed'
+      DealCorrected:
+        $ref: '#/components/messages/DealCorrected'
       NostroBreakAged:
         $ref: '#/components/messages/NostroBreakAged'
+      CashFlowGenerated:
+        $ref: '#/components/messages/CashFlowGenerated'
+      CashFlowOverridden:
+        $ref: '#/components/messages/CashFlowOverridden'
+      CashFlowFixed:
+        $ref: '#/components/messages/CashFlowFixed'
+      PaymentStatusChanged:
+        $ref: '#/components/messages/PaymentStatusChanged'
+
+  treasuryPayments:
+    address: openbank.treasury.payments
+    title: Bank-own payment instructions to the institution-transfer rail
+    description: |
+      Contract 9.1. The KafkaTopic CR lives in `openbank-infra/gitops/components/treasury/kafka-topic.yaml`:
+      treasury Write, swift Read. **Partitioning key: `aggregateId`** = the payment id.
+    messages:
+      PaymentReleased:
+        $ref: '#/components/messages/PaymentReleased'
+
 
 operations:
+  publishTreasuryPayments:
+    action: send
+    channel:
+      $ref: '#/channels/treasuryPayments'
+    summary: treasury-service hands a released bank-own payment to the institution-transfer rail.
   publishTreasuryDealEvents:
     action: send
     channel:
@@ -101,16 +157,50 @@ components:
       summary: "A booked, confirmed or settled deal was undone; a settled one by an offsetting journal."
       payload:
         $ref: '#/components/schemas/DealReversed'
+    DealCorrected:
+      name: treasury.deal.corrected.v1
+      summary: "A four-eyes correction of a booked deal was approved; its delta journals are owed to the ledger (ADR-0344 D7)."
+      payload:
+        $ref: '#/components/schemas/DealCorrected'
     NostroBreakAged:
       name: treasury.nostro.break-aged.v1
       summary: "An open nostro reconciliation break reached the alert age and amount (ADR-0315 D7). Nothing posted."
       payload:
         $ref: '#/components/schemas/NostroBreakAged'
+    CashFlowGenerated:
+      name: treasury.cashflow.generated.v1
+      summary: "A cash-flow ledger version was generated and stored with the submission (ADR-0344 D4)."
+      payload:
+        $ref: '#/components/schemas/CashFlowGenerated'
+    CashFlowOverridden:
+      name: treasury.cashflow.overridden.v1
+      summary: "A four-eyes override of one cash flow was approved or rejected (ADR-0344 D4). Nothing posted."
+      payload:
+        $ref: '#/components/schemas/CashFlowOverridden'
+    CashFlowFixed:
+      name: treasury.cashflow.fixed.v1
+      summary: "Floating flows of one deal version were FIXED from an observed index value that passed the quality gate (ADR-0344 D5)."
+      payload:
+        $ref: '#/components/schemas/CashFlowFixed'
+
+    PaymentStatusChanged:
+      name: treasury.payment.status-changed.v1
+      summary: "An own-account payment changed status (ADR-0344 D6)."
+      payload:
+        $ref: '#/components/schemas/PaymentStatusChanged'
+    PaymentReleased:
+      name: treasury.payment.released.v1
+      summary: "A human released an own-account payment; the rail is to transfer it (contract 9.1)."
+      payload:
+        $ref: '#/components/schemas/PaymentReleased'
 
   schemas:
     ProductType:
       type: string
-      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD, FX_SPOT]
+      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD, FX_SPOT, CASH, TREASURY_BILL, BOND, BILL_OF_EXCHANGE, LOAN, FX_FORWARD, FX_SWAP, FRA, IRS, REPO, REVERSE_REPO]
+    DealKind:
+      type: string
+      enum: [ACTUAL, PLANNED, HYPOTHETICAL]
     FxSide:
       type: [string, 'null']
       enum: [BUY, SELL, null]
@@ -151,6 +241,17 @@ components:
             decision: { type: string, enum: [WITHIN_LIMIT] }
             maxPrincipal: { type: [number, 'null'], description: "In the deal's currency" }
             maxTenorDays: { type: [integer, 'null'], description: 'Null = no tenor cap (FX_SPOT)' }
+        kind: { $ref: '#/components/schemas/DealKind' }
+        bookId: { type: [string, 'null'] }
+        legs:
+          type: array
+          description: "`LegSpec` in `Legs.kt` (rates as annual percentages; dayCount as the enum name, e.g. ACT_360)."
+          items: { type: object, additionalProperties: true }
+        scheduleVersion: { type: integer }
+        scheduleHash: { type: [string, 'null'] }
+        rollDirection: { type: string, enum: [FROM_START, FROM_END], description: 'Absent = FROM_END. Places a leg whose stub is NONE.' }
+        calendars: { type: array, items: { type: string }, description: 'Deal header calendar codes; a leg without paymentCalendars uses their joint calendar. Empty/absent = leg currency calendar.' }
+        businessDayConvention: { type: [string, 'null'], description: 'Deal header convention a leg without its own inherits.' }
 
     DealConfirmed:
       type: object
@@ -167,6 +268,7 @@ components:
         simulated: { type: boolean, description: 'True when the simulated counterparty set (ADR-0315 D9, sandbox only) confirmed it: a SYNTHETIC confirmation.' }
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
+        kind: { $ref: '#/components/schemas/DealKind' }
 
     DealSettled:
       type: object
@@ -220,8 +322,30 @@ components:
           description: Null when reversed from BOOKED or CONFIRMED, before anything had posted.
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
+        kind: { $ref: '#/components/schemas/DealKind' }
         fxSide: { $ref: '#/components/schemas/FxSide' }
         counterAmount: { $ref: '#/components/schemas/CounterAmount' }
+
+    DealCorrected:
+      type: object
+      description: "Constructor properties of `DealCorrected` in `TreasuryEventPayloads.kt`."
+      required: [dealId, correctionId, product, fromVersion, toVersion, scheduleVersion, fullUnwind, changedFlows, deltaJournals, effectiveFrom, reason, proposedBy, approvedBy, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        correctionId: { type: string, format: uuid }
+        product: { $ref: '#/components/schemas/ProductType' }
+        fromVersion: { type: integer }
+        toVersion: { type: integer }
+        scheduleVersion: { type: integer }
+        fullUnwind: { type: boolean, description: "True: the deal ended REVERSED and every posted journal is offset." }
+        changedFlows: { type: integer }
+        deltaJournals: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        reason: { type: string }
+        proposedBy: { type: string }
+        approvedBy: { type: string }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
 
     NostroBreakAged:
       type: object
@@ -241,3 +365,157 @@ components:
         thresholdDays: { type: integer, description: 'openbank.treasury.nostro.break-alert-age-days at the time of the alert' }
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
+
+    CashFlowGenerated:
+      type: object
+      description: "Constructor properties of `CashFlowGenerated` in `TreasuryEventPayloads.kt`."
+      required: [dealId, product, kind, dealVersion, scheduleVersion, scheduleHash, flowCount, projectedCount, carriedOverrides, conflicts, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        product: { $ref: '#/components/schemas/ProductType' }
+        kind: { $ref: '#/components/schemas/DealKind' }
+        bookId: { type: [string, 'null'] }
+        dealVersion: { type: integer }
+        scheduleVersion: { type: integer }
+        scheduleHash: { type: string }
+        flowCount: { type: integer }
+        projectedCount: { type: integer, description: Floating flows whose amount awaits a fixing }
+        carriedOverrides: { type: integer }
+        conflicts: { type: integer, description: Approved overrides that could not be carried over }
+        occurredAt: { type: string, format: date-time }
+        flows:
+          type: array
+          maxItems: 20000
+          description: 1.7.0 — the stored rows (absent before 1.7.0)
+          items: { $ref: '#/components/schemas/LedgerFlowItem' }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
+
+    CashFlowOverridden:
+      type: object
+      description: "Constructor properties of `CashFlowOverridden` in `TreasuryEventPayloads.kt`."
+      required: [dealId, flowId, overrideId, status, reason, proposedBy, decidedBy, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        flowId: { type: string, format: uuid }
+        overrideId: { type: string, format: uuid }
+        status: { type: string, enum: [APPROVED, REJECTED] }
+        paymentDate: { type: [string, 'null'], format: date }
+        amount: { type: [number, 'null'] }
+        originalPaymentDate: { type: [string, 'null'], format: date }
+        originalAmount: { type: [number, 'null'] }
+        reason: { type: string }
+        proposedBy: { type: string }
+        decidedBy: { type: string, description: Never equal to proposedBy (four-eyes) }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
+    CashFlowFixed:
+      type: object
+      description: "Constructor properties of `CashFlowFixed` in `TreasuryEventPayloads.kt`."
+      required: [dealId, dealVersion, scheduleVersion, index, fixingDate, value, source, sha256, flows, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        dealVersion: { type: integer }
+        scheduleVersion: { type: integer }
+        index: { type: string }
+        fixingDate: { type: string, format: date }
+        value: { type: number, description: The observed index value in percent }
+        source: { type: string, enum: [IMPORT, MANUAL, FEED] }
+        sha256: { type: string, description: 'SHA-256 of index|date|value|source' }
+        flows:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/FixedFlowItem' }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
+    FixedFlowItem:
+      type: object
+      description: "Constructor properties of `FixedFlowItem` in `TreasuryEventPayloads.kt`."
+      required: [flowId, legIndex, periodIndex, kind, direction, currency, paymentDate, rate, amount, rateSource, state]
+      properties:
+        flowId: { type: string, format: uuid }
+        legIndex: { type: integer }
+        periodIndex: { type: integer }
+        kind: { type: string }
+        direction: { type: string, enum: [IN, OUT] }
+        currency: { type: string }
+        accrualStart: { type: [string, 'null'], format: date }
+        accrualEnd: { type: [string, 'null'], format: date }
+        paymentDate: { type: string, format: date }
+        rate: { type: number }
+        amount: { type: number }
+        rateSource: { type: string, enum: [OBSERVED] }
+        state: { type: string, enum: [FIXED] }
+
+    LedgerFlowItem:
+      type: object
+      description: "Constructor properties of `LedgerFlowItem` in `TreasuryEventPayloads.kt`."
+      required: [flowId, legIndex, periodIndex, kind, direction, currency, paymentDate, rateSource, state, manual]
+      properties:
+        flowId: { type: string, format: uuid }
+        legIndex: { type: integer }
+        periodIndex: { type: integer }
+        kind: { type: string, enum: [PRINCIPAL, INTEREST, FEE, NOTIONAL_EXCHANGE, PREMIUM] }
+        direction: { type: string, enum: [IN, OUT] }
+        currency: { type: string }
+        accrualStart: { type: [string, 'null'], format: date }
+        accrualEnd: { type: [string, 'null'], format: date }
+        fixingDate: { type: [string, 'null'], format: date }
+        paymentDate: { type: string, format: date }
+        notional: { type: [number, 'null'] }
+        rate: { type: [number, 'null'] }
+        rateSource: { type: string, enum: [FIXED, OBSERVED, PROJECTED, RATE_UNTIL_FIRST_FIXING, MISSING] }
+        amount: { type: [number, 'null'] }
+        state: { type: string, enum: [PROJECTED, FIXED, DUE, SETTLED, POSTED, CANCELLED] }
+        manual: { type: boolean }
+
+    PaymentStatusChanged:
+      type: object
+      description: "Constructor properties of `PaymentStatusChanged` in `PaymentService.kt`."
+      required: [paymentId, status, direction, counterpartyId, currency, amount, valueDate, nettedFlowIds, dealIds, occurredAt, sourceService]
+      properties:
+        paymentId: { type: string, format: uuid }
+        status: { type: string, enum: [PROPOSED, RELEASED, SENT, SETTLED, FAILED, CANCELLED, RAIL_NOT_SUPPORTED, MANUALLY_SETTLED, RETURNED] }
+        direction: { type: string, enum: [IN, OUT] }
+        counterpartyId: { type: string }
+        currency: { type: string }
+        amount: { type: number }
+        valueDate: { type: string, format: date }
+        rail: { type: [string, 'null'] }
+        railReference: { type: [string, 'null'] }
+        nettedFlowIds: { type: array, items: { type: string, format: uuid } }
+        dealIds: { type: array, items: { type: string, format: uuid } }
+        actor: { type: [string, 'null'] }
+        reason: { type: [string, 'null'] }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
+
+    TransferParty:
+      type: object
+      required: [bic, accountNumber]
+      properties:
+        bic: { type: string, maxLength: 11 }
+        accountNumber: { type: string, maxLength: 64 }
+        glAccountingClass: { type: [string, 'null'] }
+        name: { type: [string, 'null'], maxLength: 140 }
+
+    PaymentReleased:
+      type: object
+      description: "Constructor properties of `PaymentReleased` in `PaymentService.kt`."
+      required: [paymentId, idempotencyKey, rail, currency, amount, valueDate, debtor, creditor, ssiVersion, remittanceInformation, dealIds, flowIds, releasedBy, releasedAt, synthetic]
+      properties:
+        paymentId: { type: string, format: uuid }
+        idempotencyKey: { type: string, maxLength: 128 }
+        rail: { type: string, enum: [CERTIS, TARGET2, SWIFT] }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        amount: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: "Decimal string, 2 dp." }
+        valueDate: { type: string, format: date }
+        debtor: { $ref: '#/components/schemas/TransferParty' }
+        creditor: { $ref: '#/components/schemas/TransferParty' }
+        intermediaryBic: { type: [string, 'null'] }
+        ssiVersion: { type: integer, minimum: 1, description: "The SSI version the creditor was addressed from, re-verified inside the release transaction (additive to contract 9.1)." }
+        remittanceInformation: { type: string, maxLength: 140 }
+        dealIds: { type: array, items: { type: string, format: uuid } }
+        flowIds: { type: array, items: { type: string, format: uuid } }
+        releasedBy: { type: string }
+        releasedAt: { type: string, format: date-time }
+        synthetic: { type: boolean }
