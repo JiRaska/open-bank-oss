@@ -30,11 +30,7 @@ object ProductStateTransition {
                     when (l.accountingClass) {
                         AccountingClass.CUSTOMER_DEPOSIT -> {
                             balance += signed
-                            events += AccountEvent(
-                                if (signed.signum() >= 0) EventKind.INTEREST else EventKind.FEE,
-                                on,
-                                l.amount,
-                            )
+                            events += AccountEvent(eventKindOf(i), on, l.amount)
                         }
                         AccountingClass.ACCRUED_INTEREST_PAYABLE -> accrued += signed
                         else -> Unit
@@ -51,6 +47,22 @@ object ProductStateTransition {
             events = events,
             balanceSamples = state.balanceSamples + BalanceSample(on, balance),
         )
+    }
+
+    /**
+     * The account event a `Post` touching the customer deposit represents, read from its COUNTER
+     * line's accounting class — never from the direction alone, which would record a maturity
+     * pay-out or a penalty as a fee and make `countEvents(FEE, …)` miscount.
+     */
+    fun eventKindOf(post: Instruction.Post): EventKind {
+        val counter = post.lines.firstOrNull { it.accountingClass != AccountingClass.CUSTOMER_DEPOSIT }?.accountingClass
+        return when (counter) {
+            AccountingClass.ACCRUED_INTEREST_PAYABLE, AccountingClass.INTEREST_EXPENSE -> EventKind.INTEREST
+            AccountingClass.FEE_INCOME -> EventKind.FEE
+            AccountingClass.PENALTY_INCOME -> EventKind.PENALTY
+            AccountingClass.SETTLEMENT -> EventKind.TRANSFER_OUT
+            AccountingClass.CUSTOMER_DEPOSIT, null -> EventKind.TRANSFER_IN
+        }
     }
 
     /** Applies a customer posting (the thing a `prePosting` hook was asked about) once it is accepted. */

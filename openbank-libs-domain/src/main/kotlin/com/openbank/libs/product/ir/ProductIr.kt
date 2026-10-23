@@ -35,6 +35,9 @@ object IrLimits {
     const val MAX_TIERS: Int = 16
     const val MAX_FEES: Int = 32
     const val MAX_PREDICATE_DEPTH: Int = 8
+
+    /** Operands of one `and` / `or` node — a breadth limit, independent of [MAX_PREDICATE_DEPTH]. */
+    const val MAX_AND_OR_OPERANDS: Int = 8
     const val MAX_RULES_PER_HOOK: Int = 32
     const val MAX_NOTIFY_VARIABLES: Int = 16
     const val MAX_RULE_ID_LENGTH: Int = 64
@@ -80,7 +83,7 @@ enum class MaturityAction { CAPITALISE, PAY_OUT, ROLL_OVER }
 enum class PenaltyKind { RATE, FORFEITED_INTEREST_FRACTION }
 
 /** Kinds of account event the predicate language can count, sum or require absent. */
-enum class EventKind { DEPOSIT, WITHDRAWAL, CARD_PAYMENT, TRANSFER_OUT, TRANSFER_IN, FEE, INTEREST }
+enum class EventKind { DEPOSIT, WITHDRAWAL, CARD_PAYMENT, TRANSFER_OUT, TRANSFER_IN, FEE, INTEREST, PENALTY }
 
 /** A rolling window ending at the evaluation date (inclusive of today, `days` days back). */
 data class Window(val days: Int)

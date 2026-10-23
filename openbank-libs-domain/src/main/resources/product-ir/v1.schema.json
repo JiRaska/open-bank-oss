@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openbank.example/schemas/product-ir/v1.schema.json",
   "title": "OpenBank Product IR v1",
-  "description": "ADR-0352 product IR v1 (deposit products) under the ADR-0258 trusted profile: additionalProperties false everywhere, closed enums, local $ref only, no scripts. Hard run limits (ADR-0352 section 2) are stated here as maxItems/maximum and repeated in com.openbank.libs.product.ir.IrLimits: maxInstructionsPerEvaluation = 64 (held by the interpreter at runtime), tiers <= 16, fees <= 32, predicate depth <= 8 (the schema's $ref recursion is bounded by the parser), rules per hook <= 32, notify variables <= 16, ruleId <= 64 chars, termMonths <= 600, window days <= 3660. Decimals are authored as JSON numbers or decimal strings; a rate or fraction carries at most 10 decimal places and an amount or threshold at most 4 (their canonical scales). ruleId is an explicit identifier, unique within the revision, never an index.",
+  "description": "ADR-0352 product IR v1 (deposit products) under the ADR-0258 trusted profile: additionalProperties false everywhere, closed enums, local $ref only, no scripts. Hard run limits (ADR-0352 section 2) are stated here as maxItems/maximum and repeated in com.openbank.libs.product.ir.IrLimits: maxInstructionsPerEvaluation = 64 (held by the interpreter at runtime), tiers <= 16, fees <= 32, predicate depth <= 8 and operands per and/or <= 8 (the schema's $ref recursion is bounded by the parser), rules per hook <= 32, notify variables <= 16, ruleId <= 64 chars, termMonths <= 600, window days <= 3660. Decimals are authored as JSON numbers or decimal strings; a rate or fraction carries at most 10 decimal places and an amount or threshold at most 4 (their canonical scales). ruleId is an explicit identifier, unique within the revision, never an index.",
   "type": "object",
   "additionalProperties": false,
   "required": ["irVersion", "productCode", "currency", "hooks"],
@@ -30,7 +30,7 @@
     "cadence": { "type": "string", "enum": ["DAILY", "MONTHLY", "QUARTERLY", "ANNUALLY", "AT_MATURITY", "ON_EVENT"] },
     "dayCount": { "type": "string", "enum": ["ACT_365_FIXED", "ACT_360", "ACT_ACT", "THIRTY_360_BOND_BASIS"] },
     "operator": { "type": "string", "enum": ["GT", "GTE", "LT", "LTE", "EQ", "NEQ"] },
-    "eventKind": { "type": "string", "enum": ["DEPOSIT", "WITHDRAWAL", "CARD_PAYMENT", "TRANSFER_OUT", "TRANSFER_IN", "FEE", "INTEREST"] },
+    "eventKind": { "type": "string", "enum": ["DEPOSIT", "WITHDRAWAL", "CARD_PAYMENT", "TRANSFER_OUT", "TRANSFER_IN", "FEE", "INTEREST", "PENALTY"] },
     "roundingPolicy": {
       "description": "A com.openbank.libs.domain.money.RoundingPolicy name (ADR-0318).",
       "type": "string",

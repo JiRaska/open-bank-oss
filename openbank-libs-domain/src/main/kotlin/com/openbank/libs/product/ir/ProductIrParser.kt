@@ -519,7 +519,7 @@ object ProductIrParser {
                 }
                 "and", "or" -> {
                     known(o, p, "type", "operands")
-                    val ops = list(o, p, "operands", IrLimits.MAX_PREDICATE_DEPTH, required = true).mapIndexed { i, x ->
+                    val ops = list(o, p, "operands", IrLimits.MAX_AND_OR_OPERANDS, required = true).mapIndexed { i, x ->
                         predicate(
                             x,
                             "$p/operands/$i",

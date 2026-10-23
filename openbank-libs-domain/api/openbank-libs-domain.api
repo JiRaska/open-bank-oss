@@ -3693,6 +3693,7 @@ public final class com/openbank/libs/product/ir/EventKind : java/lang/Enum {
 	public static final field DEPOSIT Lcom/openbank/libs/product/ir/EventKind;
 	public static final field FEE Lcom/openbank/libs/product/ir/EventKind;
 	public static final field INTEREST Lcom/openbank/libs/product/ir/EventKind;
+	public static final field PENALTY Lcom/openbank/libs/product/ir/EventKind;
 	public static final field TRANSFER_IN Lcom/openbank/libs/product/ir/EventKind;
 	public static final field TRANSFER_OUT Lcom/openbank/libs/product/ir/EventKind;
 	public static final field WITHDRAWAL Lcom/openbank/libs/product/ir/EventKind;
@@ -3910,6 +3911,7 @@ public final class com/openbank/libs/product/ir/IrLimits {
 	public static final field AMOUNT_SCALE I
 	public static final field INSTANCE Lcom/openbank/libs/product/ir/IrLimits;
 	public static final field INSTRUCTION_AMOUNT_SCALE I
+	public static final field MAX_AND_OR_OPERANDS I
 	public static final field MAX_FEES I
 	public static final field MAX_INSTRUCTIONS_PER_EVALUATION I
 	public static final field MAX_NOTIFY_VARIABLES I
@@ -4286,6 +4288,7 @@ public final class com/openbank/libs/product/ir/ProductStateTransition {
 	public static final field INSTANCE Lcom/openbank/libs/product/ir/ProductStateTransition;
 	public final fun apply (Lcom/openbank/libs/product/ir/ProductState;Ljava/util/List;Ljava/time/LocalDate;)Lcom/openbank/libs/product/ir/ProductState;
 	public final fun applyPosting (Lcom/openbank/libs/product/ir/ProductState;Lcom/openbank/libs/product/ir/Posting;Ljava/time/LocalDate;)Lcom/openbank/libs/product/ir/ProductState;
+	public final fun eventKindOf (Lcom/openbank/libs/product/ir/Instruction$Post;)Lcom/openbank/libs/product/ir/EventKind;
 }
 
 public final class com/openbank/libs/product/ir/RateType : java/lang/Enum {

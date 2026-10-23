@@ -55,6 +55,29 @@ class ProductStateTransitionTest {
     }
 
     @Test
+    fun `the event kind follows the counter line, so a penalty or pay-out is never counted as a fee`() {
+        val cases = mapOf(
+            AccountingClass.FEE_INCOME to EventKind.FEE,
+            AccountingClass.PENALTY_INCOME to EventKind.PENALTY,
+            AccountingClass.SETTLEMENT to EventKind.TRANSFER_OUT,
+            AccountingClass.ACCRUED_INTEREST_PAYABLE to EventKind.INTEREST,
+        )
+        for ((counter, kind) in cases) {
+            val interest = counter == AccountingClass.ACCRUED_INTEREST_PAYABLE
+            val dir = if (interest) PostingDirection.CREDIT else PostingDirection.DEBIT
+            val other = if (dir == PostingDirection.CREDIT) PostingDirection.DEBIT else PostingDirection.CREDIT
+            val s = ProductStateTransition.apply(
+                IrFixtures.state("100.00"),
+                listOf(post(line(AccountingClass.CUSTOMER_DEPOSIT, dir, "1"), line(counter, other, "1"))),
+                day,
+            )
+            assertThat(s.events.single().kind).withFailMessage("$counter").isEqualTo(kind)
+        }
+        val creditOnly = post(line(AccountingClass.CUSTOMER_DEPOSIT, PostingDirection.CREDIT, "1"))
+        assertThat(ProductStateTransition.eventKindOf(creditOnly)).isEqualTo(EventKind.TRANSFER_IN)
+    }
+
+    @Test
     fun `an accepted customer posting moves the balance and records the event`() {
         val s = ProductStateTransition.applyPosting(
             IrFixtures.state("100.00"),

@@ -361,6 +361,17 @@ comparison: the first commercial path announced in 2026 for generating a product
 language model relies on human sign-off alone. Here the sign-off is preceded by a mandatory
 behavioural simulation diff and followed by a signature and two independent approvals.
 
+### Phase 1 delivery notes
+
+Recorded when phase 1 landed (#13608), so the text matches what the IR v1 schema accepts:
+
+- The predicate language also carries `postingComparison` (`POSTING_AMOUNT`, `PROJECTED_BALANCE`),
+  meaningful in `prePosting`/`postPosting` only; it is what a `prePosting` `Reject` is gated on.
+- `Reprice` may change only `interest.rate` and `interest.bonus.rate` in v1.
+- The bit-exact characterisation test in `openbank-libs-finance` (generated inputs) does **not**
+  discharge section 10: golden data exported from the running interest-service remains a
+  precondition of the phase-3 interest switch.
+
 ## Alternatives considered
 
 - **Vendor-style smart contracts in a general-purpose language (Python, JavaScript, Kotlin
