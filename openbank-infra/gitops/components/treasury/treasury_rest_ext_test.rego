@@ -345,3 +345,14 @@ test_reference_machines_and_agents_get_nothing if {
 		not allowed_on(p, "treasury.reference.approve", "counterparty")
 	}
 }
+
+# Least privilege: the reference editor reads reference data and NOTHING else. Known-negative for
+# every other treasury read; back office keeps its deal and position reads.
+test_reference_editor_reads_reference_only if {
+	allowed(editor, "treasury.reference.read")
+	every a in (reads | {"treasury.portfolio.inspect"}) {
+		not allowed(editor, a)
+	}
+	allowed(back_office, "treasury.deal.read")
+	allowed(back_office, "treasury.position.read")
+}

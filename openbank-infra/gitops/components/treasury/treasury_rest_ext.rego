@@ -14,7 +14,7 @@
 #       approver role, never the dealer; the domain also refuses the deal's creator and submitter)
 #   treasury.deal.override-limit              — ROLE_TREASURY_SENIOR_APPROVER only (ADR-0315 D4)
 #   treasury.nostro.read                      — treasury dealers, approvers and admins (#10896)
-#   treasury.reference.read                   — treasury staff (ADR-0344 D3)
+#   treasury.reference.read                   — treasury staff, and the reference editor (ADR-0344 D3)
 #   treasury.reference.propose, .import       — ROLE_TREASURY_REFERENCE_EDITOR or ROLE_TREASURY_BACK_OFFICE
 #   treasury.reference.approve                — ROLE_TREASURY_APPROVER; for kind `counterparty` (limits)
 #                                               ROLE_TREASURY_SENIOR_APPROVER only
@@ -70,8 +70,7 @@ allowed_reasons contains "treasury-staff-read" if {
 	treasury_staff
 	some role in {
 		"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER",
-		"ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR",
-		"ROLE_ADMIN",
+		"ROLE_TREASURY_BACK_OFFICE", "ROLE_ADMIN",
 	}
 	role in input.principal.roles
 	input.action in {
@@ -86,6 +85,14 @@ allowed_reasons contains "treasury-staff-read" if {
 		# ADR-0344 D3: effective-dated reference data.
 		"treasury.reference.read",
 	}
+}
+
+# Least privilege: the reference editor maintains code lists, so its ONLY read is reference data.
+# It must not reach deals, counterparties' exposure, positions, nostro, portfolio or quotes.
+allowed_reasons contains "treasury-reference-read" if {
+	treasury_staff
+	"ROLE_TREASURY_REFERENCE_EDITOR" in input.principal.roles
+	input.action == "treasury.reference.read"
 }
 
 allowed_reasons contains "treasury-dealer-write" if {

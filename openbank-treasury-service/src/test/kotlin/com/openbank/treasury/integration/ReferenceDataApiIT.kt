@@ -263,6 +263,15 @@ class ReferenceDataApiIT {
         }
     }
 
+    @Test
+    @Order(9)
+    @TestSecurity(user = "erik.editor", roles = ["ROLE_TREASURY_REFERENCE_EDITOR"])
+    fun `9 - the reference editor reads reference data but not deals, counterparties or positions`() {
+        given().`when`().get("/api/v1/treasury/reference/calendar/CERTIS").then().statusCode(200)
+        given().`when`().get("/api/v1/treasury/deals").then().statusCode(403)
+        given().`when`().get("/api/v1/treasury/counterparties").then().statusCode(403)
+    }
+
     private fun status(kind: String, key: String, version: Int): String? = jdbc { c ->
         c.prepareStatement(
             "select status from reference_records where kind = ? and record_key = ? and version = ?",
