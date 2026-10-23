@@ -68,16 +68,6 @@ dependencies {
     // Same version pin as openbank-ledger-service/openbank-balance-service's own property
     // suites and openbank-libs-domain's MoneyPropertyTest — kept a direct GAV like theirs.
     api("io.kotest:kotest-property:5.9.1")
-    // OpenAPI wire-contract kit surface (#13210): a service test validates REAL responses against
-    // its own openapi.yaml with the JSON Schema validator product-catalog / libs-domain already
-    // use. `api` so a consumer's testImplementation(project(":openbank-libs-testing")) gets it
-    // without touching its own build file (a service build.gradle.kts change would re-classify a
-    // spec-only correction as a contract change). The yaml dataformat is excluded exactly as in
-    // libs-domain (not in verification-metadata.xml); snakeyaml-engine 2.7 is the pinned parser.
-    api("com.networknt:json-schema-validator:1.5.9") {
-        exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
-    }
-    api("org.snakeyaml:snakeyaml-engine:2.7")
     // quarkus-vertx: VertxContextSupport (reactive Panache needs a Vert.x duplicated context).
     // quarkus-messaging-kafka: OutgoingKafkaRecordMetadata (kafka-api), for reading the produced
     // record's key/headers back out of the in-memory connector's sink.

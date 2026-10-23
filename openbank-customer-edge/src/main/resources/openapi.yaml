@@ -8304,6 +8304,7 @@ components:
 
     Balance:
       type: object
+      required: [id, accountId, currency, bookedAmount, availableAmount, reservedAmount, pendingAmount, updatedAt, version]
       properties:
         id:
           type: string
