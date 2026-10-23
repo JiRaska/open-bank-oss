@@ -1,0 +1,74 @@
+# ADR-0344 D7 golden: the posting-rule matrix journals of every matrix parity fixture, rendered in GL
+# codes by the matrix as it stood BEFORE postings named accounting class + role (ADR-0341 D3).
+# Generated once from that code (fe3e990b74); never regenerate it from the code under test.
+# Phase 2a (#13667) keeps only the rows of the fixtures on this branch (IRS, FRA) and drops the
+# revaluation rows (phase 3). The J and A rows are a filtered subset of the original golden; the
+# sha256-all line below is re-pinned over today's render of those fixtures, since the accrual
+# amounts it covers are not stored line by line. The phases that add fixtures restore their rows.
+sha256-all fecadcdf635ff8da3af6f8177da3cd1ecebe5f86677df3bc0c5f2af544f0b679 3123
+J fra-czk-3x6-receive-001 [AMORTISED_COST] treasury:D:trade:2026-11-02 :: DEBIT 9000 100000000.00 CZK | CREDIT 9100 100000000.00 CZK
+J fra-czk-3x6-receive-001 [AMORTISED_COST] treasury:D:payment:F0 :: DEBIT 1001 53906.46 CZK | CREDIT 4300 53906.46 CZK
+J fra-czk-3x6-receive-001 [AMORTISED_COST] treasury:D:maturity:2027-05-04 :: DEBIT 9100 100000000.00 CZK | CREDIT 9000 100000000.00 CZK
+J fra-eur-3x6-pay-002 [AMORTISED_COST] treasury:D:trade:2026-11-02 :: DEBIT 9001 25000000.00 EUR | CREDIT 9101 25000000.00 EUR
+J fra-eur-3x6-pay-002 [AMORTISED_COST] treasury:D:payment:F0 :: DEBIT 5301 14759.99 EUR | CREDIT 1002 14759.99 EUR
+J fra-eur-3x6-pay-002 [AMORTISED_COST] treasury:D:maturity:2027-05-04 :: DEBIT 9101 25000000.00 EUR | CREDIT 9001 25000000.00 EUR
+J irs-czk-adjusted-accrual-002 [AMORTISED_COST] treasury:D:trade:2026-08-12 :: DEBIT 9000 100000000.00 CZK | CREDIT 9100 100000000.00 CZK
+J irs-czk-adjusted-accrual-002 [AMORTISED_COST] treasury:D:payment:F2 :: DEBIT 1001 1855138.89 CZK | CREDIT 1670 1855138.89 CZK
+J irs-czk-adjusted-accrual-002 [AMORTISED_COST] treasury:D:payment:F0 :: DEBIT 2410 3822916.67 CZK | CREDIT 1001 3822916.67 CZK
+J irs-czk-adjusted-accrual-002 [AMORTISED_COST] treasury:D:payment:F3 :: DEBIT 1001 1789666.67 CZK | CREDIT 1670 1789666.67 CZK
+J irs-czk-adjusted-accrual-002 [AMORTISED_COST] treasury:D:payment:F1 :: DEBIT 2410 3791666.67 CZK | CREDIT 1001 3791666.67 CZK
+J irs-czk-adjusted-accrual-002 [AMORTISED_COST] treasury:D:maturity:2028-08-14 :: DEBIT 9100 100000000.00 CZK | CREDIT 9000 100000000.00 CZK
+J irs-czk-long-final-stub-eom-004 [AMORTISED_COST] treasury:D:trade:2026-08-27 :: DEBIT 9000 20000000.00 CZK | CREDIT 9100 20000000.00 CZK
+J irs-czk-long-final-stub-eom-004 [AMORTISED_COST] treasury:D:payment:F0 :: DEBIT 2410 352066.30 CZK | DEBIT 5230 3933.70 CZK | CREDIT 1001 356000.00 CZK
+J irs-czk-long-final-stub-eom-004 [AMORTISED_COST] treasury:D:payment:F4 :: DEBIT 1001 365016.67 CZK | CREDIT 1670 360983.34 CZK | CREDIT 4230 4033.33 CZK
+J irs-czk-long-final-stub-eom-004 [AMORTISED_COST] treasury:D:payment:F1 :: DEBIT 2410 364000.00 CZK | CREDIT 1001 364000.00 CZK
+J irs-czk-long-final-stub-eom-004 [AMORTISED_COST] treasury:D:payment:F2 :: DEBIT 2410 358000.00 CZK | CREDIT 1001 358000.00 CZK
+J irs-czk-long-final-stub-eom-004 [AMORTISED_COST] treasury:D:payment:F3 :: DEBIT 2410 452000.00 CZK | CREDIT 1001 452000.00 CZK
+J irs-czk-long-final-stub-eom-004 [AMORTISED_COST] treasury:D:maturity:2028-10-15 :: DEBIT 9100 20000000.00 CZK | CREDIT 9000 20000000.00 CZK
+J irs-czk-unadjusted-accrual-001 [AMORTISED_COST] treasury:D:trade:2026-08-12 :: DEBIT 9000 100000000.00 CZK | CREDIT 9100 100000000.00 CZK
+J irs-czk-unadjusted-accrual-001 [AMORTISED_COST] treasury:D:payment:F2 :: DEBIT 1001 1845111.11 CZK | CREDIT 1670 1845111.11 CZK
+J irs-czk-unadjusted-accrual-001 [AMORTISED_COST] treasury:D:payment:F0 :: DEBIT 2410 3802083.33 CZK | CREDIT 1001 3802083.33 CZK
+J irs-czk-unadjusted-accrual-001 [AMORTISED_COST] treasury:D:payment:F3 :: DEBIT 1001 1779833.33 CZK | CREDIT 1670 1779833.33 CZK
+J irs-czk-unadjusted-accrual-001 [AMORTISED_COST] treasury:D:payment:F1 :: DEBIT 2410 3812500.00 CZK | CREDIT 1001 3812500.00 CZK
+J irs-czk-unadjusted-accrual-001 [AMORTISED_COST] treasury:D:maturity:2028-08-14 :: DEBIT 9100 100000000.00 CZK | CREDIT 9000 100000000.00 CZK
+J irs-eur-backward-short-stub-003 [AMORTISED_COST] treasury:D:trade:2026-11-06 :: DEBIT 9001 50000000.00 EUR | CREDIT 9101 50000000.00 EUR
+J irs-eur-backward-short-stub-003 [AMORTISED_COST] treasury:D:payment:F0 :: DEBIT 1002 416666.67 EUR | CREDIT 1671 416666.67 EUR
+J irs-eur-backward-short-stub-003 [AMORTISED_COST] treasury:D:payment:F3 :: DEBIT 2411 390625.00 EUR | CREDIT 1002 390625.00 EUR
+J irs-eur-backward-short-stub-003 [AMORTISED_COST] treasury:D:payment:F1 :: DEBIT 1002 1200000.00 EUR | CREDIT 1671 1200000.00 EUR
+J irs-eur-backward-short-stub-003 [AMORTISED_COST] treasury:D:payment:F2 :: DEBIT 1002 1200000.00 EUR | CREDIT 1671 1200000.00 EUR
+J irs-eur-backward-short-stub-003 [AMORTISED_COST] treasury:D:maturity:2029-03-15 :: DEBIT 9101 50000000.00 EUR | CREDIT 9001 50000000.00 EUR
+A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK
+A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK | DEBIT 10027.77 CZK | CREDIT 10027.77 CZK
+A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK | DEBIT 10027.78 CZK | CREDIT 10027.78 CZK
+A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK | DEBIT 9833.33 CZK | CREDIT 9833.33 CZK
+A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK | DEBIT 9833.34 CZK | CREDIT 9833.34 CZK
+A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.67 CZK | CREDIT 10416.67 CZK
+A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.67 CZK | CREDIT 10416.67 CZK | DEBIT 10027.77 CZK | CREDIT 10027.77 CZK
+A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.67 CZK | CREDIT 10416.67 CZK | DEBIT 10027.78 CZK | CREDIT 10027.78 CZK
+A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.67 CZK | CREDIT 10416.67 CZK | DEBIT 9833.33 CZK | CREDIT 9833.33 CZK
+A irs-czk-adjusted-accrual-002 [AMORTISED_COST] accrual :: DEBIT 10416.67 CZK | CREDIT 10416.67 CZK | DEBIT 9833.34 CZK | CREDIT 9833.34 CZK
+A irs-czk-long-final-stub-eom-004 [AMORTISED_COST] accrual :: DEBIT 1966.85 CZK | CREDIT 1966.85 CZK | DEBIT 2016.66 CZK | CREDIT 2016.66 CZK
+A irs-czk-long-final-stub-eom-004 [AMORTISED_COST] accrual :: DEBIT 1966.85 CZK | CREDIT 1966.85 CZK | DEBIT 2016.67 CZK | CREDIT 2016.67 CZK
+A irs-czk-long-final-stub-eom-004 [AMORTISED_COST] accrual :: DEBIT 1966.86 CZK | CREDIT 1966.86 CZK | DEBIT 2016.67 CZK | CREDIT 2016.67 CZK
+A irs-czk-long-final-stub-eom-004 [AMORTISED_COST] accrual :: DEBIT 1967.03 CZK | CREDIT 1967.03 CZK
+A irs-czk-long-final-stub-eom-004 [AMORTISED_COST] accrual :: DEBIT 1967.04 CZK | CREDIT 1967.04 CZK
+A irs-czk-long-final-stub-eom-004 [AMORTISED_COST] accrual :: DEBIT 1973.79 CZK | CREDIT 1973.79 CZK
+A irs-czk-long-final-stub-eom-004 [AMORTISED_COST] accrual :: DEBIT 1973.80 CZK | CREDIT 1973.80 CZK
+A irs-czk-long-final-stub-eom-004 [AMORTISED_COST] accrual :: DEBIT 1978.26 CZK | CREDIT 1978.26 CZK
+A irs-czk-long-final-stub-eom-004 [AMORTISED_COST] accrual :: DEBIT 1978.27 CZK | CREDIT 1978.27 CZK
+A irs-czk-unadjusted-accrual-001 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK
+A irs-czk-unadjusted-accrual-001 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK | DEBIT 10027.77 CZK | CREDIT 10027.77 CZK
+A irs-czk-unadjusted-accrual-001 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK | DEBIT 10027.78 CZK | CREDIT 10027.78 CZK
+A irs-czk-unadjusted-accrual-001 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK | DEBIT 9833.33 CZK | CREDIT 9833.33 CZK
+A irs-czk-unadjusted-accrual-001 [AMORTISED_COST] accrual :: DEBIT 10416.66 CZK | CREDIT 10416.66 CZK | DEBIT 9833.34 CZK | CREDIT 9833.34 CZK
+A irs-czk-unadjusted-accrual-001 [AMORTISED_COST] accrual :: DEBIT 10416.67 CZK | CREDIT 10416.67 CZK
+A irs-czk-unadjusted-accrual-001 [AMORTISED_COST] accrual :: DEBIT 10416.67 CZK | CREDIT 10416.67 CZK | DEBIT 10027.77 CZK | CREDIT 10027.77 CZK
+A irs-czk-unadjusted-accrual-001 [AMORTISED_COST] accrual :: DEBIT 10416.67 CZK | CREDIT 10416.67 CZK | DEBIT 10027.78 CZK | CREDIT 10027.78 CZK
+A irs-czk-unadjusted-accrual-001 [AMORTISED_COST] accrual :: DEBIT 10416.67 CZK | CREDIT 10416.67 CZK | DEBIT 9833.33 CZK | CREDIT 9833.33 CZK
+A irs-czk-unadjusted-accrual-001 [AMORTISED_COST] accrual :: DEBIT 10416.67 CZK | CREDIT 10416.67 CZK | DEBIT 9833.34 CZK | CREDIT 9833.34 CZK
+A irs-eur-backward-short-stub-003 [AMORTISED_COST] accrual :: DEBIT 3278.68 EUR | CREDIT 3278.68 EUR
+A irs-eur-backward-short-stub-003 [AMORTISED_COST] accrual :: DEBIT 3278.69 EUR | CREDIT 3278.69 EUR
+A irs-eur-backward-short-stub-003 [AMORTISED_COST] accrual :: DEBIT 3287.67 EUR | CREDIT 3287.67 EUR
+A irs-eur-backward-short-stub-003 [AMORTISED_COST] accrual :: DEBIT 3287.68 EUR | CREDIT 3287.68 EUR
+A irs-eur-backward-short-stub-003 [AMORTISED_COST] accrual :: DEBIT 3333.33 EUR | CREDIT 3333.33 EUR | DEBIT 3125.00 EUR | CREDIT 3125.00 EUR
+A irs-eur-backward-short-stub-003 [AMORTISED_COST] accrual :: DEBIT 3333.34 EUR | CREDIT 3333.34 EUR | DEBIT 3125.00 EUR | CREDIT 3125.00 EUR

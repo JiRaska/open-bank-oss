@@ -15,3 +15,34 @@ Tato stránka zatím popisuje jen životní cyklus outboxu; zbytek datového mod
 ## Zaúčtování uvádí účetní třídu, ne GL kód (ADR-0341 D3)
 
 Noha zaúčtování nově nese `accountingClass` + `LedgerRole` (jistina, naběhlý úrok, úrokový výnos/náklad) + měnu a žádný GL kód; účet určí ledger ze své mapy. Každý `ProductType` deklaruje svou účetní třídu (např. `INTERBANK_PLACEMENT`, `CNB_LOMBARD_BORROWING`) a odsouhlasení nostra používá `TreasuryChart.nostroCode`. Test s legacy oraklem zajišťuje, že výsledné žurnály se nemění.
+
+## Referenční data a cash-flow ledger (ADR-0344, fáze 0)
+
+- **`reference_records`** (V16, V17) drží efektivně datovaná, verzovaná referenční data: kalendáře, indexy, protistrany, platební instrukce, knihy, typy produktů a další druhy z katalogu ADR-0344. Verze je PENDING, dokud ji neschválí jiný člověk. Schválení `counterparty`, které zvyšuje limit, vyžaduje senior approvera. `row_version` je optimistický zámek. Kontrola limitů čte ACTIVE verzi `counterparty`; tabulka `counterparties` je jen projekce pro cizí klíč obchodů. `reference_commands` ukládá Idempotency-Key každého příkazu.
+- **`deal_versions`, `deal_cash_flows`, `cash_flow_overrides`, `cash_flow_conflicts`** (V18, V19) ukládají každou verzi podmínek a její vygenerovaný cash-flow ledger. Podání zapíše ledger a `treasury.cashflow.generated.v1` spolu s obchodem v jedné transakci. Override je čtyřoký a zachovává původní datum i částku. Regeneraci přežije, jen dokud se nezmění hash specifikace nohy; jinak se z něj stane evidovaný konflikt. `deal_cash_flows.row_version` je optimistický zámek.
+- Ve fázi 0 lze sjednat jen pět stávajících produktů. Návrh obchodu s produktem popsaným nohami vrátí 400, dokud jeho fáze nedodá účtovací pravidla.
+- **Rollback:** V16 až V19 jsou aditivní. Stávající obchody dostanou druh `ACTUAL`, verzi 1 a verzi rozvrhu 0. Nové tabulky lze odstranit jen dokud se nepoužívají; příkazy jsou v hlavičce každé migrace.
+
+
+## Fixingy a tržní data (ADR-0344, fáze 1a)
+
+- **`observation_batches`, `index_observations`, `fixing_cases`** (V20) drží pozorování indexů. Dávka je PENDING, dokud ji neschválí jiný člověk, a použijí se jen ACTIVE pozorování. Kontrola kvality ověří MISSING, STALE a SUSPICIOUS ještě před fixingem; selhání otevře případ a nic nezafixuje.
+- **`deal_cash_flows.fixing_source`, `fixing_sha256`, `fixed_at`** (V20) zaznamenávají původ zafixované sazby. Zapisuje je jen repozitář fixingů, hlídaným UPDATE.
+- Hodinový běh fixingů (`openbank.treasury.fixing.enabled`, ve výchozím stavu zapnutý) zafixuje splatné pohyblivé toky a publikuje `treasury.cashflow.fixed.v1`.
+- IRS a FRA lze nově navrhnout, podat a zafixovat. Vypořádat je půjde až s maticí účtovacích pravidel (fáze 2).
+
+## Platby a kanál mezibankovních převodů (ADR-0344, fáze 1b)
+
+- **`treasury_payments`, `treasury_payment_flows`** (V21) drží platby na vlastní účet a FIXED toky, které každá platba hradí. Tok patří nejvýše jedné platbě; vazbu zapisuje jen hlídaný UPDATE, nikdy uložení celého řádku toku. V22 přidává převodní kanál a BIC zprostředkovatele. V23 drží idempotenční klíč platby jedinečný jen mezi nezrušenými platbami, takže zrušenou platbu lze navrhnout znovu.
+- Denní běh návrhů (`openbank.treasury.payments.enabled`, ve výchozím stavu zapnutý) navrhne platby pro FIXED toky splatné do `cut-off-window-days` (2) dnů, započtené podle nettingové dohody a adresované podle SSI platné k datu valuty. Uvolnit je smí jen `ROLE_TREASURY_PAYMENT_RELEASER`, a nikdy autor podmínek započteného obchodu.
+- Uvolnění zapíše `treasury.payment.released.v1` do `openbank.treasury.payments` v téže transakci. swift-service z něj sestaví pacs.009 a odpoví na `openbank.swift.institution-transfers`; treasury pak platbu posune na SENT, SETTLED nebo FAILED. Stav, který nelze použít, skončí v `openbank.dlq.treasury.institution-transfer-status-in`.
+- Zrušení nebo storno obchodu se odmítne, dokud je některá jeho platba uvolněná (409 PAYMENT_RELEASED); jinak ve stejné transakci stáhne jeho platby ve stavu PROPOSED.
+- **Rollback:** V21 až V23 jsou aditivní. Tabulky lze odstranit jen dokud neexistuje žádná platba; příkazy jsou v hlavičce každé migrace.
+
+## Matice účtovacích pravidel (ADR-0344 fáze 2a)
+
+- **`deal_journals`** (V24) nově připouští události matice (`TRADE`, `SETTLEMENT`, `ACCRUAL`, `PAYMENT`, `AMORTISATION`, `MATURITY` a další) vedle původních `SETTLED`, `ACCRUED`, `MATURED`, `REVERSED`. Klíč deníku matice je `treasury:<dealId>:<event>:<flowId|date>`, takže každý uhrazený tok a každý den časového rozlišení se zaúčtuje jednou.
+- `PostingMatrix` jsou verzovaná data: jeden řádek na produkt, událost, kategorii IFRS 9 a výběr toku, vystavená na `GET /api/v1/treasury/posting-rules`. Strana deníku uvádí účetní třídu a roli; ledger je mapuje na své instrumentové účty z V35.
+- IRS a FRA se nově vypořádávají, časově rozlišují, platí a splácejí přes matici. Ostatní produkty popsané nohami mají řádky neaktivní, dokud nepřijde jejich fáze.
+- Odchozí platba ve stavu SENT nebo SETTLED hned zaúčtuje deníky PAYMENT svých toků se stejnými klíči, jaké používá denní běh. Když ledger neodpovídá, zaúčtuje je další přehrání nebo denní běh a `openbank.treasury.payments.outflow.failed` výpadek započítá.
+- **Rollback:** V24 jen rozšiřuje CHECK. Původní omezení lze vrátit, dokud neexistuje žádný řádek deníku matice; příkaz je v hlavičce migrace.

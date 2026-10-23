@@ -104,3 +104,11 @@ Without libs, the same question would mean reviewing separate implementations ac
 ## Compliance matrix in central docs
 
 `docs/strategy/07-compliance-matrix.md` row "openbank-libs" points to this document as the evidence pillar. During CNB / EBA audits the inspector will receive a link to `/services/libs/docs/06-compliance.md` (admin UI rendering of this section).
+
+## Security-sensitive paths: treasury payments (ADR-0344 phase 1b)
+
+`rules.yaml: security_sensitive_paths` now lists treasury's `domain/payment/**` and
+`infrastructure/payment/**` under `auth_crypto_payment`. That code holds the payment idempotency
+keys, the four-eyes release, the funding check's advisory lock and the guarded flow claims. A PR
+that touches it therefore needs the human Security checklist answer, as every other payment path
+in the fleet does.

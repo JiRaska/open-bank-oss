@@ -93,6 +93,14 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
+    # NOT drift — the wire spelling of an ABSENT value (ADR-0344 D4). A stored cash-flow row whose
+    # floating rate is not known yet has no rate source: `rateSource` is null in the domain, exactly
+    # as libs-finance's own `ProjectedCashFlow.rateSource`, and is published and stored as MISSING
+    # (treasury `RateSourceWire`). MISSING is not a source a rate can come from, so it is not a
+    # value of libs-finance's `RateSource`; the spec is right to carry it.
+    "openbank-treasury-service:FIXED,MISSING,OBSERVED,PROJECTED,RATE_UNTIL_FIRST_FIXING":
+        "ADR-0344 D4 — cash-flow `rateSource`: NOT drift. MISSING is the wire form of no rate yet "
+        "(null RateSource), treasury RateSourceWire.",
     # MIS-PAIRINGS (ADR-0352, #668): the product IR `Cadence` (libs-domain com.openbank.libs.product.ir,
     # DAILY..ON_EVENT) is a product-behaviour vocabulary consumed by no customer-edge endpoint. These
     # three customer-edge enums (a standing-order frequency, a savings-goal frequency and a deposit
@@ -103,6 +111,12 @@ BASELINE: dict[str, str] = {
         "#668 — mis-pairing: a three-value frequency vs the product IR Cadence.",
     "openbank-customer-edge:ANNUAL,AT_MATURITY,MONTHLY,QUARTERLY,SEMI_ANNUAL":
         "#668 — mis-pairing: a deposit interest-payment frequency vs the product IR Cadence.",
+    # ADR-0344 D1: treasury's leg `Frequency` is libs-finance's frequency vocabulary
+    # (`com.openbank.libs.finance.schedule.Frequency`, a sealed class parsed from exactly these names,
+    # not a Kotlin enum), so the gate finds no enum to pair it with and falls back to the product IR
+    # Cadence it shares calendar words with.
+    "openbank-treasury-service:ANNUAL,DAILY,MONTHLY,ONCE,QUARTERLY,SEMI_ANNUAL,WEEKLY":
+        "ADR-0344 D1 — mis-pairing: a leg frequency (libs-finance Frequency names) vs the product IR Cadence.",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
     # values are the `channel` of the app-interaction attribution response
     # (GET /api/v1/campaigns/interactions/{interactionRef}/attribution), which resolves ONLY an
