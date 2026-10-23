@@ -290,8 +290,8 @@ action) lists all six steps; a step with no row is PENDING with `at` null.
 - **CASH:** `ProductType.DELIVERED` now holds every product, so a dealer may draft CASH; its
   posting rules were already in the matrix (phase 2a) and its two parity fixtures are replayed.
 - **Not here:** the record is not yet REPORTED to the ledger close. Treasury's ADR-0342 day-close
-  participation (`TreasuryCloseParticipation`, the ledger client and its scheduler,
-  `rules.yaml close_participants`) is its own PR; until it lands the ledger close does not wait for
+  participation (the participation report, the ledger client and its scheduler, and the
+  `close_participants` entry in rules.yaml) is its own PR; until it lands the ledger close does not wait for
   treasury.
 - **Residual:** MATURITIES is listed but no run records it yet, so it reads PENDING every day.
   Rollback: V28 is additive (drop the table and its sequence); the runs record nothing once the
