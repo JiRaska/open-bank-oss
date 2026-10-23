@@ -11,8 +11,6 @@ const aliases = {
 // These suites depend on process-level mocking, CJS/ESM loading, or timing that
 // Vitest's isolated VM worker cannot reproduce. Keep their established fork pool.
 const forkOnly = [
-  // Real sockets and node:fs/node:https mocks must not reuse a VM module cache.
-  'src/test/treasury-company-mtls.test.ts',
   'src/test/loyalty-console.guard.test.ts',
   'src/test/mermaid-labels.test.ts',
   'src/test/markdown-view-security.test.tsx',

@@ -137,17 +137,6 @@ spec:
             # %prod block (client certificate + openbank-ca trust, hostname verification on) — the
             # providers' 8443 listeners require a client certificate, so a trust-only default bucket
             # would fail the handshake. No QUARKUS_TLS_* env here: one source for the TLS shape.
-            # ADR-0337 amendment: the PENSION COMPANY's own treasury-service instance
-            # (treasury-pension-co), the source of PSP 34-12 PS — never the bank's `treasury`. Maps to
-            # quarkus.rest-client.treasury-service.url (${PENSION_COMPANY_TREASURY_URL}). Its private-CA
-            # mTLS listener on 8443, not plaintext 8160: the call carries a bearer token, there is
-            # no mesh, and ASVS V9.1 (asvs-l3-mechanical-subset, enforced) refuses a new http:// edge.
-            # Server identity is verified against openbank-ca with hostname verification (the
-            # treasury-service-internal-tls dnsNames carry this host); the client certificate is
-            # tax-reporting-internal-tls below. Declared HERE because gen-network-policies.py
-            # derives treasury-pension-co's ingress allow-list from this env URL.
-            - name: PENSION_COMPANY_TREASURY_URL
-              value: https://treasury-service.treasury-pension-co.svc:8443
             # OPA sidecar enforced from the first rollout: tax_reporting_rest_ext.rego grants
             # reads to real staff and the two filing state changes to a real operator; no
             # service-account reaches either by any rule.

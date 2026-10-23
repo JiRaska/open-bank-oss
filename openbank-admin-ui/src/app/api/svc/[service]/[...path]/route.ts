@@ -2,7 +2,6 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import { COMPANY_TREASURY_KEY, fetchCompanyTreasury } from '@/lib/treasury-company'
 import { NextRequest, NextResponse } from 'next/server'
 import { inCluster, resolveInClusterService } from '@/lib/discovery'
 import { auth } from '@/auth'
@@ -55,7 +54,6 @@ async function serviceBaseUrl(svcKey: string): Promise<ResolvedService> {
       ? { state: 'not_found' }
       : { state: 'unknown' }
   }
-  if (svcKey === COMPANY_TREASURY_KEY) return { state: 'not_found' }
   // Off-cluster (local dev / docker-compose): legacy localhost/container map.
   const svc = allowlist[svcKey]
   if (!svc) return { state: 'not_found' }
@@ -149,8 +147,7 @@ async function proxy(
   try {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 10_000)
-    const send = service === COMPANY_TREASURY_KEY ? fetchCompanyTreasury : fetch
-    const upstream = await send(upstreamUrl, {
+    const upstream = await fetch(upstreamUrl, {
       method: req.method,
       headers,
       body: body?.byteLength ? body : undefined,
@@ -167,7 +164,7 @@ async function proxy(
     responseHeaders.set('cache-control', 'no-store')
 
     const data = await upstream.arrayBuffer()
-    return new NextResponse([204, 205, 304].includes(upstream.status) ? null : data, { status: upstream.status, headers: responseHeaders })
+    return new NextResponse(data, { status: upstream.status, headers: responseHeaders })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: 'upstream_unreachable', detail: msg }, { status: 502 })
