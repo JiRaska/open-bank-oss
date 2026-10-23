@@ -96,7 +96,8 @@ Produktový katalog drží **pouze referenční data — žádná osobní data**
 | `V7__track_bank_v1_projection_revision.sql` | Ukládá watermarky v1 i draftu; jednostrannou rollback změnu reconciliuje a oboustranný rozpor odmítne. |
 | `V8__order_catalog_outbox_for_cursor.sql` | Přiděluje immutable commit-safe pořadí, takže opačný commit ani změna času nevytvoří mezeru v cursoru. |
 | `V14__generic_revision_role_approvals.sql` | Přejmenuje důkazy pension schválení na `catalog_revision_role_approvals` a sloupce na `approval_digest` / `approved_effective_to`, beze ztráty dat. Přidá append-only tabulku `catalog_schema_approval_policies`. (ADR-0345) |
-| `V15__revision_ir_signatures.sql` | Přidá `catalog_revision_ir_signatures`: jeden neměnný řádek na revizi s IR publikovanou přes `publish-ir` — kanonický `revision_hash`, `key_id`, `algorithm`, oddělený `signature` a `signed_at`. Rollback: odstranit trigger, funkci a tabulku; bezpečné jen dokud žádný konzument nemá připnutou podepsanou revizi. (ADR-0352) |
+| `V15__price_component_role.sql` | Přidává do `catalog_price_components` nullable sloupec `role` uzavřený CHECKem (FEE, RATE, LIMIT, THRESHOLD); FEE musí být AMOUNT. Stávající řádky mají NULL a hash obsahu jejich revizí se nemění, protože složka bez role se serializuje přesně jako dřív (#13230). Rollback: drop sloupce. |
+| `V16__revision_ir_signatures.sql` | Přidá `catalog_revision_ir_signatures`: jeden neměnný řádek na revizi s IR publikovanou přes `publish-ir` — kanonický `revision_hash`, `key_id`, `algorithm`, oddělený `signature` a `signed_at`. Rollback: odstranit trigger, funkci a tabulku; bezpečné jen dokud žádný konzument nemá připnutou podepsanou revizi. (ADR-0352) |
 
 
 ## Převod objektů katalogu

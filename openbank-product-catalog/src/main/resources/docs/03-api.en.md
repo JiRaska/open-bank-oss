@@ -175,4 +175,4 @@ The signer is selected by `openbank.catalog.ir-signing.mode`: `openbao` (OpenBao
 on a dedicated key; the deployment shape) or `hmac` (a shared-secret adapter for development and
 tests, logged as a warning at boot). A consumer verifies the signature with its own pinned-revision
 loader before evaluating a revision; the catalog is a publication authority, never a dependency on
-the posting path. The API contract version is 2.8.0; the change is additive.
+the posting path. The API contract version is 2.9.0; the change is additive.

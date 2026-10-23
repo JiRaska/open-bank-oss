@@ -152,4 +152,4 @@ Podepisovatel se volí přes `openbank.catalog.ir-signing.mode`: `openbao` (Open
 na vyhrazeném klíči; nasazovaná podoba) nebo `hmac` (adaptér se sdíleným tajemstvím pro vývoj a
 testy, při startu zalogovaný jako varování). Konzument podpis ověřuje vlastním loaderem
 připnuté revize před vyhodnocením; katalog je publikační autorita, nikdy závislost na účtovací
-cestě. Verze kontraktu API je 2.8.0; změna je aditivní.
+cestě. Verze kontraktu API je 2.9.0; změna je aditivní.

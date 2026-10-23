@@ -15,6 +15,7 @@ import com.openbank.sepa.application.port.out.SanctionsScreeningPort
 import com.openbank.sepa.application.port.out.SchemeGatewayPort
 import com.openbank.sepa.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.sepa.application.port.out.ScreeningUnavailableException
+import com.openbank.sepa.application.port.out.SepaBookingWrites
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
 import com.openbank.sepa.application.port.out.SepaPaymentRepository
 import com.openbank.sepa.application.port.out.SettlementPort
@@ -46,6 +47,7 @@ private const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
 @ApplicationScoped
 open class SepaPaymentActivitiesImpl(
     private val paymentRepository: SepaPaymentRepository,
+    private val bookingWrites: SepaBookingWrites,
     private val screeningPort: SanctionsScreeningPort,
     private val amlCasePort: AmlCasePort,
     private val fraudScoringPort: FraudScoringPort,
@@ -248,9 +250,9 @@ open class SepaPaymentActivitiesImpl(
      */
     private suspend fun settleAfterAcceptance(payment: SepaPayment, paymentId: UUID): SepaPaymentStatus {
         val processing = payment.transitionTo(SepaPaymentStatus.PROCESSING, clock = clock)
-        paymentRepository.update(
+        bookingWrites.acceptForBooking(
             payment = processing,
-            outboxMessage = SepaPaymentOutboxMessage(
+            outbox = SepaPaymentOutboxMessage(
                 aggregateId = processing.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
                 payload = """{"paymentId":"$paymentId","version":${processing.revision},"status":"PROCESSING",""" +
@@ -264,19 +266,23 @@ open class SepaPaymentActivitiesImpl(
             log.warnf(ex, "Settlement unavailable for payment %s; holding in PROCESSING", paymentId)
             return SepaPaymentStatus.PROCESSING
         }
-        return if (settled.settled) {
-            val completed = processing.transitionTo(SepaPaymentStatus.COMPLETED, clock = clock)
-            paymentRepository.update(
-                payment = completed,
-                outboxMessage = SepaPaymentOutboxMessage(
-                    aggregateId = completed.id,
+        return if (settled.settled && settled.transactionId != null) {
+            // SettlementAdapter validated this exact request/response. A return may have committed
+            // while that network call was outstanding; never write the old processing revision.
+            val completed = paymentRepository.completeSettlement(
+                requestedPayment = processing,
+                transactionId = settled.transactionId,
+                completedAt = Instant.now(clock),
+            ) { current ->
+                SepaPaymentOutboxMessage(
+                    aggregateId = paymentId,
                     eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                    payload = """{"paymentId":"$paymentId","version":${completed.revision},"status":"COMPLETED",""" +
-                        """"occurredAt":"${completed.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
-                    createdAt = Instant.now(clock),
-                ),
-            )
-            SepaPaymentStatus.COMPLETED
+                    payload = """{"paymentId":"$paymentId","version":${current.revision},"status":"COMPLETED",""" +
+                        """"occurredAt":"${current.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
+                    createdAt = current.updatedAt,
+                )
+            }
+            completed.status
         } else {
             log.warnf("Settlement returned not-settled for payment %s; holding in PROCESSING", paymentId)
             SepaPaymentStatus.PROCESSING

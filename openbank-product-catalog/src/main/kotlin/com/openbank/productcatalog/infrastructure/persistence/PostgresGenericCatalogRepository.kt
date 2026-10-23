@@ -468,6 +468,7 @@ class PostgresGenericCatalogRepository(
                 taxTreatment = price.taxTreatment.name
                 effectiveFrom = price.effectiveFrom
                 effectiveTo = price.effectiveTo
+                role = price.role?.name
             }
         }
         val relationships = revision.content.relationships.map { relationship ->
