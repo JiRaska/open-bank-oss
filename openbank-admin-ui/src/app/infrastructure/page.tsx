@@ -19,6 +19,7 @@ import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { EVENT_INSIGHTS } from '@/components/insights/catalog'
 import { parseInfrastructureStatuses, type InfrastructureStatus, type InfrastructureStatusResult } from '@/lib/infra/statusContract'
 import { classifyBffFailure } from '@/lib/services/bff'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 import { usePlatformView } from '@/lib/use-platform-view'
 
 type InfraStatus = InfrastructureStatus
@@ -177,6 +178,7 @@ export default function InfrastructurePage() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
+      <ContentSourceNote source={platformView?.declarationSource} />
       <PageHeader
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Platforma', 'Platform')}</span></div>}
         icon={<Server size={20} aria-hidden="true" />}

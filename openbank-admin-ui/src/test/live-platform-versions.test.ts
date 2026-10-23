@@ -141,6 +141,57 @@ describe('live snapshot from mocked Prometheus', () => {
     ],
   })
 
+  it('reads the controller runtime version when the container image is only a digest', async () => {
+    const s = await fetchLiveSnapshot(mockProm({
+      images: [imageRow(`sha256:${'a'.repeat(64)}`, fixedNow.getTime() / 1000, 'controller', 'kube-system')],
+      karpenterBuild: [row({ namespace: 'kube-system', container: 'controller', version: '1.14.1' }, fixedNow.getTime() / 1000)],
+    }), () => fixedNow)
+    expect(s.components.karpenter).toEqual([{ version: '1.14.1', count: 1, observedAt: fixedNow.toISOString(), source: 'prometheus-runtime-build-info' }])
+    expect(s.available).toBe(true)
+  })
+
+  it('groups controller replicas without hiding a mixed running version', async () => {
+    const metric = { namespace: 'kube-system', container: 'controller' }
+    const s = await fetchLiveSnapshot(mockProm({ karpenterBuild: [
+      row({ ...metric, version: '1.14.1' }, fixedNow.getTime() / 1000 - 10),
+      row({ ...metric, version: 'v1.14.1' }, fixedNow.getTime() / 1000),
+      row({ ...metric, version: '1.14.2' }, fixedNow.getTime() / 1000),
+    ] }), () => fixedNow)
+    expect(s.components.karpenter).toEqual([
+      { version: '1.14.1', count: 2, observedAt: fixedNow.toISOString(), source: 'prometheus-runtime-build-info' },
+      { version: '1.14.2', count: 1, observedAt: fixedNow.toISOString(), source: 'prometheus-runtime-build-info' },
+    ])
+    expect(s.available).toBe(true)
+  })
+
+  it.each([
+    [{ namespace: 'kube-system', container: 'controller', version: '1.14.1' }, IMAGE_SAMPLE_MAX_AGE_MS / 1000 + 1],
+    [{ namespace: 'kube-system', container: 'controller', version: '1.14.1' }, -31],
+    [{ namespace: 'other', container: 'controller', version: '1.14.1' }, 0],
+    [{ namespace: 'kube-system', container: 'sidecar', version: '1.14.1' }, 0],
+    [{ namespace: 'kube-system', container: 'controller', version: 'unknown' }, 0],
+  ])('does not promote stale or unrelated build information: %j', async (metric, age) => {
+    const s = await fetchLiveSnapshot(mockProm({ karpenterBuild: [row(metric, fixedNow.getTime() / 1000 - age)] }), () => fixedNow)
+    expect(s.components.karpenter).toBeUndefined()
+  })
+
+  it('preserves existing observed-image evidence when runtime build telemetry is absent', async () => {
+    const s = await fetchLiveSnapshot(mockProm({
+      images: [imageRow('public.ecr.aws/karpenter/controller:1.14.1', fixedNow.getTime() / 1000, 'controller', 'kube-system')],
+    }), () => fixedNow)
+    expect(s.components.karpenter).toEqual([{ version: '1.14.1', count: 1, observedAt: fixedNow.toISOString() }])
+  })
+
+  it('does not infer Keycloak or Karpenter versions from desired image tags', async () => {
+    const s = await fetchLiveSnapshot(mockProm({ images: [row({
+      image: `sha256:${'a'.repeat(64)}`,
+      image_spec: `registry.example/openbank-keycloak:26.8.0-optimized@sha256:${'b'.repeat(64)}`,
+      namespace: 'iam', container: 'keycloak',
+    }, fixedNow.getTime() / 1000)] }), () => fixedNow)
+    expect(s.components.keycloak).toBeUndefined()
+    expect(s.components.karpenter).toBeUndefined()
+  })
+
   it('reads versions, nodes (Ready of total) and node types', async () => {
     const s = await fetchLiveSnapshot(full, () => fixedNow)
     expect(s.available).toBe(true)
