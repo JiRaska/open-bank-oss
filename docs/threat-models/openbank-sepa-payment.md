@@ -628,8 +628,16 @@ Booking observability (#13623): an entity-only first-due marker commits with acc
   sweep is caught by `WorkflowLivenessStale`, so neither silences the alert by reading zero.
 - *Information disclosure:* alert labels are `rail`/`service`/`severity` only; no payment, account or key.
 
-**Residual.** No automatic retry of a held booking or return (deterministic answers would replay anyway); no
+- *Tampering (value date drift):* the request's value date is pinned to the durable acceptance instant, so a
+  re-drive days later sends the identical request. transaction-service answers a known key from the stored row
+  and ignores the body, so nothing fingerprints it today; the pin keeps that true if it ever does.
+- *Automatic re-settlement:* because `submitToScheme` re-enters for a held payment, ANY Temporal retry of that
+  activity (3 attempts within 10 minutes) re-settles on its own. Accepted on the same grounds as the operator
+  re-drive: same key, same request, and only the locked completion write may close the clock. A real-DB IT
+  (`SepaSettlementRedriveIT`) runs two re-drives concurrently and asserts one proof and one COMPLETED event.
+
+**Residual.** No retry beyond the workflow's own 3 attempts for a held booking, and none for a return (deterministic answers would replay anyway); no
 in-band "mark reconciled" after an out-of-band correction, so such a payment is silenced with a ticket, never by
 writing `booking_proven_at`. The pacs.008 carries no payment-type information (service level SEPA, local instrument INST) for SCT_INST; the clearing
-simulator ignores it, a real SCT Inst connection would not.
+simulator ignores it, a real SCT Inst connection would not. Tracked in #13663.
 

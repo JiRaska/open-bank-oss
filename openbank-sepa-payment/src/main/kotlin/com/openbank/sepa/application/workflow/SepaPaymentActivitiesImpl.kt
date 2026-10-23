@@ -218,8 +218,13 @@ open class SepaPaymentActivitiesImpl(
         // `sepa-settlement-<id>` key, so transaction-service replays an existing booking and never books
         // twice. Keyed on the durable booking clock, not on PROCESSING alone: a PROCESSING row with no
         // tracked obligation (legacy, or a generic status write) was never proven scheme-accepted here.
-        if (payment.status == SepaPaymentStatus.PROCESSING && bookingQuery.isBookingPending(paymentId)) {
-            return@runOnVertxContext settleHeld(payment, paymentId)
+        // Consequence, deliberately accepted: ANY Temporal retry of this activity on a held payment (the
+        // workflow's 3 attempts within 10 minutes, e.g. after a worker restart or timeout that followed the
+        // PROCESSING write) now re-settles on its own. That is safe for the same reason: same key, a value date
+        // pinned to the due instant, and completion only through the locked, replay-tolerant write.
+        if (payment.status == SepaPaymentStatus.PROCESSING) {
+            val dueAt = bookingQuery.pendingBookingDueAt(paymentId)
+            if (dueAt != null) return@runOnVertxContext settleHeld(payment, paymentId, dueAt)
         }
         if (!schemeSubmissionEnabled || payment.status != SepaPaymentStatus.VALIDATED) {
             return@runOnVertxContext payment.status
@@ -271,13 +276,14 @@ open class SepaPaymentActivitiesImpl(
                 createdAt = Instant.now(clock),
             ),
         )
-        return settleHeld(processing, paymentId)
+        // processing.updatedAt is exactly the instant acceptForBooking records as booking_first_due_at.
+        return settleHeld(processing, paymentId, processing.updatedAt)
     }
 
     /** Book an accepted PROCESSING payment; any unproven answer holds it in PROCESSING with its clock open. */
-    private suspend fun settleHeld(processing: SepaPayment, paymentId: UUID): SepaPaymentStatus {
+    private suspend fun settleHeld(processing: SepaPayment, paymentId: UUID, acceptedAt: Instant): SepaPaymentStatus {
         val settled = try {
-            settlementPort.settle(processing)
+            settlementPort.settle(processing, acceptedAt)
         } catch (ex: SettlementUnavailableException) {
             log.warnf(ex, "Settlement unavailable for payment %s; holding in PROCESSING", paymentId)
             return SepaPaymentStatus.PROCESSING

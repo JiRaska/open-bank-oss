@@ -106,6 +106,19 @@ Amount and currency must equal the payment's exactly; `value_date` may legitimat
 
 ## 3. Re-drive
 
+**A re-drive is pointless until step 2 has dealt with a stored `FAILED` or mismatched answer.** The
+re-drive sends the same key, and transaction-service answers a known key from the stored row without
+reading the body. A key that holds `FAILED`, or a `COMPLETED` row that does not match, comes back the
+same on every re-drive, and the clock stays open. Re-drive only for "No row", for a matching
+`COMPLETED` row, or for a `PENDING`/`PROCESSING` row that has since completed. For `FAILED` and
+mismatch rows, step 4 is the remedy, not a re-drive.
+
+**A Temporal retry is also a re-drive.** `SubmitToScheme` re-enters for a held payment with an open
+clock, so if the activity is retried for any reason (a worker restart or timeout after the PROCESSING
+write: up to 3 attempts within 10 minutes), settlement is called again on its own, under the same
+key, with the value date pinned to the acceptance date. Expect `openbank_payment_unsettled_total` to
+count those attempts as well.
+
 ### SEPA payment outbound booking
 
 Nothing retries a held SEPA booking on its own. The re-drive is a Temporal reset of the payment's
@@ -172,14 +185,45 @@ $T workflow reset --workflow-id "domestic-payment-$ID" --event-id "$EVENT" --rea
 
 ## 4. Reverse, reconcile
 
-**Reverse** a wrong booking through transaction-service. `transaction.reverse` is four-eyes: the
-maker's call answers with a pending approval, and a second operator approves it.
+**Reverse** a wrong booking through transaction-service. `transaction.reverse` is four-eyes, which
+takes three calls by two different operators. Approving alone does not execute anything: the maker
+must repeat the original call.
 
 ```bash
 kubectl -n payments port-forward svc/transaction-service 8102:8102 &
-curl -sS -X POST "http://localhost:8102/api/v1/transactions/<transactionId>/reverse" \
-  -H "Authorization: Bearer $OPERATOR_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"idempotencyKey":"ops-reverse-<transactionId>","reason":"#13623 booking does not match payment <paymentId>"}'
+TX=<transactionId>
+BODY='{"idempotencyKey":"ops-reverse-'$TX'","reason":"#13623 booking does not match payment <paymentId>"}'
+
+# 1. Maker (ROLE_OPERATOR). Answers 202 {"status":"PENDING_APPROVAL","approvalId":"..."}.
+curl -sS -X POST "http://localhost:8102/api/v1/transactions/$TX/reverse" \
+  -H "Authorization: Bearer $MAKER_TOKEN" -H 'Content-Type: application/json' -d "$BODY"
+APPROVAL=<approvalId from the 202>
+
+# 2. Checker (a DIFFERENT ROLE_OPERATOR/ROLE_ADMIN principal). First confirm it is still pending,
+#    and that it is the reversal of this transaction:
+curl -sS "http://localhost:8102/api/v1/transactions/approvals" -H "Authorization: Bearer $CHECKER_TOKEN" \
+  | jq --arg id "$APPROVAL" '.[] | select(.id == $id) | {id, action, resourceId, status, makerId}'
+#    expect: action "transaction.reverse", resourceId "$TX", status "PENDING". Then approve:
+curl -sS -X PATCH "http://localhost:8102/api/v1/transactions/approvals/$APPROVAL" \
+  -H "Authorization: Bearer $CHECKER_TOKEN" -H 'Content-Type: application/json' -d '{"approve":true}'
+
+# 3. Maker repeats the SAME call (same body) with the approval id. Only this executes the reversal.
+curl -sS -X POST "http://localhost:8102/api/v1/transactions/$TX/reverse" \
+  -H "Authorization: Bearer $MAKER_TOKEN" -H "X-Approval-Id: $APPROVAL" \
+  -H 'Content-Type: application/json' -d "$BODY"
+```
+
+The checker's own token cannot approve its own request (`SelfApprovalNotAllowedException`). The
+approval expires after 24h. The pending list shows only `PENDING`, so once it is approved the id
+leaves the list. To prove a reversal has **not** executed yet (approved, step 3 not run), read
+transaction-db:
+
+```sql
+-- No row: not executed. A REVERSAL row: executed, and the original moves to REVERSED.
+SELECT t.id, t.type, t.status, t.completed_at
+FROM transaction_idempotency_keys k JOIN transactions t ON t.id = k.transaction_id
+WHERE k.idempotency_key = 'ops-reverse-<transactionId>';
+SELECT status FROM transactions WHERE id = '<transactionId>';
 ```
 
 **Reconcile** means recording the decision with finance against the payment id, the key and the

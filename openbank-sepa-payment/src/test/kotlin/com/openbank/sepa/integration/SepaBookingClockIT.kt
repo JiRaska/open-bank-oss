@@ -346,7 +346,7 @@ class SepaBookingClockIT {
 
         @GET
         @Path("/{id}/pending")
-        suspend fun pending(@PathParam("id") id: UUID): String = query.isBookingPending(id).toString()
+        suspend fun pending(@PathParam("id") id: UUID): String = (query.pendingBookingDueAt(id) != null).toString()
 
         @GET
         @Path("/snapshot")

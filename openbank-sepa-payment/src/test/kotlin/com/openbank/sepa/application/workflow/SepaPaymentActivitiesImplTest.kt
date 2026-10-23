@@ -104,7 +104,7 @@ class SepaPaymentActivitiesImplTest {
             schemeSubmissionEnabled = true,
         )
         coJustRun { amlCasePort.openCase(any()) }
-        coEvery { settlementPort.settle(any()) } returns
+        coEvery { settlementPort.settle(any(), any()) } returns
             SettlementOutcome(settled = true, transactionId = UUID.randomUUID())
         stubSettlementCompletion()
         coEvery { paymentRepository.update(any(), any()) } answers { firstArg() }
@@ -132,7 +132,7 @@ class SepaPaymentActivitiesImplTest {
         coEvery { paymentRepository.update(any(), any()) } answers {
             firstArg<SepaPayment>().also { current = it }
         }
-        coEvery { settlementPort.settle(any()) } answers {
+        coEvery { settlementPort.settle(any(), any()) } answers {
             // The return intent commits while the validated request is outstanding. Its revision
             // is newer than the snapshot the strict settlement adapter is about to confirm.
             current = current.copy(
@@ -293,13 +293,13 @@ class SepaPaymentActivitiesImplTest {
             SchemeSubmissionOutcome(accepted = true, reasonCode = null)
 
         val bookedTransactionId = UUID.randomUUID()
-        coEvery { settlementPort.settle(any()) } returns SettlementOutcome(true, bookedTransactionId)
+        coEvery { settlementPort.settle(any(), any()) } returns SettlementOutcome(true, bookedTransactionId)
         val result = activities.submitToScheme(paymentId)
 
         coVerify { paymentRepository.completeSettlement(any(), bookedTransactionId, any(), any()) }
         assertThat(result).isEqualTo(SepaPaymentStatus.COMPLETED)
         coVerify { paymentRepository.update(match { it.status == SepaPaymentStatus.PROCESSING }, any()) }
-        coVerify { settlementPort.settle(match { it.status == SepaPaymentStatus.PROCESSING }) }
+        coVerify { settlementPort.settle(match { it.status == SepaPaymentStatus.PROCESSING }, any()) }
         coVerify {
             paymentRepository.completeSettlement(
                 match {
@@ -318,7 +318,7 @@ class SepaPaymentActivitiesImplTest {
         coEvery { paymentRepository.findById(paymentId) } returns validated
         coEvery { schemeGatewayPort.submit(any()) } returns
             SchemeSubmissionOutcome(accepted = true, reasonCode = null)
-        coEvery { settlementPort.settle(any()) } throws
+        coEvery { settlementPort.settle(any(), any()) } throws
             com.openbank.sepa.application.port.out.SettlementUnavailableException("down")
 
         val result = activities.submitToScheme(paymentId)
@@ -333,13 +333,14 @@ class SepaPaymentActivitiesImplTest {
         val held = payment.copy(status = SepaPaymentStatus.PROCESSING)
         coEvery { paymentRepository.findById(paymentId) } returns held
         val booked = UUID.randomUUID()
-        coEvery { settlementPort.settle(any()) } returns SettlementOutcome(true, booked)
+        coEvery { settlementPort.settle(any(), any()) } returns SettlementOutcome(true, booked)
         val redrive = redriveActivities(pending = true, schemeSubmissionEnabled = false)
 
         val result = redrive.submitToScheme(paymentId)
 
         assertThat(result).isEqualTo(SepaPaymentStatus.COMPLETED)
-        coVerify(exactly = 1) { settlementPort.settle(held) }
+        // Settled against the durable due instant, not the re-drive's clock: same request as the first attempt.
+        coVerify(exactly = 1) { settlementPort.settle(held, DUE_AT) }
         coVerify { paymentRepository.completeSettlement(held, booked, any(), any()) }
         // Never re-submitted to the scheme and never re-written to PROCESSING: only the booking is retried.
         coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
@@ -349,7 +350,7 @@ class SepaPaymentActivitiesImplTest {
     @Test
     fun `re-drive of a still-unproven booking keeps the payment PROCESSING`() {
         coEvery { paymentRepository.findById(paymentId) } returns payment.copy(status = SepaPaymentStatus.PROCESSING)
-        coEvery { settlementPort.settle(any()) } throws
+        coEvery { settlementPort.settle(any(), any()) } throws
             com.openbank.sepa.application.port.out.SettlementUnavailableException("mismatch")
 
         val result = redriveActivities(pending = true).submitToScheme(paymentId)
@@ -365,7 +366,7 @@ class SepaPaymentActivitiesImplTest {
         val result = redriveActivities(pending = false).submitToScheme(paymentId)
 
         assertThat(result).isEqualTo(SepaPaymentStatus.PROCESSING)
-        coVerify(exactly = 0) { settlementPort.settle(any()) }
+        coVerify(exactly = 0) { settlementPort.settle(any(), any()) }
     }
 
     private fun redriveActivities(pending: Boolean, schemeSubmissionEnabled: Boolean = true) = TestableActivities(
@@ -380,7 +381,7 @@ class SepaPaymentActivitiesImplTest {
         schemeSubmissionEnabled = schemeSubmissionEnabled,
         bookingQuery = object : SepaBookingQuery {
             override suspend fun bookingAgeSnapshot() = SepaBookingAgeSnapshot(null, 0)
-            override suspend fun isBookingPending(paymentId: UUID) = pending
+            override suspend fun pendingBookingDueAt(paymentId: UUID) = if (pending) DUE_AT else null
         },
     )
 
@@ -457,12 +458,12 @@ class SepaPaymentActivitiesImplTest {
         )
         coEvery { paymentRepository.findById(paymentId) } returns payment.copy(status = SepaPaymentStatus.VALIDATED)
         coEvery { schemeGatewayPort.submit(any()) } returns SchemeSubmissionOutcome(accepted = true, reasonCode = null)
-        coEvery { settlementPort.settle(any()) } answers {
+        coEvery { settlementPort.settle(any(), any()) } answers {
             assertThat(acceptedCommitReturned).isTrue()
             SettlementOutcome(settled = false, transactionId = null)
         }
         assertThat(tested.submitToScheme(paymentId)).isEqualTo(SepaPaymentStatus.PROCESSING)
-        coVerify(exactly = 1) { settlementPort.settle(any()) }
+        coVerify(exactly = 1) { settlementPort.settle(any(), any()) }
     }
 
     // --- #3914: business event time on the Temporal-path payloads -----------------------------
@@ -610,7 +611,7 @@ private class TestableActivities(
         },
     bookingQuery: SepaBookingQuery = object : SepaBookingQuery {
         override suspend fun bookingAgeSnapshot() = SepaBookingAgeSnapshot(null, 0)
-        override suspend fun isBookingPending(paymentId: UUID) = false
+        override suspend fun pendingBookingDueAt(paymentId: UUID): Instant? = null
     },
 ) : SepaPaymentActivitiesImpl(
     paymentRepository,
@@ -627,3 +628,5 @@ private class TestableActivities(
 ) {
     override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }
 }
+
+private val DUE_AT: Instant = Instant.parse("2026-02-27T23:30:00Z")
