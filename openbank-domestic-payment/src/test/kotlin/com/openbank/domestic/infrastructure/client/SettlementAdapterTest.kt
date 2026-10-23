@@ -4,6 +4,9 @@
 
 package com.openbank.domestic.infrastructure.client
 
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
 import com.openbank.domestic.domain.model.DomesticPayment
@@ -11,17 +14,16 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.libs.domain.money.Money
+import io.micrometer.prometheus.PrometheusConfig
+import io.micrometer.prometheus.PrometheusMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
-import io.mockk.verify
-import io.quarkus.oidc.client.OidcClient
-import io.quarkus.oidc.client.Tokens
 import io.smallrye.mutiny.Uni
-import jakarta.enterprise.inject.Instance
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -30,84 +32,144 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 class SettlementAdapterTest {
 
     private val client: TransactionServiceClient = mockk()
-    private val oidcClient: OidcClient = mockk()
-    private val oidcClientInstance: Instance<OidcClient> = mockk()
+    private val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
     private val accountLookup: AccountLookupPort = mockk()
+    private val txId = UUID.randomUUID()
+    private val debtor = UUID.fromString("22222222-2222-2222-2222-222222222222")
 
     private fun adapter(): SettlementAdapter =
-        SettlementAdapter(client, oidcClientInstance, accountLookup, Clock.systemUTC()).also { it.self = it }
+        SettlementAdapter(client, accountLookup, Clock.systemUTC(), registry).also { it.self = it }
 
     @BeforeEach
     fun setUp() {
-        val tokens = mockk<Tokens>()
-        every { tokens.accessToken } returns "test-token"
-        every { oidcClient.tokens } returns Uni.createFrom().item(tokens)
-        every { oidcClientInstance.get() } returns oidcClient
         // Default: no internal creditor resolved → debit-only booking (existing behaviour).
         coEvery { accountLookup.findAccountIdByIban(any()) } returns null
     }
 
+    /** A COMPLETED transaction that echoes whatever request was sent: the matching booking. */
+    private fun echo(request: InitiateTransactionRequest, status: String = "COMPLETED") = TransactionResponse(
+        id = txId,
+        status = status,
+        type = request.type,
+        sourceAccountId = request.sourceAccountId,
+        targetAccountId = request.targetAccountId,
+        amount = request.amount,
+        currencyCode = request.currencyCode,
+        rail = request.rail,
+        instructionType = request.instructionType,
+        valueDate = LocalDate.parse("2030-01-02"),
+    )
+
+    /** Answers every call with [status] and the body [body] builds from the request actually sent. */
+    private fun answer(status: Int = 201, body: (InitiateTransactionRequest) -> TransactionResponse? = { echo(it) }) {
+        val sent = slot<InitiateTransactionRequest>()
+        every { client.initiateTransaction(capture(sent)) } answers {
+            val builder = Response.status(status)
+            body(sent.captured)?.let { builder.entity(it) }
+            Uni.createFrom().item(builder.build())
+        }
+    }
+
+    private fun settleFails(p: DomesticPayment = payment()): Throwable =
+        runCatching { runBlocking { adapter().settle(p) } }.exceptionOrNull()
+            ?: error("settle() unexpectedly succeeded")
+
     @Test
-    fun `settle returns settled=true and transactionId on HTTP 201`(): Unit = runBlocking {
-        val txId = UUID.randomUUID()
-        val response = mockk<Response>()
-        every { response.status } returns 201
-        every { response.readEntity(String::class.java) } returns """{"id":"$txId","status":"BOOKED"}"""
-        every { client.initiateTransaction(any(), any()) } returns Uni.createFrom().item(response)
+    fun `settle returns settled=true and transactionId on a matching COMPLETED HTTP 201`(): Unit = runBlocking {
+        answer()
 
         val outcome = adapter().settle(payment())
 
         assertThat(outcome.settled).isTrue()
         assertThat(outcome.transactionId).isEqualTo(txId)
-        verify(exactly = 1) { client.initiateTransaction("Bearer test-token", any()) }
     }
 
     @Test
-    fun `settle returns settled=true with null transactionId on HTTP 409 (idempotent)`(): Unit = runBlocking {
-        val response = mockk<Response>()
-        every { response.status } returns 409
-        every { client.initiateTransaction(any(), any()) } returns Uni.createFrom().item(response)
+    fun `HTTP 409 is a concurrent-state conflict - never settled`() {
+        answer(409) { null }
 
-        val outcome = adapter().settle(payment())
-
-        assertThat(outcome.settled).isTrue()
-        assertThat(outcome.transactionId).isNull()
-    }
-
-    @Test
-    fun `settle throws SettlementUnavailableException on HTTP 500`(): Unit = runBlocking {
-        val response = mockk<Response>()
-        every { response.status } returns 500
-        every { client.initiateTransaction(any(), any()) } returns Uni.createFrom().item(response)
-
-        assertThatThrownBy { runBlocking { adapter().settle(payment()) } }
+        assertThat(settleFails())
             .isInstanceOf(SettlementUnavailableException::class.java)
-            .hasMessageContaining("HTTP 500")
+            .hasMessageContaining("HTTP 409")
+    }
+
+    @Test
+    fun `each mismatched field of a COMPLETED 201 is not a settlement`() {
+        val mismatches: Map<String, (InitiateTransactionRequest) -> TransactionResponse> = mapOf(
+            "type" to { r -> echo(r).copy(type = "CREDIT") },
+            "source account" to { r -> echo(r).copy(sourceAccountId = UUID.randomUUID()) },
+            "target account" to { r -> echo(r).copy(targetAccountId = UUID.randomUUID()) },
+            "amount" to { r -> echo(r).copy(amount = r.amount.add(BigDecimal("0.01"))) },
+            "currency" to { r -> echo(r).copy(currencyCode = "EUR") },
+            "rail" to { r -> echo(r).copy(rail = "SEPA_CT") },
+            "instructionType" to { r -> echo(r).copy(instructionType = "STANDING_ORDER") },
+        )
+        val creditor = UUID.randomUUID()
+        coEvery { accountLookup.findAccountIdByIban(any()) } returns creditor
+        mismatches.forEach { (field, body) ->
+            answer(body = body)
+            assertThat(settleFails())
+                .describedAs("mismatched %s", field)
+                .isInstanceOf(SettlementUnavailableException::class.java)
+                .hasMessageContaining("does not match")
+        }
+    }
+
+    @Test
+    fun `HTTP 200 or 202 with a COMPLETED body is not the provider's answer to a create`() {
+        listOf(200, 202).forEach { code ->
+            answer(code)
+            assertThat(settleFails()).describedAs("HTTP %d", code)
+                .isInstanceOf(SettlementUnavailableException::class.java)
+                .hasMessageContaining("HTTP $code")
+        }
+    }
+
+    @Test
+    fun `a PENDING 201 or 202 is completion-uncertain - never settled`() {
+        listOf(201, 202).forEach { code ->
+            answer(code) { echo(it, status = "PENDING") }
+            assertThat(settleFails()).hasCauseInstanceOf(TransactionCompletionUncertainException::class.java)
+        }
+    }
+
+    @Test
+    fun `settle throws SettlementUnavailableException on HTTP 500`() {
+        answer(500) { null }
+        assertThat(settleFails()).isInstanceOf(SettlementUnavailableException::class.java)
     }
 
     @Test
     fun `settle throws SettlementUnavailableException on connection failure`() {
-        every { client.initiateTransaction(any(), any()) } returns
+        every { client.initiateTransaction(any()) } returns
             Uni.createFrom().failure(RuntimeException("connection refused"))
 
+        assertThat(settleFails()).isInstanceOf(SettlementUnavailableException::class.java)
+    }
+
+    @Test
+    fun `cancellation is rethrown, not converted into an outage`() {
+        every { client.initiateTransaction(any()) } returns
+            Uni.createFrom().failure(CancellationException("worker shutting down"))
+
         assertThatThrownBy { runBlocking { adapter().settle(payment()) } }
-            .isInstanceOf(SettlementUnavailableException::class.java)
+            .isInstanceOf(CancellationException::class.java)
+            .isNotInstanceOf(SettlementUnavailableException::class.java)
     }
 
     @Test
     fun `settle sends correct idempotencyKey and rail`(): Unit = runBlocking {
         val p = payment()
-        val response = mockk<Response>()
-        every { response.status } returns 201
-        every { response.readEntity(String::class.java) } returns """{"id":"${UUID.randomUUID()}"}"""
-        val requestSlot = slot<InitiateSettlementRequest>()
-        every { client.initiateTransaction(any(), capture(requestSlot)) } returns
-            Uni.createFrom().item(response)
+        val requestSlot = slot<InitiateTransactionRequest>()
+        every { client.initiateTransaction(capture(requestSlot)) } answers {
+            Uni.createFrom().item(Response.status(201).entity(echo(requestSlot.captured)).build())
+        }
 
         adapter().settle(p)
 
@@ -115,6 +177,7 @@ class SettlementAdapterTest {
         assertThat(req.idempotencyKey).isEqualTo("domestic-settlement-${p.id}")
         assertThat(req.rail).isEqualTo("DOMESTIC")
         assertThat(req.type).isEqualTo("DEBIT")
+        assertThat(req.instructionType).isEqualTo("ONE_OFF")
         assertThat(req.sourceAccountId).isEqualTo(p.debtorAccountId)
         assertThat(req.amount).isEqualByComparingTo(p.amount.amount)
         assertThat(req.currencyCode).isEqualTo(p.currency)
@@ -126,12 +189,10 @@ class SettlementAdapterTest {
         // carries exactly that — scale 2, which transaction-service requires — and no rounding step
         // exists any more: an amount with a third decimal can no longer reach this adapter.
         val p = payment().copy(amount = Money.of(BigDecimal("10.130000"), "CZK"))
-        val response = mockk<Response>()
-        every { response.status } returns 201
-        every { response.readEntity(String::class.java) } returns """{"id":"${UUID.randomUUID()}"}"""
-        val requestSlot = slot<InitiateSettlementRequest>()
-        every { client.initiateTransaction(any(), capture(requestSlot)) } returns
-            Uni.createFrom().item(response)
+        val requestSlot = slot<InitiateTransactionRequest>()
+        every { client.initiateTransaction(capture(requestSlot)) } answers {
+            Uni.createFrom().item(Response.status(201).entity(echo(requestSlot.captured)).build())
+        }
 
         adapter().settle(p)
 
@@ -145,11 +206,10 @@ class SettlementAdapterTest {
         val creditorId = UUID.randomUUID()
         val ibanSlot = slot<String>()
         coEvery { accountLookup.findAccountIdByIban(capture(ibanSlot)) } returns creditorId
-        val response = mockk<Response>()
-        every { response.status } returns 201
-        every { response.readEntity(String::class.java) } returns """{"id":"${UUID.randomUUID()}"}"""
-        val reqSlot = slot<InitiateSettlementRequest>()
-        every { client.initiateTransaction(any(), capture(reqSlot)) } returns Uni.createFrom().item(response)
+        val reqSlot = slot<InitiateTransactionRequest>()
+        every { client.initiateTransaction(capture(reqSlot)) } answers {
+            Uni.createFrom().item(Response.status(201).entity(echo(reqSlot.captured)).build())
+        }
 
         adapter().settle(p)
 
@@ -166,11 +226,10 @@ class SettlementAdapterTest {
     @Test
     fun `settle books debit-only (no targetAccountId) for an external transfer`(): Unit = runBlocking {
         val p = payment().copy(transferScope = DomesticTransferScope.EXTERNAL)
-        val response = mockk<Response>()
-        every { response.status } returns 201
-        every { response.readEntity(String::class.java) } returns """{"id":"${UUID.randomUUID()}"}"""
-        val reqSlot = slot<InitiateSettlementRequest>()
-        every { client.initiateTransaction(any(), capture(reqSlot)) } returns Uni.createFrom().item(response)
+        val reqSlot = slot<InitiateTransactionRequest>()
+        every { client.initiateTransaction(capture(reqSlot)) } answers {
+            Uni.createFrom().item(Response.status(201).entity(echo(reqSlot.captured)).build())
+        }
 
         adapter().settle(p)
 
@@ -180,11 +239,100 @@ class SettlementAdapterTest {
         assertThat(reqSlot.captured.description).startsWith("CERTIS")
     }
 
+    @Test
+    fun `each unsuccessful call counts exactly one bounded outcome`() {
+        val cases: List<Pair<String, () -> Unit>> = listOf(
+            "mismatch" to { answer { echo(it).copy(amount = it.amount.add(BigDecimal.ONE)) } },
+            "mismatch" to { answer { echo(it).copy(id = null) } },
+            "mismatch" to { answer { echo(it).copy(amount = null) } },
+            "failed-replay" to { answer { echo(it, status = "FAILED") } },
+            "conflict" to { answer(409) { null } },
+            "unexpected-status" to { answer(200) },
+            "unexpected-status" to { answer(202) },
+            "unexpected-status" to { answer(400) { null } },
+            "unexpected-status" to { answer(422) { null } },
+            "unexpected-status" to { answer(500) { null } },
+            "unexpected-status" to { answer { echo(it, status = "PENDING") } },
+            "unexpected-status" to { answer { null } },
+            "transport-error" to {
+                every { client.initiateTransaction(any()) } returns
+                    Uni.createFrom().failure(RuntimeException("synthetic connection failure"))
+            },
+        )
+        val expected = mutableMapOf<String, Double>()
+        cases.forEach { (outcome, configure) ->
+            configure()
+            assertThat(settleFails()).isInstanceOf(SettlementUnavailableException::class.java)
+            expected[outcome] = (expected[outcome] ?: 0.0) + 1.0
+            assertUnsettledCounts(expected)
+        }
+    }
+
+    @Test
+    fun `repeated failed responses count attempts without counting the outer wrapper again`() {
+        val keys = mutableListOf<String>()
+        every { client.initiateTransaction(any()) } answers {
+            val request = firstArg<InitiateTransactionRequest>()
+            keys += requireNotNull(request.idempotencyKey)
+            Uni.createFrom().item(Response.status(201).entity(echo(request, status = "FAILED")).build())
+        }
+
+        // These are three actual provider calls, not a claim to execute the CDI Retry interceptor.
+        repeat(3) { settleFails() }
+
+        assertThat(keys).containsExactlyElementsOf(List(3) { "domestic-settlement-${payment().id}" })
+        assertUnsettledCounts(mapOf("failed-replay" to 3.0))
+    }
+
+    @Test
+    fun `matching completed responses including an idempotent replay never count unsettled`(): Unit = runBlocking {
+        answer()
+        val payment = payment()
+        val settlement = adapter()
+
+        assertThat(settlement.settle(payment).transactionId).isEqualTo(txId)
+        assertThat(settlement.settle(payment).transactionId).isEqualTo(txId)
+
+        assertUnsettledCounts(emptyMap())
+        assertThat(registry.scrape()).contains(
+            """openbank_payment_unsettled_total{outcome="mismatch",rail="DOMESTIC_CZK",} 0.0""",
+        )
+        // Only bounded rail/outcome labels: never payment, account, card or caller identities.
+        assertThat(registry.meters).hasSize(5)
+        registry.meters.forEach { meter ->
+            assertThat(meter.id.tags.map { it.key }).containsExactlyInAnyOrder("rail", "outcome")
+            assertThat(meter.id.getTag("rail")).isEqualTo("DOMESTIC_CZK")
+            assertThat(meter.id.name).isEqualTo("openbank.payment.unsettled")
+        }
+    }
+
+    @Test
+    fun `shutdown cancellation is rethrown unchanged without an unsettled count`() {
+        val cancellation = CancellationException("synthetic shutdown")
+        every { client.initiateTransaction(any()) } returns Uni.createFrom().failure(cancellation)
+
+        val failure = settleFails()
+        // Coroutine stack-trace recovery may copy CancellationException while retaining the original as its cause.
+        assertThat(failure).isInstanceOf(CancellationException::class.java).hasMessage("synthetic shutdown")
+        assertThat(generateSequence(failure) { it.cause }.any { it === cancellation }).isTrue()
+        assertUnsettledCounts(emptyMap())
+    }
+
+    private fun assertUnsettledCounts(expected: Map<String, Double>) {
+        listOf("mismatch", "failed-replay", "conflict", "unexpected-status", "transport-error").forEach { outcome ->
+            assertThat(
+                registry.get("openbank.payment.unsettled")
+                    .tags("rail", "DOMESTIC_CZK", "outcome", outcome).counter().count(),
+            ).describedAs("exact unsuccessful attempts for %s", outcome)
+                .isEqualTo(expected[outcome] ?: 0.0)
+        }
+    }
+
     private fun payment() = DomesticPayment(
         id = UUID.fromString("11111111-1111-1111-1111-111111111111"),
         idempotencyKey = "settle-test",
         status = DomesticPaymentStatus.SENT_TO_CLEARING,
-        debtorAccountId = UUID.fromString("22222222-2222-2222-2222-222222222222"),
+        debtorAccountId = debtor,
         debtorAccountNumber = "1234567890",
         debtorBankCode = "0800",
         debtorName = "Alice",
