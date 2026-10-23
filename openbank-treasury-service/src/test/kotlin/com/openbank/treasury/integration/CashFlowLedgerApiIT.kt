@@ -385,7 +385,7 @@ class CashFlowLedgerApiIT {
         ).isEqualTo(6)
         given().`when`().get("/api/v1/treasury/posting-rules").then().statusCode(200)
             .body("findAll { it.product == 'IRS' && it.event == 'TRADE' }", hasSize<Any>(1))
-            .body("collect { it.product }.unique()", hasSize<Any>(7))
+            .body("collect { it.product }.unique()", hasSize<Any>(11))
     }
 
     @Test
@@ -431,7 +431,7 @@ class CashFlowLedgerApiIT {
         """.trimIndent()
         post(
             "/deals",
-            """{"product":"BOND","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
+            """{"product":"BILL_OF_EXCHANGE","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
                "businessDayConvention":"MODIFIED_FOLLOWING","legs":$legs}""",
         ).then().statusCode(400).body("message", containsString("not delivered yet"))
     }
