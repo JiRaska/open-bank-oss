@@ -108,6 +108,20 @@ BASELINE: dict[str, str] = {
     "openbank-treasury-service:BANK,CENTRAL_BANK":
         "ADR-0344 — legacy counterparty list `kind`: NOT drift. Deliberate subset of CounterpartyKind; "
         "CORPORATE / ISSUER are served by the reference-data counterparty endpoint.",
+    # MIS-PAIRINGS (ADR-0352, #668): the product IR `Cadence` (libs-domain com.openbank.libs.product.ir,
+    # DAILY..ON_EVENT) is a product-behaviour vocabulary consumed by no customer-edge endpoint. These
+    # three customer-edge enums (a standing-order frequency, a savings-goal frequency and a deposit
+    # interest-payment frequency) share 3-4 calendar words with it; they model other concepts.
+    "openbank-customer-edge:ANNUALLY,BIWEEKLY,DAILY,MONTHLY,ONCE,QUARTERLY,WEEKLY":
+        "#668 — mis-pairing: a payment frequency vs the product IR Cadence.",
+    "openbank-customer-edge:ANNUALLY,MONTHLY,QUARTERLY":
+        "#668 — mis-pairing: a three-value frequency vs the product IR Cadence.",
+    "openbank-customer-edge:ANNUAL,AT_MATURITY,MONTHLY,QUARTERLY,SEMI_ANNUAL":
+        "#668 — mis-pairing: a deposit interest-payment frequency vs the product IR Cadence.",
+    # The treasury leg-schedule `Frequency` (ADR-0344 D3) serves the shared schedule Frequency, not
+    # the product IR Cadence; it shares calendar words with Cadence and models another concept.
+    "openbank-treasury-service:ANNUAL,DAILY,MONTHLY,ONCE,QUARTERLY,SEMI_ANNUAL,WEEKLY":
+        "#668 — mis-pairing: a treasury leg-schedule frequency vs the product IR Cadence.",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
     # values are the `channel` of the app-interaction attribution response
     # (GET /api/v1/campaigns/interactions/{interactionRef}/attribution), which resolves ONLY an
