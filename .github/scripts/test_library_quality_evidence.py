@@ -63,6 +63,8 @@ class EvidenceTest(unittest.TestCase):
         self.assertIn("check_library_quality_evidence.py", required)
         self.assertIn("needs.changes.outputs.admission == 'true'", required)
         self.assertIn("github.event.pull_request.head.sha", required)
+        self.assertIn("test-check-service-build-results.py ResultsTest", required)
+        self.assertIn("run: python3 .github/scripts/check-service-build-results.py", required)
 
     def test_scope(self):
         for path in ("openbank-libs-finance/src/main/X.kt", "fuzz/ossfuzz/build.gradle.kts",

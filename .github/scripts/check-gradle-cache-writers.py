@@ -136,6 +136,11 @@ DECLARED: dict[str, tuple[str, str]] = {
         "self-hosted, cache-disabled leg (ARC NAT egress, ~$200/mo) moved to the new "
         "`contract` job below.",
     ),
+    "_service-ci-pr.yml::build": (
+        "read-only",
+        ("Generated exact PR projection of the canonical service build job. Its hosted "
+         "cache consumer retains cache-read-only true; no additional writer is admitted."),
+    ),
     "_service-ci.yml::contract": (
         "disabled",
         "ADR-0250 Phase 2: the self-hosted half of the pre-split `build` job (ARC NAT "
