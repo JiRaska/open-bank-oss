@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.3.0...product-catalog-v1.3.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **product-catalog:** give @Authorize a decision point via an OPA sidecar ([#12896](https://github.com/JiRaska/open-bank-oss/issues/12896)) ([65e47cd](https://github.com/JiRaska/open-bank-oss/commit/65e47cd5420f61a2436c6e608ca915c05058c013))
+
 ## [1.3.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.2.0...product-catalog-v1.3.0) (2026-10-21)
 
 

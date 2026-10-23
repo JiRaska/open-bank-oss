@@ -114,14 +114,6 @@ deploy_holds:
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
-    openbank-card-issuance-service:
-      all_of:
-      - issue: '#13080'
-        reason: 'Inherited from held deploy PR #13080 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13080 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-case-coordinator-agent:
       all_of:
       - issue: '#12948'
@@ -5171,6 +5163,7 @@ catalog_kernel_neutrality:
     - TaxTreatment         # price quoted tax-inclusive/exclusive (ADR-0339 D fences it as price semantics)
     - EligibilityOperator  # rule-engine operators
     - RelationshipKind     # offering graph edge semantics
+    - PriceRole            # what a price component is (FEE/RATE/LIMIT/THRESHOLD, #13230); the kernel branches on it (a FEE must be an AMOUNT)
   # Words that occur in pack type names but are generic catalog/kernel language.
   vocabulary_not_industry: [legacy, product, instrument, term]
   # The /api/v1 banking compatibility vocabulary (ADR-0257 D3). Frozen: a pack schema is the
