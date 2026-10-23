@@ -11,14 +11,14 @@
 -- off-balance type, so each memo asset has a contra liability and a memo journal always balances
 -- within the pair — it never touches a real balance-sheet account.
 --
--- New accounts only; nothing existing changes, and no code collides with V1..V33.
+-- New accounts only; nothing existing changes, and no code collides with V1..V34.
 --
 -- ADR-0341 D3: treasury names a journal leg by (accountingClass, role, currency), never a GL code, so
 -- this migration also maps the matrix's classes onto the new accounts in accounting_class_gl_map
 -- (V32), seeded BY CODE exactly as V32 does. The role vocabulary grows additively by the instrument
 -- roles the matrix needs (premium/discount, fair value, revaluation reserve, realised and
 -- unrealised result, memo and memo contra); V32's five roles and rows are untouched.
--- Rollback: DELETE the V34 map rows, restore the V32 role CHECK, then delete the accounts while no
+-- Rollback: DELETE the V35 map rows, restore the V32 role CHECK, then delete the accounts while no
 -- journal line references them.
 
 INSERT INTO gl_accounts (id, code, name, type, currency_code, is_leaf, is_enabled) VALUES
@@ -99,9 +99,10 @@ ALTER TABLE accounting_class_gl_map ADD CONSTRAINT ck_accounting_class_gl_map_ro
 -- One debt-security class per IFRS 9 category; the three share the premium/discount, accrued and
 -- income accounts and differ in the principal account. The derivative classes split asset from
 -- liability and receive leg from pay leg, as V32 splits placement from borrowing.
-INSERT INTO accounting_class_gl_map (id, accounting_class, role, currency_code, gl_account_id)
-SELECT gen_random_uuid(), m.accounting_class, m.role, m.currency_code, g.id
-FROM (VALUES
+-- The rows this migration maps, held apart so the self-check below counts only THEM: an absolute
+-- count of the whole table would break the moment another migration adds rows of its own.
+CREATE TEMPORARY TABLE v35_treasury_class_map (accounting_class, role, currency_code, gl_code) AS
+SELECT * FROM (VALUES
     ('CASH_IN_TRANSIT', 'PRINCIPAL', 'CZK', '1690'),
     ('CASH_IN_TRANSIT', 'PRINCIPAL', 'EUR', '1691'),
     ('TREASURY_LOAN', 'PRINCIPAL', 'CZK', '1660'),
@@ -180,15 +181,31 @@ FROM (VALUES
     ('COLLATERAL_PLEDGED', 'MEMO', 'EUR', '9021'),
     ('COLLATERAL_PLEDGED', 'MEMO_CONTRA', 'CZK', '9120'),
     ('COLLATERAL_PLEDGED', 'MEMO_CONTRA', 'EUR', '9121')
-) AS m (accounting_class, role, currency_code, gl_code)
+) AS v (accounting_class, role, currency_code, gl_code);
+
+INSERT INTO accounting_class_gl_map (id, accounting_class, role, currency_code, gl_account_id)
+SELECT gen_random_uuid(), m.accounting_class, m.role, m.currency_code, g.id
+FROM v35_treasury_class_map m
 JOIN gl_accounts g ON g.code = m.gl_code;
 
 -- A row the JOIN dropped means a GL code is missing: fail rather than ship a silent hole (V32 idiom).
 DO $$
 BEGIN
-    IF (SELECT count(*) FROM accounting_class_gl_map) <> 35 + 78 THEN
-        RAISE EXCEPTION 'accounting_class_gl_map holds % of 113 rows after V34: a GL code it names does not exist',
-            (SELECT count(*) FROM accounting_class_gl_map);
+    IF (SELECT count(*) FROM v35_treasury_class_map) <> 78 THEN
+        RAISE EXCEPTION 'V35 declares % treasury map rows, expected 78',
+            (SELECT count(*) FROM v35_treasury_class_map);
+    END IF;
+    -- Every row V35 declares must now be mapped to the account it names; a row the JOIN dropped
+    -- means a GL code is missing.
+    IF EXISTS (
+        SELECT 1 FROM v35_treasury_class_map v
+        WHERE NOT EXISTS (
+            SELECT 1 FROM accounting_class_gl_map m JOIN gl_accounts g ON g.id = m.gl_account_id
+            WHERE m.accounting_class = v.accounting_class AND m.role = v.role
+              AND m.currency_code = v.currency_code AND g.code = v.gl_code
+        )
+    ) THEN
+        RAISE EXCEPTION 'accounting_class_gl_map lacks a V35 row after V35: a GL code it names does not exist';
     END IF;
     IF EXISTS (
         SELECT 1 FROM accounting_class_gl_map m JOIN gl_accounts g ON g.id = m.gl_account_id
@@ -197,3 +214,5 @@ BEGIN
         RAISE EXCEPTION 'accounting_class_gl_map has a row whose currency differs from its GL account''s';
     END IF;
 END $$;
+
+DROP TABLE v35_treasury_class_map;

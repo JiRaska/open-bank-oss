@@ -18,7 +18,7 @@ info:
   # /ledger/accounting-days/{businessDate}/participants[/{participant}] and PUT .../{participant}/waiver.
   # 1.28.0 -> 1.29.0 (ADR-0344 D7): additive. The accounting role enum gains the treasury instrument
   # roles (premium/discount, fair value, revaluation reserve, realised/unrealised result, memo, memo
-  # contra) that migration V34 maps for the posting-rule matrix classes.
+  # contra) that migration V35 maps for the posting-rule matrix classes.
   version: 1.29.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:

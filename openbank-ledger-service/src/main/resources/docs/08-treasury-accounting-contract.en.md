@@ -9,10 +9,10 @@ verification remain separate delivery steps.
 
 `AccountingRole` adds `PREMIUM_DISCOUNT`, `FAIR_VALUE`, `REVALUATION_RESERVE`,
 `REALISED_GAIN`, `REALISED_LOSS`, `UNREALISED_GAIN`, `UNREALISED_LOSS`, `MEMO` and
-`MEMO_CONTRA`. The V34 migration adds instrument accounts and accounting-class
+`MEMO_CONTRA`. The V35 migration adds instrument accounts and accounting-class
 mappings in CZK and EUR. Treasury resolves journal legs by accounting class, role
-and currency; the ledger owns the GL account mapping. V34 checks that the mapping
-contains 113 rows and that each mapping currency matches its GL account.
+and currency; the ledger owns the GL account mapping. V35 checks that the mapping
+contains every row it declares and that each mapping currency matches its GL account.
 
 Securities have distinct amortised-cost, FVOCI and FVTPL principal accounts.
 Forward commitments and collateral use balancing memo/contra pairs; they do not
@@ -21,7 +21,7 @@ Treasury still submits journals through the ledger posting API. This reference
 data is not evidence that a journal or external settlement actually occurred.
 
 Sources: [accounting roles](../../kotlin/com/openbank/ledger/domain/model/AccountingClassMapping.kt)
-and [V34 migration](../db/migration/V34__treasury_instrument_accounts.sql).
+and [V35 migration](../db/migration/V35__treasury_instrument_accounts.sql).
 
 ## Participant reports and operator decisions
 
