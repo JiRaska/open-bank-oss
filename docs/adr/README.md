@@ -356,7 +356,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0349](0349-complaint-intake-triage-with-a-typed-decision-model.md) | Complaint intake triage with a typed-decision model | Proposed | Planned | disputes,ml,compliance | — |
 | [0350](0350-sanctions-review-queue-ordering-with-a-typed-decision-model.md) | Sanctions review-queue ordering with a typed-decision model | Proposed | Planned | aml-sanctions,ml,compliance | — |
 | [0351](0351-transaction-categorisation-and-copilot-intent-routing-with-typed-decision-models.md) | Transaction categorisation and copilot intent routing with typed-decision models | Proposed | Planned | transactions,ai-agents,ml | — |
-| [0352](0352-product-as-code-typed-ir-pure-interpreter-git-native-catalog.md) | Product as Code: typed IR, pure interpreter, git-native product catalog | Proposed | Planned | product-catalog,interest,fees-billing,libs | — |
+| [0352](0352-product-as-code-typed-ir-pure-interpreter-git-native-catalog.md) | Product as Code: typed IR, pure interpreter, git-native product catalog | Proposed | Partial | product-catalog,interest,fees-billing,libs | — |
 
 ## By tag
 
