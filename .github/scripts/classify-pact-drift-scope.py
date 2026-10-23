@@ -16,7 +16,10 @@ Three outcomes, each fail-closed to the next wider one:
   ignored. One ``modules`` shard reruns only those modules' consumer-pact tests. Sound because a
   consumer pact is a function of its own module's test sources plus the shared libs, and every
   shared input (libs, build-logic, root Gradle files, the gate's own workflow and scripts) is
-  outside the allowed set and so selects ``full``.
+  outside the allowed set and so selects ``full``, as does any ``build.gradle.kts`` (a build
+  script can configure other projects) and any file ADDED under ``.github/`` (the helpers this
+  classifier runs come from the head checkout, so a new sibling must not be able to shadow an
+  import; they also run with ``python3 -I``).
   Measured 2026-10-23: 10 of 12 drift runs were ``full`` (4 shards x 12.7 min, 26 % of all hosted
   runner minutes) for PRs that changed a single service.
 * ``full``     — anything else: missing, empty, malformed, ambiguous, renamed, or out-of-scope diff.
@@ -59,13 +62,16 @@ _GATE_OWN_FILES = (".github/workflows/pact-drift-check.yml",)
 ADMIN_UI = "openbank-admin-ui"
 
 
-def _is_ignored(path: str) -> bool:
+def _is_ignored(path: str, added: bool) -> bool:
     if path.startswith(_IGNORED_PREFIXES) or path in _IGNORED_FILES:
         return True
     if path.startswith("openbank-infra/"):
         return _INFRA_INPUT_MARKER not in path
     if path.startswith(".github/"):
-        if path in _GATE_OWN_FILES:
+        if path in _GATE_OWN_FILES or added:
+            # A NEW file next to the gate's scripts could shadow a module they import (the
+            # helpers run from the head checkout); only modifications of existing, unrelated
+            # files are known not to be read by a pact test.
             return False
         # The gate's scripts are named for what they do; every other .github file (other gates,
         # baselines, workflows) is not read by a pact test.
@@ -95,7 +101,7 @@ def _unowned_pacts(repo: Path, pacts: set[str], modules: set[str]) -> set[str]:
     scripts = repo / ".github/scripts"
     try:
         expanded = subprocess.run(
-            ["python3", str(scripts / "expand-pact-scope-modules.py"), ",".join(sorted(modules)),
+            ["python3", "-I", str(scripts / "expand-pact-scope-modules.py"), ",".join(sorted(modules)),
              "--repo", str(repo)],
             cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         ).stdout.split()
@@ -104,7 +110,7 @@ def _unowned_pacts(repo: Path, pacts: set[str], modules: set[str]) -> set[str]:
             cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         ).stdout
         js = subprocess.run(
-            ["python3", str(scripts / "pact-js-contracts.py"), "--pacts"],
+            ["python3", "-I", str(scripts / "pact-js-contracts.py"), "--pacts"],
             cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         ).stdout.split()
     except (OSError, subprocess.CalledProcessError):
@@ -189,6 +195,7 @@ def _classify(repo: Path, base: str, head: str) -> tuple[str, str, list[str]]:
         return FULL, "empty diff", []
 
     paths: list[bytes] = []
+    added_paths: set[bytes] = set()
     renamed = False
     index = 0
     while index < len(fields):
@@ -198,6 +205,8 @@ def _classify(repo: Path, base: str, head: str) -> tuple[str, str, list[str]]:
             if index >= len(fields):
                 return FULL, "malformed diff status record", []
             paths.append(fields[index])
+            if status == b"A":
+                added_paths.add(fields[index])
             index += 1
             continue
         # Rename/copy records carry two paths. Both count as changed; the UI-only scope keeps
@@ -207,6 +216,7 @@ def _classify(repo: Path, base: str, head: str) -> tuple[str, str, list[str]]:
             if index + 1 >= len(fields):
                 return FULL, "malformed rename/copy record", []
             paths.extend(fields[index : index + 2])
+            added_paths.add(fields[index + 1])
             renamed = True
             index += 2
             continue
@@ -214,6 +224,7 @@ def _classify(repo: Path, base: str, head: str) -> tuple[str, str, list[str]]:
 
     try:
         decoded = [path.decode("utf-8", errors="strict") for path in paths]
+        added = {path.decode("utf-8", errors="strict") for path in added_paths}
     except UnicodeDecodeError:
         return FULL, "non-UTF-8 path in diff", []
 
@@ -221,7 +232,7 @@ def _classify(repo: Path, base: str, head: str) -> tuple[str, str, list[str]]:
         return FULL, "empty path set", []
     if any(path.startswith("/") or "\\" in path or ".." in path.split("/") for path in decoded):
         return FULL, "diff contains an unsafe path", []
-    decoded = [path for path in decoded if not _is_ignored(path)]
+    decoded = [path for path in decoded if not _is_ignored(path, path in added)]
     if not decoded:
         return FULL, "every changed path is a non-input; nothing to scope", []
     if all(path.startswith("openbank-admin-ui/") for path in decoded):
@@ -237,6 +248,10 @@ def _classify(repo: Path, base: str, head: str) -> tuple[str, str, list[str]]:
             return FULL, f"diff contains a path outside a scoped service module: {path}", []
         if top == "pacts":
             pacts.add(path)
+        elif rest.rsplit("/", 1)[-1] == "build.gradle.kts":
+            # A build script can configure OTHER projects (`project(":x") { ... }`), so a changed
+            # one is a fleet-wide input. This also sends every new module to the full run.
+            return FULL, f"diff changes a Gradle build script: {path}", []
         elif top == ADMIN_UI:
             modules.add(ADMIN_UI)
         elif _is_scoped_module(repo, top):

@@ -31,6 +31,11 @@ class ClassifierTest(unittest.TestCase):
         self.write("openbank-libs-domain/build.gradle.kts", "plugins {}\n")
         self.write("openbank-libs-domain/src/main/kotlin/L.kt", "initial\n")
         self.write("openbank-no-build/README.md", "not a gradle module\n")
+        # Existing non-input files: a MODIFICATION of these is ignored, an ADDED .github file is not.
+        for path in (".github/gates/gates.yaml", ".github/event-contract-baseline.txt",
+                     ".github/scripts/check-something-else.py", ".github/workflows/ci.yml",
+                     ".github/workflows/pact-drift-check.yml", "openbank-libs/governance/rules.yaml"):
+            self.write(path, "initial\n")
         # Ownership derivation stand-ins for the pacts/ check: the real scripts are not run here.
         self.write(".github/scripts/expand-pact-scope-modules.py",
                    "import sys\nprint('\\n'.join(m for m in sys.argv[1].split(',') if m != 'openbank-admin-ui'))\n"
@@ -120,10 +125,26 @@ class ClassifierTest(unittest.TestCase):
         self.assertEqual(mode, MODULE.MODULES)
         self.assertEqual(modules, ["openbank-alpha-service", "openbank-beta-service"])
 
-    def test_module_own_build_script_stays_scoped(self):
+    def test_any_build_script_change_forces_full_mode(self):
         self.write("openbank-alpha-service/build.gradle.kts", "dependencies {}\n")
         head = self.commit()
-        self.assertEqual(MODULE.classify(self.repo, self.base, head)[0], MODULE.MODULES)
+        mode, reason, _ = MODULE.classify(self.repo, self.base, head)
+        self.assertEqual(mode, MODULE.FULL)
+        self.assertIn("build.gradle.kts", reason)
+        self.base = head
+        self.write("openbank-new-service/build.gradle.kts", "plugins {}\n")
+        self.write("openbank-new-service/src/main/kotlin/N.kt", "new module\n")
+        head = self.commit()
+        self.assertEqual(MODULE.classify(self.repo, self.base, head)[0], MODULE.FULL)
+
+    def test_added_file_under_github_forces_full_mode(self):
+        for path in (".github/scripts/re.py", ".github/scripts/helper.sh", ".github/gates/new.yaml"):
+            with self.subTest(path=path):
+                self.write("openbank-alpha-service/src/main/kotlin/A.kt", f"touch {path}\n")
+                self.write(path, "new\n")
+                head = self.commit()
+                self.assertEqual(MODULE.classify(self.repo, self.base, head)[0], MODULE.FULL)
+                self.base = head
 
     def test_libs_root_gradle_and_non_module_dirs_force_full_mode(self):
         for path in ("openbank-libs-domain/src/main/kotlin/L.kt", "openbank-libs/gradle/libs.versions.toml",
