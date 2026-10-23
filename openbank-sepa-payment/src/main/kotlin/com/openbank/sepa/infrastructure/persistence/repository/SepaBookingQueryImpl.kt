@@ -7,6 +7,8 @@ import com.openbank.sepa.application.port.out.SepaBookingQuery
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Instant
+import java.util.UUID
 
 @ApplicationScoped
 class SepaBookingQueryImpl : SepaBookingQuery {
@@ -20,6 +22,16 @@ class SepaBookingQueryImpl : SepaBookingQuery {
                     "from SepaPaymentEntity p where p.bookingProvenAt is null",
                 SepaBookingAgeSnapshot::class.java,
             ).singleResult
+        }
+    }.awaitSuspending()
+
+    override suspend fun pendingBookingDueAt(paymentId: UUID): Instant? = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "select p.bookingFirstDueAt from SepaPaymentEntity p where p.paymentId = :id " +
+                    "and p.bookingFirstDueAt is not null and p.bookingProvenAt is null",
+                Instant::class.java,
+            ).setParameter("id", paymentId).singleResultOrNull
         }
     }.awaitSuspending()
 }
