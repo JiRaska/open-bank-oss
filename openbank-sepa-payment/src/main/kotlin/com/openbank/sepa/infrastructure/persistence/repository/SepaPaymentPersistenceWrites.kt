@@ -39,7 +39,14 @@ internal suspend fun PanacheRepository<SepaPaymentEntity>.mutateReturnIntent(
                 entity.applyReturnIntent(intent)
                 entity.revision += 1
             }
-            entity.toDomain()
+            entity
+        }
+        .flatMap { entity ->
+            // Return PostgreSQL's stored timestamp precision, not the pre-flush JVM value.
+            // Keep the write, refresh and original row lock inside this transaction.
+            Panache.getSession().flatMap { session ->
+                session.flush().flatMap { session.refresh(entity) }.map { entity.toDomain() }
+            }
         }
 }.awaitSuspending()
 

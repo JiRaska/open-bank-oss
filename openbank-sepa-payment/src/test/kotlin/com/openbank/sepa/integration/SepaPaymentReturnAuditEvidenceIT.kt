@@ -264,6 +264,57 @@ class SepaPaymentReturnAuditEvidenceIT {
         assertThat(outboxPayloads(payment.id, "sepa.payment.status-changed")).hasSize(1)
     }
 
+    @Test
+    @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_API"])
+    fun `new return intent exposes persisted timestamp precision before immediate completion`() {
+        val payment = seedProcessingPayment()
+        val receivedAt = Instant.parse("2026-10-22T12:00:00.123456789Z")
+        val pending = onEventLoop {
+            repository.beginReturn(
+                payment.id,
+                SepaReturnIntent(
+                    originalTransactionId = payment.transactionId,
+                    firstReceivedAt = receivedAt,
+                    reasonCode = "AM09",
+                    actorId = "service-account-openbank-services",
+                    actorType = "ROLE_API",
+                    correlationId = "precision-return",
+                ),
+            )
+        }
+        val cfg = ConfigProvider.getConfig()
+        val storedAt = DriverManager.getConnection(
+            cfg.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            cfg.getValue("quarkus.datasource.username", String::class.java),
+            cfg.getValue("quarkus.datasource.password", String::class.java),
+        ).use { connection ->
+            connection.prepareStatement(
+                "select return_first_received_at from sepa_payments where payment_id = ?",
+            ).use { statement ->
+                statement.setObject(1, payment.id)
+                statement.executeQuery().use { result ->
+                    check(result.next())
+                    result.getObject(1, OffsetDateTime::class.java).toInstant()
+                }
+            }
+        }
+        assertThat(pending.returnIntent?.firstReceivedAt)
+            .describedAs("the returned intent must contain the database's canonical timestamp")
+            .isEqualTo(storedAt)
+        assertThat(onEventLoop { repository.findById(payment.id) }?.returnIntent).isEqualTo(pending.returnIntent)
+        repeat(2) {
+            Given {
+                contentType(MediaType.APPLICATION_XML)
+                body(pacs004(payment.endToEndId, "AM09"))
+            } When {
+                post("/api/v1/sepa-payments/returns")
+            } Then { statusCode(200) }
+        }
+        assertThat(returnRow(payment.id)["status"]).isEqualTo("RETURNED")
+        assertThat(outboxPayloads(payment.id, "sepa.payment.returned")).hasSize(1)
+        assertThat(outboxPayloads(payment.id, "sepa.payment.status-changed")).hasSize(1)
+    }
+
     private fun returnRow(paymentId: UUID): Map<String, String?> {
         val cfg = ConfigProvider.getConfig()
         return DriverManager.getConnection(
