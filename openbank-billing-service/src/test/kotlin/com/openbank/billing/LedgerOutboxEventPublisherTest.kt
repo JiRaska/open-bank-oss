@@ -120,6 +120,43 @@ class LedgerOutboxEventPublisherTest {
             assertThat(meters.get("openbank.billing.fee.post.legacy_payload").counter().count()).isEqualTo(1.0)
         }
 
+    // ADR-0342 D4: a closed accounting day cannot be retried into, so the fee is FAILED at once and
+    // the row completes; BillingCloseParticipationScheduler then reports the cycle's day REFUSED.
+    @Test
+    fun `a closed-day 409 marks the fee FAILED, completes the row and is counted`(): Unit = runBlocking {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        val meters = SimpleMeterRegistry()
+        coEvery { ledger.post(any()) } throws jakarta.ws.rs.WebApplicationException(
+            jakarta.ws.rs.core.Response.status(409)
+                .entity("{\"code\":\"ACCOUNTING_DAY_CLOSED\",\"message\":\"day is LOCKED\"}").build(),
+        )
+        coEvery { assessments.markFailed(any()) } returns Unit
+
+        LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), meters).publish(entry(payload()))
+
+        coVerify(exactly = 1) { assessments.markFailed("fee-2026-07-acc-1-f1-CZK") }
+        coVerify(exactly = 0) { assessments.markPosted(any(), any()) }
+        assertThat(meters.get("openbank.billing.fee.post.closed_day_refusals").counter().count()).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `any other 409 still propagates for the outbox to retry`() {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        coEvery { ledger.post(any()) } throws jakarta.ws.rs.WebApplicationException(
+            jakarta.ws.rs.core.Response.status(409).entity("{\"code\":\"IDEMPOTENCY_CONFLICT\"}").build(),
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry())
+                    .publish(entry(payload()))
+            }
+        }.isInstanceOf(jakarta.ws.rs.WebApplicationException::class.java)
+        coVerify(exactly = 0) { assessments.markFailed(any()) }
+    }
+
     @Test
     fun `a ledger failure propagates and does not mark the fee posted`() {
         val ledger = mockk<LedgerPostingPort>()

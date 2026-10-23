@@ -9,6 +9,7 @@ import com.openbank.billing.application.port.out.BillingAssessmentRepository
 import com.openbank.billing.application.port.out.LedgerPostingPort
 import com.openbank.billing.domain.FeeJournalCommand
 import com.openbank.billing.domain.FeeReversalCommand
+import com.openbank.billing.infrastructure.scheduler.BillingCloseJobs
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
@@ -17,6 +18,7 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.reactive.messaging.MutinyEmitter
 import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.WebApplicationException
 import org.apache.kafka.common.header.internals.RecordHeaders
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
@@ -72,8 +74,28 @@ class LedgerOutboxEventPublisher(
             description = payload.description,
             accountingClass = accountingClassOf(payload.accountingClass, payload.idempotencyKey),
         )
-        val journalId = ledger.post(command)
+        val journalId = try {
+            ledger.post(command)
+        } catch (e: WebApplicationException) {
+            if (!BillingCloseJobs.isClosedDayRejection(e)) throw e
+            refuseClosedDay(payload.idempotencyKey)
+            return
+        }
         assessments.markPosted(payload.idempotencyKey, journalId)
+    }
+
+    /**
+     * The ledger refused the charge because its accounting day no longer accepts postings (ADR-0342
+     * D4, `409 ACCOUNTING_DAY_CLOSED`). Retrying cannot succeed — the day stays closed — so the fee is
+     * marked FAILED now instead of after the outbox exhausts its retries, and the row completes. The
+     * refusal is a close outcome, not lost: `BillingCloseParticipationScheduler` counts the cycle's
+     * FAILED fees and reports the day REFUSED, which holds the ledger's close until an operator waives
+     * it. Logged with the idempotency key only, never the account.
+     */
+    private suspend fun refuseClosedDay(idempotencyKey: String) {
+        assessments.markFailed(idempotencyKey)
+        meters.counter("openbank.billing.fee.post.closed_day_refusals").increment()
+        log.warnf("fee posting %s refused by the ledger: ACCOUNTING_DAY_CLOSED - marked FAILED", idempotencyKey)
     }
 
     private suspend fun publishReversal(entry: OutboxEntry) {

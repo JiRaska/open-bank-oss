@@ -5,11 +5,15 @@
 package com.openbank.billing.infrastructure.scheduler
 
 import com.openbank.billing.application.port.out.BillableAccountDiscoveryPort
+import com.openbank.billing.application.port.out.CloseJobRunPort
 import com.openbank.billing.application.usecase.BillingCycleService
+import com.openbank.libs.close.CloseJobRun
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
@@ -40,6 +44,14 @@ import java.util.Optional
  *     error); the monthly re-run is idempotent per (cycleId, accountId, currency).
  *  3. Neither → safe no-op, same as before this port existed — the scheduler still cannot
  *     charge anyone by accident on default config.
+ *
+ * **Day-close evidence (ADR-0342 D1).** Every enabled sweep records a `billing_close_job_run` row
+ * under the Prague accounting day it billed for — the same date the `cycleId` is derived from, taken
+ * once at the start of the sweep, so a sweep crossing midnight is filed under the day it started on.
+ * Accounts assessed are its items; accounts that failed to assess, or a sweep aborted by a failed
+ * discovery page, are a refusal that holds the ledger's close. The fees' journals are booked later
+ * by the outbox, so `BillingCloseParticipationScheduler` adds their posting status when it reports
+ * the day. The cron fires in [BillingCloseJobs.SCHEDULE_ZONE], the zone the reporter evaluates it in.
  */
 @ApplicationScoped
 class BillingCycleScheduler {
@@ -76,6 +88,9 @@ class BillingCycleScheduler {
     @Inject
     lateinit var domainMetrics: DomainMetrics
 
+    @Inject
+    lateinit var closeJobRuns: CloseJobRunPort
+
     private val log = Logger.getLogger(BillingCycleScheduler::class.java)
 
     private var liveness: WorkflowLivenessRecorder? = null
@@ -87,6 +102,10 @@ class BillingCycleScheduler {
      * the exact substitution that let the #2187 jobs look alive while doing nothing.
      */
     private var aborted = false
+
+    /** Accounts assessed / failed by the sweep in flight — the day-close evidence it records. */
+    private var processedInSweep = 0
+    private var failedInSweep = 0
 
     // ADR-0160 mechanism 3, registered once at startup (#2239). Before this the monthly cycle had
     // no metric, no watchdog and no alert rule of any kind — success and failure both ended in a
@@ -113,6 +132,7 @@ class BillingCycleScheduler {
     // Quarkus on a proper (duplicated) Vert.x context instead.
     @Scheduled(
         cron = "{openbank.billing.scheduler.cron}",
+        timeZone = BillingCloseJobs.SCHEDULE_ZONE,
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     suspend fun sweep() = runSweep()
@@ -128,7 +148,12 @@ class BillingCycleScheduler {
             log.debug("[billing-cycle-scheduler] Disabled — skipping sweep")
             return
         }
-        val cycleId = cycleIdFor(LocalDate.now(clock))
+        // The Prague accounting day (ADR-0207), never the UTC date: the cycle id and the day-close
+        // evidence are derived from the same date, so they cannot disagree about the month or day.
+        val businessDate = AccountingClock.bank(clock).today()
+        val cycleId = cycleIdFor(businessDate)
+        processedInSweep = 0
+        failedInSweep = 0
         val accountIds = accountIdsCsv.orElse("").split(",").map { it.trim() }.filter { it.isNotEmpty() }
         when {
             // Rule 1 (class KDoc): an operator-configured CSV is a deliberate manual override.
@@ -138,7 +163,10 @@ class BillingCycleScheduler {
                     cycleId,
                     accountIds.size,
                 )
-                val processed = billingCycleService.runCycle(cycleId, accountIds, currency)
+                val outcome = billingCycleService.runCycleWithOutcome(cycleId, accountIds, currency)
+                processedInSweep += outcome.processed
+                failedInSweep += outcome.failed
+                val processed = outcome.processed
                 log.infof(
                     "[billing-cycle-scheduler] Billing cycle %s done: %d account(s) processed",
                     cycleId,
@@ -151,7 +179,37 @@ class BillingCycleScheduler {
         // The cycle completed. runDiscoveredSweep returns early on abort, so an aborted sweep
         // falls through here — see the guard below.
         if (!aborted) liveness?.recordSuccess()
+        recordCloseEvidence(businessDate, aborted)
         aborted = false
+    }
+
+    /**
+     * Never fails the sweep: a lost record only means the day is not reported, which holds the
+     * ledger's close and pages — the safe direction.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun recordCloseEvidence(businessDate: LocalDate, aborted: Boolean) {
+        val refused = (if (aborted) 1 else 0) + failedInSweep
+        val reason = when {
+            aborted -> BillingCloseJobs.REASON_SWEEP_ABORTED
+            failedInSweep > 0 -> BillingCloseJobs.REASON_ACCOUNTS_FAILED
+            else -> null
+        }
+        try {
+            closeJobRuns.record(
+                CloseJobRun(
+                    businessDate = businessDate,
+                    job = BillingCloseJobs.CYCLE,
+                    itemsProcessed = processedInSweep,
+                    journalsPosted = 0,
+                    refused = refused,
+                    refusalReason = reason,
+                    completedAt = clock.instant(),
+                ),
+            ).awaitSuspending()
+        } catch (e: Exception) {
+            log.warnf("[billing-cycle-scheduler] day-close evidence NOT recorded (%s)", e.javaClass.simpleName)
+        }
     }
 
     /** Rule 2 (class KDoc): page through account-service's ACTIVE-account sweep, one cycle per page. */
@@ -165,7 +223,10 @@ class BillingCycleScheduler {
             do {
                 val page = accountDiscovery.activeAccounts(discoveryPageSize, cursor)
                 if (page.accountIds.isNotEmpty()) {
-                    processed += billingCycleService.runCycle(cycleId, page.accountIds, currency)
+                    val outcome = billingCycleService.runCycleWithOutcome(cycleId, page.accountIds, currency)
+                    processed += outcome.processed
+                    processedInSweep += outcome.processed
+                    failedInSweep += outcome.failed
                     pages++
                 }
                 cursor = page.nextCursor
