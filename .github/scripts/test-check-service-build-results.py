@@ -188,6 +188,35 @@ class GraphTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 graph.validate_callee(root)
 
+    def test_finite_caller_permissions_match_reviewed_baseline(self):
+        import yaml
+        spec = importlib.util.spec_from_file_location(
+            'supply_chain', Path(__file__).with_name('check-workflow-supply-chain.py'))
+        policy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(policy)
+        modules = graph.inventory(graph.ROOT)
+        jobs = yaml.safe_load(graph.caller_block(modules))
+        for job in jobs.values():
+            self.assertEqual(job['permissions'], {'contents': 'read', 'id-token': 'write'})
+        expected = {line for line in policy.WRITE_BASELINE.read_text().splitlines()
+                    if line.startswith('services-ci.yml|job:build')}
+        actual = policy.write_grants('services-ci.yml', {'jobs': jobs})
+        self.assertEqual(len(expected), 2 * len(modules))
+        self.assertEqual(policy.grant_drift(actual, expected), [])
+        unexpected = 'services-ci.yml|job:foreign|id-token'
+        self.assertEqual(policy.grant_drift(actual | {unexpected}, expected),
+                         [f'unexpected workflow write grant: {unexpected}'])
+        removed = sorted(actual)[0]
+        self.assertEqual(policy.grant_drift(actual - {removed}, expected),
+                         [f'stale workflow write baseline entry: {removed}'])
+        expanded = yaml.safe_load(graph.caller_block(modules + ['openbank-zz-fixture']))
+        new_grants = policy.write_grants('services-ci.yml', {'jobs': expanded})
+        self.assertEqual(len(policy.grant_drift(new_grants, expected)), 2)
+        changed = copy.deepcopy(jobs)
+        changed[next(iter(changed))]['permissions']['contents'] = 'write'
+        self.assertEqual(len(policy.grant_drift(
+            policy.write_grants('services-ci.yml', {'jobs': changed}), expected)), 1)
+
     def test_full_canonical_inventory(self):
         modules = graph.inventory(graph.ROOT)
         self.assertEqual(results.verify(modules, fixture(modules=modules), 'pull_request', 'refs/pull/1/merge', modules), [])
