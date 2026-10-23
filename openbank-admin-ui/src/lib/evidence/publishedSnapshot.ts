@@ -124,6 +124,23 @@ function validSnapshotUrl(base: string, key: string): string {
   return url.toString()
 }
 
+/** JSON-derived evidence is shared between readers; callers cannot alter verified bytes' meaning. */
+function freezeJson(value: unknown): void {
+  const pending: object[] = value !== null && typeof value === 'object' ? [value] : []
+  while (pending.length) {
+    const item = pending.pop()!
+    for (const child of Object.values(item)) {
+      if (child !== null && typeof child === 'object') pending.push(child)
+    }
+    Object.freeze(item)
+  }
+}
+
+function pointerIdentity(pointer: EvidenceManifest): string {
+  return JSON.stringify([pointer.schemaVersion, pointer.snapshot, pointer.sha256, pointer.sourceSha,
+    pointer.runId, pointer.runAttempt, pointer.collectedAt, pointer.expiresAt, pointer.complete])
+}
+
 export function createEvidenceSnapshotReader<T>(options: EvidenceSnapshotReaderOptions<T>) {
   const now = options.now ?? Date.now
   const fetchImpl = options.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args))
@@ -132,18 +149,24 @@ export function createEvidenceSnapshotReader<T>(options: EvidenceSnapshotReaderO
   const maxBytes = options.maxBytes ?? MAX_BYTES
   const maxDataAgeMs = options.maxDataAgeMs ?? MAX_DATA_AGE_MS
   let current: EvidenceSnapshotResult<T> | null = null
+  let verifiedIdentity: string | null = null
+  let currentBase: string | null = null
+  let generation = 0
   let nextRefreshAt = 0
   let inflight: Promise<EvidenceSnapshotResult<T>> | null = null
 
-  const currentState = (): EvidenceSnapshotResult<T> | null => {
-    if (!current || current.snapshot === null || current.provenance === null) return current
-    const pointerExpired = Date.parse(current.provenance.expiresAt) <= now()
-    const snapshotAgeMs = Math.max(0, now() - Date.parse(current.provenance.collectedAt))
-    const provenance = { ...current.provenance, pointerExpired, snapshotAgeMs }
-    return { ...current, status: pointerExpired || snapshotAgeMs > maxDataAgeMs || Boolean(current.error) ? 'stale' : 'ready', provenance }
+  const currentState = (value = current): EvidenceSnapshotResult<T> | null => {
+    if (!value) return null
+    if (value.snapshot === null || value.provenance === null) return { ...value }
+    const pointerExpired = Date.parse(value.provenance.expiresAt) <= now()
+    const snapshotAgeMs = Math.max(0, now() - Date.parse(value.provenance.collectedAt))
+    const provenance = { ...value.provenance, pointerExpired, snapshotAgeMs }
+    return { ...value, status: pointerExpired || snapshotAgeMs > maxDataAgeMs || Boolean(value.error) ? 'stale' : 'ready', provenance }
   }
 
-  async function refresh(base: string): Promise<EvidenceSnapshotResult<T>> {
+  async function refresh(base: string, epoch: number): Promise<EvidenceSnapshotResult<T>> {
+    const previous = current
+    const previousIdentity = verifiedIdentity
     const signal = AbortSignal.timeout(timeoutMs)
     const request = (url: string) => fetchImpl(url, {
       method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store',
@@ -157,14 +180,24 @@ export function createEvidenceSnapshotReader<T>(options: EvidenceSnapshotReaderO
       try { pointer = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(pointerBytes)) } catch { throw new Error('malformed manifest') }
       if (!validateEvidenceManifest(pointer, now())) throw new Error('invalid manifest schema')
 
-      const snapshotResponse = await request(validSnapshotUrl(base, pointer.snapshot))
-      if (!snapshotResponse.ok) throw new Error(`snapshot HTTP ${snapshotResponse.status}`)
-      const bytes = await readBoundedBody(snapshotResponse, maxBytes)
-      const digest = createHash('sha256').update(bytes).digest('hex')
-      if (digest !== pointer.sha256) throw new Error('snapshot digest mismatch')
+      const identity = pointerIdentity(pointer)
       let data: unknown
-      try { data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) } catch { throw new Error('malformed snapshot') }
+      if (previous?.snapshot !== null && previous?.snapshot !== undefined && identity === previousIdentity) {
+        data = previous.snapshot
+      } else {
+        const snapshotResponse = await request(validSnapshotUrl(base, pointer.snapshot))
+        if (!snapshotResponse.ok) throw new Error(`snapshot HTTP ${snapshotResponse.status}`)
+        const bytes = await readBoundedBody(snapshotResponse, maxBytes)
+        const digest = createHash('sha256').update(bytes).digest('hex')
+        if (digest !== pointer.sha256) throw new Error('snapshot digest mismatch')
+        let parsed: unknown
+        try { parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) } catch { throw new Error('malformed snapshot') }
+        freezeJson(parsed)
+        data = parsed
+      }
+      // Time-sensitive validity is checked on every pointer poll, including body reuse.
       if (!options.validateSnapshot(data, now())) throw new Error('invalid snapshot schema')
+      if (isRecord(data) && Object.hasOwn(data, 'sourceSha') && data.sourceSha !== pointer.sourceSha) throw new Error('snapshot source does not match manifest')
       if (options.collectedAt(data) !== pointer.collectedAt) throw new Error('snapshot collection time does not match manifest')
 
       const pointerExpired = Date.parse(pointer.expiresAt) <= now()
@@ -174,18 +207,24 @@ export function createEvidenceSnapshotReader<T>(options: EvidenceSnapshotReaderO
         snapshot: pointer.snapshot, sha256: pointer.sha256, collectedAt: pointer.collectedAt,
         expiresAt: pointer.expiresAt, pointerExpired, snapshotAgeMs,
       }
-      current = { status: pointerExpired || snapshotAgeMs > maxDataAgeMs ? 'stale' : 'ready', snapshot: data, provenance }
-      nextRefreshAt = now() + ttlMs
-      return current
-    } catch (error) {
-      nextRefreshAt = now() + ttlMs
-      const lastGood = currentState()
-      if (lastGood?.snapshot && lastGood.provenance) {
-        current = { ...lastGood, status: 'stale', error: error instanceof Error ? error.message : 'evidence store unavailable' }
-        return current
+      const result: EvidenceSnapshotResult<T> = { status: pointerExpired || snapshotAgeMs > maxDataAgeMs ? 'stale' : 'ready', snapshot: data, provenance }
+      if (epoch === generation) {
+        current = result
+        verifiedIdentity = identity
+        nextRefreshAt = now() + ttlMs
       }
-      current = { status: 'unavailable', snapshot: null, provenance: null, error: error instanceof Error ? error.message : 'evidence store unavailable' }
-      return current
+      return currentState(result)!
+    } catch (error) {
+      if (epoch === generation) nextRefreshAt = now() + ttlMs
+      const lastGood = currentState(previous)
+      if (lastGood?.snapshot && lastGood.provenance) {
+        const result: EvidenceSnapshotResult<T> = { ...lastGood, status: 'stale', error: error instanceof Error ? error.message : 'evidence store unavailable' }
+        if (epoch === generation) current = result
+        return currentState(result)!
+      }
+      const result: EvidenceSnapshotResult<T> = { status: 'unavailable', snapshot: null, provenance: null, error: error instanceof Error ? error.message : 'evidence store unavailable' }
+      if (epoch === generation) current = result
+      return { ...result }
     }
   }
 
@@ -193,14 +232,23 @@ export function createEvidenceSnapshotReader<T>(options: EvidenceSnapshotReaderO
     async read(): Promise<EvidenceSnapshotResult<T>> {
       const rawBase = typeof options.baseUrl === 'function' ? options.baseUrl() : options.baseUrl
       const base = evidenceStoreBaseUrl(rawBase)
+      if (currentBase !== base) {
+        generation++
+        currentBase = base
+        current = null
+        verifiedIdentity = null
+        nextRefreshAt = 0
+        inflight = null
+      }
       if (rawBase === undefined) return { status: 'disabled', snapshot: null, provenance: null }
       if (!base) return { status: 'unavailable', snapshot: null, provenance: null, error: 'invalid evidence store URL' }
       const existing = currentState()
       if (existing && now() < nextRefreshAt) return existing
       if (inflight) return inflight
-      inflight = refresh(base).finally(() => { inflight = null })
-      return inflight
+      const task = refresh(base, generation).finally(() => { if (inflight === task) inflight = null })
+      inflight = task
+      return task
     },
-    reset() { current = null; nextRefreshAt = 0; inflight = null },
+    reset() { generation++; currentBase = null; current = null; verifiedIdentity = null; nextRefreshAt = 0; inflight = null },
   }
 }

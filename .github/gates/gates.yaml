@@ -6775,6 +6775,7 @@ gates:
       - ".github/scripts/test-agent-admission.py"
       - ".github/scripts/await-admin-ui-source-validation.py"
       - ".github/scripts/test-await-admin-ui-source-validation.py"
+      - ".github/scripts/shard-verification-modules.py"
       - ".github/workflows/admin-ui-deploy.yml"
       - ".github/workflows/auto-deploy.yml"
       - ".github/workflows/platform-images.yml"
@@ -6783,6 +6784,7 @@ gates:
       python3 .github/scripts/test-infracost-scope.py
       python3 .github/scripts/test-agent-admission.py
       python3 .github/scripts/test-await-admin-ui-source-validation.py
+      python3 .github/scripts/shard-verification-modules.py --self-test
     run: python3 .github/scripts/check-workflow-supply-chain.py
 
   # ADR-0320 P3: field encryption lives in com.openbank.libs.security.FieldProtector

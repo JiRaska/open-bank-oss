@@ -60,6 +60,7 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import datetime
 import fnmatch
 import inspect
 import io
@@ -98,10 +99,16 @@ TREE_INDEPENDENT_CONTEXTS = frozenset({"issue-hygiene"})
 GUARD_CONTEXT_HINT = "agent-pr-guard"
 STALE_RED_CAP = 2      # stale-red refreshes per settle tick (ADR-0343)
 STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
-# A strict-lane reservation (ADR-0343) holds main for one PR's CI; past this it is released so a hung
-# CI cannot freeze main. 2 x the p95 of successful pull_request ci.yml runs, measured 2026-10-21 with
-# `gh run list -w ci.yml -e pull_request -s completed -L 200` (n=103 green: p50 17 min, p95 32 min).
-RESERVATION_TIMEOUT_S = 64 * 60
+# A strict-lane reservation (ADR-0343) holds main for one PR's CI and is released when that CI STALLS,
+# not when it is merely slow (#13400). A fixed 64 min bound (2 x the ci.yml p95) livelocked #13204: its
+# Services CI (336 jobs, 168 run) took 67.8 / 70.4 / 87.1 min per head, so every reservation lapsed
+# minutes before green, main moved, and the next update-branch restarted the clock. Progress = the
+# newest started_at/completed_at of any check run on the head (GitHub's clock, not the author's).
+# Stall window: 3 x the longest gap between consecutive job completions on those four heads (4.8 min,
+# measured 2026-10-22 from /actions/runs/{id}/attempts/1/jobs). The ceiling bounds a CI that keeps
+# trickling forever; it is measured from the head's committer time, which update-branch sets.
+RESERVATION_STALL_S = 15 * 60
+RESERVATION_CEILING_S = 4 * 3600
 # Lane fairness (ADR-0343): after a strict-lane merge the train gets the next turn — no strict-lane
 # update-branch while train candidates wait — for at most this long after that merge, so a train that
 # cannot be built never freezes the strict lane. Two ticks of the */10 cron at its measured p90 gap.
@@ -144,6 +151,7 @@ REFUSED_COMMENT = ("merge-train: GitHub refused to update this branch with main 
                    "own. It stays armed.")
 NOTICE_PATH_CAP = 20
 RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's inconclusive jobs were re-run once
+DEFER_CONTEXT = "merge-train/strict-deferral"   # App marker: this running strict head yielded once to a carrier
 # Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
 # whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
 # the carrier-attestation rule existed (#12506, #13137 were marked by those defects), so it is NOT
@@ -1034,6 +1042,14 @@ class GitHub:
             out.setdefault(st["context"], None if st["state"] == "pending" else st["state"])
         return out
 
+    def ci_activity(self, sha: str) -> float | None:
+        """Newest started_at/completed_at of any check run on `sha` (epoch), None when none started.
+        GitHub stamps these, so unlike the committer time they cannot be author-dated."""
+        stamps = [c.get(k) for c in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs")
+                  for k in ("started_at", "completed_at")]
+        epochs = [datetime.datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp() for t in stamps if t]
+        return max(epochs) if epochs else None
+
     def extra_checks(self, sha: str, gates: dict[str, str]) -> dict[str, str | None]:
         """Pinned extra-gate verdicts on `sha`: only check runs by the `github-actions` app whose workflow
         run's path is the declared workflow. Any completed non-success, non-skipped run = that state (red
@@ -1516,6 +1532,7 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
     Pusher(git, branch, gh.remote).push(v.tip)
     gh.post_status(v.tip, "success", f"tree={v.tree}", context=RECORD_CONTEXT)
     gh.create_carrier(branch)
+    record_deferral(gh, git, repo, base, branch)
     log(f"published {branch} over {base[:12]}: members {v.applied}, dropped {v.dropped}")
     return "published"
 
@@ -1538,7 +1555,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     # fast lane, or main moves under the reserved head's CI and it is re-updated forever (#13456).
     base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required)
     holder, timed_out = strict_reservation(git, base, strict, shadow,
-                                           fixes=strict_fixes(gh, git, base, strict, main_red, main_cache))
+                                           fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
+                                           activity=gh.ci_activity)
     acted = False
     for p in [p for p in gh.open_prs() if is_carrier(p, repo)]:
         sha, branch, carrier = p["head"]["sha"], p["head"]["ref"], p["number"]
@@ -1610,9 +1628,12 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
         if not problem and chain[0] != live_main:
             problem = "main moved since publish — the next tick rebuilds"
         if not problem and not failing and holder is not None:
-            log(f"carrier #{carrier}: green, but main is reserved for strict-lane #{holder} — held")
-            summary["in_flight"] = True  # NOT carrier_in_flight: the reserved PR must still be able to merge
-            continue
+            if deferral_state(gh, git, strict, holder) == "granted":
+                log(f"carrier #{carrier}: green; strict-lane #{holder} still running and yielded once — merging (bounded deferral)")
+            else:
+                log(f"carrier #{carrier}: green, but main is reserved for strict-lane #{holder} — held")
+                summary["in_flight"] = True  # NOT carrier_in_flight: the reserved PR must still be able to merge
+                continue
         acted = True
         if problem:
             log(f"::warning::carrier #{carrier}: {problem}")
@@ -1659,7 +1680,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     if acted:  # a carrier was judged: main or member statuses may have changed — read everything again
         base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required)
         holder, timed_out = strict_reservation(git, base, strict, shadow,
-                                               fixes=strict_fixes(gh, git, base, strict, main_red, main_cache))
+                                               fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
+                                           activity=gh.ci_activity)
     summary["main_red"] = sorted(main_red)
     fragments = regen_inventory_fragments(regen_text)
     fast, train_waiting = partition(git, base, cands, fragments)
@@ -1672,6 +1694,14 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     # below must already see it.
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
                 yield_why)
+    if (holder is not None and not carrier_in_flight and not summary["updated"] and not summary["strict"]
+            and train_waiting and not main_red and not any(is_carrier(p, repo) for p in gh.open_prs())
+            and deferral_state(gh, git, strict, holder) == "open"):
+        # Bounded deferral (#13400): the running reservation lets ONE carrier be built from green
+        # candidates during its CI; publish records the yield on the strict head (DEFER_CONTEXT).
+        log(f"strict-lane #{holder} CI running, no deferral yet: a carrier may be built during it (bounded deferral)")
+        summary["in_flight"] = False
+        summary["deferral_window"] = holder
     # Fast lane, from live data only — nothing here reads a stored classification. Held while main is
     # reserved for a strict-lane PR (or was just moved by one): GitHub auto-merge acts on this status,
     # and a merge now would put the reserved head behind main again.
@@ -1773,15 +1803,81 @@ def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now:
     return f"train's turn after a strict-lane merge ({len(train_waiting)} train candidate(s) waiting)"
 
 
+def reservation_expired(git, head: str, now: float, activity=None) -> str | None:
+    """Why the reservation on `head` is over, or None while its CI is live (ADR-0343, #13400).
+    Expired when the head is future-dated (the committer time is author-supplied, #13485), older
+    than RESERVATION_CEILING_S, or idle: nothing on it started or completed for RESERVATION_STALL_S.
+    The idle clock starts at the committer time, so a CI that never starts after update-branch is
+    a stall too. `activity(head)` = newest check-run started_at/completed_at (epoch) or None."""
+    ct = git("show", "-s", "--format=%ct", head, check=False).stdout.strip()
+    if not ct.isdigit() or now < int(ct):
+        return "head committed in the future"
+    if now - int(ct) > RESERVATION_CEILING_S:
+        return f"> {RESERVATION_CEILING_S // 60} min ceiling"
+    last = int(ct)
+    seen = activity(head) if activity else None
+    if seen is not None:
+        last = max(last, min(seen, now))
+    if now - last > RESERVATION_STALL_S:
+        return f"CI stalled: nothing started or completed for > {RESERVATION_STALL_S // 60} min"
+    return None
+
+
+def deferral_used(gh, git, head: str) -> bool:
+    """The strict head, or the head it was update-branched from (first parent), already yielded."""
+    parents = git("rev-list", "--parents", "-n", "1", head, check=False).stdout.split()
+    return any(gh.app_statuses(sha).get(DEFER_CONTEXT, ("", ""))[0] == "success" for sha in [head] + parents[1:2])
+
+
+def deferral_state(gh, git, strict: list, holder: int) -> str | None:
+    """Bounded deferral (ADR-0343, #13400) for the reservation holder: "open" — its CI is still
+    RUNNING and it never yielded, so ONE carrier may be built under it; "granted" — a carrier was
+    published under it (DEFER_CONTEXT on THIS head), so that green carrier may merge past it; None —
+    held. A green head is never pre-empted. The carrier's merge puts the head behind main and its
+    update-branch inherits the record through the first parent: after that one yield the strict PR
+    has priority until it merges or fails."""
+    view = next((v for st, v in strict if v["number"] == holder and st == "pending"), None)
+    if view is None:
+        return None
+    head = view["head_sha"]
+    if gh.app_statuses(head).get(DEFER_CONTEXT, ("", ""))[0] == "success":
+        return "granted"
+    return None if deferral_used(gh, git, head) else "open"
+
+
+def record_deferral(gh, git, repo: str, base: str, carrier_branch: str) -> list[int]:
+    """Publish: a carrier published while an armed PR's up-to-date head is still running CI consumes
+    that head's one deferral. Read from live data (head contains live main, a required context still
+    pending); settle opened the window and judges the carrier against the record."""
+    required = [c for c in gh.required() if c != STATUS_CONTEXT]
+    out = []
+    for p in gh.open_prs():
+        if is_carrier(p, repo) or not p.get("auto_merge") or p.get("draft"):
+            continue
+        n, head = p["number"], p["head"]["sha"]
+        checks = gh.checks(head)
+        if not any(checks.get(c, None) is None for c in required) or any(
+                checks.get(c) == "failure" for c in required):
+            continue
+        git("fetch", "-q", "origin", f"+{gh.head_refspec(n)}:refs/merge-train/pr-{n}", check=False)
+        if git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0 or deferral_used(gh, git, head):
+            continue
+        gh.post_status(head, "success", f"strict lane: yielded once to carrier {carrier_branch}; priority from here",
+                       context=DEFER_CONTEXT)
+        log(f"#{n:>6} strict    deferral recorded: carrier {carrier_branch} published during its CI")
+        out.append(n)
+    return out
+
+
 def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: float | None = None,
-                       fixes: dict | None = None) -> tuple[int | None, list[int]]:
+                       fixes: dict | None = None, activity=None) -> tuple[int | None, list[int]]:
     """(holder, timed_out). The holder is the oldest strict-lane PR whose head already contains live
     main and whose CI is still running with nothing failed — or has just gone green, so it merges this
     tick: main is reserved for it, so neither the
     fast lane nor a train nor another strict-lane update may move or contend for main until it
     settles (merged, failed, or timed out). A green holder that cannot merge (merge refused) is
-    bounded by the same timeout. A reservation older than RESERVATION_TIMEOUT_S — measured
-    from the head's committer time, which update-branch sets — is released and listed in timed_out.
+    bounded by the same timeout. A reservation whose CI stalled, or that passed the ceiling
+    (reservation_expired), is released and listed in timed_out.
     Main red (ADR-0343): a "waiting" PR never holds (it cannot go green until main is fixed). A FIX
     (`fixes`) holds only once its combined head contains live main, like every other PR — first, as
     strict_lane serves it first; behind main it holds nothing, since it never merges from there."""
@@ -1797,11 +1893,9 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
             continue
         if state == "green" and shadow:
             continue  # shadow never merges it, so it must not hold anything
-        ct = git("show", "-s", "--format=%ct", head, check=False).stdout.strip()
-        # The committer time is author-supplied: a head dated in the future would otherwise hold
-        # main for as long as its CI never reports, so a future stamp counts as timed out (#13485).
-        if not ct.isdigit() or not 0 <= now - int(ct) <= RESERVATION_TIMEOUT_S:
-            log(f"#{n:>6} strict    reservation timed out (> {RESERVATION_TIMEOUT_S // 60} min): released, back of the queue")
+        why = reservation_expired(git, head, now, activity)
+        if why:
+            log(f"#{n:>6} strict    reservation timed out ({why}): released, back of the queue")
             timed_out.append(n)
         elif holder is None:
             holder = n
@@ -2171,6 +2265,7 @@ class FakeGitHub:
         self.xgate_unfinished: set[str] = set()   # heads whose pinned workflow has not completed (absent = pending)
         self.gate_records: dict[str, list] = {}  # shard slug -> run-gates --json records of the carrier's CI
         self.inconclusive_reads = 0
+        self.activity: dict[str, float] = {}   # sha -> newest check-run start/finish (ci_activity)
         # The live ruleset as the settle guard sees it: merge-train pinned to the App, strict off.
         self.app_id, self.rs_checks, self.rs_strict = "4242", [{"context": STATUS_CONTEXT, "integration_id": 4242}], False
 
@@ -2214,6 +2309,9 @@ class FakeGitHub:
         for ctx, state, _desc, _creator in reversed(self.statuses.get(sha, [])):
             out.setdefault(ctx, None if state == "pending" else state)
         return {c: v for c, v in out.items() if v != "absent"}   # "absent": the context never reported
+
+    def ci_activity(self, sha):
+        return self.activity.get(sha)
 
     def extra_checks(self, sha, gates):
         """Pinned runs: `self.pinned[sha]` = {name: [states]} from the declared workflow; with none set, a
@@ -3444,6 +3542,71 @@ def self_test() -> int:
                   gh.merged == [35] and s["rejected"], f"{s} merged={gh.merged}")
             reset()
 
+            # BOUNDED STRICT DEFERRAL (#13400): a strict reservation whose CI is still running yields
+            # ONCE per strict head to a carrier built from green candidates DURING that CI. The deferral
+            # is recorded as DEFER_CONTEXT on the strict head when the carrier is published, and the
+            # update-branch that follows the carrier's merge inherits it through its first parent.
+            def deferral(sha):
+                return gh.app_statuses(sha).get(DEFER_CONTEXT, ("", ""))[0]
+
+            def running_reservation_and_green_candidate():
+                open_only("pW")
+                gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}   # pW up to date, CI running
+                open_only("p1")                                                    # a green train candidate
+
+            # (1) no deferral yet: a carrier is built and published, and the deferral recorded at publish.
+            running_reservation_and_green_candidate()
+            pw_a = gh.prs[35]["head"]["sha"]
+            s, st = tick()
+            check("deferral: running reservation + green candidate + no deferral -> a carrier is built",
+                  st == "published" and any(c["state"] == "open" for c in gh.carriers.values())
+                  and deferral(pw_a) == "success" and gh.merged == [], f"{s} st={st} defer={deferral(pw_a)!r}")
+            gh.head_checks.clear()
+            reset()
+
+            # (2) a deferral already recorded for this strict head: held, no carrier.
+            running_reservation_and_green_candidate()
+            gh.post_status(gh.prs[35]["head"]["sha"], "success", "yielded once", context=DEFER_CONTEXT)
+            s, st = tick()
+            check("deferral: a strict head that already yielded once is held (no carrier built)",
+                  st == "in-flight" and s["in_flight"] and not any(c["state"] == "open" for c in gh.carriers.values()),
+                  f"{s} st={st}")
+            gh.head_checks.clear()
+            reset()
+
+            # (3) a GREEN strict head is never pre-empted: the carrier built under its CI is held and
+            # the strict PR merges first, even though the deferral was recorded.
+            running_reservation_and_green_candidate()
+            tick()
+            gh.head_checks.clear()                     # pW goes green; the carrier is green as well
+            s = settle_now()
+            check("deferral: a green strict head is never pre-empted - it merges first, the carrier is held",
+                  gh.merged == [35] and 1 not in gh.merged, f"{s} merged={gh.merged}")
+            reset()
+
+            # (4) bounded: the carrier merges past the running head A (the one deferral); A is
+            # update-branched to B, B inherits the record via its first parent, no further carrier is
+            # built while B's CI runs, and the strict PR merges within 2 of its CI cycles.
+            gh.updates.clear()
+            running_reservation_and_green_candidate()
+            tick()                                     # cycle 1: A's CI runs, carrier published
+            s1 = settle_now()                          # the carrier is green: it pre-empts A once
+            gh.head_checks.clear()                     # A's CI finishes green, now behind main
+            settle_now()                               # update-branch -> B
+            b_head = gh.prs[35]["head"]["sha"]
+            gh.head_checks[b_head] = {"gates (data)": None}   # cycle 2: B's CI runs
+            open_only("p2")                            # another green candidate arrives
+            s2, st2 = tick()
+            gh.head_checks.clear()                     # B's CI finishes green
+            s3 = settle_now()
+            check("deferral: one yield only - the strict PR merges within 2 CI cycles, no second carrier",
+                  1 in s1["merged"] and gh.updates == [35] and st2 == "in-flight" and not deferral(b_head)
+                  and 35 in s3["merged"] and 2 not in gh.merged,
+                  f"s1={s1} st2={st2} s3={s3} merged={gh.merged} updates={gh.updates}")
+            gh.head_checks.clear()
+            gh.updates.clear()
+            reset()
+
             # LANE FAIRNESS (ADR-0343, 2026-10-21): the strict queue never empties, so before the fix
             # every strict merge was followed at once by the next strict update-branch — main stayed
             # reserved and no train ever merged (11 carriers, 0 train merges in 12.5 h; carrier
@@ -3487,20 +3650,52 @@ def self_test() -> int:
             gh.updates.clear()
             reset()
 
-            # A hung CI cannot freeze main: past RESERVATION_TIMEOUT_S the reservation is released,
-            # the fast lane runs again, and the PR goes to the back of the strict queue.
-            global RESERVATION_TIMEOUT_S
-            saved_timeout = RESERVATION_TIMEOUT_S
-            RESERVATION_TIMEOUT_S = -1
-            try:
+            # PROGRESS-BASED RESERVATION (#13400): the reservation ends when the holder's CI STALLS or
+            # passes the ceiling, never because it is slow. #13204 lapsed at 64 min on three heads
+            # whose Services CI was green at 67.8 min, and was update-branched again each time.
+            real_time = time.time
+
+            def reservation_at(offset_s, last_activity_ago_s=None):
+                """Settle with the clock `offset_s` past the reserved head's commit; its newest check-run
+                activity `last_activity_ago_s` before that (None: no check run ever started)."""
                 open_only("pW", "pF")
-                gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
-                s = settle_now()
-                check("reservation timeout: a hung reservation is released and the fast lane runs",
-                      not s["in_flight"] and 34 in s["fast"] and s.get("timed_out") == [35], str(s))
-            finally:
-                RESERVATION_TIMEOUT_S = saved_timeout
-                gh.head_checks.clear()
+                head = gh.prs[35]["head"]["sha"]
+                gh.head_checks[head] = {"gates (data)": None}
+                ct = int(gh.g("show", "-s", "--format=%ct", head).stdout.strip())
+                if last_activity_ago_s is not None:
+                    gh.activity[head] = ct + offset_s - last_activity_ago_s
+                time.time = lambda: ct + offset_s
+                try:
+                    return settle_now()
+                finally:
+                    time.time = real_time
+                    gh.head_checks.clear()
+                    gh.activity.clear()
+
+            # (a) slow but live: 90 min in, a job finished 2 min ago — main stays reserved.
+            s = reservation_at(90 * 60, 2 * 60)
+            check("reservation: slow but progressing CI (90 min, last job 2 min ago) keeps main reserved",
+                  s["in_flight"] and s["fast"] == [] and not s.get("timed_out"), str(s))
+            reset()
+            # (b) stalled: 20 min in, nothing started or finished since the update-branch.
+            s = reservation_at(RESERVATION_STALL_S + 5 * 60)
+            check("reservation: stalled CI (nothing started or completed in the stall window) times out",
+                  34 in s["fast"] and s.get("timed_out") == [35], str(s))
+            reset()
+            # (b') stalled after progress: jobs ran, then nothing for longer than the window.
+            s = reservation_at(40 * 60, RESERVATION_STALL_S + 60)
+            check("reservation: CI that progressed and then stalled times out",
+                  34 in s["fast"] and s.get("timed_out") == [35], str(s))
+            reset()
+            # (c) the hard ceiling bounds a CI that keeps trickling forever.
+            s = reservation_at(RESERVATION_CEILING_S + 60, 60)
+            check("reservation: past the hard ceiling the reservation times out even while CI progresses",
+                  34 in s["fast"] and s.get("timed_out") == [35], str(s))
+            reset()
+            # (d) a future-dated head still holds nothing, even with live CI activity (#13485).
+            s = reservation_at(-3600, -3600 - 60)
+            check("reservation: a head committed in the future times out even with live CI activity",
+                  34 in s["fast"] and s.get("timed_out") == [35], str(s))
             reset()
             # #13485: what #13500 left open; both cases fail on the code before it.
             # (a) right after update-branch nothing has REPORTED yet; that head must still hold main.

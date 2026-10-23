@@ -238,9 +238,9 @@ class SupplyChainTest(unittest.TestCase):
             if mutation == 'missing-plan-output':
                 doc['jobs']['changes']['outputs'].pop('verification-modules')
             elif mutation == 'missing-matrix-output':
-                doc['jobs']['changes']['outputs'].pop('verification-modules-json')
+                doc['jobs']['changes']['outputs'].pop('verification-shards-json')
             elif mutation == 'unsharded-verifier':
-                doc['jobs']['verification-metadata']['strategy']['matrix']['module'] = '[]'
+                doc['jobs']['verification-metadata']['strategy']['matrix']['shard'] = '[]'
             elif mutation == 'fail-fast-verifier':
                 doc['jobs']['verification-metadata']['strategy']['fail-fast'] = True
             elif mutation == 'wrong-shard-target':

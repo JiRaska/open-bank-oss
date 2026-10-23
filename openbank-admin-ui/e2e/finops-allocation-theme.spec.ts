@@ -25,6 +25,8 @@ const allocation = {
   unmapped: ['ingress'],
   method: 'requests-weighted',
   collectedAt: '2026-09-01T12:00:00Z',
+  governanceSource: { source: 'published', status: 'ready', sourceSha: 'a'.repeat(40),
+    sourceCollectedAt: '2026-09-01T11:00:00Z', fetchedAt: '2026-09-01T12:00:00Z' },
 }
 
 test.beforeEach(async ({ context, baseURL, page }) => {
@@ -47,6 +49,8 @@ test.describe('/finops/allocation — semantic theme', () => {
       await expect(page.getByText(/Payment execution|Provedení platby/i)).toBeVisible()
       await expect(page.getByText(/running components.*not in the governance manifest|běžících komponent.*není v governance manifestu/i)).toBeVisible()
       await expect(page.getByText(/per-flow sum can exceed 100%|součet přes procesy proto může přesáhnout 100 %/i)).toBeVisible()
+
+      await expect(page.getByRole('region', { name: /Cost domain classification source|Zdroj klasifikace nákladových domén/i })).toBeVisible()
 
       const results = await new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])

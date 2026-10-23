@@ -14,23 +14,17 @@
 // Sourcing mirrors the SBOM/docs bundle pattern (lib/services/docs.ts): the repo
 // root docs/ tree is .dockerignore'd out of the runtime fs, so the Dockerfile's
 // `governance-collector` stage bakes docs/adr + docs/threat-models + docs/agents
-// into an immutable /app/governance-bundle. First existing candidate wins:
+// into an immutable /app/governance-bundle. Validated published content takes precedence;
+// when absent, the image fallback is explicitly stale. Fallback candidates:
 //   1. $OPENBANK_GOVERNANCE_DOCS   (explicit override; set in the image)
 //   2. <cwd>/governance-bundle     (image-baked bundle)
 //   3. <cwd>/../docs               (local dev: `npm run dev` sees the repo root)
 
 import { promises as fs } from 'fs'
 import path from 'path'
-
-// ── Money-path services (source: openbank-libs/governance/rules.yaml →
-// money_path_services). Stable governance constant; used only to badge threat
-// models and flag money-path services that are MISSING one (the audit gap). ──
-const MONEY_PATH = new Set([
-  'ledger-service', 'transaction-service', 'account-service', 'balance-service',
-  'sepa-payment', 'sepa-instant', 'domestic-payment', 'clearing-service',
-  'swift-service', 'fx-service', 'lending-service', 'sca-service', 'consent-service',
-  'fraud-service',
-])
+import { parse as parseYaml } from 'yaml'
+import { resolveRepositoryDocumentation, repositoryDocumentationFallback, repositoryCatalogClassification } from '@/lib/evidence/repositoryDocumentationSource'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 
 export type AdrStatus = 'Accepted' | 'Proposed' | 'Superseded' | 'Deprecated' | 'Rejected' | 'Unknown'
 
@@ -48,6 +42,7 @@ export interface AdrMeta {
 }
 
 export interface AdrDoc extends AdrMeta {
+  contentSource?: ContentSourceMetadata
   /** Body markdown with the leading H1 + Date/Status/Author lines stripped. */
   body: string
 }
@@ -62,6 +57,7 @@ export interface ThreatModelMeta {
 }
 
 export interface ThreatModelDoc extends ThreatModelMeta {
+  contentSource?: ContentSourceMetadata
   markdown: string
 }
 
@@ -84,6 +80,24 @@ async function corpusDir(sub: 'adr' | 'threat-models' | 'agents'): Promise<strin
   return null
 }
 
+async function loadCorpus(sub: 'adr' | 'threat-models' | 'agents') {
+  const published = await resolveRepositoryDocumentation()
+  if (published.value) {
+    const key = sub === 'adr' ? 'adrs' : sub === 'threat-models' ? 'threatModels' : 'agentCharters'
+    return { files: published.value[key].map(item => ({ slug: path.basename(item.path, '.md'), markdown: item.markdown })),
+      contentSource: published.contentSource, moneyPathServices: published.moneyPathServices ?? new Set<string>() }
+  }
+  const dir = await corpusDir(sub)
+  const files = dir ? await Promise.all((await fs.readdir(dir)).filter(file => file.endsWith('.md')).map(async file =>
+    ({ slug: file.replace(/\.md$/, ''), markdown: await fs.readFile(path.join(dir, file), 'utf-8') }))) : []
+  let moneyPathServices: Set<string> | null = null
+  try {
+    const classification = repositoryCatalogClassification(JSON.parse(await fs.readFile(process.env.OPENBANK_CATALOG ?? path.resolve(process.cwd(), 'catalog.json'), 'utf-8')))
+    if (classification) moneyPathServices = new Set([...classification].filter(([, moneyPath]) => moneyPath).map(([service]) => service))
+  } catch { /* No classification is invented when the fallback catalog is absent. */ }
+  return { files, moneyPathServices, contentSource: repositoryDocumentationFallback(dir !== null, published.contentSource.detail) }
+}
+
 function normaliseStatus(raw: string): AdrStatus {
   const s = raw.toLowerCase()
   if (s.startsWith('accept')) return 'Accepted'
@@ -103,100 +117,63 @@ function parseAdr(slug: string, md: string): AdrDoc {
   const number = numMatch ? parseInt(numMatch[1], 10) : 0
   const numberLabel = numMatch ? numMatch[1] : '----'
   const title = firstHeading(md, slug).replace(/^\d+\.\s*/, '')
-  const status = normaliseStatus(md.match(/^Status:\s*(.+)$/m)?.[1]?.trim() ?? 'Unknown')
-  const date = md.match(/^Date:\s*(.+)$/m)?.[1]?.trim() ?? null
-  const authors = md.match(/^Author\(?s?\)?:\s*(.+)$/m)?.[1]?.trim() ?? null
-
-  // Strip the front block (H1 + the Date/Status/Author lines) — we render those
-  // in a styled meta bar, so leaving them in the body would duplicate them.
-  const body = md
-    .replace(/^#\s+.+?\r?\n/, '')
-    .replace(/^(?:Date|Status|Author\(?s?\)?):.*\r?\n?/gm, '')
-    .replace(/^\s+/, '')
+  const front = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(md)
+  let metadata: Record<string, unknown> = {}
+  try { const parsed: unknown = front ? parseYaml(front[1], { maxAliasCount: 20 }) : null; if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) metadata = parsed as Record<string, unknown> } catch { /* Legacy metadata remains readable. */ }
+  const authoredBody = front ? md.slice(front[0].length).replace(/^\s+/, '') : md
+  const status = normaliseStatus(typeof metadata['decision-status'] === 'string' ? metadata['decision-status'] : front ? 'Unknown' : md.match(/^Status:\s*(.+)$/m)?.[1]?.trim() ?? 'Unknown')
+  const date = typeof metadata.date === 'string' ? metadata.date : front ? null : md.match(/^Date:\s*(.+)$/m)?.[1]?.trim() ?? null
+  const authors = Array.isArray(metadata.authors) ? metadata.authors.filter(author => typeof author === 'string').join(', ') || null
+    : typeof metadata.authors === 'string' ? metadata.authors : front ? null : md.match(/^Author\(?s?\)?:\s*(.+)$/m)?.[1]?.trim() ?? null
+  const withoutHeading = authoredBody.replace(/^#\s+.+?\r?\n/, '').replace(/^\s+/, '')
+  const body = (front ? withoutHeading : withoutHeading.replace(/^(?:(?:Date|Status|Author\(?s?\)?):[^\r\n]*(?:\r?\n|$)|[ \t]*\r?\n)+/, '')).replace(/^\s+/, '')
 
   return { slug, number, numberLabel, title, status, date, authors, body }
 }
 
-export async function loadAdrIndex(): Promise<AdrMeta[]> {
-  const dir = await corpusDir('adr')
-  if (!dir) return []
-  const files = (await fs.readdir(dir)).filter(f => f.endsWith('.md'))
-  const metas = await Promise.all(
-    files.map(async f => {
-      const slug = f.replace(/\.md$/, '')
-      const md = await fs.readFile(path.join(dir, f), 'utf-8')
-      const { body: _body, ...meta } = parseAdr(slug, md)
-      return meta as AdrMeta
-    }),
-  )
-  return metas.sort((a, b) => a.number - b.number || a.slug.localeCompare(b.slug))
+export async function loadAdrRegistry(): Promise<{ items: AdrMeta[]; contentSource: ContentSourceMetadata }> {
+  const corpus = await loadCorpus('adr')
+  const items = corpus.files.filter(file => /^\d{4}[-.]/.test(file.slug)).map(({ slug, markdown }) => {
+    const { body: _body, ...meta } = parseAdr(slug, markdown)
+    return meta
+  }).sort((a, b) => a.number - b.number || a.slug.localeCompare(b.slug))
+  return { items, contentSource: corpus.contentSource }
 }
 
+export async function loadAdrIndex(): Promise<AdrMeta[]> { return (await loadAdrRegistry()).items }
+
 export async function loadAdr(slug: string): Promise<AdrDoc | null> {
-  if (!SLUG_RE.test(slug)) return null
-  const dir = await corpusDir('adr')
-  if (!dir) return null
-  try {
-    const md = await fs.readFile(path.join(dir, `${slug}.md`), 'utf-8')
-    return parseAdr(slug, md)
-  } catch {
-    return null
-  }
+  if (!SLUG_RE.test(slug) || !/^\d{4}[-.]/.test(slug)) return null
+  const corpus = await loadCorpus('adr')
+  const file = corpus.files.find(file => file.slug === slug)
+  return file ? { ...parseAdr(slug, file.markdown), contentSource: corpus.contentSource } : null
 }
 
 function threatService(slug: string): string {
   return slug.replace(/^openbank-/, '')
 }
 
-export async function loadThreatModelIndex(): Promise<ThreatModelMeta[]> {
-  const dir = await corpusDir('threat-models')
-  if (!dir) return []
-  const files = (await fs.readdir(dir)).filter(f => f.endsWith('.md'))
-  const metas = await Promise.all(
-    files.map(async f => {
-      const slug = f.replace(/\.md$/, '')
-      const service = threatService(slug)
-      const md = await fs.readFile(path.join(dir, f), 'utf-8')
-      return {
-        service,
-        slug,
-        title: firstHeading(md, service),
-        moneyPath: MONEY_PATH.has(service),
-      } satisfies ThreatModelMeta
-    }),
-  )
-  return metas.sort((a, b) => a.service.localeCompare(b.service))
+export async function loadThreatModelRegistry(): Promise<{ items: ThreatModelMeta[]; missing: string[]; classificationAvailable: boolean; contentSource: ContentSourceMetadata }> {
+  const corpus = await loadCorpus('threat-models')
+  const items = corpus.files.map(({ slug, markdown }) => ({ service: threatService(slug), slug,
+    title: firstHeading(markdown, threatService(slug)), moneyPath: corpus.moneyPathServices?.has(threatService(slug)) ?? false,
+  })).sort((a, b) => a.service.localeCompare(b.service))
+  const present = new Set(items.map(item => item.service))
+  return { items, missing: [...(corpus.moneyPathServices ?? [])].filter(service => !present.has(service)).sort(), classificationAvailable: corpus.moneyPathServices !== null, contentSource: corpus.contentSource }
 }
+
+export async function loadThreatModelIndex(): Promise<ThreatModelMeta[]> { return (await loadThreatModelRegistry()).items }
 
 export async function loadThreatModel(service: string): Promise<ThreatModelDoc | null> {
   if (!SLUG_RE.test(service)) return null
-  const dir = await corpusDir('threat-models')
-  if (!dir) return null
-  // Accept both the bare service id ("account-service") and the file slug
-  // ("openbank-account-service").
+  const corpus = await loadCorpus('threat-models')
   const bare = threatService(service)
-  for (const name of [`openbank-${bare}.md`, `${bare}.md`]) {
-    try {
-      const md = await fs.readFile(path.join(dir, name), 'utf-8')
-      return {
-        service: bare,
-        slug: name.replace(/\.md$/, ''),
-        title: firstHeading(md, bare),
-        moneyPath: MONEY_PATH.has(bare),
-        markdown: md,
-      }
-    } catch {
-      // try next candidate
-    }
-  }
-  return null
+  const file = corpus.files.find(file => file.slug === `openbank-${bare}`) ?? corpus.files.find(file => file.slug === bare)
+  return file ? { service: bare, slug: file.slug, title: firstHeading(file.markdown, bare),
+    moneyPath: corpus.moneyPathServices?.has(bare) ?? false, markdown: file.markdown, contentSource: corpus.contentSource } : null
 }
 
-/** Money-path services (rules.yaml) that have NO threat model yet — the gap. */
-export async function missingThreatModels(): Promise<string[]> {
-  const present = new Set((await loadThreatModelIndex()).map(m => m.service))
-  return [...MONEY_PATH].filter(s => !present.has(s)).sort()
-}
+export async function missingThreatModels(): Promise<string[]> { return (await loadThreatModelRegistry()).missing }
 
 // ── Agent charters (docs/agents, ADR-0156) — the narrative companion to the
 // enforced openbank-libs/governance/agents.yaml registry. Frontmatter carries
@@ -215,6 +192,7 @@ export interface AgentCharterDocMeta {
 }
 
 export interface AgentCharterDoc extends AgentCharterDocMeta {
+  contentSource?: ContentSourceMetadata
   /** Body markdown with the frontmatter block and leading H1 stripped. */
   body: string
 }
@@ -231,28 +209,16 @@ function parseAgentCharter(id: string, md: string): AgentCharterDoc {
 }
 
 export async function loadAgentCharterDocIndex(): Promise<AgentCharterDocMeta[]> {
-  const dir = await corpusDir('agents')
-  if (!dir) return []
-  const files = (await fs.readdir(dir)).filter(f => f.endsWith('.md') && f !== 'README.md')
-  const metas = await Promise.all(
-    files.map(async f => {
-      const id = f.replace(/\.md$/, '')
-      const md = await fs.readFile(path.join(dir, f), 'utf-8')
-      const { body: _body, ...meta } = parseAgentCharter(id, md)
-      return meta
-    }),
-  )
-  return metas.sort((a, b) => a.id.localeCompare(b.id))
+  const corpus = await loadCorpus('agents')
+  return corpus.files.filter(file => file.slug !== 'README').map(file => {
+    const { body: _body, ...meta } = parseAgentCharter(file.slug, file.markdown)
+    return meta
+  }).sort((a, b) => a.id.localeCompare(b.id))
 }
 
 export async function loadAgentCharterDoc(id: string): Promise<AgentCharterDoc | null> {
   if (!SLUG_RE.test(id)) return null
-  const dir = await corpusDir('agents')
-  if (!dir) return null
-  try {
-    const md = await fs.readFile(path.join(dir, `${id}.md`), 'utf-8')
-    return parseAgentCharter(id, md)
-  } catch {
-    return null
-  }
+  const corpus = await loadCorpus('agents')
+  const file = corpus.files.find(file => file.slug === id)
+  return file ? { ...parseAgentCharter(id, file.markdown), contentSource: corpus.contentSource } : null
 }

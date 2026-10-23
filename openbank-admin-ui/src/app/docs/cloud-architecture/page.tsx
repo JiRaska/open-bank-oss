@@ -10,6 +10,7 @@ import type { InfraStatusResult } from '@/lib/infra/probes'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { eksVersion, platformVersions } from '@/lib/platform-versions'
 import { LIVE_UNAVAILABLE_NOTE, nodesText, versionText, type Inventory, type PlatformView } from '@/lib/platform-view'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 import { usePlatformView } from '@/lib/use-platform-view'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
@@ -219,7 +220,7 @@ export default function CloudArchitecturePage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const view = usePlatformView()
-  const inventory = platformVersions?.inventory ?? null
+  const inventory = view ? view.inventory : platformVersions?.inventory ?? null
   const bootstrap = useMemo(() => bootstrapNodes(view), [view])
   const namespaces = useMemo(() => namespaceGroups(view, inventory), [view, inventory])
   const substrate = useMemo(() => substrateNodes(view, inventory), [view, inventory])
@@ -260,6 +261,7 @@ export default function CloudArchitecturePage() {
 
   return (
     <div>
+      <ContentSourceNote source={view?.declarationSource} />
       <DocsPageHeader
         crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>

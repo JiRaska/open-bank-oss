@@ -142,6 +142,7 @@ export function allocate(
   report: CostReportLike,
   footprints: ServiceFootprint[],
   groups: readonly CostGroup[] = COST_GROUPS,
+  lookupDomain: (service: string) => DataDomain | undefined = domainForService,
 ): AllocationResult {
   if (!report?.available || !Array.isArray(report.services) || report.services.length === 0) {
     return emptyResult(report ?? { available: false, currency: 'USD', total: 0, services: [] })
@@ -180,7 +181,7 @@ export function allocate(
   const byService: ServiceAllocation[] = fp
     .map(f => {
       const amount = round2(allocatable * weightOf(f))
-      const domain = domainForService(f.service)
+      const domain = lookupDomain(f.service)
       if (!domain) unmapped.push(f.service)
       return {
         service: f.service,
