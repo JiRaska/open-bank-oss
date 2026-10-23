@@ -14,14 +14,18 @@ import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.openbank.libs.iso20022.ChargeBearer
+import com.openbank.libs.iso20022.ClearingSystem
 import com.openbank.libs.iso20022.CreditTransferInstruction
+import com.openbank.libs.iso20022.InstitutionCreditTransferInstruction
 import com.openbank.libs.iso20022.Pacs008Builder
+import com.openbank.libs.iso20022.Pacs009Builder
 import com.openbank.libs.iso20022.SettlementMethod
 import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 
@@ -138,5 +142,146 @@ class ClearingSimulatorPactConsumerTest {
         assertThat(body).contains("urn:iso:std:iso:20022:tech:xsd:pacs.002.001.10")
         assertThat(body).contains("<TxSts>ACSC</TxSts>")
         assertThat(body).contains("<OrgnlEndToEndId>TRX-PACT-001</OrgnlEndToEndId>")
+    }
+
+    /**
+     * The bank-own rail (contract 9.3): a `pacs.009` on the TARGET2 route answered with an ACSC
+     * `pacs.002`, built with the same builder + mapping shape `SchemeGatewayAdapter` uses. The path
+     * is a LITERAL so the provider replay goes red if the client ever points at a route the
+     * simulator does not serve.
+     */
+    private val pacs009Xml = Pacs009Builder().build(
+        InstitutionCreditTransferInstruction(
+            messageId = "FI-1B4E28BA2FA14D2E",
+            creationDateTime = OffsetDateTime.of(2026, 10, 19, 9, 0, 0, 0, ZoneOffset.UTC),
+            interbankSettlementDate = LocalDate.of(2026, 10, 19),
+            instructionId = "1B4E28BA2FA14D2E",
+            endToEndId = "1b4e28ba2fa14d2e883f0016d3cca427",
+            transactionId = "1b4e28ba2fa14d2e883f0016d3cca427",
+            uetr = "3f0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f",
+            amount = BigDecimal("1000000.00"),
+            currency = "EUR",
+            settlementMethod = SettlementMethod.CLRG,
+            clearingSystem = ClearingSystem(code = "TGT"),
+            instructingAgentBic = "OPENCZPPXXX",
+            instructedAgentBic = "BNPAFRPPXXX",
+            intermediaryAgentBic = null,
+            debtorBic = "OPENCZPPXXX",
+            debtorAccount = "CZ6508000000192000145399",
+            creditorBic = "BNPAFRPPXXX",
+            creditorName = "Counterparty Bank",
+            creditorAccount = "FR1420041010050500013M02606",
+            remittanceInfo = "MM deal settlement",
+        ),
+    )
+
+    @Pact(consumer = "openbank-swift-service", provider = "openbank-clearing-simulator")
+    fun submitInstitutionTransferPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("the clearing simulator is available")
+        .uponReceiving("POST a bank-own pacs.009 on the TARGET2 route")
+        .path("/api/v1/clearing/fi-credit-transfers/target2")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/xml"))
+        .body(pacs009Xml, "application/xml")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/xml"))
+        .body(
+            PactXmlBuilder("Document").build { root ->
+                root.setAttributes(mapOf("xmlns" to "urn:iso:std:iso:20022:tech:xsd:pacs.002.001.10"))
+                root.appendElement("FIToFIPmtStsRpt", emptyMap<String, Any?>()) { rpt ->
+                    rpt.appendElement("GrpHdr", emptyMap<String, Any?>()) { grpHdr ->
+                        grpHdr.appendElement(
+                            "MsgId",
+                            emptyMap<String, Any?>(),
+                            Matchers.regexp("SIM-STS-.+", "SIM-STS-1b4e28ba2fa14d2e883f0016d3"),
+                        )
+                        grpHdr.appendElement(
+                            "CreDtTm",
+                            emptyMap<String, Any?>(),
+                            Matchers.regexp(
+                                "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z",
+                                "2026-10-19T09:00:00.123456Z",
+                            ),
+                        )
+                    }
+                    rpt.appendElement("TxInfAndSts", emptyMap<String, Any?>()) { tx ->
+                        tx.appendElement(
+                            "OrgnlEndToEndId",
+                            emptyMap<String, Any?>(),
+                            "1b4e28ba2fa14d2e883f0016d3cca427",
+                        )
+                        tx.appendElement("OrgnlTxId", emptyMap<String, Any?>(), "1b4e28ba2fa14d2e883f0016d3cca427")
+                        tx.appendElement("TxSts", emptyMap<String, Any?>(), "ACSC")
+                    }
+                }
+            },
+        )
+        .toPact()
+
+    /** Negative contract: a route the simulator does not clear is 404, never a silent pacs.002. */
+    @Pact(consumer = "openbank-swift-service", provider = "openbank-clearing-simulator")
+    fun unknownRoutePact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("the clearing simulator is available")
+        .uponReceiving("POST a pacs.009 on a route the simulator does not clear")
+        .path("/api/v1/clearing/fi-credit-transfers/sepa")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/xml"))
+        .body(pacs009Xml, "application/xml")
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "submitInstitutionTransferPact")
+    fun `a pacs_009 on the TARGET2 route returns an ACSC pacs_002`(mockServer: MockServer) {
+        val body = given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/xml")
+            .body(pacs009Xml)
+            .post("/api/v1/clearing/fi-credit-transfers/target2")
+            .then()
+            .statusCode(200)
+            .extract().body().asString()
+        assertThat(
+            body,
+        ).contains("<TxSts>ACSC</TxSts>", "<OrgnlEndToEndId>1b4e28ba2fa14d2e883f0016d3cca427</OrgnlEndToEndId>")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "unknownRoutePact")
+    fun `an unknown clearing route is 404`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/xml")
+            .body(pacs009Xml)
+            .post("/api/v1/clearing/fi-credit-transfers/sepa")
+            .then()
+            .statusCode(404)
+    }
+
+    /** The status query by UETR (path pinned as a literal); an unknown UETR is 404 = never received. */
+    @Pact(consumer = "openbank-swift-service", provider = "openbank-clearing-simulator")
+    fun unknownUetrStatusPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("the clearing simulator is available")
+        .uponReceiving("GET the status of a UETR the simulator never received")
+        .path("/api/v1/clearing/fi-credit-transfers/status/9a0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f")
+        .method("GET")
+        .willRespondWith()
+        .status(404)
+        .headers(mapOf("Content-Type" to "application/json"))
+        // The TYPED not-found the rail requires before it may resend; a bare 404 is ambiguity.
+        .body("""{"code":"UNKNOWN_UETR","uetr":"9a0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f"}""", "application/json")
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "unknownUetrStatusPact")
+    fun `an unknown UETR status is 404`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .get("/api/v1/clearing/fi-credit-transfers/status/9a0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f")
+            .then()
+            .statusCode(404)
+            .body("code", org.hamcrest.Matchers.equalTo("UNKNOWN_UETR"))
     }
 }

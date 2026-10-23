@@ -14,6 +14,25 @@
 #       approver role, never the dealer; the domain also refuses the deal's creator and submitter)
 #   treasury.deal.override-limit              — ROLE_TREASURY_SENIOR_APPROVER only (ADR-0315 D4)
 #   treasury.nostro.read                      — treasury dealers, approvers and admins (#10896)
+#   treasury.reference.read, treasury.cashflow.read, treasury.calendar.read — treasury staff (ADR-0344)
+#   treasury.reference.propose, .import       — ROLE_TREASURY_REFERENCE_EDITOR or ROLE_TREASURY_BACK_OFFICE
+#   treasury.reference.approve                — ROLE_TREASURY_APPROVER; for kind `counterparty` (limits)
+#                                               ROLE_TREASURY_SENIOR_APPROVER only
+#   treasury.reference.reject, .verify        — ROLE_TREASURY_APPROVER
+#   treasury.cashflow.override.propose        — ROLE_TREASURY_BACK_OFFICE
+#   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
+#   treasury.deal.correction.propose          — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE (ADR-0344 D7)
+#   treasury.deal.correction.approve/.reject  — ROLE_TREASURY_APPROVER (the domain refuses every term author)
+#   treasury.deal.correction.override-limit   — ROLE_TREASURY_SENIOR_APPROVER only (a limit decision, ADR-0315 D4)
+#   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
+#   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
+#   treasury.fixing.read, treasury.marketdata.read — treasury staff (ADR-0344 D5)
+#   treasury.marketdata.import, treasury.fixing.manual, treasury.fixing.run — ROLE_TREASURY_BACK_OFFICE
+#   treasury.revaluation.read — treasury staff; treasury.revaluation.run — ROLE_TREASURY_BACK_OFFICE (ADR-0344 D7/D8)
+#   treasury.marketdata.approve               — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
+#   treasury.payment.propose, .cancel        — ROLE_TREASURY_BACK_OFFICE (.cancel also ROLE_TREASURY_APPROVER)
+#   treasury.payment.resolve                  — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
+#   treasury.payment.release                  — ROLE_TREASURY_PAYMENT_RELEASER only (ADR-0344 D6)
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
 #                                               balance; it is still back-office evidence, #10896)
 #
@@ -54,7 +73,11 @@ treasury_staff if {
 
 allowed_reasons contains "treasury-staff-read" if {
 	treasury_staff
-	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_ADMIN"}
+	some role in {
+		"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER",
+		"ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR", "ROLE_TREASURY_PAYMENT_RELEASER",
+		"ROLE_ADMIN",
+	}
 	role in input.principal.roles
 	input.action in {
 		"treasury.deal.read",
@@ -63,6 +86,17 @@ allowed_reasons contains "treasury-staff-read" if {
 		"treasury.nostro.read",
 		# ADR-0315 D9: the simulated counterparties' SYNTHETIC quotes (GET /quotes).
 		"treasury.quote.read",
+		# ADR-0344: reference data, the cash-flow ledger and the event calendar.
+		"treasury.reference.read",
+		"treasury.cashflow.read",
+		"treasury.calendar.read",
+		# ADR-0344 D5: fixings and market data (factor history, quality, batches).
+		"treasury.fixing.read",
+		"treasury.marketdata.read",
+		# ADR-0344 D6: own-account payments.
+		"treasury.payment.read",
+		# ADR-0344 D7/D8: the revaluation record of a date.
+		"treasury.revaluation.read",
 	}
 }
 
@@ -109,4 +143,151 @@ allowed_reasons contains "treasury-nostro-upload" if {
 	treasury_staff
 	"ROLE_TREASURY_APPROVER" in input.principal.roles
 	input.action == "treasury.nostro.upload"
+}
+
+# ADR-0344 D3/D4/D10: back office and the reference editor PROPOSE; the approver DECIDES. No role
+# here both writes and activates. The domain additionally refuses the proposer as decider and any
+# non-human as decider; AI agents get nothing from this file (their charter is the one grant).
+allowed_reasons contains "treasury-reference-propose" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_REFERENCE_EDITOR", "ROLE_TREASURY_BACK_OFFICE"}
+	role in input.principal.roles
+	input.action in {"treasury.reference.propose", "treasury.reference.import"}
+}
+
+allowed_reasons contains "treasury-reference-decide" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action in {"treasury.reference.reject", "treasury.reference.verify"}
+}
+
+# Approving a kind that carries no credit limit: the approver. An ALLOWLIST, not "anything but
+# counterparty": a missing, differently-cased or unknown kind matches nothing here and is denied,
+# so a spelling the domain might still resolve can never reach the plain approver.
+allowed_reasons contains "treasury-reference-approve" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action == "treasury.reference.approve"
+	input.resource.id in non_limit_reference_kinds
+}
+
+# Every ADR-0344 reference kind (the reference_records kind CHECK) except `counterparty`.
+non_limit_reference_kinds := {
+	"calendar", "index", "ssi", "netting", "security", "book", "bucket-set", "regulatory-code",
+	"product-type", "party-group", "party-type", "country", "document-type", "account",
+	"settlement-place", "loan-type", "communication-channel", "market-factor", "own-capital-item",
+	"period-length", "scenario", "behavioural-scenario", "calculation-settings", "limit-settings",
+	"derivative-conversion-factor", "collateral-haircut", "portfolio-group", "accounting-settings",
+	"balance-sheet-side", "dealing-filter",
+}
+
+# A counterparty record carries the credit limits the booking check reads, so activating one is a
+# limit decision and needs the SENIOR approver — never a cheaper path than the senior limit
+# override. The domain refines this (only a raise strictly needs the senior); the policy is the
+# coarser, safe side of the same rule.
+allowed_reasons contains "treasury-reference-approve-counterparty" if {
+	treasury_staff
+	"ROLE_TREASURY_SENIOR_APPROVER" in input.principal.roles
+	input.action == "treasury.reference.approve"
+	reference_kind_is_counterparty
+}
+
+reference_kind_is_counterparty if input.resource.id == "counterparty"
+
+allowed_reasons contains "treasury-back-office-write" if {
+	treasury_staff
+	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
+	input.action in {
+		"treasury.cashflow.override.propose",
+		"treasury.deal.send-confirmation",
+	}
+}
+
+allowed_reasons contains "treasury-approver-cashflow" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action in {
+		"treasury.cashflow.override.approve",
+		"treasury.cashflow.override.reject",
+		"treasury.deal.send-confirmation",
+	}
+}
+
+# ADR-0344 D7: a correction of a booked deal is proposed by the desk or back office and decided by an
+# approver. The domain additionally refuses as decider the proposer, every term author of the deal,
+# the authors of its earlier corrections and any non-human principal.
+allowed_reasons contains "treasury-correction-propose" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_BACK_OFFICE"}
+	role in input.principal.roles
+	input.action == "treasury.deal.correction.propose"
+}
+
+allowed_reasons contains "treasury-correction-decide" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action in {"treasury.deal.correction.approve", "treasury.deal.correction.reject"}
+}
+
+# A correction whose terms breach a counterparty limit is a limit decision: the senior only, as for
+# a booking (the domain refuses a term author and the later approval by the same senior).
+allowed_reasons contains "treasury-correction-override-limit" if {
+	treasury_staff
+	"ROLE_TREASURY_SENIOR_APPROVER" in input.principal.roles
+	input.action == "treasury.deal.correction.override-limit"
+}
+
+# Schedule preview runs the schedule engine: real work per call, so only the roles that build or
+# check a ticket (dealer, back office) may ask for it — not every reader.
+allowed_reasons contains "treasury-schedule-preview" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_BACK_OFFICE"}
+	role in input.principal.roles
+	input.action == "treasury.deal.preview"
+}
+
+# ADR-0344 D5: back office imports observations, proposes manual fixings and runs the fixing pass;
+# an approver (a different human, checked in the domain and the database) activates them. No role
+# both writes and activates market data; machines and AI agents get nothing from this file.
+allowed_reasons contains "treasury-back-office-market-data" if {
+	treasury_staff
+	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
+	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run", "treasury.revaluation.run"}
+}
+
+allowed_reasons contains "treasury-approver-market-data" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
+	role in input.principal.roles
+	input.action == "treasury.marketdata.approve"
+}
+
+# ADR-0344 D6: back office proposes and cancels own-account payments; ONLY the payment releaser
+# releases one — no dealer, approver, admin, machine or agent. The domain adds that the releaser is
+# neither a deal's creator nor a term author.
+allowed_reasons contains "treasury-back-office-payment" if {
+	treasury_staff
+	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
+	input.action in {"treasury.payment.propose", "treasury.payment.cancel"}
+}
+
+allowed_reasons contains "treasury-approver-payment-cancel" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action == "treasury.payment.cancel"
+}
+
+# A released payment is resolved (MANUALLY_SETTLED / RETURNED) by an approver; the domain refuses
+# its releaser and every term author.
+allowed_reasons contains "treasury-approver-payment-resolve" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
+	role in input.principal.roles
+	input.action == "treasury.payment.resolve"
+}
+
+allowed_reasons contains "treasury-payment-release" if {
+	treasury_staff
+	"ROLE_TREASURY_PAYMENT_RELEASER" in input.principal.roles
+	input.action == "treasury.payment.release"
 }

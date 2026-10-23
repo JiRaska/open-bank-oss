@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: risk-engine
     app.kubernetes.io/part-of: risk
   annotations:
-    openbank.tech/policy-checksum: "c59532b7f48cb4a2"
+    openbank.tech/policy-checksum: "274835f817dd006f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -848,6 +848,15 @@ data:
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-treasury")
     	input.action == "risk.curve-set.read"
+    }
+
+    # ADR-0344 D8: treasury revalues its fair-value book off the risk engine's valuation of a TIED_OUT
+    # snapshot (RevaluationService). Same machine, same principal-id keying; snapshot reads only — the
+    # list and the per-snapshot valuation, both `risk.snapshot.read`. Never create.
+    allowed_reasons contains "treasury-m2m-risk-snapshot-read" if {
+    	input.principal.type == "HUMAN"
+    	machine_named("service-account-openbank-treasury")
+    	input.action == "risk.snapshot.read"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0

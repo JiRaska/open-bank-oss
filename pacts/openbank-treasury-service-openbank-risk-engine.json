@@ -4,6 +4,199 @@
   },
   "interactions": [
     {
+      "description": "GET the snapshot runs to find the TIED_OUT run of a valuation date",
+      "providerStates": [
+        {
+          "name": "a TIED_OUT risk snapshot values a treasury IRS"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/risk/snapshots",
+        "query": {
+          "limit": [
+            "100"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "runs": [
+            {
+              "asOf": "2026-06-30",
+              "id": "0191c0de-0000-7000-8000-0000000052a1",
+              "status": "TIED_OUT"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.runs": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.runs[*].asOf": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.runs[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the valuation of a TIED_OUT snapshot for the revaluation",
+      "providerStates": [
+        {
+          "name": "a TIED_OUT risk snapshot values a treasury IRS"
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "STRING",
+            "expression": "/api/v1/risk/snapshots/${runId}/valuation",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/api/v1/risk/snapshots/0191c0de-0000-7000-8000-0000000052a1/valuation"
+      },
+      "response": {
+        "body": {
+          "deals": [
+            {
+              "clean": 1234.56,
+              "dealId": "0191c0de-0000-7000-8000-00000000d1a1",
+              "pv": 1234.56
+            }
+          ],
+          "header": {
+            "asOf": "2026-06-30",
+            "currency": "CZK",
+            "runId": "0191c0de-0000-7000-8000-0000000052a1",
+            "valuationInputHash": "sha256:0"
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.deals": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.deals[*].clean": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.deals[*].dealId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.deals[*].pv": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.header.asOf": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.header.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.header.runId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.header.valuationInputHash": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "GET a curve set with its pillars for the simulated quotes",
       "providerStates": [
         {
@@ -206,6 +399,21 @@
       }
     },
     {
+      "description": "GET a snapshot valuation with no identity",
+      "providerStates": [
+        {
+          "name": "no valid identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/risk/snapshots/0191c0de-0000-7000-8000-0000000052a1/valuation"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "GET the curve sets with no identity",
       "providerStates": [
         {
@@ -218,6 +426,26 @@
         "query": {
           "limit": [
             "1"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "GET the snapshot runs with no identity",
+      "providerStates": [
+        {
+          "name": "no valid identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/risk/snapshots",
+        "query": {
+          "limit": [
+            "100"
           ]
         }
       },

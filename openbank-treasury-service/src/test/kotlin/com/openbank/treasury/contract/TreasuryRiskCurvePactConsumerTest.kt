@@ -22,6 +22,9 @@ import com.openbank.treasury.domain.model.QuotePricer
 import com.openbank.treasury.infrastructure.quote.CurveSetListResponse
 import com.openbank.treasury.infrastructure.quote.CurveSetResponse
 import com.openbank.treasury.infrastructure.quote.RiskCurveRestClient
+import com.openbank.treasury.infrastructure.revaluation.RiskValuationRestClient
+import com.openbank.treasury.infrastructure.revaluation.SnapshotRunListResponse
+import com.openbank.treasury.infrastructure.revaluation.ValuationResponse
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.QueryParam
@@ -42,6 +45,11 @@ import java.util.UUID
  * client's `@Path` ([listPath], [getPath]). Deriving both from the annotation would let them move
  * together and stay green against a route that does not exist. The curve-set id is supplied by the
  * provider state, because the provider mints it when the state uploads the set.
+ *
+ * It also carries the revaluation's reads (ADR-0344 D8, [RiskValuationRestClient]): the snapshot
+ * run list (its `TIED_OUT` status pinned BY VALUE — the adapter keeps only those runs) and one run's
+ * valuation, each with a negative twin refused 401 without identity. One class, because the pact
+ * file is written per consumer/provider pair and a second class would overwrite it.
  *
  * IMPORTANT — regenerate on change: re-run
  * `./gradlew :openbank-treasury-service:test --tests "*TreasuryRiskCurvePactConsumerTest*"` and
@@ -157,6 +165,109 @@ class TreasuryRiskCurvePactConsumerTest {
         ).queryParam(limitParam, 1).get(listPath).then().statusCode(HTTP_UNAUTHORIZED)
     }
 
+    @Pact(consumer = "openbank-treasury-service", provider = "openbank-risk-engine")
+    fun snapshotListPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(VALUATION_STATE)
+        .uponReceiving("GET the snapshot runs to find the TIED_OUT run of a valuation date")
+        .path("/api/v1/risk/snapshots")
+        .query("limit=100")
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .body(
+            newJsonBody { o ->
+                o.eachLike("runs") { r ->
+                    r.uuid("id", UUID.fromString(RUN_ID))
+                    r.stringType("asOf", RUN_AS_OF)
+                    r.stringValue("status", "TIED_OUT")
+                }
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-treasury-service", provider = "openbank-risk-engine")
+    fun valuationPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(VALUATION_STATE)
+        .uponReceiving("GET the valuation of a TIED_OUT snapshot for the revaluation")
+        .pathFromProviderState("/api/v1/risk/snapshots/\${runId}/valuation", "/api/v1/risk/snapshots/$RUN_ID/valuation")
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .body(
+            newJsonBody { o ->
+                o.`object`("header") { h ->
+                    h.uuid("runId", UUID.fromString(RUN_ID))
+                    h.stringType("asOf", RUN_AS_OF)
+                    h.stringType("currency", "CZK")
+                    h.stringType("valuationInputHash", "sha256:0")
+                }
+                o.eachLike("deals") { d ->
+                    d.uuid("dealId", UUID.fromString(DEAL_ID))
+                    d.numberType("pv", PV)
+                    d.numberType("clean", PV)
+                }
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-treasury-service", provider = "openbank-risk-engine")
+    fun anonymousRunListRefusedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NO_IDENTITY)
+        .uponReceiving("GET the snapshot runs with no identity")
+        .path("/api/v1/risk/snapshots")
+        .query("limit=100")
+        .method("GET")
+        .willRespondWith()
+        .status(HTTP_UNAUTHORIZED)
+        .toPact()
+
+    @Pact(consumer = "openbank-treasury-service", provider = "openbank-risk-engine")
+    fun anonymousValuationRefusedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NO_IDENTITY)
+        .uponReceiving("GET a snapshot valuation with no identity")
+        .path("/api/v1/risk/snapshots/$RUN_ID/valuation")
+        .method("GET")
+        .willRespondWith()
+        .status(HTTP_UNAUTHORIZED)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "snapshotListPact")
+    fun `the run list carries the TIED_OUT status the adapter filters on`(mockServer: MockServer) {
+        assertThat(runListPath).isEqualTo("/api/v1/risk/snapshots")
+        val body = given().baseUri(mockServer.getUrl()).queryParam(runLimitParam, 100)
+            .get(runListPath).then().statusCode(200).extract().asString()
+        val run = json.readValue<SnapshotRunListResponse>(body).runs.single()
+        assertThat(run.id).isEqualTo(UUID.fromString(RUN_ID))
+        assertThat(run.status).isEqualTo("TIED_OUT")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "valuationPact")
+    fun `the valuation carries each deal's clean value`(mockServer: MockServer) {
+        assertThat(valuationPath).isEqualTo("/api/v1/risk/snapshots/{id}/valuation")
+        val body = given().baseUri(mockServer.getUrl()).get(valuationPath.replace("{id}", RUN_ID))
+            .then().statusCode(200).extract().asString()
+        val v = json.readValue<ValuationResponse>(body)
+        assertThat(v.header.runId).isEqualTo(UUID.fromString(RUN_ID))
+        assertThat(v.deals.single().dealId).isEqualTo(UUID.fromString(DEAL_ID))
+        assertThat(v.deals.single().clean).isNotNull()
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "anonymousRunListRefusedPact")
+    fun `an anonymous snapshot run list is refused 401`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).queryParam(runLimitParam, 100).get(runListPath)
+            .then().statusCode(HTTP_UNAUTHORIZED)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "anonymousValuationRefusedPact")
+    fun `an anonymous valuation read is refused 401`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).get(valuationPath.replace("{id}", RUN_ID))
+            .then().statusCode(HTTP_UNAUTHORIZED)
+    }
+
     private companion object {
         const val STATE = "a curve set with a CZEONIA curve exists"
         const val NO_IDENTITY = "no valid identity is presented"
@@ -176,6 +287,21 @@ class TreasuryRiskCurvePactConsumerTest {
         )
             .joinToString("/") { it.trim('/') }.let { "/$it" }
         val limitParam: String = RiskCurveRestClient::class.java
+            .getDeclaredMethod("list", Int::class.javaPrimitiveType)
+            .parameterAnnotations[0].filterIsInstance<QueryParam>().single().value
+
+        const val VALUATION_STATE = "a TIED_OUT risk snapshot values a treasury IRS"
+        const val RUN_ID = "0191c0de-0000-7000-8000-0000000052a1"
+        const val DEAL_ID = "0191c0de-0000-7000-8000-00000000d1a1"
+        const val RUN_AS_OF = "2026-06-30"
+        const val PV = 1234.56
+        val runListPath: String = RiskValuationRestClient::class.java.getAnnotation(Path::class.java).value
+        val valuationPath: String = listOf(
+            runListPath,
+            RiskValuationRestClient::class.java.getDeclaredMethod("valuation", String::class.java)
+                .getAnnotation(Path::class.java).value,
+        ).joinToString("/") { it.trim('/') }.let { "/$it" }
+        val runLimitParam: String = RiskValuationRestClient::class.java
             .getDeclaredMethod("list", Int::class.javaPrimitiveType)
             .parameterAnnotations[0].filterIsInstance<QueryParam>().single().value
     }
