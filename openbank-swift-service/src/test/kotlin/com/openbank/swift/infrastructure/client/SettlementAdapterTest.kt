@@ -321,6 +321,9 @@ class SettlementAdapterTest {
         val outcome = adapter.settle(message(valueDate = "2026-06-22"))
 
         assertThat(outcome.settled).isFalse()
+        // #13686: it can never heal, so it is permanent (the re-drive stops) and counted as bad-data.
+        assertThat(outcome.permanent).isTrue()
+        assertSingleUnsettled("bad-data")
         verify(exactly = 0) { client.initiateTransaction(any()) }
     }
 

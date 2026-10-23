@@ -5,6 +5,7 @@
 package com.openbank.swift.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.swift.application.port.`in`.SendSwiftCommand
 import com.openbank.swift.application.port.out.SchemeGatewayPort
@@ -14,6 +15,7 @@ import com.openbank.swift.application.port.out.SettlementOutcome
 import com.openbank.swift.application.port.out.SettlementPort
 import com.openbank.swift.application.port.out.SettlementUnavailableException
 import com.openbank.swift.application.port.out.SwiftRepository
+import com.openbank.swift.application.port.out.SwiftSettlementRedrivePort
 import com.openbank.swift.domain.model.SwiftMessage
 import com.openbank.swift.domain.model.SwiftMessageType
 import com.openbank.swift.domain.model.SwiftPriority
@@ -40,6 +42,9 @@ class SwiftServiceTest {
     private val schemeGatewayPort = mockk<SchemeGatewayPort>()
     private val settlementPort = mockk<SettlementPort>()
     private val objectMapper = ObjectMapper().apply { findAndRegisterModules() }
+    private val redrive = mockk<SwiftSettlementRedrivePort>().also {
+        coEvery { it.stop(any(), any(), any()) } returns true
+    }
     private val clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
     private val service = SwiftService(
         repo,
@@ -47,6 +52,7 @@ class SwiftServiceTest {
         settlementPort,
         objectMapper,
         clock,
+        redrive,
         schemeSubmissionEnabled = false,
     )
     private val serviceWithFlag = SwiftService(
@@ -55,6 +61,7 @@ class SwiftServiceTest {
         settlementPort,
         objectMapper,
         clock,
+        redrive,
         schemeSubmissionEnabled = true,
     )
 
@@ -271,7 +278,7 @@ class SwiftServiceTest {
             coEvery { settlementPort.settle(capture(sent)) } returns SettlementOutcome(true, UUID.randomUUID())
             coEvery { repo.completeBooking(any(), any(), any()) } answers { firstArg() }
 
-            assertThat(serviceWithFlag.settleAccepted(held).status).isEqualTo(SwiftStatus.COMPLETED)
+            assertThat(serviceWithFlag.settleAccepted(held).message.status).isEqualTo(SwiftStatus.COMPLETED)
             assertThat(sent.captured.valueDate).isEqualTo("20260527")
             assertThat(sent.captured).isEqualTo(held)
             coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
@@ -281,10 +288,33 @@ class SwiftServiceTest {
     fun `settleAccepted never settles a message that is not SENT`(): Unit = runBlocking {
         SwiftStatus.entries.filter { it != SwiftStatus.SENT }.forEach { status ->
             val other = message(UUID.randomUUID(), status)
-            assertThat(serviceWithFlag.settleAccepted(other)).isEqualTo(other)
+            assertThat(serviceWithFlag.settleAccepted(other).message).isEqualTo(other)
         }
         coVerify(exactly = 0) { settlementPort.settle(any()) }
     }
+
+    @Test
+    fun `a permanent settlement outcome is reported so the re-drive can stop`(): Unit = runBlocking {
+        coEvery { settlementPort.settle(any()) } returns SettlementOutcome(false, null, permanent = true)
+        val attempt = serviceWithFlag.settleAccepted(message(UUID.randomUUID(), SwiftStatus.SENT))
+        assertThat(attempt.permanent).isTrue()
+        assertThat(attempt.message.status).isEqualTo(SwiftStatus.SENT)
+    }
+
+    @Test
+    fun `operator ack and reject stop the re-drive first and are refused while it holds a live claim`(): Unit =
+        runBlocking {
+            val id = UUID.randomUUID()
+            coEvery { repo.findById(id) } returns message(id, SwiftStatus.SENT)
+            coEvery { redrive.stop(id, any(), any()) } returns false
+            assertThatThrownBy { runBlocking { service.acknowledge(id, "ack") } }
+                .isInstanceOf(ResourceConflictException::class.java)
+            assertThatThrownBy { runBlocking { service.reject(id, "no") } }
+                .isInstanceOf(ResourceConflictException::class.java)
+            coVerify(exactly = 0) { repo.saveWithOutbox(any(), any()) }
+            coVerify { redrive.stop(id, "operator-ack", any()) }
+            coVerify { redrive.stop(id, "operator-reject", any()) }
+        }
 
     @Test
     fun `settlement rethrows cancellation instead of holding the message`(): Unit = runBlocking {

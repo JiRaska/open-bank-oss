@@ -11,7 +11,9 @@ import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.logging.Logger
 import java.time.Duration
 
 /**
@@ -35,6 +37,7 @@ class SwiftSettlementRedriveScheduler(
     private val batchSize: Int,
 ) {
     private var liveness: WorkflowLivenessRecorder? = null
+    private val log = Logger.getLogger(SwiftSettlementRedriveScheduler::class.java)
 
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
         if (enabled) {
@@ -45,12 +48,27 @@ class SwiftSettlementRedriveScheduler(
         }
     }
 
-    @Scheduled(every = "60s", delayed = "30s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    @Suppress("TooGenericExceptionCaught")
+    @Scheduled(
+        every = "\${openbank.swift.settlement-redrive.every:60s}",
+        delayed = "\${openbank.swift.settlement-redrive.delayed:30s}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
+    )
     suspend fun sweep() {
         if (!enabled) return
         service.due(batchSize).forEach { id ->
-            if (service.redrive(id) == Result.EXHAUSTED) {
-                metrics.unsettled(SwiftSettlementMetrics.Outcome.REDRIVE_EXHAUSTED)
+            try {
+                if (service.redrive(id) == Result.EXHAUSTED) {
+                    metrics.unsettled(SwiftSettlementMetrics.Outcome.REDRIVE_EXHAUSTED)
+                }
+            } catch (ex: CancellationException) {
+                throw ex
+            } catch (ex: Exception) {
+                // observed-by: openbank_payment_unsettled_total{outcome="redrive-error"} and the open booking
+                // clock (SwiftBookingUnsettled). One message's database error must not abort the batch; its
+                // claim lapses with the lease and the next tick retries it.
+                metrics.unsettled(SwiftSettlementMetrics.Outcome.REDRIVE_ERROR)
+                log.errorf(ex, "Settlement re-drive of SWIFT message %s failed; continuing the sweep", id)
             }
         }
         liveness?.recordSuccess()

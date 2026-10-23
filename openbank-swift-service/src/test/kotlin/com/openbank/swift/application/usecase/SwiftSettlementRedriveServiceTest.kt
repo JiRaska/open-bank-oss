@@ -52,7 +52,7 @@ class SwiftSettlementRedriveServiceTest {
     @Test
     fun `a proven booking releases the claim it holds`(): Unit = runBlocking {
         claimed()
-        coEvery { swift.settleAccepted(message) } returns completed()
+        coEvery { swift.settleAccepted(message) } returns SwiftService.SettleAttempt(completed(), false)
         assertThat(service.redrive(id)).isEqualTo(SwiftSettlementRedriveService.Result.SETTLED)
         coVerify(exactly = 1) { port.release(id, any()) }
         coVerify(exactly = 0) { port.reschedule(any(), any(), any(), any()) }
@@ -61,12 +61,23 @@ class SwiftSettlementRedriveServiceTest {
     @Test
     fun `an unproven booking is counted and exhaustion is reported`(): Unit = runBlocking {
         claimed()
-        coEvery { swift.settleAccepted(message) } returns message
+        coEvery { swift.settleAccepted(message) } returns SwiftService.SettleAttempt(message, false)
         coEvery { message.status } returns SwiftStatus.SENT
         coEvery { port.reschedule(id, any(), now, backoff) } returns RescheduleOutcome(10, null, exhausted = true)
         assertThat(service.redrive(id)).isEqualTo(SwiftSettlementRedriveService.Result.EXHAUSTED)
         coEvery { port.reschedule(id, any(), now, backoff) } returns RescheduleOutcome(3, now, exhausted = false)
         assertThat(service.redrive(id)).isEqualTo(SwiftSettlementRedriveService.Result.RESCHEDULED)
+    }
+
+    @Test
+    fun `bad stored data exhausts at once instead of spending the backoff`(): Unit = runBlocking {
+        claimed()
+        coEvery { message.status } returns SwiftStatus.SENT
+        coEvery { swift.settleAccepted(message) } returns SwiftService.SettleAttempt(message, permanent = true)
+        coEvery { port.exhaust(id, any(), now) } returns RescheduleOutcome(1, null, exhausted = true)
+        assertThat(service.redrive(id)).isEqualTo(SwiftSettlementRedriveService.Result.EXHAUSTED)
+        coVerify(exactly = 0) { port.reschedule(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { port.release(any(), any()) }
     }
 
     @Test

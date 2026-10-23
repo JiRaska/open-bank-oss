@@ -58,37 +58,61 @@ class SwiftSettlementRedriveRepository : SwiftSettlementRedrivePort {
     }
 
     override suspend fun reschedule(id: UUID, token: UUID, now: Instant, backoff: RedriveBackoff): RescheduleOutcome? =
-        Panache.withTransaction {
-            Panache.getSession().chain { session ->
-                session.createNativeQuery<Any>(HELD_ATTEMPTS_SQL)
-                    .setParameter("id", id)
-                    .setParameter("token", token)
-                    .resultList
-                    .chain { rows ->
-                        val held = rows.firstOrNull()
-                            ?: return@chain Uni.createFrom().item(null as RescheduleOutcome?)
-                        val attempts = (held as Number).toInt() + 1
-                        val exhausted = attempts >= backoff.maxAttempts
-                        val nextAt = if (exhausted) null else now.plus(backoff.delayAfter(attempts))
-                        session.createNativeMutationQuery(RESCHEDULE_SQL)
-                            .setParameter("id", id)
-                            .setParameter("token", token)
-                            .setParameter("attempts", attempts)
-                            .setParameter("nextAt", nextAt)
-                            .setParameter("exhaustedAt", if (exhausted) now else null)
-                            .executeUpdate()
-                            .map { updated ->
-                                if (updated == 1) RescheduleOutcome(attempts, nextAt, exhausted) else null
-                            }
-                    }
-            }
-        }.awaitSuspending()
+        record(id, token, now) { attempts ->
+            (attempts >= backoff.maxAttempts) to now.plus(backoff.delayAfter(attempts))
+        }
+
+    override suspend fun exhaust(id: UUID, token: UUID, now: Instant): RescheduleOutcome? =
+        record(id, token, now) { true to null }
+
+    override suspend fun stop(id: UUID, reason: String, now: Instant): Boolean = Panache.withTransaction {
+        Panache.getSession().chain { session ->
+            session.createNativeMutationQuery(STOP_SQL)
+                .setParameter("id", id)
+                .setParameter("reason", reason)
+                .setParameter("now", now)
+                .executeUpdate()
+        }
+    }.awaitSuspending() == 1
+
+    /** [decide] maps the new attempt count to (exhausted, next attempt instant when not exhausted). */
+    private suspend fun record(
+        id: UUID,
+        token: UUID,
+        now: Instant,
+        decide: (Int) -> Pair<Boolean, Instant?>,
+    ): RescheduleOutcome? = Panache.withTransaction {
+        Panache.getSession().chain { session ->
+            session.createNativeQuery<Any>(HELD_ATTEMPTS_SQL)
+                .setParameter("id", id)
+                .setParameter("token", token)
+                .resultList
+                .chain { rows ->
+                    val held = rows.firstOrNull()
+                        ?: return@chain Uni.createFrom().item(null as RescheduleOutcome?)
+                    val attempts = (held as Number).toInt() + 1
+                    val (exhausted, next) = decide(attempts)
+                    val nextAt = if (exhausted) null else next
+                    session.createNativeMutationQuery(RESCHEDULE_SQL)
+                        .setParameter("id", id)
+                        .setParameter("token", token)
+                        .setParameter("attempts", attempts)
+                        .setParameter("nextAt", nextAt)
+                        .setParameter("exhaustedAt", if (exhausted) now else null)
+                        .executeUpdate()
+                        .map { updated ->
+                            if (updated == 1) RescheduleOutcome(attempts, nextAt, exhausted) else null
+                        }
+                }
+        }
+    }.awaitSuspending()
 
     private companion object {
         /** The booking clock is open on a SENT MT103 that is neither exhausted, backing off nor held. */
         const val ELIGIBLE = "message_type = 'MT103' AND status = 'SENT' " +
             "AND booking_first_due_at IS NOT NULL AND booking_first_due_at <= :dueBefore " +
             "AND booking_proven_at IS NULL AND booking_redrive_exhausted_at IS NULL " +
+            "AND booking_redrive_stopped_at IS NULL " +
             "AND (booking_redrive_next_at IS NULL OR booking_redrive_next_at <= :now) " +
             "AND (booking_redrive_claimed_until IS NULL OR booking_redrive_claimed_until < :now)"
 
@@ -99,6 +123,13 @@ class SwiftSettlementRedriveRepository : SwiftSettlementRedrivePort {
 
         const val RELEASE_SQL = "UPDATE swift_messages SET booking_redrive_claim = NULL, " +
             "booking_redrive_claimed_until = NULL WHERE id = :id AND booking_redrive_claim = :token"
+
+        /** Refuses a live claim; keeps the first stop's time and reason if already stopped. */
+        const val STOP_SQL = "UPDATE swift_messages SET " +
+            "booking_redrive_stopped_at = COALESCE(booking_redrive_stopped_at, :now), " +
+            "booking_redrive_stop_reason = COALESCE(booking_redrive_stop_reason, :reason), " +
+            "booking_redrive_claim = NULL, booking_redrive_claimed_until = NULL " +
+            "WHERE id = :id AND (booking_redrive_claimed_until IS NULL OR booking_redrive_claimed_until < :now)"
 
         const val HELD_ATTEMPTS_SQL = "SELECT booking_redrive_attempts FROM swift_messages " +
             "WHERE id = :id AND booking_redrive_claim = :token FOR UPDATE"

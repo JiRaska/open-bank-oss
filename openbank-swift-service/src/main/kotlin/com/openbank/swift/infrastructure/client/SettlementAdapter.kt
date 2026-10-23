@@ -56,14 +56,16 @@ class SettlementAdapter(
             requestFor(message, sourceAccountId)
         } catch (e: DateTimeParseException) {
             // SwiftMessage.validate() guarantees YYYYMMDD at creation; a stored value that no longer parses is
-            // bad data, not an outage: nothing is sent and the message stays SENT.
+            // bad data, not an outage: nothing is sent and the message stays SENT. It cannot heal, so it is
+            // counted as bad-data and marked permanent: the re-drive stops on it, the open clock keeps alerting.
+            metrics.unsettled(Outcome.BAD_DATA)
             log.errorf(
                 e,
                 "SWIFT message %s has an unparseable value date '%s'; not booking",
                 message.id,
                 message.valueDate,
             )
-            return SettlementOutcome(settled = false, transactionId = null)
+            return SettlementOutcome(settled = false, transactionId = null, permanent = true)
         }
 
         return try {

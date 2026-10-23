@@ -48,6 +48,12 @@ class SwiftSettlementMetrics {
 
         // #13686: the re-drive gave up on a message; it is no longer retried and its booking clock stays open.
         REDRIVE_EXHAUSTED("redrive-exhausted"),
+
+        // #13686: stored data no attempt can fix (unparseable 32A value date); nothing was sent.
+        BAD_DATA("bad-data"),
+
+        // #13686: one message's re-drive failed outside settlement (e.g. a database error); the sweep went on.
+        REDRIVE_ERROR("redrive-error"),
     }
 
     companion object {

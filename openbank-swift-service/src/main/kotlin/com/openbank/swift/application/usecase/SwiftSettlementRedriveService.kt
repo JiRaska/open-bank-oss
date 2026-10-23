@@ -69,9 +69,12 @@ class SwiftSettlementRedriveService(
         val now = Instant.now(clock)
         val token = UUID.randomUUID()
         if (!redrive.claim(id, token, now, now.minus(minAge), now.plus(lease))) return Result.NOT_CLAIMED
+        var permanent = false
         val settled = try {
             val message = repo.findById(id) ?: error("claimed SWIFT message $id is missing")
-            swift.settleAccepted(message).status == SwiftStatus.COMPLETED
+            val attempt = swift.settleAccepted(message)
+            permanent = attempt.permanent
+            attempt.message.status == SwiftStatus.COMPLETED
         } catch (ex: CancellationException) {
             // The claim lapses with its lease; the next sweep picks the message up again.
             throw ex
@@ -84,7 +87,11 @@ class SwiftSettlementRedriveService(
             log.infof("Settlement re-drive booked SWIFT message %s", id)
             return Result.SETTLED
         }
-        val outcome = redrive.reschedule(id, token, Instant.now(clock), backoff) ?: return Result.NOT_CLAIMED
+        val outcome = if (permanent) {
+            redrive.exhaust(id, token, Instant.now(clock))
+        } else {
+            redrive.reschedule(id, token, Instant.now(clock), backoff)
+        } ?: return Result.NOT_CLAIMED
         if (outcome.exhausted) {
             log.errorf(
                 "Settlement re-drive of SWIFT message %s exhausted after %d attempts; booking clock stays open",

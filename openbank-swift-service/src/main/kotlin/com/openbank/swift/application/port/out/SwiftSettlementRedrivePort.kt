@@ -32,6 +32,18 @@ interface SwiftSettlementRedrivePort {
      * holds the claim.
      */
     suspend fun reschedule(id: UUID, token: UUID, now: Instant, backoff: RedriveBackoff): RescheduleOutcome?
+
+    /**
+     * Count one attempt and exhaust the message at once: its answer can never change (bad stored data).
+     * The booking clock stays open. Null when [token] no longer holds the claim.
+     */
+    suspend fun exhaust(id: UUID, token: UUID, now: Instant): RescheduleOutcome?
+
+    /**
+     * Manual-remediation stop: the sweep never claims [id] again. Refused (`false`) while a re-drive holds a
+     * live claim, so a stop can never race an in-flight transaction-service call. Also clears a lapsed claim.
+     */
+    suspend fun stop(id: UUID, reason: String, now: Instant): Boolean
 }
 
 /** Bounded exponential backoff: `min(base * 2^(n-1), max)` after the n-th unproven attempt. */

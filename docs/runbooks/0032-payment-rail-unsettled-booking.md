@@ -219,9 +219,39 @@ UPDATE, so two pods or an overlapping tick make one call, not two. An unproven a
 `openbank_payment_unsettled_total{rail="SWIFT",outcome="redrive-exhausted"}` increments, and the clock
 stays open, so this alert keeps firing. A transport blip is normally booked before the alert's 30m.
 
+**The alert can fire while the re-drive is still live.** 10 attempts span about 6 hours and the alert
+fires at 30 minutes, so for most of that window the sweep is still calling transaction-service under
+`swift-settlement-<messageId>`. Booking or reversing by hand, or under any other key, while it is live
+races the sweep and can debit the customer twice. So **step 1 for SWIFT is always the stop below**,
+before step 1 of the shared procedure and before any manual action.
+
+**Step S1 — stop the re-drive for this message (four-eyes, before anything else).** Open a ticket
+recording the message id, why it is stopped, the approver and the executor (two different people). The
+approver reviews the statement and the ticket; the executor runs it and pastes the result into the
+ticket. It refuses a message whose re-drive holds a live claim: `UPDATE 0` means a call is in flight.
+Wait for the lease to pass (2 minutes) and run it again. Never act by hand on `UPDATE 0`.
+
+```sql
+-- swift-service-db, as the application owner. Expect UPDATE 1.
+UPDATE swift_messages
+SET booking_redrive_stopped_at = now(),
+    booking_redrive_stop_reason = '<ticket> approver=<name> executor=<name>'
+WHERE id = '<messageId>' AND booking_redrive_stopped_at IS NULL
+  AND (booking_redrive_claimed_until IS NULL OR booking_redrive_claimed_until < now());
+
+-- Then confirm: stopped, no live claim. Only now go on to the shared steps.
+SELECT booking_redrive_stopped_at, booking_redrive_stop_reason, booking_redrive_claim,
+       booking_redrive_claimed_until, now() AS checked_at
+FROM swift_messages WHERE id = '<messageId>';
+```
+
+A stopped message is never claimed by the sweep again. Its booking clock stays open, so the alert keeps
+firing until the message is closed as in "Closing a corrected payment".
+
 What the re-drive does **not** cover:
 
-- a message an operator already acknowledged or rejected (it is no longer `SENT`);
+- a message an operator already acknowledged or rejected (it is no longer `SENT`). `ack`/`reject` also
+  stop its re-drive, and answer 409 while a re-drive holds a live claim: retry after the 2-minute lease;
 - a stored `FAILED` or mismatched answer, which comes back the same on every attempt and exhausts;
 - a message with no `ordering_customer_account_id` or an unparseable value date, which never calls
   transaction-service and exhausts too.
@@ -230,7 +260,7 @@ Where the re-drive stands, on `swift-service-db` (read-only):
 
 ```sql
 SELECT id AS message_id, status, booking_redrive_attempts, booking_redrive_next_at,
-       booking_redrive_claimed_until, booking_redrive_exhausted_at
+       booking_redrive_claimed_until, booking_redrive_exhausted_at, booking_redrive_stopped_at
 FROM swift_messages
 WHERE message_type = 'MT103' AND booking_first_due_at IS NOT NULL AND booking_proven_at IS NULL
 ORDER BY booking_first_due_at
@@ -250,7 +280,10 @@ Then the remedy depends on step 1:
 | `COMPLETED`, every field matches | The next attempt replays it as a matched 201 and closes the clock. If exhausted, **re-drive** with the command below. |
 | `COMPLETED`, money differs / `FAILED` | Do not re-drive. Same as the shared table in step 2: **reverse** a wrong booking, or a finance correction for `FAILED`. |
 
-**Re-drive command (exhausted message).** This re-arms the sweep's bookkeeping for one message and
+**Re-drive command (exhausted message).** Four-eyes, like the stop: a ticket records the message id,
+the step 1 result that justifies it, the approver and the executor (two different people), and the
+executor runs the statement only after the approver has signed off on the ticket. Never re-arm a stopped
+message: a stop means someone is remediating it by hand. This re-arms the sweep's bookkeeping for one message and
 touches nothing else: never `booking_first_due_at`, `booking_proven_at` or `booking_transaction_id`,
 and never a message another pod holds. The sweep then picks it up within a minute, under the same key.
 
@@ -260,7 +293,8 @@ UPDATE swift_messages
 SET booking_redrive_attempts = 0, booking_redrive_next_at = NULL, booking_redrive_exhausted_at = NULL
 WHERE id = '<messageId>' AND message_type = 'MT103' AND status = 'SENT'
   AND booking_first_due_at IS NOT NULL AND booking_proven_at IS NULL
-  AND booking_redrive_exhausted_at IS NOT NULL AND booking_redrive_claim IS NULL;
+  AND booking_redrive_exhausted_at IS NOT NULL AND booking_redrive_claim IS NULL
+  AND booking_redrive_stopped_at IS NULL;
 ```
 
 Confirm a minute or two later that `booking_proven_at` is set and the status is `COMPLETED`. If it is
