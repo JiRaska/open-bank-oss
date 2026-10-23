@@ -147,6 +147,11 @@ DECLARED: dict[str, tuple[str, str]] = {
         "here shows up.",
     ),
     "api-fuzz.yml::fuzz": ("read-only", "Consumer; restores fleet-lint's home."),
+    "libs-quality.yml::compatibility": (
+        "read-only",
+        "Library ABI, coverage and recovery proofs consume fleet-lint's Gradle home. "
+        "The dedicated library job must never publish another cache entry or become a writer.",
+    ),
     "api-fuzz-authenticated.yml::fuzz-authenticated": (
         "read-only",
         "Consumer; restores fleet-lint's home.",

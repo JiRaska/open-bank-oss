@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-ledger-pension-co-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "3aefc26e13679949"
+        openbank.tech/policy-checksum: "d0e4d86c0a4eacfc"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -106,6 +106,12 @@ spec:
             # producer has nowhere to connect even if the dispatcher were switched on).
             - name: MP_MESSAGING_OUTGOING_LEDGER_EVENTS_OUT_TOPIC
               value: openbank.ledger-pension-co.journal.posted.disabled
+            # Defer the underlying Kafka producer initialization until first use. The connector
+            # still creates its wrapper and serialization resources at boot; lazy-client does
+            # not disable the channel or prevent a later send from creating the producer.
+            # Keep dispatch disabled and the isolated topic above as separate safeguards.
+            - name: MP_MESSAGING_OUTGOING_LEDGER_EVENTS_OUT_LAZY_CLIENT
+              value: "true"
             # Quarkus disables a @Scheduled method whose config-expression cron resolves to "off".
             # Sub-ledger tie-out of the bank's deposit-control accounts 2100–2103 (ADR-0039 B).
             - name: OPENBANK_LEDGER_TIEOUT_CRON
@@ -121,6 +127,10 @@ spec:
               value: "off"
             # …so the day lock has no calendar to read: off, not shadow/enforce.
             - name: LEDGER_DAY_LOCK_MODE
+              value: "off"
+            # …and no day-close participants of its own yet (ADR-0342): the bank's list names
+            # interest-service, which never reports to this entity's books.
+            - name: LEDGER_CLOSE_PARTICIPANTS_MODE
               value: "off"
             # OIDC resource server: same realm as the bank instance.
             - name: QUARKUS_OIDC_AUTH_SERVER_URL

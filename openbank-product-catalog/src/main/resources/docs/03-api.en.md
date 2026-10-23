@@ -52,6 +52,13 @@ a strong numeric `If-Match`: missing is 428 and stale/concurrent is 412.
 
 ### Generic governed catalog (v2)
 
+The exact product-type schema can declare an `approvalPolicy` for revision approval.
+It exposes the required role codes, whether `effectiveFrom` is required, and required
+attributes; it does not expose the internal authority used to authorize the caller.
+Clients use the generic revision-approval endpoints for such schemas. The deprecated
+`pension-approvals` aliases remain available during the client transition and must
+not be removed until deployed consumers have moved to the generic endpoints.
+
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/v2/product-types` | List immutable trusted schemas |

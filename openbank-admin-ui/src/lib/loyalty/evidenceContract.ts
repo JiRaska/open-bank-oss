@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { LoyaltyCatalogueResponse, LoyaltyState } from '@/app/api/loyalty/route'
-import type { LeafLedgerRow, LoyaltyPartyResponse } from '@/app/api/loyalty/party/[partyId]/route'
+import type { LeafLedgerRow, LoyaltyCatalogueResponse, LoyaltyPartyResponse, LoyaltyState } from '@/lib/loyalty/contracts'
 
 const STATES = new Set<LoyaltyState>(['ok', 'not_deployed', 'unreachable', 'unauthorized'])
 const ENTRY_TYPES = new Set<LeafLedgerRow['type']>(['EARN', 'BURN', 'EXPIRE', 'REVERSE'])

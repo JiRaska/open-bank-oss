@@ -94,6 +94,8 @@ openApiGenerate {
                 "PriceComponent",
                 "ProductRevision",
                 "PublishRequest",
+                "RevisionApprovalPolicy",
+                "RevisionApprovalRole",
                 "RevisionRequest",
                 "RevisionContent",
                 "SchemaRef",

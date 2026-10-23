@@ -30,7 +30,7 @@ enum class TimeBucket(val label: String, private val upperMonths: Long?) {
 
     companion object {
         fun of(date: LocalDate, asOf: LocalDate): TimeBucket {
-            if (!date.isAfter(NonMaturityDepositCashFlows.nextBusinessDay(asOf))) return OVERNIGHT
+            if (!date.isAfter(NonMaturityDepositCashFlows.nextWeekday(asOf))) return OVERNIGHT
             return entries.firstOrNull { b -> b.upperMonths != null && !date.isAfter(asOf.plusMonths(b.upperMonths)) }
                 ?: OVER_10Y
         }

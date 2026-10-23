@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.1...billing-service-v0.16.2) (2026-10-21)
+
+
+### Security
+
+* **billing:** redact assessment logs and isolate role tests ([#13549](https://github.com/JiRaska/open-bank-oss/issues/13549)) ([9f80e96](https://github.com/JiRaska/open-bank-oss/commit/9f80e96a47c5abf33749c8b5d7c9bd20c488e8c9))
+
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.0...billing-service-v0.16.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **customer-edge:** prefix unprefixed metrics with openbank. and gate new ones ([#13193](https://github.com/JiRaska/open-bank-oss/issues/13193)) ([ca69f24](https://github.com/JiRaska/open-bank-oss/commit/ca69f2451fee91827db7fb179bde3b4244b0455c))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.15.0...billing-service-v0.16.0) (2026-10-19)
+
+
+### Features
+
+* **billing:** price fees from the pinned catalog revision, post by accounting class (ADR-0341) ([#13209](https://github.com/JiRaska/open-bank-oss/issues/13209)) ([dcd911c](https://github.com/JiRaska/open-bank-oss/commit/dcd911cea88eaa7b38cb7192ab89de830400b5a9))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.14.1...billing-service-v0.15.0) (2026-10-16)
 
 

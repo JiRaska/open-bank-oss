@@ -175,8 +175,10 @@ data class ProductRevision(
     val createdAt: Instant,
     val updatedAt: Instant,
     val revision: Long = 0,
-    val pensionApprovalDigest: String? = null,
-    val pensionApprovedEffectiveTo: Instant? = null,
+    /** Content digest the role approvals covered, frozen at publication when the schema has a policy. */
+    val approvalDigest: String? = null,
+    /** Effective-to the approvers saw; a successor may later shorten [effectiveTo], never this. */
+    val approvedEffectiveTo: Instant? = null,
 ) {
     init {
         require(number > 0) { "revision number must be positive" }

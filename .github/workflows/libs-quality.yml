@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Libs compatibility and recovery
+
+on:
+  pull_request:
+    paths:
+      - "openbank-libs*/**"
+      - "fuzz/**"
+      - ".github/workflows/libs-quality.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libs-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    name: Library ABI and recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          java-version: "25"
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-read-only: true
+      - name: Build every library with ABI, coverage, recovery and old-consumer proofs
+        run: |
+          ./gradlew \
+            :openbank-libs-domain:build :openbank-libs-domain:koverVerify \
+            :openbank-libs-runtime:build :openbank-libs-runtime:koverVerify \
+            :openbank-libs-lending:build :openbank-libs-lending:koverVerify \
+            :openbank-libs-iso20022:build :openbank-libs-iso20022:koverVerify \
+            :openbank-libs-temporal:build :openbank-libs-temporal:koverVerify \
+            :openbank-libs-testing:build :openbank-libs-testing:koverVerify \
+            --continue --console=plain
+      - name: Exercise the fuzz oracle on its corpus and deterministic mutations
+        run: ./gradlew -p fuzz/ossfuzz test --console=plain
+      - name: Upload compatibility and recovery evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: libs-compatibility-recovery-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: |
+            openbank-libs-*/build/test-results/test/*.xml
+            fuzz/ossfuzz/build/test-results/test/*.xml
+          if-no-files-found: error
+          retention-days: 30

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.30.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.30.1...transaction-service-v1.30.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **card-processing:** persist the ledger posting state per clearing and re-drive it ([#13229](https://github.com/JiRaska/open-bank-oss/issues/13229)) ([a3c8c98](https://github.com/JiRaska/open-bank-oss/commit/a3c8c98272b098bb48170e2535ae6e67a6c673c9))
+
 ## [1.30.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.30.0...transaction-service-v1.30.1) (2026-10-18)
 
 

@@ -32,6 +32,8 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
+    implementation(project(":openbank-client-transaction"))
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // #8352: AuditEventTime — the ONE shared copy of the rule `AuditConsumer.eventTime` applies to

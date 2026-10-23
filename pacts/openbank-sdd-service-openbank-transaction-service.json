@@ -13,12 +13,19 @@
       "request": {
         "body": {
           "amount": 89.90,
+          "baseAmount": null,
+          "baseCurrencyCode": null,
+          "bookingDate": null,
           "currencyCode": "EUR",
           "description": "SEPA Direct Debit DE98ZZZ09999999999 / UMR-PACT-0001",
           "idempotencyKey": "so-sdd-3b9d1c44-1111-4222-8333-444444444444-UMR-PACT-0001-2026-02-20",
+          "initiatedByPartyId": null,
           "instructionType": "DIRECT_DEBIT",
           "rail": "SEPA_CT",
+          "scaChallengeId": null,
+          "scaExemption": null,
           "sourceAccountId": "dddddddd-1111-4222-8333-444444444444",
+          "targetAccountId": null,
           "type": "DEBIT",
           "valueDate": "2026-02-20"
         },
@@ -71,12 +78,19 @@
       "request": {
         "body": {
           "amount": 89.90,
+          "baseAmount": null,
+          "baseCurrencyCode": null,
+          "bookingDate": null,
           "currencyCode": "EUR",
           "description": "SEPA Direct Debit DE98ZZZ09999999999 / UMR-PACT-0001",
           "idempotencyKey": "so-sdd-3b9d1c44-1111-4222-8333-444444444444-UMR-PACT-0001-2026-02-20",
+          "initiatedByPartyId": null,
           "instructionType": "DIRECT_DEBIT",
           "rail": "SEPA_CT",
+          "scaChallengeId": null,
+          "scaExemption": null,
           "sourceAccountId": "dddddddd-1111-4222-8333-444444444444",
+          "targetAccountId": null,
           "type": "DEBIT",
           "valueDate": "2026-02-20"
         },

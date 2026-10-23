@@ -1,10 +1,9 @@
 # Security KPI snapshot publisher (ADR-0279 #15/#17/#18 → admin-ui excellence console).
 #
-# Recomputes the three security KPIs FROM THE SAME SCRIPTS the gates run and, when the
-# snapshot changed, opens a refresh PR for openbank-admin-ui/security-kpis.json — the
-# file the admin-ui image bakes at build time (COPY openbank-admin-ui/ ./) and the
-# /api/security/kpis BFF route serves read-only. A refresh PR goes through normal CI
-# like any change; the file is CI-generated, never hand-edited (AGENTS.md rule 6).
+# Recomputes the security KPIs FROM THE SAME SCRIPTS the gates run, uploads the exact
+# generated JSON for independent runtime publication, and retains the refresh PR for
+# the image-baked fallback at /api/security/kpis. A refresh PR goes through normal CI;
+# the file is CI-generated, never hand-edited (AGENTS.md rule 6).
 #
 # Weekly Friday 09:23 UTC — after the week's deps-freshness (Wed) and credential
 # inventory (Thu) lanes, so the snapshot reflects them. Never pushes to main directly
@@ -45,6 +44,14 @@ jobs:
           # collector reports unavailable-with-reason and the rest still publish.
           MTTR_GH_TOKEN: ${{ secrets.METADATA_REFRESH_PAT }}
         run: python3 .github/scripts/security-kpis.py
+
+      - name: Retain the generated KPI snapshot for the independent publisher
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: security-kpis-${{ github.run_id }}-${{ github.run_attempt }}
+          path: openbank-admin-ui/security-kpis.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Detect a changed snapshot
         id: snapshot

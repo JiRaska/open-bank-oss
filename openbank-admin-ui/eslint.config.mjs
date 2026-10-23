@@ -23,7 +23,7 @@ const eslintConfig = [
   {
     files: ['src/**/*.{js,jsx,ts,tsx}'],
     plugins: { 'domain-boundaries': domainBoundariesPlugin },
-    rules: { 'domain-boundaries/no-payments-private-cross-domain': 'error' },
+    rules: { 'domain-boundaries/no-private-cross-import': 'error' },
   },
   {
     // Scoped to the file types eslint-config-next defines the react-hooks plugin for. Without

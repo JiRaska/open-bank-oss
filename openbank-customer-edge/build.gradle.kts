@@ -54,6 +54,28 @@ dependencies {
     // handler supplies the very argument the framework does not.
 }
 
+// This Docker-backed Redis test passes by itself, but its fixed 5s command timeout has repeatedly
+// expired at the end of the full Quarkus-heavy suite in CI. Keep the cross-replica proof in the
+// build, but run it in a fresh test JVM after `test` has released its Kafka/Redis containers and
+// Vert.x threads. Kover still instruments this Test task and the check lifecycle still requires it.
+tasks.named<Test>("test") {
+    exclude("**/PaymentSessionStoreCrossReplicaTest.class")
+}
+
+val paymentSessionStoreCrossReplicaTest = tasks.register<Test>("paymentSessionStoreCrossReplicaTest") {
+    description = "Verify nearby-pay sessions are shared across Redis-backed customer-edge replicas"
+    group = "verification"
+    dependsOn(tasks.named("testClasses"))
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    filter.includeTestsMatching("com.openbank.customeredge.infrastructure.rest.PaymentSessionStoreCrossReplicaTest")
+    shouldRunAfter(tasks.named("test"))
+}
+
+tasks.named("check") {
+    dependsOn(paymentSessionStoreCrossReplicaTest)
+}
+
 // Pact: read consumer pacts from the shared pacts/ dir at the repo root (git-pact, ADR-0063).
 // NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would not propagate).
 // Pact rootDir + Pact Broker property forwarding centralised into

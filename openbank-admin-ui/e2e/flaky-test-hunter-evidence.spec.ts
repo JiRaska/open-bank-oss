@@ -152,7 +152,7 @@ test('a failed findings load renders the error state, never the no-data panel', 
   await expect(page.getByText('No data yet')).toHaveCount(0)
 })
 
-test('available:false keeps the last-known-state banner distinct from both data states', async ({ page }) => {
+test('available:false renders unavailable findings without claiming a verified zero', async ({ page }) => {
   await page.unroute('**/api/flaky-test-hunter/findings')
   await page.route('**/api/flaky-test-hunter/findings', route => route.fulfill({
     status: 200,
@@ -162,9 +162,9 @@ test('available:false keeps the last-known-state banner distinct from both data 
 
   await page.goto('/iaops/flaky-test-hunter')
 
-  await expect(page.getByText(/not reachable in this environment/)).toBeVisible()
-  await expect(page.getByText('No data yet')).toBeVisible()
-  await expect(page.getByText('Active findings').locator('..').locator('.stat-value')).toHaveText('0')
+  await expect(page.getByText('Findings and workflow completion status are unavailable.')).toBeVisible()
+  await expect(page.getByText('No data yet')).toHaveCount(0)
+  await expect(page.getByText('Active findings').locator('..').locator('.stat-value')).toHaveText('—')
 })
 
 test('a missing finding renders not-found, not the load-failure state', async ({ page }) => {

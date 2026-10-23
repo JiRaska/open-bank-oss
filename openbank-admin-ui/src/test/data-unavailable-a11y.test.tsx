@@ -13,6 +13,15 @@ describe('DataUnavailable accessibility announcements', () => {
     expect(status).toHaveTextContent('Ledger-service is not responding')
   })
 
+  it('describes incomplete discovery without asserting deployment or health', () => {
+    render(<DataUnavailable kind="discovery_unavailable" service="Ledger-service" lang="en" />)
+
+    const status = screen.getByRole('status')
+    expect(status).toHaveTextContent('Deployment status is unknown')
+    expect(status).toHaveTextContent('does not establish whether the service is deployed or healthy')
+    expect(status).not.toHaveTextContent('is not responding')
+  })
+
   it('uses an assertive alert only for an expired session', () => {
     render(<DataUnavailable kind="unauthorized" lang="en" />)
 

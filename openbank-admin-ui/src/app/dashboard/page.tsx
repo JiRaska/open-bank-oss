@@ -17,13 +17,14 @@ import { fleetHealthState, summarizeFleetHealth } from '@/lib/dashboard/fleetHea
 import styles from './Dashboard.module.css'
 import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import { FLEET_GROUPS, parseDashboardHealth, parseGovernanceFleet } from '@/lib/dashboard/clientContract'
 import { aggregateHealthStatuses } from '@/lib/health/workloadHealth'
 
-// Tri-state per fleet member. `deployed=false` is NEUTRAL (planned, not an outage) —
-// it must never be counted as an error, or the 23 not-yet-deployed services in the
-// sandbox would read as an 85% error rate. `up` is only meaningful when deployed.
-interface SvcStatus { name: string; label: string; group: string; deployed: boolean; health: 'UP' | 'DOWN' | 'UNKNOWN'; latencyMs: number | null }
+// Deployment is tri-state: false is confirmed planned, null means discovery was
+// incomplete, and true means a live workload was observed.
+interface SvcStatus { name: string; label: string; group: string; deployed: boolean | null; health: 'UP' | 'DOWN' | 'UNKNOWN'; latencyMs: number | null }
 
 // Canonical intended fleet (ADR-0029 governance manifest) — the authoritative roster
 // of every service the platform is designed to run, independent of what is currently
@@ -70,6 +71,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [evidenceFailure, setEvidenceFailure] = useState<'governance' | 'health' | null>(null)
+  const [discoveryIncomplete, setDiscoveryIncomplete] = useState(false)
+  const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const loadingRef = useRef(false)
 
   const load = useCallback(async () => {
@@ -77,6 +80,7 @@ export default function DashboardPage() {
     loadingRef.current = true
     setLoading(true)
     setEvidenceFailure(null)
+    setDiscoveryIncomplete(false)
     // Governance and live health are independent reads. Start them together so a
     // slow health probe cannot delay the canonical roster (and vice versa).
     const governanceRequest = fetch('/api/services/governance', { cache: 'no-store' }).catch(() => null)
@@ -85,19 +89,26 @@ export default function DashboardPage() {
 
     try {
       if (!govRes?.ok) throw new Error('governance')
-      const fleet = parseGovernanceFleet(await govRes.json())
+      const governancePayload = await govRes.json()
+      setContentSource(governancePayload.contentSource ?? null)
+      const fleet = parseGovernanceFleet(governancePayload)
       if (!res?.ok) throw new Error('health')
+      const healthBody = await res.json() as { source?: string; discoveryStatus?: string }
+      const inventoryComplete = (healthBody.source === 'static' && healthBody.discoveryStatus === 'static')
+        || (healthBody.source === 'kubernetes' && healthBody.discoveryStatus === 'complete')
+      if (!inventoryComplete) setDiscoveryIncomplete(true)
       // Keep each discovered workload by namespace, then aggregate instances onto
       // the canonical logical-service roster without choosing an arbitrary one.
       const discovered = new Map<string, ReturnType<typeof parseDashboardHealth>>()
-      for (const entry of parseDashboardHealth(await res.json())) {
+      for (const entry of parseDashboardHealth(healthBody)) {
         const instances = discovered.get(entry.name) ?? []
         instances.push(entry)
         discovered.set(entry.name, instances)
       }
       // Overlay discovery on the canonical fleet: every intended service appears,
-      // with deployed/healthy resolved from the cluster. A roster member absent from
-      // discovery is NOT-DEPLOYED (neutral), never DOWN (which is a real outage).
+      // with deployed/healthy resolved from discovery. Absence means NOT-DEPLOYED
+      // only when the source explicitly reports a complete inventory; otherwise it
+      // remains unknown, never DOWN (which is a real outage).
       const results: SvcStatus[] = fleet.map(f => {
         const instances = discovered.get(f.name) ?? []
         const labels = new Set(instances.map(entry => entry.label))
@@ -107,7 +118,7 @@ export default function DashboardPage() {
           name: f.name,
           label: labels.size === 1 ? [...labels][0] : titleCase(f.name),
           group: groups.size === 1 ? [...groups][0] : f.group,
-          deployed: instances.length > 0,
+          deployed: instances.length > 0 ? true : inventoryComplete ? false : null,
           health: aggregateHealthStatuses(instances.map(entry => entry.status)),
           latencyMs: latencies.length > 0 ? Math.max(...latencies) : null,
         }
@@ -117,6 +128,9 @@ export default function DashboardPage() {
     } catch (error) {
       setStatuses([])
       setLastRefresh(null)
+      if (error instanceof Error && error.message === 'governance') {
+        setContentSource(previous => previous ? { ...previous, status: 'stale' } : null)
+      }
       setEvidenceFailure(error instanceof Error && error.message === 'governance' ? 'governance' : 'health')
     }
     setLoading(false)
@@ -189,6 +203,8 @@ export default function DashboardPage() {
         }
       />
 
+      <ContentSourceNote source={contentSource} />
+
       <ExplorerGuide title={t('Vítejte ve svém operačním kokpitu', 'Welcome to your operations cockpit')}>
         {t(
           'Začněte pracovními frontami podle svých oprávnění. Červená znamená skutečný problém; šedá služba jen čeká na nasazení. Explorer nemá rád falešné poplachy — a vy je nemusíte řešit.',
@@ -260,6 +276,14 @@ export default function DashboardPage() {
           </DataUnavailable>
         </section>
       ) : <>
+      {discoveryIncomplete && (
+        <section role="status" className="card" aria-label={t('Částečné zjištění služeb', 'Partial service discovery')} style={{ marginBottom: 16 }}>
+          <strong>{t('Inventář služeb je neúplný', 'Service inventory is incomplete')}</strong>
+          <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 13 }}>
+            {t('Zobrazené služby mají ověřený stav. U ostatních nelze z tohoto částečného čtení potvrdit nasazení.', 'Listed services have verified observations. Deployment of the remaining services cannot be confirmed from this partial read.')}
+          </p>
+        </section>
+      )}
       {/* These are intentionally current health facts, not estimated operational or compliance metrics. */}
       <section className={styles.metrics} aria-label={t('Klíčové metriky platformy', 'Platform key metrics')}>
         <StatCard className={styles.metric} icon={<Server size={15} />} label={t('Zdravé služby', 'Healthy services')} value={`${health.healthy}/${health.observed}`} tone={healthTone}
@@ -282,7 +306,8 @@ export default function DashboardPage() {
           {groups.map(group => {
             const groupSvcs = statuses.filter(s => s.group === group)
             if (groupSvcs.length === 0) return null
-            const deployedInGroup = groupSvcs.filter(s => s.deployed)
+            const deployedInGroup = groupSvcs.filter(s => s.deployed === true)
+            const unknownDeploymentInGroup = groupSvcs.filter(s => s.deployed === null)
             const observedInGroup = deployedInGroup.filter(s => s.health !== 'UNKNOWN')
             const upInGroup = observedInGroup.filter(s => s.health === 'UP').length
             // The bar is the current healthy share of deployed members; a group with nothing
@@ -297,8 +322,8 @@ export default function DashboardPage() {
                   <span className={styles.groupName}>{group.replace('-', ' ')}</span>
                   <span className={styles.groupSummary}>
                     {hasObserved
-                      ? `${upInGroup}/${observedInGroup.length} ${t('zdravé', 'healthy')}${deployedInGroup.length > observedInGroup.length ? ` · ${deployedInGroup.length - observedInGroup.length} ${t('neznámé', 'unknown')}` : ''}`
-                      : hasDeployed ? t('stav neznámý', 'health unknown') : t('nenasazeno', 'not deployed')}
+                      ? `${upInGroup}/${observedInGroup.length} ${t('zdravé', 'healthy')}${deployedInGroup.length + unknownDeploymentInGroup.length > observedInGroup.length ? ` · ${deployedInGroup.length + unknownDeploymentInGroup.length - observedInGroup.length} ${t('neznámé', 'unknown')}` : ''}`
+                      : hasDeployed || unknownDeploymentInGroup.length > 0 ? t('stav neznámý', 'health unknown') : t('nenasazeno', 'not deployed')}
                   </span>
                 </div>
                 <div className={styles.healthBar}>
@@ -315,17 +340,18 @@ export default function DashboardPage() {
         {groups.map(group => {
           const groupSvcs = statuses.filter(s => s.group === group)
           if (groupSvcs.length === 0) return null
-          const deployedInGroup = groupSvcs.filter(s => s.deployed)
+          const deployedInGroup = groupSvcs.filter(s => s.deployed === true)
+          const unknownDeploymentInGroup = groupSvcs.filter(s => s.deployed === null).length
           const observedInGroup = deployedInGroup.filter(s => s.health !== 'UNKNOWN')
           const upInGroup = observedInGroup.filter(s => s.health === 'UP').length
           const downInGroup = observedInGroup.filter(s => s.health === 'DOWN').length
-          const plannedInGroup = groupSvcs.length - deployedInGroup.length
-          const unknownInGroup = deployedInGroup.length - observedInGroup.length
+          const plannedInGroup = groupSvcs.filter(s => s.deployed === false).length
+          const unknownInGroup = deployedInGroup.length - observedInGroup.length + unknownDeploymentInGroup
           const allHealthy = observedInGroup.length > 0 && downInGroup === 0 && unknownInGroup === 0
           const color = GROUP_COLORS[group] ?? 'var(--text-tertiary)'
           const deploymentSummary = `${upInGroup}/${observedInGroup.length} ${t('zdravé', 'healthy')}${unknownInGroup > 0 ? ` · ${unknownInGroup} ${t('neznámé', 'unknown')}` : ''}${plannedInGroup > 0 ? ` · ${plannedInGroup} ${t('plán', 'planned')}` : ''}`
           // Sort deployed members first so the live ones lead each group card.
-          const ordered = [...groupSvcs].sort((a, b) => Number(b.deployed) - Number(a.deployed))
+          const ordered = [...groupSvcs].sort((a, b) => Number(b.deployed === true) - Number(a.deployed === true))
           return (
             <article key={group} className={`card ${styles.serviceGroup}`}>
               <div className={styles.serviceGroupHeader}>
@@ -346,13 +372,13 @@ export default function DashboardPage() {
                 {ordered.map(s => {
                   // Tri-state chip: live-up (green), deployed-down (red, a real outage),
                   // not-deployed (muted/neutral — planned, never an alarm).
-                  const state = !s.deployed ? 'planned' : s.health === 'UP' ? 'healthy' : s.health === 'DOWN' ? 'unhealthy' : 'unknown'
-                  const stateTitle = !s.deployed ? t('Nenasazeno v tomto prostředí', 'Not deployed in this environment') : s.health === 'UP' ? t('BĚŽÍ', 'UP') : s.health === 'DOWN' ? t('NEBĚŽÍ', 'DOWN') : t('Stav není znám', 'Health status unknown')
+                  const state = s.deployed === false ? 'planned' : s.deployed === true && s.health === 'UP' ? 'healthy' : s.deployed === true && s.health === 'DOWN' ? 'unhealthy' : 'unknown'
+                  const stateTitle = s.deployed === false ? t('Nenasazeno v tomto prostředí', 'Not deployed in this environment') : s.deployed === null ? t('Nasazení nelze potvrdit: inventář je neúplný', 'Deployment cannot be confirmed: inventory is incomplete') : s.health === 'UP' ? t('BĚŽÍ', 'UP') : s.health === 'DOWN' ? t('NEBĚŽÍ', 'DOWN') : t('Stav není znám', 'Health status unknown')
                   return (
                     <div key={s.name} title={stateTitle} className={`${styles.serviceChip} ${styles[`serviceChip${state.charAt(0).toUpperCase()}${state.slice(1)}`]}`}>
                       <span className={styles.serviceDot} aria-hidden="true" />
                       {s.label}
-                      {s.deployed && s.latencyMs ? <span className={styles.serviceLatency}>{s.latencyMs}ms</span> : null}
+                      {s.deployed === true && s.latencyMs ? <span className={styles.serviceLatency}>{s.latencyMs}ms</span> : null}
                     </div>
                   )
                 })}

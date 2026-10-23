@@ -87,3 +87,19 @@ Posting is idempotent via the **`idempotencyKey` field on the request body** (no
 ## Error model
 
 `ApiError`: `{ "code": "...", "message": "..." }`. Mapping is centralized in `ExceptionMappers` and deferred to `openbank-libs` for the generic fallback (ADR-0049 D4 — the service does not register a catch-all `Exception` mapper). Typical statuses: `400` (unbalanced / invalid posting), `401`/`403` (auth), `404` (unknown journal), `409` (idempotency-key conflict).
+
+## Day-close participants (ADR-0342)
+
+`GET /api/v1/ledger/accounting-days/{date}/participants` returns the day's completeness. A declared participant (for example `interest`) reports `RAN`, `SKIPPED` or `REFUSED` with `PUT .../participants/{participant}`; only the service-account declared for it may report. A participant that never reported is listed in `missing`; one whose latest report is `REFUSED` is listed in `refused` - its work (for example interest capitalization) was not posted. Either holds the day in `CUTOFF` (`complete=false`) until the participant reports `RAN` or an operator waives it.
+
+`PUT .../participants/{participant}/waiver` (operator, mandatory reason) is allowed only for an existing `CUTOFF` day and only for a participant with no `RAN` report: `404` for a day that was never opened (so also any future day), `409` for a day that is not in `CUTOFF` or a participant that already ran. A waiver is appended, never overwriting an earlier row; it may supersede a `REFUSED` report.
+
+`openbank.ledger.close.participants-mode` is `off`, `shadow` (default, counts would-hold decisions and still ties out) or `enforce`; any other value fails the service start.
+
+In `enforce`, the accounting-day service applies the participant check to both scheduler and manual operator `CUTOFF → TIED_OUT` transitions, under the existing transactional day lock. A missing or REFUSED participant returns 409 until a valid report or an explicit reasoned operator waiver is recorded. A caller cannot omit this policy. The default remains `shadow`; this change does not authorize enabling enforcement.
+
+A waiver requires a verified human JWT even when OPA authorization is advisory; a machine token is rejected with 403 despite an operator role. Audit attribution uses only the nonblank JWT `sub`; a missing, blank or unreadable subject is 401, without falling back to a display name.
+
+## Accounting-class map (ADR-0341 D3)
+
+Posters send an `accountingClass` and a role on each journal line and the ledger resolves the GL account from its own `accounting_class_gl_map` table (migration V31). The read side is `GET /api/v1/accounting-classes` and `GET /api/v1/accounting-classes/resolve`, for regulatory readers and reconciliations. There is deliberately no write endpoint: the map changes by reviewed migration, as the chart does.

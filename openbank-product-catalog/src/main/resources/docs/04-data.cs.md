@@ -95,6 +95,7 @@ Produktový katalog drží **pouze referenční data — žádná osobní data**
 | `V6__preserve_mixed_version_outbox_and_published_children.sql` | Nejprve obnoví defaulty pro starý outbox writer a uzavře INSERT/přesun potomků publikované revize. |
 | `V7__track_bank_v1_projection_revision.sql` | Ukládá watermarky v1 i draftu; jednostrannou rollback změnu reconciliuje a oboustranný rozpor odmítne. |
 | `V8__order_catalog_outbox_for_cursor.sql` | Přiděluje immutable commit-safe pořadí, takže opačný commit ani změna času nevytvoří mezeru v cursoru. |
+| `V14__generic_revision_role_approvals.sql` | Přejmenuje důkazy pension schválení na `catalog_revision_role_approvals` a sloupce na `approval_digest` / `approved_effective_to`, beze ztráty dat. Přidá append-only tabulku `catalog_schema_approval_policies`. (ADR-0345) |
 
 
 ## Převod objektů katalogu

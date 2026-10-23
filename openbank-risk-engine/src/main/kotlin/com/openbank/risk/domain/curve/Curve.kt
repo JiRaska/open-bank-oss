@@ -4,6 +4,9 @@
 
 package com.openbank.risk.domain.curve
 
+import com.openbank.libs.domain.calendar.DayCount
+import com.openbank.libs.finance.pricing.DiscountCurve
+import com.openbank.libs.finance.pricing.ForwardCurve
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
@@ -47,7 +50,10 @@ class Curve(
      * sampled at the pillars and re-interpolated. Null for an unshocked curve.
      */
     val adjustment: ZeroRateAdjustment? = null,
-) {
+) : DiscountCurve {
+
+    /** The libs-finance view of this curve (ADR-0344 D8): its valuation date is [asOf]. */
+    override val valuationDate: LocalDate get() = asOf
 
     val pillars: List<CurvePillar> = pillars.toList()
 
@@ -66,7 +72,7 @@ class Curve(
     /** ACT/365F year fraction from [asOf]. */
     fun yearFraction(date: LocalDate): BigDecimal = yearFraction(asOf, date)
 
-    fun zeroRate(date: LocalDate): BigDecimal {
+    override fun zeroRate(date: LocalDate): BigDecimal {
         val base = baseZeroRate(date)
         return adjustment?.adjust(yearFraction(maxOf(date, asOf)), base) ?: base
     }
@@ -87,7 +93,7 @@ class Curve(
     }
 
     /** `exp(−r·t)`; exactly 1 at [asOf]. A date before [asOf] is a flow already due: also 1. */
-    fun discountFactor(date: LocalDate): BigDecimal {
+    override fun discountFactor(date: LocalDate): BigDecimal {
         if (!date.isAfter(asOf)) return BigDecimal.ONE
         return BigMath.exp(zeroRate(date).multiply(yearFraction(date), BigMath.MC).negate())
     }
@@ -138,12 +144,19 @@ class Curve(
         return Curve(index, asOf, pillars.map { it.copy(zeroRate = it.zeroRate.add(shift)) }, adjustment)
     }
 
+    /**
+     * The projection curve libs-finance's `CashFlowProjector` reads for a floating index on this
+     * curve: simply-compounded forwards `(DF(s)/DF(e) − 1) / τ` under the LEG's own day count, so a
+     * floating period accrues on its contract convention while the curve keeps one time axis.
+     */
+    fun projection(): ForwardCurve = impliedForwards()
+
     companion object {
-        const val DAYS_PER_YEAR = 365
         const val RATE_SCALE = 10
         private const val BP_DECIMALS = 4
 
+        /** The curve-time axis: the kernel's ACT/365F (no local day-count constant, ADR-0344). */
         fun yearFraction(from: LocalDate, to: LocalDate): BigDecimal =
-            BigDecimal(ChronoUnit.DAYS.between(from, to)).divide(BigDecimal(DAYS_PER_YEAR), BigMath.MC)
+            DayCount.ACT_365_FIXED.yearFraction(from, to).toBigDecimal(BigMath.MC)
     }
 }

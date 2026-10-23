@@ -86,7 +86,6 @@ com.openbank.party/
     ├── persistence/repository/      *RepositoryImpl (Panache reactive)
     ├── outbox/                      PartyOutboxDispatcher (@Scheduled)
     ├── kafka/                       KafkaPartyOutboxEventPublisher, KycAmlEventConsumer
-    ├── authz/                       AuthzProducer (OPA, ADR-0034)
     └── flags/                       FlagdProducer (OpenFeature, ADR-0067)
 ```
 

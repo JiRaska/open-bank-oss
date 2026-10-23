@@ -71,6 +71,7 @@ export default function DisputesPage() {
                 idle: t('dispute-service spí (scale-to-zero), probouzí se…', 'dispute-service idle (scaled to zero), waking…'),
                 down: t('dispute-service neodpovídá', 'dispute-service is not responding'),
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
+                unknown: t('Stav nasazení nelze ověřit', 'Deployment status is unknown'),
               }}
             />
             <button type="button" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit seznam sporů', 'Refresh disputes')} className="btn btn-secondary btn-sm">

@@ -40,13 +40,9 @@ class LedgerPostingAdapterTest {
 
     private val config = object : BillingLedgerConfig {
         override fun systemActorId(): UUID = UUID.fromString("00000000-0000-0000-0000-0000000000bb")
-        override fun gl(): BillingLedgerConfig.Gl = object : BillingLedgerConfig.Gl {
-            override fun feeReceivable(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000000002")
-            override fun feeIncome(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000004003")
-        }
     }
 
-    private val adapter = LedgerPostingAdapter(ledgerClient, config, clock)
+    private val adapter = LedgerPostingAdapter(ledgerClient, config, clock, postByClass = true)
 
     private fun command(idempotencyKey: String = "fee-2026-07-acc-1-f1-CZK") = FeeJournalCommand(
         idempotencyKey = idempotencyKey,
@@ -56,10 +52,11 @@ class LedgerPostingAdapterTest {
         amount = BigDecimal("150.00"),
         currency = "CZK",
         description = "Fee charge: Maintenance",
+        accountingClass = "CUSTOMER_DEPOSIT_DEMAND",
     )
 
     @Test
-    fun `posts a clock-dated balanced journal built from the configured GL accounts and returns the journal id`() {
+    fun `posts a clock-dated balanced journal whose legs name accounting classes and returns the journal id`() {
         val requestSlot: CapturingSlot<LedgerPostJournalRequest> = slot()
         val journalId = UUID.randomUUID()
         every { ledgerClient.postJournal(capture(requestSlot)) } returns Uni.createFrom().item(
@@ -96,6 +93,7 @@ class LedgerPostingAdapterTest {
         amount = BigDecimal("150.00"),
         currency = "CZK",
         reason = "waiver bug",
+        accountingClass = "CUSTOMER_DEPOSIT_DEMAND",
     )
 
     @Test
@@ -124,5 +122,48 @@ class LedgerPostingAdapterTest {
         assertThatThrownBy { runBlocking { adapter.postReversal(reversalCommand()) } }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("ledger down")
+    }
+
+    private fun capture(postByClass: Boolean, block: suspend (LedgerPostingAdapter) -> Unit): LedgerPostJournalRequest {
+        val requestSlot: CapturingSlot<LedgerPostJournalRequest> = slot()
+        every { ledgerClient.postJournal(capture(requestSlot)) } returns Uni.createFrom().item(
+            LedgerJournalEntryResponse(UUID.randomUUID(), UUID.randomUUID(), "POSTED"),
+        )
+        runBlocking { block(LedgerPostingAdapter(ledgerClient, config, clock, postByClass)) }
+        return requestSlot.captured
+    }
+
+    @Test
+    fun `with the switch off the legs are the explicit accounts the ledger has always accepted`() {
+        val mapper = com.fasterxml.jackson.databind.ObjectMapper()
+        for (ccy in listOf("CZK", "EUR")) {
+            val charge = capture(false) { it.post(command().copy(currency = ccy)) }
+            val reversal = capture(false) { it.postReversal(reversalCommand().copy(currency = ccy)) }
+            for ((name, request) in listOf("charge" to charge, "reversal" to reversal)) {
+                val legs = mapper.readTree(mapper.writeValueAsString(request))["lines"]
+                assertThat(legs[0]["glAccountId"].asText()).describedAs("$name $ccy debit/credit customer leg")
+                    .isEqualTo("a0000000-0000-0000-0000-000000000002")
+                assertThat(legs[1]["glAccountId"].asText()).describedAs("$name $ccy income leg")
+                    .isEqualTo("a0000000-0000-0000-0000-000000004003")
+                legs.forEach {
+                    // exactly the payload an older ledger knows: no class fields at all
+                    assertThat(it.has("accountingClass")).isFalse()
+                    assertThat(it.has("accountingRole")).isFalse()
+                }
+            }
+            assertThat(charge.lines.map { it.side }).containsExactly("DEBIT", "CREDIT")
+            assertThat(reversal.lines.map { it.side }).containsExactly("CREDIT", "DEBIT")
+        }
+    }
+
+    @Test
+    fun `with the switch on the legs name a class and role and no account`() {
+        val mapper = com.fasterxml.jackson.databind.ObjectMapper()
+        val request = capture(true) { it.post(command()) }
+        val legs = mapper.readTree(mapper.writeValueAsString(request))["lines"]
+        assertThat(legs[0]["accountingClass"].asText()).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
+        assertThat(legs[0]["accountingRole"].asText()).isEqualTo("PRINCIPAL")
+        assertThat(legs[1]["accountingClass"].asText()).isEqualTo("FEE_INCOME_ACCOUNT")
+        legs.forEach { assertThat(it.has("glAccountId")).isFalse() }
     }
 }

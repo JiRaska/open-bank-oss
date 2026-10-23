@@ -7,11 +7,13 @@ package com.openbank.flakytest.infrastructure.rest
 
 import com.openbank.flakytest.application.port.incoming.AnalyzeTestIntelligenceUseCase
 import com.openbank.flakytest.application.port.incoming.GetFindingsUseCase
+import com.openbank.flakytest.application.port.incoming.GetOperatorWorkflowStatusUseCase
 import com.openbank.flakytest.application.port.incoming.RunFlakyTestCheckUseCase
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.domain.model.FlakyTestReport
 import com.openbank.flakytest.domain.model.RunTrigger
 import com.openbank.flakytest.domain.model.TestIntelligenceAnalysisRequest
+import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
@@ -29,6 +31,7 @@ import kotlinx.coroutines.runBlocking
 class FlakyTestResource(
     private val runCheck: RunFlakyTestCheckUseCase,
     private val getFindings: GetFindingsUseCase,
+    private val getWorkflowStatus: GetOperatorWorkflowStatusUseCase,
     private val testIntelligenceAnalysis: AnalyzeTestIntelligenceUseCase,
 ) {
     @POST
@@ -63,6 +66,13 @@ class FlakyTestResource(
             FlakyTestCheckStarted(runCheck.startDetached(RunTrigger.OPERATOR_MANUAL, boundedKey)),
         ).build()
     }
+
+    /** Read-only, admin-scoped status for a recent operator workflow. */
+    @GET
+    @Path("/check/workflows/{workflowId}")
+    @RolesAllowed("ROLE_ADMIN")
+    @Blocking
+    fun getOperatorWorkflowStatus(@PathParam("workflowId") workflowId: String) = getWorkflowStatus.getStatus(workflowId)
 
     /** The agent receives only a bounded provenance projection and cannot apply a remediation. */
     @POST

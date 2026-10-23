@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.12.0...sepa-instant-v0.12.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **sepa-instant:** preserve settlement proof and omit provider payloads ([#13223](https://github.com/JiRaska/open-bank-oss/issues/13223)) ([b99d45e](https://github.com/JiRaska/open-bank-oss/commit/b99d45e14b336ae750eb0ff5f19f7ead257fcb41))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.5...sepa-instant-v0.12.0) (2026-10-16)
 
 

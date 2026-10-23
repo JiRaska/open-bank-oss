@@ -11,3 +11,7 @@ Tato stránka zatím popisuje jen životní cyklus outboxu; zbytek datového mod
 - Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
 - Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
 - Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
+
+## Zaúčtování uvádí účetní třídu, ne GL kód (ADR-0341 D3)
+
+Noha zaúčtování nově nese `accountingClass` + `LedgerRole` (jistina, naběhlý úrok, úrokový výnos/náklad) + měnu a žádný GL kód; účet určí ledger ze své mapy. Každý `ProductType` deklaruje svou účetní třídu (např. `INTERBANK_PLACEMENT`, `CNB_LOMBARD_BORROWING`) a odsouhlasení nostra používá `TreasuryChart.nostroCode`. Test s legacy oraklem zajišťuje, že výsledné žurnály se nemění.

@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.0](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v3.0.0...pension-service-v3.1.0) (2026-10-21)
+
+
+### Features
+
+* **product-catalog:** expose schema approval policy; move consumers off pension-approval aliases ([#13496](https://github.com/JiRaska/open-bank-oss/issues/13496)) ([6174564](https://github.com/JiRaska/open-bank-oss/commit/61745645e041c190e49bfe9d01d384a80bc7bce9))
+
 ## [3.0.0](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v2.0.3...pension-service-v3.0.0) (2026-10-17)
 
 

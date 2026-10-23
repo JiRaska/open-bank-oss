@@ -14,18 +14,41 @@ import java.util.UUID
  * ledger-service (ADR-0143 step 2). Pure and side-effect-free so the accounting is fully
  * unit-tested without any HTTP — mirrors `openbank-lending-service`'s `LendingJournalFactory`.
  *
- * Fees are single-currency (no FX in phase 2, ADR-0143): DEBIT the customer's deposit-control GL
- * with `subAccountId = accountId` for the sub-ledger tie-out (ADR-0039 Phase B — the only GL
- * account class that accepts `subAccountId`), CREDIT the bank fee-income GL, both in the fee's
- * own currency (`baseAmount == amount`).
+ * Fees are single-currency (no FX in phase 2, ADR-0143): DEBIT the customer's deposit-control
+ * leg with `subAccountId = accountId` for the sub-ledger tie-out (ADR-0039 Phase B — the only GL
+ * account class that accepts `subAccountId`), CREDIT the bank fee-income leg, both in the fee's
+ * own currency (`baseAmount == amount`). Legs name an accounting class and role, never a GL
+ * account (ADR-0341 D3): the ledger resolves them with the leg's currency.
  */
 object BillingJournalFactory {
 
+    /**
+     * The customer leg's class comes from the pinned revision; the ledger maps (class, PRINCIPAL,
+     * currency) to that currency's deposit-control GL (ledger V32). In CZK that is 2100, the very
+     * account billing always debited; `FeeJournalsUnchangedTest` proves CZK is byte-identical. A
+     * non-CZK fee debits its own control account (2101-2103) -- the old fixed CZK account was refused
+     * by the ledger for any other currency, so no non-CZK fee ever posted through it.
+     */
+    private const val CUSTOMER_ROLE = "PRINCIPAL"
+
+    /**
+     * ROLLOUT SHIM (`openbank.billing.ledger.post-by-class` = false, the default): the two accounts the
+     * previous release named by id, `a0..0002` (2100) and `a0..4003` (4003), for every currency exactly as
+     * before. It exists so deploying billing before the ledger that serves accounting classes cannot make
+     * the ledger refuse every fee. Flip the switch once that ledger is live, then delete these two.
+     */
+    private val FEE_RECEIVABLE_GL: UUID = UUID.fromString("a0000000-0000-0000-0000-000000000002")
+    private val FEE_INCOME_GL: UUID = UUID.fromString("a0000000-0000-0000-0000-000000004003")
+
+    /** The bank's fee income, a class of its own that no product revision carries (ADR-0341 D3). */
+    private const val FEE_INCOME_CLASS = "FEE_INCOME_ACCOUNT"
+    private const val FEE_INCOME_ROLE = "FEE_INCOME"
+
     fun buildRequest(
         command: FeeJournalCommand,
-        accounts: BillingLedgerConfig.Gl,
         systemActorId: UUID,
         date: LocalDate,
+        postByClass: Boolean = true,
     ): LedgerPostJournalRequest = LedgerPostJournalRequest(
         // The idempotency key is already unique per (cycleId, accountId, feeId, currency)
         // (ADR-0143 step 3), so it doubles as the ledger's own dedup key — a redrive replays
@@ -36,15 +59,17 @@ object BillingJournalFactory {
         valueDate = date.toString(),
         description = command.description,
         createdBy = systemActorId,
-        lines = buildLines(command, accounts),
+        lines = buildLines(command, postByClass),
     )
 
-    fun buildLines(command: FeeJournalCommand, accounts: BillingLedgerConfig.Gl): List<LedgerJournalLineRequest> {
+    fun buildLines(command: FeeJournalCommand, postByClass: Boolean = true): List<LedgerJournalLineRequest> {
         val ccy = command.currency
         val value = command.amount
         return listOf(
             LedgerJournalLineRequest(
-                glAccountId = accounts.feeReceivable(),
+                glAccountId = FEE_RECEIVABLE_GL.takeUnless { postByClass },
+                accountingClass = command.accountingClass.takeIf { postByClass },
+                accountingRole = CUSTOMER_ROLE.takeIf { postByClass },
                 side = "DEBIT",
                 amount = value,
                 currencyCode = ccy,
@@ -53,7 +78,9 @@ object BillingJournalFactory {
                 subAccountId = accountIdAsUuidOrNull(command.accountId),
             ),
             LedgerJournalLineRequest(
-                glAccountId = accounts.feeIncome(),
+                glAccountId = FEE_INCOME_GL.takeUnless { postByClass },
+                accountingClass = FEE_INCOME_CLASS.takeIf { postByClass },
+                accountingRole = FEE_INCOME_ROLE.takeIf { postByClass },
                 side = "CREDIT",
                 amount = value,
                 currencyCode = ccy,
@@ -83,9 +110,9 @@ object BillingJournalFactory {
      */
     fun buildReversalRequest(
         command: FeeReversalCommand,
-        accounts: BillingLedgerConfig.Gl,
         systemActorId: UUID,
         date: LocalDate,
+        postByClass: Boolean = true,
     ): LedgerPostJournalRequest = LedgerPostJournalRequest(
         idempotencyKey = command.idempotencyKey,
         transactionId = UUID.nameUUIDFromBytes(command.idempotencyKey.toByteArray(Charsets.UTF_8)),
@@ -93,18 +120,17 @@ object BillingJournalFactory {
         valueDate = date.toString(),
         description = "Reversal of fee charge (${command.reason})",
         createdBy = systemActorId,
-        lines = buildReversalLines(command, accounts),
+        lines = buildReversalLines(command, postByClass),
     )
 
-    fun buildReversalLines(
-        command: FeeReversalCommand,
-        accounts: BillingLedgerConfig.Gl,
-    ): List<LedgerJournalLineRequest> {
+    fun buildReversalLines(command: FeeReversalCommand, postByClass: Boolean = true): List<LedgerJournalLineRequest> {
         val ccy = command.currency
         val value = command.amount
         return listOf(
             LedgerJournalLineRequest(
-                glAccountId = accounts.feeReceivable(),
+                glAccountId = FEE_RECEIVABLE_GL.takeUnless { postByClass },
+                accountingClass = command.accountingClass.takeIf { postByClass },
+                accountingRole = CUSTOMER_ROLE.takeIf { postByClass },
                 side = "CREDIT",
                 amount = value,
                 currencyCode = ccy,
@@ -113,7 +139,9 @@ object BillingJournalFactory {
                 subAccountId = accountIdAsUuidOrNull(command.accountId),
             ),
             LedgerJournalLineRequest(
-                glAccountId = accounts.feeIncome(),
+                glAccountId = FEE_INCOME_GL.takeUnless { postByClass },
+                accountingClass = FEE_INCOME_CLASS.takeIf { postByClass },
+                accountingRole = FEE_INCOME_ROLE.takeIf { postByClass },
                 side = "DEBIT",
                 amount = value,
                 currencyCode = ccy,

@@ -32,6 +32,13 @@ interface RunFlakyTestCheckUseCase {
     suspend fun startDetached(trigger: RunTrigger, idempotencyKey: String? = null): String
 }
 
+/** Read-only Temporal status for a bounded operator-triggered workflow handle. */
+interface GetOperatorWorkflowStatusUseCase {
+    fun getStatus(workflowId: String): OperatorWorkflowStatus
+}
+
+data class OperatorWorkflowStatus(val workflowId: String, val status: String)
+
 interface GetFindingsUseCase {
     suspend fun getActive(): List<FlakyTestFinding>
     suspend fun getById(id: String): FlakyTestFinding?

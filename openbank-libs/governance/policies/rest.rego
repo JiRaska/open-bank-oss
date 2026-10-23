@@ -412,6 +412,25 @@ allowed_reasons contains "pension-catalog-read-approval" if {
 	"CATALOG_SCOPE_READ" in input.principal.roles
 }
 
+# Generic role-qualified revision approval (#13429). Which role a revision needs and which
+# authority proves it is pack data checked by product-catalog; OPA only requires a verified human
+# holding SOME approval authority (the derived CATALOG_REVISION_APPROVER marker).
+allowed_reasons contains "catalog-revision-decide-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.revisionApproval.decide"
+	input.resource.id
+	"CATALOG_REVISION_APPROVER" in input.principal.roles
+}
+
+allowed_reasons contains "catalog-revision-read-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.revisionApproval.read"
+	input.resource.id
+	"CATALOG_SCOPE_READ" in input.principal.roles
+}
+
 # A named human legal/product reviewer needs the catalog workspace before deciding a revision.
 # The read role is derived from that reviewer's verified realm role by product-catalog; it is
 # never a realm-wide default or an assignable CATALOG_SCOPE_READ role.
@@ -420,7 +439,7 @@ allowed_reasons contains "pension-catalog-human-reviewer-read" if {
 	not startswith(input.principal.id, "service-account-")
 	input.action == "catalog.read"
 	"CATALOG_SCOPE_READ" in input.principal.roles
-	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER"}
+	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "CATALOG_REVISION_APPROVER"}
 	role in input.principal.roles
 }
 
@@ -439,7 +458,7 @@ allowed_reasons contains "pension-catalog-m2m-read-approval" if {
     input.principal.id == "service-account-openbank-pension"
     "ROLE_API" in input.principal.roles
     "CATALOG_SCOPE_READ" in input.principal.roles
-    input.action == "catalog.pensionApproval.read"
+    input.action in {"catalog.pensionApproval.read", "catalog.revisionApproval.read"}
     input.resource.id
     input.attributes.azp == "openbank-pension"
     input.attributes.preferred_username == "service-account-openbank-pension"
