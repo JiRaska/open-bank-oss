@@ -13,7 +13,10 @@ import com.openbank.libs.product.ir.ProductInterpreter
 import com.openbank.libs.testing.product.ProductArb
 import com.openbank.libs.testing.product.assertMoneyConserved
 import com.openbank.products.catalog.ReferenceProducts
+import io.kotest.property.Arb
 import io.kotest.property.PropTestConfig
+import io.kotest.property.arbitrary.bigDecimal
+import io.kotest.property.arbitrary.boolean
 import io.kotest.property.arbitrary.flatMap
 import io.kotest.property.arbitrary.map
 import io.kotest.property.checkAll
@@ -21,6 +24,8 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.TestFactory
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.ZoneOffset
 
 /**
@@ -38,7 +43,16 @@ class ReferenceProductPropertyTest {
             DynamicTest.dynamicTest(p.name) {
                 val rev = p.compile()
                 val cases = ProductArb.today.flatMap { today ->
-                    ProductArb.state(rev.currency, today).flatMap { state ->
+                    // ProductArb draws balances uniformly up to 500 000, so a waiver threshold of 1 000 almost
+                    // never fails and the fee's Post path is not exercised. Half the cases are re-drawn below
+                    // 2 000 so every reference product's posting rules are reached (the counters below assert it).
+                    ProductArb.state(rev.currency, today).flatMap { generated ->
+                        Arb.boolean().flatMap { low ->
+                            Arb.bigDecimal(BigDecimal("0.00"), BigDecimal("2000.00")).map { b ->
+                                if (low) generated.copy(balance = b.setScale(2, RoundingMode.HALF_UP)) else generated
+                            }
+                        }
+                    }.flatMap { state ->
                         ProductArb.event(rev).map { event -> Triple(today, state, event) }
                     }
                 }
