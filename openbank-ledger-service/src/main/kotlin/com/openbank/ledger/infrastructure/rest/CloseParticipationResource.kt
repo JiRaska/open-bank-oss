@@ -11,8 +11,6 @@ import com.openbank.ledger.domain.model.CloseParticipationRecord
 import com.openbank.ledger.domain.model.ParticipationOutcome
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
-import com.openbank.libs.close.CloseOutcome
-import com.openbank.libs.close.ParticipantDayStatus
 import com.openbank.libs.security.Roles
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
@@ -135,7 +133,7 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
     private fun parseOutcome(value: String?): ParticipationOutcome {
         val allowed = listOf(ParticipationOutcome.RAN, ParticipationOutcome.SKIPPED, ParticipationOutcome.REFUSED)
         return allowed.firstOrNull { it.name == value?.uppercase() } ?: throw WebApplicationException(
-            "outcome must be one of ${allowed.joinToString { it.name }}",
+            "outcome must be one of ${allowed.joinToString()}",
             Response.Status.BAD_REQUEST,
         )
     }
@@ -158,9 +156,20 @@ data class ReportParticipationRequest(
 
 data class WaiveParticipationRequest(val reason: String?)
 
+/**
+ * What the completeness view shows per participant: the latest [ParticipationOutcome] name, or
+ * [MISSING] for a declared participant that has not reported. MISSING is the absence of a record and
+ * never a stored outcome, so it is a wire constant here rather than a second outcome vocabulary.
+ */
+object ParticipantDayStatus {
+    const val MISSING = "MISSING"
+
+    fun of(outcome: ParticipationOutcome): String = outcome.name
+}
+
 data class ParticipationResponse(
     val participant: String,
-    val status: ParticipantDayStatus,
+    val status: String,
     val journalsPosted: Int,
     val itemsProcessed: Int,
     val reason: String?,
@@ -184,14 +193,7 @@ data class CloseCompletenessResponse(
 
 private fun CloseParticipationRecord.toResponse() = ParticipationResponse(
     participant = participant,
-    status = when (outcome) {
-        is ParticipationOutcome.Reported -> when (outcome.value) {
-            CloseOutcome.RAN -> ParticipantDayStatus.RAN
-            CloseOutcome.SKIPPED -> ParticipantDayStatus.SKIPPED
-            CloseOutcome.REFUSED -> ParticipantDayStatus.REFUSED
-        }
-        ParticipationOutcome.Waived -> ParticipantDayStatus.WAIVED
-    },
+    status = ParticipantDayStatus.of(outcome),
     journalsPosted = journalsPosted,
     itemsProcessed = itemsProcessed,
     reason = reason,

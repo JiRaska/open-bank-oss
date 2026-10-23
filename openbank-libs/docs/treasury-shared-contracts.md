@@ -9,15 +9,15 @@ force.
 
 [`CloseOutcome`](../../openbank-libs-domain/src/main/kotlin/com/openbank/libs/close/CloseOutcome.kt)
 contains `RAN`, `SKIPPED` and `REFUSED` for participant reports.
-[`ParticipantDayStatus`](../../openbank-libs-domain/src/main/kotlin/com/openbank/libs/close/ParticipantDayStatus.kt)
-adds `WAIVED` and `MISSING` for the completeness read response. A missing report
-is not a report, and only the ledger's operator path may waive participation.
-Consumers must not use the read-side enum to widen the report request contract.
+The ledger's completeness read response can additionally show `WAIVED` (an
+operator decision, ledger-owned) and `MISSING` (a declared participant with no
+report). A missing report is not a report, and only the ledger's operator path may
+waive participation. Neither value is a participant outcome, so neither widens the
+report request contract.
 
 [`CloseParticipationReporter`](../../openbank-libs-runtime/src/main/kotlin/com/openbank/libs/close/CloseParticipationReporter.kt)
-retains the participant-owned sink and delivery behavior. Its metric name
-`openbank.close.participation.reports` is now available through the public `METRIC`
-constant. Delivery failure is observed without failing the caller's job; the
+retains the participant-owned sink and delivery behavior. Its metric is
+`openbank.close.participation.reports`. Delivery failure is observed without failing the caller's job; the
 caller must re-offer persisted outcomes on a later tick. An identical report
 already delivered is not sent again while remembered by this process. This is
 not a durable exactly-once guarantee. Whether an absent report actually blocks

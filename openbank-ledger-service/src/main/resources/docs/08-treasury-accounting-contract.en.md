@@ -30,8 +30,9 @@ The branch declares `treasury` alongside `interest` in
 principal for each participant. `PUT
 /api/v1/ledger/accounting-days/{businessDate}/participants/{participant}` accepts
 only `RAN`, `SKIPPED` or `REFUSED`. A participant cannot submit `WAIVED` or
-`MISSING`. The shared `CloseOutcome` describes reports; `ParticipantDayStatus`
-describes the read response, which can additionally show those two states.
+`MISSING`. The shared `CloseOutcome` describes reports; the read response's
+`status` can additionally show those two states (`WAIVED` from an operator,
+`MISSING` for a declared participant that has not reported).
 
 `WAIVED` is an explicit human operator decision through the separate `/waiver`
 endpoint. Its reason is mandatory; it is valid only for an existing CUTOFF day,
