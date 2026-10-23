@@ -278,9 +278,14 @@ jobs:
           FULL_RESULT: ${{ needs.gradle-pacts.result }}
         run: |
           set -euo pipefail
-          if [ "$SCOPE_RESULT" = success ] && { [ "$SCOPE_MODE" = ui-only ] || [ "$SCOPE_MODE" = modules ]; }; then
+          if [ "$SCOPE_RESULT" = success ] && [ "$SCOPE_MODE" = ui-only ]; then
             [ "$FULL_RESULT" = success ] || {
-              echo "::error::Scoped ($SCOPE_MODE) JVM Pact producers did not complete: $FULL_RESULT"
+              echo "::error::Admin UI JVM Pact producers did not complete: $FULL_RESULT"
+              exit 1
+            }
+          elif [ "$SCOPE_RESULT" = success ] && [ "$SCOPE_MODE" = modules ]; then
+            [ "$FULL_RESULT" = success ] || {
+              echo "::error::Module-scoped JVM Pact producers did not complete: $FULL_RESULT"
               exit 1
             }
           else
