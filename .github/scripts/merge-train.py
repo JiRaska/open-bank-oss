@@ -87,6 +87,8 @@ STATUS_CONTEXT = "merge-train"
 RECORD_CONTEXT = "merge-train/record"          # publish's record of the tree it pushed
 BOT_LOGIN = "openbank-gitops-bot[bot]"          # the only creator whose statuses/PRs are trusted
 EXCLUDED_BRANCH_PREFIXES = ("codex/",)
+OWNER_APPROVAL_CONTEXT = "merge-train/owner-approval"
+OWNER_APPROVAL_WORKFLOW = pathlib.Path(".github/workflows/merge-train-owner-approval.yml")
 CARRIER_LABEL = "merge-train"
 TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -385,6 +387,18 @@ def extra_verdict(states: list[str | None]) -> str | None:
     return "success" if any(s in OK_STATES for s in states) else states[0]
 
 
+def owner_approval_valid(number: int, ref: str, app: dict | None) -> bool:
+    """Only the latest App status on this exact head can admit an owner-approved codex PR.
+
+    app_statuses() authenticates the producer and SHA. The canonical description additionally
+    binds the PR number, so two PRs sharing a head cannot borrow each other's approval.
+    """
+    if not any(ref.startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES):
+        return True
+    return (type(number) is int and number > 0
+            and (app or {}).get(OWNER_APPROVAL_CONTEXT) == ("success", f"owner-approved PR #{number}"))
+
+
 def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
               app: dict[str, tuple[str, str]] | None = None, untrainable=None,
               extra: list[str] | None = None) -> tuple[bool, str]:
@@ -403,9 +417,8 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
     if not pr.get("same_repo", True):
         return False, "head is a fork"
     ref = pr.get("head_ref") or ""
-    for pre in EXCLUDED_BRANCH_PREFIXES:
-        if ref.startswith(pre):
-            return False, f"excluded prefix {pre}"
+    if not owner_approval_valid(pr.get("number"), ref, app):
+        return False, "codex PR needs owner approval on this exact head"
     for f in pr.get("files") or []:
         if unsafe_path(f):
             return False, "a path contains a control character — manual lane, never a train"
@@ -1000,6 +1013,44 @@ def ruleset_guard(rules, app_id) -> str | None:
     return None
 
 
+def owner_approval_error(repo: str, number: int, head: str, decision: str,
+                         env: dict, metadata: dict, pr: dict) -> str | None:
+    """Fail closed before writing a decision; the workflow performs the same actor checks pre-token."""
+    owner = metadata.get("owner") or {}
+    if (metadata.get("full_name") != repo or owner.get("type") != "User"
+            or env.get("GITHUB_REPOSITORY") != repo
+            or env.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
+            or env.get("GITHUB_REF") != "refs/heads/main"
+            or env.get("GITHUB_RUN_ATTEMPT") != "1"
+            or env.get("GITHUB_ACTOR") != owner.get("login")
+            or env.get("GITHUB_TRIGGERING_ACTOR") != owner.get("login")
+            or env.get("GITHUB_ACTOR_ID") != str(owner.get("id"))):
+        return "only a first-attempt main dispatch by the live User repository owner may decide"
+    if type(number) is not int or number < 1 or not isinstance(head, str) or not SHA_RE.fullmatch(head) or decision not in ("approve", "revoke"):
+        return "invalid PR number, full head SHA or decision"
+    target, base = pr.get("head") or {}, pr.get("base") or {}
+    if (pr.get("number") != number
+            or (decision == "approve" and (pr.get("state") != "open" or pr.get("draft")))
+            or target.get("sha") != head or (target.get("repo") or {}).get("full_name") != repo
+            or base.get("ref") != "main" or (base.get("repo") or {}).get("full_name") != repo
+            or not any((target.get("ref") or "").startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES)):
+        return "decision requires an open, non-draft, same-repository codex PR to main at the supplied head"
+    return None
+
+
+def mode_owner_approval(gh, number: int, head: str, decision: str) -> None:
+    metadata = get(f"/repos/{gh.repo}")
+    pr = gh.pr(number)
+    error = owner_approval_error(gh.repo, number, head, decision, os.environ, metadata, pr)
+    if error:
+        raise SystemExit(f"::error::{error}")
+    state = "success" if decision == "approve" else "failure"
+    description = f"owner-{'approved' if decision == 'approve' else 'revoked'} PR #{number}"
+    # This is a decision record, never a CI verdict or the required merge-train context.
+    gh.post_status(head, state, description, context=OWNER_APPROVAL_CONTEXT)
+    log(f"owner decision: {decision} PR #{number} at {head}")
+
+
 class GitHub:
     """Every GitHub read and write. The self-test substitutes a fake with the same methods."""
 
@@ -1114,6 +1165,12 @@ class GitHub:
 
     def merge(self, n: int, head: str) -> str | None:
         """Squash-merge pinned to the verified head sha (the API's `sha` = --match-head-commit)."""
+        pr = self.pr(n)
+        if pr["head"]["sha"] != head:
+            return None
+        if not owner_approval_valid(n, pr["head"]["ref"], None):
+            if not pr.get("auto_merge") or not owner_approval_valid(n, pr["head"]["ref"], self.app_statuses(head)):
+                return None
         code, data = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/merge", {"merge_method": "squash", "sha": head})
         return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
 
@@ -1642,7 +1699,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             expected = live_main
             for n, head in chain[1]:
                 pr = gh.pr(n)
-                if pr.get("state") != "open" or pr["head"]["sha"] != head:
+                if (pr.get("state") != "open" or pr["head"]["sha"] != head
+                        or not owner_approval_valid(n, pr["head"]["ref"], gh.app_statuses(head))):
                     log(f"#{n} changed since the train was verified; stopping")
                     break
                 if not shadow and gh.main_sha() != expected:
@@ -2104,6 +2162,11 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         if gh.main_sha() != base:
             log(f"#{n:>6} strict    main moved since it was read — next tick")
             break
+        live_pr = gh.pr(n)
+        if (live_pr["head"]["sha"] != head
+                or not owner_approval_valid(n, live_pr["head"]["ref"], gh.app_statuses(head))):
+            log(f"#{n:>6} strict    head or owner approval changed — next tick")
+            continue
         if fix:
             desc = f"strict lane: fix for {', '.join(fix)} red on main {base[:12]}, verified on its up-to-date head"
             log(f"#{n:>6} strict    fix for {', '.join(fix)} red on main {base[:12]}: combined head verified, merging")
@@ -2170,6 +2233,31 @@ def job_sections(text: str) -> dict[str, str]:
     return {parts[i]: parts[i + 1] for i in range(1, len(parts) - 1, 2)}
 
 
+def owner_approval_declaration_errors(text: str) -> list[str]:
+    code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+    sec = job_sections(code).get("decide", "")
+    guard = ("if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' "
+             "&& github.actor == github.repository_owner && github.triggering_actor == github.repository_owner "
+             "&& github.run_attempt == 1")
+    must = [guard, "ref: main", "persist-credentials: false", "actions/create-github-app-token@",
+            "show HEAD:.github/scripts/merge-train.py", "python3 -I -S", '" owner-approval',
+            '--pr "$OWNER_PR" --head "$OWNER_HEAD" --decision "$OWNER_DECISION"']
+    errors = [f"owner approval writer missing {needle}" for needle in must if needle not in sec]
+    if "group: merge-train-owner-approval-${{ github.event_name }}-${{ github.ref }}" not in code or "cancel-in-progress: false" not in code:
+        errors.append("owner decisions must serialize separately from untrusted PR verification")
+    if sec.count("actions/checkout@") != 1 or sec.count("ref: main") != 1:
+        errors.append("owner approval writer must check out main exactly once")
+    if sec.count("run:") != 1:
+        errors.append("owner approval writer must have only its isolated decision command")
+    for forbidden in ("github.head_ref", "github.event.", "download-artifact", "gh pr merge", "gh pr review",
+                      "contents: write", "statuses: write", "pull_request_target:"):
+        if forbidden in code:
+            errors.append(f"owner approval writer forbids {forbidden}")
+    if "python3 .github/" in sec:
+        errors.append("owner approval writer must run only its isolated main script")
+    return errors
+
+
 def check_declaration() -> int:
     if not WORKFLOW.exists():
         print(f"::error::{WORKFLOW} missing")
@@ -2203,6 +2291,7 @@ def check_declaration() -> int:
     rules = pathlib.Path(RULES_FILE)
     if not parse_extra_gates(rules.read_text() if rules.exists() else ""):
         fails.append(f"{RULES_FILE}: merge_train.extra_gates must declare at least one check (parsed as empty)")
+    fails += owner_approval_declaration_errors(OWNER_APPROVAL_WORKFLOW.read_text() if OWNER_APPROVAL_WORKFLOW.exists() else "")
     for f in fails:
         print(f"::error::merge-train.yml declaration: {f}")
     n = len(TOP) + 6 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
@@ -2841,6 +2930,32 @@ def self_test() -> int:
                 gh.statuses.clear()
                 gh.g("checkout", "-q", "-f", "main")
                 gh.g("reset", "-q", "--hard", base0)
+
+            # Owner-approved codex paths use the real train/strict machinery, never a shortcut.
+            gh.g("branch", "codex/owner-feature", "p1")
+            gh.g("branch", "codex/owner-workflow", "pW")
+            gh.add_pr(70, "codex/owner-feature", "2026-01-01")
+            _, st = tick()
+            check("owner: unapproved codex head creates no train", st == "idle" and not gh.merged)
+            h = gh.prs[70]["head"]["sha"]
+            gh.post_status(h, "success", "owner-approved PR #70", OWNER_APPROVAL_CONTEXT)
+            tick()  # carrier produced while approved
+            gh.post_status(h, "failure", "owner-revoked PR #70", OWNER_APPROVAL_CONTEXT)
+            tick()
+            check("owner: revoked codex carrier cannot merge", not gh.merged, str(gh.merged))
+            reset()
+            gh.add_pr(70, "codex/owner-feature", "2026-01-01")
+            gh.post_status(h, "success", "owner-approved PR #70", OWNER_APPROVAL_CONTEXT)
+            drain()
+            check("owner: approved codex feature uses verified train", gh.merged == [70], str(gh.merged))
+            reset()
+            gh.add_pr(71, "codex/owner-workflow", "2026-01-01")
+            h = gh.prs[71]["head"]["sha"]
+            gh.post_status(h, "success", "owner-approved PR #71", OWNER_APPROVAL_CONTEXT)
+            tick()
+            check("owner: approved codex workflow uses strict lane", gh.merged == [71]
+                  and gh.app_statuses(h).get(STATUS_CONTEXT, ("", ""))[1].startswith("strict lane:"), str(gh.merged))
+            reset()
 
             # 4-PR batch, #3 bad: bisect across ticks isolates #3; 1, 2, 4 merge.
             open_only("p1", "p2", "p3", "p4")
@@ -4280,7 +4395,7 @@ def self_test() -> int:
 # --------------------------------------------------------------------------- main
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle"])
+    ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle", "owner-approval"])
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--check-declaration", action="store_true")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
@@ -4293,6 +4408,9 @@ def main() -> int:
     ap.add_argument("--workdir", default="")
     ap.add_argument("--run-url", default=os.environ.get("MERGE_TRAIN_RUN_URL", ""))
     ap.add_argument("--shadow", action="store_true", help="settle: post statuses and comments, never merge (phase 0)")
+    ap.add_argument("--pr", type=int, default=0, help="owner-approval: exact PR number")
+    ap.add_argument("--head", default="", help="owner-approval: full current head SHA")
+    ap.add_argument("--decision", choices=["approve", "revoke"], default="approve")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
@@ -4303,6 +4421,9 @@ def main() -> int:
     if "GH_TOKEN" not in os.environ:
         ap.error("GH_TOKEN is required (read-only for build, the App token for publish/settle)")
     gh = GitHub(args.repo, args.branch, args.run_url)
+    if args.mode == "owner-approval":
+        mode_owner_approval(gh, args.pr, args.head, args.decision)
+        return 0
     workdir = args.workdir or os.getcwd()
     if args.mode == "build":
         if not args.out:
