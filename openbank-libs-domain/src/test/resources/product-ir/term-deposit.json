@@ -1,0 +1,37 @@
+{
+  "irVersion": 1,
+  "productCode": "TD-12M",
+  "currency": "EUR",
+  "interest": {
+    "ruleId": "interest.base",
+    "rateType": "TIERED",
+    "tiers": [
+      { "from": "0.00", "to": "10000.00", "rate": "0.0200" },
+      { "from": "10000.00", "rate": "0.0300" }
+    ],
+    "dayCount": "ACT_360",
+    "accrualCadence": "DAILY",
+    "capitalisationCadence": "AT_MATURITY",
+    "accrualRounding": "INTEREST_ACCRUAL",
+    "postingRounding": "LEDGER_POSTING"
+  },
+  "termDeposit": {
+    "ruleId": "term.main",
+    "termMonths": 12,
+    "maturityAction": "CAPITALISE",
+    "earlyWithdrawal": { "ruleId": "term.early-withdrawal", "kind": "RATE", "rate": "0.0100" }
+  },
+  "hooks": {
+    "onOpen": [
+      { "ruleId": "open.schedule-accrual", "action": { "type": "SCHEDULE", "hook": "scheduled", "tag": "ACCRUAL", "cadence": "DAILY" } },
+      { "ruleId": "open.schedule-maturity", "action": { "type": "SCHEDULE", "hook": "scheduled", "tag": "MATURITY", "cadence": "AT_MATURITY" } }
+    ],
+    "prePosting": [
+      { "ruleId": "posting.early-withdrawal", "action": { "type": "EARLY_WITHDRAWAL_PENALTY" } }
+    ],
+    "scheduled": [
+      { "ruleId": "scheduled.accrue", "trigger": "ACCRUAL", "action": { "type": "ACCRUE_INTEREST" } },
+      { "ruleId": "scheduled.mature", "trigger": "MATURITY", "action": { "type": "MATURE" } }
+    ]
+  }
+}
