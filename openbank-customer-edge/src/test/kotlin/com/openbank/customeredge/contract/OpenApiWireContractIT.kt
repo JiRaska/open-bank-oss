@@ -3,15 +3,9 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.customeredge.contract
 
-import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.node.ArrayNode
-import com.fasterxml.jackson.databind.node.ObjectNode
-import com.networknt.schema.InputFormat
-import com.networknt.schema.JsonSchemaFactory
-import com.networknt.schema.SchemaValidatorsConfig
-import com.networknt.schema.SpecVersion
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
+import com.openbank.libs.testing.openapi.OpenApiWireValidator
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.test.junit.QuarkusMock
@@ -24,8 +18,6 @@ import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.snakeyaml.engine.v2.api.Load
-import org.snakeyaml.engine.v2.api.LoadSettings
 
 /**
  * The published `openapi.yaml` must describe what the REAL customer-edge endpoints put on the wire
@@ -37,7 +29,7 @@ import org.snakeyaml.engine.v2.api.LoadSettings
  * (RestAssured) through the real resource, with `UpstreamClient` (the one seam to account-/balance-/delegation-service) replaced by a
  * path-routed stub via `QuarkusMock` — no extra Quarkus restart, so no extra heap in the shared suite JVM —
  * then validates each response body against the operation's own 200 schema taken from
- * `openapi.yaml` (networknt JSON Schema validator, the one product-catalog / libs-domain use).
+ * `openapi.yaml` (libs-testing's `OpenApiWireValidator`: networknt JSON Schema validator, the one product-catalog / libs-domain use).
  *
  * The upstream fixtures are the shapes the upstream services actually serialise:
  * - balance-service `BalanceResource.getBalances` answers `mapOf("balances" to <domain Balance list>)`;
@@ -117,47 +109,8 @@ class OpenApiWireContractIT {
         assertThat(errors).describedAs("response of $specPath against openapi.yaml").isEmpty()
     }
 
-    private fun validate(body: String, specPath: String): List<String> {
-        val spec = loadSpec()
-        val schema200 = spec.path("paths").path(specPath).path("get").path("responses").path("200")
-            .path("content").path("application/json").path("schema")
-        assertThat(schema200.isMissingNode).describedAs("200 schema of GET $specPath").isFalse()
-        // Root document: components (so '#/components/schemas/X' resolves) + the operation's schema.
-        val root = mapper.createObjectNode()
-        root.set<JsonNode>("components", spec.path("components"))
-        root.set<JsonNode>("allOf", mapper.createArrayNode().add(schema200))
-        val config = SchemaValidatorsConfig.builder().formatAssertionsEnabled(true).build()
-        val factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
-        val schema = factory.getSchema(mapper.writeValueAsString(root), InputFormat.JSON, config)
-        return schema.validate(body, InputFormat.JSON).map { it.message }
-    }
-
-    /** openapi.yaml as JSON, with OpenAPI 3.0 `nullable: true` expressed as a JSON Schema null type. */
-    private fun loadSpec(): JsonNode {
-        val text = checkNotNull(javaClass.classLoader.getResourceAsStream("openapi.yaml")) {
-            "openapi.yaml not on the test classpath"
-        }.bufferedReader().use { it.readText() }
-        val loaded = Load(LoadSettings.builder().build()).loadFromString(text)
-        val tree = mapper.valueToTree<JsonNode>(loaded)
-        return nullableToType(tree)
-    }
-
-    private fun nullableToType(node: JsonNode): JsonNode {
-        when (node) {
-            is ObjectNode -> {
-                node.fieldNames().asSequence().toList().forEach { f ->
-                    node.set<JsonNode>(f, nullableToType(node.get(f)))
-                }
-                if (node.path("nullable").asBoolean(false) && node.has("type") && node.get("type").isTextual) {
-                    val types: ArrayNode = mapper.createArrayNode().add(node.get("type").asText()).add("null")
-                    node.set<JsonNode>("type", types)
-                }
-            }
-            is ArrayNode -> for (i in 0 until node.size()) node.set(i, nullableToType(node.get(i)))
-            else -> Unit
-        }
-        return node
-    }
+    private fun validate(body: String, specPath: String): List<String> =
+        OpenApiWireValidator().violations(body, specPath)
 }
 
 internal const val WIRE_PARTY_ID = "55555555-5555-4555-8555-555555555555"

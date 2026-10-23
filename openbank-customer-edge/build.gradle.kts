@@ -34,13 +34,6 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.mockk)
-    // OpenApiWireContractIT (#13210): validates real responses against openapi.yaml. Same validator
-    // and yaml exclusion as libs-domain; declared here (not api-exposed from libs-testing) so it does
-    // not fan out to every consumer of that module.
-    testImplementation("com.networknt:json-schema-validator:1.5.9") {
-        exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
-    }
-    testImplementation("org.snakeyaml:snakeyaml-engine:2.7")
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.redpanda)
     // Provider-side Pact verification (ADR-0063, issue #2322): replays copilot's
