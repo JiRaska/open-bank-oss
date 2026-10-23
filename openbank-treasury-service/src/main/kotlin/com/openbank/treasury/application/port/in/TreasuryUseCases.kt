@@ -13,13 +13,20 @@ import com.openbank.treasury.domain.model.BreakAlertPolicy
 import com.openbank.treasury.domain.model.BreakChanges
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.Deal
+import com.openbank.treasury.domain.model.DealHeader
+import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxSide
+import com.openbank.treasury.domain.model.LegSpec
 import com.openbank.treasury.domain.model.NostroBreak
 import com.openbank.treasury.domain.model.NostroReconciliation
 import com.openbank.treasury.domain.model.NostroStatement
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.SimulatedQuote
+import com.openbank.treasury.domain.reference.ReferenceKind
+import com.openbank.treasury.domain.reference.ReferencePayload
+import com.openbank.treasury.domain.reference.ReferenceRecord
+import com.openbank.treasury.domain.reference.ReferenceStatus
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -39,6 +46,11 @@ data class DraftDealCommand(
     val inputs: String? = null,
     /** FX_SPOT only: the bank's side on the foreign [currency]. */
     val fxSide: FxSide? = null,
+    /** ADR-0344 D2. */
+    val kind: DealKind = DealKind.ACTUAL,
+    /** Required for the leg-described products; derived from the flat fields for the legacy five. */
+    val legs: List<LegSpec> = emptyList(),
+    val header: DealHeader = DealHeader.EMPTY,
 )
 
 data class DealView(val deal: Deal, val journals: List<LedgerJournalRef>)
@@ -128,11 +140,26 @@ data class AccrualRun(val journals: Int, val failures: List<Throwable>)
 @Suppress("TooManyFunctions")
 interface TreasuryDealUseCase {
     /**
+     * ADR-0344 D7: the SAME term vetting a draft, submission and booking run, applied to the deal a
+     * correction would make — reference effectiveness, the FX rate flag, the product mandate (never
+     * overridable) and the counterparty limit on the corrected exposure (a breach passes only under
+     * [override], a senior's recorded override that still covers it). Returns the corrected deal as
+     * vetted and its limit check (null for a product that consumes no limit).
+     */
+    suspend fun vetCorrection(
+        target: com.openbank.treasury.domain.model.Deal,
+        override: com.openbank.treasury.domain.model.LimitOverride?,
+    ): Pair<com.openbank.treasury.domain.model.Deal, com.openbank.treasury.domain.model.LimitCheck?>
+
+    /**
      * Every command takes the client's idempotency key (null only for the in-process simulated
      * market). A replayed key returns the deal as it now stands; a key reused for a different
      * command or deal is refused (400).
      */
     suspend fun draft(command: DraftDealCommand, actor: Actor, key: String? = null): Deal
+
+    /** ADR-0344: new terms for a DRAFT (`PUT /deals/{id}`); a human, or the agent that drafted it. */
+    suspend fun editDraft(dealId: UUID, command: DraftDealCommand, actor: Actor, key: String? = null): Deal
     suspend fun submit(dealId: UUID, actor: Actor, key: String? = null): Deal
     suspend fun approve(dealId: UUID, actor: Actor, key: String? = null): Deal
 
@@ -140,6 +167,15 @@ interface TreasuryDealUseCase {
     suspend fun overrideLimit(dealId: UUID, reason: String, actor: Actor, key: String? = null): Deal
     suspend fun reject(dealId: UUID, reason: String, actor: Actor, key: String? = null): Deal
     suspend fun cancel(dealId: UUID, actor: Actor, key: String? = null): Deal
+
+    /** ADR-0344 catalogue: the bank's own confirmation was sent (state unchanged, posts nothing). */
+    suspend fun sendConfirmation(
+        dealId: UUID,
+        documentId: String?,
+        channel: String?,
+        actor: Actor,
+        key: String? = null,
+    ): Deal
 
     /** ADR-0315 D2: the counterparty confirmed the booked terms (BOOKED -> CONFIRMED). Posts nothing. */
     suspend fun confirm(dealId: UUID, reference: String?, actor: Actor, key: String? = null): Deal
@@ -158,6 +194,24 @@ interface TreasuryDealUseCase {
 
     /** Post every missing daily accrual of every SETTLED deal up to [asOf] (capped at maturity). */
     suspend fun accrueInterest(asOf: LocalDate): AccrualRun
+
+    /**
+     * ADR-0344 D7 outflow: post, through the posting matrix, the accruals and the PAYMENT journals of
+     * every flow of [dealId] paid on or before [through] (a SENT/SETTLED payment's value date). The
+     * keys are the same `treasury:<dealId>:payment:<flowId>` the daily run uses, so whichever posts
+     * first wins and the other is a ledger replay. A legacy product or a deal not SETTLED posts
+     * nothing. Returns the journals posted.
+     */
+    suspend fun postOutflow(dealId: java.util.UUID, through: LocalDate): Int = 0
+
+    /**
+     * ADR-0344 D7: the posting-rule matrix (versioned data) for the products that post today. The
+     * rows of a product whose phase has not landed stay dormant and are not served.
+     */
+    fun postingRules(): List<com.openbank.treasury.domain.model.PostingRule> =
+        com.openbank.treasury.domain.model.PostingMatrix.rules.filter {
+            it.product in com.openbank.treasury.domain.model.ProductType.DELIVERED
+        }
 }
 
 interface NostroReconciliationUseCase {
@@ -200,4 +254,163 @@ interface NostroBreakUseCase {
     suspend fun breaks(iban: String, includeResolved: Boolean): List<NostroBreakView>
 
     val policy: BreakAlertPolicy
+}
+
+data class ProposeReferenceCommand(
+    val kind: ReferenceKind,
+    val key: String,
+    val validFrom: LocalDate,
+    val validTo: LocalDate?,
+    val payload: ReferencePayload,
+    val reason: String,
+)
+
+data class ReferenceHistory(
+    val kind: ReferenceKind,
+    val key: String,
+    val active: ReferenceRecord?,
+    val versions: List<ReferenceRecord>,
+)
+
+/** `type` is `deal` or a reference kind's wire name; `field` names what points at the record. */
+data class ReferenceDependant(val type: String, val id: String, val field: String)
+
+interface ReferenceDataUseCase {
+    suspend fun list(kind: ReferenceKind, status: ReferenceStatus?, asOf: LocalDate?): List<ReferenceRecord>
+
+    suspend fun history(kind: ReferenceKind, key: String): ReferenceHistory
+
+    suspend fun propose(command: ProposeReferenceCommand, actor: Actor, key: String): ReferenceRecord
+
+    /** [seniorApprover]: the caller holds the senior approver role (needed to raise a counterparty limit). */
+    suspend fun approve(
+        kind: ReferenceKind,
+        recordKey: String,
+        version: Int,
+        actor: Actor,
+        key: String,
+        seniorApprover: Boolean,
+    ): ReferenceRecord
+
+    suspend fun reject(
+        kind: ReferenceKind,
+        recordKey: String,
+        version: Int,
+        reason: String,
+        actor: Actor,
+        key: String,
+    ): ReferenceRecord
+
+    suspend fun verify(kind: ReferenceKind, recordKey: String, version: Int, actor: Actor, key: String): ReferenceRecord
+
+    suspend fun dependencies(kind: ReferenceKind, key: String): List<ReferenceDependant>
+
+    /** Many PENDING proposals of one kind, all-or-nothing, under one Idempotency-Key. */
+    suspend fun importProposals(
+        kind: ReferenceKind,
+        commands: List<ProposeReferenceCommand>,
+        actor: Actor,
+        key: String,
+    ): List<ReferenceRecord>
+
+    /** Who proposed, approved, rejected or verified what, newest first. */
+    suspend fun activity(since: java.time.Instant?): List<ReferenceActivity>
+}
+
+data class ReferenceActivity(
+    val at: java.time.Instant,
+    val actor: String,
+    val action: String,
+    val kind: String,
+    val key: String,
+    val version: Int,
+)
+
+/** The stored ledger of one schedule version (ADR-0344 D4). */
+data class CashFlowLedgerView(
+    val dealId: UUID,
+    val dealVersion: Int,
+    val scheduleVersion: Int,
+    val scheduleHash: String?,
+    val generatedAt: java.time.Instant?,
+    val flows: List<com.openbank.treasury.domain.cashflow.CashFlow>,
+    val overrides: List<com.openbank.treasury.domain.cashflow.CashFlowOverride>,
+)
+
+enum class TreasuryEventType {
+    REFIXING,
+    INTEREST_PAYMENT,
+    PRINCIPAL_PAYMENT,
+    MATURITY,
+    OPTION_EXERCISE,
+    MARGIN_CALL,
+    SETTLEMENT,
+}
+
+data class TreasuryCalendarEvent(
+    val date: LocalDate,
+    val type: TreasuryEventType,
+    val description: String,
+    val dealId: UUID,
+    val flowId: UUID?,
+    val responsibleRole: String,
+)
+
+interface CashFlowUseCase {
+    suspend fun ledger(dealId: UUID, scheduleVersion: Int?): CashFlowLedgerView
+
+    /** Generate the ledger the deal would have now, WITHOUT storing it. */
+    suspend fun preview(dealId: UUID): CashFlowLedgerView
+
+    @Suppress("LongParameterList")
+    suspend fun proposeOverride(
+        dealId: UUID,
+        flowId: UUID,
+        paymentDate: LocalDate?,
+        amount: BigDecimal?,
+        reason: String,
+        actor: Actor,
+        key: String,
+    ): com.openbank.treasury.domain.cashflow.CashFlowOverride
+
+    suspend fun approveOverride(
+        dealId: UUID,
+        flowId: UUID,
+        overrideId: UUID,
+        actor: Actor,
+        key: String,
+    ): com.openbank.treasury.domain.cashflow.CashFlowOverride
+
+    @Suppress("LongParameterList")
+    suspend fun rejectOverride(
+        dealId: UUID,
+        flowId: UUID,
+        overrideId: UUID,
+        reason: String,
+        actor: Actor,
+        key: String,
+    ): com.openbank.treasury.domain.cashflow.CashFlowOverride
+
+    suspend fun conflicts(dealId: UUID): List<com.openbank.treasury.domain.cashflow.CashFlowConflict>
+
+    /** One deal's overrides, optionally by status (the approver's view of a deal). */
+    suspend fun overrides(
+        dealId: UUID,
+        status: com.openbank.treasury.domain.cashflow.OverrideStatus?,
+    ): List<com.openbank.treasury.domain.cashflow.CashFlowOverride>
+
+    /** The four-eyes queue across deals: overrides in [status], oldest first, at most [limit]. */
+    suspend fun overrideQueue(
+        status: com.openbank.treasury.domain.cashflow.OverrideStatus,
+        limit: Int,
+    ): List<com.openbank.treasury.domain.cashflow.CashFlowOverride>
+
+    suspend fun versions(dealId: UUID): List<com.openbank.treasury.application.port.out.DealVersionView>
+
+    suspend fun calendar(
+        from: LocalDate,
+        to: LocalDate,
+        bookId: String?,
+        types: Set<TreasuryEventType>?,
+    ): List<TreasuryCalendarEvent>
 }
