@@ -9,6 +9,7 @@ import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
 import com.openbank.sepa.domain.model.SepaRejectReason
+import com.openbank.sepa.domain.model.SepaReturnIntent
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.engine.SimulatedWriteFailure
@@ -54,8 +55,9 @@ object SepaSettlementScenario {
         // 3. Credit the payee's settlement leg. A post-commit conflict forces the settlement to
         //    reverse the already-booked debit (compensation), and the SEPA payment is RETURNED.
         if (world.context.faults.shouldConflict()) {
+            leg = leg.beginReturn(world)
             leg = leg.advanceSettlement(world, SettlementStatus.CREDITED_REVERSED)
-            leg.advancePayment(world, SepaPaymentStatus.RETURNED)
+            leg.completeReturn(world)
             world.audit.append("settlement ${leg.settlement.id} reversed: post-commit conflict")
             return
         }
@@ -70,7 +72,7 @@ object SepaSettlementScenario {
         if (world.context.faults.shouldFailWrite()) {
             throw SimulatedWriteFailure("settlement debit failed for ${leg.settlement.id}")
         }
-        leg.advanceSettlement(world, SettlementStatus.DEBITED)
+        leg.advanceSettlement(world, SettlementStatus.DEBITED).recordDebit(world)
     } catch (e: SimulatedWriteFailure) {
         val rejected = leg.advanceSettlement(world, SettlementStatus.REJECTED)
         rejected.advancePayment(world, SepaPaymentStatus.REJECTED, reason = SepaRejectReason.TECHNICAL_ERROR)
@@ -141,6 +143,50 @@ object SepaSettlementScenario {
         val paymentIndex: Int,
         val settlementIndex: Int,
     ) {
+        // These identities represent modeled settlement effects, not calls to a ledger/provider.
+        // Derivation avoids consuming random values and preserves seed replay for other scenarios.
+        private fun transactionId(effect: String): UUID =
+            UUID.nameUUIDFromBytes("sepa-simulation-${payment.id}-$effect".toByteArray(Charsets.UTF_8))
+
+        fun recordDebit(world: World): SepaSettlementLeg = storePayment(
+            world,
+            payment.copy(transactionId = transactionId("debit")),
+        )
+
+        fun beginReturn(world: World): SepaSettlementLeg = storePayment(
+            world,
+            payment.copy(
+                returnIntent = SepaReturnIntent(
+                    originalTransactionId = requireNotNull(payment.transactionId),
+                    firstReceivedAt = world.context.clock.instant(),
+                    reasonCode = "SIMULATED_POST_COMMIT_CONFLICT",
+                    actorId = "simulation",
+                    actorType = "SYSTEM",
+                    correlationId = payment.id.toString(),
+                ),
+            ),
+        )
+
+        fun completeReturn(world: World): SepaSettlementLeg {
+            check(settlement.status == SettlementStatus.CREDITED_REVERSED)
+            val intent = requireNotNull(payment.returnIntent)
+            val proven = storePayment(
+                world,
+                payment.copy(
+                    returnIntent = intent.copy(
+                        resolvedAt = world.context.clock.instant(),
+                        reversalTransactionId = transactionId("refund"),
+                    ),
+                ),
+            )
+            return proven.advancePayment(world, SepaPaymentStatus.RETURNED)
+        }
+
+        private fun storePayment(world: World, next: SepaPayment): SepaSettlementLeg {
+            world.sepaPayments[paymentIndex] = next
+            return copy(payment = next)
+        }
+
         fun advancePayment(world: World, to: SepaPaymentStatus, reason: SepaRejectReason? = null): SepaSettlementLeg {
             val next = payment.transitionTo(to, reason = reason, clock = world.context.clock)
             world.sepaPayments[paymentIndex] = next
