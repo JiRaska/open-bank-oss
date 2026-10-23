@@ -4,6 +4,7 @@ import { closeSync, constants, fstatSync, mkdtempSync, openSync, readFileSync, r
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { collectRepositoryDocumentation } from './collect-repository-documentation.mjs'
 import { isAdminUiContentSnapshot, ADMIN_UI_CONTENT_MAX_BYTES } from '../src/lib/evidence/contentSnapshot.ts'
 
 const SOURCE_SHA = /^[0-9a-f]{40}$/
@@ -65,7 +66,7 @@ function generateJson(repoRoot, temporaryDirectory, name, script) {
 }
 
 /** Generate a single bounded payload from the reviewed source tree; no network or credentials. */
-export function collectAdminUiContent({ repoRoot = REPO, sourceSha, includePlatformDeclarations = false, now = Date.now } = {}) {
+export function collectAdminUiContent({ repoRoot = REPO, sourceSha, includeRepositoryDocumentation = false, includePlatformDeclarations = false, now = Date.now } = {}) {
   const root = resolve(repoRoot)
   if (typeof sourceSha !== 'string' || !SOURCE_SHA.test(sourceSha)) throw new Error('source SHA must be a full lowercase 40-character Git SHA')
   const checkedOutSha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
@@ -77,14 +78,20 @@ export function collectAdminUiContent({ repoRoot = REPO, sourceSha, includePlatf
       .map(item => ({ slug: item.path, yaml: item.content }))
     const libsDocs = filesIn(root, 'openbank-libs/docs', '.md', name => `openbank-libs/docs/${name}`)
       .map(item => ({ path: item.path, markdown: item.content }))
+    const catalog = generateJson(root, temporaryDirectory, 'catalog', 'generate-catalog.mjs')
+    const repositoryDocumentation = includeRepositoryDocumentation ? collectRepositoryDocumentation({
+      root, catalog, readSource: readBoundedSourceFile,
+      events: generateJson(root, temporaryDirectory, 'events', 'generate-events.mjs'),
+    }) : undefined
     const snapshot = {
       schemaVersion: 1,
       sourceSha,
       collectedAt: new Date(now()).toISOString(),
       content: {
-        // Enable only after readers accepting the additive field have rolled out.
+        // Additive producer fields stay off until compatible readers have rolled out.
         ...(includePlatformDeclarations ? { platformVersions: generateJson(root, temporaryDirectory, 'platform-versions', 'generate-platform-versions.mjs') } : {}),
-        catalog: generateJson(root, temporaryDirectory, 'catalog', 'generate-catalog.mjs'),
+        ...(repositoryDocumentation ? { repositoryDocumentation } : {}),
+        catalog,
         serviceGraph: generateJson(root, temporaryDirectory, 'service-graph', 'generate-service-graph.mjs'),
         governance: generateJson(root, temporaryDirectory, 'governance', 'generate-governance.mjs'),
         securityGraph: generateJson(root, temporaryDirectory, 'security-graph', 'generate-security-graph.mjs'),
@@ -106,7 +113,7 @@ export function collectAdminUiContent({ repoRoot = REPO, sourceSha, includePlatf
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   try {
     const { sourceSha, out } = parseArgs(process.argv.slice(2))
-    const bytes = collectAdminUiContent({ sourceSha, includePlatformDeclarations: process.env.OPENBANK_CONTENT_PLATFORM_DECLARATIONS === 'true' })
+    const bytes = collectAdminUiContent({ sourceSha, includeRepositoryDocumentation: process.env.OPENBANK_CONTENT_REPOSITORY_DOCUMENTATION === 'true', includePlatformDeclarations: process.env.OPENBANK_CONTENT_PLATFORM_DECLARATIONS === 'true' })
     writeFileSync(out, bytes, { mode: 0o600 })
     process.stdout.write(`Collected admin-ui source content (${bytes.byteLength} bytes) for ${sourceSha}\n`)
   } catch (error) {

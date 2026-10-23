@@ -108,6 +108,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: verification module selection self-test
+        if: steps.admit.outputs.proceed == 'true'
+        run: python3 .github/scripts/derive-verification-modules.py --self-test
       - id: detect
         if: steps.admit.outputs.proceed == 'true'
         run: |
