@@ -3089,8 +3089,9 @@ gates:
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
+      python3 .github/scripts/test-merge-train-owner-approval.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/merge-train.py", "openbank-libs/governance/rules.yaml"]
+    selftest_inputs: [".github/scripts/merge-train.py", ".github/scripts/test-merge-train-owner-approval.py", ".github/workflows/merge-train-owner-approval.yml", "openbank-libs/governance/rules.yaml"]
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
 

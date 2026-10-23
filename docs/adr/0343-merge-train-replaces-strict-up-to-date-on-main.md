@@ -66,7 +66,7 @@ the gitops App**, and the strict up-to-date policy is turned off. Concretely:
 2. **Candidates.** Open, non-draft, same-repository PRs with auto-merge armed, every required
    context of `main-protection` (other than `merge-train` itself) `success` at the head, no
    `agent-pr-guard` refusal, and no App-posted `merge-train` failure on that head (a culprit waits
-   for a push). `codex/` branches are excluded. A PR touching **anything under `.github/` that
+   for a push). `codex/` branches require an explicit owner decision on the exact PR head (see Owner-approved agent PRs below). A PR touching **anything under `.github/` that
    can change what executes** — every workflow and action file, every script of any extension
    (and any extension-less file), `gates.yaml` (its run commands), pip requirement pins, agent
    prompts, the regen inventory — or **any file the generator runner would execute** never
@@ -268,7 +268,7 @@ For each armed, non-draft PR that `qualifies()` refuses ONLY for the manual-lane
    would mean a second definition of "up to date". With strict off `auto-update-armed-prs.yml` exits before enumerating
    PRs, so the train owns this update.
 Refusals other than the manual-lane one keep a PR out of this lane: red, pending, disarmed, draft,
-fork, `codex/`, a `merge-train` failure, `agent-pr-guard`, a path with a control character, and a
+fork, a `codex/` head without owner approval, a `merge-train` failure, `agent-pr-guard`, a path with a control character, and a
 symlink or gitlink. **The human gate is unchanged:** only ARMED PRs are considered, and arming
 money-path, governance and workflow PRs is already human-only through the owner's local hook — the
 strict lane adds no new way for an unarmed or agent-armed workflow change to reach main.
@@ -638,3 +638,42 @@ undo in git.
 - ADR-0254 — ruleset context parity gate
 - `.github/workflows/auto-update-armed-prs.yml` — the strict-mode workaround this supersedes
 - `.github/workflows/merge-train.yml`, `.github/scripts/merge-train.py`
+
+
+## Owner-approved agent PRs
+
+A `codex/` prefix remains excluded unless the User repository owner records an explicit decision
+for that PR and its full current head SHA. The separate **Merge train owner approval** workflow
+runs only from `main`, checks both the original and triggering actor against the owner before
+minting an App token, and rejects reruns. Its isolated main script rechecks the live repository
+owner, numeric actor identity, PR number, SHA, same-repository head/base, target `main`, open state
+and non-draft state before granting approval. Revocation also works after drafting or closing.
+Neither PR code nor artifacts are executed with that token. Organization ownership fails closed;
+this mechanism currently targets this user-owned repository.
+
+The writer posts only `merge-train/owner-approval`, through the existing GitOps App, with a
+canonical PR-bound description on the supplied SHA. It never posts the required `merge-train`
+verdict, approves a GitHub review, arms auto-merge or merges. The train accepts only the latest
+App-authored decision on that SHA; another producer, PR number, failure/revocation or missing
+record does not authorize a merge. A push (including strict-lane update-branch) expires approval
+because it changes the head SHA. Approval is rechecked before the merge API call.
+
+This changes only the prefix exclusion. A PR must still be explicitly armed, non-draft and
+same-repository, pass every required and extra gate, and obey all conflict, unsafe-path,
+strict-lane, current-main and App-pinned producer checks. Approval is a decision record, never
+substitute CI evidence. An executable workflow/governance change still uses the strict lane,
+including its update-branch and fresh CI cycle.
+
+After reviewing the actual head, the owner may run:
+
+```sh
+gh workflow run merge-train-owner-approval.yml --repo JiRaska/open-bank-oss --ref main \
+  -f pr=PR_NUMBER -f head=FULL_CURRENT_SHA -f decision=approve
+```
+
+Use `decision=revoke` to withdraw that exact decision. A rerun cannot replay an old approval;
+submit a new dispatch. A successful decision triggers the ordinary train reader; it does not
+make other gates green. If strict lane updates the PR, inspect the combined head and CI and
+submit a new decision for the new SHA. The workflow exists only after this governance change
+lands through the existing owner-authorized non-agent-prefix strict lane; it cannot authorize
+its own installation from an untrusted branch.
