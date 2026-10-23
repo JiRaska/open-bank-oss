@@ -110,3 +110,11 @@ changes do not alter XML production code): JMH 1.37, Temurin 25.0.4.1, SerialGC,
 20,800–20,880 B/op; the combined result was 20,864.2 B/op. Only that measured allocation entry
 was lowered from 63,432.3 B/op; unrelated budgets and the declared interpreter latency bound
 were retained. Timing was measured under concurrent workstation load and is not a latency claim.
+
+Runtime mutation protection uses the same PIT target and exclusion sets as the scheduled lane.
+`libs-quality.yml` now runs its 70% Gradle-enforced floor and uploads the mutation XML; the separate
+authorization lane retains its own verdict. The local 2026-10-23 report detected 217/304 mutations:
+196 KILLED, 21 TIMED_OUT, 46 SURVIVED and 41 NO_COVERAGE. A timeout is recorded separately, not
+presented as an assertion kill. The older 192/292 report is not an identical-source baseline.
+The new scoped idempotency transition, post-suspension failure and non-null outbox getter tests
+preserve actual behavior; remaining/equivalent mutations still need review under #11479.

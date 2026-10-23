@@ -4,6 +4,8 @@ name: Libs compatibility and recovery
 on:
   pull_request:
     paths:
+      - ".github/scripts/pitest-libs-advisory.init.gradle"
+      - ".github/workflows/pitest.yml"
       - "openbank-libs*/**"
       - "fuzz/**"
       - ".clusterfuzzlite/**"
@@ -48,6 +50,8 @@ jobs:
           python3 .github/scripts/library_quality_scope.py > /tmp/library-proof-tasks
           mapfile -t proof_tasks < /tmp/library-proof-tasks
           ./gradlew "${proof_tasks[@]}" --continue --console=plain
+      - name: Enforce runtime mutation floor with unchanged targets
+        run: ./gradlew -I .github/scripts/pitest-libs-advisory.init.gradle :openbank-libs-runtime:pitest --console=plain
       - name: Exercise the fuzz oracle on its corpus and deterministic mutations
         run: ./gradlew -p fuzz/ossfuzz test --console=plain
       - name: Upload compatibility and recovery evidence
@@ -58,5 +62,6 @@ jobs:
           path: |
             openbank-libs-*/build/test-results/test/*.xml
             fuzz/ossfuzz/build/test-results/test/*.xml
+            openbank-libs-runtime/build/reports/pitest/mutations.xml
           if-no-files-found: error
           retention-days: 30

@@ -19,6 +19,8 @@ name: ClusterFuzzLite
 on:
   pull_request:
     paths:
+      - ".github/scripts/pitest-libs-advisory.init.gradle"
+      - ".github/workflows/pitest.yml"
       - "openbank-libs*/**"
       - "fuzz/**"
       - ".clusterfuzzlite/**"

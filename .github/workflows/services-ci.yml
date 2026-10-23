@@ -138,7 +138,8 @@ jobs:
             echo "services=[]" >> "$GITHUB_OUTPUT"
             echo "any=false" >> "$GITHUB_OUTPUT"
           else
-            JSON=$(printf '%s\n' $CHANGED | sort -u | jq -R . | jq -cs .)
+            read -r -a changed_modules <<< "$CHANGED"
+            JSON=$(printf '%s\n' "${changed_modules[@]}" | sort -u | jq -R . | jq -cs .)
             echo "services=$JSON" >> "$GITHUB_OUTPUT"
             echo "any=true" >> "$GITHUB_OUTPUT"
           fi
