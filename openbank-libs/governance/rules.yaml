@@ -5134,6 +5134,8 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/**/domain/model/Legs.kt"  # ADR-0344 D4: the leg-spec SHA-256 decides whether an override survives regeneration
       - "src/main/kotlin/**/domain/marketdata/**"  # ADR-0344 D5: observation provenance hashes behind every fixed rate
+      - "src/main/kotlin/**/domain/payment/**"  # ADR-0344 D6: payment idempotency keys, four-eyes release, funding check
+      - "src/main/kotlin/**/infrastructure/payment/**"  # ADR-0344 D6: guarded flow claims and the funding advisory lock
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
