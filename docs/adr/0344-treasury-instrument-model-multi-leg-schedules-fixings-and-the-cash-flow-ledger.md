@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [architecture, ledger, payments, accounting-close]
 summary: "Treasury deals become multi-leg instruments over effective-dated reference data; a stored, versioned, overridable cash-flow ledger drives fixings, payment orders and posting rules, proven field by field against golden fixtures."
-followup: "#10618 — phases 1-4: fixings, payments, posting-rule matrix, corrections, valuation, EMIR exports, day-end completion"
+followup: "#10618 — after phase 4: the admin-ui treasury workbench (EMIR capture form, day-completion page), a MATURITIES day step, treasury day-close participation (ADR-0342)"
 ---
 
 # ADR-0344 — Treasury instrument model: multi-leg schedules, fixings, an overridable cash-flow ledger and the deal-to-payment-to-posting chain
