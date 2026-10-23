@@ -7,7 +7,9 @@ import json
 import shutil
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
+from typing import ClassVar
 
 SPEC = importlib.util.spec_from_file_location('results', Path(__file__).with_name('check-service-build-results.py'))
 results = importlib.util.module_from_spec(SPEC)
@@ -206,7 +208,7 @@ class GraphTest(unittest.TestCase):
         unexpected = 'services-ci.yml|job:foreign|id-token'
         self.assertEqual(policy.grant_drift(actual | {unexpected}, expected),
                          [f'unexpected workflow write grant: {unexpected}'])
-        removed = sorted(actual)[0]
+        removed = min(actual)
         self.assertEqual(policy.grant_drift(actual - {removed}, expected),
                          [f'stale workflow write baseline entry: {removed}'])
         expanded = yaml.safe_load(graph.caller_block(modules + ['openbank-zz-fixture']))
@@ -244,6 +246,225 @@ class GraphTest(unittest.TestCase):
             self.assertEqual(sorted(m for chain in chains for m in chain), modules)
             for selected in [set(modules), set(modules[::2]), {modules[-1]}, set()]:
                 self.assertLessEqual(sum(any(m in selected for m in chain) for chain in chains), width)
+
+
+@contextmanager
+def preserve_fixture_outputs(*names):
+    saved = {}
+    for name in names:
+        path = Path(name)
+        if path.is_symlink():
+            raise AssertionError('fixture output must not be a symlink')
+        saved[path] = (path.read_bytes(), path.stat().st_mode) if path.exists() else None
+    try:
+        yield
+    finally:
+        for path, previous in saved.items():
+            if previous is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(previous[0])
+                path.chmod(previous[1])
+
+
+class ThinCalleeTest(unittest.TestCase):
+    # Golden bodies captured before extraction; intentional preservation boundary.
+    BODIES: ClassVar[dict] = {'build-test.sh': ('build', 'Build + test (:${{ inputs.service }})', '7d8c1749e22e575911efb4b7d3147470d64af8ef8d58aa3ed5fe9c949981c894', {'SERVICE': '${{ inputs.service }}'}), 'checkout-provider-ref.sh': ('contract', 'Check out a requested provider version only after proving it is on main', '9359271c9fbb762b315b2cc0b0da49b326d93fab2901a15e4b1ca21b294495fd', {}), 'prepare-provider-overlay.sh': ('contract', 'Check out P and overlay the provider test tree from F (equivalence-proven)', '0f445699cbeda8ff0dbad68672a9a71bc53219d33bbf96b23a43f4c9371708f0', {}), 'prewarm-images.sh': ('contract', 'Pre-warm Testcontainers image cache via ECR', '36f9392b6a9fd8ab7df2d878ba0b936420502a88fccfa77085755f22103b0bfc', {'ECR_LOGIN_OUTCOME': '${{ steps.ecr_login.outcome }}'}), 'configure-maven-mirror.sh': ('contract', 'Configure CodeArtifact Maven mirror', '8a6a6c1a11a5623f49afbd15dff4af80c338c295e695c27f7959a71aeedb15bf', {}), 'warm-gradle-cache.sh': ('contract', 'Warm Gradle dependency cache (self-heal corrupted entries)', '5c234b880455ce780fae589d39d1f91d0cd08b43644e567b7b6f88c8a691bd44', {'SERVICE': '${{ inputs.service }}'}), 'publish-consumer-pacts.sh': ('contract', 'Publish consumer pacts to broker', '6bdbc08d0209bd0dd7c545679063a38479c14b3e835ceab2f744ab1ea9d3844f', {'SERVICE': '${{ inputs.service }}'}), 'discover-provider-task.sh': ('contract', 'Discover provider Pact task', 'e78a0cf60a5611406644949246814eda227c7d6c91534cfd74341ed2c32560a1', {'REQUIRE_PROVIDER_PACT_TEST': '${{ inputs.require_provider_pact_test }}'}), 'preflight-pact-broker.sh': ('contract', 'Preflight Pact Broker selector/HAL response', '771d0c340377a6d4d43e0d19a7a0648ac79b39783e3a51469df9979d92565049', {})}
+
+    def test_exact_bodies_and_explicit_environment(self):
+        import hashlib
+        import subprocess
+
+        import yaml
+        workflow = yaml.safe_load((graph.ROOT / '.github/workflows/_service-ci.yml').read_text())
+        folder = graph.ROOT / '.github/scripts/service-ci-steps'
+        self.assertEqual({p.name for p in folder.glob('*.sh')}, set(self.BODIES))
+        for filename, (job, name, digest, bindings) in self.BODIES.items():
+            with self.subTest(helper=filename):
+                path = folder / filename
+                body = path.read_text().split('\n', 2)[2]
+                self.assertEqual(hashlib.sha256(body.encode()).hexdigest(), digest)
+                self.assertNotIn('${{', body)
+                subprocess.run(['bash', '-n', str(path)], check=True)
+                step = next(s for s in workflow['jobs'][job]['steps'] if s.get('name') == name)
+                self.assertEqual(step['run'], f'bash -e "$SERVICE_CI_HELPERS/{filename}"')
+                for key, expression in bindings.items():
+                    self.assertEqual(step['env'][key], expression)
+
+    def test_helpers_staged_before_historical_checkout(self):
+        import yaml
+        workflow = yaml.safe_load((graph.ROOT / '.github/workflows/_service-ci.yml').read_text())
+        for job in ['build', 'contract']:
+            steps = workflow['jobs'][job]['steps']
+            stage = next(i for i, s in enumerate(steps)
+                         if s.get('name') == 'Stage trusted service CI step helpers')
+            self.assertNotIn('if', steps[stage])
+            self.assertIn('mktemp -d "${RUNNER_TEMP}/service-ci-helpers.XXXXXX"', steps[stage]['run'])
+            self.assertIn('chmod 600', steps[stage]['run'])
+            self.assertIn('>> "$GITHUB_ENV"', steps[stage]['run'])
+            for i, s in enumerate(steps):
+                if 'git checkout' in s.get('run', '') or '$SERVICE_CI_HELPERS/' in s.get('run', ''):
+                    self.assertLess(stage, i)
+            checkout = next(s for s in steps[:stage] if 'actions/checkout@' in s.get('uses', ''))
+            self.assertIn('github.sha', checkout['with']['ref'])
+        self.assertEqual(set(workflow['jobs']), {'build', 'contract', 'publish-evidence'})
+
+    def test_staged_helpers_survive_historical_workspace_replacement(self):
+        import os
+        import subprocess
+
+        import yaml
+        workflow = yaml.safe_load((graph.ROOT / '.github/workflows/_service-ci.yml').read_text())
+        stage = next(s['run'] for s in workflow['jobs']['contract']['steps']
+                     if s.get('name') == 'Stage trusted service CI step helpers')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'workspace/.github/scripts/service-ci-steps'
+            source.mkdir(parents=True)
+            for filename in self.BODIES:
+                shutil.copyfile(graph.ROOT / '.github/scripts/service-ci-steps' / filename,
+                                source / filename)
+            shutil.copyfile(graph.ROOT / '.github/scripts/heal-gradle-verification-failure.sh',
+                            source.parent / 'heal-gradle-verification-failure.sh')
+            runner = root / 'runner'
+            runner.mkdir()
+            environment = root / 'environment'
+            subprocess.run(['bash', '-e', '-c', stage], cwd=root / 'workspace',
+                           env=dict(os.environ, RUNNER_TEMP=str(runner), GITHUB_ENV=str(environment)),
+                           check=True, capture_output=True)
+            staged = Path(environment.read_text().strip().removeprefix('SERVICE_CI_HELPERS='))
+            self.assertEqual(staged.parent, runner)
+            self.assertEqual(staged.stat().st_mode & 0o777, 0o700)
+            for filename in self.BODIES:
+                before = (source / filename).read_bytes()
+                (source / filename).write_text('exit 99\n')
+                self.assertEqual((staged / filename).read_bytes(), before)
+                self.assertEqual((staged / filename).stat().st_mode & 0o777, 0o600)
+            (source.parent / 'heal-gradle-verification-failure.sh').unlink()
+            missing = subprocess.run(['bash', '-e', '-c', stage], cwd=root / 'workspace',
+                                     env=dict(os.environ, RUNNER_TEMP=str(runner), GITHUB_ENV=str(environment)),
+                                     capture_output=True, check=False)
+            self.assertNotEqual(missing.returncode, 0)
+
+    def test_build_failure_preserves_exit_and_cleans_owned_observer(self):
+        import os
+        import subprocess
+        import sys
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            commands = root / 'commands'
+            commands.mkdir()
+            docker = commands / 'docker'
+            docker.write_text(f'#!{sys.executable}\nimport os,pathlib,signal\n'
+                              'pathlib.Path(os.environ["OBSERVER_PID"]).write_text(str(os.getpid()))\n'
+                              'signal.pause()\n')
+            docker.chmod(0o700)
+            scripts = root / '.github/scripts'
+            scripts.mkdir(parents=True)
+            for name in ['retry-testcontainers-ebusy.sh', 'retry-gradle-verification-cache.sh']:
+                (scripts / name).write_text('shift\nexec "$@"\n')
+            gradle = root / 'gradlew'
+            gradle.write_text(f'#!{sys.executable}\nimport os,pathlib,time\n'
+                              'deadline=time.monotonic()+2\n'
+                              'while not pathlib.Path(os.environ["OBSERVER_PID"]).exists():\n'
+                              ' if time.monotonic()>deadline: raise SystemExit(98)\n'
+                              ' time.sleep(0.001)\n'
+                              'raise SystemExit(7)\n')
+            gradle.chmod(0o700)
+            pidfile = root / 'observer'
+            env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ['PATH'],
+                       SERVICE='openbank-fixture', OBSERVER_PID=str(pidfile))
+            result = subprocess.run(['bash', '-e', str(graph.ROOT / '.github/scripts/service-ci-steps/build-test.sh')],
+                                    cwd=root, env=env, capture_output=True, text=True, check=False, timeout=5)
+            self.assertEqual(result.returncode, 7, result.stderr)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(pidfile.read_text()), 0)
+
+    def test_warmup_uses_trusted_healer_not_historical_workspace(self):
+        import os
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp, preserve_fixture_outputs('/tmp/gradle-warmup.log'):
+            root = Path(tmp)
+            commands = root / 'commands'
+            commands.mkdir()
+            timeout = commands / 'timeout'
+            timeout.write_text('#!/bin/sh\necho unrelated-fixture-failure\nexit 1\n')
+            timeout.chmod(0o700)
+            historical = root / '.github/scripts'
+            historical.mkdir(parents=True)
+            poison = root / 'historical-executed'
+            (historical / 'heal-gradle-verification-failure.sh').write_text(f'touch "{poison}"\nexit 0\n')
+            trusted = root / 'trusted'
+            trusted.mkdir()
+            shutil.copyfile(graph.ROOT / '.github/scripts/heal-gradle-verification-failure.sh',
+                            trusted / 'heal-gradle-verification-failure.sh')
+            env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ['PATH'],
+                       SERVICE='openbank-fixture', SERVICE_CI_HELPERS=str(trusted))
+            result = subprocess.run(['bash', '-e', str(graph.ROOT / '.github/scripts/service-ci-steps/warm-gradle-cache.sh')],
+                                    cwd=root, env=env, capture_output=True, text=True, check=False, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('reason other than cache corruption', result.stdout)
+            self.assertFalse(poison.exists())
+
+    def test_consumer_publication_zero_and_exact_selected_files(self):
+        import os
+        import subprocess
+        script = graph.ROOT / '.github/scripts/service-ci-steps/publish-consumer-pacts.sh'
+        for nonempty in [False, True]:
+            with (self.subTest(nonempty=nonempty), tempfile.TemporaryDirectory() as tmp,
+                  preserve_fixture_outputs('/tmp/pact-publish.json')):
+                root = Path(tmp)
+                (root / 'pacts').mkdir()
+                fixture = {'consumer': {'name': 'fixture-consumer'}, 'provider': {'name': 'fixture-provider'}}
+                (root / 'pacts/openbank-foreign-contract.json').write_text(json.dumps(fixture))
+                if nonempty:
+                    (root / 'pacts/openbank-fixture-contract.json').write_text(json.dumps(fixture))
+                runner = root / 'runner'
+                runner.mkdir()
+                capture = root / 'request'
+                (runner / 'pact-broker-post.sh').write_text(
+                    'cp "$2" "$CAPTURE"\nprintf \'{"notices":[]}\\n\' > "$3"\necho 200\n')
+                env = dict(os.environ, SERVICE='openbank-fixture', BRANCH='fixture', GITHUB_SHA='a' * 40,
+                           GITHUB_SERVER_URL='https://example.invalid', GITHUB_REPOSITORY='fixture/repo',
+                           GITHUB_RUN_ID='42', RUNNER_TEMP=str(runner), CAPTURE=str(capture),
+                           PACT_BROKER_URL='https://broker.invalid', PACT_BROKER_PASSWORD='secret-canary')
+                result = subprocess.run(['bash', '-e', str(script)], cwd=root, env=env,
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn('secret-canary', result.stdout + result.stderr)
+                self.assertEqual(capture.exists(), nonempty)
+                if nonempty:
+                    body = json.loads(capture.read_text())
+                    self.assertEqual(body['pacticipantName'], 'openbank-fixture')
+                    self.assertEqual(body['pacticipantVersionNumber'], 'a' * 40)
+                    self.assertEqual(body['branch'], 'fixture')
+                    self.assertEqual(len(body['contracts']), 1)
+
+    def test_provider_discovery_success_absence_and_failure(self):
+        import os
+        import subprocess
+        script = graph.ROOT / '.github/scripts/service-ci-steps/discover-provider-task.sh'
+        for owns_test, has_task, required, expected in [
+                (True, True, False, 0), (True, False, False, 1),
+                (False, True, False, 0), (False, True, True, 1)]:
+            with self.subTest(owns_test=owns_test, has_task=has_task, required=required), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                tests = root / 'openbank-fixture/src/test'
+                tests.mkdir(parents=True)
+                if owns_test:
+                    (tests / 'FixtureProviderVerificationTest.kt').touch()
+                gradle = root / 'gradlew'
+                gradle.write_text('#!/bin/sh\n' + ('echo providerPactTest\n' if has_task else 'echo tasks\n'))
+                gradle.chmod(0o700)
+                output = root / 'output'
+                env = dict(os.environ, SERVICE='openbank-fixture', PACT_PROVIDER_VERSION='fixture',
+                           REQUIRE_PROVIDER_PACT_TEST=str(required).lower(), GITHUB_OUTPUT=str(output))
+                result = subprocess.run(['bash', '-e', str(script)], cwd=root, env=env,
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                if expected == 0:
+                    self.assertEqual(output.read_text().strip(),
+                                     'available=' + str(owns_test and has_task).lower())
 
 
 if __name__ == '__main__':
