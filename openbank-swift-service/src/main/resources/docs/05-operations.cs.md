@@ -125,6 +125,11 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 
 ## Hodiny odchozího zaúčtování (#13623)
 
+Nullable interní `targetAccountId` v generované odpovědi musí odpovídat odeslanému null.
+Jinak shodná dokončená odpověď s interním cílovým účtem zůstává nevyřízeným výsledkem
+`mismatch`, nikoli důkazem tohoto externího SWIFT zaúčtování. Vynechaný nebo explicitně null
+cílový účet je při shodě ostatních údajů nadále přijat (#13217).
+
 Přijetí MT103 uloží první čas splatnosti zaúčtování atomicky se SENT a existující stavovou
 událostí před voláním transaction-service. Chybějící účet povinnost neuzavírá. Pouze striktně
 ověřená odpověď 201 COMPLETED s identitou transakce dovolí atomicky uložit lokální důkaz,

@@ -125,6 +125,11 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 
 ## Outbound booking clock (#13623)
 
+The generated response's nullable internal `targetAccountId` must match the submitted null.
+An otherwise matching completed response naming an internal destination is an unsettled
+`mismatch`, not proof of this external SWIFT booking. An omitted or explicitly null destination
+continues to be accepted when all other booking fields match (#13217).
+
 Accepted MT103 submission commits the first booking-due timestamp with SENT and its existing
 status event before calling transaction-service. A missing ordering account also leaves this
 obligation pending. Only the existing strictly matched 201 COMPLETED response with a transaction

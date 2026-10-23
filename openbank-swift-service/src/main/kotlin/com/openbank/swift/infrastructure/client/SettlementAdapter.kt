@@ -116,7 +116,7 @@ class SettlementAdapter(
 
     /**
      * HTTP 201 (the provider's answer to a create, including its idempotent replay) with a COMPLETED
-     * transaction that matches the request is the ONLY settlement (#13217): type, source account, numeric
+     * transaction that matches the request is the ONLY settlement (#13217): type, source and target account, numeric
      * amount, currency, rail and instruction type, as sepa-instant's `SettlementAdapter` binds them.
      * valueDate is not compared - the provider resolves it to a business day. 200/202, a missing id or a
      * booking for something else leaves the message SENT; the shared facade has already thrown on a
@@ -134,6 +134,7 @@ class SettlementAdapter(
         val matchesRequest = tx.status == COMPLETED &&
             tx.type == request.type &&
             tx.sourceAccountId == request.sourceAccountId &&
+            tx.targetAccountId == request.targetAccountId &&
             amount.compareTo(request.amount) == 0 &&
             tx.currencyCode == request.currencyCode &&
             tx.rail == request.rail &&
