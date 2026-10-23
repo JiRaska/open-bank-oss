@@ -152,6 +152,10 @@ class CatalogPriceEntity {
 
     @Column(name = "effective_to")
     var effectiveTo: Instant? = null
+
+    /** #13230; null on components authored before roles existed. */
+    @Column(name = "role")
+    var role: String? = null
 }
 
 @Entity

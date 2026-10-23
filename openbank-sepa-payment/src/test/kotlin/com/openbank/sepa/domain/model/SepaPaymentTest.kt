@@ -14,6 +14,54 @@ import java.util.UUID
 class SepaPaymentTest {
 
     @Test
+    fun `pending return refuses a fresh conflicting terminal transition`() {
+        val pending = payment(status = SepaPaymentStatus.PROCESSING).copy(
+            revision = 17,
+            returnIntent = SepaReturnIntent(
+                UUID.randomUUID(),
+                Instant.parse("2026-01-02T00:00:00Z"),
+                "AM09",
+                "actor",
+                "ROLE_API",
+                null,
+            ),
+        )
+        for (target in listOf(SepaPaymentStatus.REJECTED, SepaPaymentStatus.CANCELLED, SepaPaymentStatus.RETURNED)) {
+            assertThat(pending.canTransitionTo(target)).isFalse()
+            assertThatThrownBy {
+                pending.transitionTo(target, SepaRejectReason.TECHNICAL_ERROR, clock = Clock.systemUTC())
+            }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+        assertThat(pending.canTransitionTo(SepaPaymentStatus.COMPLETED)).isFalse()
+        val identified = pending.copy(transactionId = pending.returnIntent?.originalTransactionId)
+        assertThat(identified.canTransitionTo(SepaPaymentStatus.COMPLETED)).isTrue()
+    }
+
+    @Test
+    fun `returned requires proven reversal even through generic status transition`() {
+        val now = Instant.parse("2026-01-02T00:00:00Z")
+        for (status in listOf(SepaPaymentStatus.PROCESSING, SepaPaymentStatus.COMPLETED)) {
+            val original = payment(status = status)
+            assertThatThrownBy { original.transitionTo(SepaPaymentStatus.RETURNED, clock = Clock.systemUTC()) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            val intent = SepaReturnIntent(
+                UUID.randomUUID(),
+                now.minusSeconds(30),
+                "AM09",
+                "actor",
+                "ROLE_API",
+                null,
+                resolvedAt = now,
+                reversalTransactionId = UUID.randomUUID(),
+            )
+            val returned = original.copy(returnIntent = intent)
+                .transitionTo(SepaPaymentStatus.RETURNED, clock = Clock.fixed(now, ZoneOffset.UTC))
+            assertThat(returned.status).isEqualTo(SepaPaymentStatus.RETURNED)
+            assertThat(returned.returnIntent?.firstReceivedAt).isEqualTo(now.minusSeconds(30))
+        }
+    }
+
+    @Test
     fun `reject transition requires reject reason`() {
         assertThatThrownBy {
             payment().transitionTo(SepaPaymentStatus.REJECTED, clock = Clock.systemUTC())
