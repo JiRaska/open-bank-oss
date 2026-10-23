@@ -186,7 +186,7 @@ class SepaTransactionClientWorkerThreadIT {
         Stub.status = 201
         Stub.body = completedBody(txId)
 
-        val outcome: SettlementOutcome = onWorkerThread { settlement.settle(payment()) }
+        val outcome: SettlementOutcome = onWorkerThread { settlement.settle(payment(), ACCEPTED_AT) }
 
         assertThat(outcome.settled).isTrue()
         assertThat(outcome.transactionId).isEqualTo(txId)
@@ -211,7 +211,7 @@ class SepaTransactionClientWorkerThreadIT {
         Stub.status = 409
         Stub.body = """{"code":"CONCURRENT_UPDATE"}"""
 
-        assertThat(failureOf { settlement.settle(payment()) })
+        assertThat(failureOf { settlement.settle(payment(), ACCEPTED_AT) })
             .isInstanceOf(SettlementUnavailableException::class.java).hasMessageContaining("409")
         assertThat(failureOf { reversal.reverseTransaction(UUID.randomUUID(), "sepa-reversal-y", "AC04") })
             .isInstanceOf(ReversalUnavailableException::class.java).hasMessageContaining("409")
@@ -224,7 +224,7 @@ class SepaTransactionClientWorkerThreadIT {
         Stub.status = 202
         Stub.body = completedBody(UUID.randomUUID())
 
-        assertThat(failureOf { settlement.settle(payment()) })
+        assertThat(failureOf { settlement.settle(payment(), ACCEPTED_AT) })
             .isInstanceOf(SettlementUnavailableException::class.java).hasMessageContaining("Unexpected HTTP 202")
     }
 
@@ -233,7 +233,7 @@ class SepaTransactionClientWorkerThreadIT {
         Stub.status = 201
         Stub.body = completedBody(UUID.randomUUID(), status = "PENDING")
 
-        val failure = failureOf { settlement.settle(payment()) }
+        val failure = failureOf { settlement.settle(payment(), ACCEPTED_AT) }
 
         assertThat(failure).isInstanceOf(SettlementUnavailableException::class.java)
         assertThat(generateSequence(failure) { it.cause }.any { it is TransactionCompletionUncertainException })
@@ -247,7 +247,9 @@ class SepaTransactionClientWorkerThreadIT {
         Stub.status = 201
         Stub.body = completedBody(UUID.randomUUID(), type = "DEBIT")
 
-        assertThat(failureOf { settlement.settle(payment()) })
+        assertThat(failureOf { settlement.settle(payment(), ACCEPTED_AT) })
             .isInstanceOf(SettlementUnavailableException::class.java).hasMessageContaining("does not match")
     }
 }
+
+private val ACCEPTED_AT: java.time.Instant = java.time.Instant.parse("2026-01-20T09:00:00Z")
