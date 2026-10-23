@@ -60,6 +60,13 @@ class Eba42DatapointFixtureTest {
         assertThat(actual).containsExactlyElementsOf(expected)
     }
 
+    @Test
+    fun `a coordinate outside the pinned fixture is notFound and never a supported fact`() {
+        val supported = fixture["supportedFacts"].map { it["templateId"].asText() to it["rowRef"].asText() }
+
+        assertThat(supported).doesNotContain("F99.99" to "r0010", "F01.01" to "r9999")
+    }
+
     private fun line(code: String, accountType: String, net: String) = TrialBalanceLineDto(
         code = code,
         accountType = accountType,
