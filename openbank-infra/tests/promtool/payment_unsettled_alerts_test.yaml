@@ -6,6 +6,7 @@
 rule_files:
   - payments-openbank-sepa-payment-unsettled-alerts.yaml
   - payments-openbank-domestic-payment-unsettled-alerts.yaml
+  - payments-openbank-swift-unsettled-alerts.yaml
 
 evaluation_interval: 1m
 
@@ -121,6 +122,58 @@ tests:
               summary: "Domestic payment sent to clearing but its debit is unbooked for over an hour"
               description: "The oldest domestic payment with an open booking clock has waited at least 1h 11m 0s. Temporal keeps retrying with the same key, which cannot fix a deterministic answer. Read the outcome under domestic-settlement-<paymentId> in transaction-service, then reconcile, reverse or re-drive. openbank_payment_unsettled_total{rail=\"DOMESTIC_CZK\"} says which answer it got."
               runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0032-payment-rail-unsettled-booking.md#domestic-payment-outbound-booking"
+
+  # ---------------------------------------------------------------- SWIFT outbound booking (30m)
+  - interval: 1m
+    name: "SWIFT booking open past 30m for the whole window fires"
+    input_series:
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SWIFT", pod="swift-a"}'
+        values: "1500+60x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SwiftBookingUnsettled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: swift-service
+              rail: SWIFT
+            exp_annotations:
+              subject_period: 30s
+              summary: "SWIFT message accepted by the scheme but its debit is unbooked for over 30 minutes"
+              description: "The oldest SWIFT message with an open booking clock has waited at least 41m 0s. It is held in SENT; nothing retries it and swift-service has no re-drive path. Read the outcome under swift-settlement-<messageId> in transaction-service, then reconcile or reverse. openbank_payment_unsettled_total{rail=\"SWIFT\"} says which answer it got."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0032-payment-rail-unsettled-booking.md#swift-outbound-booking"
+
+  - interval: 1m
+    name: "SWIFT booking just under 30m does NOT fire"
+    input_series:
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SWIFT", pod="swift-a"}'
+        values: "1700+0x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SwiftBookingUnsettled
+        exp_alerts: []
+
+  - interval: 1m
+    name: "SWIFT booking that crossed 30m only 5m ago does NOT fire yet"
+    input_series:
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SWIFT", pod="swift-a"}'
+        values: "300+60x30"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: SwiftBookingUnsettled
+        exp_alerts: []
+
+  - interval: 1m
+    name: "SWIFT cold pod (NaN) and another rail's old booking do NOT fire the SWIFT alert"
+    input_series:
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SWIFT", pod="swift-a"}'
+        values: "NaN+0x30"
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SEPA", pod="sepa-a"}'
+        values: "1900+60x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SwiftBookingUnsettled
+        exp_alerts: []
 
   - interval: 1m
     name: "domestic booking under 1h does NOT fire (Temporal still has a transient to heal)"
