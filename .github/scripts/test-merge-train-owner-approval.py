@@ -6,6 +6,7 @@ import importlib.util
 import os
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
@@ -174,6 +175,39 @@ class OwnerApprovalTest(unittest.TestCase):
         for unsafe in ["\n      - run: gh pr merge 1", "\n      - uses: actions/download-artifact@unsafe",
                        "\n      - run: python3 .github/unsafe.py"]:
             self.assertTrue(train.owner_approval_declaration_errors(code + unsafe))
+
+
+class SyntheticClockTest(unittest.TestCase):
+    def test_runner_age_does_not_expire_fixtures_but_explicit_ci_age_does(self):
+        epoch = 1767225600
+        real_env = train.base_env
+        # Model a suite taking longer than even the hard ceiling, without sleeping. Both git's
+        # commit time and the settle clock must remain on the fixture's modeled instant.
+        with patch.object(train.time, "time", return_value=epoch + train.RESERVATION_CEILING_S + 60) as wall:
+            with train._synthetic_clock(epoch), tempfile.TemporaryDirectory() as root:
+                git = train.Git(root)
+                git("init", "-q", "-b", "main")
+                git("commit", "-q", "--allow-empty", "-m", "synthetic reservation")
+                head = git("rev-parse", "HEAD").stdout.strip()
+                self.assertEqual(str(epoch), git("show", "-s", "--format=%ct", head).stdout.strip())
+                self.assertIsNone(train.reservation_expired(git, head, train.time.time()))
+                wall.assert_not_called()
+                stalled = epoch + train.RESERVATION_STALL_S + 1
+                self.assertIn("stalled", train.reservation_expired(git, head, stalled))
+                self.assertIsNone(train.reservation_expired(git, head, stalled, lambda _: stalled - 60))
+                self.assertIn("ceiling", train.reservation_expired(
+                    git, head, epoch + train.RESERVATION_CEILING_S + 1,
+                    lambda _: epoch + train.RESERVATION_CEILING_S))
+                self.assertIn("future", train.reservation_expired(git, head, epoch - 1))
+            self.assertIs(train.time.time, wall)
+            self.assertIs(train.base_env, real_env)
+
+    def test_fixture_clock_and_git_environment_restore_after_exception(self):
+        real_time, real_env = train.time.time, train.base_env
+        with self.assertRaisesRegex(RuntimeError, "fixture failure"), train._synthetic_clock():
+            raise RuntimeError("fixture failure")
+        self.assertIs(train.time.time, real_time)
+        self.assertIs(train.base_env, real_env)
 
 
 if __name__ == "__main__":

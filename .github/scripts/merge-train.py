@@ -2301,6 +2301,29 @@ def check_declaration() -> int:
 
 
 # --------------------------------------------------------------------------- self-test
+@contextlib.contextmanager
+def _synthetic_clock(epoch: int = 1767225600):
+    """Keep synthetic git commits and ticks on one explicit clock, independent of suite duration.
+
+    Reservation scenarios advance tick time explicitly relative to their commit; elapsed runner
+    time is not modeled CI inactivity. Production clocks and commit environments are unchanged.
+    """
+    original_time, original_env = time.time, base_env
+
+    def dated_env():
+        env = original_env()
+        env.update({"GIT_AUTHOR_DATE": f"{epoch} +0000", "GIT_COMMITTER_DATE": f"{epoch} +0000"})
+        return env
+
+    time.time = lambda: epoch
+    globals()["base_env"] = dated_env
+    try:
+        yield
+    finally:
+        time.time = original_time
+        globals()["base_env"] = original_env
+
+
 SYN_GENERATOR = ".github/scripts/regen.py"
 SYN_GENERATOR_SRC = (
     "import json,os,pathlib\n"
@@ -2877,7 +2900,7 @@ def self_test() -> int:
         env = generator_env()
         check("generator env: no *TOKEN*, no RUNNER_TEMP, isolated git config",
               not any("TOKEN" in k for k in env) and "RUNNER_TEMP" not in env and env["GIT_CONFIG_GLOBAL"] == os.devnull)
-        with tempfile.TemporaryDirectory() as root:
+        with _synthetic_clock(), tempfile.TemporaryDirectory() as root:
             origin = os.path.join(root, "origin")
             _synthetic_origin(origin)
             gh = FakeGitHub(origin, root)
