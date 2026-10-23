@@ -38,3 +38,11 @@ A posting leg now carries `accountingClass` + `LedgerRole` (principal, accrued i
 - Release writes `treasury.payment.released.v1` to `openbank.treasury.payments` in the same transaction. swift-service turns it into a pacs.009 and answers on `openbank.swift.institution-transfers`; treasury moves the payment to SENT, SETTLED or FAILED. A status it cannot apply goes to `openbank.dlq.treasury.institution-transfer-status-in`.
 - Cancelling or reversing a deal refuses while one of its payments is released (409 PAYMENT_RELEASED) and otherwise withdraws its PROPOSED payments in the same transaction.
 - **Rollback:** V21 to V23 are additive. Drop the tables only while no payment row exists; each migration header carries the statements.
+
+## The posting-rule matrix (ADR-0344 phase 2a)
+
+- **`deal_journals`** (V24) now admits the matrix events (`TRADE`, `SETTLEMENT`, `ACCRUAL`, `PAYMENT`, `AMORTISATION`, `MATURITY` and the rest) next to the legacy `SETTLED`, `ACCRUED`, `MATURED`, `REVERSED`. A matrix journal's key is `treasury:<dealId>:<event>:<flowId|date>`, so each paid flow and each accrual day posts once.
+- `PostingMatrix` is versioned data: one row per product, event, IFRS 9 category and flow selector, served at `GET /api/v1/treasury/posting-rules`. A leg names an accounting class and role; the ledger maps them to its V35 instrument accounts.
+- IRS and FRA now settle, accrue, pay and mature through the matrix. The other leg-described products keep their rows dormant until their phase lands.
+- A SENT or SETTLED outgoing payment posts its flows' PAYMENT journals at once, under the same keys the daily run uses. If the ledger is down, the next replay or the daily run posts them, and `openbank.treasury.payments.outflow.failed` counts the miss.
+- **Rollback:** V24 only widens a CHECK. Restore the old constraint once no matrix journal row exists; the statement is in the migration header.

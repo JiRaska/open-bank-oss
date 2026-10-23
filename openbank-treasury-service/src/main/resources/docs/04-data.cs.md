@@ -38,3 +38,11 @@ Noha zaúčtování nově nese `accountingClass` + `LedgerRole` (jistina, naběh
 - Uvolnění zapíše `treasury.payment.released.v1` do `openbank.treasury.payments` v téže transakci. swift-service z něj sestaví pacs.009 a odpoví na `openbank.swift.institution-transfers`; treasury pak platbu posune na SENT, SETTLED nebo FAILED. Stav, který nelze použít, skončí v `openbank.dlq.treasury.institution-transfer-status-in`.
 - Zrušení nebo storno obchodu se odmítne, dokud je některá jeho platba uvolněná (409 PAYMENT_RELEASED); jinak ve stejné transakci stáhne jeho platby ve stavu PROPOSED.
 - **Rollback:** V21 až V23 jsou aditivní. Tabulky lze odstranit jen dokud neexistuje žádná platba; příkazy jsou v hlavičce každé migrace.
+
+## Matice účtovacích pravidel (ADR-0344 fáze 2a)
+
+- **`deal_journals`** (V24) nově připouští události matice (`TRADE`, `SETTLEMENT`, `ACCRUAL`, `PAYMENT`, `AMORTISATION`, `MATURITY` a další) vedle původních `SETTLED`, `ACCRUED`, `MATURED`, `REVERSED`. Klíč deníku matice je `treasury:<dealId>:<event>:<flowId|date>`, takže každý uhrazený tok a každý den časového rozlišení se zaúčtuje jednou.
+- `PostingMatrix` jsou verzovaná data: jeden řádek na produkt, událost, kategorii IFRS 9 a výběr toku, vystavená na `GET /api/v1/treasury/posting-rules`. Strana deníku uvádí účetní třídu a roli; ledger je mapuje na své instrumentové účty z V35.
+- IRS a FRA se nově vypořádávají, časově rozlišují, platí a splácejí přes matici. Ostatní produkty popsané nohami mají řádky neaktivní, dokud nepřijde jejich fáze.
+- Odchozí platba ve stavu SENT nebo SETTLED hned zaúčtuje deníky PAYMENT svých toků se stejnými klíči, jaké používá denní běh. Když ledger neodpovídá, zaúčtuje je další přehrání nebo denní běh a `openbank.treasury.payments.outflow.failed` výpadek započítá.
+- **Rollback:** V24 jen rozšiřuje CHECK. Původní omezení lze vrátit, dokud neexistuje žádný řádek deníku matice; příkaz je v hlavičce migrace.
