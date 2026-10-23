@@ -34,6 +34,16 @@ Pravidla hlášená v `breaches[]` jsou `PRODUCT_NOT_PERMITTED`, `CURRENCY_NOT_P
 
 Kontrakt API je `openapi.yaml` (`info.version` se řídí ADR-0048). Produktové limity jsou aditivní: 1.18.0, s odpovědí 422 u `submit` a `approve`.
 
+## Opravy obchodů (ADR-0344 D7)
+
+Obchod popsaný nohami (IRS, FRA, BOND, TREASURY_BILL, REPO, REVERSE_REPO) ve stavu BOOKED, CONFIRMED nebo SETTLED se mění jen opravou podle principu čtyř očí, nikdy přímou editací. Původní produkty se místo toho stornují a zaúčtují znovu.
+
+- `POST /api/v1/treasury/deals/{id}/corrections` navrhne částečné nové podmínky (nohy, sazbu, kalendáře, konvenci pracovního dne, poznámku) nebo úplné zrušení (`fullUnwind`), vždy s důvodem a datem účinnosti `effectiveFrom`. Navrhuje dealer nebo back office. Odpověď obsahuje náhled: nové toky, změněné toky a rozdílové účetní zápisy, které by změna zaúčtovala. Na jednom obchodu čeká nejvýše jedna oprava (PENDING).
+- O `/approve` a `/reject` rozhoduje schvalovatel. Musí to být člověk a nesmí být autorem podmínek obchodu: ne navrhovatel, tvůrce, předkladatel, editor návrhu ani navrhovatel dřívější opravy.
+- Opravený obchod se prověřuje stejně jako při zaúčtování: referenční data, produktový mandát a limit protistrany. Překročení limitu lze navrhnout jen s `requestLimitOverride`. Před schválením pak musí výjimku zaznamenat senior schvalovatel (`/override-limit`).
+- Schválení zapíše novou verzi podmínek a její cash-flow ledger v jedné transakci. Pokud mezitím fixing, override nebo platba změnily rozpis, odpověď je 409 `FLOW_CHANGED`. Uvolněná platba na změněném toku vede k 409 `PAYMENT_RELEASED`. Rozdílové zápisy se pak zaúčtují pod klíči `treasury:<dealId>:correction:<correctionId>:…` a oprava přejde do stavu `POSTED`, jakmile jsou v hlavní knize všechny. Co se při schválení zaúčtovat nepodařilo, dokončí hodinová úloha `treasury-correction-posting`. Pokud hlavní kniha den zápisu už uzavřela, zápis jde do dnešního otevřeného dne.
+- Každý POST vyžaduje `Idempotency-Key`. Schválení se publikuje jako událost `treasury.deal.corrected.v1`.
+
 ## Zapojení při buildu
 
 - **Bod rozhodování politik OPA.** `openbank.authz.opa-pdp-producer.enabled: true` zapne v libs-runtime `OpaPolicyDecisionPointProducer`, který dodá klienta OPA sidecaru podle `opa.url`, `opa.path` a `opa.timeout-ms` (výchozí 500 ms). Čte se při buildu.

@@ -58,7 +58,11 @@ info:
   # 1.22.0: additive — ADR-0344 phase 2a: GET /posting-rules (the posting-rule matrix as versioned
   #         data, PostingRule schema). IRS and FRA now settle and mature through the matrix; the
   #         journals list carries its events (trade, settlement, accrual, payment, maturity, ...).
-  version: 1.22.0
+  # 1.23.0: additive — ADR-0344 phase 2b: BOND, TREASURY_BILL, REPO and REVERSE_REPO are drafted,
+  #         settled and matured through the matrix (GET /posting-rules serves their rows); four-eyes
+  #         corrections of a booked deal (/deals/{id}/corrections: list, get, propose, approve,
+  #         override-limit, reject; CorrectionRequest, DealCorrection, PostedDelta schemas).
+  version: 1.23.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -1526,6 +1530,150 @@ paths:
         '409': { description: Not released }
         '422': { description: FOUR_EYES_VIOLATION }
 
+  /api/v1/treasury/deals/{id}/corrections:
+    get:
+      tags: [Treasury]
+      operationId: listDealCorrections
+      summary: The deal's corrections, oldest first
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      responses:
+        '200':
+          description: Every correction of the deal with its preview
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 1000
+                items: { $ref: '#/components/schemas/DealCorrection' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No such deal }
+    post:
+      tags: [Treasury]
+      operationId: proposeDealCorrection
+      summary: >-
+        Propose a correction of a BOOKED, CONFIRMED or SETTLED leg-described deal (PENDING). The
+        answer carries the preview - the flows the new version generates, the flows that change and
+        the delta journals it would post (what the new version implies minus what was posted, per
+        event and flow). At most one PENDING correction per deal (409 CORRECTION_STALE).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DealId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CorrectionRequest' }
+      responses:
+        '201':
+          description: The PENDING correction with its preview
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DealCorrection' }
+        '400': { description: Malformed or missing reason / effectiveFrom, or no change at all }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No such deal }
+        '409': { description: INVALID_STATE (not correctable) or CORRECTION_STALE (one is already pending) }
+        '422': { description: 'REFERENCE_NOT_EFFECTIVE, PRODUCT_LIMIT_BREACHED, or LIMIT_BREACHED (without requestLimitOverride)' }
+
+  /api/v1/treasury/deals/{id}/corrections/{correctionId}:
+    get:
+      tags: [Treasury]
+      operationId: getDealCorrection
+      summary: One correction with its preview
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/CorrectionId'
+      responses:
+        '200':
+          description: The correction
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DealCorrection' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No such correction on the deal }
+
+  /api/v1/treasury/deals/{id}/corrections/{correctionId}/approve:
+    post:
+      tags: [Treasury]
+      operationId: approveDealCorrection
+      summary: >-
+        Approve a pending correction. The approver is a human who is neither its proposer nor any
+        term author of the deal (creator, submitter, draft editors, authors of earlier corrections).
+        In one transaction under the deal lock: refused 409 PAYMENT_RELEASED while a payment that is
+        released, sent or failed covers a CHANGED flow; PROPOSED payments of changed flows are
+        withdrawn; the new deal version and its regenerated ledger (stored observed fixings
+        re-supplied, overrides carried or conflicted) commit. The delta journals then post into the
+        open accounting day (a closed day moves them to today, recording the original value date);
+        the correction is POSTED once they all have, APPROVED until then.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/CorrectionId'
+      responses:
+        '200':
+          description: The approved (or already posted) correction
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DealCorrection' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No such correction on the deal }
+        '409': { description: PAYMENT_RELEASED, CORRECTION_STALE (the deal moved on), FLOW_CHANGED (its schedule was written meanwhile) or INVALID_STATE }
+        '422': { description: 'FOUR_EYES_VIOLATION, LIMIT_BREACHED (re-measured now and under the lock) or PRODUCT_LIMIT_BREACHED' }
+
+  /api/v1/treasury/deals/{id}/corrections/{correctionId}/override-limit:
+    post:
+      tags: [Treasury]
+      operationId: overrideDealCorrectionLimit
+      summary: >-
+        A senior approver overrides the counterparty-limit breach a correction's terms cause
+        (proposed with requestLimitOverride). Bounded to the exposure measured now; the senior is
+        no term author and may not also approve it; approval re-measures under the lock.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/CorrectionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: The correction carrying the override
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DealCorrection' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No such correction on the deal }
+        '409': { description: INVALID_STATE - not pending, no override requested, or no breach to override }
+        '422': { description: FOUR_EYES_VIOLATION }
+
+  /api/v1/treasury/deals/{id}/corrections/{correctionId}/reject:
+    post:
+      tags: [Treasury]
+      operationId: rejectDealCorrection
+      summary: Reject a pending correction with a reason (same four-eyes rule as approval)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/CorrectionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: The rejected correction
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DealCorrection' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No such correction on the deal }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '422': { description: FOUR_EYES_VIOLATION }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1639,6 +1787,75 @@ components:
         status: { type: string, enum: [PENDING, ACTIVE, REJECTED] }
         batchId: { type: string, format: uuid }
         sha256: { type: string, description: 'SHA-256 of index|date|value|source' }
+    CorrectionChanges:
+      type: object
+      description: The partial terms a correction changes; absent = unchanged. Legs are replaced as a whole.
+      properties:
+        legs:
+          type: array
+          maxItems: 4
+          items: { $ref: '#/components/schemas/LegSpec' }
+        rate: { type: number }
+        calendars:
+          type: array
+          maxItems: 10
+          items: { type: string, maxLength: 32 }
+        businessDayConvention: { type: string, enum: [UNADJUSTED, FOLLOWING, MODIFIED_FOLLOWING, PRECEDING, MODIFIED_PRECEDING] }
+        note: { type: string, maxLength: 2000 }
+    CorrectionRequest:
+      type: object
+      required: [reason, effectiveFrom]
+      properties:
+        changes: { $ref: '#/components/schemas/CorrectionChanges' }
+        fullUnwind:
+          type: boolean
+          description: True unwinds the deal completely - every posted journal is offset and the deal ends REVERSED (the way a SETTLED matrix deal is taken back). No changes may be given with it.
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        effectiveFrom: { type: string, format: date }
+        requestLimitOverride:
+          type: boolean
+          description: >-
+            The corrected terms are vetted exactly as a booking (references, FX flag, product mandate,
+            counterparty limit). A counterparty-limit breach is refused (422 LIMIT_BREACHED) unless this
+            is true; then approval waits for a senior's override. A product-mandate breach is always 422.
+    PostedDelta:
+      type: object
+      properties:
+        idempotencyKey: { type: string }
+        journalId: { type: string, format: uuid }
+        entryDate: { type: string, format: date }
+        originalValueDate:
+          type: [string, 'null']
+          format: date
+          description: Set when the original day was closed and the journal posted into today's open day.
+    DealCorrection:
+      type: object
+      properties:
+        correctionId: { type: string, format: uuid }
+        dealId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, APPROVED, POSTED, REJECTED] }
+        baseVersion: { type: integer }
+        newVersion: { type: [integer, 'null'] }
+        fullUnwind: { type: boolean }
+        reason: { type: string }
+        effectiveFrom: { type: string, format: date }
+        changes: { $ref: '#/components/schemas/CorrectionChanges' }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        decisionReason: { type: [string, 'null'] }
+        limitOverrideRequested: { type: boolean }
+        limitOverrideBy: { type: [string, 'null'] }
+        limitOverrideCoversExposureUpTo: { type: [number, 'null'] }
+        posted:
+          type: array
+          maxItems: 2000
+          items: { $ref: '#/components/schemas/PostedDelta' }
+        preview:
+          type: object
+          description: '`{ newFlows, changedFlows: [{slot, before, after}], deltaJournals: [{sourceEvent, key, valueDate, idempotencyKey, lines}] }` as computed when proposed.'
+          additionalProperties: true
     PaymentStatus:
       type: string
       enum: [PROPOSED, RELEASED, SENT, SETTLED, FAILED, CANCELLED, RAIL_NOT_SUPPORTED, MANUALLY_SETTLED, RETURNED]

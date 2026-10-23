@@ -34,6 +34,16 @@ The rules reported in `breaches[]` are `PRODUCT_NOT_PERMITTED`, `CURRENCY_NOT_PE
 
 The API contract is `openapi.yaml` (`info.version` follows ADR-0048). Product limits are additive: 1.18.0, with a 422 on `submit` and `approve`.
 
+## Corrections (ADR-0344 D7)
+
+A BOOKED, CONFIRMED or SETTLED leg-described deal (IRS, FRA, BOND, TREASURY_BILL, REPO, REVERSE_REPO) is changed through a four-eyes correction, never edited in place; the legacy products are reversed and re-booked instead.
+
+- `POST /api/v1/treasury/deals/{id}/corrections` proposes partial new terms (legs, rate, calendars, business-day convention, note) or a `fullUnwind`, with a reason and an `effectiveFrom` date. A dealer or the back office proposes. The response carries a preview: the new flows, the changed flows and the delta journals the change would post. At most one correction per deal is PENDING.
+- `/approve` and `/reject` are decided by an approver who is human and is none of the deal's term authors: not the proposer, creator, submitter, a draft editor or the proposer of an earlier correction.
+- The corrected deal is vetted exactly as a booking is: reference data, product mandate and the counterparty limit. A limit breach can be proposed only with `requestLimitOverride`; then a senior approver records the override (`/override-limit`) before anyone approves.
+- Approval commits the new terms version and its cash-flow ledger in one transaction. If a fixing, override or payment changed the schedule meanwhile, the answer is 409 `FLOW_CHANGED`; a released payment on a changed flow gives 409 `PAYMENT_RELEASED`. The delta journals then post under `treasury:<dealId>:correction:<correctionId>:…` keys, and the correction is `POSTED` once all of them are in the ledger. Anything the approval could not post is finished by the hourly `treasury-correction-posting` job. If the ledger has closed the journal's day, the journal goes into today's open day.
+- Every POST requires an `Idempotency-Key`. The approval is published as `treasury.deal.corrected.v1`.
+
 ## Build-time wiring
 
 - **OPA policy decision point.** `openbank.authz.opa-pdp-producer.enabled: true` makes libs-runtime's `OpaPolicyDecisionPointProducer` supply the OPA sidecar client, configured by `opa.url`, `opa.path` and `opa.timeout-ms` (default 500 ms). It is read at build time.
