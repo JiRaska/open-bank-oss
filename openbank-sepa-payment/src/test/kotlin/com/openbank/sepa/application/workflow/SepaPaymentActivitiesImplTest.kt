@@ -380,6 +380,33 @@ class SepaPaymentActivitiesImplTest {
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
     }
 
+    @Test
+    fun `accepted booking write completes before the settlement provider is called`() {
+        var acceptedCommitReturned = false
+        val writes = object : com.openbank.sepa.application.port.out.SepaBookingWrites {
+            override suspend fun acceptForBooking(
+                payment: SepaPayment,
+                outbox: SepaPaymentOutboxMessage,
+            ): SepaPayment {
+                val stored = paymentRepository.update(payment, outbox)
+                acceptedCommitReturned = true
+                return stored
+            }
+        }
+        val tested = TestableActivities(
+            paymentRepository, screeningPort, amlCasePort, fraudScoringPort, schemeGatewayPort, settlementPort,
+            clock = clock, metrics = metrics, schemeSubmissionEnabled = true, bookingWrites = writes,
+        )
+        coEvery { paymentRepository.findById(paymentId) } returns payment.copy(status = SepaPaymentStatus.VALIDATED)
+        coEvery { schemeGatewayPort.submit(any()) } returns SchemeSubmissionOutcome(accepted = true, reasonCode = null)
+        coEvery { settlementPort.settle(any()) } answers {
+            assertThat(acceptedCommitReturned).isTrue()
+            SettlementOutcome(settled = false, transactionId = null)
+        }
+        assertThat(tested.submitToScheme(paymentId)).isEqualTo(SepaPaymentStatus.PROCESSING)
+        coVerify(exactly = 1) { settlementPort.settle(any()) }
+    }
+
     // --- #3914: business event time on the Temporal-path payloads -----------------------------
     //
     // These five payloads carried no time field at all, so AuditConsumer.eventTime() returned null
@@ -518,8 +545,14 @@ private class TestableActivities(
     clock: Clock,
     metrics: DomainMetrics,
     schemeSubmissionEnabled: Boolean,
+    bookingWrites: com.openbank.sepa.application.port.out.SepaBookingWrites =
+        object : com.openbank.sepa.application.port.out.SepaBookingWrites {
+            override suspend fun acceptForBooking(payment: SepaPayment, outbox: SepaPaymentOutboxMessage): SepaPayment =
+                paymentRepository.update(payment, outbox)
+        },
 ) : SepaPaymentActivitiesImpl(
     paymentRepository,
+    bookingWrites,
     screeningPort,
     amlCasePort,
     fraudScoringPort,

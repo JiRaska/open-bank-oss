@@ -15,6 +15,7 @@ import com.openbank.sepa.application.port.out.SanctionsScreeningPort
 import com.openbank.sepa.application.port.out.SchemeGatewayPort
 import com.openbank.sepa.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.sepa.application.port.out.ScreeningUnavailableException
+import com.openbank.sepa.application.port.out.SepaBookingWrites
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
 import com.openbank.sepa.application.port.out.SepaPaymentRepository
 import com.openbank.sepa.application.port.out.SettlementPort
@@ -46,6 +47,7 @@ private const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
 @ApplicationScoped
 open class SepaPaymentActivitiesImpl(
     private val paymentRepository: SepaPaymentRepository,
+    private val bookingWrites: SepaBookingWrites,
     private val screeningPort: SanctionsScreeningPort,
     private val amlCasePort: AmlCasePort,
     private val fraudScoringPort: FraudScoringPort,
@@ -248,9 +250,9 @@ open class SepaPaymentActivitiesImpl(
      */
     private suspend fun settleAfterAcceptance(payment: SepaPayment, paymentId: UUID): SepaPaymentStatus {
         val processing = payment.transitionTo(SepaPaymentStatus.PROCESSING, clock = clock)
-        paymentRepository.update(
+        bookingWrites.acceptForBooking(
             payment = processing,
-            outboxMessage = SepaPaymentOutboxMessage(
+            outbox = SepaPaymentOutboxMessage(
                 aggregateId = processing.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
                 payload = """{"paymentId":"$paymentId","version":${processing.revision},"status":"PROCESSING",""" +

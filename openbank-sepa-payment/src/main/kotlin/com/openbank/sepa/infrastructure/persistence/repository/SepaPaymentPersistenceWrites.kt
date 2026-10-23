@@ -61,6 +61,7 @@ internal suspend fun PanacheRepository<SepaPaymentEntity>.updateWithMessages(
     outboxMessages: List<SepaPaymentOutboxMessage>,
     outboxRepository: SepaPaymentOutboxRepositoryImpl,
     allowReturnResolution: Boolean = false,
+    acceptedBooking: Boolean = false,
 ): SepaPayment = Panache.withTransaction {
     find("paymentId", payment.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
         .invoke { entity ->
@@ -69,6 +70,7 @@ internal suspend fun PanacheRepository<SepaPaymentEntity>.updateWithMessages(
                 "stale SEPA payment revision ${payment.revision}; expected ${entity.revision + 1}"
             }
             SepaReturnWritePolicy.validate(entity.toDomain(), payment, allowReturnResolution)
+            entity.applyBookingAcceptance(payment, acceptedBooking)
             entity.applyLifecycleUpdate(payment)
         }
         .flatMap {

@@ -604,3 +604,6 @@ scheduler, outbound booking-age clock or approved SLA/alert threshold in this ch
 an approved reconciliation read path, operator recovery stays blocked. Existing authentication,
 M2M privileges and review requirements remain in force. Retain intent data during application rollback; reconcile/export pending intents before the
 destructive schema downgrade using the migration's documented reverse SQL.
+
+
+Booking observability (#13623): an entity-only first-due marker commits with accepted PROCESSING before provider IO. Only the validated completion port records proof in the locked lifecycle/outbox transaction. Generic writes preserve pending evidence; nullable historical coverage is reported separately and never suppresses tracked pending age. This does not authorize retries, reconciliation actions, SLA policy or a transaction lookup API.

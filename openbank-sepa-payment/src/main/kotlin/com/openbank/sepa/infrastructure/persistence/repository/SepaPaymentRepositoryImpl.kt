@@ -32,7 +32,13 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
 
     override suspend fun save(payment: SepaPayment, outboxMessage: SepaPaymentOutboxMessage): SepaPayment =
         Panache.withTransaction {
-            persist(payment.toEntity())
+            persist(
+                payment.toEntity().also {
+                    // A direct generic insert into a booking/terminal state is not acceptance proof.
+                    it.bookingClockCovered =
+                        payment.status in setOf(SepaPaymentStatus.RECEIVED, SepaPaymentStatus.VALIDATED)
+                },
+            )
                 .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage).replaceWith(payment) }
         }.awaitSuspending()
 
@@ -110,12 +116,14 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
                 val current = checkNotNull(entity).toDomain()
                 SepaSettlementCompletion.validateRequest(current, requestedPayment, transactionId)
                 if (SepaSettlementCompletion.isCompatibleReplay(current, transactionId)) {
+                    entity.proveBooking(transactionId, completedAt)
                     Uni.createFrom().item(current)
                 } else {
                     val completed = SepaSettlementCompletion.completed(current, transactionId, completedAt)
                     SepaReturnWritePolicy.validate(current, completed, false, allowInitialSettlementIdentity = true)
                     val message = statusMessage(completed)
                     require(message.aggregateId == completed.id && message.eventType == "sepa.payment.status-changed")
+                    entity.proveBooking(transactionId, completedAt)
                     entity.applyLifecycleUpdate(completed)
                     outboxRepository.persistWithinCurrentTransaction(message).replaceWith(completed)
                 }

@@ -77,7 +77,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 Outbound settlement requires HTTP 201 and a COMPLETED transaction with an id whose type, source account, numeric amount, currency, rail and instruction type match the submitted request. The structured request maps `SCT` to `SEPA_CT` and `SCT_INST` to `SEPA_INST`, with `ONE_OFF` for both. These transaction fields do not themselves prove clearing completion or an instant-payment SLA. The existing `sepa-settlement-<payment-id>` key is unchanged. An existing booking under that key may still carry historical `SEPA_CT` or a null instruction type; a mismatched response remains unresolved. Do not infer that no old booking exists from today's strict request parsing, accept a mismatched booking, change its recorded history or submit a new key to force a retry. Establish the outcome through an approved reconciliation read path before corrective action.
 
-The counter supplies no durable outbound-booking age, SLA threshold/alert or new recovery endpoint. The refund clock below measures a different operation. A public read-only transaction lookup by idempotency key and the remaining booking clocks, alerts and operator integration remain open parts of #13623.
+The counter itself supplies no durable age. The outbound booking clock and separate refund clock described below add tracked timestamps, with explicit unknown historical coverage; neither supplies an SLA threshold/alert or recovery endpoint. A public read-only transaction lookup by idempotency key, other rails, alerts and operator integration remain open parts of #13623.
 
 ### Unresolved inbound returns (#13623)
 
@@ -178,3 +178,12 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+
+### Outbound booking clock (#13623)
+
+`openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SEPA"}` measures the oldest tracked outbound booking obligation, starting with the committed accepted VALIDATED → PROCESSING transition. This is separate from the refund clock. A matched, strictly validated settlement response resolves the marker together with original transaction identity, COMPLETED and its outbox event; pending refund metadata remains intact. Generic status writes cannot clear the obligation or certify settlement.
+
+`openbank_payment_booking_unknown_coverage{rail="SEPA"}` separately counts rows with neither tracked start nor proof whose provenance is unknown, across all business statuses. Historical columns remain NULL without backfill; creation/submission time is not substituted. The tracked age is a lower bound when coverage is incomplete: unknown rows never suppress a known overdue age. Startup is NaN, successfully queried empty tracked set is zero, and query failure keeps the last timestamp aging. Zero age alone is not all-clear when unknown coverage is nonzero.
+
+No SLA threshold, alert, recovery action, new retry key or by-key lookup endpoint is introduced. Preserve `sepa-settlement-<paymentId>` and `sepa-reversal-<paymentId>`; reconcile ambiguity rather than creating another financial intent. Local supplied-ID fixtures do not prove a live provider response or deployed readiness.

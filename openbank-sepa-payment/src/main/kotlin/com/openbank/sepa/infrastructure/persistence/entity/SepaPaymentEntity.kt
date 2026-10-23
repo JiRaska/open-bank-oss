@@ -111,4 +111,17 @@ class SepaPaymentEntity : PanacheEntity() {
 
     @Column(name = "return_reversal_transaction_id")
     var returnReversalTransactionId: UUID? = null
+
+    @Column(name = "booking_first_due_at")
+    var bookingFirstDueAt: Instant? = null
+
+    @Column(name = "booking_proven_at")
+    var bookingProvenAt: Instant? = null
+
+    @Column(name = "booking_transaction_id")
+    var bookingTransactionId: UUID? = null
+
+    // Constructor default applies only to new inserts; migration deliberately has no DEFAULT.
+    @Column(name = "booking_clock_covered")
+    var bookingClockCovered: Boolean? = true
 }

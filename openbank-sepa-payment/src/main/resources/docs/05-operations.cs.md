@@ -77,7 +77,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 
 Odchozí settlement vyžaduje HTTP 201 a transakci COMPLETED s identifikátorem a shodou typu, zdrojového účtu, číselné částky, měny, railu a typu instrukce s požadavkem. Strukturovaný požadavek mapuje `SCT` na `SEPA_CT` a `SCT_INST` na `SEPA_INST`, pro oba používá `ONE_OFF`. Tyto údaje o transakci samy nedokazují dokončení clearingu ani splnění SLA okamžité platby. Klíč `sepa-settlement-<payment-id>` zůstává stejný. Dřívější booking pod tímto klíčem může mít `SEPA_CT` nebo null typ instrukce; neodpovídající reakce zůstává nevyřešená. Z dnešního striktního parsování nevyvozujte, že historický booking neexistuje. Nepřijímejte neodpovídající booking, nepřepisujte jeho historii ani nevytvářejte nový klíč k vynucení opakování. Před nápravou ověřte výsledek schválenou reconciliation cestou pro čtení.
 
-Čítač nepřidává trvalé stáří odchozího bookingu, SLA limit/alarm ani recovery endpoint. Níže uvedené stáří refundu měří jinou operaci. Veřejné vyhledání transakce pouze pro čtení podle idempotentního klíče, zbývající booking clocks, alarmy a operátorská integrace zůstávají otevřenými částmi #13623.
+Samotný čítač trvalé stáří neměří. Níže popsané booking a samostatné refund hodiny přidávají sledované časy s výslovně neznámým historickým pokrytím, nikoli SLA limit/alarm či recovery endpoint. Veřejné vyhledání transakce pouze pro čtení podle idempotentního klíče, ostatní rails, alarmy a operátorská integrace zůstávají otevřenými částmi #13623.
 
 ### Nevyřešené příchozí vratky (#13623)
 
@@ -146,3 +146,12 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+
+### Hodiny nevyřízeného interního bookingu (#13623)
+
+`openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SEPA"}` měří stáří nejstarší sledované povinnosti zaúčtovat odchozí platbu. Čas vzniká ve stejném commitu jako přijatý přechod VALIDATED → PROCESSING před voláním poskytovatele. Refund má samostatné hodiny. Pouze validovaná odpovídající settlement odpověď uloží důkaz spolu s původním transaction ID, stavem COMPLETED a outbox událostí. Pending refund metadata zůstávají zachována; obecný zápis stavu povinnost nesmaže ani nepotvrdí booking.
+
+`openbank_payment_booking_unknown_coverage{rail="SEPA"}` samostatně počítá řádky bez počátku/důkazu s neznámým pokrytím ve všech stavech. Historické hodnoty zůstávají NULL bez backfillu a bez odvozování z createdAt/submittedAt. Sledované stáří je při neúplném pokrytí dolní mez; neznámé řádky nesmějí potlačit známou nevyřízenou platbu. Před prvním úspěšným dotazem je hodnota NaN, úspěšně zjištěná prázdná množina má nulu. Po chybě dotazu stáří posledního časového údaje dále roste. Samotná nula při neznámém pokrytí není potvrzení bezchybného stavu.
+
+Změna nepřidává SLA limit, alert, nápravnou operaci, nový retry klíč ani lookup endpoint. Zachovejte `sepa-settlement-<paymentId>` a `sepa-reversal-<paymentId>`; nejasnost vyžaduje rekonciliaci, nikoli nový finanční záměr. Testovací endpoint s dodaným ID neprokazuje skutečného poskytovatele ani nasazení.
