@@ -1098,6 +1098,12 @@ def check(root: Path) -> list[str]:
     )
     if staging_test.returncode != 0:
         errors.append(f"PIT artifact staging regression tests failed: {staging_test.stderr.strip()}")
+    pool_test = subprocess.run(
+        [sys.executable, str(root / ".github/scripts/test-admin-ui-ti-staging-pool.py")],
+        capture_output=True, text=True, check=False,
+    )
+    if pool_test.returncode != 0:
+        errors.append(f"Test Intelligence staging pool regression tests failed: {pool_test.stderr.strip()}")
     performance_stage = deploy.partition("Stage performance evidence from latest complete k6 run")[2].partition(
         "Collect production-readiness scorecard"
     )[0]

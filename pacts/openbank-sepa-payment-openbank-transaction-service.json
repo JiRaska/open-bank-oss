@@ -16,6 +16,7 @@
           "currencyCode": "EUR",
           "description": "pact contract SEPA payment",
           "idempotencyKey": "pact-sepa-txn-001",
+          "instructionType": "ONE_OFF",
           "rail": "SEPA_CT",
           "sourceAccountId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
           "type": "TRANSFER",
@@ -29,8 +30,14 @@
       },
       "response": {
         "body": {
+          "amount": 250.00,
+          "currencyCode": "EUR",
           "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
-          "status": "COMPLETED"
+          "instructionType": "ONE_OFF",
+          "rail": "SEPA_CT",
+          "sourceAccountId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          "status": "COMPLETED",
+          "type": "TRANSFER"
         },
         "generators": {
           "body": {
@@ -44,6 +51,14 @@
         },
         "matchingRules": {
           "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
             "$.id": {
               "combine": "AND",
               "matchers": [
@@ -71,6 +86,7 @@
           "currencyCode": "EUR",
           "description": "pact contract SEPA payment",
           "idempotencyKey": "pact-sepa-txn-001",
+          "instructionType": "ONE_OFF",
           "rail": "SEPA_CT",
           "sourceAccountId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
           "type": "TRANSFER",

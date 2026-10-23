@@ -103,6 +103,7 @@ erasure dimension because there is no personal data (see [06 — Compliance](./0
 | `V7__track_bank_v1_projection_revision.sql` | Records v1 and draft watermarks so one-sided rollback writes reconcile and two-sided drift fails closed. |
 | `V8__order_catalog_outbox_for_cursor.sql` | Assigns immutable commit-safe cursor positions so reverse commits or clock changes cannot create a gap. |
 | `V14__generic_revision_role_approvals.sql` | Renames the pension approval evidence to `catalog_revision_role_approvals` and `approval_digest` / `approved_effective_to` in place. Adds append-only `catalog_schema_approval_policies`. (ADR-0345) |
+| `V15__price_component_role.sql` | Adds the nullable, CHECK-closed `role` (FEE, RATE, LIMIT, THRESHOLD) to `catalog_price_components`; a FEE must be an AMOUNT. Existing rows keep NULL and their revisions' content hashes are unchanged, because a component without a role serialises exactly as before (#13230). Rollback: drop the column. |
 
 
 ## Catalog object conversion

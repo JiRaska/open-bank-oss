@@ -102,3 +102,33 @@ test('malformed data cannot publish into any dataset', async () => {
     assert.equal(h.puts.length, 0)
   } finally { h.cleanup() }
 })
+
+
+test('complete repository corpus above two MiB publishes only under the existing content prefix', async () => {
+  const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+  const snapshot = JSON.parse(collectAdminUiContent({ sourceSha, includeRepositoryDocumentation: true }))
+  assert.ok(Buffer.byteLength(JSON.stringify(snapshot)) > 2 * 1024 * 1024)
+  const h = harness(snapshot, { ...env, EVIDENCE_SOURCE_SHA: sourceSha })
+  try {
+    await h.publish('content', { now: () => Date.now() + 1_000 })
+    assert.equal(h.puts.length, 2)
+    assert.match(h.puts[0].key, /^admin-ui\/content\/snapshots\//)
+    assert.equal(h.puts[1].key, 'admin-ui/content/current.json')
+    assert.equal(h.puts[1].body.sourceSha, sourceSha)
+  } finally { h.cleanup() }
+})
+
+test('content remains bounded at eight MiB and all other datasets retain two MiB limits', async () => {
+  const tooLargeForOthers = harness({ padding: 'x'.repeat(2 * 1024 * 1024) })
+  try {
+    for (const dataset of Object.keys(DATASETS).filter(name => name !== 'content')) {
+      assert.throws(() => tooLargeForOthers.publish(dataset), /input exceeds size limit/)
+    }
+    assert.equal(tooLargeForOthers.puts.length, 0)
+  } finally { tooLargeForOthers.cleanup() }
+  const tooLargeForContent = harness({ padding: 'x'.repeat(8 * 1024 * 1024) })
+  try {
+    await assert.rejects(tooLargeForContent.publish('content'), /input exceeds size limit/)
+    assert.equal(tooLargeForContent.puts.length, 0)
+  } finally { tooLargeForContent.cleanup() }
+})

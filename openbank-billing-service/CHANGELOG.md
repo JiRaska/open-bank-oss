@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.2...billing-service-v0.16.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* **billing:** book non-CZK fees on per-currency fee-income accounts ([#13606](https://github.com/JiRaska/open-bank-oss/issues/13606)) ([bfd0cb1](https://github.com/JiRaska/open-bank-oss/commit/bfd0cb17fe958b53d6d5db91ce14e2de8d5a61fe))
+
 ## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.1...billing-service-v0.16.2) (2026-10-21)
 
 

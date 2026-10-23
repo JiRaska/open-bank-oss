@@ -59,6 +59,15 @@ dependencies {
     // BalancePropertyTest — kept as a direct GAV like theirs rather than the shared catalog, since
     // only the handful of services with money-invariant property suites need it.
     testImplementation("io.kotest:kotest-property:5.9.1")
+    // ADR-0352: the product-IR JSON Schema (src/main/resources/product-ir) is held in step with the
+    // Kotlin parser by ProductIrSchemaAgreementTest, which validates the fixtures with the same
+    // validator product-catalog's JsonSchemaCatalogValidator uses. TEST ONLY — main stays Jackson-free
+    // (the domain-purity gate), which is why the parser is hand-written (IrJson).
+    testImplementation("com.networknt:json-schema-validator:1.5.9") {
+        // YAML schemas are not used (the IR schema is JSON); the transitive 2.18.x yaml dataformat is
+        // not in gradle/verification-metadata.xml and the fleet pins force jackson core/databind anyway.
+        exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
+    }
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -68,6 +77,11 @@ tasks.test {
 }
 
 kover {
+    currentProject {
+        createVariant("productIr") {
+            add("jvm")
+        }
+    }
     reports {
         // Re-measured 2026-09-29 on main merged with feat/spend-category-vocabulary's split of
         // libs-domain into libs-lending/libs-iso20022 (over two independent koverXmlReport runs,
@@ -78,6 +92,26 @@ kover {
                 bound {
                     minValue = 87
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+        // ADR-0352 §8: the product IR package (parser, canonical hash, pure interpreter) carries
+        // its own floor, FIXED at 90 by the ADR rather than ratcheted up from a first measurement;
+        // coverage-floor-ratchet then keeps it from moving down. Kover 0.9 scopes filters per report
+        // variant, not per rule, so the package floor is its own variant (`koverVerifyProductIr`,
+        // run by the aggregate `koverVerify`). Independent of the module floor above.
+        variant("productIr") {
+            filters {
+                includes {
+                    packages("com.openbank.libs.product")
+                }
+            }
+            verify {
+                rule("product-ir-package-floor") {
+                    bound {
+                        minValue = 90
+                        coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                    }
                 }
             }
         }

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.37.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.37.0...ledger-service-v1.37.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **billing:** book non-CZK fees on per-currency fee-income accounts ([#13606](https://github.com/JiRaska/open-bank-oss/issues/13606)) ([bfd0cb1](https://github.com/JiRaska/open-bank-oss/commit/bfd0cb17fe958b53d6d5db91ce14e2de8d5a61fe))
+
 ## [1.37.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.36.0...ledger-service-v1.37.0) (2026-10-22)
 
 

@@ -101,6 +101,16 @@ BASELINE: dict[str, str] = {
     "openbank-treasury-service:FIXED,MISSING,OBSERVED,PROJECTED,RATE_UNTIL_FIRST_FIXING":
         "ADR-0344 D4 — cash-flow `rateSource`: NOT drift. MISSING is the wire form of no rate yet "
         "(null RateSource), treasury RateSourceWire.",
+    # MIS-PAIRINGS (ADR-0352, #668): the product IR `Cadence` (libs-domain com.openbank.libs.product.ir,
+    # DAILY..ON_EVENT) is a product-behaviour vocabulary consumed by no customer-edge endpoint. These
+    # three customer-edge enums (a standing-order frequency, a savings-goal frequency and a deposit
+    # interest-payment frequency) share 3-4 calendar words with it; they model other concepts.
+    "openbank-customer-edge:ANNUALLY,BIWEEKLY,DAILY,MONTHLY,ONCE,QUARTERLY,WEEKLY":
+        "#668 — mis-pairing: a payment frequency vs the product IR Cadence.",
+    "openbank-customer-edge:ANNUALLY,MONTHLY,QUARTERLY":
+        "#668 — mis-pairing: a three-value frequency vs the product IR Cadence.",
+    "openbank-customer-edge:ANNUAL,AT_MATURITY,MONTHLY,QUARTERLY,SEMI_ANNUAL":
+        "#668 — mis-pairing: a deposit interest-payment frequency vs the product IR Cadence.",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
     # values are the `channel` of the app-interaction attribution response
     # (GET /api/v1/campaigns/interactions/{interactionRef}/attribution), which resolves ONLY an

@@ -1,13 +1,14 @@
 ---
 date: 2026-10-22
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [product-catalog, interest, fees-billing, libs]
 summary: "Product behaviour becomes a typed, total, signed JSON IR authored in git and executed by one pure interpreter shared by production, simulation, CI and Studio; publishing needs both PR review and Studio role approval."
+followup: "#668 — phase 1 (IR, interpreter, finance primitives, golden runner, gates) built; phases 2-6 (signing, loader, openbank-products, consumers, simulation, Studio) unbuilt"
 ---
 
 # ADR-0352 — Product as Code: typed IR, pure interpreter, git-native product catalog
@@ -359,6 +360,17 @@ output, and the Studio business approval displays that diff next to the role app
 comparison: the first commercial path announced in 2026 for generating a product contract with a
 language model relies on human sign-off alone. Here the sign-off is preceded by a mandatory
 behavioural simulation diff and followed by a signature and two independent approvals.
+
+### Phase 1 delivery notes
+
+Recorded when phase 1 landed (#13608), so the text matches what the IR v1 schema accepts:
+
+- The predicate language also carries `postingComparison` (`POSTING_AMOUNT`, `PROJECTED_BALANCE`),
+  meaningful in `prePosting`/`postPosting` only; it is what a `prePosting` `Reject` is gated on.
+- `Reprice` may change only `interest.rate` and `interest.bonus.rate` in v1.
+- The bit-exact characterisation test in `openbank-libs-finance` (generated inputs) does **not**
+  discharge section 10: golden data exported from the running interest-service remains a
+  precondition of the phase-3 interest switch.
 
 ## Alternatives considered
 
