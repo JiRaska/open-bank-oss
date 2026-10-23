@@ -78,7 +78,7 @@ Acceptance into `SENT_TO_CLEARING` records the first booking-due timestamp in th
 
 `openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="DOMESTIC_CZK"}` reports the age of the oldest tracked pending marker across business statuses. It is a lower bound when coverage is incomplete, starts as NaN before a successful query, and is zero when the successfully queried tracked set is empty. A failed refresh retains the last durable timestamp and its age keeps increasing. `openbank_payment_booking_unknown_coverage{rail="DOMESTIC_CZK"}` separately counts rows without a start/proof whose coverage is unknown. Existing rows in every lifecycle state retain nullable unknown provenance without backfill; a generic write bypassing booking tracking also remains unknown across later terminal states. This count is conservative historical coverage, not proof that each counted row is unsettled. An empty tracked set does not establish all-clear while coverage is unknown.
 
-These clocks are separate from payment creation, clearing dispatch, refunds and the existing stranded gauge. No age threshold, SLA alert, historical binding, new retry key, lookup/recovery API or retention policy is introduced. Historical reconciliation and owner-approved SLA rules remain open.
+These clocks are separate from payment creation, clearing dispatch, refunds and the existing stranded gauge. `DomesticPaymentBookingUnsettled` alerts on it (1h, below). No historical binding, new retry key, lookup/recovery API or retention policy is introduced.
 
 
 ### Unsettled internal booking outcomes
@@ -87,7 +87,7 @@ These clocks are separate from payment creation, clearing dispatch, refunds and 
 
 Settlement requires HTTP 201, a COMPLETED transaction with an id, and a match to the submitted type, account identities, amount, currency, rail and instruction type. A failed or uncertain attempt does not advance the payment from SENT_TO_CLEARING to SETTLED. The existing provider resilience and Temporal activity policies may retry; this counter does not change those policies or count the outer exception wrapper again. Preserve `domestic-settlement-<paymentId>` during investigation: a 409 or uncertain response is not proof that no booking occurred. Establish the transaction outcome through approved reconciliation tooling before corrective action; do not rotate the key or use a new booking POST as a lookup.
 
-The attempt counter alone does not establish durable age or reconciliation. The separate tracked booking clock above adds partial durable coverage, not a public transaction lookup by idempotency key, an age/SLA alert or a recovery endpoint. The existing stranded-payment gauge remains unchanged and does not establish those missing guarantees. These parts of #13623 remain open; neither a zero counter nor a successful local build proves reconciliation or deployment readiness.
+The attempt counter alone does not establish durable age or reconciliation. The separate tracked booking clock above adds partial durable coverage, not a public transaction lookup by idempotency key or a recovery endpoint; the age alert is below. The existing stranded-payment gauge remains unchanged and does not establish those missing guarantees. Neither a zero counter nor a successful local build proves reconciliation or deployment readiness.
 
 ### Payments stuck in RECEIVED
 
@@ -152,3 +152,7 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+### Unsettled booking alert and re-drive (#13623)
+
+`DomesticPaymentBookingUnsettled` fires when the oldest open booking clock is older than 1h (`openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`, tested by `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`). Temporal keeps retrying settlement every 5 minutes for 7 days under the same key, which heals a transient outage but never a deterministic answer. The operator remedy (query transaction-service by key, then reconcile, reverse or re-drive, including a reset of a workflow that has already failed) is `docs/runbooks/0032-payment-rail-unsettled-booking.md`.

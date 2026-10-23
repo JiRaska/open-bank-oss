@@ -28,6 +28,7 @@ import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -60,9 +61,9 @@ class SettlementAdapter(
     private val transactions = TransactionClient(client)
 
     @Suppress("TooGenericExceptionCaught")
-    override suspend fun settle(payment: SepaPayment): SettlementOutcome {
+    override suspend fun settle(payment: SepaPayment, acceptedAt: Instant): SettlementOutcome {
         try {
-            return self.settleWithResilience(payment)
+            return self.settleWithResilience(payment, acceptedAt)
         } catch (ex: CancellationException) {
             throw ex
         } catch (ex: SettlementUnavailableException) {
@@ -81,8 +82,8 @@ class SettlementAdapter(
         abortOn = [SettlementUnavailableException::class, CancellationException::class],
     )
     @Timeout(8_000)
-    open suspend fun settleWithResilience(payment: SepaPayment): SettlementOutcome {
-        val request = requestFor(payment)
+    open suspend fun settleWithResilience(payment: SepaPayment, acceptedAt: Instant): SettlementOutcome {
+        val request = requestFor(payment, acceptedAt)
         // This method is the interceptor's actual provider-call attempt. Count here, never again
         // in the outer settle wrapper, and preserve every exception/retry decision unchanged.
         val outcome = initiate(request)
@@ -129,14 +130,17 @@ class SettlementAdapter(
         else -> Outcome.TRANSPORT_ERROR
     }
 
-    private fun requestFor(payment: SepaPayment) = InitiateTransactionRequest(
+    private fun requestFor(payment: SepaPayment, acceptedAt: Instant) = InitiateTransactionRequest(
         idempotencyKey = "sepa-settlement-${payment.id}",
         type = "TRANSFER",
         sourceAccountId = payment.debtorAccountId,
         amount = payment.amount.amount,
         currencyCode = payment.currency,
         description = "SEPA ${payment.type.name}: ${payment.remittanceInfo ?: payment.endToEndId}",
-        valueDate = LocalDate.now(clock),
+        // Pinned to the acceptance date in the clock's zone, never today's: a re-drive must send the request
+        // the first attempt sent. (transaction-service answers a replayed key from the stored row and ignores
+        // the body, so this changes nothing on replay; it matters when the first attempt never landed.)
+        valueDate = LocalDate.ofInstant(acceptedAt, clock.zone),
         rail = when (payment.type) {
             SepaPaymentType.SCT -> PaymentRail.SEPA_CT.name
             SepaPaymentType.SCT_INST -> PaymentRail.SEPA_INST.name
