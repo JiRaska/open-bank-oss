@@ -4,7 +4,10 @@
 
 package com.openbank.lending.infrastructure.persistence.repository
 
+import com.openbank.lending.application.port.out.AllowancePostings
+import com.openbank.lending.application.port.out.AllowancePostingsPort
 import com.openbank.lending.application.port.out.CloseJobRunPort
+import com.openbank.lending.application.port.out.InFlightRun
 import com.openbank.libs.close.CloseJobRun
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -15,13 +18,25 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 
 /**
- * Postgres [CloseJobRunPort] over `lending_close_job_run` (V28). Same shape as interest-service's,
- * except that a second run on the same day ADDS its items and journals: lending's jobs run on an
- * interval, so a pod restart can run a job twice in one day, and the second pass (which finds the
- * first one's work already done) must not overwrite the day's counts with zero.
+ * Postgres day-close evidence for lending: [CloseJobRunPort] over `lending_close_job_run` (V28), and
+ * [AllowancePostingsPort] over the `lending.allowance.posting` rows of `lending_outbox`.
+ *
+ * Same shape as interest-service's run table, except that a second run on the same day ADDS its items
+ * and journals (lending's jobs run on an interval, so a restart can run a job twice in one day) and a
+ * pass marks itself in flight before it starts.
  */
 @ApplicationScoped
-class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : CloseJobRunPort {
+class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) :
+    CloseJobRunPort,
+    AllowancePostingsPort {
+
+    override fun markStarted(businessDate: LocalDate, job: String, at: Instant): Uni<Unit> = sf.withTransaction { s ->
+        s.createNativeQuery<Int>(START_SQL)
+            .setParameter(P_DATE, businessDate)
+            .setParameter(P_JOB, job)
+            .setParameter(P_ITEMS, OffsetDateTime.ofInstant(at, ZoneOffset.UTC))
+            .executeUpdate()
+    }.replaceWith(Unit)
 
     override fun record(run: CloseJobRun): Uni<Unit> = sf.withTransaction { s ->
         s.createNativeQuery<Int>(UPSERT_SQL)
@@ -41,6 +56,25 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : CloseJobRun
             .setParameter(P_JOB, to)
             .resultList
     }.map { rows -> rows.map { it.toRun() } }
+
+    override fun inFlightBetween(from: LocalDate, to: LocalDate): Uni<List<InFlightRun>> = sf.withSession { s ->
+        s.createNativeQuery<Array<Any?>>(IN_FLIGHT_SQL)
+            .setParameter(P_DATE, from)
+            .setParameter(P_JOB, to)
+            .resultList
+    }.map { rows -> rows.map { InFlightRun(asDate(it[0]), it[1] as String, asInstant(it[2])) } }
+
+    override fun postingsFor(accountingDate: LocalDate): Uni<AllowancePostings> = sf.withSession { s ->
+        s.createNativeQuery<Array<Any?>>(ALLOWANCE_SQL)
+            .setParameter(1, accountingDate.toString())
+            .singleResult
+    }.map { row ->
+        AllowancePostings(
+            pending = (row[0] as Number).toInt(),
+            posted = (row[1] as Number).toInt(),
+            dead = (row[2] as Number).toInt(),
+        )
+    }
 
     // Column order of SELECT_SQL.
     private fun Array<Any?>.toRun() = CloseJobRun(
@@ -67,7 +101,7 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : CloseJobRun
     }
 
     private companion object {
-        // Positional parameters of UPSERT_SQL (SELECT_SQL reuses 1 and 2 for its range).
+        // Positional parameters of UPSERT_SQL (SELECT_SQL reuses 1 and 2 for its range, START_SQL 1-3).
         const val P_DATE = 1
         const val P_JOB = 2
         const val P_ITEMS = 3
@@ -83,6 +117,11 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : CloseJobRun
         const val COL_REASON = 5
         const val COL_COMPLETED = 6
 
+        const val START_SQL =
+            "INSERT INTO lending_close_job_run (business_date, job, running, started_at) " +
+                "VALUES (?1, ?2, TRUE, ?3) " +
+                "ON CONFLICT (business_date, job) DO UPDATE SET running = TRUE, started_at = EXCLUDED.started_at"
+
         const val UPSERT_SQL =
             "INSERT INTO lending_close_job_run " +
                 "(business_date, job, items_processed, journals_posted, refused, refusal_reason, completed_at) " +
@@ -91,10 +130,25 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : CloseJobRun
                 "items_processed = lending_close_job_run.items_processed + EXCLUDED.items_processed, " +
                 "journals_posted = lending_close_job_run.journals_posted + EXCLUDED.journals_posted, " +
                 "refused = EXCLUDED.refused, refusal_reason = EXCLUDED.refusal_reason, " +
-                "completed_at = EXCLUDED.completed_at"
+                "completed_at = EXCLUDED.completed_at, running = FALSE"
 
         const val SELECT_SQL =
             "SELECT business_date, job, items_processed, journals_posted, refused, refusal_reason, completed_at " +
-                "FROM lending_close_job_run WHERE business_date BETWEEN ?1 AND ?2 ORDER BY business_date, job"
+                "FROM lending_close_job_run WHERE business_date BETWEEN ?1 AND ?2 " +
+                "AND NOT running AND completed_at IS NOT NULL ORDER BY business_date, job"
+
+        const val IN_FLIGHT_SQL =
+            "SELECT business_date, job, started_at FROM lending_close_job_run " +
+                "WHERE business_date BETWEEN ?1 AND ?2 AND running ORDER BY business_date, job"
+
+        // FAILED is a retryable outbox state (the dispatcher re-claims it), so it is still pending;
+        // only DEAD means the journal will never be booked.
+        const val ALLOWANCE_SQL =
+            "SELECT " +
+                "count(*) FILTER (WHERE status IN ('PENDING', 'DISPATCHING', 'FAILED')), " +
+                "count(*) FILTER (WHERE status = 'SENT'), " +
+                "count(*) FILTER (WHERE status = 'DEAD') " +
+                "FROM lending_outbox WHERE event_type = 'lending.allowance.posting' " +
+                "AND CAST(payload AS jsonb) ->> 'accountingDate' = ?1"
     }
 }

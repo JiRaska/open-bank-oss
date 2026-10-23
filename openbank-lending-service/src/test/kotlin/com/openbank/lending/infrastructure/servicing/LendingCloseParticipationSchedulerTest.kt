@@ -5,6 +5,7 @@
 package com.openbank.lending.infrastructure.servicing
 
 import com.openbank.lending.application.port.`in`.AccrueInterestUseCase
+import com.openbank.lending.application.port.out.AllowancePostings
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.libs.close.CloseJobRun
 import com.openbank.libs.close.CloseOutcome
@@ -44,10 +45,16 @@ class LendingCloseParticipationSchedulerTest {
     private val today = LocalDate.of(2026, 10, 3)
     private val runs = RecordingCloseJobRuns()
     private val delivered = mutableListOf<CloseParticipationReport>()
+    private var allowance = AllowancePostings(pending = 0, posted = 0, dead = 0)
+    private val postingsAsked = mutableListOf<LocalDate>()
 
     private fun scheduler(accrualEvery: String = "24h", provisioningEvery: String = "24h") =
         LendingCloseParticipationScheduler(
             closeJobRuns = runs,
+            allowancePostings = { day ->
+                postingsAsked += day
+                Uni.createFrom().item(allowance)
+            },
             sink = { participant, report ->
                 assertThat(participant).isEqualTo(LendingCloseJobs.PARTICIPANT)
                 delivered += report
@@ -58,7 +65,6 @@ class LendingCloseParticipationSchedulerTest {
             domainMetrics = noOpDomainMetrics(),
             accrualEvery = accrualEvery,
             provisioningEvery = provisioningEvery,
-            lookbackDays = 3,
         )
 
     @BeforeEach
@@ -217,6 +223,129 @@ class LendingCloseParticipationSchedulerTest {
 
         assertThat(asked).containsExactly(pragueDay)
         assertThat(runs.runs.keys).containsExactly(pragueDay to LendingCloseJobs.ACCRUAL)
+    }
+
+    // ── review fixes: allowance outbox, in-flight marker, drain + catch-up ─────────────────────
+
+    @Test
+    fun `provisioning is not reported while its allowance journals are still in the outbox`() {
+        val day = LocalDate.of(2026, 10, 2)
+        ran(day, LendingCloseJobs.ACCRUAL, items = 1, journals = 1)
+        ran(day, LendingCloseJobs.PROVISIONING, items = 4, journals = 0)
+        allowance = AllowancePostings(pending = 2, posted = 1, dead = 0)
+
+        scheduler().reportDays(today).await().indefinitely()
+
+        assertThat(delivered.map { it.businessDate }).doesNotContain(day)
+        assertThat(postingsAsked).contains(day)
+    }
+
+    @Test
+    fun `delivered allowance journals count as provisioning's journals`() {
+        val day = LocalDate.of(2026, 10, 2)
+        ran(day, LendingCloseJobs.ACCRUAL, items = 1, journals = 1)
+        ran(day, LendingCloseJobs.PROVISIONING, items = 4, journals = 0)
+        allowance = AllowancePostings(pending = 0, posted = 3, dead = 0)
+
+        scheduler().reportDays(today).await().indefinitely()
+
+        assertThat(reportFor(day).outcome).isEqualTo(CloseOutcome.RAN)
+        assertThat(reportFor(day).journalsPosted).isEqualTo(4)
+    }
+
+    @Test
+    fun `an allowance journal the outbox gave up on makes the day REFUSED`() {
+        val day = LocalDate.of(2026, 10, 2)
+        ran(day, LendingCloseJobs.ACCRUAL, items = 1, journals = 1)
+        ran(day, LendingCloseJobs.PROVISIONING, items = 4, journals = 0)
+        allowance = AllowancePostings(pending = 0, posted = 2, dead = 1)
+
+        scheduler().reportDays(today).await().indefinitely()
+
+        assertThat(reportFor(day).outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(reportFor(day).reason).contains("1 ${LendingCloseJobs.REASON_ALLOWANCE_NOT_POSTED}")
+    }
+
+    @Test
+    fun `a day with a pass still in flight is not reported, even over an earlier RAN row`() {
+        val day = LocalDate.of(2026, 10, 2)
+        ran(day, LendingCloseJobs.ACCRUAL, items = 1, journals = 1)
+        ran(day, LendingCloseJobs.PROVISIONING, items = 4, journals = 0)
+        // A second accrual pass for the same day started 10 minutes ago and has not finished.
+        runs.markStarted(day, LendingCloseJobs.ACCRUAL, clock.instant().minusSeconds(600)).await().indefinitely()
+
+        scheduler().reportDays(today).await().indefinitely()
+
+        assertThat(delivered.map { it.businessDate }).doesNotContain(day)
+    }
+
+    @Test
+    fun `a pass marked in flight past the stale threshold is reported REFUSED, never left hanging`() {
+        val day = LocalDate.of(2026, 10, 2)
+        ran(day, LendingCloseJobs.PROVISIONING, items = 4, journals = 0)
+        runs.markStarted(day, LendingCloseJobs.ACCRUAL, clock.instant().minusSeconds(3 * 3600)).await().indefinitely()
+
+        scheduler().reportDays(today).await().indefinitely()
+
+        assertThat(reportFor(day).outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(reportFor(day).reason).contains(LendingCloseJobs.REASON_PASS_ABANDONED)
+    }
+
+    @Test
+    fun `a pass marks itself in flight before accruing`() {
+        val accrual = mockk<AccrueInterestUseCase>()
+        every { accrual.accrueDueInterest(any(), any()) } answers {
+            assertThat(runs.inFlight.keys).contains(today to LendingCloseJobs.ACCRUAL)
+            Uni.createFrom().item(AccrualOutcome(today, 0))
+        }
+        InterestAccrualScheduler(accrual, 500, clock, noOpDomainMetrics(), runs).runAccrualPass()
+            .await().indefinitely()
+
+        assertThat(runs.inFlight).isEmpty()
+        assertThat(runs.runs.getValue(today to LendingCloseJobs.ACCRUAL).refused).isZero()
+    }
+
+    @Test
+    fun `a truncated batch is drained within the pass and the day records RAN`() {
+        val accrual = mockk<AccrueInterestUseCase>()
+        every { accrual.accrueDueInterest(today, 2) } returnsMany listOf(
+            Uni.createFrom().item(AccrualOutcome(today, 2, 2, truncated = true)),
+            Uni.createFrom().item(AccrualOutcome(today, 1, 1, truncated = false)),
+        )
+        InterestAccrualScheduler(accrual, 2, clock, noOpDomainMetrics(), runs).runAccrualPass()
+            .await().indefinitely()
+
+        val run = runs.runs.getValue(today to LendingCloseJobs.ACCRUAL)
+        assertThat(run.refused).isZero()
+        assertThat(run.itemsProcessed).isEqualTo(3)
+        assertThat(run.journalsPosted).isEqualTo(3)
+    }
+
+    @Test
+    fun `an earlier day left truncated is caught up as of that day and re-recorded RAN`() {
+        val dayD = today.minusDays(1)
+        ran(
+            dayD,
+            LendingCloseJobs.ACCRUAL,
+            items = 500,
+            journals = 500,
+            refused = 1,
+            reason = LendingCloseJobs.REASON_ACCRUAL_TRUNCATED,
+        )
+        val asked = mutableListOf<LocalDate>()
+        val accrual = mockk<AccrueInterestUseCase>()
+        every { accrual.accrueDueInterest(any(), any()) } answers {
+            asked += firstArg<LocalDate>()
+            Uni.createFrom().item(AccrualOutcome(firstArg(), 7, 7))
+        }
+        InterestAccrualScheduler(accrual, 500, clock, noOpDomainMetrics(), runs).runAccrualPass()
+            .await().indefinitely()
+
+        assertThat(asked).containsExactly(dayD, today)
+        val caughtUp = runs.runs.getValue(dayD to LendingCloseJobs.ACCRUAL)
+        assertThat(caughtUp.refused).isZero()
+        assertThat(caughtUp.refusalReason).isNull()
+        assertThat(caughtUp.itemsProcessed).isEqualTo(507)
     }
 
     @Test

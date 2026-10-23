@@ -5,16 +5,29 @@
 package com.openbank.lending.infrastructure.servicing
 
 import com.openbank.lending.application.port.out.CloseJobRunPort
+import com.openbank.lending.application.port.out.InFlightRun
 import com.openbank.libs.close.CloseJobRun
 import io.smallrye.mutiny.Uni
+import java.time.Instant
 import java.time.LocalDate
 
 /**
- * In-memory [CloseJobRunPort] with `lending_close_job_run`'s upsert semantics: items and journals
- * accumulate per (day, job), refused and its reason are the latest run's.
+ * In-memory [CloseJobRunPort] with `lending_close_job_run`'s semantics: items and journals accumulate
+ * per (day, job), refused and its reason are the latest run's, [markStarted] sets an in-flight marker
+ * that [record] clears, and [findBetween] returns completed runs only.
  */
 class RecordingCloseJobRuns : CloseJobRunPort {
     val runs = linkedMapOf<Pair<LocalDate, String>, CloseJobRun>()
+    val inFlight = linkedMapOf<Pair<LocalDate, String>, Instant>()
+
+    /** Every (day, job) ever marked started, in order — what a pass worked as of. */
+    val started = mutableListOf<Pair<LocalDate, String>>()
+
+    override fun markStarted(businessDate: LocalDate, job: String, at: Instant): Uni<Unit> {
+        inFlight[businessDate to job] = at
+        started += businessDate to job
+        return Uni.createFrom().item(Unit)
+    }
 
     override fun record(run: CloseJobRun): Uni<Unit> {
         val key = run.businessDate to run.job
@@ -27,9 +40,15 @@ class RecordingCloseJobRuns : CloseJobRunPort {
                 journalsPosted = prior.journalsPosted + run.journalsPosted,
             )
         }
+        inFlight.remove(key)
         return Uni.createFrom().item(Unit)
     }
 
-    override fun findBetween(from: LocalDate, to: LocalDate): Uni<List<CloseJobRun>> =
-        Uni.createFrom().item(runs.values.filter { it.businessDate in from..to })
+    override fun findBetween(from: LocalDate, to: LocalDate): Uni<List<CloseJobRun>> = Uni.createFrom().item(
+        runs.filter { (key, run) -> run.businessDate in from..to && key !in inFlight }.values.toList(),
+    )
+
+    override fun inFlightBetween(from: LocalDate, to: LocalDate): Uni<List<InFlightRun>> = Uni.createFrom().item(
+        inFlight.filterKeys { it.first in from..to }.map { (k, at) -> InFlightRun(k.first, k.second, at) },
+    )
 }

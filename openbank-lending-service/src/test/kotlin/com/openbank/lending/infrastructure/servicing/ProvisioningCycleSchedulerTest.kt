@@ -158,4 +158,39 @@ class ProvisioningCycleSchedulerTest {
         assertThat(registry.get("openbank.lending.provisioning.unprovisioned").gauge().value()).isEqualTo(1.0)
         registry.close()
     }
+
+    // Review fix: the loans-assessed count travels with the pass's own outcome, never a bean field
+    // that the previous pass left behind.
+    @Test
+    fun `each pass records its own loans-assessed count, and a failed pass records none`() {
+        val evidence = RecordingCloseJobRuns()
+        val observed = ProvisioningCycleScheduler(
+            cycle,
+            batchSize = 500,
+            clock = clock,
+            domainMetrics = mockk(relaxed = true),
+            coverage = mockk {
+                every { countEligibleForProvisioning() } returns Uni.createFrom().item(0L)
+                every { countUnprovisioned(any()) } returns Uni.createFrom().item(0L)
+                every { countForPeriod(any()) } returns Uni.createFrom().item(0L)
+            },
+            runs = runs,
+            registry = null,
+            closeJobRuns = evidence,
+        )
+        val day = java.time.LocalDate.of(2026, 6, 15)
+        every { cycle.runProvisioningCycle(any(), any(), any()) } returns
+            Uni.createFrom().item(ProvisioningRunOutcome("2026-06-15", 5, 0))
+        observed.runProvisioningPass().await().indefinitely()
+        assertThat(evidence.runs.getValue(day to LendingCloseJobs.PROVISIONING).itemsProcessed).isEqualTo(5)
+
+        every { cycle.runProvisioningCycle(any(), any(), any()) } returns
+            Uni.createFrom().failure(IllegalStateException("ledger down"))
+        runCatching { observed.runProvisioningPass().await().indefinitely() }
+
+        val afterFailure = evidence.runs.getValue(day to LendingCloseJobs.PROVISIONING)
+        assertThat(afterFailure.itemsProcessed).describedAs("the failed pass adds nothing").isEqualTo(5)
+        assertThat(afterFailure.refusalReason).isEqualTo(LendingCloseJobs.REASON_PROVISIONING_FAILED)
+        assertThat(evidence.inFlight).isEmpty()
+    }
 }
