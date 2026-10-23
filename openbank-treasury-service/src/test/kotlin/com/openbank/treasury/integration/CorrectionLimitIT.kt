@@ -41,8 +41,8 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * ADR-0344 D7 security: a correction is vetted exactly as a booking. A LOAN to the 500 M CZK limit
- * counterparty: raising its notional tenfold is refused at proposal; past the product mandate it is
+ * ADR-0344 D7 security: a correction is vetted exactly as a booking. A REVERSE_REPO (cash lent: an
+ * asset, so it consumes the line) to the 500 M CZK limit counterparty: raising its notional tenfold is refused at proposal; past the product mandate it is
  * never proposable; a raise within the limit at proposal but over it at approval (another deal
  * booked meanwhile) is refused at approval, and the guard under the deal lock refuses it by itself;
  * a breach passes only under a senior's override, never approved by that senior.
@@ -87,7 +87,7 @@ class CorrectionLimitIT {
     private fun book(notional: String): String {
         val id: String = post(
             "/deals",
-            """{"product":"LOAN","counterpartyId":"SIMBK-C","bookId":"TRADING-BOOK","calendars":["CERTIS"],
+            """{"product":"REVERSE_REPO","counterpartyId":"SIMBK-C","bookId":"TRADING-BOOK","calendars":["CERTIS"],
                "businessDayConvention":"MODIFIED_FOLLOWING","legs":${legs(notional)}}""",
         ).then().statusCode(201).extract().path("dealId")
         post("/deals/$id/submit").then().statusCode(200)
@@ -98,11 +98,11 @@ class CorrectionLimitIT {
     @Test
     @Order(1)
     @TestSecurity(user = "erik.editor", roles = ["ROLE_TREASURY_REFERENCE_EDITOR"])
-    fun `1 - the LOAN mandate is proposed`() {
+    fun `1 - the REVERSE_REPO mandate is proposed`() {
         post(
             "/reference/product-type",
-            """{"key":"LOAN","validFrom":"$today","reason":"open lending",
-               "payload":{"code":"LOAN","permitted":true,"maxPrincipal":{"CZK":5000000000.00},"maxTenorDays":3660}}""",
+            """{"key":"REVERSE_REPO","validFrom":"$today","reason":"open reverse repo lending",
+               "payload":{"code":"REVERSE_REPO","permitted":true,"maxPrincipal":{"CZK":5000000000.00},"maxTenorDays":3660}}""",
         ).then().statusCode(201)
     }
 
@@ -110,13 +110,13 @@ class CorrectionLimitIT {
     @Order(2)
     @TestSecurity(user = "sam.senior", roles = ["ROLE_TREASURY_SENIOR_APPROVER", "ROLE_TREASURY_APPROVER"])
     fun `2 - and activated`() {
-        post("/reference/product-type/LOAN/versions/1/approve").then().statusCode(200)
+        post("/reference/product-type/REVERSE_REPO/versions/1/approve").then().statusCode(200)
     }
 
     @Test
     @Order(3)
     @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
-    fun `3 - a 100 M loan is booked with the 500 M counterparty`() {
+    fun `3 - a 100 M reverse repo is booked with the 500 M counterparty`() {
         deal = book("100000000.00")
     }
 
@@ -136,7 +136,7 @@ class CorrectionLimitIT {
     @Test
     @Order(5)
     @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
-    fun `5 - another 100 M loan with the same counterparty is booked meanwhile`() {
+    fun `5 - another 100 M reverse repo with the same counterparty is booked meanwhile`() {
         other = book("100000000.00")
     }
 
