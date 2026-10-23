@@ -31,17 +31,22 @@ class M2mOidcClientIdentityWiringTest {
     }
 
     @Test
-    fun `the transaction-service adapters inject the named m2m oidc-client`() {
+    fun `the transaction-service client mints its bearer from the named m2m oidc-client`() {
+        // #13224: the token is attached by the filter on the generated client, not by hand in the adapters.
+        val named = TransactionServiceClient::class.java.getAnnotation(OidcClientFilter::class.java)
+        assertThat(named).describedAs("@OidcClientFilter on TransactionServiceClient").isNotNull
+        assertThat(named.value).isEqualTo(M2M)
+        assertThat(
+            TransactionServiceClient::class.java.getAnnotationsByType(RegisterProvider::class.java)
+                .map { it.value.java },
+        )
+            .describedAs("the default-client filter would re-attach the shared principal's token")
+            .doesNotContain(OidcClientRequestReactiveFilter::class.java)
         listOf(SettlementAdapter::class.java, ReversalAdapter::class.java).forEach { adapter ->
             val qualifiers = adapter.declaredConstructors.single().parameterAnnotations
                 .flatMap { it.toList() }
                 .filterIsInstance<NamedOidcClient>()
-            assertThat(qualifiers.map { it.value })
-                .describedAs(
-                    "%s must mint its bearer from the named client, not the shared default",
-                    adapter.simpleName,
-                )
-                .containsExactly(M2M)
+            assertThat(qualifiers).describedAs("%s must not mint a bearer by hand", adapter.simpleName).isEmpty()
         }
     }
 
