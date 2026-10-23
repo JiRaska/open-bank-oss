@@ -88,7 +88,13 @@ class LendingWorkflowLivenessTest {
                 Uni.createFrom().item(AccrualOutcome(asOf = asOf, installmentsAccrued = 2))
         }
         val scheduler =
-            InterestAccrualScheduler(accrual, batchSize = 500, clock = clock, domainMetrics = metricsOver(registry))
+            InterestAccrualScheduler(
+                accrual,
+                batchSize = 500,
+                clock = clock,
+                domainMetrics = metricsOver(registry),
+                closeJobRuns = RecordingCloseJobRuns(),
+            )
 
         scheduler.onStart(StartupEvent())
 
@@ -120,7 +126,13 @@ class LendingWorkflowLivenessTest {
                 Uni.createFrom().item(AccrualOutcome(asOf = asOf, installmentsAccrued = 0))
         }
         val scheduler =
-            InterestAccrualScheduler(accrual, batchSize = 500, clock = clock, domainMetrics = metricsOver(registry))
+            InterestAccrualScheduler(
+                accrual,
+                batchSize = 500,
+                clock = clock,
+                domainMetrics = metricsOver(registry),
+                closeJobRuns = RecordingCloseJobRuns(),
+            )
         scheduler.onStart(StartupEvent())
 
         scheduler.runAccrualPass().await().indefinitely()
@@ -139,7 +151,13 @@ class LendingWorkflowLivenessTest {
                 Uni.createFrom().failure(IllegalStateException("ledger down"))
         }
         val scheduler =
-            InterestAccrualScheduler(accrual, batchSize = 500, clock = clock, domainMetrics = metricsOver(registry))
+            InterestAccrualScheduler(
+                accrual,
+                batchSize = 500,
+                clock = clock,
+                domainMetrics = metricsOver(registry),
+                closeJobRuns = RecordingCloseJobRuns(),
+            )
         scheduler.onStart(StartupEvent())
 
         runCatching { scheduler.runAccrualPass().await().indefinitely() }
@@ -174,6 +192,7 @@ class LendingWorkflowLivenessTest {
                 },
                 runs = cycleRuns(),
                 registry = null,
+                closeJobRuns = RecordingCloseJobRuns(),
             )
 
         scheduler.onStart(StartupEvent())
@@ -220,6 +239,7 @@ class LendingWorkflowLivenessTest {
             coverage,
             cycleRuns(),
             null,
+            RecordingCloseJobRuns(),
         )
         scheduler.onStart(StartupEvent())
 
@@ -252,6 +272,7 @@ class LendingWorkflowLivenessTest {
             coverage,
             cycleRuns(),
             null,
+            RecordingCloseJobRuns(),
         )
         scheduler.onStart(StartupEvent())
 
@@ -283,6 +304,7 @@ class LendingWorkflowLivenessTest {
             coverage,
             cycleRuns(unresolvedPriorDays = 1),
             registry,
+            RecordingCloseJobRuns(),
         )
         scheduler.onStart(StartupEvent())
 
@@ -321,6 +343,7 @@ class LendingWorkflowLivenessTest {
                 },
                 runs = cycleRuns(),
                 registry = null,
+                closeJobRuns = RecordingCloseJobRuns(),
             )
         scheduler.onStart(StartupEvent())
 

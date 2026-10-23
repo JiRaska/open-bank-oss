@@ -1179,7 +1179,13 @@ class LendingService @Inject constructor(
             Multi.createFrom().iterable(due)
                 .onItem().transformToUniAndConcatenate { installment -> accrueOne(installment) }
                 .collect().asList()
-                .map { AccrualOutcome(asOf = asOf, installmentsAccrued = it.size) }
+                .map { accrued ->
+                    AccrualOutcome(
+                        asOf = asOf,
+                        installmentsAccrued = accrued.size,
+                        journalsPosted = accrued.count { it.interest.isPositive() },
+                    )
+                }
         }
 
     private fun accrueOne(installment: LoanInstallment): Uni<LoanInstallment> {

@@ -34,7 +34,13 @@ class InterestAccrualSchedulerTest {
     private val accrual = mockk<AccrueInterestUseCase>()
     private val clock = Clock.fixed(Instant.parse("2026-07-01T04:00:00Z"), ZoneOffset.UTC)
     private val scheduler =
-        InterestAccrualScheduler(accrual, batchSize = 250, clock = clock, domainMetrics = mockk(relaxed = true))
+        InterestAccrualScheduler(
+            accrual,
+            batchSize = 250,
+            clock = clock,
+            domainMetrics = mockk(relaxed = true),
+            closeJobRuns = RecordingCloseJobRuns(),
+        )
 
     @BeforeEach
     fun stubPanacheSession() {

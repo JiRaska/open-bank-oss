@@ -155,6 +155,7 @@ class ProvisioningCycleRunIT {
                 coverage,
                 runs,
                 null,
+                com.openbank.lending.infrastructure.servicing.RecordingCloseJobRuns(),
             )
 
             VertxContextSupport.subscribeAndAwait { scheduler.runProvisioningPass() }

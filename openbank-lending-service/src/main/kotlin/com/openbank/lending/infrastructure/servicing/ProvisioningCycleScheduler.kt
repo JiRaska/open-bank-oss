@@ -5,6 +5,7 @@
 package com.openbank.lending.infrastructure.servicing
 
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
+import com.openbank.lending.application.port.out.CloseJobRunPort
 import com.openbank.lending.application.port.out.ProvisioningCoverageRepository
 import com.openbank.lending.application.port.out.ProvisioningCycleRunRepository
 import com.openbank.libs.observability.DomainMetrics
@@ -53,6 +54,7 @@ class ProvisioningCycleScheduler(
     private val coverage: ProvisioningCoverageRepository,
     private val runs: ProvisioningCycleRunRepository,
     private val registry: MeterRegistry?,
+    private val closeJobRuns: CloseJobRunPort,
 ) {
     // Explicit @Inject constructor: MeterRegistry is optional (absent in slim test slices), and with
     // two constructors and no annotation ArC registers no bean at all — the trap documented on
@@ -67,6 +69,7 @@ class ProvisioningCycleScheduler(
         coverage: ProvisioningCoverageRepository,
         runs: ProvisioningCycleRunRepository,
         registryInstance: Instance<MeterRegistry>,
+        closeJobRuns: CloseJobRunPort,
     ) : this(
         cycle,
         batchSize,
@@ -75,6 +78,7 @@ class ProvisioningCycleScheduler(
         coverage,
         runs,
         if (registryInstance.isResolvable) registryInstance.get() else null,
+        closeJobRuns,
     )
 
     private val log = Logger.getLogger(ProvisioningCycleScheduler::class.java)
@@ -172,6 +176,7 @@ class ProvisioningCycleScheduler(
                     }
                     .flatMap { unresolved ->
                         cycle.runProvisioningCycle(period, asOf, batchSize)
+                            .invoke { outcome -> lastAssessed = outcome.loansAssessed }
                             .invoke { outcome ->
                                 log.infof(
                                     "IFRS 9 provisioning cycle %s: %d loans assessed, %d allowance commands queued",
@@ -185,13 +190,53 @@ class ProvisioningCycleScheduler(
                                 runs.markResult(asOf, attemptId, missing, OffsetDateTime.now(clock))
                                     .replaceWith(missing)
                             }
+                            .call { missing -> recordCloseEvidence(missing) }
                             .map { missing -> missing == 0L && unresolved == 0L }
                     }
             }
             .invoke { complete -> if (complete) liveness?.recordSuccess() }
             .onFailure().invoke { e -> log.error("IFRS 9 provisioning cycle failed", e) }
+            .onFailure().call { _ ->
+                LendingCloseJobs.record(
+                    closeJobRuns,
+                    clock,
+                    LendingCloseJobs.PROVISIONING,
+                    items = 0,
+                    journals = 0,
+                    refused = 1,
+                    reason = LendingCloseJobs.REASON_PROVISIONING_FAILED,
+                )
+            }
             .replaceWithVoid()
     }
+
+    /**
+     * Day-close evidence (ADR-0342 D1). The allowance journals this pass queues are dispatched by the
+     * outbox, not booked here, so the run reports `journalsPosted = 0` and counts loans assessed as
+     * its items. A pass that leaves eligible exposures unprovisioned, or whose coverage could not be
+     * counted, cannot certify the day: it is recorded REFUSED with the shortfall, which holds the
+     * ledger's close until a complete pass (or an operator waiver) replaces it.
+     */
+    private fun recordCloseEvidence(missing: Long?): Uni<Unit> {
+        val incomplete = missing == null || missing > 0
+        return LendingCloseJobs.record(
+            closeJobRuns,
+            clock,
+            LendingCloseJobs.PROVISIONING,
+            items = lastAssessed,
+            journals = 0,
+            refused = if (incomplete) (missing ?: 1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() else 0,
+            reason = when {
+                missing == null -> LendingCloseJobs.REASON_PROVISIONING_UNCOUNTED
+                missing > 0 -> LendingCloseJobs.REASON_PROVISIONING_INCOMPLETE
+                else -> null
+            },
+        )
+    }
+
+    /** Loans assessed by the pass in flight; only read after its cycle completed. */
+    @Volatile
+    private var lastAssessed: Int = 0
 
     private companion object {
         const val METRICS_SERVICE_TAG = "lending"

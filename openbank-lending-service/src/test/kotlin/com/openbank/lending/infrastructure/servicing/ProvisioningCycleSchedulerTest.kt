@@ -55,6 +55,7 @@ class ProvisioningCycleSchedulerTest {
             },
             runs = runs,
             registry = null,
+            closeJobRuns = RecordingCloseJobRuns(),
         )
 
     @BeforeEach
@@ -117,6 +118,7 @@ class ProvisioningCycleSchedulerTest {
             mockk(relaxed = true),
             runs,
             registry,
+            RecordingCloseJobRuns(),
         )
         observed.onStart(io.quarkus.runtime.StartupEvent())
 
@@ -145,6 +147,7 @@ class ProvisioningCycleSchedulerTest {
             coverage = coverageLoans,
             runs = runs,
             registry = registry,
+            closeJobRuns = RecordingCloseJobRuns(),
         )
         observed.onStart(io.quarkus.runtime.StartupEvent())
         every { cycle.runProvisioningCycle("2026-06-15", any(), 500) } returns
