@@ -97,6 +97,17 @@ Symptom: outbox INSERT fails with `relation "swift_outbox_seq" does not exist`. 
 
 A repeated submit with the same `idempotencyKey` returns the existing message. A `409` indicates a duplicate key with a conflicting payload — do not retry; fix the client or use a new key.
 
+## Bank-own transfers released by treasury
+
+Treasury's `treasury.payment.released.v1` (channel `treasury-payments-in`) becomes one bank-own
+transfer per payment, sent as pacs.009 on the route the release names; its status is published on
+`openbank.swift.institution-transfers`. A release whose value date is more than
+`institution-transfer.value-date-past-tolerance-days` in the past is refused (DT01). A transfer is
+never resubmitted blindly and a known one is never rejected: an ambiguous submission is resolved by
+asking the scheme by UETR. The resolution sweeper (`institution-transfer.resolution.*`: `every`,
+`initial-delay`, `min-age`, `batch-size`) asks about unknown submissions and SENT transfers older
+than `min-age`. A record the consumer cannot process is dead-lettered by the channel configuration.
+
 ## Tests & coverage
 
 - Tests: `SwiftServiceTest`, `SwiftMessageTest`, `HibernateSequenceGuardTest` (Quarkus JUnit5, AssertJ, MockK).

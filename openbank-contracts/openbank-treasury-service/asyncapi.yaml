@@ -9,8 +9,17 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Treasury Service — deal events
-  version: 1.8.0
+  version: 1.9.0
   description: |
+    1.9.0 (additive, ADR-0344 phase 1b, contract 9): the bank-own payment rail. Release is ASYNC
+    and ATOMIC: `treasury.payment.released.v1` is written on the NEW channel
+    `openbank.treasury.payments` in the same transaction that moves the payment to RELEASED (rail
+    from the SSI: CZK CERTIS, EUR TARGET2, other SWIFT). The rail's status events
+    (`openbank.swift.institution-transfers`, swift-service's contract) move it on, idempotent on
+    (paymentId, status). New on the deal topic: `treasury.payment.status-changed.v1`, an
+    own-account payment moved (PROPOSED, RELEASED, SENT, RAIL_NOT_SUPPORTED, SETTLED,
+    MANUALLY_SETTLED, RETURNED, FAILED, CANCELLED), keyed by the payment id.
+
     1.8.0 (additive, ADR-0344 phase 1a): `treasury.cashflow.fixed.v1` on the same topic: floating
     flows of one deal version moved PROJECTED/MISSING -> FIXED from an observed index value that
     passed the quality gate, with the value, its source and SHA-256 provenance hash. `ProductType`
@@ -87,9 +96,26 @@ channels:
         $ref: '#/components/messages/CashFlowOverridden'
       CashFlowFixed:
         $ref: '#/components/messages/CashFlowFixed'
+      PaymentStatusChanged:
+        $ref: '#/components/messages/PaymentStatusChanged'
+
+  treasuryPayments:
+    address: openbank.treasury.payments
+    title: Bank-own payment instructions to the institution-transfer rail
+    description: |
+      Contract 9.1. The KafkaTopic CR lives in `openbank-infra/gitops/components/treasury/kafka-topic.yaml`:
+      treasury Write, swift Read. **Partitioning key: `aggregateId`** = the payment id.
+    messages:
+      PaymentReleased:
+        $ref: '#/components/messages/PaymentReleased'
 
 
 operations:
+  publishTreasuryPayments:
+    action: send
+    channel:
+      $ref: '#/channels/treasuryPayments'
+    summary: treasury-service hands a released bank-own payment to the institution-transfer rail.
   publishTreasuryDealEvents:
     action: send
     channel:
@@ -143,6 +169,17 @@ components:
       summary: "Floating flows of one deal version were FIXED from an observed index value that passed the quality gate (ADR-0344 D5)."
       payload:
         $ref: '#/components/schemas/CashFlowFixed'
+
+    PaymentStatusChanged:
+      name: treasury.payment.status-changed.v1
+      summary: "An own-account payment changed status (ADR-0344 D6)."
+      payload:
+        $ref: '#/components/schemas/PaymentStatusChanged'
+    PaymentReleased:
+      name: treasury.payment.released.v1
+      summary: "A human released an own-account payment; the rail is to transfer it (contract 9.1)."
+      payload:
+        $ref: '#/components/schemas/PaymentReleased'
 
   schemas:
     ProductType:
@@ -397,8 +434,54 @@ components:
         state: { type: string, enum: [PROJECTED, FIXED, DUE, SETTLED, POSTED, CANCELLED] }
         manual: { type: boolean }
 
+    PaymentStatusChanged:
+      type: object
+      description: "Constructor properties of `PaymentStatusChanged` in `PaymentService.kt`."
+      required: [paymentId, status, direction, counterpartyId, currency, amount, valueDate, nettedFlowIds, dealIds, occurredAt, sourceService]
+      properties:
+        paymentId: { type: string, format: uuid }
+        status: { type: string, enum: [PROPOSED, RELEASED, SENT, SETTLED, FAILED, CANCELLED, RAIL_NOT_SUPPORTED, MANUALLY_SETTLED, RETURNED] }
+        direction: { type: string, enum: [IN, OUT] }
+        counterpartyId: { type: string }
+        currency: { type: string }
+        amount: { type: number }
+        valueDate: { type: string, format: date }
+        rail: { type: [string, 'null'] }
+        railReference: { type: [string, 'null'] }
+        nettedFlowIds: { type: array, items: { type: string, format: uuid } }
+        dealIds: { type: array, items: { type: string, format: uuid } }
+        actor: { type: [string, 'null'] }
+        reason: { type: [string, 'null'] }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
 
+    TransferParty:
+      type: object
+      required: [bic, accountNumber]
+      properties:
+        bic: { type: string, maxLength: 11 }
+        accountNumber: { type: string, maxLength: 64 }
+        glAccountingClass: { type: [string, 'null'] }
+        name: { type: [string, 'null'], maxLength: 140 }
 
-
-
-
+    PaymentReleased:
+      type: object
+      description: "Constructor properties of `PaymentReleased` in `PaymentService.kt`."
+      required: [paymentId, idempotencyKey, rail, currency, amount, valueDate, debtor, creditor, ssiVersion, remittanceInformation, dealIds, flowIds, releasedBy, releasedAt, synthetic]
+      properties:
+        paymentId: { type: string, format: uuid }
+        idempotencyKey: { type: string, maxLength: 128 }
+        rail: { type: string, enum: [CERTIS, TARGET2, SWIFT] }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        amount: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: "Decimal string, 2 dp." }
+        valueDate: { type: string, format: date }
+        debtor: { $ref: '#/components/schemas/TransferParty' }
+        creditor: { $ref: '#/components/schemas/TransferParty' }
+        intermediaryBic: { type: [string, 'null'] }
+        ssiVersion: { type: integer, minimum: 1, description: "The SSI version the creditor was addressed from, re-verified inside the release transaction (additive to contract 9.1)." }
+        remittanceInformation: { type: string, maxLength: 140 }
+        dealIds: { type: array, items: { type: string, format: uuid } }
+        flowIds: { type: array, items: { type: string, format: uuid } }
+        releasedBy: { type: string }
+        releasedAt: { type: string, format: date-time }
+        synthetic: { type: boolean }

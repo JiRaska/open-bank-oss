@@ -33,6 +33,8 @@ dependencies {
     // ADR-0344 D1: schedule generation, accrual and calendars (framework-free).
     implementation(project(":openbank-libs-finance"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0344 D6: the institution-transfer rail vocabulary (SettlementRail) and pacs.009 shapes.
+    implementation(project(":openbank-libs-iso20022"))
 
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)

@@ -143,4 +143,31 @@ class ExceptionMappers {
     private companion object {
         const val UNPROCESSABLE = 422
     }
+
+    // ── ADR-0344 D6: the payment chain ───────────────────────────────────────────────────
+
+    @ServerExceptionMapper
+    fun dealHasReleasedPayment(e: com.openbank.treasury.domain.payment.DealHasReleasedPaymentException): Response =
+        error(Response.Status.CONFLICT.statusCode, "PAYMENT_RELEASED", e.message)
+
+    @ServerExceptionMapper
+    fun paymentStale(e: com.openbank.treasury.domain.payment.PaymentStaleException): Response =
+        error(Response.Status.CONFLICT.statusCode, "PAYMENT_STALE", e.message)
+
+    @ServerExceptionMapper
+    fun ssiChanged(e: com.openbank.treasury.domain.payment.SsiChangedException): Response =
+        error(Response.Status.CONFLICT.statusCode, "SSI_CHANGED", e.message)
+
+    @ServerExceptionMapper
+    fun paymentNotFound(e: com.openbank.treasury.application.port.out.PaymentNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun fundingExceeded(e: com.openbank.treasury.domain.payment.FundingExceededException): Response =
+        error(UNPROCESSABLE, "FUNDING_EXCEEDED", e.message)
+
+    /** A limit-consuming write lost the line-lock race to another deal on the same line (422). */
+    @ServerExceptionMapper
+    fun limitLineBreached(e: com.openbank.treasury.application.port.out.LimitLineBreachedException): Response =
+        error(UNPROCESSABLE, "LIMIT_BREACHED", e.message)
 }
