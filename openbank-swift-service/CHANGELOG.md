@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.1...swift-service-v0.13.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **swift:** settle only a COMPLETED 201 that matches the request ([#13622](https://github.com/JiRaska/open-bank-oss/issues/13622)) ([fad71f4](https://github.com/JiRaska/open-bank-oss/commit/fad71f4593cbd0f39cb852529f96b6e3a6802bea))
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.0...swift-service-v0.13.1) (2026-10-19)
 
 
