@@ -1005,5 +1005,4 @@ object MatrixPostings {
         )
         return PostingMatrix.lines(rows, ctx, deal.currency, category)
     }
-
 }
