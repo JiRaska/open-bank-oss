@@ -46,3 +46,12 @@ Noha zaúčtování nově nese `accountingClass` + `LedgerRole` (jistina, naběh
 - IRS a FRA se nově vypořádávají, časově rozlišují, platí a splácejí přes matici. Ostatní produkty popsané nohami mají řádky neaktivní, dokud nepřijde jejich fáze.
 - Odchozí platba ve stavu SENT nebo SETTLED hned zaúčtuje deníky PAYMENT svých toků se stejnými klíči, jaké používá denní běh. Když ledger neodpovídá, zaúčtuje je další přehrání nebo denní běh a `openbank.treasury.payments.outflow.failed` výpadek započítá.
 - **Rollback:** V24 jen rozšiřuje CHECK. Původní omezení lze vrátit, dokud neexistuje žádný řádek deníku matice; příkaz je v hlavičce migrace.
+
+## FX forwardy a swapy, směnky, úvěry, přecenění a analýza (ADR-0344 fáze 3)
+
+- FX_FORWARD, FX_SWAP, BILL_OF_EXCHANGE a LOAN lze nově navrhnout a vypořádávají se, časově rozlišují, platí a splácejí přes matici. Každý má paritní fixtury s nezávislým orákulem a své původní zlaté deníky.
+- **`deal_revaluations`** (V25) drží jeden řádek na obchod a datum ocenění: čistou reálnou hodnotu z rizikového enginu na snapshotu TIED_OUT k tomu datu, účetní hodnotu, kumulativní úpravu a změnu zaúčtovanou jako událost matice REVALUATION (FVOCI do fondu z přecenění, FVTPL a deriváty do nerealizovaného zisku či ztráty). Klíč v ledgeru je `treasury:<dealId>:revaluation:<date>`. Data na obchod jen rostou; dřívější datum se odmítne a nikdy se nedoplňuje. Obchod, který engine neocenil, je hlášená mezera, nikdy nula.
+- Denní běh (`openbank.treasury.revaluation.enabled`, ve výchozím stavu zapnutý, cron `openbank.treasury.revaluation.cron`) a `POST /api/v1/treasury/revaluations/run` nejdřív znovu zaúčtují dlužné řádky; `openbank_treasury_revaluation_unposted` počítá, co ledger ještě nepřijal, a spouští `TreasuryRevaluationUnposted`.
+- **`internal_rate_sheets`** (V26) drží interní sazby schválené čtyřma očima (`/market-data/internal-rate-sheets`). Jeden ACTIVE list na jméno; schválení nahradí předchozí. Zatím se z nich nic neoceňuje.
+- `POST /api/v1/treasury/analysis/cash-flows` agreguje uložené peněžní toky podle měny (hrubě, netto nebo kumulativně). Jen čte a přepočítává jen schváleným fixingem `FX_<CCY>_<REF>`.
+- **Rollback:** V25 a V26 jsou aditivní. Tabulky lze odstranit, dokud neobsahují řádek; příkaz je v hlavičce každé migrace. Zaúčtované deníky přecenění v ledgeru zůstávají.

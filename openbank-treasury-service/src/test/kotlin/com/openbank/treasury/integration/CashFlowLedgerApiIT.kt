@@ -385,7 +385,8 @@ class CashFlowLedgerApiIT {
         ).isEqualTo(6)
         given().`when`().get("/api/v1/treasury/posting-rules").then().statusCode(200)
             .body("findAll { it.product == 'IRS' && it.event == 'TRADE' }", hasSize<Any>(1))
-            .body("collect { it.product }.unique()", hasSize<Any>(7))
+            // Five legacy products + IRS, FRA (phase 2a) + FX_FORWARD, FX_SWAP, BILL_OF_EXCHANGE, LOAN (phase 3).
+            .body("collect { it.product }.unique()", hasSize<Any>(11))
     }
 
     @Test

@@ -46,3 +46,12 @@ A posting leg now carries `accountingClass` + `LedgerRole` (principal, accrued i
 - IRS and FRA now settle, accrue, pay and mature through the matrix. The other leg-described products keep their rows dormant until their phase lands.
 - A SENT or SETTLED outgoing payment posts its flows' PAYMENT journals at once, under the same keys the daily run uses. If the ledger is down, the next replay or the daily run posts them, and `openbank.treasury.payments.outflow.failed` counts the miss.
 - **Rollback:** V24 only widens a CHECK. Restore the old constraint once no matrix journal row exists; the statement is in the migration header.
+
+## FX forwards and swaps, bills, loans, revaluation and analysis (ADR-0344 phase 3)
+
+- FX_FORWARD, FX_SWAP, BILL_OF_EXCHANGE and LOAN are now drafted and settle, accrue, pay and mature through the matrix. Each has independent-oracle parity fixtures and its original golden journals.
+- **`deal_revaluations`** (V25) holds one row per deal and valuation date: the risk engine's clean fair value on the TIED_OUT snapshot of that date, the carrying amount, the cumulative adjustment and the change posted as the matrix REVALUATION event (FVOCI to the revaluation reserve, FVTPL and derivatives to unrealised P&L). The ledger key is `treasury:<dealId>:revaluation:<date>`. Dates per deal only increase; an earlier date is refused, never back-filled. A deal the engine did not value is a reported gap, never a zero.
+- The daily run (`openbank.treasury.revaluation.enabled`, default on, cron `openbank.treasury.revaluation.cron`) and `POST /api/v1/treasury/revaluations/run` re-post owed rows first; `openbank_treasury_revaluation_unposted` counts what the ledger has not accepted yet and drives `TreasuryRevaluationUnposted`.
+- **`internal_rate_sheets`** (V26) hold four-eyes approved internal rates (`/market-data/internal-rate-sheets`). One ACTIVE sheet per name; approving supersedes the previous one. Nothing prices from them yet.
+- `POST /api/v1/treasury/analysis/cash-flows` aggregates the stored cash-flow ledger by currency (gross, net or cumulative). It is read-only and converts only at an approved `FX_<CCY>_<REF>` fixing.
+- **Rollback:** V25 and V26 are additive. Drop the tables while no row exists; each migration header carries the statement. Posted revaluation journals stay in the ledger.

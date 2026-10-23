@@ -35,8 +35,7 @@ import java.util.concurrent.Executors
 
 /**
  * ADR-0344 D7/D8 over real HTTP and Postgres: a fair-value derivative the risk engine has not valued
- * is a DATA GAP — nothing posts, no row, the REVALUATION day step FAILED with the reason, never a
- * zero; once valued the change posts through the matrix REVALUATION event; a replay of the same
+ * is a DATA GAP — nothing posts, no row, the gap reported with its reason, never a zero; once valued the change posts through the matrix REVALUATION event; a replay of the same
  * (deal, date) posts nothing new and returns the same record; two concurrent runs of a new date
  * write exactly one row and one journal key, and the next date posts only the CHANGE.
  */
@@ -46,7 +45,7 @@ import java.util.concurrent.Executors
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 @TestProfile(RevaluationApiIT.OwnDatabase::class)
 class RevaluationApiIT {
-    /** Its own application (and Postgres): the reference data and day steps must not leak into other ITs. */
+    /** Its own application (and Postgres): the reference data and revaluation rows must not leak into other ITs. */
     class OwnDatabase : QuarkusTestProfile
 
     @Inject
@@ -116,7 +115,7 @@ class RevaluationApiIT {
     @Test
     @Order(4)
     @TestSecurity(user = "bert.backoffice", roles = ["ROLE_TREASURY_BACK_OFFICE"])
-    fun `4 - with no valuation the deal is a data gap, nothing posts and the day step FAILS with the reason`() {
+    fun `4 - with no valuation the deal is a data gap, nothing posts and the gap names the reason`() {
         valuation.reset()
         val before = ledger.journals.size
         post("/revaluations/run?asOf=$today").then().statusCode(200)
@@ -124,9 +123,6 @@ class RevaluationApiIT {
             .body("gaps.find { it.dealId == '$irs' }.reason", containsString("no TIED_OUT risk snapshot"))
         assertThat(ledger.journals.size).isEqualTo(before)
         assertThat(rows()).isZero()
-        given().`when`().get("/api/v1/treasury/day-completion/$today").then().statusCode(200)
-            .body("steps.find { it.step == 'REVALUATION' }.status", equalTo("FAILED"))
-            .body("steps.find { it.step == 'REVALUATION' }.detail", containsString("no TIED_OUT risk snapshot"))
 
         // Valued, but unpriced by the engine: still a gap, never a zero.
         valuation.byDate[today] = book(today, DealFairValue(UUID.fromString(irs), null, null, "no PRIBOR_3M curve"))
@@ -160,8 +156,6 @@ class RevaluationApiIT {
         assertThat(count("select count(*) from deal_journals where idempotency_key = '$key'")).isEqualTo(1)
         given().`when`().get("/api/v1/treasury/revaluations?asOf=$today").then().statusCode(200)
             .body("find { it.dealId == '$irs' }.change", equalTo(125000.0f))
-        given().`when`().get("/api/v1/treasury/day-completion/$today").then().statusCode(200)
-            .body("steps.find { it.step == 'REVALUATION' }.status", equalTo("DONE"))
     }
 
     @Test
@@ -236,8 +230,7 @@ class RevaluationApiIT {
         ledger.down = true
         try {
             post("/revaluations/run?asOf=$d1").then().statusCode(200).body("journals", equalTo(0))
-            given().`when`().get("/api/v1/treasury/day-completion/$d1").then().statusCode(200)
-                .body("steps.find { it.step == 'REVALUATION' }.status", equalTo("FAILED"))
+                .body("owed", equalTo(1))
             post("/revaluations/run?asOf=$d2&dealId=$irs").then().statusCode(409)
                 .body("error", equalTo("PRIOR_REVALUATION_UNPOSTED"))
             assertThat(
@@ -247,6 +240,7 @@ class RevaluationApiIT {
             ledger.down = false
         }
         post("/revaluations/run?asOf=$d2").then().statusCode(200).body("reposted", equalTo(1))
+            .body("owed", equalTo(0))
         assertThat(ledger.journals).containsKey("treasury:$irs:revaluation:$d1")
         assertThat(ledger.journals).containsKey("treasury:$irs:revaluation:$d2")
         val change = jdbc { c ->
@@ -261,8 +255,6 @@ class RevaluationApiIT {
             count("select count(*) from deal_revaluations where idempotency_key is not null and journal_id is null"),
         )
             .isZero()
-        given().`when`().get("/api/v1/treasury/day-completion/$d2").then().statusCode(200)
-            .body("steps.find { it.step == 'REVALUATION' }.status", equalTo("DONE"))
     }
 
     @Test

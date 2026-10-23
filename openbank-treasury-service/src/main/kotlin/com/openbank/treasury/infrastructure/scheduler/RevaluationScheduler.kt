@@ -23,8 +23,8 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * ADR-0344 D7/D8: the daily revaluation of the bank's accounting day, off the risk engine's
  * TIED_OUT snapshot of that date. Re-runs are harmless (idempotent per deal and date); a deal the
- * engine could not value is a gap that marks the REVALUATION day step FAILED with its reason (the
- * run records the step itself). Metric `openbank.treasury.revaluations{outcome}`.
+ * engine could not value is a gap logged with its reason and counted, never posted as zero; only a
+ * run with no gap and no failure records liveness. Metric `openbank.treasury.revaluations{outcome}`.
  *
  * A `suspend fun`: a plain `@Scheduled` method has no Vert.x context, and `runBlocking` around
  * reactive Panache throws HR000068 (check-no-runblocking-in-scheduled).

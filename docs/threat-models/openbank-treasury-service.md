@@ -174,6 +174,54 @@ turns SENT, the outflow journals wait for the next replay or the daily run (coun
 `openbank.treasury.payments.outflow.failed`); until then the funding check still counts the flows
 as unbooked, which errs towards refusing.
 
+## Revaluation, internal rate sheets and cash-flow analysis (ADR-0344 phase 3) — V25, V26
+
+FX_FORWARD, FX_SWAP, BILL_OF_EXCHANGE and LOAN join `ProductType.DELIVERED`: they are drafted and
+settle, accrue, pay and mature through the posting-rule matrix that phase 2a delivered, each held to
+an independent-oracle parity fixture and to the original golden journals (no new OPA action).
+
+- **Revaluation (D7/D8).** A daily `@Scheduled` suspend run (`treasury-revaluation-run`, liveness,
+  `openbank.treasury.revaluation.{enabled,cron}`) and `POST /api/v1/treasury/revaluations/run?asOf=&dealId=`
+  (OPA `treasury.revaluation.run`, `ROLE_TREASURY_BACK_OFFICE` only, never a machine or an AI agent)
+  revalue every live ACTUAL derivative and every SETTLED FVOCI / FVTPL security. The figure is the risk
+  engine's CLEAN value on the TIED_OUT snapshot of exactly that date, less the carrying amount
+  (amortised cost for a security, zero for a derivative), less the adjustment recognised so far; it
+  posts as the matrix REVALUATION event (FVOCI to the revaluation reserve, FVTPL and derivatives to
+  unrealised P&L). `GET /api/v1/treasury/revaluations?asOf=` (`treasury.revaluation.read`, treasury staff).
+- **New edge (STRIDE-S/E):** treasury → risk-engine 8443 as `service-account-openbank-treasury`, now
+  granted `risk.snapshot.read` (the snapshot list and one run's valuation) beside its curve-set read,
+  keyed by principal id in `risk_rest_ext.rego`; never `risk.snapshot.create`. The consumer pact pins
+  both paths literally with a 401 negative twin each, and the risk engine replays it on every PR.
+- **STRIDE-T (integrity of the figure):** treasury never prices. A deal the engine did not value,
+  valued as unpriced, without a clean value or in another currency, or an unreachable engine, is a
+  reported DATA GAP: nothing posts and no row is written — never a zero.
+- **STRIDE-R (ordering and idempotency):** ledger key `treasury:<deal>:revaluation:<date>`; V25
+  `deal_revaluations` is unique on (deal, date). Per deal, dates are strictly increasing: the row is
+  claimed under a per-deal advisory lock before the ledger is asked; an earlier date that is not an
+  exact replay is refused 409 `REVALUATION_OUT_OF_ORDER` and never back-filled. A claimed row whose
+  post never reached the ledger is OWED: a new date of that deal is refused 409
+  `PRIOR_REVALUATION_UNPOSTED`, every whole-book run re-posts owed rows first by their own key and
+  stored change, and `openbank_treasury_revaluation_unposted` drives `TreasuryRevaluationUnposted`
+  (> 0 for 1h, warning; NaN on a cold pod; promtool-tested).
+- **STRIDE-D:** at most 5,000 deals per run; list limit 1..1000.
+- **Internal rate sheets (contract 8.5).** `GET/POST /api/v1/treasury/market-data/internal-rate-sheets`
+  and `/{id}/approve|reject` reuse `treasury.marketdata.read|import|approve`. Four-eyes: a sheet is
+  PENDING until a DIFFERENT human decides it (422 `FOUR_EYES_VIOLATION` for the proposer, 403 for an
+  agent or machine; V26 repeats `decided_by <> proposed_by`). A decision locks the row (a second is
+  409 `RATE_SHEET_STALE`); approval supersedes the ACTIVE sheet of the same name in one transaction,
+  and a partial unique index allows one ACTIVE per name. 1..200 rates, labels ≤ 64, values within
+  ±100 % at ≤ 6 dp. Nothing posts or prices from a sheet yet.
+- **Cash-flow analysis (contract 8.4).** `POST /api/v1/treasury/analysis/cash-flows`
+  (`treasury.cashflow.read`, no new grant) aggregates the stored cash-flow ledger, read-only. A
+  reference-currency conversion uses only the four-eyes approved `FX_<CCY>_<REF>` fixing of the
+  calculation date; a missing rate or amount is a reported gap, never a guess. BEHAVIOURAL and
+  STRESS answer 422 `SCENARIO_NOT_AVAILABLE`. Horizon 1..3660 days, ≤ 50,000 flows read (422
+  `ANALYSIS_TOO_LARGE`, counted before loading), ≤ 2,000 drill-down rows.
+- **Residual:** a deal in another currency than the engine's reporting currency is always a gap until
+  the engine reports per-deal currency. The REVALUATION day step and the close's due steps arrive with
+  phase 4. Rollback: switch `OPENBANK_TREASURY_REVALUATION_ENABLED` off and remove the routes; V25 and
+  V26 are additive (drop the tables); posted journals stay in the ledger.
+
 ## STRIDE analysis
 
 | Threat | Control | Residual risk |
@@ -222,3 +270,4 @@ minimum reserves (D8), and real market connectivity (D9).
 - **2026-10-23** — **ADR-0344 phase 1a: fixings, the market-data quality gate, IRS and FRA cash flows (#13638).** Adds `observation_batches`, `index_observations`, `fixing_cases` and the fixing provenance columns (V20), the `/fixings` and `/market-data` surface, and the OPA rules for it; see the section above. IRS and FRA are drafted and fixed but not settled until phase 2. Rollback: revert the PR (V20 is additive).
 - **2026-10-23** — **ADR-0344 phase 1b: own-account payments and the institution-transfer rail (#13647).** Adds `treasury_payments`, `treasury_payment_flows` (V21), the transfer rail and intermediary BIC (V22) and a payment key reusable after cancel (V23); the `/payments` surface; role `ROLE_TREASURY_PAYMENT_RELEASER` (realm, OPA, admin-ui); the `openbank.treasury.payments` producer and the `institution-transfer-status-in` consumer with its DLQ; the nostro receipt matcher; the limit-line lock on submit and approve. Controls are in the section above. Rollback: revert; V21–V23 are additive while no payment row exists.
 - **2026-10-23** — **ADR-0344 phase 2a: the posting-rule matrix (#13667).** IRS and FRA settle, accrue, pay and mature through `PostingMatrix`; V24 widens the `deal_journals` event CHECK; a SENT payment posts its outflow journals; `GET /posting-rules` (`treasury.reference.read`, no new OPA action). Ledger V35 seeds the instrument accounts the matrix posts to. Controls are in the section above. Rollback: revert; V24 is a CHECK widening, reversible while no matrix journal row exists.
+- **2026-10-23** — **ADR-0344 phase 3: FX forwards and swaps, bills of exchange, loans, revaluation, internal rate sheets and cash-flow analysis.** The four products are delivered through the phase-2a matrix; revaluation off the risk engine's valuation (V25), internal rate sheets (V26) and the cash-flow analysis read; OPA `treasury.revaluation.read|run` and the treasury m2m `risk.snapshot.read` grant. Controls are in the section above. Rollback: revert; V25 and V26 are additive.

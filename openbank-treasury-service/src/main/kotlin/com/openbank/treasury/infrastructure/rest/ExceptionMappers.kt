@@ -137,6 +137,33 @@ class ExceptionMappers {
     fun notPermitted(e: ActorNotPermittedException): Response =
         error(Response.Status.FORBIDDEN.statusCode, "ACTOR_NOT_PERMITTED", e.message)
 
+    // ── ADR-0344 phase 3: cash-flow analysis, internal rate sheets, revaluation ───────────
+
+    @ServerExceptionMapper
+    fun scenarioNotAvailable(e: com.openbank.treasury.application.usecase.ScenarioNotAvailableException): Response =
+        error(UNPROCESSABLE, "SCENARIO_NOT_AVAILABLE", e.message)
+
+    @ServerExceptionMapper
+    fun analysisTooLarge(e: com.openbank.treasury.application.port.out.AnalysisTooLargeException): Response =
+        error(UNPROCESSABLE, "ANALYSIS_TOO_LARGE", e.message)
+
+    @ServerExceptionMapper
+    fun rateSheetNotFound(e: com.openbank.treasury.infrastructure.marketdata.RateSheetNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun rateSheetStale(e: com.openbank.treasury.infrastructure.marketdata.RateSheetStaleException): Response =
+        error(Response.Status.CONFLICT.statusCode, "RATE_SHEET_STALE", e.message)
+
+    @ServerExceptionMapper
+    fun priorRevaluationUnposted(
+        e: com.openbank.treasury.application.port.out.PriorRevaluationUnpostedException,
+    ): Response = error(Response.Status.CONFLICT.statusCode, "PRIOR_REVALUATION_UNPOSTED", e.message)
+
+    @ServerExceptionMapper
+    fun revaluationOutOfOrder(e: com.openbank.treasury.application.port.out.RevaluationOutOfOrderException): Response =
+        error(Response.Status.CONFLICT.statusCode, "REVALUATION_OUT_OF_ORDER", e.message)
+
     private fun error(status: Int, code: String, message: String?): Response =
         Response.status(status).entity(mapOf("error" to code, "message" to message)).build()
 

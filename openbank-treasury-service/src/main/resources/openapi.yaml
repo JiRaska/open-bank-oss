@@ -58,7 +58,7 @@ info:
   # 1.22.0: additive — ADR-0344 phase 2a: GET /posting-rules (the posting-rule matrix as versioned
   #         data, PostingRule schema). IRS and FRA now settle and mature through the matrix; the
   #         journals list carries its events (trade, settlement, accrual, payment, maturity, ...).
-  version: 1.22.0
+  version: 1.23.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -1525,6 +1525,218 @@ paths:
         '200': { description: Resolved, content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
         '409': { description: Not released }
         '422': { description: FOUR_EYES_VIOLATION }
+  /api/v1/treasury/market-data/internal-rate-sheets:
+    get:
+      tags: [Treasury]
+      operationId: listRateSheets
+      summary: Internal rate sheets the bank publishes, newest first (contract 8.5)
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, ACTIVE, REJECTED, SUPERSEDED] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: The sheets
+          content:
+            application/json:
+              schema: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/RateSheet' } }
+    post:
+      tags: [Treasury]
+      operationId: proposeRateSheet
+      summary: Propose a rate sheet (back office) — PENDING until a different human approves it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, effectiveFrom, rates]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+                effectiveFrom: { type: string, format: date }
+                rates:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [label, value]
+                    properties:
+                      label: { type: string, minLength: 1, maxLength: 64 }
+                      value: { type: number, minimum: -100, maximum: 100, description: Percent, at most 6 decimals }
+      responses:
+        '201':
+          description: The PENDING sheet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateSheet' }
+        '400':
+          description: A bad name, date or rate
+  /api/v1/treasury/market-data/internal-rate-sheets/{id}/approve:
+    post:
+      tags: [Treasury]
+      operationId: approveRateSheet
+      summary: Approve a rate sheet (four-eyes, never its proposer or an AI agent); supersedes the ACTIVE sheet of the same name
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The ACTIVE sheet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateSheet' }
+        '404':
+          description: No such sheet
+        '409':
+          description: RATE_SHEET_STALE — no longer PENDING
+        '422':
+          description: FOUR_EYES_VIOLATION (an AI or machine principal is 403 ACTOR_NOT_PERMITTED)
+  /api/v1/treasury/market-data/internal-rate-sheets/{id}/reject:
+    post:
+      tags: [Treasury]
+      operationId: rejectRateSheet
+      summary: Reject a rate sheet with a reason (four-eyes)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200':
+          description: The REJECTED sheet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateSheet' }
+        '409':
+          description: RATE_SHEET_STALE — no longer PENDING
+  /api/v1/treasury/analysis/cash-flows:
+    post:
+      tags: [Treasury]
+      operationId: analyseCashFlows
+      summary: Contractual cash flows from the stored ledger by currency — gross, net or cumulative, daily or monthly — optionally converted at the approved FX fixing of the calculation date (contract 8.4)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [calculationDate, referenceCurrency]
+              properties:
+                calculationDate: { type: string, format: date }
+                referenceCurrency: { type: string, pattern: '^[A-Z]{3}$' }
+                convertToReference: { type: boolean, default: false }
+                expression: { type: string, enum: [GROSS, NET, CUMULATIVE], default: NET }
+                scenario: { type: string, enum: [CONTRACTUAL, BEHAVIOURAL, STRESS], default: CONTRACTUAL }
+                splitMonthly: { type: boolean, default: false }
+                bookId: { type: string, maxLength: 64, nullable: true, description: The book and every descendant in the ACTIVE book hierarchy }
+                bankAccountId: { type: string, maxLength: 64, nullable: true, description: The deal's settlement cash account }
+                includePlanned: { type: boolean, default: false, description: Include PLANNED deals beside ACTUAL ones }
+                horizonDays: { type: integer, minimum: 1, maximum: 3660, default: 366 }
+      responses:
+        '200':
+          description: Series per currency, the reference-currency series (null when not converting or when any currency lacks a fixing), drill-down flows (at most 2000) and data gaps
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  to: { type: string, format: date }
+                  series:
+                    type: array
+                    maxItems: 200
+                    items: { $ref: '#/components/schemas/CashFlowSeries' }
+                  reference: { allOf: [{ $ref: '#/components/schemas/CashFlowSeries' }], nullable: true }
+                  flows:
+                    type: array
+                    maxItems: 2000
+                    items:
+                      type: object
+                      properties:
+                        date: { type: string, format: date }
+                        currency: { type: string }
+                        amount: { type: number, description: Signed, + in and − out }
+                        referenceAmount: { type: number, nullable: true }
+                        dealId: { type: string, format: uuid }
+                        legIndex: { type: integer }
+                        flowId: { type: string, format: uuid }
+                        kind: { type: string }
+                        dealKind: { $ref: '#/components/schemas/DealKind' }
+                        state: { type: string }
+                  flowsTruncated: { type: boolean }
+                  fxRates:
+                    type: array
+                    maxItems: 200
+                    items:
+                      type: object
+                      properties:
+                        currency: { type: string }
+                        index: { type: string, description: 'FX_<CCY>_<REF>: units of the reference currency per one unit of CCY' }
+                        rate: { type: number }
+                        date: { type: string, format: date }
+                  dataGaps:
+                    type: array
+                    maxItems: 400
+                    items:
+                      type: object
+                      properties:
+                        currency: { type: string, nullable: true }
+                        reason: { type: string }
+        '400':
+          description: A bad parameter (date, currency, horizon, enum, identifier length)
+        '422':
+          description: SCENARIO_NOT_AVAILABLE (BEHAVIOURAL or STRESS — no scenario model is published yet), or ANALYSIS_TOO_LARGE (more than 50000 flows in the horizon)
+  /api/v1/treasury/revaluations:
+    get:
+      tags: [Treasury]
+      operationId: listRevaluations
+      summary: The fair-value revaluations recorded for one valuation date (ADR-0344 D7/D8)
+      parameters:
+        - { name: asOf, in: query, required: true, schema: { type: string, format: date } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 500 } }
+      responses:
+        '200':
+          description: One row per revalued deal
+          content:
+            application/json:
+              schema: { type: array, maxItems: 1000, items: { $ref: '#/components/schemas/Revaluation' } }
+  /api/v1/treasury/revaluations/run:
+    post:
+      tags: [Treasury]
+      operationId: runRevaluation
+      summary: Revalue the fair-value deals (or one, by dealId) off the risk engine's TIED_OUT valuation of the date; a deal it did not value is a gap, never a zero
+      parameters:
+        - { name: asOf, in: query, required: true, schema: { type: string, format: date } }
+        - { name: dealId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The run
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asOf: { type: string, format: date }
+                  snapshotId: { type: string, format: uuid, nullable: true }
+                  revalued: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/Revaluation' } }
+                  journals: { type: integer, minimum: 0 }
+                  reposted: { type: integer, minimum: 0, description: Rows claimed by an earlier run and owed to the ledger that this run posted first }
+                  owed: { type: integer, minimum: 0, description: Rows still claimed but unposted after the run; any one FAILS the REVALUATION day step }
+                  gaps:
+                    type: array
+                    maxItems: 5000
+                    items:
+                      type: object
+                      properties:
+                        dealId: { type: string, format: uuid }
+                        reason: { type: string, maxLength: 500 }
+                  failures: { type: array, maxItems: 5000, items: { type: string, maxLength: 500 } }
+        '409':
+          description: REVALUATION_OUT_OF_ORDER, or PRIOR_REVALUATION_UNPOSTED (the deal's latest revaluation is claimed but not yet posted; the next whole-book run re-posts it first) — a single-deal run for a date not after the deal's latest revaluation that is not an exact replay (dates are strictly increasing per deal; an earlier date is never back-filled)
 
 components:
   securitySchemes:
@@ -2679,3 +2891,51 @@ components:
         id: { type: string }
         name: { type: string }
       additionalProperties: true
+    RateSheet:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        effectiveFrom: { type: string, format: date }
+        status: { type: string, enum: [PENDING, ACTIVE, REJECTED, SUPERSEDED] }
+        rates:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              value: { type: number }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        decisionReason: { type: string, nullable: true }
+    CashFlowSeries:
+      type: object
+      properties:
+        currency: { type: string }
+        buckets:
+          type: array
+          maxItems: 4000
+          items:
+            type: object
+            properties:
+              date: { type: string, format: date, description: The day, or the first of the month when split monthly }
+              inflow: { type: number }
+              outflow: { type: number, description: Signed (≤ 0) }
+              net: { type: number }
+              cumulative: { type: number }
+              value: { type: number, description: 'The figure the expression asks for: GROSS → inflow + |outflow|, NET → net, CUMULATIVE → cumulative' }
+    Revaluation:
+      type: object
+      description: One deal's revaluation on one date (ADR-0344 D7/D8); amounts in the deal currency
+      properties:
+        dealId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        snapshotId: { type: string, format: uuid }
+        fairValue: { type: number, description: The clean fair value the risk engine reported }
+        carrying: { type: number, description: Amortised cost for a security, zero for a derivative }
+        cumulative: { type: number, description: Cumulative fair-value adjustment after this date }
+        change: { type: number, description: The change this date posted through the REVALUATION event }
+        journalId: { type: string, format: uuid, nullable: true }

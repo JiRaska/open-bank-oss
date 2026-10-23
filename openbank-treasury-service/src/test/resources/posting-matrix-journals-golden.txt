@@ -6,7 +6,7 @@
 # the original golden; the sha256-all line below is re-pinned over today's render of those fixtures,
 # since the accrual amounts it covers are not stored line by line. The phases that add fixtures restore
 # their rows.
-sha256-all PENDING 0
+sha256-all 0a338dd93f48f11e02968ccb688fb9fbcf74da16924fc01bfd0684088b9e5490 5953
 J bill-of-exchange-czk-001 [AMORTISED_COST] treasury:D:settlement:2026-11-02 :: DEBIT 1600 3000000.00 CZK | CREDIT 1630 63102.51 CZK | CREDIT 1001 2936897.49 CZK
 J bill-of-exchange-czk-001 [AMORTISED_COST] treasury:D:maturity:2027-05-03 :: DEBIT 1001 3000000.00 CZK | CREDIT 1600 3000000.00 CZK
 J bill-of-exchange-czk-001 [FVOCI] treasury:D:settlement:2026-11-02 :: DEBIT 1610 3000000.00 CZK | CREDIT 1630 63102.51 CZK | CREDIT 1001 2936897.49 CZK
