@@ -109,6 +109,30 @@ jobs:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
     steps:
+      # Marker lifecycle (read by all-green, check-service-build-markers.py). Artifacts are
+      # RUN-scoped, not attempt-scoped: a green leg's marker from attempt 1 would survive
+      # "Re-run all jobs" even if the leg then fails or never uploads. So the very first
+      # step overwrites it with result=started (invalidating any stale success the moment
+      # the leg re-runs), and the last step, if: always(), overwrites it with the final
+      # job status. Only result=success counts; a leg carried forward by "Re-run failed
+      # jobs" keeps its attempt-1 success, which is still valid for the same sha.
+      - name: Mark service build started
+        if: inputs.ref == ''
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/marker"
+          printf '{"service":"%s","sha":"%s","result":"started","attempt":%s}\n' \
+            "$SERVICE" "$GITHUB_SHA" "$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/marker/marker.json"
+      - name: Upload service build started marker
+        if: inputs.ref == ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: service-build-ok-${{ inputs.service }}
+          path: ${{ runner.temp }}/marker/marker.json
+          retention-days: 14
+          overwrite: true
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # A historical provider ref may predate the retry helpers used by this workflow.
@@ -416,23 +440,24 @@ jobs:
           retention-days: 14
           overwrite: true
 
-      # Last step, success() only: the all-green aggregate requires one of these per
-      # selected service and reads them via the artifact service, not the REST quota.
-      - name: Record service build success marker
-        if: success() && inputs.ref == ''
+      # Last step, if: always(): records the final job status over the `started` marker.
+      # Only result=success satisfies all-green; failure/cancelled stay visible as such.
+      - name: Record service build final marker
+        if: always() && inputs.ref == ''
         env:
           SERVICE: ${{ inputs.service }}
+          JOB_STATUS: ${{ job.status }}
         run: |
           mkdir -p "$RUNNER_TEMP/marker"
-          printf '{"service":"%s","sha":"%s","result":"success","attempt":%s}\n' \
-            "$SERVICE" "$GITHUB_SHA" "$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/marker/marker.json"
-      - name: Upload service build success marker
-        if: success() && inputs.ref == ''
+          printf '{"service":"%s","sha":"%s","result":"%s","attempt":%s}\n' \
+            "$SERVICE" "$GITHUB_SHA" "$JOB_STATUS" "$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/marker/marker.json"
+      - name: Upload service build final marker
+        if: always() && inputs.ref == ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: service-build-ok-${{ inputs.service }}
           path: ${{ runner.temp }}/marker/marker.json
-          retention-days: 3
+          retention-days: 14
           overwrite: true
 
   # ── publish-evidence: commit-addressed Test Intelligence store (#13201) ─────────────────

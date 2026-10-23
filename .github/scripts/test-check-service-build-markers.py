@@ -37,6 +37,13 @@ class T(unittest.TestCase):
     def test_missing_directory_fails(self):
         self.assertTrue(markers.verify(["a"], "/nonexistent-dir", SHA))
 
+    def test_started_marker_fails(self):  # stale success overwritten at leg start
+        self.assertTrue(self.run_case(["a"], lambda d: make(d, "a", result="started")))
+
+    def test_failure_and_cancelled_markers_fail(self):
+        for r in ("failure", "cancelled"):
+            self.assertTrue(self.run_case(["a"], lambda d: make(d, "a", result=r)))
+
     def test_non_success_marker_fails(self):
         self.assertTrue(self.run_case(["a"], lambda d: make(d, "a", result="failure")))
 

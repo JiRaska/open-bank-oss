@@ -348,7 +348,12 @@ jobs:
         env:
           SERVICES_JSON: ${{ needs.changes.outputs.services }}
           MARKER_DIR: ${{ runner.temp }}/service-build-markers
-        run: python3 .github/scripts/check-service-build-markers.py
+        run: |
+          # Second, independent signal (markers are the first): the aggregate must also be green.
+          if [ "${{ needs.build.result }}" != "success" ]; then
+            echo "needs.build.result is ${{ needs.build.result }}, not success."; exit 1
+          fi
+          python3 .github/scripts/check-service-build-markers.py
 
   # Nightly-only: turn a failed full-fleet build into an actionable, deduplicated issue.
   # Runs solely for the scheduled run so PR/push failures (already visible as red checks)
