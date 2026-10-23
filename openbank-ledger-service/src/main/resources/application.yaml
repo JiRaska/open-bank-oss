@@ -93,6 +93,7 @@ mp:
         connector: smallrye-kafka
         client.id: ledger-service-${quarkus.uuid}
         topic: openbank.ledger.journal.posted
+        enabled: ${LEDGER_EVENTS_OUT_ENABLED:true}
         value:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
