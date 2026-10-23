@@ -19,6 +19,7 @@ import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.persistence.lock.ClusterLock
+import com.openbank.libs.security.sanitizeForLog
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.MultiGauge
@@ -286,9 +287,9 @@ class AccountingDayScheduler(
                 "Accounting day %s: tie-out is OK but day-close participant(s) %s have not reported " +
                     "(missing) or were refused - missing=%s refused=%s - %s",
                 date,
-                completeness.pending.sorted(),
-                completeness.missing.sorted(),
-                completeness.refused.sorted(),
+                completeness.pending.sorted().toString().sanitizeForLog(),
+                completeness.missing.sorted().toString().sanitizeForLog(),
+                completeness.refused.sorted().toString().sanitizeForLog(),
                 consequence,
             )
         }
@@ -358,10 +359,16 @@ class AccountingDayScheduler(
             log.warnf(
                 "Accounting day %s: a participant report landed during the tie-out - %s; day stays in CUTOFF",
                 date,
-                held.message,
+                held.message.sanitizeForLog(),
             )
         } catch (ex: Exception) {
-            log.errorf(ex, "Accounting-day reconcile step '%s' failed for %s: %s", step, date, ex.message)
+            log.errorf(
+                ex,
+                "Accounting-day reconcile step '%s' failed for %s: %s",
+                step,
+                date,
+                ex.message.sanitizeForLog(),
+            )
         }
     }
 

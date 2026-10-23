@@ -16,6 +16,7 @@ import com.openbank.ledger.domain.model.CloseParticipationRecord
 import com.openbank.ledger.domain.model.LedgerConflictException
 import com.openbank.ledger.domain.model.ParticipationOutcome
 import com.openbank.ledger.domain.model.requireValid
+import com.openbank.libs.security.sanitizeForLog
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.StartupEvent
 import io.smallrye.config.ConfigMapping
@@ -132,7 +133,7 @@ class CloseParticipationService(
         if (record.outcome == ParticipationOutcome.WAIVED && command.outcome != ParticipationOutcome.WAIVED) {
             log.infof(
                 "Day-close participant %s reported %s for %s but an operator WAIVED it - the waiver stands",
-                command.participant,
+                command.participant.sanitizeForLog(),
                 command.outcome,
                 command.businessDate,
             )
@@ -141,7 +142,7 @@ class CloseParticipationService(
             log.warnf(
                 "Day-close participant %s reported %s for %s AFTER the day left CUTOFF — stored as late, " +
                     "the day does not move",
-                record.participant,
+                record.participant.sanitizeForLog(),
                 record.outcome,
                 record.businessDate,
             )
