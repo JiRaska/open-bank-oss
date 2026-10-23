@@ -114,14 +114,6 @@ deploy_holds:
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
-    openbank-card-issuance-service:
-      all_of:
-      - issue: '#13080'
-        reason: 'Inherited from held deploy PR #13080 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13080 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-case-coordinator-agent:
       all_of:
       - issue: '#12948'
