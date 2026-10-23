@@ -186,7 +186,14 @@ class PaymentService(
         val unaddressable = outcomes.filterIsInstance<ProposalOutcome.Unaddressable>()
             .map { "${it.counterpartyId}/${it.currency}: no effective SSI for ${it.flowIds.size} flow(s)" }
         dayCompletion?.record(
-            DayStepRecord.of(date, DayStep.PAYMENTS, proposed.size, failures.size + unaddressable.size, clock.instant(), journals = 0)
+            DayStepRecord.of(
+                date,
+                DayStep.PAYMENTS,
+                proposed.size,
+                failures.size + unaddressable.size,
+                clock.instant(),
+                journals = 0,
+            )
                 .let { r ->
                     if (unaddressable.isNotEmpty() && failures.isEmpty()) {
                         r.copy(detail = unaddressable.joinToString("; ").take(DayStepRecord.MAX_DETAIL))

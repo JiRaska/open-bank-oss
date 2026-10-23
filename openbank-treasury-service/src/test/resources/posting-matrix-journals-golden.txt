@@ -1,12 +1,7 @@
 # ADR-0344 D7 golden: the posting-rule matrix journals of every matrix parity fixture, rendered in GL
 # codes by the matrix as it stood BEFORE postings named accounting class + role (ADR-0341 D3).
 # Generated once from that code (fe3e990b74); never regenerate it from the code under test.
-# Phases 2a (#13667), 2b and 3 keep only the rows of the fixtures on this branch (IRS, FRA, bonds,
-# T-bills, repos, FX forwards and swaps, bills of exchange, loans), revaluation rows included. The J
-# and A rows are a filtered subset of the original golden; the sha256-all line below is re-pinned
-# over today's render of those fixtures, since the accrual amounts it covers are not stored line by
-# line. The phases that add fixtures restore their rows.
-sha256-all 25db50846491234786972d0a100145df2324b8062688b26a8e9ac94f91b2f686 13325
+sha256-all f7de9e8a529f08ce7337f05f99b651b9c464dc4e428df5eea3eea3cde3e0f9ef 13327
 J bill-of-exchange-czk-001 [AMORTISED_COST] treasury:D:settlement:2026-11-02 :: DEBIT 1600 3000000.00 CZK | CREDIT 1630 63102.51 CZK | CREDIT 1001 2936897.49 CZK
 J bill-of-exchange-czk-001 [AMORTISED_COST] treasury:D:maturity:2027-05-03 :: DEBIT 1001 3000000.00 CZK | CREDIT 1600 3000000.00 CZK
 J bill-of-exchange-czk-001 [FVOCI] treasury:D:settlement:2026-11-02 :: DEBIT 1610 3000000.00 CZK | CREDIT 1630 63102.51 CZK | CREDIT 1001 2936897.49 CZK
@@ -58,6 +53,8 @@ J bond-eur-secondary-accrued-002 [FVTPL] treasury:D:payment:F5 :: DEBIT 1002 649
 J bond-eur-secondary-accrued-002 [FVTPL] treasury:D:maturity:2029-06-15 :: DEBIT 1002 2000000.00 EUR | CREDIT 1621 2000000.00 EUR
 J bond-eur-secondary-accrued-002 [FVTPL] treasury:D:revaluation:2026-12-31 :: DEBIT 1621 1500.00 EUR | CREDIT 4311 1500.00 EUR
 J bond-eur-secondary-accrued-002 [FVTPL] treasury:D:revaluation:2026-12-31 :: DEBIT 5311 200.00 EUR | CREDIT 1621 200.00 EUR
+J cash-czk-in-001 [AMORTISED_COST] treasury:D:settlement:2026-11-02 :: DEBIT 1001 2500000.00 CZK | CREDIT 1690 2500000.00 CZK
+J cash-czk-out-holiday-002 [AMORTISED_COST] treasury:D:settlement:2026-11-17 :: DEBIT 1690 1000000.00 CZK | CREDIT 1001 1000000.00 CZK
 J fra-czk-3x6-receive-001 [AMORTISED_COST] treasury:D:trade:2026-11-02 :: DEBIT 9000 100000000.00 CZK | CREDIT 9100 100000000.00 CZK
 J fra-czk-3x6-receive-001 [AMORTISED_COST] treasury:D:payment:F0 :: DEBIT 1001 53906.46 CZK | CREDIT 4300 53906.46 CZK
 J fra-czk-3x6-receive-001 [AMORTISED_COST] treasury:D:maturity:2027-05-04 :: DEBIT 9100 100000000.00 CZK | CREDIT 9000 100000000.00 CZK

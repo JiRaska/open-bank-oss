@@ -12,8 +12,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import jakarta.inject.Inject
-import org.eclipse.microprofile.config.ConfigProvider
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
 import java.time.Clock
@@ -82,10 +82,12 @@ class RevaluationSchedulerIT {
                     "order by recorded_at desc limit 1",
             ).use { ps ->
                 ps.setObject(1, day)
-                ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+                firstString(ps.executeQuery())
             }
         }
     }
+
+    private fun firstString(rs: java.sql.ResultSet): String? = rs.use { if (it.next()) it.getString(1) else null }
 
     private companion object {
         const val WAIT_NANOS = 30_000_000_000L
