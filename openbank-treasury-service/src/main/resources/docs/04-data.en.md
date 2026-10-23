@@ -15,3 +15,26 @@ This page currently documents only the outbox lifecycle; the rest of the data mo
 ## Postings name an accounting class, not a GL code (ADR-0341 D3)
 
 A posting leg now carries `accountingClass` + `LedgerRole` (principal, accrued interest, interest income/expense) + currency and no GL code; the ledger resolves the account from its own map. Each `ProductType` declares its accounting class (e.g. `INTERBANK_PLACEMENT`, `CNB_LOMBARD_BORROWING`), and nostro reconciliation uses `TreasuryChart.nostroCode`. A legacy-posting oracle test pins that the resulting journals are unchanged.
+
+## Reference data and the cash-flow ledger (ADR-0344 phase 0)
+
+- **`reference_records`** (V16, V17) holds effective-dated, versioned reference data: calendars, indices, counterparties, settlement instructions, books, product types and the rest of the ADR-0344 kind catalogue. A version is PENDING until a different human approves it. Approving a `counterparty` that raises a limit needs the senior approver. `row_version` is an optimistic lock. The limit check reads the ACTIVE `counterparty` version; the `counterparties` table is only a projection for the deals' foreign key. `reference_commands` stores each command's Idempotency-Key.
+- **`deal_versions`, `deal_cash_flows`, `cash_flow_overrides`, `cash_flow_conflicts`** (V18, V19) store each terms version and its generated cash-flow ledger. Submission writes the ledger and `treasury.cashflow.generated.v1` with the deal in one transaction. An override is four-eyes and keeps the original date and amount. It survives regeneration only while its leg-spec hash is unchanged; otherwise it becomes a listed conflict. `deal_cash_flows.row_version` is an optimistic lock.
+- In phase 0, only the five existing products book. Draft refuses every leg-described product (400) until its phase delivers posting rules.
+- **Rollback:** V16 to V19 are additive. Existing deals become kind `ACTUAL`, version 1, schedule version 0. Drop the new tables only while they are unused; each migration header carries the statements.
+
+
+## Fixings and market data (ADR-0344 phase 1a)
+
+- **`observation_batches`, `index_observations`, `fixing_cases`** (V20) hold index observations. A batch is PENDING until a different human approves it, and only ACTIVE observations are used. The quality gate checks MISSING, STALE and SUSPICIOUS before any fixing; a failure opens a case and fixes nothing.
+- **`deal_cash_flows.fixing_source`, `fixing_sha256`, `fixed_at`** (V20) record where a fixed rate came from. Only the fixing repository writes them, with a guarded UPDATE.
+- The hourly fixing pass (`openbank.treasury.fixing.enabled`, default on) fixes due floating flows and publishes `treasury.cashflow.fixed.v1`.
+- IRS and FRA are now drafted, submitted and fixed. They settle only once the posting-rule matrix lands (phase 2).
+
+## Payments and the institution-transfer rail (ADR-0344 phase 1b)
+
+- **`treasury_payments`, `treasury_payment_flows`** (V21) hold own-account payments and the FIXED flows each one pays. A flow belongs to at most one payment; the link is written only by a guarded UPDATE, never by the whole-row flow save. V22 adds the transfer rail and the intermediary BIC. V23 makes a payment's idempotency key unique among non-cancelled payments only, so a cancelled payment can be proposed again.
+- The daily proposal run (`openbank.treasury.payments.enabled`, default on) proposes payments for FIXED flows paid within `cut-off-window-days` (2), netted per netting agreement and addressed from the SSI effective on the value date. Only `ROLE_TREASURY_PAYMENT_RELEASER` releases one, and never a term author of a netted deal.
+- Release writes `treasury.payment.released.v1` to `openbank.treasury.payments` in the same transaction. swift-service turns it into a pacs.009 and answers on `openbank.swift.institution-transfers`; treasury moves the payment to SENT, SETTLED or FAILED. A status it cannot apply goes to `openbank.dlq.treasury.institution-transfer-status-in`.
+- Cancelling or reversing a deal refuses while one of its payments is released (409 PAYMENT_RELEASED) and otherwise withdraws its PROPOSED payments in the same transaction.
+- **Rollback:** V21 to V23 are additive. Drop the tables only while no payment row exists; each migration header carries the statements.

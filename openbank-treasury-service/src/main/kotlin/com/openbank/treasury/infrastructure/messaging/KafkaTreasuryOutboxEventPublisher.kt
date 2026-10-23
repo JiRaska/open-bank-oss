@@ -16,8 +16,10 @@ import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
 
 @ApplicationScoped
-class KafkaTreasuryOutboxEventPublisher(@Channel("treasury-events-out") private val emitter: MutinyEmitter<String>) :
-    OutboxEventPublisher {
+class KafkaTreasuryOutboxEventPublisher(
+    @Channel("treasury-events-out") private val emitter: MutinyEmitter<String>,
+    @Channel("treasury-payments-out") private val payments: MutinyEmitter<String>,
+) : OutboxEventPublisher {
 
     /**
      * The whole [OutboxEntry] decides the record, not just its payload: the partition key is the
@@ -31,6 +33,11 @@ class KafkaTreasuryOutboxEventPublisher(@Channel("treasury-events-out") private 
             .withKey(OutboxKafkaHeaders.partitionKey(entry))
             .withHeaders(kafkaHeaders)
             .build()
-        emitter.sendMessage(Message.of(entry.payload).addMetadata(meta)).awaitSuspending()
+        // Contract 9.1: the release instruction goes to the rail's own topic (openbank.treasury.payments,
+        // treasury Write / swift Read); every other event stays on the deal feed.
+        val target = if (entry.eventType == PAYMENT_RELEASED) payments else emitter
+        target.sendMessage(Message.of(entry.payload).addMetadata(meta)).awaitSuspending()
     }
 }
+
+private const val PAYMENT_RELEASED = "treasury.payment.released.v1"

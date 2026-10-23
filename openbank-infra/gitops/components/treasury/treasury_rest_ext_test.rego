@@ -34,7 +34,6 @@ renamed_sa := {
 	"roles": ["ROLE_TREASURY_APPROVER", "ROLE_TREASURY_DEALER"],
 }
 
-
 agent := {"service_account": false, "type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"]}
 
 reads := {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read", "treasury.nostro.read", "treasury.quote.read"}
@@ -207,4 +206,132 @@ test_nobody_else_may_upload_nostro_statement if {
 	every p in [dealer, senior, nobody, shared_sa, agent] {
 		not allowed(p, "treasury.nostro.upload")
 	}
+}
+
+# --- ADR-0344 reference data and the cash-flow ledger ---
+
+back_office := {"service_account": false, "type": "HUMAN", "id": "bo-1", "roles": ["ROLE_TREASURY_BACK_OFFICE"]}
+
+editor := {"service_account": false, "type": "HUMAN", "id": "editor-1", "roles": ["ROLE_TREASURY_REFERENCE_EDITOR"]}
+
+allowed_on(p, a, r) if rest.allow.allow with input as {"principal": p, "action": a, "resource": {"id": r}}
+
+test_reference_proposers_may_propose_and_not_decide if {
+	every p in [back_office, editor] {
+		allowed(p, "treasury.reference.propose")
+		allowed(p, "treasury.reference.read")
+		not allowed_on(p, "treasury.reference.approve", "calendar")
+		not allowed(p, "treasury.reference.reject")
+		not allowed(p, "treasury.reference.verify")
+	}
+}
+
+test_approver_decides_reference_but_cannot_propose if {
+	allowed_on(approver, "treasury.reference.approve", "calendar")
+	allowed(approver, "treasury.reference.verify")
+	allowed(approver, "treasury.reference.reject")
+	not allowed(approver, "treasury.reference.propose")
+}
+
+# Known-NEGATIVE first: an ordinary approver may not activate counterparty limits.
+test_counterparty_approval_needs_the_senior if {
+	not allowed_on(approver, "treasury.reference.approve", "counterparty")
+	allowed_on(senior, "treasury.reference.approve", "counterparty")
+	not allowed_on(senior, "treasury.reference.approve", "calendar")
+
+	# An unknown, differently-cased or absent kind never reaches the plain approver (fail closed).
+	not allowed_on(approver, "treasury.reference.approve", "Counterparty")
+	not allowed_on(approver, "treasury.reference.approve", "no-such-kind")
+	not rest.allow.allow with input as {"principal": approver, "action": "treasury.reference.approve"}
+}
+
+test_reference_machines_and_agents_get_nothing if {
+	every p in [shared_sa, renamed_sa, agent] {
+		not allowed(p, "treasury.reference.propose")
+		not allowed_on(p, "treasury.reference.approve", "calendar")
+		not allowed_on(p, "treasury.reference.approve", "counterparty")
+		not allowed(p, "treasury.cashflow.override.approve")
+	}
+}
+
+test_override_split_between_back_office_and_approver if {
+	allowed(back_office, "treasury.cashflow.override.propose")
+	not allowed(back_office, "treasury.cashflow.override.approve")
+	allowed(approver, "treasury.cashflow.override.approve")
+	not allowed(approver, "treasury.cashflow.override.propose")
+	not allowed(dealer, "treasury.cashflow.override.propose")
+}
+
+test_schedule_preview_is_dealer_and_back_office_only if {
+	not allowed(approver, "treasury.deal.preview")
+	not allowed(nobody, "treasury.deal.preview")
+	not allowed(agent, "treasury.deal.preview")
+	not allowed(shared_sa, "treasury.deal.preview")
+	allowed(dealer, "treasury.deal.preview")
+	allowed(back_office, "treasury.deal.preview")
+}
+
+test_market_data_proposer_cannot_approve_and_approver_cannot_propose if {
+	not allowed(back_office, "treasury.marketdata.approve")
+	not allowed(approver, "treasury.marketdata.import")
+	not allowed(approver, "treasury.fixing.manual")
+	not allowed(dealer, "treasury.marketdata.import")
+	allowed(back_office, "treasury.marketdata.import")
+	allowed(back_office, "treasury.fixing.manual")
+	allowed(back_office, "treasury.fixing.run")
+	allowed(approver, "treasury.marketdata.approve")
+	allowed(senior, "treasury.marketdata.approve")
+}
+
+test_market_data_machines_and_agents_get_nothing if {
+	every p in [shared_sa, renamed_sa, agent, nobody] {
+		not allowed(p, "treasury.marketdata.import")
+		not allowed(p, "treasury.marketdata.approve")
+		not allowed(p, "treasury.fixing.manual")
+		not allowed(p, "treasury.fixing.run")
+	}
+}
+
+test_staff_read_fixings_and_market_data if {
+	allowed(dealer, "treasury.fixing.read")
+	allowed(approver, "treasury.marketdata.read")
+	not allowed(agent, "treasury.marketdata.read")
+}
+
+# --- ADR-0344 D6 payments: must-DENY first ---
+
+releaser := {"service_account": false, "type": "HUMAN", "id": "rita-1", "roles": ["ROLE_TREASURY_PAYMENT_RELEASER"]}
+
+test_only_the_payment_releaser_releases if {
+	every p in [dealer, approver, senior, admin, back_office, editor, nobody] {
+		not allowed(p, "treasury.payment.release")
+	}
+	allowed(releaser, "treasury.payment.release")
+	not allowed(releaser, "treasury.payment.propose")
+	not allowed(releaser, "treasury.payment.cancel")
+}
+
+test_payment_machines_and_agents_get_nothing if {
+	agent_releaser := {"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_TREASURY_PAYMENT_RELEASER"]}
+	every p in [shared_sa, renamed_sa, agent, agent_releaser] {
+		not allowed(p, "treasury.payment.release")
+		not allowed(p, "treasury.payment.propose")
+		not allowed(p, "treasury.payment.cancel")
+	}
+}
+
+test_back_office_proposes_and_cancels_payments if {
+	allowed(back_office, "treasury.payment.propose")
+	allowed(back_office, "treasury.payment.cancel")
+	allowed(approver, "treasury.payment.cancel")
+	not allowed(approver, "treasury.payment.propose")
+	allowed(releaser, "treasury.payment.read")
+}
+
+test_only_approvers_resolve_a_released_payment if {
+	every p in [releaser, back_office, dealer, admin, agent, shared_sa] {
+		not allowed(p, "treasury.payment.resolve")
+	}
+	allowed(approver, "treasury.payment.resolve")
+	allowed(senior, "treasury.payment.resolve")
 }

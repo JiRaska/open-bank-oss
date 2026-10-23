@@ -21,17 +21,21 @@ import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.DealRepository
+import com.openbank.treasury.application.port.out.ExposureGuard
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.domain.model.Actor
+import com.openbank.treasury.domain.model.CashFlowGenerated
 import com.openbank.treasury.domain.model.Counterparty
-import com.openbank.treasury.domain.model.DayCount
+import com.openbank.treasury.domain.model.CounterpartyKind
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealBooked
+import com.openbank.treasury.domain.model.DealCalendars
 import com.openbank.treasury.domain.model.DealConfirmed
+import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealMatured
 import com.openbank.treasury.domain.model.DealReversed
 import com.openbank.treasury.domain.model.DealSettled
@@ -82,16 +86,34 @@ class TreasuryDealService(
      * service constructed without a mandate must not book as though every product were permitted.
      */
     private val productLimits: ProductLimitPolicy,
+    /**
+     * ADR-0344 D3/D4: reference validation and the cash-flow ledger. Null only in unit tests of the
+     * lifecycle alone; the CDI producer always wires it.
+     */
+    private val schedules: ScheduleService? = null,
+    /** ADR-0344 catalogue: the product mandate from the reference store (config seeds the rest). */
+    private val mandate: (suspend () -> ProductLimitPolicy)? = null,
+    /**
+     * ADR-0344 D6: runs before a deal is cancelled or reversed: blocks the change while a payment of
+     * the deal is released, withdraws its PROPOSED payments.
+     */
+    private val paymentGuard: (suspend (dealId: UUID) -> Unit)? = null,
 ) : TreasuryDealUseCase {
+
+    private suspend fun policy(): ProductLimitPolicy = mandate?.invoke() ?: productLimits
 
     override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, DRAFT, null)?.let { return it } }
+        // ADR-0344 delivery phases: a product is drafted only once its phase has landed (400, never a
+        // 500 later). A delivered leg-described product still settles only through the posting-rule
+        // matrix (phase 2), which settle and mature check.
+        require(command.product in ProductType.DELIVERED) { NOT_DELIVERED.format(command.product) }
         counterparties.findById(command.counterpartyId) ?: throw UnknownCounterpartyException(command.counterpartyId)
         val now = clock.instant()
         val today = bankToday()
         val tradeDate = command.tradeDate ?: today
         val valueDate = command.valueDate
-            ?: if (command.product == ProductType.FX_SPOT) DayCount.spotDate(tradeDate) else null
+            ?: if (command.product == ProductType.FX_SPOT) DealCalendars.spotDate(tradeDate, command.currency) else null
         val drafted = Deal.draft(
             id = Ids.newId(),
             product = command.product,
@@ -107,32 +129,113 @@ class TreasuryDealService(
             rationale = command.rationale,
             inputs = command.inputs,
             fxSide = command.fxSide,
+            kind = command.kind,
+            legs = command.legs,
+            header = command.header,
         )
-        // #10896: flag (never block) an FX deal rate outside tolerance of fx-service's mid.
-        val deal = if (fxTolerance.enabled) {
-            drafted.checkRate(fxMid.mid(drafted.currency, tradeDate), fxTolerance.tolerancePercent, now)
-        } else {
-            drafted
-        }
+        val deal = vetTerms(drafted)
         return deals.save(deal, command = key?.let { CommandKey(it, DRAFT, deal.id) })
+    }
+
+    override suspend fun editDraft(dealId: UUID, command: DraftDealCommand, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, EDIT, dealId)?.let { return it } }
+        val existing = load(dealId)
+        counterparties.findById(command.counterpartyId) ?: throw UnknownCounterpartyException(command.counterpartyId)
+        val tradeDate = command.tradeDate ?: existing.tradeDate
+        val valueDate = command.valueDate
+            ?: if (command.product == ProductType.FX_SPOT) DealCalendars.spotDate(tradeDate, command.currency) else null
+        // The new terms are built exactly as a new draft by the deal's creator would be: every
+        // invariant of a draft holds again, including an agent draft's rationale and inputs.
+        val replacement = Deal.draft(
+            id = existing.id,
+            product = command.product,
+            counterpartyId = command.counterpartyId,
+            currency = command.currency,
+            principal = command.principal,
+            rate = command.rate,
+            tradeDate = tradeDate,
+            valueDate = requireNotNull(valueDate) { "valueDate is required" },
+            maturityDate = command.maturityDate,
+            actor = existing.createdBy,
+            at = existing.createdAt,
+            rationale = command.rationale ?: existing.rationale,
+            inputs = command.inputs ?: existing.inputs,
+            fxSide = command.fxSide,
+            kind = command.kind,
+            legs = command.legs,
+            header = command.header,
+        )
+        val edited = vetTerms(existing.editDraft(replacement, actor, clock.instant()))
+        return deals.save(edited, command = cmd(key, EDIT, dealId))
+    }
+
+    /**
+     * The term checks every path that creates, changes or advances a deal's terms runs — draft,
+     * edit, submit, approve — so none can skip one: every named reference effective on the trade
+     * date and (#10896) the FX rate re-flagged against fx-service's mid (a flag, never a block).
+     * Leg/flat consistency and the work bounds are [Deal]'s own invariants and hold on every copy;
+     * product and counterparty limits are evaluated at submit and re-checked at approval.
+     */
+    private suspend fun vetTerms(deal: Deal): Deal {
+        schedules?.requireEffective(deal)
+        return if (fxTolerance.enabled) {
+            deal.checkRate(fxMid.mid(deal.currency, deal.tradeDate), fxTolerance.tolerancePercent, clock.instant())
+        } else {
+            deal
+        }
     }
 
     override suspend fun submit(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, SUBMIT, dealId)?.let { return it } }
-        val deal = load(dealId)
+        val deal = vetTerms(load(dealId))
+        val check = limitCheck(deal)
+        val submitted = deal.submit(actor, check, clock.instant(), policy().evaluate(deal))
+        // ADR-0344 D4: the cash-flow ledger is generated at submission and stored with it.
+        val generated = schedules?.generate(submitted)
+        val withSchedule = generated?.let { submitted.withSchedule(it.write.scheduleVersion, it.hash) } ?: submitted
+        val events = generated?.let { g ->
+            listOf(
+                DealEvent(
+                    CashFlowGenerated.EVENT_TYPE,
+                    objectMapper.writeValueAsString(
+                        CashFlowGenerated(
+                            dealId = withSchedule.id,
+                            product = withSchedule.product,
+                            kind = withSchedule.kind,
+                            bookId = withSchedule.bookId,
+                            dealVersion = withSchedule.version,
+                            scheduleVersion = withSchedule.scheduleVersion,
+                            scheduleHash = g.hash,
+                            flowCount = g.flows.size,
+                            projectedCount = g.flows.count { it.amount == null },
+                            carriedOverrides = g.write.carried.size,
+                            conflicts = g.write.conflicts.size,
+                            occurredAt = withSchedule.updatedAt,
+                            flows = g.flows.map(com.openbank.treasury.domain.model.LedgerFlowItem::of),
+                        ),
+                    ),
+                ),
+            )
+        }.orEmpty()
         return deals.save(
-            deal.submit(actor, limitCheck(deal), clock.instant(), productLimits.evaluate(deal)),
+            withSchedule,
             command = cmd(key, SUBMIT, dealId),
+            schedule = generated?.write,
+            extraEvents = events,
+            // A submission that fits consumes the line now: serialised with every other write on it.
+            // One that breaches goes to review (PENDING_APPROVAL) and is re-guarded at approval.
+            limitGuard = check.takeIf { submitted.consumesLimit && !it.breached }?.let { ExposureGuard.of(it) },
         )
     }
 
     override suspend fun approve(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, APPROVE, dealId)?.let { return it } }
-        val deal = load(dealId)
+        val deal = vetTerms(load(dealId))
         // Re-checked at approval: exposure may have moved, and the product mandate may have been
         // tightened, since submission (ADR-0315 D4).
-        val productCheck = productLimits.evaluate(deal)
-        val booked = deal.approve(actor, limitCheck(deal), clock.instant(), productCheck)
+        val productCheck = policy().evaluate(deal)
+        val check = limitCheck(deal)
+        val booked = deal.approve(actor, check, clock.instant(), productCheck)
         val event = DealEvent(
             DealBooked.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -151,10 +254,21 @@ class TreasuryDealService(
                     fxSide = booked.fx?.side,
                     counterAmount = booked.fx?.counterAmount,
                     productLimit = productCheck.limit?.let { ProductLimitApplied.of(it, booked.currency) },
+                    kind = booked.kind,
+                    bookId = booked.bookId,
+                    legs = booked.legs,
+                    scheduleVersion = booked.scheduleVersion,
+                    scheduleHash = booked.scheduleHash,
+                    rollDirection = booked.header.rollDirection,
+                    calendars = booked.header.calendars,
+                    businessDayConvention = booked.header.businessDayConvention,
                 ),
             ),
         )
-        return deals.save(booked, event = event, command = cmd(key, APPROVE, dealId))
+        val guard = check.takeIf {
+            booked.consumesLimit
+        }?.let { ExposureGuard.of(it, booked.limitOverride?.coversExposureUpTo) }
+        return deals.save(booked, event = event, command = cmd(key, APPROVE, dealId), limitGuard = guard)
     }
 
     override suspend fun overrideLimit(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {
@@ -172,7 +286,10 @@ class TreasuryDealService(
 
     override suspend fun cancel(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, CANCEL, dealId)?.let { return it } }
-        return deals.save(load(dealId).cancel(actor, clock.instant()), command = cmd(key, CANCEL, dealId))
+        // Domain transition (authorisation, state) FIRST; the payment withdrawal happens in the save's
+        // transaction under the deal lock, so a refused or failed cancel withdraws nothing.
+        val cancelled = load(dealId).cancel(actor, clock.instant())
+        return deals.save(cancelled, command = cmd(key, CANCEL, dealId), withdrawPayments = paymentGuard != null)
     }
 
     override suspend fun confirm(dealId: UUID, reference: String?, actor: Actor, key: String?): Deal {
@@ -191,6 +308,7 @@ class TreasuryDealService(
                     confirmedBy = actor.id,
                     simulated = actor == Actor.SIMULATED_MARKET,
                     occurredAt = confirmed.updatedAt,
+                    kind = confirmed.kind,
                 ),
             ),
         )
@@ -201,6 +319,7 @@ class TreasuryDealService(
         key?.let { k -> replay(k, SETTLE, dealId)?.let { return it } }
         val deal = load(dealId)
         val settled = deal.settle(actor, bankToday(), clock.instant(), confirmationRequired)
+        check(settled.product.legacy) { NOT_DELIVERED.format(settled.product) }
         val ref = post(PostingRules.settlement(settled), settled.valueDate, "treasury ${settled.product} settlement")
         val event = DealEvent(
             DealSettled.EVENT_TYPE,
@@ -230,6 +349,7 @@ class TreasuryDealService(
         // ADR-0315 D5: catch the accrual up to maturity first, so the maturity journal clears the
         // accrued account instead of booking the whole interest to income in one amount.
         accrueThrough(deal, deal.maturityDate)
+        check(matured.product.legacy) { NOT_DELIVERED.format(matured.product) }
         val ref = post(
             PostingRules.maturity(matured, accruedSoFar(deal)),
             matured.maturityDate,
@@ -258,6 +378,12 @@ class TreasuryDealService(
         key?.let { k -> replay(k, REVERSE, dealId)?.let { return it } }
         val deal = load(dealId)
         val reversed = deal.reverse(actor, reason, clock.instant())
+        // Read-only pre-check before the reversal journal is posted (no side effect); the binding
+        // check and the withdrawal run again under the deal lock in the save's transaction.
+        paymentGuard?.invoke(dealId)
+        check(deal.product.legacy || deal.state != DealState.SETTLED) {
+            "a settled ${deal.product} deal is changed by a correction (ADR-0344 D7), not reversed"
+        }
         val accrued = if (deal.state == DealState.SETTLED) accruedSoFar(deal) else BigDecimal.ZERO
         val ref = PostingRules.reversal(reversed, deal.state, accrued)
             ?.let {
@@ -282,10 +408,23 @@ class TreasuryDealService(
                     occurredAt = reversed.updatedAt,
                     fxSide = reversed.fx?.side,
                     counterAmount = reversed.fx?.counterAmount,
+                    kind = reversed.kind,
                 ),
             ),
         )
-        return deals.save(reversed, ref, event, cmd(key, REVERSE, dealId))
+        return deals.save(reversed, ref, event, cmd(key, REVERSE, dealId), withdrawPayments = paymentGuard != null)
+    }
+
+    override suspend fun sendConfirmation(
+        dealId: UUID,
+        documentId: String?,
+        channel: String?,
+        actor: Actor,
+        key: String?,
+    ): Deal {
+        key?.let { k -> replay(k, SEND_CONFIRMATION, dealId)?.let { return it } }
+        val sent = load(dealId).recordConfirmationSent(actor, clock.instant(), documentId, channel)
+        return deals.save(sent, command = cmd(key, SEND_CONFIRMATION, dealId))
     }
 
     override suspend fun get(dealId: UUID): DealView = DealView(load(dealId), deals.journals(dealId))
@@ -294,7 +433,9 @@ class TreasuryDealService(
 
     override suspend fun counterparties(): List<CounterpartyExposure> {
         val overrides = deals.pendingLimitOverrides()
-        return counterparties.list().flatMap { cp -> exposures(cp, overrides) }
+        // The limit view's response enum is closed at BANK | CENTRAL_BANK (openapi): the corporate and
+        // issuer records ADR-0344 D3 added are served by GET /reference/counterparty, not here.
+        return counterparties.list().filter { it.kind in LIMIT_VIEW_KINDS }.flatMap { cp -> exposures(cp, overrides) }
     }
 
     private suspend fun exposures(cp: Counterparty, overrides: List<Deal>): List<CounterpartyExposure> =
@@ -352,8 +493,11 @@ class TreasuryDealService(
         // confirmation, `simulated = true` on the event and SIMULATED_MARKET on the timeline), so
         // the settlement pass below finds them CONFIRMED whatever `confirmationRequired` says. A
         // quoted deal struck off the counterparty's quote is DECLINED: it stays BOOKED for a person.
-        val confirmations = deals.list(DealState.BOOKED).map { d -> runCatching { simulatedConfirm(d, market) } }
+        val confirmations = deals.list(DealState.BOOKED).filter {
+            it.kind == DealKind.ACTUAL && it.product.legacy
+        }.map { d -> runCatching { simulatedConfirm(d, market) } }
         val settleable = Deal.settleableStates(confirmationRequired)
+        // ADR-0344: a PLANNED or HYPOTHETICAL deal is never confirmed, settled or matured by the market.
         val moves = deals.dueForSettlement(today, settleable).map { d -> runCatching { settle(d.id, market) } } +
             deals.dueForMaturity(today).map { d -> runCatching { mature(d.id, market) } }
         return SimulatedMarketRun(
@@ -391,6 +535,7 @@ class TreasuryDealService(
 
     /** Post each day after the last accrued one, up to and including [through]. Returns journals posted. */
     private suspend fun accrueThrough(deal: Deal, through: LocalDate): Int {
+        if (!deal.product.legacy) return 0
         var day = (lastAccrued(deal) ?: deal.valueDate).plusDays(1)
         var posted = 0
         while (!day.isAfter(through)) {
@@ -488,6 +633,7 @@ class TreasuryDealService(
     private fun cmd(key: String?, action: String, dealId: UUID) = key?.let { CommandKey(it, action, dealId) }
 
     private companion object {
+        const val NOT_DELIVERED = "product %s is not delivered yet (ADR-0344 delivery phases)"
         const val MAX_KEY_LENGTH = 128
 
         /** Cash has moved: what an ACTUAL position counts. */
@@ -503,6 +649,7 @@ class TreasuryDealService(
             ProductType.CNB_DEPOSIT_FACILITY,
         )
         const val DRAFT = "DRAFT"
+        const val EDIT = "EDIT"
         const val SUBMIT = "SUBMIT"
         const val APPROVE = "APPROVE"
         const val OVERRIDE = "OVERRIDE_LIMIT"
@@ -512,5 +659,7 @@ class TreasuryDealService(
         const val SETTLE = "SETTLE"
         const val MATURE = "MATURE"
         const val REVERSE = "REVERSE"
+        const val SEND_CONFIRMATION = "SEND_CONFIRMATION"
+        val LIMIT_VIEW_KINDS = setOf(CounterpartyKind.BANK, CounterpartyKind.CENTRAL_BANK)
     }
 }
