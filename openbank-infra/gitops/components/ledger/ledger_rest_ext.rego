@@ -210,6 +210,17 @@ allowed_reasons contains "service-lending-ledger-post" if {
 	input.action == "ledger.create"
 }
 
+# #13167 / ADR-0342 D2 — billing-service's OWN machine identity (named oidc-client `m2m`, Keycloak
+# client `openbank-billing`, ROLE_API only) reporting day-close participation for `billing`. The
+# participation PUT is admitted under ledger.create, so this is exactly that action and nothing
+# else. Billing's journals still ride the shared openbank-services principal; binding the
+# participant to that shared principal would let every service report billing complete.
+allowed_reasons contains "service-billing-ledger-post" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-billing")
+	input.action == "ledger.create"
+}
+
 allowed_reasons contains "service-clearing-ledger-post" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-clearing")

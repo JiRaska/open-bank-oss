@@ -1305,6 +1305,9 @@ close_participants:
     lending:                                # #13167: accrual + provisioning passes
       service: openbank-lending-service
       principal: service-account-openbank-lending
+    billing:                                # #13167: monthly billing cycle + its fee postings
+      service: openbank-billing-service
+      principal: service-account-openbank-billing
 
 money_path_services:
   - openbank-ledger-service
