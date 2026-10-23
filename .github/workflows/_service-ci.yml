@@ -123,13 +123,13 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/marker"
           printf '{"service":"%s","sha":"%s","result":"started","attempt":%s}\n' \
-            "$SERVICE" "$GITHUB_SHA" "$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/marker/marker.json"
+            "$SERVICE" "$GITHUB_SHA" "$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/marker/marker-${SERVICE}.json"
       - name: Upload service build started marker
         if: inputs.ref == ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: service-build-ok-${{ inputs.service }}
-          path: ${{ runner.temp }}/marker/marker.json
+          path: ${{ runner.temp }}/marker/marker-${{ inputs.service }}.json
           retention-days: 14
           overwrite: true
 
@@ -450,13 +450,13 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/marker"
           printf '{"service":"%s","sha":"%s","result":"%s","attempt":%s}\n' \
-            "$SERVICE" "$GITHUB_SHA" "$JOB_STATUS" "$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/marker/marker.json"
+            "$SERVICE" "$GITHUB_SHA" "$JOB_STATUS" "$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/marker/marker-${SERVICE}.json"
       - name: Upload service build final marker
         if: always() && inputs.ref == ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: service-build-ok-${{ inputs.service }}
-          path: ${{ runner.temp }}/marker/marker.json
+          path: ${{ runner.temp }}/marker/marker-${{ inputs.service }}.json
           retention-days: 14
           overwrite: true
 

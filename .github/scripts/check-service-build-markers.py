@@ -18,7 +18,8 @@ import os
 import sys
 from pathlib import Path
 
-PREFIX = "service-build-ok-"
+PREFIX = "marker-"
+SUFFIX = ".json"
 
 
 def verify(services, directory, sha):
@@ -29,15 +30,21 @@ def verify(services, directory, sha):
     problems = []
     if not root.is_dir():
         return [f"marker directory {directory} does not exist"]
+    # Flat layout (download-artifact merge-multiple): one marker-<service>.json per leg.
+    # The layout does not depend on how many artifacts matched.
     for entry in sorted(root.iterdir()):
-        if not entry.is_dir() or not entry.name.startswith(PREFIX):
-            problems.append(f"unexpected entry {entry.name}")
+        name = entry.name
+        if not entry.is_file() or not (name.startswith(PREFIX) and name.endswith(SUFFIX)):
+            problems.append(f"unexpected entry {name}")
             continue
-        service = entry.name[len(PREFIX):]
+        service = name[len(PREFIX):-len(SUFFIX)]
         try:
-            data = json.loads((entry / "marker.json").read_text())
+            data = json.loads(entry.read_text())
         except (OSError, ValueError) as exc:
             problems.append(f"{service}: unreadable marker ({exc.__class__.__name__})")
+            continue
+        if not isinstance(data, dict):
+            problems.append(f"{service}: marker is not an object")
             continue
         if data.get("service") != service or data.get("sha") != sha or data.get("result") != "success":
             problems.append(f"{service}: marker does not attest success of this sha")

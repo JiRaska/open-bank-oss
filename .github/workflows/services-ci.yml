@@ -343,6 +343,9 @@ jobs:
         with:
           pattern: service-build-ok-*
           path: ${{ runner.temp }}/service-build-markers
+          # Flat marker-<service>.json files regardless of how many artifacts match
+          # (a single match otherwise extracts without its artifact-named directory).
+          merge-multiple: true
       - name: Require every selected service build to pass
         if: needs.changes.outputs.any == 'true'
         env:

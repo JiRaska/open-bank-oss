@@ -15,11 +15,10 @@ SHA = "a" * 40
 
 
 def make(root, svc, **over):
-    d = Path(root) / f"service-build-ok-{svc}"
-    d.mkdir()
+    d = Path(root)
     body = {"service": svc, "sha": SHA, "result": "success"}
     body.update(over)
-    (d / "marker.json").write_text(json.dumps(body))
+    (d / f"marker-{svc}.json").write_text(json.dumps(body))
 
 
 class T(unittest.TestCase):
@@ -60,12 +59,39 @@ class T(unittest.TestCase):
 
     def test_corrupt_marker_fails(self):
         def b(d):
-            make(d, "a"); (Path(d) / "service-build-ok-a" / "marker.json").write_text("{")
+            make(d, "a"); (Path(d) / "marker-a.json").write_text("{")
         self.assertTrue(self.run_case(["a"], b))
 
     def test_invalid_matrix_fails(self):
         for s in ([], ["a", "a"], "a"):
             self.assertTrue(self.run_case(s, lambda d: make(d, "a")))
+
+    def test_single_artifact_flat_layout_passes(self):  # regression: 1 match extracts flat
+        self.assertEqual(self.run_case(["a"], lambda d: make(d, "a")), [])
+
+    def test_nested_per_artifact_directory_is_rejected(self):
+        def b(d):
+            make(d, "a")
+            n = Path(d) / "service-build-ok-a"
+            n.mkdir()
+            (n / "marker.json").write_text("{}")
+        self.assertTrue(self.run_case(["a"], b))
+
+    def test_unknown_file_fails(self):
+        def b(d):
+            make(d, "a"); (Path(d) / "marker.json").write_text("{}")
+        self.assertTrue(self.run_case(["a"], b))
+
+    def test_filename_content_disagreement_fails(self):
+        def b(d):
+            make(d, "a"); (Path(d) / "marker-a.json").write_text(
+                json.dumps({"service": "b", "sha": SHA, "result": "success"}))
+        self.assertTrue(self.run_case(["a"], b))
+
+    def test_non_object_json_fails(self):
+        def b(d):
+            make(d, "a"); (Path(d) / "marker-a.json").write_text("[]")
+        self.assertTrue(self.run_case(["a"], b))
 
     def test_exact_set_passes(self):
         def b(d):
