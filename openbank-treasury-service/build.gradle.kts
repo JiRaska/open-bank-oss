@@ -31,6 +31,8 @@ dependencies {
 
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // semt.002 statement-of-holdings reader (ADR-0337 amendment): the fleet's ISO 20022 library.
+    implementation(project(":openbank-libs-iso20022"))
 
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
@@ -41,6 +43,8 @@ dependencies {
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Consumer-driven contract test for the nostro ledger reads (ADR-0315 D5, #10896).
     testImplementation(libs.pact.consumer)
+    // ADR-0337 amendment: git-pact replay of tax-reporting's portfolio pact (+ negative-auth and broker twins).
+    testImplementation(libs.pact.provider)
 }
 
 kover {
