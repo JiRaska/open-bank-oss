@@ -14,6 +14,7 @@ import com.openbank.billing.application.port.out.RevisionTermsUnreadableExceptio
 import com.openbank.billing.domain.AssessedFee
 import com.openbank.billing.domain.BillableFee
 import com.openbank.billing.domain.BillingAssessment
+import com.openbank.billing.domain.FeeIncomeCurrencies
 import com.openbank.libs.product.FeeContext
 import com.openbank.libs.product.WaiveReason
 import com.openbank.libs.product.WaiverEvaluator
@@ -46,6 +47,11 @@ class FeeAssessmentService(
 ) {
 
     suspend fun assess(cycleId: String, accountId: String, currency: String): BillingAssessment {
+        // Fail-closed (#13226): a currency the ledger has no fee-income account for would only ever 422 at
+        // the ledger and wedge its outbox row. Refuse it here, counted by reason -- never a zero charge.
+        if (!FeeIncomeCurrencies.isMapped(currency)) {
+            return skipped(cycleId, accountId, currency, "FEE_INCOME_CURRENCY_UNMAPPED")
+        }
         val billing = accounts.resolve(accountId, currency)
             ?: return skipped(cycleId, accountId, currency, "ACCOUNT_CONTEXT_UNRESOLVED")
 
