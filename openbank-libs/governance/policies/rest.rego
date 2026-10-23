@@ -393,6 +393,21 @@ allowed_reasons contains "commstyle-read-publish-approval" if {
 	input.action == "commstyle.approval.read"
 }
 
+# ADR-0352 §7: publishing an IR-bearing catalog revision signs its canonical revisionHash, and a
+# valid signature is authority over every account under the product — so this is its own action
+# (catalog.publish-ir, four_eyes.actions), never the shared catalog.publish, and human-only: the
+# shared backend service-account carries ROLE_OPERATOR in some realms and is classified HUMAN
+# (rules.yaml: authz_policy.principal_type_service_unreachable), so HUMAN + ROLE_OPERATOR alone
+# would re-admit that machine identity. Maker != checker is enforced independently by
+# product-catalog (GenericCatalogService.publishIr); this rule only decides WHO may attempt it.
+allowed_reasons contains "catalog-publish-ir" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	not principal_is_machine
+	input.action == "catalog.publish-ir"
+}
+
 # Pension catalog approval is a distinct human decision, never a generic publish grant.
 # The endpoint checks the requested legal/product role and immutable JWT actor identity.
 allowed_reasons contains "pension-catalog-decide-approval" if {

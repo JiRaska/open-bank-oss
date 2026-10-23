@@ -211,6 +211,30 @@ class GraphTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 graph.validate_callee(root)
 
+    def test_new_module_rejects_old_roster_until_canonical_regeneration(self):
+        import yaml
+        modules = graph.inventory(graph.ROOT)
+        self.assertIn('openbank-products', modules)
+        previous = [module for module in modules if module != 'openbank-products']
+        old_needs = fixture(selected=['openbank-libs'], modules=previous)
+        findings = results.verify(['openbank-libs'], old_needs,
+                                  'pull_request', 'refs/pull/1/merge', modules)
+        self.assertTrue(findings)
+        self.assertIn('build_pr_openbank_products', str(findings))
+        self.assertIn('build_other_openbank_products', str(findings))
+        source = (graph.ROOT / graph.WORKFLOW).read_text()
+        old_graph = graph.generated(source, previous)
+        regenerated = graph.generated(old_graph, modules)
+        self.assertNotEqual(old_graph, regenerated)
+        self.assertEqual(graph.generated(regenerated, modules), regenerated)
+        callers = yaml.safe_load(graph.caller_block(modules))
+        self.assertEqual(len(callers), 2 * len(modules))
+        for lane in graph.LANES:
+            self.assertIn(graph.job_id('openbank-products', lane), callers)
+        self.assertEqual(results.verify(['openbank-libs'],
+                                       fixture(selected=['openbank-libs'], modules=modules),
+                                       'pull_request', 'refs/pull/1/merge', modules), [])
+
     def test_finite_caller_permissions_match_reviewed_baseline(self):
         import yaml
         spec = importlib.util.spec_from_file_location(

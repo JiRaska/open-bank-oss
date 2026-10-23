@@ -150,6 +150,12 @@ data class RevisionContent(
     val eligibility: List<EligibilityRule> = emptyList(),
     val relationships: List<OfferingRelationship> = emptyList(),
     val documentCodes: List<String> = emptyList(),
+    /**
+     * Product IR (ADR-0352 §1): the revision's executable behaviour as the raw IR document tree,
+     * next to the attributes and prices. Validated by `ProductIrParser` on every write and hashed
+     * by `ProductIrCanonical` at publication; `null` for a revision with no behaviour.
+     */
+    val behaviour: CatalogValue.ObjectValue? = null,
 ) {
     init {
         require(prices.map(PriceComponent::code).distinct().size == prices.size) { "price codes must be unique" }
@@ -191,6 +197,8 @@ data class ProductRevision(
     val approvalDigest: String? = null,
     /** Effective-to the approvers saw; a successor may later shorten [effectiveTo], never this. */
     val approvedEffectiveTo: Instant? = null,
+    /** Detached publish-path signature over the IR's `revisionHash` (ADR-0352 §4); set only by `publish-ir`. */
+    val irSignature: RevisionIrSignature? = null,
 ) {
     init {
         require(number > 0) { "revision number must be positive" }
@@ -205,6 +213,27 @@ data class ProductRevision(
             "checker must differ from maker"
         }
         require(revision >= 0) { "revision must not be negative" }
+    }
+}
+
+/**
+ * The publish path's detached signature over an IR-bearing revision's canonical hash (ADR-0352 §4).
+ * [revisionHash] is `ProductIrCanonical.revisionHash` of `RevisionContent.behaviour`; [signature]
+ * is produced by the configured `IrSignerPort` and verified by every consumer's pinned-revision
+ * loader before the revision is evaluated. Evidence: immutable once written.
+ */
+data class RevisionIrSignature(
+    val revisionHash: String,
+    val keyId: String,
+    val algorithm: String,
+    val signature: String,
+    val signedAt: Instant,
+) {
+    init {
+        require(revisionHash.matches(Regex("^[0-9a-f]{64}$"))) { "revisionHash must be 64 lower-case hex characters" }
+        require(keyId.isNotBlank() && algorithm.isNotBlank() && signature.isNotBlank()) {
+            "signature fields must not be blank"
+        }
     }
 }
 

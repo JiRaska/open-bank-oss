@@ -991,9 +991,22 @@ jobs:
     secrets:
       PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
 
+  build_pr_openbank_products:
+    name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-products') && 'build (openbank-products)' || 'Not selected (pr, openbank-products)' }}
+    needs: [changes, publication-ready, build_pr_openbank_libs_runtime]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-products') }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_service-ci-pr.yml
+    with:
+      service: openbank-products
+    secrets:
+      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+
   build_pr_openbank_psd2_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-psd2-service') && 'build (openbank-psd2-service)' || 'Not selected (pr, openbank-psd2-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_libs_runtime]
+    needs: [changes, publication-ready, build_pr_openbank_libs_temporal]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-psd2-service') }}
     permissions:
       contents: read
@@ -1006,7 +1019,7 @@ jobs:
 
   build_pr_openbank_referral_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-referral-service') && 'build (openbank-referral-service)' || 'Not selected (pr, openbank-referral-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_libs_temporal]
+    needs: [changes, publication-ready, build_pr_openbank_libs_testing]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-referral-service') }}
     permissions:
       contents: read
@@ -1019,7 +1032,7 @@ jobs:
 
   build_pr_openbank_release_steward:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-release-steward') && 'build (openbank-release-steward)' || 'Not selected (pr, openbank-release-steward)' }}
-    needs: [changes, publication-ready, build_pr_openbank_libs_testing]
+    needs: [changes, publication-ready, build_pr_openbank_loyalty_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-release-steward') }}
     permissions:
       contents: read
@@ -1032,7 +1045,7 @@ jobs:
 
   build_pr_openbank_risk_engine:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-risk-engine') && 'build (openbank-risk-engine)' || 'Not selected (pr, openbank-risk-engine)' }}
-    needs: [changes, publication-ready, build_pr_openbank_loyalty_service]
+    needs: [changes, publication-ready, build_pr_openbank_mcp_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-risk-engine') }}
     permissions:
       contents: read
@@ -1045,7 +1058,7 @@ jobs:
 
   build_pr_openbank_sanctions_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sanctions-service') && 'build (openbank-sanctions-service)' || 'Not selected (pr, openbank-sanctions-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_mcp_service]
+    needs: [changes, publication-ready, build_pr_openbank_notification_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sanctions-service') }}
     permissions:
       contents: read
@@ -1058,7 +1071,7 @@ jobs:
 
   build_pr_openbank_sca_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sca-service') && 'build (openbank-sca-service)' || 'Not selected (pr, openbank-sca-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_notification_service]
+    needs: [changes, publication-ready, build_pr_openbank_onboarding_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sca-service') }}
     permissions:
       contents: read
@@ -1071,7 +1084,7 @@ jobs:
 
   build_pr_openbank_sdd_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sdd-service') && 'build (openbank-sdd-service)' || 'Not selected (pr, openbank-sdd-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_onboarding_service]
+    needs: [changes, publication-ready, build_pr_openbank_party_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sdd-service') }}
     permissions:
       contents: read
@@ -1084,7 +1097,7 @@ jobs:
 
   build_pr_openbank_security_scanner:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-security-scanner') && 'build (openbank-security-scanner)' || 'Not selected (pr, openbank-security-scanner)' }}
-    needs: [changes, publication-ready, build_pr_openbank_party_service]
+    needs: [changes, publication-ready, build_pr_openbank_pension_fund_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-security-scanner') }}
     permissions:
       contents: read
@@ -1097,7 +1110,7 @@ jobs:
 
   build_pr_openbank_sepa_instant:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sepa-instant') && 'build (openbank-sepa-instant)' || 'Not selected (pr, openbank-sepa-instant)' }}
-    needs: [changes, publication-ready, build_pr_openbank_pension_fund_service]
+    needs: [changes, publication-ready, build_pr_openbank_pension_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sepa-instant') }}
     permissions:
       contents: read
@@ -1110,7 +1123,7 @@ jobs:
 
   build_pr_openbank_sepa_payment:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sepa-payment') && 'build (openbank-sepa-payment)' || 'Not selected (pr, openbank-sepa-payment)' }}
-    needs: [changes, publication-ready, build_pr_openbank_pension_service]
+    needs: [changes, publication-ready, build_pr_openbank_pid_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sepa-payment') }}
     permissions:
       contents: read
@@ -1123,7 +1136,7 @@ jobs:
 
   build_pr_openbank_settlement_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-settlement-service') && 'build (openbank-settlement-service)' || 'Not selected (pr, openbank-settlement-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_pid_service]
+    needs: [changes, publication-ready, build_pr_openbank_product_catalog]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-settlement-service') }}
     permissions:
       contents: read
@@ -1136,7 +1149,7 @@ jobs:
 
   build_pr_openbank_simulation:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-simulation') && 'build (openbank-simulation)' || 'Not selected (pr, openbank-simulation)' }}
-    needs: [changes, publication-ready, build_pr_openbank_product_catalog]
+    needs: [changes, publication-ready, build_pr_openbank_products]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-simulation') }}
     permissions:
       contents: read
@@ -2070,9 +2083,22 @@ jobs:
     secrets:
       PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
 
+  build_other_openbank_products:
+    name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-products') && 'build (openbank-products)' || 'Not selected (other, openbank-products)' }}
+    needs: [changes, publication-ready, build_other_openbank_mcp_service]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-products') }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_service-ci.yml
+    with:
+      service: openbank-products
+    secrets:
+      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+
   build_other_openbank_psd2_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-psd2-service') && 'build (openbank-psd2-service)' || 'Not selected (other, openbank-psd2-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_mcp_service]
+    needs: [changes, publication-ready, build_other_openbank_notification_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-psd2-service') }}
     permissions:
       contents: read
@@ -2085,7 +2111,7 @@ jobs:
 
   build_other_openbank_referral_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-referral-service') && 'build (openbank-referral-service)' || 'Not selected (other, openbank-referral-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_notification_service]
+    needs: [changes, publication-ready, build_other_openbank_onboarding_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-referral-service') }}
     permissions:
       contents: read
@@ -2098,7 +2124,7 @@ jobs:
 
   build_other_openbank_release_steward:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-release-steward') && 'build (openbank-release-steward)' || 'Not selected (other, openbank-release-steward)' }}
-    needs: [changes, publication-ready, build_other_openbank_onboarding_service]
+    needs: [changes, publication-ready, build_other_openbank_party_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-release-steward') }}
     permissions:
       contents: read
@@ -2111,7 +2137,7 @@ jobs:
 
   build_other_openbank_risk_engine:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-risk-engine') && 'build (openbank-risk-engine)' || 'Not selected (other, openbank-risk-engine)' }}
-    needs: [changes, publication-ready, build_other_openbank_party_service]
+    needs: [changes, publication-ready, build_other_openbank_pension_fund_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-risk-engine') }}
     permissions:
       contents: read
@@ -2124,7 +2150,7 @@ jobs:
 
   build_other_openbank_sanctions_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sanctions-service') && 'build (openbank-sanctions-service)' || 'Not selected (other, openbank-sanctions-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_pension_fund_service]
+    needs: [changes, publication-ready, build_other_openbank_pension_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sanctions-service') }}
     permissions:
       contents: read
@@ -2137,7 +2163,7 @@ jobs:
 
   build_other_openbank_sca_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sca-service') && 'build (openbank-sca-service)' || 'Not selected (other, openbank-sca-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_pension_service]
+    needs: [changes, publication-ready, build_other_openbank_pid_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sca-service') }}
     permissions:
       contents: read
@@ -2150,7 +2176,7 @@ jobs:
 
   build_other_openbank_sdd_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sdd-service') && 'build (openbank-sdd-service)' || 'Not selected (other, openbank-sdd-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_pid_service]
+    needs: [changes, publication-ready, build_other_openbank_product_catalog]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sdd-service') }}
     permissions:
       contents: read
@@ -2163,7 +2189,7 @@ jobs:
 
   build_other_openbank_security_scanner:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-security-scanner') && 'build (openbank-security-scanner)' || 'Not selected (other, openbank-security-scanner)' }}
-    needs: [changes, publication-ready, build_other_openbank_product_catalog]
+    needs: [changes, publication-ready, build_other_openbank_products]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-security-scanner') }}
     permissions:
       contents: read
@@ -2481,6 +2507,7 @@ jobs:
       - build_pr_openbank_pension_service
       - build_pr_openbank_pid_service
       - build_pr_openbank_product_catalog
+      - build_pr_openbank_products
       - build_pr_openbank_psd2_service
       - build_pr_openbank_referral_service
       - build_pr_openbank_release_steward
@@ -2564,6 +2591,7 @@ jobs:
       - build_other_openbank_pension_service
       - build_other_openbank_pid_service
       - build_other_openbank_product_catalog
+      - build_other_openbank_products
       - build_other_openbank_psd2_service
       - build_other_openbank_referral_service
       - build_other_openbank_release_steward

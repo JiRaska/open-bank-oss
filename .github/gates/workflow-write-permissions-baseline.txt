@@ -138,6 +138,7 @@ services-ci.yml|job:build_other_openbank_pension_fund_service|id-token
 services-ci.yml|job:build_other_openbank_pension_service|id-token
 services-ci.yml|job:build_other_openbank_pid_service|id-token
 services-ci.yml|job:build_other_openbank_product_catalog|id-token
+services-ci.yml|job:build_other_openbank_products|id-token
 services-ci.yml|job:build_other_openbank_psd2_service|id-token
 services-ci.yml|job:build_other_openbank_referral_service|id-token
 services-ci.yml|job:build_other_openbank_release_steward|id-token
@@ -221,6 +222,7 @@ services-ci.yml|job:build_pr_openbank_pension_fund_service|id-token
 services-ci.yml|job:build_pr_openbank_pension_service|id-token
 services-ci.yml|job:build_pr_openbank_pid_service|id-token
 services-ci.yml|job:build_pr_openbank_product_catalog|id-token
+services-ci.yml|job:build_pr_openbank_products|id-token
 services-ci.yml|job:build_pr_openbank_psd2_service|id-token
 services-ci.yml|job:build_pr_openbank_referral_service|id-token
 services-ci.yml|job:build_pr_openbank_release_steward|id-token
