@@ -58,8 +58,10 @@ class SwiftSettlementRedriveScheduler(
         if (!enabled) return
         service.due(batchSize).forEach { id ->
             try {
-                if (service.redrive(id) == Result.EXHAUSTED) {
-                    metrics.unsettled(SwiftSettlementMetrics.Outcome.REDRIVE_EXHAUSTED)
+                when (service.redrive(id)) {
+                    Result.EXHAUSTED -> metrics.unsettled(SwiftSettlementMetrics.Outcome.REDRIVE_EXHAUSTED)
+                    Result.LATE_COMPLETION -> metrics.unsettled(SwiftSettlementMetrics.Outcome.LATE_COMPLETION)
+                    else -> Unit
                 }
             } catch (ex: CancellationException) {
                 throw ex

@@ -46,16 +46,27 @@ class SwiftSettlementRedriveRepository : SwiftSettlementRedrivePort {
             }
         }.awaitSuspending() == 1
 
-    override suspend fun release(id: UUID, token: UUID) {
-        Panache.withTransaction {
-            Panache.getSession().chain { session ->
-                session.createNativeMutationQuery(RELEASE_SQL)
-                    .setParameter("id", id)
-                    .setParameter("token", token)
-                    .executeUpdate()
-            }
-        }.awaitSuspending()
-    }
+    /** `true` only if [token] still holds the claim AND nobody stopped or waived the message meanwhile. */
+    override suspend fun release(id: UUID, token: UUID): Boolean = Panache.withTransaction {
+        Panache.getSession().chain { session ->
+            session.createNativeMutationQuery(RELEASE_SQL)
+                .setParameter("id", id)
+                .setParameter("token", token)
+                .executeUpdate()
+                .chain { released ->
+                    if (released == 1) {
+                        Uni.createFrom().item(true)
+                    } else {
+                        // Late: still drop our own claim if it is there, so a stopped row carries no stale token.
+                        session.createNativeMutationQuery(CLEAR_CLAIM_SQL)
+                            .setParameter("id", id)
+                            .setParameter("token", token)
+                            .executeUpdate()
+                            .map { false }
+                    }
+                }
+        }
+    }.awaitSuspending()
 
     override suspend fun reschedule(id: UUID, token: UUID, now: Instant, backoff: RedriveBackoff): RescheduleOutcome? =
         record(id, token, now) { attempts ->
@@ -112,7 +123,7 @@ class SwiftSettlementRedriveRepository : SwiftSettlementRedrivePort {
         const val ELIGIBLE = "message_type = 'MT103' AND status = 'SENT' " +
             "AND booking_first_due_at IS NOT NULL AND booking_first_due_at <= :dueBefore " +
             "AND booking_proven_at IS NULL AND booking_redrive_exhausted_at IS NULL " +
-            "AND booking_redrive_stopped_at IS NULL " +
+            "AND booking_redrive_stopped_at IS NULL AND booking_waived_at IS NULL " +
             "AND (booking_redrive_next_at IS NULL OR booking_redrive_next_at <= :now) " +
             "AND (booking_redrive_claimed_until IS NULL OR booking_redrive_claimed_until < :now)"
 
@@ -122,6 +133,10 @@ class SwiftSettlementRedriveRepository : SwiftSettlementRedrivePort {
             "booking_redrive_claimed_until = :leaseUntil WHERE id = :id AND $ELIGIBLE"
 
         const val RELEASE_SQL = "UPDATE swift_messages SET booking_redrive_claim = NULL, " +
+            "booking_redrive_claimed_until = NULL WHERE id = :id AND booking_redrive_claim = :token " +
+            "AND booking_redrive_stopped_at IS NULL AND booking_waived_at IS NULL"
+
+        const val CLEAR_CLAIM_SQL = "UPDATE swift_messages SET booking_redrive_claim = NULL, " +
             "booking_redrive_claimed_until = NULL WHERE id = :id AND booking_redrive_claim = :token"
 
         /** Refuses a live claim; keeps the first stop's time and reason if already stopped. */

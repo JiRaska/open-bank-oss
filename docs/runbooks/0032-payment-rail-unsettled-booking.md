@@ -248,6 +248,39 @@ FROM swift_messages WHERE id = '<messageId>';
 A stopped message is never claimed by the sweep again. Its booking clock stays open, so the alert keeps
 firing until the message is closed as in "Closing a corrected payment".
 
+**The stop does not cancel a call already in flight.** A re-drive that stalled past its 2-minute lease
+lets the stop succeed while its transaction-service call is still running, and that call can still
+book (its proof is then recorded and counted as `outcome="late-completion"`). So, after S1:
+
+- **Step S2 — read transaction-service for `swift-settlement-<messageId>`** (step 1's query). If a row
+  exists, **reconcile from that row and never book**. Re-read it after any wait; a late completion can
+  appear minutes after the stop.
+- **Any manual booking MUST use the same idempotency key, `swift-settlement-<messageId>`.** Never a new
+  key, never a ledger adjustment that bypasses transaction-service's dedup. With the same key a stalled
+  re-drive and the manual booking resolve to one transaction; with any other key the customer is debited
+  twice.
+
+**Step S3 (only when no debit is owed) — four-eyes waive.** For a message rejected after ACSC, or
+otherwise owed no booking (confirmed with finance), close the obligation instead of leaving the alert
+firing forever. Same ticket discipline as S1: the approver signs off the ticket, then a different person
+executes. Run it only after S1 and S2 found no transaction row. A waived message leaves the age gauge and
+`SwiftBookingUnsettled`, and the sweep never claims it.
+
+```sql
+-- swift-service-db, as the application owner. Expect UPDATE 1.
+UPDATE swift_messages
+SET booking_waived_at = now(),
+    booking_waive_reason = '<ticket>: <why no debit is owed>',
+    booking_waive_approver = '<approver name>'
+WHERE id = '<messageId>' AND booking_proven_at IS NULL AND booking_waived_at IS NULL
+  AND booking_redrive_stopped_at IS NOT NULL
+  AND (booking_redrive_claimed_until IS NULL OR booking_redrive_claimed_until < now());
+```
+
+A waive is not a booking proof: `booking_proven_at` stays null, and the record of why sits in the row.
+If a transaction row for the key appears later (a late completion), reconcile it with finance; the waive
+is then wrong and must be reviewed on the same ticket.
+
 What the re-drive does **not** cover:
 
 - a message an operator already acknowledged or rejected (it is no longer `SENT`). `ack`/`reject` also
@@ -276,7 +309,7 @@ Then the remedy depends on step 1:
 |---|---|
 | No row, re-drive still counting | Wait: the next attempt is at `booking_redrive_next_at`. If transaction-service is down, fix that first. |
 | No row, exhausted (the cause was an outage, now fixed) | **Re-drive** with the command below. |
-| No row, no `ordering_customer_account_id` / unparseable value date | Nothing can be sent in-band. Escalate to finance: the MT103 has left, so the debit is booked by a ledger correction, and the message is closed as below ("Closing a corrected payment"). Fix the data cause so the next message does not repeat it. |
+| No row, no `ordering_customer_account_id` / unparseable value date | Nothing can be sent in-band. After S1 and S2, escalate to finance: the MT103 has left, so the debit is booked by hand through transaction-service **under `swift-settlement-<messageId>`** (never another key), and the message is closed as below ("Closing a corrected payment"). Fix the data cause so the next message does not repeat it. |
 | `COMPLETED`, every field matches | The next attempt replays it as a matched 201 and closes the clock. If exhausted, **re-drive** with the command below. |
 | `COMPLETED`, money differs / `FAILED` | Do not re-drive. Same as the shared table in step 2: **reverse** a wrong booking, or a finance correction for `FAILED`. |
 

@@ -63,6 +63,8 @@ class SwiftSettlementRedriveIT {
             "openbank.swift.settlement-redrive.backoff-base" to "PT0.001S",
             "openbank.swift.settlement-redrive.backoff-max" to "PT0.001S",
             "openbank.swift.settlement-redrive.max-attempts" to "2",
+            // Short, so the late-completion test can stall a call past it. Claims are taken at t=0 elsewhere.
+            "openbank.swift.settlement-redrive.lease" to "PT1S",
         )
     }
 
@@ -189,6 +191,76 @@ class SwiftSettlementRedriveIT {
         assertThat(onContext { query.bookingAgeSnapshot() }.oldestDueAt).isNotNull()
     }
 
+    @Test
+    fun `a re-drive stalled past its lease still records its proof after a stop, as a late completion`() {
+        val id = heldMessage()
+        val transactionId = UUID.nameUUIDFromBytes("swift-settlement-$id".toByteArray())
+        behavior = {
+            holdUntil(CountDownLatch(1)) // never released: stalls the full HOLD_MS, well past the 1s lease
+            SettlementOutcome(true, transactionId)
+        }
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            val inFlight = pool.submit<Result> { onContext { redrive.redrive(id) } }
+            Thread.sleep(STALL_MS)
+            // Runbook S1 stop: accepted, because the stalled call's lease has lapsed.
+            assertThat(
+                update(
+                    "UPDATE swift_messages SET booking_redrive_stopped_at = now(), " +
+                        "booking_redrive_stop_reason = 'TICKET-2 approver=a executor=b' WHERE id = ? " +
+                        "AND (booking_redrive_claimed_until IS NULL OR booking_redrive_claimed_until < now())",
+                    id,
+                ),
+            ).isEqualTo(1)
+            assertThat(inFlight.get(30, TimeUnit.SECONDS)).isEqualTo(Result.LATE_COMPLETION)
+        } finally {
+            pool.shutdownNow()
+        }
+        assertThat(
+            count(
+                "select count(*) from swift_messages where id = ? and status = 'COMPLETED' " +
+                    "and booking_proven_at is not null and booking_transaction_id = '$transactionId' " +
+                    "and booking_redrive_stopped_at is not null",
+                id,
+            ),
+        ).describedAs("late booking proof recorded, never dropped").isEqualTo(1)
+    }
+
+    @Test
+    fun `a four-eyes waived message leaves the age gauge and is never re-driven`() {
+        val id = heldMessage()
+        valueDates.clear()
+        execute("update swift_messages set booking_first_due_at = '2000-01-01T00:00:00Z' where id = '$id'")
+        assertThat(onContext { query.bookingAgeSnapshot() }.oldestDueAt).isEqualTo(OLDEST)
+        // Runbook 0032 waive statement (after the stop).
+        assertThat(
+            update(
+                "UPDATE swift_messages SET booking_redrive_stopped_at = now(), " +
+                    "booking_redrive_stop_reason = 'TICKET-3 approver=a executor=b', " +
+                    "booking_waived_at = now(), " +
+                    "booking_waive_reason = 'TICKET-3 rejected after ACSC, no debit owed', " +
+                    "booking_waive_approver = 'approver-a' WHERE id = ? AND booking_proven_at IS NULL " +
+                    "AND (booking_redrive_claimed_until IS NULL OR booking_redrive_claimed_until < now())",
+                id,
+            ),
+        ).isEqualTo(1)
+        assertThat(onContext { query.bookingAgeSnapshot() }.oldestDueAt).isNotEqualTo(OLDEST)
+        // The claim refuses it on the waive alone, even with the stop cleared.
+        execute(
+            "update swift_messages set booking_redrive_stopped_at = null, booking_redrive_stop_reason = null " +
+                "where id = '$id'",
+        )
+        assertThat(onContext { redrive.redrive(id) }).isEqualTo(Result.NOT_CLAIMED)
+        assertThat(valueDates).isEmpty()
+    }
+
+    private fun update(sql: String, id: UUID): Int = dataSource.connection.use { c ->
+        c.prepareStatement(sql).use { s ->
+            s.setObject(1, id)
+            s.executeUpdate()
+        }
+    }
+
     /** POST the MT103; the scheme accepts and the only settlement call fails, so it is held SENT. */
     private fun heldMessage(): UUID {
         val key = UUID.randomUUID()
@@ -247,6 +319,8 @@ class SwiftSettlementRedriveIT {
         private const val HOLD_MS = 3_000L
         private const val POLL_MS = 10L
         private const val BACKOFF_SLEEP_MS = 50L
+        private const val STALL_MS = 1_500L
+        private val OLDEST = java.time.Instant.parse("2000-01-01T00:00:00Z")
 
         @Volatile
         var behavior: suspend (SwiftMessage) -> SettlementOutcome = { SettlementOutcome(false, null) }

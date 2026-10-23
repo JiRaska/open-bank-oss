@@ -56,7 +56,11 @@ class SwiftSettlementRedriveService(
 
     private val log = Logger.getLogger(SwiftSettlementRedriveService::class.java)
 
-    enum class Result { SETTLED, RESCHEDULED, EXHAUSTED, NOT_CLAIMED }
+    /**
+     * [LATE_COMPLETION]: the booking was proven (and its proof recorded) after this re-drive had lost its
+     * claim, e.g. a stall past the lease and a manual-remediation stop in between. Counted and logged loudly.
+     */
+    enum class Result { SETTLED, LATE_COMPLETION, RESCHEDULED, EXHAUSTED, NOT_CLAIMED }
 
     /** Candidate ids for one sweep; each still has to win [redrive]'s claim. */
     suspend fun due(limit: Int): List<UUID> {
@@ -83,7 +87,16 @@ class SwiftSettlementRedriveService(
             false
         }
         if (settled) {
-            redrive.release(id, token)
+            // The completion write is NOT conditional on the claim: a booking transaction-service made must never
+            // be dropped. Losing the claim meanwhile is recorded as a late completion instead.
+            if (!redrive.release(id, token)) {
+                log.errorf(
+                    "Settlement re-drive booked SWIFT message %s after losing its claim (lease lapsed, stop or " +
+                        "another claim in flight); the proof is recorded, check any manual remediation",
+                    id,
+                )
+                return Result.LATE_COMPLETION
+            }
             log.infof("Settlement re-drive booked SWIFT message %s", id)
             return Result.SETTLED
         }

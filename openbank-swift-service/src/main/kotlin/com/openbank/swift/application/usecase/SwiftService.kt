@@ -238,6 +238,12 @@ class SwiftService(
  * #13686: an operator decision takes the message out of the settlement re-drive for good, and is refused
  * while a re-drive holds a live claim (an in-flight transaction-service call). The booking clock is NOT
  * closed: it can only close on a proven booking, so the unsettled alert keeps naming an unbooked debit.
+ *
+ * The stop commits in its OWN transaction, before the status write. That fails safe: if the status write then
+ * fails, the message is stopped but keeps its old status, so the only effect is that the sweep no longer
+ * books it (the alert keeps firing); it can never leave a message re-drivable that an operator decided on.
+ * A re-drive that stalled past its lease can still complete after the stop: that booking is under the same
+ * `swift-settlement-<messageId>` key, its proof is recorded, and it is counted as a late completion.
  */
 private suspend fun SwiftSettlementRedrivePort.stopForOperator(id: UUID, reason: String, now: Instant) {
     if (!stop(id, reason, now)) {

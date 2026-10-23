@@ -53,6 +53,7 @@ class SwiftSettlementRedriveServiceTest {
     fun `a proven booking releases the claim it holds`(): Unit = runBlocking {
         claimed()
         coEvery { swift.settleAccepted(message) } returns SwiftService.SettleAttempt(completed(), false)
+        coEvery { port.release(id, any()) } returns true
         assertThat(service.redrive(id)).isEqualTo(SwiftSettlementRedriveService.Result.SETTLED)
         coVerify(exactly = 1) { port.release(id, any()) }
         coVerify(exactly = 0) { port.reschedule(any(), any(), any(), any()) }
@@ -67,6 +68,16 @@ class SwiftSettlementRedriveServiceTest {
         assertThat(service.redrive(id)).isEqualTo(SwiftSettlementRedriveService.Result.EXHAUSTED)
         coEvery { port.reschedule(id, any(), now, backoff) } returns RescheduleOutcome(3, now, exhausted = false)
         assertThat(service.redrive(id)).isEqualTo(SwiftSettlementRedriveService.Result.RESCHEDULED)
+    }
+
+    @Test
+    fun `a booking proven after the claim was lost is a late completion, never a dropped proof`(): Unit = runBlocking {
+        claimed()
+        coEvery { swift.settleAccepted(message) } returns SwiftService.SettleAttempt(completed(), false)
+        coEvery { port.release(id, any()) } returns false
+        assertThat(service.redrive(id)).isEqualTo(SwiftSettlementRedriveService.Result.LATE_COMPLETION)
+        coVerify(exactly = 0) { port.reschedule(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { port.exhaust(any(), any(), any()) }
     }
 
     @Test

@@ -22,8 +22,11 @@ interface SwiftSettlementRedrivePort {
     /** Atomically claim [id] with [token] until [leaseUntil]; `false` if not eligible or held by someone else. */
     suspend fun claim(id: UUID, token: UUID, now: Instant, dueBefore: Instant, leaseUntil: Instant): Boolean
 
-    /** Release a claim after the booking was proven. */
-    suspend fun release(id: UUID, token: UUID)
+    /**
+     * Release a claim after the booking was proven. `false` means [token] no longer held it: the call outlived
+     * its lease, and a stop (or another claim) happened while it was in flight. The proof is recorded anyway.
+     */
+    suspend fun release(id: UUID, token: UUID): Boolean
 
     /**
      * Count one unproven attempt and release the claim. The next attempt waits [RedriveBackoff.delayAfter];
