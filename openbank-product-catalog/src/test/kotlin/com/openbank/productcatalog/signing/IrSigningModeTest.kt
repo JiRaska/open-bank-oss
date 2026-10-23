@@ -29,7 +29,7 @@ class IrSigningModeTest {
 
     @Test
     fun `the default mode is disabled and an unknown mode is a boot error`() {
-        assertThat(IrSigningMode.parse(IrSigningMode.DEFAULT)).isEqualTo(IrSigningMode.DISABLED)
+        assertThat(IrSigningMode.parse(IrSigningMode.DEFAULT)).isEqualTo("disabled")
         assertThatThrownBy { IrSigningMode.parse("hmac-please") }.hasMessageContaining("must be one of")
     }
 

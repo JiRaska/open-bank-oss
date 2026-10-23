@@ -30,26 +30,28 @@ import java.util.Optional
  * - [HMAC]: a shared secret, which proves nothing about WHO signed. Dev and test launch modes only;
  *   [IrSigningModeGuard] refuses to boot a production launch with it.
  */
-enum class IrSigningMode(val configValue: String) {
-    DISABLED("disabled"),
-    OPENBAO("openbao"),
-    HMAC("hmac"),
-    ;
+object IrSigningMode {
+    const val DISABLED = "disabled"
+    const val OPENBAO = "openbao"
+    const val HMAC = "hmac"
+    const val PROPERTY = "openbank.catalog.ir-signing.mode"
+    const val DEFAULT = DISABLED
 
-    companion object {
-        const val PROPERTY = "openbank.catalog.ir-signing.mode"
-        const val DEFAULT = "disabled"
+    /**
+     * A configuration switch, deliberately not an enum: the catalog kernel admits only structural
+     * enums (rules.yaml catalog_kernel_neutrality), and this is neither business nor structure.
+     */
+    private val ALL = listOf(DISABLED, OPENBAO, HMAC)
 
-        fun parse(value: String): IrSigningMode = entries.firstOrNull { it.configValue == value }
-            ?: error("$PROPERTY must be one of ${entries.map { it.configValue }}, was '$value'")
+    fun parse(value: String): String = value.takeIf { it in ALL }
+        ?: error("$PROPERTY must be one of $ALL, was '$value'")
 
-        /**
-         * Whether [mode] may run under [launchMode]. HMAC outside dev/test would publish signatures
-         * anyone holding the config could forge, so it is refused rather than warned about.
-         */
-        fun permitted(mode: IrSigningMode, launchMode: LaunchMode): Boolean =
-            mode != HMAC || launchMode == LaunchMode.DEVELOPMENT || launchMode == LaunchMode.TEST
-    }
+    /**
+     * Whether [mode] may run under [launchMode]. HMAC outside dev/test would publish signatures
+     * anyone holding the config could forge, so it is refused rather than warned about.
+     */
+    fun permitted(mode: String, launchMode: LaunchMode): Boolean =
+        mode != HMAC || launchMode == LaunchMode.DEVELOPMENT || launchMode == LaunchMode.TEST
 }
 
 /**
@@ -91,7 +93,7 @@ class IrSignerProducer(
             val login = OpenBaoKubernetesLogin(transport, role, Path.of(saTokenPath))
             OpenBaoTransitIrSigner(transport, keyId, CachingOpenBaoTokenSource(login::login), transitMount)
         }
-        IrSigningMode.HMAC -> HmacIrSigner(
+        else -> HmacIrSigner(
             hmacSecret.orElseThrow {
                 IllegalStateException("${IrSigningMode.PROPERTY}=hmac needs openbank.catalog.ir-signing.hmac-secret")
             }.toByteArray(Charsets.UTF_8),
