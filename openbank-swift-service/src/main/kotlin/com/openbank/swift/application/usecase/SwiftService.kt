@@ -166,7 +166,7 @@ class SwiftService(
     }
 
     /** One settlement attempt: the resulting message, and whether no retry can ever change the answer. */
-    data class SettleAttempt(val message: SwiftMessage, val permanent: Boolean)
+    data class SettleAttempt(val message: SwiftMessage, val permanent: Boolean, val bookingProven: Boolean = false)
 
     /**
      * ADR-0108: call transaction-service to book the funds and advance to COMPLETED.
@@ -177,7 +177,15 @@ class SwiftService(
         val outcome = settlementPort.settle(message)
         if (outcome.settled && outcome.transactionId != null) {
             val completed = message.copy(status = SwiftStatus.COMPLETED, updatedAt = Instant.now(clock))
-            SettleAttempt(repo.completeBooking(completed, outcome.transactionId, statusChangedEvent(completed)), false)
+            val recorded = try {
+                repo.completeBooking(completed, outcome.transactionId, statusChangedEvent(completed))
+            } catch (ex: ResourceConflictException) {
+                log.debug("Normal booking completion conflicted; checking the strict late-proof boundary", ex)
+                // Only the separate boundary may retain proof after an operator status/version change.
+                // It rechecks the immutable request and durable stop under a short row lock.
+                repo.recordLateBookingProof(message, outcome.transactionId, Instant.now(clock))
+            }
+            SettleAttempt(recorded, permanent = false, bookingProven = true)
         } else {
             log.warnf(
                 "Settlement unproven for SWIFT message %s; message stays SENT",

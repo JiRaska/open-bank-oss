@@ -277,6 +277,10 @@ WHERE id = '<messageId>' AND booking_proven_at IS NULL AND booking_waived_at IS 
   AND (booking_redrive_claimed_until IS NULL OR booking_redrive_claimed_until < now());
 ```
 
+A waiver requires all three evidence fields to be present and reason/approver to be nonblank; a partial NULL triple is rejected by PostgreSQL.
+
+A validated late answer after ACK/REJECT records proof while preserving that business decision and emits no COMPLETED status event. The `late-completion` outcome still requires reconciliation of the same-key transaction.
+
 A waive is not a booking proof: `booking_proven_at` stays null, and the record of why sits in the row.
 If a transaction row for the key appears later (a late completion), reconcile it with finance; the waive
 is then wrong and must be reviewed on the same ticket.

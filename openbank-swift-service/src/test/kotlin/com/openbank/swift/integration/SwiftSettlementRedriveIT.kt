@@ -8,6 +8,7 @@ import com.openbank.swift.application.port.out.SettlementOutcome
 import com.openbank.swift.application.port.out.SettlementPort
 import com.openbank.swift.application.port.out.SettlementUnavailableException
 import com.openbank.swift.application.port.out.SwiftBookingQuery
+import com.openbank.swift.application.port.out.SwiftRepository
 import com.openbank.swift.application.usecase.SwiftSettlementRedriveService
 import com.openbank.swift.application.usecase.SwiftSettlementRedriveService.Result
 import com.openbank.swift.domain.model.SwiftMessage
@@ -27,9 +28,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
+import org.junit.jupiter.params.provider.ValueSource
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -88,6 +93,9 @@ class SwiftSettlementRedriveIT {
 
     @Inject
     lateinit var redrive: SwiftSettlementRedriveService
+
+    @Inject
+    lateinit var repository: SwiftRepository
 
     @Inject
     lateinit var query: SwiftBookingQuery
@@ -252,6 +260,162 @@ class SwiftSettlementRedriveIT {
         )
         assertThat(onContext { redrive.redrive(id) }).isEqualTo(Result.NOT_CLAIMED)
         assertThat(valueDates).isEmpty()
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        value = [
+            "now(), NULL, NULL",
+            "now(), NULL, 'approver'",
+            "now(), 'ticket', NULL",
+            "now(), '', 'approver'",
+            "now(), 'ticket', ''",
+            "NULL, 'ticket', 'approver'",
+        ],
+        quoteCharacter = '"',
+    )
+    fun `partial or blank waive metadata is rejected by PostgreSQL`(
+        waivedAt: String,
+        reason: String,
+        approver: String,
+    ) {
+        val id = heldMessage()
+        assertThatThrownBy {
+            update(
+                "UPDATE swift_messages SET booking_waived_at = $waivedAt, " +
+                    "booking_waive_reason = $reason, booking_waive_approver = $approver WHERE id = ?",
+                id,
+            )
+        }.isInstanceOf(java.sql.SQLException::class.java)
+            .hasMessageContaining("swift_booking_waive_complete")
+        assertThat(count("select count(*) from swift_messages where id = ? and booking_waived_at is null", id))
+            .isEqualTo(1)
+    }
+
+    @Test
+    fun `complete waive metadata is accepted by PostgreSQL`() {
+        val id = heldMessage()
+        assertThat(
+            update(
+                "UPDATE swift_messages SET booking_waived_at = now(), " +
+                    "booking_waive_reason = 'ticket', booking_waive_approver = 'approver' WHERE id = ?",
+                id,
+            ),
+        ).isEqualTo(1)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["ACKNOWLEDGED", "REJECTED"])
+    fun `operator transition during stalled booking retains late proof without changing its status`(status: String) {
+        val id = heldMessage()
+        val transactionId = UUID.nameUUIDFromBytes("swift-settlement-$id".toByteArray())
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        behavior = {
+            entered.countDown()
+            holdUntil(release)
+            SettlementOutcome(true, transactionId)
+        }
+        val pool = Executors.newSingleThreadExecutor()
+        val outcome = try {
+            val inFlight = pool.submit<Result> { onContext { redrive.redrive(id) } }
+            check(entered.await(10, TimeUnit.SECONDS)) { "provider call was not entered" }
+            // The provider remains blocked while its durable lease expires.
+            Thread.sleep(STALL_MS)
+            val action = if (status == "ACKNOWLEDGED") "ack" else "reject"
+            val body = if (status == "ACKNOWLEDGED") {
+                """{"ackRef":"ACK-LATE"}"""
+            } else {
+                """{"reason":"controlled operator decision"}"""
+            }
+            given().contentType("application/json").body(body).post("/api/v1/swift/$id/$action")
+                .then().statusCode(200)
+            assertThat(count("select count(*) from swift_messages where id = ? and status = '$status'", id))
+                .isEqualTo(1)
+            release.countDown()
+            inFlight.get(30, TimeUnit.SECONDS)
+        } finally {
+            release.countDown()
+            pool.shutdownNow()
+        }
+        assertThat(
+            count(
+                "select count(*) from swift_messages where id = ? and status = '$status' " +
+                    "and booking_proven_at is not null and booking_transaction_id = '$transactionId' " +
+                    "and booking_redrive_stopped_at is not null",
+                id,
+            ),
+        ).describedAs("validated late booking proof retained without overwriting operator decision").isEqualTo(1)
+        assertThat(outcome).isEqualTo(Result.LATE_COMPLETION)
+        assertThat(
+            count(
+                "select count(*) from swift_outbox where aggregate_id = ? and payload::jsonb->>'status' = 'COMPLETED'",
+                id,
+            ),
+        ).describedAs("no invented COMPLETED transition").isZero()
+        assertThat(schemeCalls.get()).isEqualTo(1)
+        assertThat(onContext { redrive.redrive(id) }).isEqualTo(Result.NOT_CLAIMED)
+    }
+
+    @Test
+    fun `late proof refuses an unstopped message or a changed immutable request`() {
+        val id = heldMessage()
+        val attempt = checkNotNull(onContext { repository.findById(id) })
+        val transactionId = UUID.randomUUID()
+        expectBookingConflict {
+            onContext { repository.recordLateBookingProof(attempt, transactionId, java.time.Instant.now()) }
+        }
+        given().contentType("application/json").body("""{"ackRef":"ACK-PROOF"}""")
+            .post("/api/v1/swift/$id/ack").then().statusCode(200)
+        expectBookingConflict {
+            onContext {
+                repository.recordLateBookingProof(
+                    attempt.copy(valueDate = "20261021"),
+                    transactionId,
+                    java.time.Instant.now(),
+                )
+            }
+        }
+        assertThat(count("select count(*) from swift_messages where id = ? and booking_proven_at is null", id))
+            .isEqualTo(1)
+    }
+
+    @Test
+    fun `late proof replays identically and rejects a conflicting transaction without a completion event`() {
+        val id = heldMessage()
+        val attempt = checkNotNull(onContext { repository.findById(id) })
+        given().contentType("application/json").body("""{"reason":"operator decision"}""")
+            .post("/api/v1/swift/$id/reject").then().statusCode(200)
+        val transactionId = UUID.randomUUID()
+        val provenAt = java.time.Instant.now()
+        val recorded = onContext { repository.recordLateBookingProof(attempt, transactionId, provenAt) }
+        assertThat(onContext { repository.recordLateBookingProof(attempt, transactionId, provenAt.plusSeconds(1)) })
+            .isEqualTo(recorded)
+        expectBookingConflict {
+            onContext { repository.recordLateBookingProof(attempt, UUID.randomUUID(), provenAt) }
+        }
+        assertThat(
+            count(
+                "select count(*) from swift_messages where id = ? and status = 'REJECTED' " +
+                    "and booking_transaction_id = '$transactionId' and booking_proven_at is not null",
+                id,
+            ),
+        ).isEqualTo(1)
+        assertThat(
+            count(
+                "select count(*) from swift_outbox where aggregate_id = ? and payload::jsonb->>'status' = 'COMPLETED'",
+                id,
+            ),
+        ).isZero()
+    }
+
+    private fun expectBookingConflict(block: () -> Unit) {
+        val failure = runCatching(block).exceptionOrNull()
+        assertThat(
+            generateSequence(failure) { it.cause }.any {
+                it is com.openbank.libs.domain.error.ResourceConflictException
+            },
+        ).describedAs("strict booking boundary refuses the conflicting request").isTrue()
     }
 
     private fun update(sql: String, id: UUID): Int = dataSource.connection.use { c ->

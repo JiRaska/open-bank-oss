@@ -101,6 +101,10 @@ class SwiftMessageEntity {
     @field:Column(name = "booking_waived_at", insertable = false, updatable = false)
     var bookingWaivedAt: Instant? = null
 
+    /** Native re-drive bookkeeping is never written by a generic aggregate merge. */
+    @field:Column(name = "booking_redrive_stopped_at", insertable = false, updatable = false)
+    var bookingRedriveStoppedAt: Instant? = null
+
     @field:Version
     var version: Long = 0
 

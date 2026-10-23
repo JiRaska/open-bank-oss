@@ -2,10 +2,10 @@
 
 package com.openbank.swift.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.swift.application.port.out.RedriveBackoff
 import com.openbank.swift.application.port.out.SwiftRepository
 import com.openbank.swift.application.port.out.SwiftSettlementRedrivePort
-import com.openbank.swift.domain.model.SwiftStatus
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -71,14 +71,14 @@ class SwiftSettlementRedriveService(
     @Suppress("TooGenericExceptionCaught")
     suspend fun redrive(id: UUID): Result {
         val now = Instant.now(clock)
-        val token = UUID.randomUUID()
+        val token = Ids.randomId()
         if (!redrive.claim(id, token, now, now.minus(minAge), now.plus(lease))) return Result.NOT_CLAIMED
         var permanent = false
         val settled = try {
             val message = repo.findById(id) ?: error("claimed SWIFT message $id is missing")
             val attempt = swift.settleAccepted(message)
             permanent = attempt.permanent
-            attempt.message.status == SwiftStatus.COMPLETED
+            attempt.bookingProven
         } catch (ex: CancellationException) {
             // The claim lapses with its lease; the next sweep picks the message up again.
             throw ex
@@ -125,15 +125,13 @@ class SwiftSettlementRedriveService(
 
 /** The three backoff knobs, bundled so the service's injection constructor stays under detekt's limit. */
 @ApplicationScoped
-class RedriveBackoffConfig {
+class RedriveBackoffConfig(
     @ConfigProperty(name = "openbank.swift.settlement-redrive.backoff-base", defaultValue = "PT2M")
-    lateinit var base: Duration
-
+    private val base: Duration,
     @ConfigProperty(name = "openbank.swift.settlement-redrive.backoff-max", defaultValue = "PT1H")
-    lateinit var max: Duration
-
+    private val max: Duration,
     @ConfigProperty(name = "openbank.swift.settlement-redrive.max-attempts", defaultValue = "10")
-    var maxAttempts: Int = 0
-
+    private val maxAttempts: Int,
+) {
     fun toBackoff() = RedriveBackoff(base, max, maxAttempts)
 }

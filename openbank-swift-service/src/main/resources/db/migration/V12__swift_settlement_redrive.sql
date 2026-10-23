@@ -18,7 +18,8 @@ ALTER TABLE swift_messages
     ADD COLUMN booking_waive_approver TEXT;
 ALTER TABLE swift_messages ADD CONSTRAINT swift_booking_waive_complete CHECK (
     (booking_waived_at IS NULL AND booking_waive_reason IS NULL AND booking_waive_approver IS NULL)
-    OR (booking_waived_at IS NOT NULL AND length(trim(booking_waive_reason)) > 0
+    OR (booking_waived_at IS NOT NULL AND booking_waive_reason IS NOT NULL
+        AND booking_waive_approver IS NOT NULL AND length(trim(booking_waive_reason)) > 0
         AND length(trim(booking_waive_approver)) > 0)
 );
 ALTER TABLE swift_messages ADD CONSTRAINT swift_booking_redrive_stop_reasoned CHECK (
@@ -33,6 +34,7 @@ CREATE INDEX idx_swift_booking_redrive_due ON swift_messages (booking_redrive_ne
     WHERE booking_first_due_at IS NOT NULL AND booking_proven_at IS NULL
       AND booking_redrive_exhausted_at IS NULL AND booking_redrive_stopped_at IS NULL
       AND booking_waived_at IS NULL;
+-- Late proof remains durable independently of operator status. Do not clear proof or waiver evidence on rollback.
 -- Rollback: disable the sweep first (openbank.swift.settlement-redrive.enabled=false) and roll back the
 -- reader/writer; the columns are inert without it and may stay. Never touch booking_first_due_at,
 -- booking_proven_at or booking_transaction_id to roll this back. Only after that:

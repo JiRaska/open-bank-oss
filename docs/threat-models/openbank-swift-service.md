@@ -304,3 +304,5 @@ not change any existing request's outcome until explicitly flipped.
   rail, instruction type, completion and transaction-id checks remain in force. Same identity,
   endpoint and idempotency key; no retry, API or schema change. Rollback: revert this predicate
   change; the prior acceptance of an unexpected destination returns.
+
+- **2026-10-23 — Late booking proof (#13686/#13217).** After a stalled re-drive, an operator ACK/REJECT may already have committed. A separate short row-locked internal write retains strictly validated provider proof only for the unchanged original request and a durable operator stop. It preserves the operator status and metadata, emits no invented COMPLETED transition, replays the same transaction id without another write, and refuses conflicting proof. Normal completion CAS remains strict. Waiver evidence requires a complete non-null, nonblank triple; SQL NULL cannot silently exclude an obligation. No new endpoint, retry key or scheme submission.
