@@ -41,9 +41,14 @@ Rollout order, always:
 
 Deploying Billing before the ledger is safe while the flag is `false`.
 
-With `false` fee legs carry the accounts billing always posted (2100 / 4003). With `true` they name a class
-and role and the ledger map decides; fees in a currency without a mapped fee-income account are then
-refused by the ledger (422, tracked in #13226), exactly as they were refused before.
+With `false` a **CZK** fee's legs carry the accounts billing always posted (2100 / 4003). A non-CZK fee
+always names a class and role, whatever the flag: the two literal accounts are CZK and the ledger refuses
+them for any other currency (#13226). With `true` every fee names a class and role and the ledger map
+decides. Fee income is booked in the fee's own currency on 4003 (CZK), 4004 (EUR), 4005 (USD) and
+4006 (GBP), seeded by ledger `V34`, so deploy that ledger before this Billing release. A fee in any other
+currency is not written to the outbox: it is counted as
+`openbank_billing_assessment_skipped_total{reason="FEE_INCOME_CURRENCY_UNMAPPED"}`. To measure and replay
+the non-CZK backlog that the old behaviour stranded, follow `docs/runbooks/0030-billing-non-czk-fee-backlog.md`.
 
 **Rollback.** With the flag `true` the legs carry no account, so an older ledger (below `V32`) refuses
 every line. There is no rollback by configuration alone: set `OPENBANK_BILLING_LEDGER_POST_BY_CLASS=false` and redeploy Billing FIRST,
