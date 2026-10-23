@@ -6,14 +6,10 @@ package com.openbank.treasury.parity
 
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.MatrixPostings
-import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.PostingLine
-import com.openbank.treasury.domain.model.PostingMatrix
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.reference.Ifrs9Category
 import kotlinx.coroutines.runBlocking
-import java.math.BigDecimal
-import java.time.LocalDate
 
 /** Every journal of every matrix fixture's life, rendered with ids replaced by stable ordinals. */
 object MatrixJournalRender {

@@ -25,7 +25,6 @@ import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 import java.math.BigDecimal
-import java.time.LocalDate
 
 /**
  * ADR-0344 D7: every leg-described product settles, accrues, pays and matures through the
