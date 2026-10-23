@@ -40,7 +40,11 @@ info:
   #         /portfolio/statements (custodian semt.002; a correction supersedes, the prior version is
   #         kept), GET /portfolio/statements?date= (the version trail) and GET
   #         /portfolio/period-end?date= (tax-reporting's PSP 34-12 PS source; 409 when no statement).
-  version: 1.19.0
+  # 1.20.0: additive — effective-dated four-eyes reference data (ADR-0344 D3): /reference/{kind}
+  #         (list, propose, history, approve, reject, verify, export, import), the reference user
+  #         activity and application version history. The counterparty limit master is the ACTIVE
+  #         counterparty record. 422 REFERENCE_BACKDATED, 403 SENIOR_APPROVAL_REQUIRED.
+  version: 1.20.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -627,6 +631,230 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/treasury/reference/{kind}:
+    get:
+      tags: [Treasury]
+      operationId: listReferenceRecords
+      summary: Reference records of one kind (ADR-0344 D3), optionally those effective on `asOf` and/or in one status
+      parameters:
+        - $ref: '#/components/parameters/ReferenceKind'
+        - name: asOf
+          in: query
+          required: false
+          description: Only records effective on this date (validFrom <= asOf and (validTo is null or asOf < validTo)).
+          schema: { type: string, format: date }
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ReferenceStatus' }
+      responses:
+        '200':
+          description: Matching records, by key then version
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReferenceRecord' }
+        '400': { description: Unknown kind or status }
+    post:
+      tags: [Treasury]
+      operationId: proposeReferenceRecord
+      summary: >-
+        Propose a new version of a reference record (ROLE_TREASURY_REFERENCE_EDITOR or
+        ROLE_TREASURY_BACK_OFFICE; an AI agent may propose). PENDING until a different human approves.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ReferenceKind'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReferenceProposal' }
+      responses:
+        '201':
+          description: The PENDING version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReferenceRecord' }
+        '400': { description: Unknown kind, a payload that fails the kind's schema, a key that does not match the payload, or a blank reason }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/treasury/reference/{kind}/{key}:
+    get:
+      tags: [Treasury]
+      operationId: getReferenceRecord
+      summary: The currently active version of one record and its full version history
+      parameters:
+        - $ref: '#/components/parameters/ReferenceKind'
+        - $ref: '#/components/parameters/ReferenceKey'
+      responses:
+        '200':
+          description: Active version (null if none is active today) and every version, oldest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReferenceHistory' }
+        '404': { description: No version of this record exists }
+
+  /api/v1/treasury/reference/{kind}/{key}/versions/{version}/approve:
+    post:
+      tags: [Treasury]
+      operationId: approveReferenceRecord
+      summary: >-
+        Approve a PENDING version (ROLE_TREASURY_APPROVER; for kind `counterparty`, whose records carry
+        the credit limits, ROLE_TREASURY_SENIOR_APPROVER — a raised limit is refused otherwise with 403
+        SENIOR_APPROVAL_REQUIRED, and the limits before and after are recorded in approvalNote). A
+        counterparty or ssi version may not start before today (422 REFERENCE_BACKDATED). It becomes ACTIVE; an ACTIVE version
+        of the same key it overlaps is closed at its validFrom (or SUPERSEDED when it would start
+        no earlier). The proposer may not approve; an AI agent may never approve.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ReferenceKind'
+        - $ref: '#/components/parameters/ReferenceKey'
+        - $ref: '#/components/parameters/ReferenceVersion'
+      responses:
+        '200':
+          description: The ACTIVE version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReferenceRecord' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No such version }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '422': { description: FOUR_EYES_VIOLATION }
+
+  /api/v1/treasury/reference/{kind}/{key}/versions/{version}/reject:
+    post:
+      tags: [Treasury]
+      operationId: rejectReferenceRecord
+      summary: Reject a PENDING version with a reason (ROLE_TREASURY_APPROVER; not the proposer)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ReferenceKind'
+        - $ref: '#/components/parameters/ReferenceKey'
+        - $ref: '#/components/parameters/ReferenceVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: The REJECTED version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReferenceRecord' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No such version }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '422': { description: FOUR_EYES_VIOLATION }
+
+  /api/v1/treasury/reference/{kind}/{key}/versions/{version}/verify:
+    post:
+      tags: [Treasury]
+      operationId: verifyReferenceRecord
+      summary: >-
+        Mark a version's content as verified against its source (ROLE_TREASURY_APPROVER; not the
+        proposer; never an AI agent). An unverified record may be used but is never silently trusted.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ReferenceKind'
+        - $ref: '#/components/parameters/ReferenceKey'
+        - $ref: '#/components/parameters/ReferenceVersion'
+      responses:
+        '200':
+          description: The version with verified=true
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReferenceRecord' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No such version }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '422': { description: FOUR_EYES_VIOLATION }
+
+
+  /api/v1/treasury/reference/{kind}/export:
+    get:
+      tags: [Treasury]
+      operationId: exportReferenceRecords
+      summary: Every version of every record of one kind, in the same JSON shape as GET /reference/{kind}
+      parameters:
+        - $ref: '#/components/parameters/ReferenceKind'
+      responses:
+        '200':
+          description: Records
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ReferenceRecord' } }
+
+  /api/v1/treasury/reference/{kind}/import:
+    post:
+      tags: [Treasury]
+      operationId: importReferenceRecords
+      summary: >-
+        Propose many versions at once (ROLE_TREASURY_REFERENCE_EDITOR or ROLE_TREASURY_BACK_OFFICE).
+        Each item becomes a PENDING proposal exactly as POST /reference/{kind} would make it; nothing
+        activates without four-eyes approval. All-or-nothing: one invalid item rejects the import.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ReferenceKind'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/ReferenceProposal' } }
+      responses:
+        '201':
+          description: The PENDING versions
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ReferenceRecord' } }
+        '400': { description: An invalid item (its index is in the message) }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/treasury/reference/user-activity:
+    get:
+      tags: [Treasury]
+      operationId: getReferenceUserActivity
+      summary: Read-only — who proposed, approved, rejected or verified reference data, newest first
+      parameters:
+        - { name: since, in: query, required: false, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    at: { type: string, format: date-time }
+                    actor: { type: string }
+                    action: { type: string, enum: [PROPOSE, APPROVE, REJECT, VERIFY] }
+                    kind: { type: string }
+                    key: { type: string }
+                    version: { type: integer }
+
+  /api/v1/treasury/reference/application-version-history:
+    get:
+      tags: [Treasury]
+      operationId: getApplicationVersionHistory
+      summary: Read-only — the schema migrations applied to this service's store, oldest first
+      responses:
+        '200':
+          description: Versions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    version: { type: string }
+                    description: { type: string }
+                    installedOn: { type: string, format: date-time }
+
+
   /api/v1/treasury/portfolio/statements:
     post:
       tags: [Portfolio]
@@ -763,6 +991,23 @@ components:
       schema:
         type: string
         format: uuid
+    ReferenceKind:
+      name: kind
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ReferenceKind' }
+    ReferenceKey:
+      name: key
+      in: path
+      required: true
+      description: The record key; for `ssi` it is `counterpartyId:currency`, for `regulatory-code` `list:code`.
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    ReferenceVersion:
+      name: version
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+
 
   responses:
     DealOk:
@@ -807,7 +1052,7 @@ components:
           type: string
           description: >-
             FOUR_EYES_VIOLATION, LIMIT_BREACHED, PRODUCT_LIMIT_BREACHED, ACTOR_NOT_PERMITTED,
-            INVALID_STATE, NOT_FOUND
+            INVALID_STATE, NOT_FOUND, REFERENCE_BACKDATED, SENIOR_APPROVAL_REQUIRED
         message:
           type: [string, 'null']
         breaches:
@@ -1010,7 +1255,7 @@ components:
       properties:
         counterpartyId: { type: string }
         name: { type: string }
-        kind: { type: string, enum: [BANK, CENTRAL_BANK] }
+        kind: { type: string, enum: [BANK, CENTRAL_BANK] } # 1.20.0: CORPORATE and ISSUER counterparties are not listed here (closed response enum); see GET /reference/counterparty
         synthetic: { type: boolean }
         currency: { type: string }
         limit: { type: number }
@@ -1236,3 +1481,172 @@ components:
         sha256: {type: string}
         uploadedBy: {type: string}
         uploadedAt: {type: string, format: date-time}
+    BusinessDayConvention:
+      type: string
+      enum: [UNADJUSTED, FOLLOWING, MODIFIED_FOLLOWING, PRECEDING, MODIFIED_PRECEDING]
+    DayCountConvention:
+      type: string
+      enum: [ACT/360, ACT/365F, ACT/ACT_ISDA, 30/360, 30E/360]
+    Frequency:
+      type: string
+      enum: [ONCE, DAILY, WEEKLY, MONTHLY, QUARTERLY, SEMI_ANNUAL, ANNUAL]
+    ReferenceKind:
+      type: string
+      enum: [calendar, index, counterparty, ssi, netting, security, book, bucket-set, regulatory-code]
+    ReferenceStatus:
+      type: string
+      enum: [PENDING, ACTIVE, SUPERSEDED, REJECTED]
+    ReferenceProposal:
+      type: object
+      required: [key, validFrom, payload, reason]
+      properties:
+        key: { type: string, minLength: 1, maxLength: 128 }
+        validFrom: { type: string, format: date }
+        validTo: { type: [string, 'null'], format: date, description: Exclusive end; null is open-ended }
+        payload: { $ref: '#/components/schemas/ReferencePayload' }
+        reason: { type: string, minLength: 1, maxLength: 1000 }
+    ReferenceRecord:
+      type: object
+      required: [kind, key, version, status, validFrom, verified, payload, createdBy, createdAt]
+      properties:
+        kind: { $ref: '#/components/schemas/ReferenceKind' }
+        key: { type: string }
+        version: { type: integer }
+        status: { $ref: '#/components/schemas/ReferenceStatus' }
+        validFrom: { type: string, format: date }
+        validTo: { type: [string, 'null'], format: date }
+        verified: { type: boolean }
+        payload: { $ref: '#/components/schemas/ReferencePayload' }
+        createdBy: { type: string }
+        createdByType: { type: string, enum: [HUMAN, AI_AGENT, SERVICE, SYSTEM] }
+        createdAt: { type: string, format: date-time }
+        approvedBy: { type: [string, 'null'] }
+        approvedAt: { type: [string, 'null'], format: date-time }
+        verifiedBy: { type: [string, 'null'] }
+        reason: { type: [string, 'null'] }
+        decisionReason: { type: [string, 'null'] }
+        approvalNote: { type: [string, 'null'], description: 'What the approval changed, e.g. a counterparty''s limits before and after' }
+    ReferenceHistory:
+      type: object
+      required: [kind, key, versions]
+      properties:
+        kind: { $ref: '#/components/schemas/ReferenceKind' }
+        key: { type: string }
+        active:
+          oneOf:
+            - $ref: '#/components/schemas/ReferenceRecord'
+            - type: 'null'
+        versions:
+          type: array
+          items: { $ref: '#/components/schemas/ReferenceRecord' }
+    ReferencePayload:
+      description: The payload for the record's kind; validated per kind on proposal.
+      anyOf:
+        - $ref: '#/components/schemas/CalendarPayload'
+        - $ref: '#/components/schemas/IndexPayload'
+        - $ref: '#/components/schemas/CounterpartyPayload'
+        - $ref: '#/components/schemas/SsiPayload'
+        - $ref: '#/components/schemas/NettingPayload'
+        - $ref: '#/components/schemas/SecurityPayload'
+        - $ref: '#/components/schemas/BookPayload'
+        - $ref: '#/components/schemas/BucketSetPayload'
+        - $ref: '#/components/schemas/RegulatoryCodePayload'
+    CalendarPayload:
+      type: object
+      required: [code, baseCalendar]
+      properties:
+        code: { type: string }
+        baseCalendar: { type: string, enum: [CERTIS, TARGET2, WEEKEND_ONLY] }
+        extraHolidays: { type: array, items: { type: string, format: date } }
+        removedHolidays: { type: array, items: { type: string, format: date } }
+    IndexPayload:
+      type: object
+      required: [code, currency, tenor, dayCount, fixingLagBusinessDays, fixingCalendar, source]
+      properties:
+        code: { type: string }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        tenor: { type: string, pattern: '^(ON|[0-9]+[DWMY])$' }
+        dayCount: { $ref: '#/components/schemas/DayCountConvention' }
+        fixingLagBusinessDays: { type: integer, minimum: 0 }
+        fixingCalendar: { type: string }
+        source: { type: string, enum: [CNB, ECB, MANUAL, FEED] }
+        staleAfterBusinessDays: { type: integer, minimum: 0 }
+        suspiciousJumpBp: { type: integer, minimum: 0 }
+    CounterpartyPayload:
+      type: object
+      required: [id, name, kind, countryCode]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [BANK, CENTRAL_BANK, CORPORATE, ISSUER] }
+        lei: { type: [string, 'null'], pattern: '^[A-Z0-9]{20}$' }
+        countryCode: { type: string, pattern: '^[A-Z]{2}$' }
+        limits: { type: object, additionalProperties: { type: number, minimum: 0 } }
+        nettingAgreementId: { type: [string, 'null'] }
+    SsiPayload:
+      type: object
+      required: [counterpartyId, currency, rail, beneficiaryAccount]
+      properties:
+        counterpartyId: { type: string }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        rail: { type: string, enum: [CERTIS, SEPA, TARGET2, SWIFT] }
+        beneficiaryAccount: { type: string, minLength: 1, maxLength: 34 }
+        bic: { type: [string, 'null'], pattern: '^[A-Z0-9]{8}([A-Z0-9]{3})?$' }
+        intermediaryBic: { type: [string, 'null'], pattern: '^[A-Z0-9]{8}([A-Z0-9]{3})?$' }
+    NettingPayload:
+      type: object
+      required: [id, counterpartyId, currencies, paymentNetting]
+      properties:
+        id: { type: string }
+        counterpartyId: { type: string }
+        currencies: { type: array, items: { type: string } }
+        paymentNetting: { type: boolean }
+    SecurityPayload:
+      type: object
+      required: [isin, name, issuerId, type, currency, issueDate, maturityDate, denomination, dayCount, businessDayConvention, calendar]
+      properties:
+        isin: { type: string, pattern: '^[A-Z]{2}[A-Z0-9]{9}[0-9]$' }
+        name: { type: string }
+        issuerId: { type: string }
+        type: { type: string, enum: [BOND, TREASURY_BILL, BILL_OF_EXCHANGE] }
+        currency: { type: string }
+        issueDate: { type: string, format: date }
+        maturityDate: { type: string, format: date }
+        denomination: { type: number, exclusiveMinimum: 0 }
+        couponRate: { type: [number, 'null'] }
+        couponFrequency: { oneOf: [{ $ref: '#/components/schemas/Frequency' }, { type: 'null' }] }
+        dayCount: { $ref: '#/components/schemas/DayCountConvention' }
+        businessDayConvention: { $ref: '#/components/schemas/BusinessDayConvention' }
+        calendar: { type: string }
+    BookPayload:
+      type: object
+      required: [id, name, purpose, ifrs9Category]
+      properties:
+        id: { type: string }
+        parentId: { type: [string, 'null'] }
+        name: { type: string }
+        purpose: { type: string, enum: [BANKING_BOOK, TRADING_BOOK] }
+        ifrs9Category: { type: string, enum: [AMORTISED_COST, FVOCI, FVTPL] }
+    BucketSetPayload:
+      type: object
+      required: [id, name, buckets]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        buckets:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [label, fromDays]
+            properties:
+              label: { type: string }
+              fromDays: { type: integer, minimum: 0 }
+              toDays: { type: [integer, 'null'] }
+    RegulatoryCodePayload:
+      type: object
+      required: [list, code, label]
+      properties:
+        list: { type: string, enum: [CNB, DISIFE23, EMIR_PRODUCT, LCR, NSFR, TRADE_REPORTING, CLASSIFICATION] }
+        code: { type: string }
+        label: { type: string }

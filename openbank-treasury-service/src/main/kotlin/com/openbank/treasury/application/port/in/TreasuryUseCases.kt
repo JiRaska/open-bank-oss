@@ -23,6 +23,10 @@ import com.openbank.treasury.domain.model.NostroReconciliation
 import com.openbank.treasury.domain.model.NostroStatement
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.SimulatedQuote
+import com.openbank.treasury.domain.reference.ReferenceKind
+import com.openbank.treasury.domain.reference.ReferencePayload
+import com.openbank.treasury.domain.reference.ReferenceRecord
+import com.openbank.treasury.domain.reference.ReferenceStatus
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -204,6 +208,71 @@ interface NostroBreakUseCase {
 
     val policy: BreakAlertPolicy
 }
+
+data class ProposeReferenceCommand(
+    val kind: ReferenceKind,
+    val key: String,
+    val validFrom: LocalDate,
+    val validTo: LocalDate?,
+    val payload: ReferencePayload,
+    val reason: String,
+)
+
+data class ReferenceHistory(
+    val kind: ReferenceKind,
+    val key: String,
+    val active: ReferenceRecord?,
+    val versions: List<ReferenceRecord>,
+)
+
+interface ReferenceDataUseCase {
+    suspend fun list(kind: ReferenceKind, status: ReferenceStatus?, asOf: LocalDate?): List<ReferenceRecord>
+
+    suspend fun history(kind: ReferenceKind, key: String): ReferenceHistory
+
+    suspend fun propose(command: ProposeReferenceCommand, actor: Actor, key: String): ReferenceRecord
+
+    /** [seniorApprover]: the caller holds the senior approver role (needed to raise a counterparty limit). */
+    suspend fun approve(
+        kind: ReferenceKind,
+        recordKey: String,
+        version: Int,
+        actor: Actor,
+        key: String,
+        seniorApprover: Boolean,
+    ): ReferenceRecord
+
+    suspend fun reject(
+        kind: ReferenceKind,
+        recordKey: String,
+        version: Int,
+        reason: String,
+        actor: Actor,
+        key: String,
+    ): ReferenceRecord
+
+    suspend fun verify(kind: ReferenceKind, recordKey: String, version: Int, actor: Actor, key: String): ReferenceRecord
+
+    /** Many PENDING proposals of one kind, all-or-nothing, under one Idempotency-Key. */
+    suspend fun importProposals(
+        kind: ReferenceKind,
+        commands: List<ProposeReferenceCommand>,
+        actor: Actor,
+        key: String,
+    ): List<ReferenceRecord>
+
+    /** Who proposed, approved, rejected or verified what, newest first. */
+    suspend fun activity(since: java.time.Instant?): List<ReferenceActivity>
+}
+
+data class ReferenceActivity(
+    val at: java.time.Instant,
+    val actor: String,
+    val action: String,
+    val kind: String,
+    val key: String,
+    val version: Int,
+)
 
 /**
  * The custodian's period-end statement of holdings (ADR-0337 amendment): ingested like a nostro

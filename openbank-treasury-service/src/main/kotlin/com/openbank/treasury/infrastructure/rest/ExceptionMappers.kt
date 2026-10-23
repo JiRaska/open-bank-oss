@@ -15,6 +15,9 @@ import com.openbank.treasury.domain.model.LimitBreachedException
 import com.openbank.treasury.domain.model.ProductLimitBreachedException
 import com.openbank.treasury.domain.model.QuoteUnavailableException
 import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
+import com.openbank.treasury.domain.reference.ReferenceBackdatedException
+import com.openbank.treasury.domain.reference.ReferenceNotFoundException
+import com.openbank.treasury.domain.reference.SeniorApprovalRequiredException
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 
@@ -33,6 +36,27 @@ class ExceptionMappers {
     @ServerExceptionMapper
     fun notFound(e: DealNotFoundException): Response =
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun referenceNotFound(e: ReferenceNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun referenceBackdated(e: ReferenceBackdatedException): Response =
+        error(UNPROCESSABLE, "REFERENCE_BACKDATED", e.message)
+
+    @ServerExceptionMapper
+    fun seniorRequired(e: SeniorApprovalRequiredException): Response =
+        error(Response.Status.FORBIDDEN.statusCode, "SENIOR_APPROVAL_REQUIRED", e.message)
+
+    /** A concurrent writer committed first (row_version moved under the lock-free path): a conflict, 409. */
+    @ServerExceptionMapper
+    fun optimisticLock(e: jakarta.persistence.OptimisticLockException): Response =
+        error(Response.Status.CONFLICT.statusCode, "INVALID_STATE", e.message)
+
+    @ServerExceptionMapper
+    fun staleState(e: org.hibernate.StaleObjectStateException): Response =
+        error(Response.Status.CONFLICT.statusCode, "INVALID_STATE", e.message)
 
     @ServerExceptionMapper
     fun statementNotFound(e: StatementNotFoundException): Response =

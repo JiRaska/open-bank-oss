@@ -93,6 +93,13 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
+    # NOT drift — a DELIBERATE SUBSET (ADR-0344). The legacy counterparty list response
+    # (GET /api/v1/treasury/counterparties) returns only BANK and CENTRAL_BANK rows; CORPORATE and
+    # ISSUER counterparties live in reference data and are listed by GET /reference/counterparty,
+    # whose schema carries the full CounterpartyKind. A closed response enum may not grow silently.
+    "openbank-treasury-service:BANK,CENTRAL_BANK":
+        "ADR-0344 — legacy counterparty list `kind`: NOT drift. Deliberate subset of CounterpartyKind; "
+        "CORPORATE / ISSUER are served by the reference-data counterparty endpoint.",
     # MIS-PAIRINGS (ADR-0352, #668): the product IR `Cadence` (libs-domain com.openbank.libs.product.ir,
     # DAILY..ON_EVENT) is a product-behaviour vocabulary consumed by no customer-edge endpoint. These
     # three customer-edge enums (a standing-order frequency, a savings-goal frequency and a deposit
@@ -103,6 +110,10 @@ BASELINE: dict[str, str] = {
         "#668 — mis-pairing: a three-value frequency vs the product IR Cadence.",
     "openbank-customer-edge:ANNUAL,AT_MATURITY,MONTHLY,QUARTERLY,SEMI_ANNUAL":
         "#668 — mis-pairing: a deposit interest-payment frequency vs the product IR Cadence.",
+    # The treasury leg-schedule `Frequency` (ADR-0344 D3) serves the shared schedule Frequency, not
+    # the product IR Cadence; it shares calendar words with Cadence and models another concept.
+    "openbank-treasury-service:ANNUAL,DAILY,MONTHLY,ONCE,QUARTERLY,SEMI_ANNUAL,WEEKLY":
+        "#668 — mis-pairing: a treasury leg-schedule frequency vs the product IR Cadence.",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
     # values are the `channel` of the app-interaction attribution response
     # (GET /api/v1/campaigns/interactions/{interactionRef}/attribution), which resolves ONLY an

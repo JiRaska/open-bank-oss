@@ -305,3 +305,43 @@ test_tax_reporting_explicit_null_marker_is_not_legacy if {
 		not portfolio_allowed(p, "treasury.portfolio.inspect")
 	}
 }
+
+# --- ADR-0344 D3 reference data ---
+
+back_office := {"service_account": false, "type": "HUMAN", "id": "bo-1", "roles": ["ROLE_TREASURY_BACK_OFFICE"]}
+
+editor := {"service_account": false, "type": "HUMAN", "id": "editor-1", "roles": ["ROLE_TREASURY_REFERENCE_EDITOR"]}
+
+allowed_on(p, a, r) if rest.allow.allow with input as {"principal": p, "action": a, "resource": {"id": r}}
+
+test_reference_proposers_may_propose_and_not_decide if {
+	every p in [back_office, editor] {
+		allowed(p, "treasury.reference.propose")
+		allowed(p, "treasury.reference.read")
+		not allowed_on(p, "treasury.reference.approve", "calendar")
+		not allowed(p, "treasury.reference.reject")
+		not allowed(p, "treasury.reference.verify")
+	}
+}
+
+test_approver_decides_reference_but_cannot_propose if {
+	allowed_on(approver, "treasury.reference.approve", "calendar")
+	allowed(approver, "treasury.reference.verify")
+	allowed(approver, "treasury.reference.reject")
+	not allowed(approver, "treasury.reference.propose")
+}
+
+# Known-NEGATIVE first: an ordinary approver may not activate counterparty limits.
+test_counterparty_approval_needs_the_senior if {
+	not allowed_on(approver, "treasury.reference.approve", "counterparty")
+	allowed_on(senior, "treasury.reference.approve", "counterparty")
+	not allowed_on(senior, "treasury.reference.approve", "calendar")
+}
+
+test_reference_machines_and_agents_get_nothing if {
+	every p in [shared_sa, renamed_sa, agent] {
+		not allowed(p, "treasury.reference.propose")
+		not allowed_on(p, "treasury.reference.approve", "calendar")
+		not allowed_on(p, "treasury.reference.approve", "counterparty")
+	}
+}

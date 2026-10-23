@@ -20,9 +20,11 @@ import com.openbank.treasury.application.port.out.LedgerReadPort
 import com.openbank.treasury.application.port.out.NostroBreakRepository
 import com.openbank.treasury.application.port.out.NostroStatementRepository
 import com.openbank.treasury.application.port.out.PortfolioStatementRepository
+import com.openbank.treasury.application.port.out.ReferenceRepository
 import com.openbank.treasury.application.usecase.NostroBreakService
 import com.openbank.treasury.application.usecase.NostroReconciliationService
 import com.openbank.treasury.application.usecase.PortfolioStatementService
+import com.openbank.treasury.application.usecase.ReferenceDataService
 import com.openbank.treasury.application.usecase.SimulatedQuoteService
 import com.openbank.treasury.application.usecase.TreasuryDealService
 import com.openbank.treasury.domain.model.BreakAlertPolicy
@@ -88,6 +90,12 @@ class TreasuryServiceProducer {
         quotes,
         productLimits.toPolicy(),
     )
+
+    /** ADR-0344 D3: the reference-data steward. */
+    @Produces
+    @ApplicationScoped
+    fun referenceDataService(records: ReferenceRepository, clock: Clock): ReferenceDataService =
+        ReferenceDataService(records, clock)
 
     @Produces
     @ApplicationScoped
