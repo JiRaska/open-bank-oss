@@ -4333,7 +4333,7 @@ libs_bench_alloc_baseline:
   require:
     - "every @Benchmark has an entry in alloc-baseline.json and every entry has a @Benchmark (scope derived, both directions)"
     - "B/op from a JMH run (-f 1 -wi 3 -i 3 -prof gc, SerialGC, -Xmx512m) stays within max(5 %, 16 B) above the baseline"
-    - "the baseline is written by check-bench-alloc-baseline.py --write-baseline from a run, never typed by hand"
+    - "the baseline is generated from JMH by check-bench-alloc-baseline.py --write-baseline or --ratchet-baseline, never typed by hand; a selective ratchet cannot raise an existing budget"
     - "a benchmark whose B/op is bimodal across forks (the JIT decides it) is listed in the script's UNSTABLE table with the measurement: it runs and is reported, never compared; a stale UNSTABLE entry is a finding"
   gate: libs-bench-alloc-baseline
   baseline: "openbank-libs-benchmarks/alloc-baseline.json"
