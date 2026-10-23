@@ -134,14 +134,6 @@ deploy_holds:
       issue: '#12948'
       reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
       release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-    openbank-communication-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-consent-service:
       all_of:
       - issue: '#12948'
