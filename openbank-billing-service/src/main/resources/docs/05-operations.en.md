@@ -11,6 +11,22 @@ dropped components; it does not count the components themselves. These aggregate
 identify an individual assessment;
 investigate affected records through authorized business data access, not operational logs.
 
+## Which price components are billed (#13230)
+
+A revision whose price components carry a catalog `role` is billed by role. Only `FEE` is charged; a `LIMIT`,
+`THRESHOLD` or `RATE` never is. If the revision also embeds a v1 document, a `FEE` is billed only when its
+code is one the v1 document derives, and it keeps that v1 fee's id. The idempotency key
+(cycle, account, fee id, currency) therefore stays the same when an account is re-pinned mid-cycle, and
+nothing is charged twice. A `FEE` with any other code is dropped and counted as
+`openbank.billing.fee.component.dropped{reason=NOT_IN_LEGACY_DOCUMENT}`. A revision with no roles at all
+is billed by the legacy match against its embedded v1 fees, exactly as before.
+
+A dropped `NOT_IN_LEGACY_DOCUMENT` fee is never charged, so it is lost revenue on every assessment
+under that revision. The `BillingFeeComponentNotBilledNotInLegacyDocument` alert (warning) fires on
+it. The remedy is a new catalog revision: either add the fee to the v1 product so its code is derived,
+or publish a revision without the embedded v1 document. Then re-pin the affected accounts. The steps
+are in `docs/runbooks/0031-billing-fee-not-in-legacy-document.md`.
+
 ## Billing metric prefix migration
 
 Seven billing counters now use the `openbank.billing.*` Micrometer prefix. The suffixes are

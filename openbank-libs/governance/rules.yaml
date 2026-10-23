@@ -5143,6 +5143,7 @@ catalog_kernel_neutrality:
     - TaxTreatment         # price quoted tax-inclusive/exclusive (ADR-0339 D fences it as price semantics)
     - EligibilityOperator  # rule-engine operators
     - RelationshipKind     # offering graph edge semantics
+    - PriceRole            # what a price component is (FEE/RATE/LIMIT/THRESHOLD, #13230); the kernel branches on it (a FEE must be an AMOUNT)
   # Words that occur in pack type names but are generic catalog/kernel language.
   vocabulary_not_industry: [legacy, product, instrument, term]
   # The /api/v1 banking compatibility vocabulary (ADR-0257 D3). Frozen: a pack schema is the
