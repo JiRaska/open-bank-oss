@@ -1173,9 +1173,13 @@ class LendingService @Inject constructor(
      * (IAS 1 accrual basis), booking each to the ledger as an accrual against a receivable. Idempotent:
      * the `interestAccrued` flag is set per row, so a re-run never double-recognizes. Repayment later
      * settles the receivable rather than re-recognizing income (see [recordRepayment]).
+     *
+     * Reads `limit + 1` rows and accrues at most [limit]: the extra row is only a probe, so a pass the
+     * batch cap cut short reports [AccrualOutcome.truncated] instead of looking complete (ADR-0342).
      */
     override fun accrueDueInterest(asOf: LocalDate, limit: Int): Uni<AccrualOutcome> =
-        installments.findAccruable(asOf, limit).flatMap { due ->
+        installments.findAccruable(asOf, limit + 1).flatMap { found ->
+            val due = found.take(limit)
             Multi.createFrom().iterable(due)
                 .onItem().transformToUniAndConcatenate { installment -> accrueOne(installment) }
                 .collect().asList()
@@ -1184,6 +1188,7 @@ class LendingService @Inject constructor(
                         asOf = asOf,
                         installmentsAccrued = accrued.size,
                         journalsPosted = accrued.count { it.interest.isPositive() },
+                        truncated = found.size > limit,
                     )
                 }
         }

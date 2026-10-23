@@ -817,6 +817,35 @@ class LendingServiceTest {
         verify(exactly = 0) { events.emit(any<LendingOutboxMessage>()) }
     }
 
+    // ADR-0342: a pass the batch cap cut short must say so, or it is recorded RAN over unbooked interest.
+    @Test
+    fun `accrual probes one row past the batch and reports a truncated pass`() {
+        val loanId = LoanId.random()
+        fun zeroInterest(n: Int) = LoanInstallment(
+            loanId = loanId,
+            number = n,
+            dueDate = LocalDate.parse("2026-07-01"),
+            openingBalance = eur("100.00"),
+            principal = eur("100.00"),
+            interest = eur("0.00"),
+            payment = eur("100.00"),
+            closingBalance = eur("0.00"),
+        )
+        every { installments.findAccruable(any(), 3) } returns
+            Uni.createFrom().item(listOf(zeroInterest(1), zeroInterest(2), zeroInterest(3)))
+        every { installments.findAccruable(any(), 4) } returns
+            Uni.createFrom().item(listOf(zeroInterest(1), zeroInterest(2), zeroInterest(3)))
+        every { installments.markAccrued(any(), any()) } returns Uni.createFrom().item(1)
+
+        val capped = service.accrueDueInterest(LocalDate.parse("2026-08-01"), 2).await().indefinitely()
+        assertThat(capped.installmentsAccrued).isEqualTo(2)
+        assertThat(capped.truncated).isTrue()
+
+        val complete = service.accrueDueInterest(LocalDate.parse("2026-08-01"), 3).await().indefinitely()
+        assertThat(complete.installmentsAccrued).isEqualTo(3)
+        assertThat(complete.truncated).isFalse()
+    }
+
     @Test
     fun `repayment settles the receivable when interest was already accrued`() {
         val loanId = LoanId.random()

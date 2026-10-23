@@ -579,7 +579,11 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
   or crashed pass holds the ledger's close. An accrual the ledger refuses with `409
   ACCOUNTING_DAY_CLOSED` (D4) is recorded REFUSED with that category; any other failed pass, and a
   provisioning pass that leaves exposures unprovisioned or cannot count coverage, is REFUSED with a
-  fixed category, never RAN. Reasons carry categories and counts only — no loan id, party id or
+  fixed category, never RAN. An accrual pass the batch cap cut short (the use case reads one row
+  past the batch as a probe) is REFUSED `due installment(s) left unaccrued`, so a capped pass cannot
+  report a complete day. Both passes now take their as-of date from the Prague accounting day
+  (`AccountingClock.bank`) once at the start and file their evidence under that same date, so a pass
+  crossing midnight, or a UTC pod, cannot accrue for one day and report another. Reasons carry categories and counts only — no loan id, party id or
   exception text leaves the service. **STRIDE-D:** a ledger outage only delays the report (re-offered
   every tick, the day waits and pages). **Known gap:** allowance journals queued by provisioning are
   dispatched by the outbox, so a closed-day 409 at dispatch time is not yet a participation outcome

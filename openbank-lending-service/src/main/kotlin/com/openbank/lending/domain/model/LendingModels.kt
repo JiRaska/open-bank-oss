@@ -220,6 +220,8 @@ data class AccrualOutcome(
     val installmentsAccrued: Int,
     /** Journals booked: installments with positive interest (a zero-interest row is only flagged). */
     val journalsPosted: Int = 0,
+    /** True when the batch cap stopped the pass with installments still due as of [asOf]. */
+    val truncated: Boolean = false,
 )
 
 /**
