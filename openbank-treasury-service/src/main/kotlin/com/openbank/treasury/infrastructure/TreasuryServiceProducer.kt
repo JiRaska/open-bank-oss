@@ -80,6 +80,7 @@ class TreasuryServiceProducer {
         productLimits: ProductLimitConfig,
         schedules: ScheduleService,
         references: ReferenceRepository,
+        payments: com.openbank.treasury.application.usecase.PaymentService,
     ): TreasuryDealUseCase = TreasuryDealService(
         deals,
         counterparties,
@@ -95,6 +96,7 @@ class TreasuryServiceProducer {
         productLimits.toPolicy(),
         schedules,
         ProductMandate(references, productLimits.toPolicy(), clock)::policy,
+        paymentGuard = { id -> payments.guardDealChange(id) },
     )
 
     /** ADR-0344 D3/D4: reference validation and schedule generation through openbank-libs-finance. */
@@ -155,7 +157,59 @@ class TreasuryServiceProducer {
         ledger: LedgerReadPort,
         config: NostroConfig,
         clock: Clock,
-    ): NostroReconciliationUseCase = NostroReconciliationService(statements, ledger, config.accounts(), clock)
+        payments: com.openbank.treasury.application.usecase.PaymentService,
+    ): NostroReconciliationUseCase = NostroReconciliationService(statements, ledger, config.accounts(), clock) {
+            ccy,
+            amount,
+            date,
+            ref,
+            who,
+        ->
+        payments.matchIncoming(ccy, amount, date, ref, who)
+    }
+
+    /** ADR-0344 D6: the deal-to-payment chain. */
+    @Produces
+    @ApplicationScoped
+    @Suppress("LongParameterList")
+    fun paymentService(
+        payments: com.openbank.treasury.application.port.out.PaymentRepository,
+        deals: DealRepository,
+        cashFlows: CashFlowRepository,
+        references: ReferenceRepository,
+        ledger: LedgerReadPort,
+        objectMapper: ObjectMapper,
+        clock: Clock,
+        meterRegistry: io.micrometer.core.instrument.MeterRegistry,
+        @ConfigProperty(name = "openbank.treasury.payments.cut-off-window-days", defaultValue = "2")
+        window: Long,
+        @ConfigProperty(
+            name = "openbank.treasury.payments.own-bic",
+            defaultValue = com.openbank.treasury.application.usecase.PaymentService.DEFAULT_OWN_BIC,
+        )
+        ownBic: String,
+        counterparties: CounterpartyRepository,
+    ): com.openbank.treasury.application.usecase.PaymentService =
+        com.openbank.treasury.application.usecase.PaymentService(
+            payments,
+            deals,
+            cashFlows,
+            references,
+            ledger,
+            objectMapper,
+            clock,
+            window,
+            onFundingExceeded = { ccy ->
+                meterRegistry.counter("openbank.treasury.funding.exceeded", "currency", ccy).increment()
+            },
+            onParkedMatch = { meterRegistry.counter("openbank.treasury.payments.match.parked").increment() },
+            ownBic = ownBic,
+            counterparty = { id ->
+                counterparties.findById(id)?.let {
+                    com.openbank.treasury.application.usecase.CounterpartyIdentity(it.name, it.synthetic)
+                }
+            },
+        )
 
     /** ADR-0315 D7: breaks with age and the alert threshold (`openbank.treasury.nostro.break-alert-*`). */
     @Produces

@@ -173,10 +173,12 @@ class DealRepositoryImpl(
         command: CommandKey?,
         schedule: ScheduleWrite?,
         extraEvents: List<DealEvent>,
+        withdrawPayments: Boolean,
+        limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
     ): Deal {
         val actor = deal.history.lastOrNull()?.actor?.id ?: deal.createdBy.id
         Panache.withTransaction {
-            val row = find("dealId", deal.id).firstResult()
+            val row = lockedRow(deal.id, withdrawPayments, limitGuard)
             row.flatMap { existing ->
                 val entity = existing ?: DealEntity().apply {
                     dealId = deal.id
@@ -209,6 +211,29 @@ class DealRepositoryImpl(
             }
         }.awaitSuspending()
         return deal
+    }
+
+    /**
+     * The deal row, locked when the change withdraws payments or consumes a limit line. Lock order
+     * everywhere: the deal row, then the limit line, so two writes on
+     * one line never deadlock.
+     */
+    private fun lockedRow(
+        dealId: UUID,
+        withdrawPayments: Boolean,
+        limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
+    ): Uni<DealEntity?> {
+        if (!withdrawPayments && limitGuard == null) return find("dealId", dealId).firstResult()
+        return find("dealId", dealId).withLock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE).firstResult()
+            .flatMap { locked ->
+                if (withdrawPayments) withdraw(dealId).map { locked } else Uni.createFrom().item(locked)
+            }
+            .flatMap { locked ->
+                limitGuard?.let { g ->
+                    Panache.getSession().flatMap { exposureUnderLock(it, dealId, g) }.map { locked }
+                }
+                    ?: Uni.createFrom().item(locked)
+            }
     }
 
     /** One `deal_versions` row per terms version; the schedule columns follow the latest generation. */
@@ -248,6 +273,120 @@ class DealRepositoryImpl(
         "legs" to deal.legs,
         "header" to deal.header.copy(confirmationsSent = emptyList()),
     )
+
+    /**
+     * Under the deal lock: refuse while a payment of the deal is released; else cancel its PROPOSED
+     * payments with scoped, version-bumped updates, free exactly their flows, drop their links and
+     * record the status event — all in the caller's transaction.
+     */
+    private fun withdraw(dealId: java.util.UUID): Uni<Void> = Panache.getSession().flatMap { session ->
+        val like = "%$dealId%"
+        session.createNativeQuery<Any>(
+            "select cast(payment_id as varchar) from treasury_payments where deal_ids like :d and status in (:released)",
+        ).setParameter("d", like).setParameter("released", RELEASED_STATUSES).resultList.flatMap { released ->
+            released.firstOrNull()?.let {
+                throw com.openbank.treasury.domain.payment.DealHasReleasedPaymentException(
+                    dealId,
+                    java.util.UUID.fromString(it.toString()),
+                )
+            }
+            session.createNativeQuery<Any>(
+                "select cast(payment_id as varchar) from treasury_payments where deal_ids like :d and status = 'PROPOSED' for update",
+            ).setParameter("d", like).resultList
+        }.flatMap { proposed ->
+            cancelProposed(session, dealId, proposed.map { java.util.UUID.fromString(it.toString()) })
+        }
+    }
+
+    /** Cancel each PROPOSED payment (scoped, guarded on its status), free its flows, record the event. */
+    private fun cancelProposed(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        dealId: java.util.UUID,
+        pids: List<java.util.UUID>,
+    ): Uni<Void> = pids.fold(Uni.createFrom().voidItem()) { chain, pid ->
+        chain.flatMap {
+            session.createNativeQuery<Any>(
+                "update deal_cash_flows set payment_id = null, row_version = row_version + 1 where payment_id = :p",
+            ).setParameter("p", pid.toString()).executeUpdate()
+        }.flatMap {
+            session.createNativeQuery<Any>("delete from treasury_payment_flows where payment_id = :p")
+                .setParameter("p", pid).executeUpdate()
+        }.flatMap {
+            session.createNativeQuery<Any>(
+                "update treasury_payments set status = 'CANCELLED', status_reason = :r where payment_id = :p and status = 'PROPOSED'",
+            ).setParameter("r", "deal $dealId changed").setParameter("p", pid).executeUpdate()
+        }.flatMap { n ->
+            check(n == 1) { "payment $pid changed while its deal was being changed" }
+            outbox.persistInTransaction(
+                OutboxMessage(
+                    aggregateId = pid,
+                    eventType = "treasury.payment.status-changed.v1",
+                    payload = objectMapper.writeValueAsString(
+                        mapOf(
+                            "paymentId" to pid,
+                            "status" to "CANCELLED",
+                            "reason" to "deal $dealId changed",
+                            "occurredAt" to clock.instant(),
+                        ),
+                    ),
+                    createdAt = clock.instant(),
+                ),
+            )
+        }
+    }
+
+    /**
+     * The headroom a limit-consuming write (submit, approve) was vetted against,
+     * re-measured inside its transaction under a transaction-scoped lock on the (counterparty, limit
+     * currency) line — ONE key for every such write, so two writes on one line serialise and cannot
+     * jointly breach — by the same [lineExposure] query [exposure] answers with. A breach meanwhile
+     * is a 422, never a committed breach.
+     */
+    private fun exposureUnderLock(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        dealId: java.util.UUID,
+        g: com.openbank.treasury.application.port.out.ExposureGuard,
+    ): Uni<Void> = session.createNativeQuery<Any>("select pg_advisory_xact_lock(hashtext(:line))")
+        .setParameter("line", "treasury-limit:${g.counterpartyId}:${g.currency}").singleResult
+        .flatMap { lineExposure(session, g.counterpartyId, g.currency, dealId) }
+        .map { exposure ->
+            if (exposure > g.maxOthers) {
+                throw com.openbank.treasury.application.port.out.LimitLineBreachedException(
+                    "counterparty ${g.counterpartyId} ${g.currency}: other exposure $exposure exceeds the " +
+                        "${g.maxOthers} headroom the change was vetted against",
+                )
+            }
+        }.replaceWithVoid()
+
+    /**
+     * The limit-consuming exposure of one (counterparty, LIMIT currency) line, [excludeDealId] aside:
+     * the principal of ACTUAL asset deals in that currency in a consuming state, plus — on the CZK
+     * line — the CZK counter-amount of unsettled ACTUAL FX spots ([Deal.limitAmount] of each).
+     */
+    private fun lineExposure(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        counterpartyId: String,
+        currency: String,
+        excludeDealId: UUID?,
+    ): Uni<BigDecimal> {
+        val fxPart = if (currency == Deal.CZK) {
+            " + coalesce((select sum(fx_counter_amount) from deals where counterparty_id = :cp " +
+                "and product = 'FX_SPOT' and state in (:fxStates) and kind = 'ACTUAL' and deal_id <> :d), 0)"
+        } else {
+            ""
+        }
+        val q = session.createNativeQuery<Any>(
+            "select coalesce((select sum(principal) from deals where counterparty_id = :cp " +
+                "and currency = :ccy and state in (:states) and product in (:products) " +
+                "and kind = 'ACTUAL' and deal_id <> :d), 0)" +
+                fxPart,
+        ).setParameter("cp", counterpartyId).setParameter("ccy", currency)
+            .setParameter("d", excludeDealId ?: NO_DEAL)
+            .setParameter("states", LIMIT_CONSUMING_STATE_NAMES)
+            .setParameter("products", LIMIT_CONSUMING_PRODUCT_NAMES)
+        if (fxPart.isNotEmpty()) q.setParameter("fxStates", Deal.FX_LIMIT_CONSUMING_STATES.map { it.name })
+        return q.singleResult.map { BigDecimal(it.toString()) }
+    }
 
     private fun scheduleRows(s: ScheduleWrite): Uni<Void> {
         val flows = s.flows.map { CashFlowEntity().fill(it) }
@@ -358,36 +497,6 @@ class DealRepositoryImpl(
         Panache.withSession {
             Panache.getSession().flatMap { lineExposure(it, counterpartyId, currency, excludeDealId) }
         }.awaitSuspending()
-
-    /**
-     * The limit-consuming exposure of one (counterparty, LIMIT currency) line, [excludeDealId] aside:
-     * the principal of ACTUAL asset deals in that currency in a consuming state, plus — on the CZK
-     * line — the CZK counter-amount of unsettled ACTUAL FX spots ([Deal.limitAmount] of each).
-     */
-    private fun lineExposure(
-        session: org.hibernate.reactive.mutiny.Mutiny.Session,
-        counterpartyId: String,
-        currency: String,
-        excludeDealId: UUID?,
-    ): Uni<BigDecimal> {
-        val fxPart = if (currency == Deal.CZK) {
-            " + coalesce((select sum(fx_counter_amount) from deals where counterparty_id = :cp " +
-                "and product = 'FX_SPOT' and state in (:fxStates) and kind = 'ACTUAL' and deal_id <> :d), 0)"
-        } else {
-            ""
-        }
-        val q = session.createNativeQuery<Any>(
-            "select coalesce((select sum(principal) from deals where counterparty_id = :cp " +
-                "and currency = :ccy and state in (:states) and product in (:products) " +
-                "and kind = 'ACTUAL' and deal_id <> :d), 0)" +
-                fxPart,
-        ).setParameter("cp", counterpartyId).setParameter("ccy", currency)
-            .setParameter("d", excludeDealId ?: NO_DEAL)
-            .setParameter("states", LIMIT_CONSUMING_STATE_NAMES)
-            .setParameter("products", LIMIT_CONSUMING_PRODUCT_NAMES)
-        if (fxPart.isNotEmpty()) q.setParameter("fxStates", Deal.FX_LIMIT_CONSUMING_STATES.map { it.name })
-        return q.singleResult.map { BigDecimal(it.toString()) }
-    }
 
     /**
      * Deals currently PENDING_APPROVAL that carry a senior limit override (ADR-0315 D4, #10896).
@@ -561,6 +670,9 @@ class DealRepositoryImpl(
     }
 
     private companion object {
+        /** Derived from [PaymentStatus.BLOCKING_DEAL_CHANGE] — never a second literal list. */
+        val RELEASED_STATUSES = com.openbank.treasury.domain.payment.PaymentStatus.BLOCKING_DEAL_CHANGE_NAMES
+
         /** Derived from [Deal.LIMIT_CONSUMING_STATES] — never a second, independently-typed literal list. */
         val LIMIT_CONSUMING_STATE_NAMES = Deal.LIMIT_CONSUMING_STATES.map { it.name }
 

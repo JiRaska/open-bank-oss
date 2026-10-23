@@ -21,6 +21,7 @@ import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.DealRepository
+import com.openbank.treasury.application.port.out.ExposureGuard
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LedgerJournalRef
@@ -92,6 +93,11 @@ class TreasuryDealService(
     private val schedules: ScheduleService? = null,
     /** ADR-0344 catalogue: the product mandate from the reference store (config seeds the rest). */
     private val mandate: (suspend () -> ProductLimitPolicy)? = null,
+    /**
+     * ADR-0344 D6: runs before a deal is cancelled or reversed: blocks the change while a payment of
+     * the deal is released, withdraws its PROPOSED payments.
+     */
+    private val paymentGuard: (suspend (dealId: UUID) -> Unit)? = null,
 ) : TreasuryDealUseCase {
 
     private suspend fun policy(): ProductLimitPolicy = mandate?.invoke() ?: productLimits
@@ -216,6 +222,9 @@ class TreasuryDealService(
             command = cmd(key, SUBMIT, dealId),
             schedule = generated?.write,
             extraEvents = events,
+            // A submission that fits consumes the line now: serialised with every other write on it.
+            // One that breaches goes to review (PENDING_APPROVAL) and is re-guarded at approval.
+            limitGuard = check.takeIf { submitted.consumesLimit && !it.breached }?.let { ExposureGuard.of(it) },
         )
     }
 
@@ -256,7 +265,10 @@ class TreasuryDealService(
                 ),
             ),
         )
-        return deals.save(booked, event = event, command = cmd(key, APPROVE, dealId))
+        val guard = check.takeIf {
+            booked.consumesLimit
+        }?.let { ExposureGuard.of(it, booked.limitOverride?.coversExposureUpTo) }
+        return deals.save(booked, event = event, command = cmd(key, APPROVE, dealId), limitGuard = guard)
     }
 
     override suspend fun overrideLimit(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {
@@ -277,7 +289,7 @@ class TreasuryDealService(
         // Domain transition (authorisation, state) FIRST; the payment withdrawal happens in the save's
         // transaction under the deal lock, so a refused or failed cancel withdraws nothing.
         val cancelled = load(dealId).cancel(actor, clock.instant())
-        return deals.save(cancelled, command = cmd(key, CANCEL, dealId))
+        return deals.save(cancelled, command = cmd(key, CANCEL, dealId), withdrawPayments = paymentGuard != null)
     }
 
     override suspend fun confirm(dealId: UUID, reference: String?, actor: Actor, key: String?): Deal {
@@ -366,6 +378,9 @@ class TreasuryDealService(
         key?.let { k -> replay(k, REVERSE, dealId)?.let { return it } }
         val deal = load(dealId)
         val reversed = deal.reverse(actor, reason, clock.instant())
+        // Read-only pre-check before the reversal journal is posted (no side effect); the binding
+        // check and the withdrawal run again under the deal lock in the save's transaction.
+        paymentGuard?.invoke(dealId)
         check(deal.product.legacy || deal.state != DealState.SETTLED) {
             "a settled ${deal.product} deal is changed by a correction (ADR-0344 D7), not reversed"
         }
@@ -397,7 +412,7 @@ class TreasuryDealService(
                 ),
             ),
         )
-        return deals.save(reversed, ref, event, cmd(key, REVERSE, dealId))
+        return deals.save(reversed, ref, event, cmd(key, REVERSE, dealId), withdrawPayments = paymentGuard != null)
     }
 
     override suspend fun sendConfirmation(

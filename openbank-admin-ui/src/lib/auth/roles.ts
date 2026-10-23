@@ -54,6 +54,9 @@ export const ROLES = {
   // sent confirmations; the reference editor proposes reference-data versions. Neither approves.
   TREASURY_BACK_OFFICE: "ROLE_TREASURY_BACK_OFFICE",
   TREASURY_REFERENCE_EDITOR: "ROLE_TREASURY_REFERENCE_EDITOR",
+  // ADR-0344 phase 1b: the payment releaser alone releases a proposed payment to the rail; never
+  // the deal's creator or a term author (the domain's 403), never ADMIN.
+  TREASURY_PAYMENT_RELEASER: "ROLE_TREASURY_PAYMENT_RELEASER",
 } as const
 
 export type Role = typeof ROLES[keyof typeof ROLES]
@@ -65,7 +68,7 @@ export const PERMISSIONS = {
   // the KYC and supervisor entries their role-specific workspace can be
   // derived, but the role matrix says they may not view the dashboard — a
   // contradiction ADR-0229 D4 explicitly rules out.
-  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.RISK, ROLES.FINANCE, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_REFERENCE_EDITOR],
+  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.RISK, ROLES.FINANCE, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_REFERENCE_EDITOR, ROLES.TREASURY_PAYMENT_RELEASER],
   // Accounts
   "accounts:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS],
   "accounts:create":          [ROLES.ADMIN, ROLES.OPERATOR],
@@ -129,6 +132,8 @@ export const PERMISSIONS = {
   // admitted (mirrored in ADMIN_EXCLUDED_BY_SERVICE, roles.test.ts).
   "treasury:nostro:read":   [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
   "treasury:nostro:upload": [ROLES.TREASURY_APPROVER],
+  // ADR-0344 phase 1b (PaymentResource release): the releaser role only, never ADMIN.
+  "treasury:payment:release": [ROLES.TREASURY_PAYMENT_RELEASER],
   // Pension back office (ADR-0334, #12350): exactly the two pension services' @RolesAllowed.
   // Reads admit OPERATOR, ADMIN and AUDITOR; every write (activate, NAV calculate/publish, strategy
   // change submit/decide/apply) admits OPERATOR and ADMIN. Four-eyes between maker and checker is
