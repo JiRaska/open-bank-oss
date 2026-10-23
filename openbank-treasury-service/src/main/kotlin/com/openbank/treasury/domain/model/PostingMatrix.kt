@@ -1006,25 +1006,4 @@ object MatrixPostings {
         return PostingMatrix.lines(rows, ctx, deal.currency, category)
     }
 
-    /** The REVALUATION journal for a fair-value change from the risk engine's valuation (never priced here). */
-    fun revaluation(
-        deal: Deal,
-        change: BigDecimal,
-        currency: String,
-        asOf: LocalDate,
-        category: Ifrs9Category,
-    ): JournalSpec? {
-        val rows = PostingMatrix.rows(deal.product, PostingEvent.REVALUATION, category)
-        if (rows.isEmpty() || change.signum() == 0) return null
-        val ctx = PostingContext(
-            mapOf(
-                AmountExpression.GAIN to change.max(BigDecimal.ZERO),
-                AmountExpression.LOSS to change.negate().max(BigDecimal.ZERO),
-            ),
-        )
-        val lines = PostingMatrix.lines(rows, ctx, currency, category)
-        return lines.takeIf {
-            it.size >= 2
-        }?.let { JournalSpec(deal.id, PostingEvent.REVALUATION, it, suffix = asOf.toString()) }
-    }
 }

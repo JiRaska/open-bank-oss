@@ -113,8 +113,8 @@ class TreasuryDealService(
     override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, DRAFT, null)?.let { return it } }
         // ADR-0344 delivery phases: a product is drafted only once its phase has landed (400, never a
-        // 500 later). A delivered leg-described product still settles only through the posting-rule
-        // matrix (phase 2), which settle and mature check.
+        // 500 later). A delivered leg-described product settles and matures through the posting-rule
+        // matrix; settle and mature check the same set.
         require(command.product in ProductType.DELIVERED) { NOT_DELIVERED.format(command.product) }
         counterparties.findById(command.counterpartyId) ?: throw UnknownCounterpartyException(command.counterpartyId)
         val now = clock.instant()
@@ -358,10 +358,10 @@ class TreasuryDealService(
         key?.let { k -> replay(k, MATURE, dealId)?.let { return it } }
         val deal = load(dealId)
         val matured = deal.mature(actor, bankToday(), clock.instant())
+        check(matured.product in ProductType.DELIVERED) { NOT_DELIVERED.format(matured.product) }
         // ADR-0315 D5: catch the accrual up to maturity first, so the maturity journal clears the
         // accrued account instead of booking the whole interest to income in one amount.
         accrueThrough(deal, deal.maturityDate)
-        check(matured.product in ProductType.DELIVERED) { NOT_DELIVERED.format(matured.product) }
         val ref = if (matured.product.legacy) {
             post(
                 PostingRules.maturity(matured, accruedSoFar(deal)),

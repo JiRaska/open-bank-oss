@@ -65,8 +65,9 @@ enum class ProductType(
     companion object {
         /**
          * ADR-0344 delivery phases: the products a dealer may draft today. Phase 0 delivered the five
-         * legacy products, phase 1a adds IRS and FRA (cash flows and fixings; they settle once the
-         * posting-rule matrix lands). Mirrored by the parity gate's REQUIRED_PRODUCTS.
+         * legacy products, phase 1a adds IRS and FRA (cash flows and fixings), and phase 2a lets them
+         * settle and mature through the posting-rule matrix. Mirrored by the parity gate's
+         * REQUIRED_PRODUCTS.
          */
         val DELIVERED: Set<ProductType> = entries.filter { it.legacy }.toSet() + setOf(IRS, FRA)
     }

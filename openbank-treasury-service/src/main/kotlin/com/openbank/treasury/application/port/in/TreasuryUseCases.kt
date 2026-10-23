@@ -192,9 +192,14 @@ interface TreasuryDealUseCase {
      */
     suspend fun postOutflow(dealId: java.util.UUID, through: LocalDate): Int = 0
 
-    /** ADR-0344 D7: the posting-rule matrix, every product (versioned data). */
+    /**
+     * ADR-0344 D7: the posting-rule matrix (versioned data) for the products that post today. The
+     * rows of a product whose phase has not landed stay dormant and are not served.
+     */
     fun postingRules(): List<com.openbank.treasury.domain.model.PostingRule> =
-        com.openbank.treasury.domain.model.PostingMatrix.rules
+        com.openbank.treasury.domain.model.PostingMatrix.rules.filter {
+            it.product in com.openbank.treasury.domain.model.ProductType.DELIVERED
+        }
 }
 
 interface NostroReconciliationUseCase {

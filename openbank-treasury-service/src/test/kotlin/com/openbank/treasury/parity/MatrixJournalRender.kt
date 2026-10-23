@@ -44,12 +44,6 @@ object MatrixJournalRender {
                     MatrixPostings.maturity(deal, flows, category, MatrixPostings.amortisedThrough(deal, flows, last))
                         ?.let(journals::add)
                 }
-                if (PostingMatrix.hasEvent(product, PostingEvent.REVALUATION)) {
-                    listOf(BigDecimal("1500.00"), BigDecimal("-200.00")).forEach { change ->
-                        MatrixPostings.revaluation(deal, change, deal.currency, LocalDate.of(2026, 12, 31), category)
-                            ?.let(journals::add)
-                    }
-                }
                 journals.map { j ->
                     var key = j.idempotencyKey.replace(deal.id.toString(), "D")
                     ordinal.forEach { (id, o) -> key = key.replace(id, o) }

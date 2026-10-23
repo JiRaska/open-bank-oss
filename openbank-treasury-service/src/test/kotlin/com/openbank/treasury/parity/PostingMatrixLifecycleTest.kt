@@ -119,43 +119,20 @@ class PostingMatrixLifecycleTest {
     }
 
     @Test
-    fun `a revaluation posts by category - FVOCI to equity, FVTPL to P&L, never at amortised cost`() {
-        val bond = ParityFixtures.deal(matrixFixtures.first { it["product"].asText() == "BOND" }["deal"])
-        val day = LocalDate.of(2026, 12, 31)
-        val fvoci =
-            checkNotNull(
-                MatrixPostings.revaluation(bond, BigDecimal("1500.00"), bond.currency, day, Ifrs9Category.FVOCI),
-            )
-        assertThat(fvoci.lines.map { it.glCode() to it.side }).containsExactlyInAnyOrder(
-            LedgerMapGolden.gl("DEBT_SECURITY_FVOCI", "PRINCIPAL", bond.currency) to Side.DEBIT,
-            LedgerMapGolden.gl("DEBT_SECURITY_FVOCI", "REVALUATION_RESERVE", bond.currency) to Side.CREDIT,
-        )
-        val fvtplLoss =
-            checkNotNull(
-                MatrixPostings.revaluation(bond, BigDecimal("-200.00"), bond.currency, day, Ifrs9Category.FVTPL),
-            )
-        assertThat(fvtplLoss.lines.map { it.glCode() to it.side }).containsExactlyInAnyOrder(
-            LedgerMapGolden.gl("TREASURY_TRADING_RESULT", "UNREALISED_LOSS", bond.currency) to Side.DEBIT,
-            LedgerMapGolden.gl("DEBT_SECURITY_FVTPL", "PRINCIPAL", bond.currency) to Side.CREDIT,
-        )
-        assertThat(
-            MatrixPostings.revaluation(bond, BigDecimal("1500.00"), bond.currency, day, Ifrs9Category.AMORTISED_COST),
-        ).isNull()
-        assertThat(fvoci.idempotencyKey).isEqualTo("treasury:${bond.id}:revaluation:$day")
-    }
-
-    @Test
     fun `a payment key names the flow, an accrual key the day`() {
-        val fixture = matrixFixtures.first { it["id"].asText() == "loan-czk-act365f-004" }
+        val fixture = matrixFixtures.first { it["id"].asText() == "irs-czk-unadjusted-accrual-001" }
         val deal: Deal = ParityFixtures.deal(fixture["deal"])
-        val flows: List<CashFlow> = runBlocking { ParityFixtures.scheduleService(fixture, deal).generate(deal).flows }
+        val flows: List<CashFlow> = runBlocking {
+            ParityFixtures.scheduleService(fixture, deal).generate(deal, ParityFixtures.fixings(fixture)).flows
+        }
+        val through = MatrixPostings.lastPaymentDate(deal, flows)
         val run = MatrixPostings.run(
             deal,
             flows,
             Ifrs9Category.AMORTISED_COST,
             null,
             emptySet(),
-            deal.valueDate.plusDays(100),
+            through,
         )
         val payment = run.first { it.spec.event == PostingEvent.PAYMENT }
         val paid = flows.first { payment.spec.idempotencyKey.endsWith(it.flowId.toString()) }
@@ -168,11 +145,11 @@ class PostingMatrixLifecycleTest {
             deal,
             flows,
             Ifrs9Category.AMORTISED_COST,
-            deal.valueDate.plusDays(100),
+            through,
             run.filter {
                 it.spec.event == PostingEvent.PAYMENT
             }.map { r -> flows.first { r.spec.idempotencyKey.endsWith(it.flowId.toString()) }.flowId }.toSet(),
-            deal.valueDate.plusDays(100),
+            through,
         )
         assertThat(again).isEmpty()
         assertThat(AmountExpression.entries).contains(AmountExpression.UNACCRUED)

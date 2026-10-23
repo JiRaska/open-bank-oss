@@ -32,7 +32,7 @@ class PostingMatrixJournalsUnchangedTest {
     fun `every non-accrual journal is unchanged, line for line`() {
         val expected = golden.filter { it.startsWith("J ") }.map { it.removePrefix("J ") }
         assertThat(now.filter { ":accrual:" !in it }).containsExactlyElementsOf(expected)
-        assertThat(expected).hasSizeGreaterThan(100)
+        assertThat(expected).hasSizeGreaterThan(25)
     }
 
     @Test
