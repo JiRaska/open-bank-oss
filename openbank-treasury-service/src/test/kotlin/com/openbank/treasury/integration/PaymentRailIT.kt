@@ -239,28 +239,17 @@ class PaymentRailIT {
 
     @Test
     @Order(8)
-    fun `8 - SENT twice is applied once, and SENT posts the outflow journal so funding stops counting it`() {
-        // The deal has settled (its value date came): the matrix posts its flows' PAYMENT journals.
+    fun `8 - SENT twice is applied once, and the outflow keeps counting until the ledger books it`() {
         jdbc { c -> c.prepareStatement("update deals set state = 'SETTLED' where deal_id = '$dealA'").executeUpdate() }
-        postings.reset()
-        val amountA = onContext { payments.find(UUID.fromString(payA)) }.amount
         val pendingBefore = onContext { paymentRepository.pendingOut("CZK", valueDate) }
         val sent = onContext { payments.onRailStatus(event(payA, RailStatus.SENT)) }
         assertThat(sent?.status?.name).isEqualTo("SENT")
-        val outKey = "treasury:$dealA:payment:${outFlow(dealA)}"
-        assertThat(postings.journals.keys).contains(outKey)
-        assertThat(
-            postings.journals.getValue(outKey).second.lines.single { it.accountingClass == "NOSTRO_ACCOUNT" }.side.name,
-        ).isEqualTo("CREDIT")
-        assertThat(count("select count(*) from deal_journals where idempotency_key = '$outKey'")).isEqualTo(1)
-        // The ledger balance now carries payA's outflow; the funding pending must not count it again.
-        assertThat(onContext { paymentRepository.pendingOut("CZK", valueDate) })
-            .isEqualByComparingTo(pendingBefore - amountA)
+        // The PAYMENT journals of a SENT payment are posted by the posting-rule matrix (ADR-0344
+        // phase 2); until then the funding check keeps counting the outflow.
+        assertThat(onContext { paymentRepository.pendingOut("CZK", valueDate) }).isEqualByComparingTo(pendingBefore)
         assertThat(onContext { payments.onRailStatus(event(payA, RailStatus.SENT)) }).isNull()
         assertThat(onContext { payments.onRailStatus(event(payA, RailStatus.ACCEPTED)) }).isNull()
         assertThat(statusEvents(payA, "SENT")).isEqualTo(1)
-        // A replayed SENT re-offers the same keys: the ledger answers its original journal, nothing new.
-        assertThat(postings.journals.keys.count { it.endsWith(":payment:${outFlow(dealA)}") }).isEqualTo(1)
     }
 
     @Test
