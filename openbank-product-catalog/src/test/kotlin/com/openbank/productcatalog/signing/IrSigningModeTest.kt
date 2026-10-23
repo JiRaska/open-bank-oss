@@ -40,7 +40,8 @@ class IrSigningModeTest {
             .hasMessageContaining("disabled")
         assertThatThrownBy { producer("hmac", Optional.empty()).irSigner() }
             .hasMessageContaining("needs openbank.catalog.ir-signing.hmac-secret")
-        val signed = producer("hmac", Optional.of("unit-test-secret-not-for-production")).irSigner().sign("a".repeat(64))
+        val signer = producer("hmac", Optional.of("unit-test-secret-not-for-production")).irSigner()
+        val signed = signer.sign("a".repeat(64))
         assertThat(signed.algorithm).isEqualTo("hmac-sha256")
     }
 
