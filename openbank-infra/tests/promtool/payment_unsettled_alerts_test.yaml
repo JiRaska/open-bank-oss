@@ -1,0 +1,133 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for the #13623 unsettled-booking age alerts, per rail: a must-FIRE case, a
+# must-NOT-fire control just under the SLA, a cold pod (NaN until its first sweep) and a value
+# that crossed the line too recently for the [10m] window. Ages are written as real seconds and
+# grow 60/min like the gauge does, so `time()` starting at the epoch plays no part (#5736 notes).
+rule_files:
+  - payments-openbank-sepa-payment-unsettled-alerts.yaml
+  - payments-openbank-domestic-payment-unsettled-alerts.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ---------------------------------------------------------------- SEPA outbound booking (30m)
+  - interval: 1m
+    name: "SEPA booking open past 30m for the whole window fires"
+    input_series:
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SEPA", pod="sepa-a"}'
+        values: "1500+60x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SepaPaymentBookingUnsettled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: sepa-payment
+              rail: SEPA
+            exp_annotations:
+              subject_period: 30s
+              summary: "SEPA payment accepted by the scheme but its debit is unbooked for over 30 minutes"
+              description: "The oldest SEPA payment with an open booking clock has waited at least 41m 0s. It is held in PROCESSING and nothing retries it. Read the outcome under sepa-settlement-<paymentId> in transaction-service, then reconcile, reverse or re-drive. openbank_payment_unsettled_total{rail=\"SEPA\"} says which answer it got."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0032-payment-rail-unsettled-booking.md#sepa-payment-outbound-booking"
+
+  - interval: 1m
+    name: "SEPA booking just under 30m does NOT fire"
+    input_series:
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SEPA", pod="sepa-a"}'
+        values: "1700+0x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SepaPaymentBookingUnsettled
+        exp_alerts: []
+
+  - interval: 1m
+    name: "SEPA booking that crossed 30m only 5m ago does NOT fire yet"
+    input_series:
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SEPA", pod="sepa-a"}'
+        values: "300+60x30"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: SepaPaymentBookingUnsettled
+        exp_alerts: []
+
+  - interval: 1m
+    name: "SEPA cold pod (NaN) and an empty tracked set (0) do NOT fire"
+    input_series:
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SEPA", pod="sepa-a"}'
+        values: "NaN+0x30"
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SEPA", pod="sepa-b"}'
+        values: "0+0x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SepaPaymentBookingUnsettled
+        exp_alerts: []
+
+  - interval: 1m
+    name: "another rail's old booking does NOT fire the SEPA alert"
+    input_series:
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="DOMESTIC_CZK", pod="dom-a"}'
+        values: "1900+60x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SepaPaymentBookingUnsettled
+        exp_alerts: []
+
+  # ---------------------------------------------------------------- SEPA refund / reversal (1h)
+  - interval: 1m
+    name: "SEPA refund unproven past 1h fires"
+    input_series:
+      - series: 'openbank_payment_refund_unsettled_oldest_age_seconds{rail="SEPA", operation="refund", pod="sepa-a"}'
+        values: "3300+60x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SepaPaymentRefundUnsettled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: sepa-payment
+              rail: SEPA
+            exp_annotations:
+              subject_period: 30s
+              summary: "SEPA return received but the customer refund is unproven for over an hour"
+              description: "The oldest unresolved SEPA return has waited at least 1h 11m 0s. The payment is held out of RETURNED because no reversal was proven. Read the outcome under sepa-reversal-<paymentId> in transaction-service, then reconcile or re-drive the return."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0032-payment-rail-unsettled-booking.md#sepa-payment-refund-reversal"
+
+  - interval: 1m
+    name: "SEPA refund under 1h does NOT fire"
+    input_series:
+      - series: 'openbank_payment_refund_unsettled_oldest_age_seconds{rail="SEPA", operation="refund", pod="sepa-a"}'
+        values: "3500+0x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SepaPaymentRefundUnsettled
+        exp_alerts: []
+
+  # ---------------------------------------------------------------- domestic outbound booking (1h)
+  - interval: 1m
+    name: "domestic booking open past 1h fires"
+    input_series:
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="DOMESTIC_CZK", pod="dom-a"}'
+        values: "3300+60x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: DomesticPaymentBookingUnsettled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: domestic-payment
+              rail: DOMESTIC_CZK
+            exp_annotations:
+              subject_period: 30s
+              summary: "Domestic payment sent to clearing but its debit is unbooked for over an hour"
+              description: "The oldest domestic payment with an open booking clock has waited at least 1h 11m 0s. Temporal keeps retrying with the same key, which cannot fix a deterministic answer. Read the outcome under domestic-settlement-<paymentId> in transaction-service, then reconcile, reverse or re-drive. openbank_payment_unsettled_total{rail=\"DOMESTIC_CZK\"} says which answer it got."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0032-payment-rail-unsettled-booking.md#domestic-payment-outbound-booking"
+
+  - interval: 1m
+    name: "domestic booking under 1h does NOT fire (Temporal still has a transient to heal)"
+    input_series:
+      - series: 'openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="DOMESTIC_CZK", pod="dom-a"}'
+        values: "3500+0x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: DomesticPaymentBookingUnsettled
+        exp_alerts: []

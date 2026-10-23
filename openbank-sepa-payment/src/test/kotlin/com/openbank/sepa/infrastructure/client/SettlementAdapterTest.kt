@@ -86,7 +86,7 @@ class SettlementAdapterTest {
         every { client.initiateTransaction(any()) } returns Uni.createFrom().item(builder.build())
     }
 
-    private fun settleFails(): Throwable = runCatching { runBlocking { adapter.settle(payment()) } }
+    private fun settleFails(): Throwable = runCatching { runBlocking { adapter.settle(payment(), ACCEPTED_AT) } }
         .exceptionOrNull() ?: error("settle() unexpectedly succeeded")
 
     @Test
@@ -97,7 +97,7 @@ class SettlementAdapterTest {
                 Uni.createFrom().item(Response.status(201).entity(matching()).build())
             val p = payment()
 
-            val outcome = adapter.settle(p)
+            val outcome = adapter.settle(p, ACCEPTED_AT)
 
             assertThat(outcome.settled).isTrue()
             assertThat(outcome.transactionId).isEqualTo(txId)
@@ -108,13 +108,25 @@ class SettlementAdapterTest {
         }
 
     @Test
+    fun `value date is pinned to the acceptance date, not the day of a later re-drive`(): Unit = runBlocking {
+        val sent = slot<InitiateTransactionRequest>()
+        every { client.initiateTransaction(capture(sent)) } returns
+            Uni.createFrom().item(Response.status(201).entity(matching()).build())
+
+        // The adapter's clock reads 2026-01-20; the payment was accepted three days earlier.
+        adapter.settle(payment(), Instant.parse("2026-01-17T15:00:00Z"))
+
+        assertThat(sent.captured.valueDate).isEqualTo(LocalDate.parse("2026-01-17"))
+    }
+
+    @Test
     fun `instant marker requests SEPA_INST ONE_OFF and accepts only its matching completed echo`(): Unit = runBlocking {
         val sent = slot<InitiateTransactionRequest>()
         every { client.initiateTransaction(capture(sent)) } returns
             Uni.createFrom().item(Response.status(201).entity(matching().copy(rail = "SEPA_INST")).build())
         val p = payment().copy(type = SepaPaymentType.SCT_INST)
 
-        val outcome = adapter.settle(p)
+        val outcome = adapter.settle(p, ACCEPTED_AT)
 
         assertThat(outcome.settled).isTrue()
         assertThat(outcome.transactionId).isEqualTo(txId)
@@ -133,7 +145,7 @@ class SettlementAdapterTest {
         val p = payment().copy(type = SepaPaymentType.SCT_INST)
 
         repeat(2) {
-            val failure = runCatching { adapter.settle(p) }.exceptionOrNull()
+            val failure = runCatching { adapter.settle(p, ACCEPTED_AT) }.exceptionOrNull()
             assertThat(failure).isInstanceOf(SettlementUnavailableException::class.java)
                 .hasMessageContaining("does not match")
         }
@@ -220,7 +232,7 @@ class SettlementAdapterTest {
     fun `cancellation is rethrown, not converted into an outage`() {
         every { client.initiateTransaction(any()) } returns
             Uni.createFrom().failure(CancellationException("worker shutting down"))
-        assertThatThrownBy { runBlocking { adapter.settle(payment()) } }
+        assertThatThrownBy { runBlocking { adapter.settle(payment(), ACCEPTED_AT) } }
             .isInstanceOf(CancellationException::class.java)
             .isNotInstanceOf(SettlementUnavailableException::class.java)
     }
@@ -250,14 +262,14 @@ class SettlementAdapterTest {
         val expected = SepaSettlementMetrics.Outcome.entries.associate { it.label to 0.0 }.toMutableMap()
         for (case in cases) {
             answer(case.tx, case.http)
-            assertThat(runCatching { adapter.settle(payment()) }.exceptionOrNull())
+            assertThat(runCatching { adapter.settle(payment(), ACCEPTED_AT) }.exceptionOrNull())
                 .isInstanceOf(SettlementUnavailableException::class.java)
             expected[case.expected] = expected.getValue(case.expected) + 1.0
             assertThat(counts()).isEqualTo(expected)
         }
         every { client.initiateTransaction(any()) } returns
             Uni.createFrom().failure(IllegalStateException("synthetic transport"))
-        assertThat(runCatching { adapter.settle(payment()) }.exceptionOrNull())
+        assertThat(runCatching { adapter.settle(payment(), ACCEPTED_AT) }.exceptionOrNull())
             .isInstanceOf(SettlementUnavailableException::class.java)
         expected["transport-error"] = 1.0
         assertThat(counts()).isEqualTo(expected)
@@ -267,7 +279,7 @@ class SettlementAdapterTest {
     fun `matching SCT and instant calls count no unsettled attempt`(): Unit = runBlocking {
         for (type in listOf(SepaPaymentType.SCT, SepaPaymentType.SCT_INST)) {
             answer(matching().copy(rail = if (type == SepaPaymentType.SCT) "SEPA_CT" else "SEPA_INST"))
-            assertThat(adapter.settle(payment().copy(type = type)).settled).isTrue()
+            assertThat(adapter.settle(payment().copy(type = type), ACCEPTED_AT).settled).isTrue()
         }
         assertThat(counts().values).containsOnly(0.0)
     }
@@ -280,7 +292,7 @@ class SettlementAdapterTest {
             Uni.createFrom().item(Response.status(201).entity(matching("FAILED")).build())
         }
         repeat(3) {
-            assertThat(runCatching { adapter.settle(p) }.exceptionOrNull())
+            assertThat(runCatching { adapter.settle(p, ACCEPTED_AT) }.exceptionOrNull())
                 .isInstanceOf(SettlementUnavailableException::class.java)
         }
         assertThat(sent.map { it.idempotencyKey }).containsOnly("sepa-settlement-${p.id}")
@@ -293,10 +305,12 @@ class SettlementAdapterTest {
     fun `cancellation propagates its original cause and increments nothing`(): Unit = runBlocking {
         val cancellation = CancellationException("synthetic cancellation")
         every { client.initiateTransaction(any()) } returns Uni.createFrom().failure(cancellation)
-        val failure = runCatching { adapter.settle(payment()) }.exceptionOrNull()
+        val failure = runCatching { adapter.settle(payment(), ACCEPTED_AT) }.exceptionOrNull()
         // Coroutine stack-trace recovery may copy the exception while retaining the original as its cause.
         assertThat(failure).isInstanceOf(CancellationException::class.java).hasMessage("synthetic cancellation")
         assertThat(generateSequence(failure) { it.cause }.any { it === cancellation }).isTrue()
         assertThat(counts().values).containsOnly(0.0)
     }
 }
+
+private val ACCEPTED_AT: java.time.Instant = java.time.Instant.parse("2026-01-20T09:00:00Z")
