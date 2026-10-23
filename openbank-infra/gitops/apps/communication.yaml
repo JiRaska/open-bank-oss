@@ -2,12 +2,9 @@
 # style/playbook layer that sits on top of the immutable git prompt core, and admin-ui
 # edits it under four-eyes with evals-on-publish.
 #
-# Registered at the SAME stage referral was: the component declares the namespace, its
-# single-owner CNPG Postgres + daily ScheduledBackup, the OIDC ExternalSecret, the
-# internal TLS Certificate, the valkey cache, the OPA bundle and the workload — with the
-# Deployment at `replicas: 0`. Syncing this Application therefore provisions the domain
-# and starts NO pod; activation is a separate reviewed change that records live health
-# evidence, exactly as communication-service.yaml's own header states.
+# The component provisions its database, OIDC and TLS prerequisites. The reviewed
+# workload activation is declared in communication-service.yaml; this Application
+# reconciles that desired state from main.
 #
 # Why it is registered now rather than at activation: admin-ui already ships a
 # RoleBinding for admin-ui-discovery into namespace `communication` (#9173) and lists
@@ -17,7 +14,7 @@
 #   namespaces "communication" not found
 # — so admin-ui itself had been OutOfSync since 2026-09-10T21:10Z, and communication-db
 # fired PostgresClusterDeclaredNotDeployed. A component that nothing syncs is not a
-# staged rollout, it is a manifest no one applies; the staging lives in `replicas: 0`.
+# staged rollout, it is a manifest no one applies.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
