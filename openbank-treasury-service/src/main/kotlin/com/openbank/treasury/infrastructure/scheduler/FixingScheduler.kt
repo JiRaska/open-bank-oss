@@ -19,10 +19,9 @@ import java.time.Clock
 import java.time.Duration
 
 /**
- * ADR-0344 D5: the daily fixing run for the bank's accounting day. Re-runs are harmless (a fixed
+ * ADR-0344 D5: the hourly fixing pass for the bank's accounting day. Re-runs are harmless (a fixed
  * flow is no longer due), so a run that found an index blocked fixes it on a later pass once a
- * good observation is approved. Metric `openbank.treasury.fixings{outcome}`; the FIXINGS
- * day-completion step is recorded by the run itself.
+ * good observation is approved. Metric `openbank.treasury.fixings{outcome}`.
  *
  * A `suspend fun`: a plain `@Scheduled` method has no Vert.x context, and `runBlocking` around
  * reactive Panache throws HR000068 (check-no-runblocking-in-scheduled).

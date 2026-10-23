@@ -107,7 +107,14 @@ class FixingService(
         return views.filter { status == null || it.status == status }.sortedBy { it.index }
     }
 
-    /** Fix every due (index, [date]) that passes the quality gate; block the rest. Records the FIXINGS step. */
+    /**
+     * Fix every due (index, [date]) that passes the quality gate; block the rest. A BLOCKED index
+     * opens a fixing case and fixes nothing, but nothing holds the accounting day on it yet (the
+     * day-completion record is a later ADR-0344 phase), so the day can close with flows still
+     * PROJECTED; the case is listed by `GET /fixings`. Each deal of an index is fixed in its own
+     * transaction: a failure on one deal leaves the earlier deals FIXED and reports the index as
+     * failed, and the next pass (idempotent: a fixed flow is no longer due) finishes it.
+     */
     suspend fun run(date: LocalDate): FixingRunResult {
         val byIndex = groupByIndex(flows.dueOn(date))
         var fixedFlows = 0
@@ -125,7 +132,10 @@ class FixingService(
                     fixedIndices += index
                     resolveCase(index, date)
                 }
-            }.onFailure { failures += it }
+            }.onFailure {
+                if (it is kotlin.coroutines.cancellation.CancellationException) throw it
+                failures += it
+            }
         }
         return FixingRunResult(date, fixedFlows, fixedIndices, blocked, failures)
     }

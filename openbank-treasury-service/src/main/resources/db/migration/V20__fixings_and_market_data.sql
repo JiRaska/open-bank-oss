@@ -9,7 +9,7 @@
 -- last value.
 --
 -- Rollback: DROP TABLE fixing_cases, index_observations, observation_batches; DROP the three
--- deal_cash_flows columns; restore the reference kind CHECK of V18.
+-- deal_cash_flows columns and the deal_cash_flows_observed_provenance constraint.
 
 CREATE TABLE observation_batches (
     batch_id        UUID          PRIMARY KEY,
@@ -72,14 +72,7 @@ ALTER TABLE deal_cash_flows ADD COLUMN fixing_source VARCHAR(16)
 ALTER TABLE deal_cash_flows ADD COLUMN fixing_sha256 CHAR(64);
 ALTER TABLE deal_cash_flows ADD COLUMN fixed_at TIMESTAMPTZ;
 ALTER TABLE deal_cash_flows ADD CONSTRAINT deal_cash_flows_observed_provenance
+    -- A flow FIXED by the fixing workflow (fixed_at set) must carry its provenance hash. A row
+    -- regenerated from already-observed fixings carries neither, and stays legal.
     CHECK (rate_source <> 'OBSERVED' OR state <> 'FIXED' OR fixing_sha256 IS NOT NULL OR fixed_at IS NULL);
 
--- Internal (bank-published) rate sheets are an effective-dated, four-eyes reference kind.
-ALTER TABLE reference_records DROP CONSTRAINT IF EXISTS reference_records_kind_check;
-ALTER TABLE reference_records ADD CONSTRAINT reference_records_kind_check CHECK (kind IN (
-    'calendar', 'index', 'counterparty', 'ssi', 'netting', 'security', 'book', 'bucket-set',
-    'regulatory-code', 'product-type', 'party-group', 'party-type', 'country', 'document-type',
-    'account', 'settlement-place', 'loan-type', 'communication-channel', 'market-factor',
-    'own-capital-item', 'period-length', 'scenario', 'behavioural-scenario', 'calculation-settings',
-    'limit-settings', 'derivative-conversion-factor', 'collateral-haircut', 'portfolio-group',
-    'accounting-settings', 'balance-sheet-side', 'dealing-filter', 'internal-rate-sheet'));
