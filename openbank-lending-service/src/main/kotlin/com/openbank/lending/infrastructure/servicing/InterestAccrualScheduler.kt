@@ -6,6 +6,7 @@ package com.openbank.lending.infrastructure.servicing
 
 import com.openbank.lending.application.port.`in`.AccrueInterestUseCase
 import com.openbank.lending.application.port.out.CloseJobRunPort
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -64,7 +65,10 @@ class InterestAccrualScheduler @Inject constructor(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     fun runAccrualPass(): Uni<Void> = Panache.withSession {
-        accrual.accrueDueInterest(LocalDate.now(clock), batchSize)
+        // The Prague accounting day (ADR-0207), not the UTC date: the pass accrues what is due on
+        // the day it reports for, and the evidence is recorded under that same date (outcome.asOf).
+        val asOf = AccountingClock.bank(clock).today()
+        accrual.accrueDueInterest(asOf, batchSize)
             .invoke { outcome ->
                 if (outcome.installmentsAccrued > 0) {
                     log.infof(
@@ -80,16 +84,21 @@ class InterestAccrualScheduler @Inject constructor(
                 liveness?.recordSuccess()
             }
             .call { outcome ->
+                // A batch-limited pass that left due installments behind has not finished the day:
+                // RAN here would let the ledger tie the day out over interest that was not booked.
                 LendingCloseJobs.record(
                     closeJobRuns,
                     clock,
+                    outcome.asOf,
                     LendingCloseJobs.ACCRUAL,
                     items = outcome.installmentsAccrued,
                     journals = outcome.journalsPosted,
+                    refused = if (outcome.truncated) 1 else 0,
+                    reason = if (outcome.truncated) LendingCloseJobs.REASON_ACCRUAL_TRUNCATED else null,
                 )
             }
             .onFailure().invoke { e -> log.error("interest accrual pass failed", e) }
-            .onFailure().call { e -> recordRefusal(e) }
+            .onFailure().call { e -> recordRefusal(asOf, e) }
             .replaceWithVoid()
     }
 
@@ -99,11 +108,12 @@ class InterestAccrualScheduler @Inject constructor(
      * the count is the one installment that stopped it; the rest are still due and the next pass
      * retries them.
      */
-    private fun recordRefusal(e: Throwable): Uni<Unit> {
+    private fun recordRefusal(asOf: LocalDate, e: Throwable): Uni<Unit> {
         val closed = LendingCloseJobs.isClosedDayRejection(e)
         return LendingCloseJobs.record(
             closeJobRuns,
             clock,
+            asOf,
             LendingCloseJobs.ACCRUAL,
             items = 0,
             journals = 0,

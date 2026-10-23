@@ -184,6 +184,42 @@ class LendingCloseParticipationSchedulerTest {
     }
 
     @Test
+    fun `a batch-limited pass that left installments due is REFUSED, never RAN`() {
+        accrualScheduler(
+            Uni.createFrom().item(
+                AccrualOutcome(today, installmentsAccrued = 500, journalsPosted = 500, truncated = true),
+            ),
+        ).runAccrualPass().await().indefinitely()
+
+        val run = runs.runs.getValue(today to LendingCloseJobs.ACCRUAL)
+        assertThat(run.refused).isEqualTo(1)
+        assertThat(run.refusalReason).isEqualTo(LendingCloseJobs.REASON_ACCRUAL_TRUNCATED)
+
+        ran(today, LendingCloseJobs.PROVISIONING, items = 1, journals = 0)
+        scheduler().reportDays(today.plusDays(1)).await().indefinitely()
+        assertThat(reportFor(today).outcome).isEqualTo(CloseOutcome.REFUSED)
+    }
+
+    @Test
+    fun `a pass just after Prague midnight accrues and records the Prague day, not the UTC date`() {
+        // 2026-10-02T22:30Z is 00:30 on 2026-10-03 in Prague (CEST, UTC+2).
+        val pastMidnight = Clock.fixed(Instant.parse("2026-10-02T22:30:00Z"), ZoneOffset.UTC)
+        val pragueDay = LocalDate.of(2026, 10, 3)
+        val asked = mutableListOf<LocalDate>()
+        val accrual = mockk<AccrueInterestUseCase> {
+            every { accrueDueInterest(any(), any()) } answers {
+                asked += firstArg<LocalDate>()
+                Uni.createFrom().item(AccrualOutcome(firstArg(), installmentsAccrued = 1, journalsPosted = 1))
+            }
+        }
+        InterestAccrualScheduler(accrual, 500, pastMidnight, noOpDomainMetrics(), runs).runAccrualPass()
+            .await().indefinitely()
+
+        assertThat(asked).containsExactly(pragueDay)
+        assertThat(runs.runs.keys).containsExactly(pragueDay to LendingCloseJobs.ACCRUAL)
+    }
+
+    @Test
     fun `a 409 without the closed-day code is not a closed-day refusal`() {
         val otherConflict = WebApplicationException(
             Response.status(CONFLICT).entity("""{"code":"IDEMPOTENCY_CONFLICT"}""").build(),

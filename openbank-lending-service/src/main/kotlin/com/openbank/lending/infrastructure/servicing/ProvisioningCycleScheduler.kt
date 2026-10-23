@@ -8,6 +8,7 @@ import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.out.CloseJobRunPort
 import com.openbank.lending.application.port.out.ProvisioningCoverageRepository
 import com.openbank.lending.application.port.out.ProvisioningCycleRunRepository
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.Gauge
@@ -161,7 +162,8 @@ class ProvisioningCycleScheduler(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     fun runProvisioningPass(): Uni<Void> = Panache.withSession {
-        val asOf = LocalDate.now(clock)
+        // The Prague accounting day (ADR-0207): the reporting date and the day-close evidence agree.
+        val asOf = AccountingClock.bank(clock).today()
         val period = asOf.format(periodFormat)
         // Commit the start BEFORE any loan-level transaction. An abrupt stop leaves durable RUNNING
         // evidence; a later date cannot certify that earlier reporting date as complete.
@@ -190,7 +192,7 @@ class ProvisioningCycleScheduler(
                                 runs.markResult(asOf, attemptId, missing, OffsetDateTime.now(clock))
                                     .replaceWith(missing)
                             }
-                            .call { missing -> recordCloseEvidence(missing) }
+                            .call { missing -> recordCloseEvidence(asOf, missing) }
                             .map { missing -> missing == 0L && unresolved == 0L }
                     }
             }
@@ -200,6 +202,7 @@ class ProvisioningCycleScheduler(
                 LendingCloseJobs.record(
                     closeJobRuns,
                     clock,
+                    asOf,
                     LendingCloseJobs.PROVISIONING,
                     items = 0,
                     journals = 0,
@@ -217,11 +220,12 @@ class ProvisioningCycleScheduler(
      * counted, cannot certify the day: it is recorded REFUSED with the shortfall, which holds the
      * ledger's close until a complete pass (or an operator waiver) replaces it.
      */
-    private fun recordCloseEvidence(missing: Long?): Uni<Unit> {
+    private fun recordCloseEvidence(asOf: LocalDate, missing: Long?): Uni<Unit> {
         val incomplete = missing == null || missing > 0
         return LendingCloseJobs.record(
             closeJobRuns,
             clock,
+            asOf,
             LendingCloseJobs.PROVISIONING,
             items = lastAssessed,
             journals = 0,

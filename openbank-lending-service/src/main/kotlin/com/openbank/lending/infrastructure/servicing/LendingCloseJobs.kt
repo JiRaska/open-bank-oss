@@ -7,11 +7,11 @@ package com.openbank.lending.infrastructure.servicing
 import com.openbank.lending.application.port.out.CloseJobRunPort
 import com.openbank.libs.close.AccountingDayClosed
 import com.openbank.libs.close.CloseJobRun
-import com.openbank.libs.domain.calendar.AccountingClock
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.WebApplicationException
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.LocalDate
 
 /** Job names recorded in `lending_close_job_run` (ADR-0342 D1). Stable: they are persisted. */
 object LendingCloseJobs {
@@ -28,6 +28,7 @@ object LendingCloseJobs {
      */
     const val REASON_DAY_CLOSED = "ledger refused the posting: ACCOUNTING_DAY_CLOSED"
     const val REASON_ACCRUAL_FAILED = "accrual pass failed before completing"
+    const val REASON_ACCRUAL_TRUNCATED = "due installment(s) left unaccrued"
     const val REASON_PROVISIONING_FAILED = "provisioning pass failed before completing"
     const val REASON_PROVISIONING_INCOMPLETE = "eligible exposure(s) left unprovisioned"
     const val REASON_PROVISIONING_UNCOUNTED = "provisioning coverage could not be counted"
@@ -56,13 +57,16 @@ object LendingCloseJobs {
     }.getOrNull()
 
     /**
-     * Records one job's run for the CURRENT accounting day (Europe/Prague, ADR-0207 — never the UTC
-     * date). Never fails the caller: a lost record only means the day is not reported, which holds
-     * the ledger's close and pages, the safe direction.
+     * Records one job's run under [businessDate] — the accounting day (Europe/Prague, ADR-0207) the
+     * pass itself worked as of, taken once at the start of the pass, so a pass that crosses midnight
+     * is filed under the day it accrued for, never the UTC date or the day it happened to finish.
+     * Never fails the caller: a lost record only means the day is not reported, which holds the
+     * ledger's close and pages, the safe direction.
      */
     fun record(
         runs: CloseJobRunPort,
         clock: Clock,
+        businessDate: LocalDate,
         job: String,
         items: Int,
         journals: Int,
@@ -70,7 +74,7 @@ object LendingCloseJobs {
         reason: String? = null,
     ): Uni<Unit> = runs.record(
         CloseJobRun(
-            businessDate = AccountingClock.bank(clock).today(),
+            businessDate = businessDate,
             job = job,
             itemsProcessed = items,
             journalsPosted = journals,
