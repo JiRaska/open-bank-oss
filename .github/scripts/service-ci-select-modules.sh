@@ -315,38 +315,54 @@ self_test() {
   repo=$(mktemp -d)
   out=$(mktemp -d)
   trap 'rm -rf "$repo" "$out"' RETURN
+  # The sandbox must not inherit the OUTER repo's git state. The gate runner exports
+  # GIT_INDEX_FILE (a private copy of the real index) and CI may carry global config such as
+  # commit.gpgsign, hooks or a default branch, any of which made a sandbox git command fail
+  # while the old `>/dev/null 2>&1` hid it: the later `git checkout main && ... commit` chain
+  # then short-circuited, HEAD~1..HEAD stayed on the shared-build-input commit, and the
+  # "inert push builds nothing" case read the full fleet with no error shown.
+  local gitenv=(env -u GIT_INDEX_FILE -u GIT_DIR -u GIT_WORK_TREE -u GIT_OBJECT_DIRECTORY
+    -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_PREFIX
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1)
+  sg() { ( cd "$repo" && "${gitenv[@]}" git -c commit.gpgsign=false -c core.hooksPath=/dev/null "$@" ); }
+  setup_fail() { echo "SELF-TEST FAIL: sandbox setup step failed: $*"; cat "$out/setup.log" 2>/dev/null; return 1; }
+  sg_do() { sg "$@" >>"$out/setup.log" 2>&1 || { setup_fail "git $*"; return 1; }; }
   (
-    cd "$repo"
-    git init -q -b main . && git config user.email t@example.invalid && git config user.name t
-    mkdir -p .github openbank-a-service/src openbank-b-service/src docs
-    cp -R "$root/.github/scripts" .github/scripts
-    : > openbank-a-service/build.gradle.kts; : > openbank-b-service/build.gradle.kts
-    : > openbank-a-service/src/A.kt; : > openbank-b-service/src/B.kt; : > docs/x.md
-    mkdir -p openbank-c-service/src/test/kotlin
-    : > openbank-c-service/build.gradle.kts
-    # A test that reads every sibling module (fleet scanner) must ride along with any change.
-    printf '%s\n' 'val r = File("..").listFiles()!!.filter { it.name.startsWith("openbank-") }' > openbank-c-service/src/test/kotlin/Scan.kt
-    git add -A && git commit -q -m base
-    git remote add origin "$repo"
-    git fetch -q origin main
-    git checkout -q -b pr
-    echo a >> openbank-a-service/src/A.kt && git commit -qam a
-  ) >/dev/null 2>&1
+    sg_do init -q -b main . &&
+    sg_do config user.email t@example.invalid && sg_do config user.name t
+  ) || return 1
+  mkdir -p "$repo/.github" "$repo/openbank-a-service/src" "$repo/openbank-b-service/src" "$repo/docs" \
+           "$repo/openbank-c-service/src/test/kotlin"
+  cp -R "$root/.github/scripts" "$repo/.github/scripts"
+  find "$repo/.github/scripts" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+  : > "$repo/openbank-a-service/build.gradle.kts"; : > "$repo/openbank-b-service/build.gradle.kts"
+  : > "$repo/openbank-a-service/src/A.kt"; : > "$repo/openbank-b-service/src/B.kt"; : > "$repo/docs/x.md"
+  : > "$repo/openbank-c-service/build.gradle.kts"
+  # A test that reads every sibling module (fleet scanner) must ride along with any change.
+  printf '%s\n' 'val r = File("..").listFiles()!!.filter { it.name.startsWith("openbank-") }' > "$repo/openbank-c-service/src/test/kotlin/Scan.kt"
+  sg_do add -A && sg_do commit -q -m base &&
+  sg_do remote add origin "$repo" && sg_do fetch -q origin main &&
+  sg_do checkout -q -b pr || return 1
+  echo a >> "$repo/openbank-a-service/src/A.kt"
+  sg_do commit -q -am a || return 1
   expect() { # name want got
     if [ "$2" != "$3" ]; then echo "SELF-TEST FAIL: $1: want '$2' got '$3'"; rc=1; else echo "ok: $1 -> '$3'"; fi
   }
   run() { # event; prints sorted module list
-    ( cd "$repo" && EVENT_NAME="$1" BASE_REF=main SELECT_OUT="$out" GITHUB_OUTPUT="$out/gho" \
+    ( cd "$repo" && rm -f "$out/changed.txt" && "${gitenv[@]}" EVENT_NAME="$1" BASE_REF=main SELECT_OUT="$out" GITHUB_OUTPUT="$out/gho" \
         bash "$root/.github/scripts/service-ci-select-modules.sh" >"$out/log" 2>&1 ) || { echo "SELF-TEST FAIL: run $1 exited non-zero"; cat "$out/log"; rc=1; }
     tr ' ' '\n' < "$out/changed.txt" | grep -v '^$' | sort -u | tr '\n' ' ' || true
   }
   expect schedule-builds-all "openbank-a-service openbank-b-service openbank-c-service " "$(run schedule)"
   expect pr-scopes-to-changed-module-plus-fleet-scanner "openbank-a-service openbank-c-service " "$(run pull_request)"
   # Negative control: a shared build input must widen to the full fleet, not stay scoped.
-  ( cd "$repo" && echo x > build.gradle.kts && git add build.gradle.kts && git commit -qm g ) >/dev/null 2>&1
+  echo x > "$repo/build.gradle.kts"
+  sg_do add build.gradle.kts && sg_do commit -q -m g || return 1
   expect pr-global-input-builds-all "openbank-a-service openbank-b-service openbank-c-service " "$(run pull_request)"
   # Push of only an inert path (docs) builds nothing.
-  ( cd "$repo" && git checkout -q main && echo d >> docs/x.md && git commit -qam d ) >/dev/null 2>&1
+  sg_do checkout -q main || return 1
+  echo d >> "$repo/docs/x.md"
+  sg_do commit -q -am d || return 1
   expect push-inert-builds-nothing "" "$(run push)"
   echo "SUBJECTS=4  # scenarios exercised"
   return $rc
