@@ -168,26 +168,25 @@ class RevaluationServiceTest {
     }
 
     @Test
-    fun `every kind of data gap is reported with its reason, never posted as zero`() =
-        runBlocking<Unit> {
-            val irs = bookedIrs().also { deals.rows[it.id] = it }
+    fun `every kind of data gap is reported with its reason, never posted as zero`() = runBlocking<Unit> {
+        val irs = bookedIrs().also { deals.rows[it.id] = it }
 
-            assertThat(service.revalue(day).gaps.single().reason).contains("no TIED_OUT risk snapshot")
+        assertThat(service.revalue(day).gaps.single().reason).contains("no TIED_OUT risk snapshot")
 
-            engine.books[day] = book(day)
-            assertThat(service.revalue(day).gaps.single().reason).contains("not in the risk engine's valuation")
-            engine.books[day] = book(day, fv(irs, null, "no PRIBOR_6M curve"))
-            assertThat(service.revalue(day).gaps.single().reason).contains("unpriced")
-            engine.books[day] = book(day, fv(irs, null))
-            assertThat(service.revalue(day).gaps.single().reason).contains("no clean value")
-            engine.books[day] = book(day, fv(irs, "100.00"), currency = "EUR")
-            assertThat(service.revalue(day).gaps.single().reason).contains("valued in EUR")
-            engine.down = true
-            assertThat(service.revalue(day).gaps.single().reason).contains("valuation unavailable")
+        engine.books[day] = book(day)
+        assertThat(service.revalue(day).gaps.single().reason).contains("not in the risk engine's valuation")
+        engine.books[day] = book(day, fv(irs, null, "no PRIBOR_6M curve"))
+        assertThat(service.revalue(day).gaps.single().reason).contains("unpriced")
+        engine.books[day] = book(day, fv(irs, null))
+        assertThat(service.revalue(day).gaps.single().reason).contains("no clean value")
+        engine.books[day] = book(day, fv(irs, "100.00"), currency = "EUR")
+        assertThat(service.revalue(day).gaps.single().reason).contains("valued in EUR")
+        engine.down = true
+        assertThat(service.revalue(day).gaps.single().reason).contains("valuation unavailable")
 
-            assertThat(ledger.posted).isEmpty()
-            assertThat(store.rows).isEmpty()
-        }
+        assertThat(ledger.posted).isEmpty()
+        assertThat(store.rows).isEmpty()
+    }
 
     @Test
     fun `a valued derivative posts its change to P&L once, a replay posts nothing, the next date only the delta`() =
