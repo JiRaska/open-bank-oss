@@ -42,7 +42,7 @@ class T(unittest.TestCase):
 
     def test_failure_and_cancelled_markers_fail(self):
         for r in ("failure", "cancelled"):
-            self.assertTrue(self.run_case(["a"], lambda d: make(d, "a", result=r)))
+            self.assertTrue(self.run_case(["a"], lambda d, r=r: make(d, "a", result=r)))
 
     def test_non_success_marker_fails(self):
         self.assertTrue(self.run_case(["a"], lambda d: make(d, "a", result="failure")))
