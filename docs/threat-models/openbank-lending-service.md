@@ -569,8 +569,9 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
 - **2026-10-23** — **Lending is a day-close participant (ADR-0342, #13167).** New outbound edge:
   `PUT /api/v1/ledger/accounting-days/{date}/participants/lending` to ledger-service, over the same
   `ledger-service` base URL and named oidc-client `m2m` (Keycloak `openbank-lending`) as the existing
-  journal POST — no new credential, client, grant or port; the ledger admits it under the
-  `service-lending-ledger-post` `ledger.create` rule that principal already holds. New table
+  journal POST — no new credential, client or port. The ledger authorizes it as its OWN action
+  `ledger.close.participate` (rule `service-close-participation`, which binds each account to its one
+  participant name), never the generic `ledger.create`. New table
   `lending_close_job_run` (V28) recording, per Prague accounting day, that the accrual and
   provisioning passes ran and what they did; a new hourly `LendingCloseParticipationScheduler`
   folds those rows into the report. **STRIDE-S:** the ledger accepts a `lending` report only from
@@ -585,9 +586,18 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
   (`AccountingClock.bank`) once at the start and file their evidence under that same date, so a pass
   crossing midnight, or a UTC pod, cannot accrue for one day and report another. Reasons carry categories and counts only — no loan id, party id or
   exception text leaves the service. **STRIDE-D:** a ledger outage only delays the report (re-offered
-  every tick, the day waits and pages). **Known gap:** allowance journals queued by provisioning are
-  dispatched by the outbox, so a closed-day 409 at dispatch time is not yet a participation outcome
-  (the pass reports `journalsPosted = 0` for them). The ledger keeps the check in `shadow`; flipping
+  every tick, the day waits and pages). **Review hardening:** (1) provisioning's allowance journals
+  are dispatched by the outbox, so the day is not reported while any `lending.allowance.posting` row
+  for it (payload `accountingDate`, indexed in V28) is still PENDING/DISPATCHING/FAILED; SENT rows
+  are its journals and DEAD rows (the outbox gave up, a closed-day 409 included) make the day
+  REFUSED. (2) Each pass marks itself in flight before working; the day is not reported while the
+  marker stands (a pass running across midnight cannot be overtaken by an earlier RAN row), and a
+  marker older than `lending.close.stale-after` (2h) is reported REFUSED `pass started and never
+  completed`, so a crash cannot hold the day unresolvably. (3) The accrual drains truncated batches
+  within `drain-budget` / `max-drain-rounds`, and each pass first re-drains every earlier day in the
+  lookback still REFUSED as truncated, as of that day, re-recording it RAN once nothing is left. (4) A
+  report the ledger receives after it TIED_OUT or LOCKED the day is stored `late = true` and never
+  moves the day (`DayCloseParticipantsIT`: a later REFUSED is stored late). The ledger keeps the check in `shadow`; flipping
   to enforce is an owner step. Rollback: revert the application while preserving additive V28 run
   evidence; schema removal needs a separate reviewed retention plan.
 - **2026-10-14** — **Explicit origination commands: withdraw / submit-documents / sign, KYC-validity expiry, four-eyes SLA escalation** (ADR-0211 D3 slice; refs #12748). Four new endpoints: desk `POST /api/v1/lending/applications/{id}/withdraw|submit-documents|sign` under new actions `lending.withdraw` / `lending.submitDocuments` / `lending.sign` (desk-role sets in `lending_rest_ext.rego` plus the edge `prohibited` veto, 37 rego tests), and the customer edge `POST /api/v1/lending/intake/applications/{id}/withdraw` reusing the existing `lending.intake` action. **Elevation of privilege / spoofing:** the actor is the JWT subject on the desk endpoints and the vouched edge principal on intake; the intake endpoint looks the application up owner-filtered so a customer touching another party's id gets the same 404 as a missing one — existence is not disclosed across the trust boundary. **Tampering / repudiation:** `sign` persists the signature-artefact hash (V27 adds nullable `loan_application.signature_artefact_hash`, additive, rollback = `DROP COLUMN`) via a same-claim compare-and-set (`compareAndSetSignature`, mirroring `claimDecision`), so the row either carries the hash the decision claimed or the sign fails closed; the hash corroborates the signature evidence without storing the artefact itself. **Withdrawal boundary (ADR-0211, not ADR-0215):** application withdrawal is available only pre-disbursement — `SIGNED` and every terminal state refuse with 422 through the state machine, which remains the single authority on lawful transitions; the statutory post-disbursement cooling-off unwind stays a live-loan path (ADR-0215). **Four-eyes SLA:** a new `FOUR_EYES` timer branch escalates after 5 days — it emits a `credit.application.four_eyes_sla_escalation` evidence event and increments `openbank.lending.origination.four_eyes_sla_escalation`; it NEVER auto-approves (no human edge leaves the graph) and is idempotent by aggregate re-read, so replay cannot double-escalate. **KYC validity:** a new `KYC_PENDING` branch expires the application via the existing `expireIfInState` after 30 days to `EXPIRED`. Timer constants live in the workflow source because `run`/`stateEntered` signatures are frozen by in-flight histories — replay safety, not config. The state machine gained property tests (jqwik) over lawful walks and human-only edges. No new caller, topic, network-policy edge or machine privilege. Money-path: the PR needs two approvals. Rollback: revert; V27 is additive.

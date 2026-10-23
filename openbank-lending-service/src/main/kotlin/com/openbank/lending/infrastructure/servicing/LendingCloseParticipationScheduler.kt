@@ -4,8 +4,12 @@
 
 package com.openbank.lending.infrastructure.servicing
 
+import com.openbank.lending.application.port.out.AllowancePostingsPort
 import com.openbank.lending.application.port.out.CloseJobRunPort
+import com.openbank.lending.application.port.out.InFlightRun
+import com.openbank.libs.close.CloseJobRun
 import com.openbank.libs.close.CloseParticipationAssembler
+import com.openbank.libs.close.CloseParticipationReport
 import com.openbank.libs.close.CloseParticipationReporter
 import com.openbank.libs.close.CloseParticipationSink
 import com.openbank.libs.domain.calendar.AccountingClock
@@ -35,6 +39,20 @@ import java.time.LocalDate
  * not reported at all and the ledger keeps it in CUTOFF — lending running late holds the close.
  * Both switched off (`off`/`disabled`) is reported SKIPPED with that reason.
  *
+ * Two more holds, both "not reported yet", never a guess:
+ *  - **in flight** — a pass for the day has marked itself started and not finished, so an earlier
+ *    RAN row may be about to change (a pass running across midnight). A marker older than
+ *    [staleAfter] is a pass that died: that job is reported REFUSED `pass started and never completed`,
+ *    so a crash cannot hold the day unresolvably;
+ *  - **allowance journals pending** — provisioning queues its allowance journals in the outbox, so the
+ *    day waits until every `lending.allowance.posting` row for it has been delivered. SENT rows count as
+ *    provisioning's journals; DEAD rows (the outbox gave up, e.g. on the ledger's closed-day 409) make
+ *    the day REFUSED.
+ *
+ * A report the ledger receives for a day it has already TIED_OUT or LOCKED is stored with `late = true`
+ * and never moves the day (ledger `CloseParticipationService`, ADR-0342 D4): a REFUSED that arrives
+ * after the close is visible on the day-end page but cannot reopen it.
+ *
  * Returns the `Uni` for Quarkus to subscribe: a plain `@Scheduled` method has no Vert.x context,
  * so `runBlocking` around reactive Panache would throw `HR000068` and never run (CLAUDE.md).
  * `LendingCloseParticipationSchedulerCronIT` drives the real cron.
@@ -42,15 +60,22 @@ import java.time.LocalDate
 @ApplicationScoped
 class LendingCloseParticipationScheduler(
     private val closeJobRuns: CloseJobRunPort,
+    private val allowancePostings: AllowancePostingsPort,
     sink: CloseParticipationSink,
     meterRegistry: MeterRegistry,
-    clock: Clock,
+    private val clock: Clock,
     private val domainMetrics: DomainMetrics,
     @ConfigProperty(name = "lending.servicing.accrual.every") private val accrualEvery: String,
     @ConfigProperty(name = "lending.provisioning.cycle.every") private val provisioningEvery: String,
-    @ConfigProperty(name = "lending.close.lookback-days", defaultValue = "3")
-    private val lookbackDays: Long,
 ) {
+    // Field-injected, not constructor parameters: detekt LongParameterList fires AT 9.
+    @ConfigProperty(name = "lending.close.lookback-days", defaultValue = "3")
+    var lookbackDays: Long = DEFAULT_LOOKBACK_DAYS
+
+    /** An in-flight marker older than this is a pass that died (twice the default drain budget, plus margin). */
+    @ConfigProperty(name = "lending.close.stale-after", defaultValue = "PT2H")
+    var staleAfter: Duration = DEFAULT_STALE_AFTER
+
     private val log = Logger.getLogger(LendingCloseParticipationScheduler::class.java)
     private val reporter = CloseParticipationReporter(LendingCloseJobs.PARTICIPANT, sink, meterRegistry)
     private val accountingClock = AccountingClock.bank(clock)
@@ -93,21 +118,74 @@ class LendingCloseParticipationScheduler(
     fun reportDays(today: LocalDate): Uni<TickResult> {
         val from = today.minusDays(lookbackDays)
         val to = today.minusDays(1)
-        val due = dueJobs()
+        val days = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }.toList()
         return closeJobRuns.findBetween(from, to).flatMap { runs ->
-            val reports = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }
-                .mapNotNull { day ->
-                    CloseParticipationAssembler.assemble(day, due, runs, skipReason = SKIP_REASON).also {
-                        if (it == null) log.infof("lending day-close for %s not reported: a due job has not run", day)
+            closeJobRuns.inFlightBetween(from, to).flatMap { inFlight ->
+                Multi.createFrom().iterable(days)
+                    .onItem().transformToUniAndConcatenate { day -> assemble(day, runs, inFlight) }
+                    .collect().asList()
+                    .flatMap { assembled ->
+                        Multi.createFrom().iterable(assembled.filterNotNull())
+                            .onItem().transformToUniAndConcatenate { reporter.report(it) }
+                            .collect().asList()
                     }
-                }
-                .toList()
-            Multi.createFrom().iterable(reports)
-                .onItem().transformToUniAndConcatenate { reporter.report(it) }
-                .collect().asList()
-                .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
+                    .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
+            }
         }
     }
+
+    private fun assemble(
+        day: LocalDate,
+        runs: List<CloseJobRun>,
+        inFlight: List<InFlightRun>,
+    ): Uni<CloseParticipationReport?> {
+        val due = dueJobs()
+        val now = clock.instant()
+        val flying = inFlight.filter { it.businessDate == day && it.job in due }
+        if (flying.any { it.startedAt.plus(staleAfter).isAfter(now) }) {
+            log.infof("lending day-close for %s not reported: a pass for it is still in flight", day)
+            return Uni.createFrom().nullItem()
+        }
+        // A marker past staleAfter is a pass that died: that job is REFUSED, never "still running".
+        val abandoned = flying.map {
+            CloseJobRun(day, it.job, 0, 0, 1, LendingCloseJobs.REASON_PASS_ABANDONED, it.startedAt)
+        }
+        val forDay = runs.filter { it.businessDate == day }
+            .filterNot { run -> abandoned.any { it.job == run.job } } + abandoned
+        val provisioning = forDay.firstOrNull { it.job == LendingCloseJobs.PROVISIONING }
+        if (provisioning == null || LendingCloseJobs.PROVISIONING !in due) {
+            return Uni.createFrom().item(assembleOrLog(day, due, forDay))
+        }
+        return allowancePostings.postingsFor(day).map { postings ->
+            if (postings.pending > 0) {
+                log.infof(
+                    "lending day-close for %s not reported: %d allowance journal(s) still in the outbox",
+                    day,
+                    postings.pending,
+                )
+                return@map null
+            }
+            val folded = if (postings.dead > 0) {
+                val reasons = listOfNotNull(
+                    provisioning.refusalReason?.let { "${provisioning.refused} $it" },
+                    "${postings.dead} ${LendingCloseJobs.REASON_ALLOWANCE_NOT_POSTED}",
+                )
+                provisioning.copy(
+                    journalsPosted = postings.posted,
+                    refused = provisioning.refused + postings.dead,
+                    refusalReason = reasons.joinToString("; "),
+                )
+            } else {
+                provisioning.copy(journalsPosted = postings.posted)
+            }
+            assembleOrLog(day, due, forDay.map { if (it.job == LendingCloseJobs.PROVISIONING) folded else it })
+        }
+    }
+
+    private fun assembleOrLog(day: LocalDate, due: Set<String>, runs: List<CloseJobRun>): CloseParticipationReport? =
+        CloseParticipationAssembler.assemble(day, due, runs, skipReason = SKIP_REASON).also {
+            if (it == null) log.infof("lending day-close for %s not reported: a due job has not run", day)
+        }
 
     /** Interval jobs are due every day they are switched on. */
     internal fun dueJobs(): Set<String> = buildSet {
@@ -119,6 +197,8 @@ class LendingCloseParticipationScheduler(
 
     private companion object {
         const val WORKFLOW_NAME = "lending-close-participation"
+        const val DEFAULT_LOOKBACK_DAYS = 3L
+        val DEFAULT_STALE_AFTER: Duration = Duration.ofHours(2)
 
         /** The values Quarkus reads as "never run" for `every`. */
         val OFF_VALUES = setOf("off", "disabled")

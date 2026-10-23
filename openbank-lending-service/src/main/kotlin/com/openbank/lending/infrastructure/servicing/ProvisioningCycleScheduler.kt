@@ -8,6 +8,7 @@ import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.out.CloseJobRunPort
 import com.openbank.lending.application.port.out.ProvisioningCoverageRepository
 import com.openbank.lending.application.port.out.ProvisioningCycleRunRepository
+import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
@@ -165,9 +166,11 @@ class ProvisioningCycleScheduler(
         // The Prague accounting day (ADR-0207): the reporting date and the day-close evidence agree.
         val asOf = AccountingClock.bank(clock).today()
         val period = asOf.format(periodFormat)
-        // Commit the start BEFORE any loan-level transaction. An abrupt stop leaves durable RUNNING
-        // evidence; a later date cannot certify that earlier reporting date as complete.
-        runs.markStarted(asOf, OffsetDateTime.now(clock))
+        // In-flight marker first (ADR-0342): while it stands the reporter does not report this day.
+        LendingCloseJobs.markStarted(closeJobRuns, clock, asOf, LendingCloseJobs.PROVISIONING)
+            // Commit the start BEFORE any loan-level transaction. An abrupt stop leaves durable RUNNING
+            // evidence; a later date cannot certify that earlier reporting date as complete.
+            .flatMap { runs.markStarted(asOf, OffsetDateTime.now(clock)) }
             .flatMap { attemptId ->
                 runs.countUnresolvedBefore(asOf)
                     .invoke { unresolved ->
@@ -178,7 +181,6 @@ class ProvisioningCycleScheduler(
                     }
                     .flatMap { unresolved ->
                         cycle.runProvisioningCycle(period, asOf, batchSize)
-                            .invoke { outcome -> lastAssessed = outcome.loansAssessed }
                             .invoke { outcome ->
                                 log.infof(
                                     "IFRS 9 provisioning cycle %s: %d loans assessed, %d allowance commands queued",
@@ -187,13 +189,15 @@ class ProvisioningCycleScheduler(
                                     outcome.journalsQueued,
                                 )
                             }
-                            .flatMap { publishCoverage(period) }
-                            .flatMap { missing ->
+                            // The outcome travels down the chain with the coverage count: no bean field
+                            // to go stale between passes.
+                            .flatMap { outcome -> publishCoverage(period).map { missing -> outcome to missing } }
+                            .flatMap { (outcome, missing) ->
                                 runs.markResult(asOf, attemptId, missing, OffsetDateTime.now(clock))
-                                    .replaceWith(missing)
+                                    .replaceWith(outcome to missing)
                             }
-                            .call { missing -> recordCloseEvidence(asOf, missing) }
-                            .map { missing -> missing == 0L && unresolved == 0L }
+                            .call { (outcome, missing) -> recordCloseEvidence(asOf, outcome, missing) }
+                            .map { (_, missing) -> missing == 0L && unresolved == 0L }
                     }
             }
             .invoke { complete -> if (complete) liveness?.recordSuccess() }
@@ -215,19 +219,21 @@ class ProvisioningCycleScheduler(
 
     /**
      * Day-close evidence (ADR-0342 D1). The allowance journals this pass queues are dispatched by the
-     * outbox, not booked here, so the run reports `journalsPosted = 0` and counts loans assessed as
-     * its items. A pass that leaves eligible exposures unprovisioned, or whose coverage could not be
-     * counted, cannot certify the day: it is recorded REFUSED with the shortfall, which holds the
-     * ledger's close until a complete pass (or an operator waiver) replaces it.
+     * outbox, not booked here, so the run records `journalsPosted = 0` and loans assessed as items;
+     * [LendingCloseParticipationScheduler] adds the day's allowance journals once the outbox has
+     * delivered them, and does not report the day while any is still pending. A pass that leaves
+     * eligible exposures unprovisioned, or whose coverage could not be counted, cannot certify the day:
+     * it is recorded REFUSED with the shortfall, which holds the ledger's close until a complete pass
+     * (or an operator waiver) replaces it.
      */
-    private fun recordCloseEvidence(asOf: LocalDate, missing: Long?): Uni<Unit> {
+    private fun recordCloseEvidence(asOf: LocalDate, outcome: ProvisioningRunOutcome, missing: Long?): Uni<Unit> {
         val incomplete = missing == null || missing > 0
         return LendingCloseJobs.record(
             closeJobRuns,
             clock,
             asOf,
             LendingCloseJobs.PROVISIONING,
-            items = lastAssessed,
+            items = outcome.loansAssessed,
             journals = 0,
             refused = if (incomplete) (missing ?: 1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() else 0,
             reason = when {
@@ -237,10 +243,6 @@ class ProvisioningCycleScheduler(
             },
         )
     }
-
-    /** Loans assessed by the pass in flight; only read after its cycle completed. */
-    @Volatile
-    private var lastAssessed: Int = 0
 
     private companion object {
         const val METRICS_SERVICE_TAG = "lending"

@@ -26,7 +26,9 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
  * `openbank-services` principal, and binding the `billing` participant to a principal every service
  * holds would let any of them report billing complete. This client uses the NAMED oidc-client `m2m`
  * (Keycloak `openbank-billing`, ROLE_API only — already used for the account reads), and the ledger
- * admits it under `service-billing-ledger-post` (`ledger_rest_ext.rego`).
+ * admits it under `ledger.close.participate` for the participant `billing` only
+ * (`ledger_rest_ext.rego: service-close-participation`). That is billing's whole ledger grant on its
+ * own identity: it cannot post, reverse or read a journal with it.
  */
 @RegisterRestClient(configKey = "ledger-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)

@@ -32,9 +32,19 @@ object LendingCloseJobs {
     const val REASON_PROVISIONING_FAILED = "provisioning pass failed before completing"
     const val REASON_PROVISIONING_INCOMPLETE = "eligible exposure(s) left unprovisioned"
     const val REASON_PROVISIONING_UNCOUNTED = "provisioning coverage could not be counted"
+    const val REASON_ALLOWANCE_NOT_POSTED = "allowance journal(s) never booked (outbox gave up)"
+    const val REASON_PASS_ABANDONED = "pass started and never completed"
 
     private const val HTTP_CONFLICT = 409
     private val log = Logger.getLogger(LendingCloseJobs::class.java)
+
+    /**
+     * Sets the in-flight marker for `(businessDate, job)` before a pass does any work. Unlike [record],
+     * a failure here FAILS the pass: running without the marker would let the reporter send an earlier
+     * run's RAN for a day this pass is still changing.
+     */
+    fun markStarted(runs: CloseJobRunPort, clock: Clock, businessDate: LocalDate, job: String): Uni<Unit> =
+        runs.markStarted(businessDate, job, clock.instant())
 
     /**
      * True when the ledger's closed-day 409 (ADR-0342 D4) is anywhere in [failure]'s cause chain.
