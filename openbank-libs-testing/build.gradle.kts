@@ -62,6 +62,9 @@ dependencies {
     // domain types (openbank-libs-domain), unlike JournalEntry/JournalLine which live
     // per-service.
     api(project(":openbank-libs-domain"))
+    // ADR-0352: the golden-scenario runner evaluates product IR with the production arithmetic
+    // (FinanceProductArithmetic) so a scenario proves the same code path a consumer runs.
+    api(project(":openbank-libs-finance"))
     // Same version pin as openbank-ledger-service/openbank-balance-service's own property
     // suites and openbank-libs-domain's MoneyPropertyTest — kept a direct GAV like theirs.
     api("io.kotest:kotest-property:5.9.1")

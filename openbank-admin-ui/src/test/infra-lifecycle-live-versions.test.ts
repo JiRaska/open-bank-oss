@@ -31,7 +31,7 @@ afterEach(() => {
   liveSnapshot.components.clickhouse = [
     { version: '26.8', count: 1, observedAt: liveSnapshot.fetchedAt },
   ]
-  for (const id of ['postgres', 'keycloak', 'openbao']) {
+  for (const id of ['postgres', 'keycloak', 'openbao', 'karpenter']) {
     delete (liveSnapshot.components as Record<string, unknown>)[id]
   }
   vi.unstubAllGlobals()
@@ -65,6 +65,18 @@ describe('/api/infra/lifecycle runtime version evidence', () => {
     if (valkey.declared.version !== null) expect(valkey.declared.version).not.toBe(valkey.running.version)
   })
 
+  it('preserves runtime build-info provenance instead of claiming an observed image tag', async () => {
+    (liveSnapshot.components as Record<string, unknown>).karpenter = [{
+      version: '1.14.1', count: 1, observedAt: liveSnapshot.fetchedAt, source: 'prometheus-runtime-build-info',
+    }]
+    const { GET } = await import('@/app/api/infra/lifecycle/route')
+    const payload = await (await GET()).json()
+    const controller = payload.components.find((component: { id: string }) => component.id === 'karpenter')
+    expect(controller.running.version).toBe('1.14.1')
+    expect(controller.running.source).toBe('prometheus-runtime-build-info')
+    expect(controller.running.observedAt).toBe(liveSnapshot.fetchedAt)
+  })
+
   it('does not invent a ClickHouse runtime version when the fresh image sample is absent', async () => {
     liveSnapshot.components.clickhouse = []
     const { GET } = await import('@/app/api/infra/lifecycle/route')
@@ -88,7 +100,7 @@ describe('/api/infra/lifecycle runtime version evidence', () => {
     const valkey = payload.components.find((component: { id: string }) => component.id === 'valkey')
     expect(valkey.running).toEqual({
       version: null,
-      source: 'mixed-running-images',
+      source: 'mixed-running-workloads',
       observedAt: null,
       versions: [
         { version: '8.1.10', count: 2, observedAt },

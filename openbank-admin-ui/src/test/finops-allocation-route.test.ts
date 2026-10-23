@@ -6,8 +6,11 @@
 // derived footprints and 200s with an allocation; degrades to available:false (still 200) when a
 // snapshot is missing, so the page never sees a raw error (admin-ui graceful-state rule).
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { promises as fs } from 'fs'
+
+const { readSnapshot } = vi.hoisted(() => ({ readSnapshot: vi.fn() }))
+vi.mock('@/lib/evidence/contentSnapshot', () => ({ createAdminUiContentSnapshotReader: () => ({ read: readSnapshot }) }))
 
 // Capture the real readFile BEFORE any spy is installed.
 // Vitest 4 uses fs.promises.readFile internally (async) to load TypeScript source files
@@ -15,6 +18,7 @@ import { promises as fs } from 'fs'
 // in CI on a fresh checkout). The mock must passthrough unknown paths to the real readFile
 // so that Vitest's module loader can resolve the route + its dependency tree.
 const _realReadFile = fs.readFile.bind(fs)
+const governancePathBeforeSuite = process.env.OPENBANK_GOVERNANCE
 
 const COST = JSON.stringify({
   available: true, currency: 'USD', periodStart: '2026-05-04', periodEnd: '2026-06-03',
@@ -50,11 +54,17 @@ function mockFiles(map: Record<string, string>) {
 
 describe('GET /api/finops/allocation', () => {
   beforeEach(() => {
-    delete process.env.OPENBANK_COST_REPORT_LIVE
-    delete process.env.OPENBANK_COST_REPORT
-    delete process.env.OPENBANK_COST_FOOTPRINTS
+    readSnapshot.mockReset().mockResolvedValue({ status: 'unavailable', snapshot: null, provenance: null })
+    vi.stubEnv('OPENBANK_COST_REPORT_LIVE', undefined)
+    vi.stubEnv('OPENBANK_COST_REPORT', undefined)
+    vi.stubEnv('OPENBANK_GOVERNANCE', undefined)
+    vi.stubEnv('OPENBANK_COST_FOOTPRINTS', undefined)
   })
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
+  afterAll(() => {
+    // VM workers reuse process state across suites; a missing-source fixture must not leak.
+    expect(process.env.OPENBANK_GOVERNANCE).toBe(governancePathBeforeSuite)
+  })
 
   it('200s with an allocation joining costs + footprints', async () => {
     mockFiles({ cost: COST, footprints: FOOTPRINTS })
@@ -88,4 +98,46 @@ describe('GET /api/finops/allocation', () => {
     expect(body.allocatable).toBe(90)
     expect(body.byService).toEqual([])
   })
+  it('uses the next published domain revision without an image rebuild and preserves unknown mappings', async () => {
+    mockFiles({ cost: COST, footprints: FOOTPRINTS })
+    const { GET } = await import('../app/api/finops/allocation/route')
+    const provenance = { sourceSha: 'a'.repeat(40), collectedAt: '2026-10-22T10:00:00.000Z', runId: 123, runAttempt: 1 }
+    const published = (domain: string, status = 'ready') => ({ status, provenance,
+      snapshot: { content: { governance: { services: [{ serviceName: 'openbank-account-service', dataDomain: domain }] } } },
+    })
+    readSnapshot.mockResolvedValue(published('payments'))
+    const first = await (await GET()).json()
+    expect(first.byService.find((row: { service: string }) => row.service === 'account-service').domain).toBe('payments')
+    expect(first.unmapped).toContain('ledger-service')
+    expect(first.governanceSource).toMatchObject({ source: 'published', status: 'ready', sourceSha: provenance.sourceSha, sourceCollectedAt: provenance.collectedAt })
+    readSnapshot.mockResolvedValue(published('identity', 'stale'))
+    const second = await (await GET()).json()
+    expect(second.byService.find((row: { service: string }) => row.service === 'account-service').domain).toBe('identity')
+    expect(second.governanceSource).toMatchObject({ source: 'published', status: 'stale', sourceCollectedAt: provenance.collectedAt })
+    expect(second.collectedAt).toBe('2026-06-03T00:00:00Z')
+  })
+
+  it('labels the image governance fallback stale and rejects unknown domain values', async () => {
+    mockFiles({ cost: COST, footprints: FOOTPRINTS })
+    const { GET } = await import('../app/api/finops/allocation/route')
+    const fallback = await (await GET()).json()
+    expect(fallback.governanceSource).toMatchObject({ source: 'image-baked', status: 'stale', sourceCollectedAt: null })
+    readSnapshot.mockResolvedValue({ status: 'ready', provenance: { sourceSha: 'b'.repeat(40) },
+      snapshot: { content: { governance: { services: [{ serviceName: 'account-service', dataDomain: 'invented' }] } } },
+    })
+    const unknown = await (await GET()).json()
+    expect(unknown.unmapped).toContain('account-service')
+    expect(unknown.byService.find((row: { service: string }) => row.service === 'account-service').domain).toBe('platform')
+  })
+
+  it('keeps domains unmapped when neither published nor image governance is available', async () => {
+    mockFiles({ cost: COST, footprints: FOOTPRINTS })
+    vi.stubEnv('OPENBANK_GOVERNANCE', '/nonexistent-test-governance.json')
+    const { GET } = await import('../app/api/finops/allocation/route')
+    const body = await (await GET()).json()
+    expect(body.unmapped).toEqual(['account-service', 'ledger-service'])
+    expect(body.byDomain).toEqual([expect.objectContaining({ domain: 'platform' })])
+    expect(body.governanceSource).toMatchObject({ source: 'unavailable', status: 'unavailable' })
+  })
+
 })

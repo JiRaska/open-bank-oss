@@ -155,6 +155,8 @@ export function publishEvidenceSnapshot({
   if (typeof validateSnapshot !== 'function' || typeof snapshotCollectedAt !== 'function') throw new Error('dataset validation contract is required')
   if (typeof bucket !== 'string' || !bucket.trim()) throw new Error('EVIDENCE_BUCKET is required')
   const safePrefix = validatePrefix(prefix)
+  // Only reviewed repository content contains the bounded Markdown corpora.
+  const maxInputBytes = safePrefix === 'admin-ui/content' ? 8 * 1024 * 1024 : MAX_INPUT_BYTES
   const sourceSha = env.EVIDENCE_SOURCE_SHA ?? env.GITHUB_SHA
   if (typeof sourceSha !== 'string' || !SOURCE_SHA.test(sourceSha)) throw new Error('publication source SHA must be a full 40-character lowercase SHA')
   const runId = parsePositiveInteger(env.GITHUB_RUN_ID, 'GITHUB_RUN_ID')
@@ -179,7 +181,7 @@ export function publishEvidenceSnapshot({
       const object = getObject(execFileSync, bucket, `${safePrefix}/${rollback}`, snapshotPath)
       if (!object.exists) throw new Error('rollback snapshot does not exist')
       payloadBytes = readFile(snapshotPath)
-      if (payloadBytes.byteLength > MAX_INPUT_BYTES) throw new Error('rollback snapshot exceeds size limit')
+      if (payloadBytes.byteLength > maxInputBytes) throw new Error('rollback snapshot exceeds size limit')
       digest = sha256(payloadBytes)
       if (digest !== match[3]) throw new Error('rollback snapshot filename hash does not match its bytes')
       payload = loadJson(payloadBytes, 'rollback snapshot')
@@ -192,7 +194,7 @@ export function publishEvidenceSnapshot({
     } else {
       if (typeof file !== 'string' || !file) throw new Error('file is required')
       payloadBytes = readFile(file)
-      if (payloadBytes.byteLength > MAX_INPUT_BYTES) throw new Error('evidence input exceeds size limit')
+      if (payloadBytes.byteLength > maxInputBytes) throw new Error('evidence input exceeds size limit')
       payload = loadJson(payloadBytes, 'evidence input')
       if (!validateSnapshot(payload, now())) throw new Error('evidence input failed schema validation')
       digest = sha256(payloadBytes)
