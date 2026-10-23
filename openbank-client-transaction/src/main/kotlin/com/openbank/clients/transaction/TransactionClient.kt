@@ -67,7 +67,16 @@ class TransactionClient(private val api: TransactionsApi) {
             if (outcome is TransactionCallOutcome.HttpSuccess &&
                 (outcome.bodyError != null || outcome.body?.status != "COMPLETED")
             ) {
-                throw TransactionCompletionUncertainException(outcome.status, outcome.bodyError)
+                val completionFailure = if (outcome.bodyError == null && outcome.body?.status == "FAILED") {
+                    TransactionCompletionFailure.FAILED
+                } else {
+                    TransactionCompletionFailure.UNPROVEN
+                }
+                throw TransactionCompletionUncertainException.classified(
+                    outcome.status,
+                    outcome.bodyError,
+                    completionFailure,
+                )
             }
             return outcome
         }
@@ -177,4 +186,24 @@ class TransactionHttpException(val status: Int, cause: Throwable? = null) :
  * A returned FAILED state is not interpreted as proof that no ledger effect ever happened.
  */
 class TransactionCompletionUncertainException(val status: Int, cause: Throwable? = null) :
-    RuntimeException("transaction-service completion is unproven (HTTP $status)", cause)
+    RuntimeException("transaction-service completion is unproven (HTTP $status)", cause) {
+    // Keep the original constructor and its default-argument JVM signature unchanged.
+    var completionFailure: TransactionCompletionFailure = TransactionCompletionFailure.UNPROVEN
+        private set
+
+    companion object {
+        internal fun classified(
+            status: Int,
+            cause: Throwable?,
+            completionFailure: TransactionCompletionFailure,
+        ): TransactionCompletionUncertainException = TransactionCompletionUncertainException(status, cause).also {
+            it.completionFailure = completionFailure
+        }
+    }
+}
+
+/** Bounded response metadata only; no body, provider text or inference that a request was replayed. */
+enum class TransactionCompletionFailure {
+    FAILED,
+    UNPROVEN,
+}

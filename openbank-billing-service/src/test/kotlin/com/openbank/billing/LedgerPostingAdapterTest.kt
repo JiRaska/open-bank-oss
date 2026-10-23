@@ -134,26 +134,35 @@ class LedgerPostingAdapterTest {
     }
 
     @Test
-    fun `with the switch off the legs are the explicit accounts the ledger has always accepted`() {
+    fun `with the switch off a CZK fee's legs are the explicit accounts the ledger has always accepted`() {
         val mapper = com.fasterxml.jackson.databind.ObjectMapper()
-        for (ccy in listOf("CZK", "EUR")) {
-            val charge = capture(false) { it.post(command().copy(currency = ccy)) }
-            val reversal = capture(false) { it.postReversal(reversalCommand().copy(currency = ccy)) }
-            for ((name, request) in listOf("charge" to charge, "reversal" to reversal)) {
-                val legs = mapper.readTree(mapper.writeValueAsString(request))["lines"]
-                assertThat(legs[0]["glAccountId"].asText()).describedAs("$name $ccy debit/credit customer leg")
-                    .isEqualTo("a0000000-0000-0000-0000-000000000002")
-                assertThat(legs[1]["glAccountId"].asText()).describedAs("$name $ccy income leg")
-                    .isEqualTo("a0000000-0000-0000-0000-000000004003")
-                legs.forEach {
-                    // exactly the payload an older ledger knows: no class fields at all
-                    assertThat(it.has("accountingClass")).isFalse()
-                    assertThat(it.has("accountingRole")).isFalse()
-                }
+        val charge = capture(false) { it.post(command().copy(currency = "CZK")) }
+        val reversal = capture(false) { it.postReversal(reversalCommand().copy(currency = "CZK")) }
+        for ((name, request) in listOf("charge" to charge, "reversal" to reversal)) {
+            val legs = mapper.readTree(mapper.writeValueAsString(request))["lines"]
+            assertThat(legs[0]["glAccountId"].asText()).describedAs("$name CZK customer leg")
+                .isEqualTo("a0000000-0000-0000-0000-000000000002")
+            assertThat(legs[1]["glAccountId"].asText()).describedAs("$name CZK income leg")
+                .isEqualTo("a0000000-0000-0000-0000-000000004003")
+            legs.forEach {
+                // exactly the payload an older ledger knows: no class fields at all
+                assertThat(it.has("accountingClass")).isFalse()
+                assertThat(it.has("accountingRole")).isFalse()
             }
-            assertThat(charge.lines.map { it.side }).containsExactly("DEBIT", "CREDIT")
-            assertThat(reversal.lines.map { it.side }).containsExactly("CREDIT", "DEBIT")
         }
+        assertThat(charge.lines.map { it.side }).containsExactly("DEBIT", "CREDIT")
+        assertThat(reversal.lines.map { it.side }).containsExactly("CREDIT", "DEBIT")
+    }
+
+    @Test
+    fun `with the switch off a non-CZK fee still posts by class - the CZK literals were always refused for it`() {
+        // #13226: 2100/4003 are CZK accounts; an EUR leg on them was a 422 that wedged the outbox row.
+        val mapper = com.fasterxml.jackson.databind.ObjectMapper()
+        val charge = capture(false) { it.post(command().copy(currency = "EUR")) }
+        val legs = mapper.readTree(mapper.writeValueAsString(charge))["lines"]
+        assertThat(legs[0]["accountingClass"].asText()).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
+        assertThat(legs[1]["accountingClass"].asText()).isEqualTo("FEE_INCOME_ACCOUNT")
+        legs.forEach { assertThat(it.has("glAccountId")).isFalse() }
     }
 
     @Test

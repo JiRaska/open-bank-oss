@@ -32,6 +32,8 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0319: transaction-service client GENERATED from its openapi.yaml (#13224).
+    implementation(project(":openbank-client-transaction"))
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
     testImplementation(libs.quarkus.test.security)
@@ -78,6 +80,14 @@ kover {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// Forked test JVM heap. SepaTransactionClientWorkerThreadIT's OidcEnabled profile (#13224) adds one
+// more Quarkus boot next to the outbox-claim IT's, and the default 512m test heap then dies with
+// OutOfMemoryError mid-suite (measured locally: the executor crashed, 7 tests read as skipped). Same
+// per-module override as domestic-payment and account-service.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
 
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
 // pitest.yml, advisory — never a per-PR gate. Per-service plugin pin on purpose (rules.yaml
