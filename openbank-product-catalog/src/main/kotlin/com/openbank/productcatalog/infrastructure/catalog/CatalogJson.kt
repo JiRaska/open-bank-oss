@@ -16,6 +16,7 @@ import com.openbank.productcatalog.domain.catalog.OfferingRelationship
 import com.openbank.productcatalog.domain.catalog.PriceCadence
 import com.openbank.productcatalog.domain.catalog.PriceComponent
 import com.openbank.productcatalog.domain.catalog.PriceKind
+import com.openbank.productcatalog.domain.catalog.PriceRole
 import com.openbank.productcatalog.domain.catalog.ProductRevision
 import com.openbank.productcatalog.domain.catalog.RelationshipKind
 import com.openbank.productcatalog.domain.catalog.RevisionContent
@@ -80,7 +81,9 @@ class CatalogJson(private val mapper: ObjectMapper) {
             "prices",
             mapper.valueToTree(
                 content.prices.map { price ->
-                    mapOf(
+                    // `role` is emitted only when present, so a revision authored before #13230 hashes and
+                    // approves exactly as it did when it was published.
+                    listOfNotNull(price.role?.let { "role" to it.name }).toMap() + mapOf(
                         "code" to price.code,
                         "kind" to price.kind.name,
                         "value" to price.value.toPlainString(),
@@ -118,6 +121,7 @@ class CatalogJson(private val mapper: ObjectMapper) {
                 effectiveTo = it.get("effectiveTo")?.takeUnless(JsonNode::isNull)?.let { value ->
                     java.time.Instant.parse(value.asText())
                 },
+                role = it.get("role")?.takeUnless(JsonNode::isNull)?.let { value -> PriceRole.valueOf(value.asText()) },
             )
         }.orEmpty(),
         eligibility = node.get("eligibility")?.map {

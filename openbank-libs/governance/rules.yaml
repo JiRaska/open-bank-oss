@@ -35,9 +35,9 @@ deploy_holds:
       issue: "#13231"
       reason: "Automatic ledger posting re-drive must wait for verified provider-wide idempotency protection."
       release_condition: "The provider V22 migration is committed and its registry, partition triggers and cross-date idempotency checks are verified; the owner explicitly approves re-driving the existing clearing backlog."
-    # Migrated from deploy branches (issue #11503). The retired supersede design copied these
-    # holds onto deploy PR branches; each traces to an owner hold on a deploy PR (#12948 was
-    # drafted and labelled `blocked` by its owner). Holds now live only here.
+    # Migrated from deploy branches (issue #11503). Entries inherited from deploy PR #12948
+    # recorded no reason and were released; money-path services carry a staged wave entry in
+    # their place. Every entry with its own issue, reason or release condition is kept.
     openbank-account-service:
       all_of:
       - issue: '#13079'
@@ -46,30 +46,21 @@ deploy_holds:
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-agent-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-aml-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-anacredit-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-ap2-service:
       all_of:
       - issue: '#13079'
@@ -79,149 +70,93 @@ deploy_holds:
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-audit-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-authz-policy-auditor:
       issue: '#13304'
       reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
       release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-balance-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-billing-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-campaign-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
-    openbank-card-issuance-service:
-      all_of:
-      - issue: '#13080'
-        reason: 'Inherited from held deploy PR #13080 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13080 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-case-coordinator-agent:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-clearing-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
-    openbank-clearing-simulator:
-      issue: '#12948'
-      reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-      release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-communication-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-consent-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-context-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-control-liveness-sentinel:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-copilot-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-delegation-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-devops-agent:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-dispute-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-docs-truth-agent:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-document-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-domestic-payment:
       all_of:
       - issue: '#13079'
@@ -230,38 +165,25 @@ deploy_holds:
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-engagement-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-finops-agent:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-finrep-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-flaky-test-hunter:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-fraud-service:
       all_of:
       - issue: '#13079'
@@ -270,30 +192,25 @@ deploy_holds:
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 1 is healthy for 24h.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-fx-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-governance-auditor:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-incentive-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-interest-service:
       all_of:
       - issue: '#13079'
@@ -309,120 +226,76 @@ deploy_holds:
         reason: "Default-on catalog rate sync and V19/V20 account revision pinning require an owner-approved first deployment."
         release_condition: "The owner approves the exact interest image and deployment window after accepting V19/V20 backfill semantics, verifying catalog access, and defining rollback that preserves account revision pins."
     openbank-kyb-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
-    openbank-kyc-service:
-      issue: '#12948'
-      reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-      release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-ledger-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
-      - issue: "#13167"
-        reason: "Day-close participation V33 and its API require owner-controlled first image delivery."
-        release_condition: "The owner approves the exact ledger image and deployment window, accepts V33 schema and audit-history retention, and verifies ledger-interest participant API and authorization compatibility. Bank participation remains shadow and pension-company participation remains off; enforcement, replay and financial operations require separate approval."
+      - issue: '#13167'
+        reason: 'Day-close participation V33 and its API require owner-controlled first image delivery.'
+        release_condition: 'The owner approves the exact ledger image and deployment window, accepts V33 schema and audit-history retention, and verifies ledger-interest participant API and authorization compatibility. Bank participation remains shadow and pension-company participation remains off; enforcement, replay and financial operations require separate approval.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-lending-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-loyalty-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-mcp-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-notification-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-onboarding-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
-    openbank-party-service:
-      issue: '#12948'
-      reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-      release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-pension-fund-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-pid-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-psd2-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-referral-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-release-steward:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-risk-engine:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-sanctions-service:
       all_of:
       - issue: '#13079'
@@ -431,102 +304,89 @@ deploy_holds:
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 1 is healthy for 24h.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-sca-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-sdd-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
-    openbank-security-scanner:
-      issue: '#12948'
-      reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-      release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-sepa-instant:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-sepa-payment:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-settlement-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-standing-order-service:
-      issue: '#12948'
-      reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-      release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
+      issue: '#11503'
+      reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+      release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-statement-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-swift-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-tpp-registry-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
     openbank-treasury-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-vop-service:
       all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-wealth-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      issue: '#13304'
+      reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
+      release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
 
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
@@ -1261,6 +1121,47 @@ change_requirements:
     ci_producer: ".github/scripts/check-adr-proposed-staleness.py"
     target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the 4-findings seed tail (0141, 0142, 0155, 0170) is decided, re-affirmed, or baselined
     blocked_on: "first live run flags 4 genuinely open proposals from 2026-06/07; enforcement is safe once that tail is triaged — the gate is sweep-proof by construction (creation-age + deliberate last-reviewed), so no mechanical commit can silently reset it"
+  adr_delivery_scripts:
+    # An ADR's `## Delivery check` is the falsifier of its own `delivery-status`, and as prose
+    # nobody runs it: ADR-0344 read `planned` while code for its decisions landed, found only by a
+    # hand audit. gen-adr-delivery-checks.py extracts each ```bash block into the DERIVED
+    # docs/adr/checks/<nnnn>.sh; the checker runs it in a checkout of origin/main and compares.
+    detect: ["docs/adr/*.md with a `## Delivery check` section holding a ```bash block"]
+    require:
+      - "every measurable line passes => delivery-status is not `planned`"
+      - "no measurable line passes => delivery-status is not `shipped`"
+      - "docs/adr/checks/<nnnn>.sh equals the generator's output (derived, never hand-edited)"
+    gate: adr-delivery-scripts
+    enforced: advisory
+    ci_producer: ".github/scripts/check-adr-delivery-scripts.sh"
+    target_enforce_date: "2027-01-31"   # ADR-0144; enforce once two more ADRs carry an executable block
+    blocked_on: "only ADR-0317 and ADR-0344 have a ```bash Delivery check today; a line whose tool the runner lacks (yq) is UNMEASURED, so enforcement waits until the blocks are written for the runner"
+  requirements_traceability:
+    # A functional-baseline catalogue in ADR prose has no traceability: 38 treasury items had to be
+    # audited by hand to learn which existed. <service>/governance/requirements.yaml makes each item
+    # a row with a status and evidence a machine can check.
+    detect: ["*/governance/requirements.yaml", "a PR touching <service>/src/main where that file exists"]
+    require:
+      - "every entry has id, text, status (BUILT|PARTIAL|MISSING), evidence (list)"
+      - "a BUILT entry has evidence, and every file evidence path exists"
+      - "a PR changing a service's src/main without touching its requirements.yaml gets an advisory note"
+    gate: requirements-traceability
+    enforced: advisory
+    ci_producer: ".github/scripts/check-requirements-traceability.py"
+    target_enforce_date: "2027-01-31"   # ADR-0144; the schema half can enforce once a second service adopts the file
+    blocked_on: "one seeded service (treasury); the touched-without-update note is advisory by design and stays so"
+  pr_shared_files:
+    # A PR carrying a file byte-identical to another open PR (both differing from main) carries a
+    # copy: whichever merges first turns the other's into a conflicting no-op. The treasury e2e
+    # branch carried 75 of #13408's 104 files that way.
+    detect: ["a path whose blob at this PR's head equals its blob at another open PR's head, differing from the merge-base"]
+    require:
+      - "the overlap is named in CI output as `<path> identical to #<n>`"
+    gate: pr-shared-files
+    enforced: advisory
+    ci_producer: ".github/scripts/check-pr-shared-files.sh"
+    target_enforce_date: "2027-03-31"   # ADR-0144; a stacked PR legitimately shares its parent's files, so this stays a report until stacks are labelled
+    blocked_on: "stacked PRs (child carries the parent's files by design) are indistinguishable from copies without a declared stack relation"
   service_code_change:
     detect: ["<service>/src/main/**"]
     require:
@@ -4320,6 +4221,32 @@ libs_bench_alloc_baseline:
   target_enforce_date: "2026-12-15"   # ADR-0144; matches the gate's review_after
   ci_producer: ".github/scripts/check-bench-alloc-baseline.py"
 
+product_ir_determinism:
+  # ADR-0352 §8: every golden scenario runs twice in one JVM with byte-identical canonical output
+  # (GoldenDeterminismTest, openbank-libs-testing); the gate keeps that test's scope equal to the
+  # committed scenario files. Cross-irVersion equivalence is a declared no-op with one version.
+  detect: ["openbank-libs-testing/src/main/resources/product-golden/*.json", "openbank-libs-testing/src/main/resources/product-golden/index.txt"]
+  require:
+    - "every scenario file is listed in index.txt and every index entry exists"
+    - "every scenario's revision uses a supported irVersion and its name equals its file name"
+    - "GoldenDeterminismTest exists, is not disabled and iterates the committed index"
+  gate: product-ir-determinism
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144; ADR-0352 flips it at the end of phase 2
+  ci_producer: ".github/scripts/check-product-ir-determinism.py"
+
+product_ir_run_limits:
+  # ADR-0352 §2: hard run limits are part of the IR schema; review is not the control, the validator is.
+  detect: ["**/*.json carrying a top-level irVersion + hooks (product IR) or revision + steps (golden scenario)"]
+  require:
+    - "tiers, fees, rules per hook, notify variables and predicate depth stay within the maxima of product-ir/v1.schema.json"
+    - "every ruleId is present, matches the pattern and is unique within its revision"
+    - "no golden scenario step expects more than maxInstructionsPerEvaluation instructions"
+  gate: product-ir-run-limits
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144; ADR-0352 flips it at the end of phase 2
+  ci_producer: ".github/scripts/check-product-ir-run-limits.py"
+
 realm_devci_artifact_parity:
   detect: [
     "openbank-infra/gitops/components/keycloak/*realm-template*.json",
@@ -5155,6 +5082,7 @@ catalog_kernel_neutrality:
     - TaxTreatment         # price quoted tax-inclusive/exclusive (ADR-0339 D fences it as price semantics)
     - EligibilityOperator  # rule-engine operators
     - RelationshipKind     # offering graph edge semantics
+    - PriceRole            # what a price component is (FEE/RATE/LIMIT/THRESHOLD, #13230); the kernel branches on it (a FEE must be an AMOUNT)
   # Words that occur in pack type names but are generic catalog/kernel language.
   vocabulary_not_industry: [legacy, product, instrument, term]
   # The /api/v1 banking compatibility vocabulary (ADR-0257 D3). Frozen: a pack schema is the
@@ -5213,3 +5141,20 @@ catalog_kernel_neutrality:
 merge_train:
   extra_gates:
     - {workflow: .github/workflows/security.yml, check: Trivy}
+
+# ---------------------------------------------------------------------------------------
+# PR span limits — check-pr-component-span.py (gate pr-component-span, enforced).
+# A releasing PR (feat/fix/perf/security or breaking) that touches more than max_version_dirs
+# directories holding a version.txt, or more than max_changed_lines changed lines, is not
+# reviewable as one unit: one PR grew to 698 files across 15 released modules and 149 conflicts.
+# Work that must land as one unit goes through a long-lived integration branch carrying
+# `integration_label`; that label on a PR based on main is itself a failure, or it is a bypass.
+# ---------------------------------------------------------------------------------------
+pr_span_limits:
+  max_version_dirs: 3
+  max_changed_lines: 15000
+  integration_label: integration-branch
+  releasing_types: [feat, fix, perf, security]
+  gate: pr-component-span
+  enforced: enforced
+  ci_producer: ".github/scripts/check-pr-component-span.py"
