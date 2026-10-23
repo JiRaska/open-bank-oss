@@ -85,6 +85,18 @@ class SwiftMessageEntity {
     @field:Column(name = "rejection_reason")
     var rejectionReason: String? = null
 
+    @field:Column(name = "booking_first_due_at")
+    var bookingFirstDueAt: Instant? = null
+
+    @field:Column(name = "booking_proven_at")
+    var bookingProvenAt: Instant? = null
+
+    @field:Column(name = "booking_transaction_id")
+    var bookingTransactionId: UUID? = null
+
+    @field:Column(name = "booking_clock_covered")
+    var bookingClockCovered: Boolean? = null
+
     @field:Version
     var version: Long = 0
 

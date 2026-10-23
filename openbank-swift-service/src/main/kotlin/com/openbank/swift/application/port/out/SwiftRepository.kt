@@ -9,7 +9,7 @@ import com.openbank.swift.domain.model.SwiftStatus
 import java.util.UUID
 
 /** Outbound persistence port for the SWIFT message aggregate. */
-interface SwiftRepository {
+interface SwiftRepository : SwiftBookingWrites {
 
     suspend fun save(msg: SwiftMessage): SwiftMessage
 

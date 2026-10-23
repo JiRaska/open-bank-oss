@@ -280,3 +280,14 @@ not change any existing request's outcome until explicitly flipped.
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
 
 - **2026-10-22** — **Settlement answer bound to the request (#13217).** `SettlementAdapter` settles an MT103 only on HTTP 201 with a COMPLETED transaction (enforced by the shared facade) that has an id and matches the request's type, source account, amount, currency, rail and instruction type. HTTP 200/202 and a COMPLETED booking for something else no longer mark the message settled; it stays SENT. **Tampering / repudiation:** a wrong or foreign booking can no longer be recorded as this message's settlement. Same edge, identity, credential and endpoint; no new event. The consumer pact pins the bound response fields so the provider replay keeps them honest. Rollback: revert the commit.
+
+- **Outbound local booking proof (#13623).** Internal nullable due/proof/transaction columns
+  retain unresolved obligations across independent ACK/reject status changes. Narrow row-locked,
+  version-checked writes commit accepted-due/SENT/event and proven-booking/COMPLETED/event
+  atomically. Network calls hold no database lock. Existing strict provider binding and booking
+  key remain unchanged; callbacks win over stale completion. Pending local proof is not evidence
+  that the provider did not book. Coverage of historical rows is explicitly unknown rather than
+  backfilled from creation. Fixed-rail gauges expose tracked age and unknown coverage separately;
+  no payment identities or private errors enter labels. No new endpoint, caller privilege,
+  financial retry, SLA or alert. Rollback readers/writers while retaining additive metadata;
+  reconcile/export obligations before any destructive schema removal.

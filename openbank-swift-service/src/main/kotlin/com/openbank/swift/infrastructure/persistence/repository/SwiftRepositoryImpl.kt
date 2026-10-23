@@ -4,6 +4,7 @@
 
 package com.openbank.swift.infrastructure.persistence.repository
 
+import com.openbank.swift.application.port.out.SwiftBookingWrites
 import com.openbank.swift.application.port.out.SwiftOutboxMessage
 import com.openbank.swift.application.port.out.SwiftRepository
 import com.openbank.swift.domain.model.SwiftMessage
@@ -21,22 +22,33 @@ import org.hibernate.reactive.mutiny.Mutiny
 import java.util.UUID
 
 @ApplicationScoped
-class SwiftRepositoryImpl(private val outboxRepoImpl: SwiftOutboxRepositoryImpl) :
-    SwiftRepository,
+class SwiftRepositoryImpl(
+    private val outboxRepoImpl: SwiftOutboxRepositoryImpl,
+    private val bookingWrites: SwiftBookingWritesImpl,
+) : SwiftRepository,
+    SwiftBookingWrites by bookingWrites,
     PanacheRepository<SwiftMessageEntity> {
     private fun mergeOrInsert(session: Mutiny.Session, msg: SwiftMessage): Uni<SwiftMessageEntity> =
         session.find(SwiftMessageEntity::class.java, msg.id).flatMap { existing ->
             if (existing != null) {
+                if (isUntrackedBookingWrite(existing, msg)) {
+                    existing.bookingClockCovered = false
+                }
                 existing.applyUpdate(msg)
                 Uni.createFrom().item(existing)
             } else {
-                session.merge(msg.toEntity())
+                session.merge(msg.toEntity().also { it.bookingClockCovered = msg.status == SwiftStatus.VALIDATED })
             }
         }
 
     override suspend fun save(msg: SwiftMessage): SwiftMessage = Panache.withTransaction {
-        Panache.getSession().flatMap { session -> mergeOrInsert(session, msg) }
-    }.awaitSuspending().toDomain()
+        Panache.getSession().flatMap { session ->
+            mergeOrInsert(session, msg).flatMap { entity ->
+                // Strict booking request binding must receive actual persisted timestamp precision.
+                session.flush().flatMap { session.refresh(entity) }.map { entity.toDomain() }
+            }
+        }
+    }.awaitSuspending()
 
     override suspend fun saveWithOutbox(msg: SwiftMessage, outbox: SwiftOutboxMessage): SwiftMessage =
         Panache.withTransaction {

@@ -248,16 +248,17 @@ class SwiftServiceTest {
         coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
         coEvery { schemeGatewayPort.submit(any()) } returns
             SchemeSubmissionOutcome(accepted = true, reasonCode = null, rawMt = "<pacs.008/>")
-        coEvery { repo.saveWithOutbox(match { it.status == SwiftStatus.SENT }, any()) } answers { firstArg() }
+        coEvery { repo.acceptForBooking(match { it.status == SwiftStatus.SENT }, any()) } answers { firstArg() }
         coEvery { settlementPort.settle(any()) } returns SettlementOutcome(settled = true, transactionId = txId)
-        coEvery { repo.saveWithOutbox(match { it.status == SwiftStatus.COMPLETED }, any()) } answers { firstArg() }
+        coEvery { repo.completeBooking(match { it.status == SwiftStatus.COMPLETED }, any(), any()) } answers
+            { firstArg() }
 
         val result = serviceWithFlag.send(command())
 
         assertThat(result.status).isEqualTo(SwiftStatus.COMPLETED)
         coVerify(exactly = 1) { schemeGatewayPort.submit(any()) }
         coVerify(exactly = 1) { settlementPort.settle(any()) }
-        coVerify(exactly = 1) { repo.saveWithOutbox(match { it.status == SwiftStatus.COMPLETED }, any()) }
+        coVerify(exactly = 1) { repo.completeBooking(match { it.status == SwiftStatus.COMPLETED }, any(), any()) }
     }
 
     @Test
@@ -277,11 +278,11 @@ class SwiftServiceTest {
             coEvery { schemeGatewayPort.submit(any()) } returns
                 SchemeSubmissionOutcome(accepted = true, reasonCode = null, rawMt = "<pacs.008/>")
             coEvery {
-                repo.saveWithOutbox(match { it.status == SwiftStatus.SENT }, capture(sentOutbox))
+                repo.acceptForBooking(match { it.status == SwiftStatus.SENT }, capture(sentOutbox))
             } answers { firstArg() }
             coEvery { settlementPort.settle(any()) } returns SettlementOutcome(settled = true, transactionId = txId)
             coEvery {
-                repo.saveWithOutbox(match { it.status == SwiftStatus.COMPLETED }, capture(completedOutbox))
+                repo.completeBooking(match { it.status == SwiftStatus.COMPLETED }, any(), capture(completedOutbox))
             } answers { firstArg() }
 
             serviceWithFlag.send(command())
@@ -298,13 +299,24 @@ class SwiftServiceTest {
         coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
         coEvery { schemeGatewayPort.submit(any()) } returns
             SchemeSubmissionOutcome(accepted = true, reasonCode = null, rawMt = "<pacs.008/>")
-        coEvery { repo.saveWithOutbox(match { it.status == SwiftStatus.SENT }, any()) } answers { firstArg() }
+        coEvery { repo.acceptForBooking(match { it.status == SwiftStatus.SENT }, any()) } answers { firstArg() }
         coEvery { settlementPort.settle(any()) } throws SettlementUnavailableException("txn-svc down")
 
         val result = serviceWithFlag.send(command())
 
         assertThat(result.status).isEqualTo(SwiftStatus.SENT)
-        coVerify(exactly = 0) { repo.saveWithOutbox(match { it.status == SwiftStatus.COMPLETED }, any()) }
+        coVerify(exactly = 0) { repo.completeBooking(match { it.status == SwiftStatus.COMPLETED }, any(), any()) }
+    }
+
+    @Test
+    fun `settled without transaction identity cannot record booking proof`(): Unit = runBlocking {
+        coEvery { repo.findByIdempotencyKey("idem-1") } returns null
+        coEvery { repo.save(any()) } answers { firstArg() }
+        coEvery { schemeGatewayPort.submit(any()) } returns SchemeSubmissionOutcome(true, null, "<pacs.008/>")
+        coEvery { repo.acceptForBooking(any(), any()) } answers { firstArg() }
+        coEvery { settlementPort.settle(any()) } returns SettlementOutcome(true, null)
+        assertThat(serviceWithFlag.send(command()).status).isEqualTo(SwiftStatus.SENT)
+        coVerify(exactly = 0) { repo.completeBooking(any(), any(), any()) }
     }
 
     @Test

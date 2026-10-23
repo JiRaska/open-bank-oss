@@ -129,7 +129,11 @@ class SwiftService(
                     updatedAt = now,
                 )
             }
-            val persisted = repo.saveWithOutbox(updated, statusChangedEvent(updated))
+            val persisted = if (outcome.accepted) {
+                repo.acceptForBooking(updated, statusChangedEvent(updated))
+            } else {
+                repo.saveWithOutbox(updated, statusChangedEvent(updated))
+            }
             // ADR-0108: book the funds in transaction-service after scheme ACSC.
             if (persisted.status == SwiftStatus.SENT) settle(persisted) else persisted
         } catch (ex: SchemeGatewayUnavailableException) {
@@ -148,12 +152,12 @@ class SwiftService(
     @Suppress("TooGenericExceptionCaught")
     private suspend fun settle(message: SwiftMessage): SwiftMessage = try {
         val outcome = settlementPort.settle(message)
-        if (outcome.settled) {
+        if (outcome.settled && outcome.transactionId != null) {
             val completed = message.copy(status = SwiftStatus.COMPLETED, updatedAt = Instant.now(clock))
-            repo.saveWithOutbox(completed, statusChangedEvent(completed))
+            repo.completeBooking(completed, outcome.transactionId, statusChangedEvent(completed))
         } else {
             log.warnf(
-                "Settlement skipped for SWIFT message %s (no account UUID); message stays SENT",
+                "Settlement unproven for SWIFT message %s; message stays SENT",
                 message.id,
             )
             message
