@@ -82,7 +82,6 @@ class BillingCloseParticipationTest {
         domainMetrics = noOpDomainMetrics(),
         cycleEnabled = enabled,
         cycleCron = "0 0 3 1 * ?",
-        lookbackDays = 3,
     )
 
     private fun noOpDomainMetrics(): DomainMetrics {

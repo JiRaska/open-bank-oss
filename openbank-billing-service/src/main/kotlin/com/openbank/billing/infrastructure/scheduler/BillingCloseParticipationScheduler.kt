@@ -62,9 +62,11 @@ class BillingCloseParticipationScheduler(
     @ConfigProperty(name = "openbank.billing.scheduler.enabled", defaultValue = "false")
     private val cycleEnabled: Boolean,
     @ConfigProperty(name = "openbank.billing.scheduler.cron") private val cycleCron: String,
-    @ConfigProperty(name = "openbank.billing.close.lookback-days", defaultValue = "3")
-    private val lookbackDays: Long,
 ) {
+    // Field-injected, not a 9th constructor parameter (detekt LongParameterList fires AT 9).
+    @ConfigProperty(name = "openbank.billing.close.lookback-days", defaultValue = "3")
+    var lookbackDays: Long = DEFAULT_LOOKBACK_DAYS
+
     private val log = Logger.getLogger(BillingCloseParticipationScheduler::class.java)
     private val reporter = CloseParticipationReporter(BillingCloseJobs.PARTICIPANT, sink, meterRegistry)
     private val accountingClock = AccountingClock.bank(clock)
@@ -163,6 +165,7 @@ class BillingCloseParticipationScheduler(
 
     private companion object {
         const val WORKFLOW_NAME = "billing-close-participation"
+        const val DEFAULT_LOOKBACK_DAYS = 3L
         val OFF_VALUES = setOf("off", "disabled")
         const val SKIP_NOT_DUE = "no billing cycle is scheduled on this day"
         const val SKIP_DISABLED = "billing cycle sweep is switched off"
