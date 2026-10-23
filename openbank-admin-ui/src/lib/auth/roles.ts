@@ -118,7 +118,7 @@ export const PERMISSIONS = {
   // write set, because the method-level @RolesAllowed does not admit it. Cancel admits both desk
   // roles. Four-eyes between two PEOPLE is the domain's 422, not a role split.
   // ADR-0344 (API 1.19.0) widens the class-level read set with the back-office and reference-editor
-  // roles; treasury-rbac.guard.test.ts names that addition explicitly.
+  // roles, so the console set still equals TreasuryResource's class-level @RolesAllowed exactly.
   "treasury:view":          [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_REFERENCE_EDITOR],
   "treasury:deal:create":   [ROLES.TREASURY_DEALER],
   "treasury:deal:approve":  [ROLES.TREASURY_APPROVER],
