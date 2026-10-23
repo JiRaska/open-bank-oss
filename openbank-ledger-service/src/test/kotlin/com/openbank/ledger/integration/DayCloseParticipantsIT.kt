@@ -284,6 +284,7 @@ class DayCloseParticipantsIT {
                 OutboxMessage(aggregateId = cut.id, eventType = "AccountingDayTransitioned", payload = "{}"),
             )
         }
+        othersReport(date)
     }
 
     @Test
