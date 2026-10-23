@@ -1785,6 +1785,12 @@ def last_merge_was_strict(gh, git, base: str) -> bool:
     return gh.app_statuses(head).get(STATUS_CONTEXT, ("", ""))[1].startswith("strict lane:")
 
 
+def clock_now() -> float:
+    """The single wall-clock read behind every expiry decision (reservation stall/ceiling, train turn).
+    A seam so the self-test can pin it; production returns time.time() unchanged."""
+    return time.time()
+
+
 def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now: float | None = None) -> str | None:
     """Why the strict lane must not START a reservation (update-branch) this tick, or None. Lane
     fairness (ADR-0343): (1) an open carrier is the train's in-flight turn — a reservation started
@@ -1796,7 +1802,7 @@ def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now:
         return "a train carrier is open over main"
     if not train_waiting or not last_merge_was_strict(gh, git, base):
         return None
-    now = time.time() if now is None else now
+    now = clock_now() if now is None else now
     ct = git("show", "-s", "--format=%ct", base, check=False).stdout.strip()
     if not ct.isdigit() or now - int(ct) > TRAIN_TURN_S:
         return None
@@ -1885,7 +1891,7 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
     Main red (ADR-0343): a "waiting" PR never holds (it cannot go green until main is fixed). A FIX
     (`fixes`) holds only once its combined head contains live main, like every other PR — first, as
     strict_lane serves it first; behind main it holds nothing, since it never merges from there."""
-    now = time.time() if now is None else now
+    now = clock_now() if now is None else now
     holder, timed_out = None, []
     fixes = fixes or {}
     ordered = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)
@@ -2471,7 +2477,8 @@ def _synthetic_origin(root: str) -> None:
               "docs/d.md": "d\n"})
 
 
-def self_test() -> int:
+def _self_test_cases() -> int:
+    global clock_now
     fails: list[str] = []
     ran: list[str] = []
 
@@ -3657,8 +3664,6 @@ def self_test() -> int:
             # PROGRESS-BASED RESERVATION (#13400): the reservation ends when the holder's CI STALLS or
             # passes the ceiling, never because it is slow. #13204 lapsed at 64 min on three heads
             # whose Services CI was green at 67.8 min, and was update-branched again each time.
-            real_time = time.time
-
             def reservation_at(offset_s, last_activity_ago_s=None, checks=None):
                 """Settle with the clock `offset_s` past the reserved head's commit; its newest check-run
                 activity `last_activity_ago_s` before that (None: no check run ever started). `checks`
@@ -3669,11 +3674,13 @@ def self_test() -> int:
                 ct = int(gh.g("show", "-s", "--format=%ct", head).stdout.strip())
                 if last_activity_ago_s is not None:
                     gh.activity[head] = ct + offset_s - last_activity_ago_s
-                time.time = lambda: ct + offset_s
+                global clock_now
+                pinned = clock_now
+                clock_now = lambda: float(ct + offset_s)
                 try:
                     return settle_now()
                 finally:
-                    time.time = real_time
+                    clock_now = pinned
                     gh.head_checks.clear()
                     gh.activity.clear()
 
@@ -3702,6 +3709,35 @@ def self_test() -> int:
             check("reservation: a head committed in the future times out even with live CI activity",
                   34 in s["fast"] and s.get("timed_out") == [35], str(s))
             reset()
+            # DETERMINISM (this file's own clock): the stall-expiry verdicts must not depend on the real
+            # wall clock. Re-run the same cases with time.time() pushed 20 min and 5 h ahead and require
+            # identical verdicts. A fixture that reads time.time() directly would flip here.
+            def verdicts():
+                out = []
+                for off, act in ((90 * 60, 2 * 60), (RESERVATION_STALL_S + 5 * 60, None), (30 * 60, 60),
+                                 (RESERVATION_CEILING_S + 60, 60)):
+                    r = reservation_at(off, act)
+                    out.append((bool(r["in_flight"]), list(r["fast"]), r.get("timed_out")))
+                    reset()
+                # default clock path (no reservation_at override): a fresh pending holder is live
+                open_only("pW", "pF")
+                gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+                r = settle_now()
+                out.append((bool(r["in_flight"]), list(r["fast"]), r.get("timed_out")))
+                gh.head_checks.clear()
+                reset()
+                return out
+            baseline = verdicts()
+            real_time_fn = time.time
+            try:
+                for skew in (20 * 60, 5 * 3600):
+                    time.time = lambda skew=skew: real_time_fn() + skew
+                    skewed = verdicts()
+                    check(f"reservation: verdicts are identical with the real clock advanced {skew // 60} min",
+                          skewed == baseline, f"{baseline} != {skewed}")
+            finally:
+                time.time = real_time_fn
+
             # GREEN IS DONE, NOT STALLED: #13608 went green ~05:50Z, nothing ran after it, and the next tick
             # read the silence as a stall and released a mergeable holder to the back of the queue.
             # (e) green, last check activity 20 min ago: merged this tick, not released.
@@ -3737,14 +3773,14 @@ def self_test() -> int:
             reset()
 
             # (b) the committer time is the author's: a head dated in the future holds nothing.
-            real_time = time.time
-            time.time = lambda: real_time() - 3600
+            pinned_clock = clock_now
+            clock_now = lambda: pinned_clock() - 3600
             try:
                 open_only("pW", "pF")
                 gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
                 s = settle_now()
             finally:
-                time.time = real_time
+                clock_now = pinned_clock
                 gh.head_checks.clear()
             check("reservation timeout: a head committed in the future holds no reservation",
                   34 in s["fast"] and s.get("timed_out") == [35], str(s))
@@ -4307,6 +4343,26 @@ def self_test() -> int:
 
 
 # --------------------------------------------------------------------------- main
+FIXED_INSTANT = 1767268800  # 2026-01-01T12:00:00Z: every self-test fixture is stamped relative to this
+
+
+def self_test() -> int:
+    """Run the cases with the clock and every fixture commit date pinned to FIXED_INSTANT, so a slow
+    run (> RESERVATION_STALL_S) or one near a boundary cannot make its own pending holders look stalled."""
+    global clock_now, base_env
+    real_clock, real_base_env = clock_now, base_env
+    stamp = f"{FIXED_INSTANT} +0000"
+
+    def pinned_env() -> dict[str, str]:
+        return {**real_base_env(), "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp}
+
+    clock_now, base_env = (lambda: float(FIXED_INSTANT)), pinned_env
+    try:
+        return _self_test_cases()
+    finally:
+        clock_now, base_env = real_clock, real_base_env
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle"])
