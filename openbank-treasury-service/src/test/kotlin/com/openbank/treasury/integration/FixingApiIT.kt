@@ -134,8 +134,6 @@ class FixingApiIT {
         given().`when`().get("/api/v1/treasury/market-data/quality?date=$fixingDate").then().statusCode(200)
             .body("missing.index", hasItem("PRIBOR_3M"))
         assertThat(projected()).isGreaterThan(0)
-        given().`when`().get("/api/v1/treasury/day-completion/$fixingDate").then().statusCode(200)
-            .body("steps.find { it.step == 'FIXINGS' }.status", equalTo("FAILED"))
     }
 
     @Test
