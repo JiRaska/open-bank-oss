@@ -22,6 +22,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -259,6 +260,38 @@ class SwiftServiceTest {
         coVerify(exactly = 1) { schemeGatewayPort.submit(any()) }
         coVerify(exactly = 1) { settlementPort.settle(any()) }
         coVerify(exactly = 1) { repo.completeBooking(match { it.status == SwiftStatus.COMPLETED }, any(), any()) }
+    }
+
+    @Test
+    fun `settleAccepted re-settles the stored SENT message without the scheme, keeping its 32A value date`(): Unit =
+        runBlocking {
+            // The clock is 2024-01-15; the stored 32A date is 2026-05-27. The request must carry the latter.
+            val held = message(UUID.randomUUID(), SwiftStatus.SENT)
+            val sent = slot<SwiftMessage>()
+            coEvery { settlementPort.settle(capture(sent)) } returns SettlementOutcome(true, UUID.randomUUID())
+            coEvery { repo.completeBooking(any(), any(), any()) } answers { firstArg() }
+
+            assertThat(serviceWithFlag.settleAccepted(held).status).isEqualTo(SwiftStatus.COMPLETED)
+            assertThat(sent.captured.valueDate).isEqualTo("20260527")
+            assertThat(sent.captured).isEqualTo(held)
+            coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
+        }
+
+    @Test
+    fun `settleAccepted never settles a message that is not SENT`(): Unit = runBlocking {
+        SwiftStatus.entries.filter { it != SwiftStatus.SENT }.forEach { status ->
+            val other = message(UUID.randomUUID(), status)
+            assertThat(serviceWithFlag.settleAccepted(other)).isEqualTo(other)
+        }
+        coVerify(exactly = 0) { settlementPort.settle(any()) }
+    }
+
+    @Test
+    fun `settlement rethrows cancellation instead of holding the message`(): Unit = runBlocking {
+        coEvery { settlementPort.settle(any()) } throws CancellationException("shutdown")
+        val held = message(UUID.randomUUID(), SwiftStatus.SENT)
+        assertThatThrownBy { runBlocking { serviceWithFlag.settleAccepted(held) } }
+            .isInstanceOf(CancellationException::class.java)
     }
 
     @Test

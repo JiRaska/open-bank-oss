@@ -209,20 +209,62 @@ $T workflow reset --workflow-id "domestic-payment-$ID" --event-id "$EVENT" --rea
 
 ### SWIFT outbound booking
 
-**swift-service has no re-drive.** It books once, right after scheme acceptance, with a single
-transaction-service call: no retry, no Temporal workflow, no scheduler. None of the operator actions
-settle a held message:
+**swift-service re-drives a held booking on its own (#13686).** It books once, right after scheme
+acceptance; if that is unproven, `SwiftSettlementRedriveScheduler` (every 60 s) calls transaction-service
+again for each MT103 that is `SENT` with an open clock and at least 2 minutes old. Same key, request
+rebuilt from the stored message (the value date is the MT103's 32A date, never today's), and it never
+resubmits to the scheme. Each message is claimed with a token and a 2-minute lease by one conditional
+UPDATE, so two pods or an overlapping tick make one call, not two. An unproven attempt backs off
+`min(2m * 2^(n-1), 1h)`; after 10 attempts (about 6h) it is **exhausted**: no longer retried,
+`openbank_payment_unsettled_total{rail="SWIFT",outcome="redrive-exhausted"}` increments, and the clock
+stays open, so this alert keeps firing. A transport blip is normally booked before the alert's 30m.
 
-- re-posting the original send returns the stored message;
-- `POST /api/v1/swift/{id}/ack` and `/reject` change the business status only, and leave the clock open.
+What the re-drive does **not** cover:
 
-Tracked in #13686. Until it lands, the remedy depends on step 1:
+- a message an operator already acknowledged or rejected (it is no longer `SENT`);
+- a stored `FAILED` or mismatched answer, which comes back the same on every attempt and exhausts;
+- a message with no `ordering_customer_account_id` or an unparseable value date, which never calls
+  transaction-service and exhausts too.
+
+Where the re-drive stands, on `swift-service-db` (read-only):
+
+```sql
+SELECT id AS message_id, status, booking_redrive_attempts, booking_redrive_next_at,
+       booking_redrive_claimed_until, booking_redrive_exhausted_at
+FROM swift_messages
+WHERE message_type = 'MT103' AND booking_first_due_at IS NOT NULL AND booking_proven_at IS NULL
+ORDER BY booking_first_due_at
+LIMIT 20;
+```
+
+If the sweep itself is down, `WorkflowLivenessStale{workflow="swift-settlement-redrive"}` fires; it is
+switched by `SWIFT_SETTLEMENT_REDRIVE_ENABLED` (default `true`).
+
+Then the remedy depends on step 1:
 
 | Step 1 for `swift-settlement-<messageId>` | Remedy |
 |---|---|
-| No row: transport error/timeout, no `ordering_customer_account_id`, unparseable value date | Nothing can be re-sent in-band. Escalate to finance: the MT103 has left, so the debit is booked by a ledger correction, and the message is closed as below ("Closing a corrected payment"). Fix the data cause first (missing account id, bad value date) so the next message does not repeat it. |
-| `COMPLETED`, every field matches | Booked; only the proof is missing. **Reconcile** (section 4): record it as booked, close as below. Do not reverse and do not rebook. |
-| `COMPLETED`, money differs / `FAILED` | Same as the shared table in step 2: **reverse** a wrong booking, or a finance correction for `FAILED`. |
+| No row, re-drive still counting | Wait: the next attempt is at `booking_redrive_next_at`. If transaction-service is down, fix that first. |
+| No row, exhausted (the cause was an outage, now fixed) | **Re-drive** with the command below. |
+| No row, no `ordering_customer_account_id` / unparseable value date | Nothing can be sent in-band. Escalate to finance: the MT103 has left, so the debit is booked by a ledger correction, and the message is closed as below ("Closing a corrected payment"). Fix the data cause so the next message does not repeat it. |
+| `COMPLETED`, every field matches | The next attempt replays it as a matched 201 and closes the clock. If exhausted, **re-drive** with the command below. |
+| `COMPLETED`, money differs / `FAILED` | Do not re-drive. Same as the shared table in step 2: **reverse** a wrong booking, or a finance correction for `FAILED`. |
+
+**Re-drive command (exhausted message).** This re-arms the sweep's bookkeeping for one message and
+touches nothing else: never `booking_first_due_at`, `booking_proven_at` or `booking_transaction_id`,
+and never a message another pod holds. The sweep then picks it up within a minute, under the same key.
+
+```sql
+-- swift-service-db, as the application owner. Expect UPDATE 1; UPDATE 0 means not eligible: stop.
+UPDATE swift_messages
+SET booking_redrive_attempts = 0, booking_redrive_next_at = NULL, booking_redrive_exhausted_at = NULL
+WHERE id = '<messageId>' AND message_type = 'MT103' AND status = 'SENT'
+  AND booking_first_due_at IS NOT NULL AND booking_proven_at IS NULL
+  AND booking_redrive_exhausted_at IS NOT NULL AND booking_redrive_claim IS NULL;
+```
+
+Confirm a minute or two later that `booking_proven_at` is set and the status is `COMPLETED`. If it is
+counting attempts again, step 1 changed: go back to it.
 
 Do **not** use `ack` or `reject` to make the alert stop: they do not touch the booking clock, so the
 alert keeps firing, and a `REJECTED` status on a message the scheme accepted misstates what happened.

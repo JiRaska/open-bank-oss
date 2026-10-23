@@ -17,6 +17,7 @@ import com.openbank.swift.domain.model.SwiftMessage
 import com.openbank.swift.domain.model.SwiftMessageType
 import com.openbank.swift.domain.model.SwiftStatus
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -136,6 +137,8 @@ class SwiftService(
             }
             // ADR-0108: book the funds in transaction-service after scheme ACSC.
             if (persisted.status == SwiftStatus.SENT) settle(persisted) else persisted
+        } catch (ex: CancellationException) {
+            throw ex
         } catch (ex: SchemeGatewayUnavailableException) {
             log.warnf(ex, "Scheme gateway unavailable for SWIFT message %s; holding in VALIDATED", message.id)
             message
@@ -146,8 +149,20 @@ class SwiftService(
     }
 
     /**
+     * #13686 re-drive entry: settle an already scheme-accepted MT103 again, under the SAME
+     * `swift-settlement-<messageId>` key and with the request built from the stored message alone (the 32A
+     * value date, never today's date). It never calls the scheme gateway. The caller
+     * ([SwiftSettlementRedriveService]) holds the durable claim and has checked the open booking clock;
+     * this refuses anything that is not SENT so a stale caller cannot complete another state.
+     */
+    suspend fun settleAccepted(message: SwiftMessage): SwiftMessage {
+        if (message.status != SwiftStatus.SENT || message.messageType != SwiftMessageType.MT103) return message
+        return settle(message)
+    }
+
+    /**
      * ADR-0108: call transaction-service to book the funds and advance to COMPLETED.
-     * Fails closed: settlement unavailable → message stays SENT (will be retried externally).
+     * Fails closed: settlement unavailable → message stays SENT; the #13686 re-drive sweep retries it.
      */
     @Suppress("TooGenericExceptionCaught")
     private suspend fun settle(message: SwiftMessage): SwiftMessage = try {
@@ -162,6 +177,8 @@ class SwiftService(
             )
             message
         }
+    } catch (ex: CancellationException) {
+        throw ex
     } catch (ex: SettlementUnavailableException) {
         log.warnf(ex, "transaction-service unavailable for SWIFT message %s; holding in SENT", message.id)
         message

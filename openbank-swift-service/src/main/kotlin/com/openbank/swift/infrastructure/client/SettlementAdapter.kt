@@ -31,7 +31,7 @@ import java.util.UUID
  * Books settled MT103 funds via transaction-service (ADR-0108).
  * Called after the clearing-simulator returns ACSC and swift-service transitions to SENT.
  * Uses the stable `swift-settlement-<messageId>` key for any explicit reconciliation.
- * The caller retains SENT on uncertainty; no automatic SENT redriver is introduced here.
+ * The caller retains SENT on uncertainty; `SwiftSettlementRedriveService` re-drives it under the same key (#13686).
  */
 @ApplicationScoped
 class SettlementAdapter(

@@ -45,6 +45,9 @@ class SwiftSettlementMetrics {
         CONFLICT("conflict"),
         UNEXPECTED_STATUS("unexpected-status"),
         TRANSPORT_ERROR("transport-error"),
+
+        // #13686: the re-drive gave up on a message; it is no longer retried and its booking clock stays open.
+        REDRIVE_EXHAUSTED("redrive-exhausted"),
     }
 
     companion object {
