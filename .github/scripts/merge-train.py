@@ -1803,12 +1803,16 @@ def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now:
     return f"train's turn after a strict-lane merge ({len(train_waiting)} train candidate(s) waiting)"
 
 
-def reservation_expired(git, head: str, now: float, activity=None) -> str | None:
+def reservation_expired(git, head: str, now: float, activity=None, green: bool = False) -> str | None:
     """Why the reservation on `head` is over, or None while its CI is live (ADR-0343, #13400).
     Expired when the head is future-dated (the committer time is author-supplied, #13485), older
     than RESERVATION_CEILING_S, or idle: nothing on it started or completed for RESERVATION_STALL_S.
     The idle clock starts at the committer time, so a CI that never starts after update-branch is
-    a stall too. `activity(head)` = newest check-run started_at/completed_at (epoch) or None."""
+    a stall too. `activity(head)` = newest check-run started_at/completed_at (epoch) or None.
+    The stall rule applies only while CI is PENDING: a `green` head is finished, not stalled, and
+    merges this tick (#13608 was released ~15 min after going green). A green head keeps the
+    future-stamp guard and the ceiling: a current green holder merges on the tick it goes green, so
+    it reaches the ceiling only if its merge is refused for hours, and then releasing is right."""
     ct = git("show", "-s", "--format=%ct", head, check=False).stdout.strip()
     if not ct.isdigit() or now < int(ct):
         return "head committed in the future"
@@ -1818,7 +1822,7 @@ def reservation_expired(git, head: str, now: float, activity=None) -> str | None
     seen = activity(head) if activity else None
     if seen is not None:
         last = max(last, min(seen, now))
-    if now - last > RESERVATION_STALL_S:
+    if not green and now - last > RESERVATION_STALL_S:
         return f"CI stalled: nothing started or completed for > {RESERVATION_STALL_S // 60} min"
     return None
 
@@ -1876,7 +1880,7 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
     tick: main is reserved for it, so neither the
     fast lane nor a train nor another strict-lane update may move or contend for main until it
     settles (merged, failed, or timed out). A green holder that cannot merge (merge refused) is
-    bounded by the same timeout. A reservation whose CI stalled, or that passed the ceiling
+    bounded by the ceiling, never by the stall rule. A reservation whose CI stalled, or that passed the ceiling
     (reservation_expired), is released and listed in timed_out.
     Main red (ADR-0343): a "waiting" PR never holds (it cannot go green until main is fixed). A FIX
     (`fixes`) holds only once its combined head contains live main, like every other PR — first, as
@@ -1893,7 +1897,7 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
             continue
         if state == "green" and shadow:
             continue  # shadow never merges it, so it must not hold anything
-        why = reservation_expired(git, head, now, activity)
+        why = reservation_expired(git, head, now, activity, green=state == "green")
         if why:
             log(f"#{n:>6} strict    reservation timed out ({why}): released, back of the queue")
             timed_out.append(n)
@@ -3655,12 +3659,13 @@ def self_test() -> int:
             # whose Services CI was green at 67.8 min, and was update-branched again each time.
             real_time = time.time
 
-            def reservation_at(offset_s, last_activity_ago_s=None):
+            def reservation_at(offset_s, last_activity_ago_s=None, checks=None):
                 """Settle with the clock `offset_s` past the reserved head's commit; its newest check-run
-                activity `last_activity_ago_s` before that (None: no check run ever started)."""
+                activity `last_activity_ago_s` before that (None: no check run ever started). `checks`
+                overrides the head's required contexts (default: one still pending)."""
                 open_only("pW", "pF")
                 head = gh.prs[35]["head"]["sha"]
-                gh.head_checks[head] = {"gates (data)": None}
+                gh.head_checks[head] = {"gates (data)": None} if checks is None else checks
                 ct = int(gh.g("show", "-s", "--format=%ct", head).stdout.strip())
                 if last_activity_ago_s is not None:
                     gh.activity[head] = ct + offset_s - last_activity_ago_s
@@ -3696,6 +3701,30 @@ def self_test() -> int:
             s = reservation_at(-3600, -3600 - 60)
             check("reservation: a head committed in the future times out even with live CI activity",
                   34 in s["fast"] and s.get("timed_out") == [35], str(s))
+            reset()
+            # GREEN IS DONE, NOT STALLED: #13608 went green ~05:50Z, nothing ran after it, and the next tick
+            # read the silence as a stall and released a mergeable holder to the back of the queue.
+            # (e) green, last check activity 20 min ago: merged this tick, not released.
+            gh.merged.clear()
+            s = reservation_at(30 * 60, RESERVATION_STALL_S + 5 * 60, checks={})
+            check("reservation: a GREEN holder idle past the stall window is merged, not released (#13608)",
+                  gh.merged == [35] and not s.get("timed_out"), f"{s} merged={gh.merged}")
+            gh.merged.clear()
+            reset()
+            # (f) pending, no activity for 20 min: still a stall.
+            s = reservation_at(30 * 60, RESERVATION_STALL_S + 5 * 60)
+            check("reservation: a PENDING holder idle past the stall window is released (stall)",
+                  s.get("timed_out") == [35] and 35 not in gh.merged, f"{s} merged={gh.merged}")
+            reset()
+            # (g) pending with recent activity: kept.
+            s = reservation_at(30 * 60, 60)
+            check("reservation: a PENDING holder with recent activity keeps main reserved",
+                  s["in_flight"] and not s.get("timed_out") and 35 not in gh.merged, str(s))
+            reset()
+            # (h) red: the failure path, never reported as a stall and never holding main.
+            s = reservation_at(30 * 60, RESERVATION_STALL_S + 5 * 60, checks={"gates (data)": "failure"})
+            check("reservation: a RED holder takes the failure path, not the stall path",
+                  not s.get("timed_out") and 35 not in gh.merged and 34 in s["fast"], f"{s} merged={gh.merged}")
             reset()
             # #13485: what #13500 left open; both cases fail on the code before it.
             # (a) right after update-branch nothing has REPORTED yet; that head must still hold main.
