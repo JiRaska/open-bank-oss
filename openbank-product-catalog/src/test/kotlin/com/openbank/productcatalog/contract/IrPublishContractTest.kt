@@ -181,7 +181,7 @@ class IrPublishContractTest {
     }
 
     @Test
-    fun `a non-JWT identity is refused publish-ir, failing closed`() {
+    fun `an identity without positive interactive-human evidence is refused publish-ir, failing closed`() {
         Given {
             contentType("application/json")
             body("""{"reason":"unverified"}""")

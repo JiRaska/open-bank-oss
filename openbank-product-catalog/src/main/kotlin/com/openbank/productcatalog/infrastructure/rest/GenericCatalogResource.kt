@@ -243,9 +243,10 @@ class GenericCatalogResource(
         request: PublishRequest,
     ): Response {
         // Enforced HERE, not only in rest.rego: @Authorize is advisory while AUTHZ_ENFORCE=false, and a
-        // Keycloak service account can carry ROLE_OPERATOR. Fails closed: anything not positively a
-        // verified person (a non-JWT identity included) is refused.
-        if (!ServiceAccountIdentity.isVerifiedPerson(identity)) {
+        // Keycloak service account can carry ROLE_OPERATOR. Fails closed on POSITIVE evidence: only a
+        // verified JWT from an interactive client (azp), with a subject and a non-service-account
+        // username matching the principal, may sign. "Does not look like a machine" is not enough.
+        if (!ServiceAccountIdentity.isHumanStaff(identity)) {
             throw CatalogForbiddenException("publish-ir requires a verified human checker")
         }
         requireRevisionOwner(service.findRevision(revisionId), offeringId)

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: swift-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "21213dccb180b0e4"
+    openbank.tech/policy-checksum: "9898f2727f5aacb6"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1773,8 +1773,8 @@ data:
                                              # ROLE_ADMIN) and excludes machines, but product-catalog runs
                                              # AUTHZ_ENFORCE=false, so that rule is advisory there. The
                                              # binding control is in the service: publishOfferingRevisionIrV2
-                                             # refuses any identity ServiceAccountIdentity.isVerifiedPerson
-                                             # does not positively classify as a person (fails closed), and
+                                             # refuses any identity ServiceAccountIdentity.isHumanStaff does
+                                             # not positively classify as interactive staff (fails closed), and
                                              # GenericCatalogService enforces maker != checker. No service
                                              # rego grants catalog.* to a machine beyond catalog.read.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
