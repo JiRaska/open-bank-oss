@@ -46,7 +46,8 @@ class LimitLineBreachedException(message: String) : RuntimeException(message)
 
 /**
  * The ledger refused a posting because its accounting day no longer accepts postings (`409
- * ACCOUNTING_DAY_CLOSED`, ADR-0342 D4): a close outcome, never a retryable error.
+ * ACCOUNTING_DAY_CLOSED`, ADR-0342 D4): a close outcome the day's record reports as REFUSED, never
+ * a retryable error.
  */
 class AccountingDayClosedException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
@@ -188,6 +189,16 @@ fun interface CurveSetPort {
 /** This service's outbox table; `persistInTransaction` chains inside the aggregate's transaction. */
 interface TreasuryOutboxRepository : OutboxRepository {
     fun persistInTransaction(message: OutboxMessage): Uni<Void>
+}
+
+/** ADR-0344 D7: the per-accounting-day completion record each treasury run writes. */
+interface DayCompletionRepository {
+    suspend fun record(r: com.openbank.treasury.domain.model.DayStepRecord)
+
+    suspend fun day(date: LocalDate): List<com.openbank.treasury.domain.model.DayStepRecord>
+
+    /** Every recorded step of the days in [from]..[to] (inclusive). */
+    suspend fun between(from: LocalDate, to: LocalDate): List<com.openbank.treasury.domain.model.DayStepRecord>
 }
 
 /** A journal the ledger holds for a posted [JournalSpec]: its id and where each leg landed. */

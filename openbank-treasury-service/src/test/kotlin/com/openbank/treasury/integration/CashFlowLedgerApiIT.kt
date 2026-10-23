@@ -387,7 +387,7 @@ class CashFlowLedgerApiIT {
             .body("findAll { it.product == 'IRS' && it.event == 'TRADE' }", hasSize<Any>(1))
             // Five legacy products, IRS and FRA (2a), BOND, TREASURY_BILL, REPO, REVERSE_REPO (2b),
             // FX_FORWARD, FX_SWAP, BILL_OF_EXCHANGE, LOAN (3).
-            .body("collect { it.product }.unique()", hasSize<Any>(15))
+            .body("collect { it.product }.unique()", hasSize<Any>(16))
     }
 
     @Test
@@ -411,7 +411,7 @@ class CashFlowLedgerApiIT {
     @Test
     @Order(14)
     @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
-    fun `14 - the override queue and a deal's overrides by status are served`() {
+    fun `14 - the override queue, a deal's overrides by status and the day-completion record are served`() {
         given().`when`().get("/api/v1/treasury/deals/$dealId/cash-flows/overrides?status=APPROVED")
             .then().statusCode(200).body("overrideId", hasItem(overrideId))
         given().`when`().get("/api/v1/treasury/deals/$dealId/cash-flows/overrides?status=PENDING")
@@ -419,23 +419,8 @@ class CashFlowLedgerApiIT {
         given().`when`().get("/api/v1/treasury/cash-flow-overrides?status=APPROVED&limit=50")
             .then().statusCode(200).body("overrideId", hasItem(overrideId))
         given().`when`().get("/api/v1/treasury/cash-flow-overrides?limit=0").then().statusCode(400)
-    }
-
-    @Test
-    @Order(15)
-    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
-    fun `15 - a product whose phase has not landed is refused until its ADR-0344 phase delivers its posting rules`() {
-        val start = today.plusDays(10)
-        val end = start.plusYears(1)
-        val legs = """
-            [{"payReceive":"PAY","currency":"CZK","notional":10000000.00,"accrualStart":"$start","accrualEnd":"$end",
-              "accrualFrequency":"QUARTERLY","paymentFrequency":"QUARTERLY","dayCount":"ACT/360","rate":{"type":"FIXED","rate":4.0}}]
-        """.trimIndent()
-        post(
-            "/deals",
-            """{"product":"CASH","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
-               "businessDayConvention":"MODIFIED_FOLLOWING","legs":$legs}""",
-        ).then().statusCode(400).body("message", containsString("not delivered yet"))
+        given().`when`().get("/api/v1/treasury/day-completion/$today").then().statusCode(200)
+            .body("steps", hasSize<Any>(6)).body("steps[0].step", equalTo("FIXINGS"))
     }
 
     private fun count(sql: String, id: String): Int = jdbc { c ->

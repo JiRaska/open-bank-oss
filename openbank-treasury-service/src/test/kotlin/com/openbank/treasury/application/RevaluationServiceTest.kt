@@ -7,6 +7,7 @@ package com.openbank.treasury.application
 import com.openbank.libs.finance.schedule.Frequency
 import com.openbank.treasury.application.port.out.BookValuation
 import com.openbank.treasury.application.port.out.CashFlowRepository
+import com.openbank.treasury.application.port.out.DayCompletionRepository
 import com.openbank.treasury.application.port.out.DealFairValue
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.PriorRevaluationUnpostedException
@@ -23,6 +24,9 @@ import com.openbank.treasury.domain.DealFixtures.NOW
 import com.openbank.treasury.domain.DealFixtures.dealer
 import com.openbank.treasury.domain.DealFixtures.withinLimit
 import com.openbank.treasury.domain.model.DayCountConvention
+import com.openbank.treasury.domain.model.DayStep
+import com.openbank.treasury.domain.model.DayStepRecord
+import com.openbank.treasury.domain.model.DayStepStatus
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealHeader
 import com.openbank.treasury.domain.model.DealKind
@@ -145,6 +149,17 @@ class RevaluationServiceTest {
     private val ledger = RecordingLedger()
     private val store = Store()
     private val engine = Engine()
+
+    private class Days : DayCompletionRepository {
+        val steps = mutableListOf<DayStepRecord>()
+        override suspend fun record(r: DayStepRecord) {
+            steps += r
+        }
+        override suspend fun day(date: LocalDate) = steps.filter { it.date == date }
+        override suspend fun between(from: LocalDate, to: LocalDate) = steps
+    }
+
+    private val days = Days()
     private val service = RevaluationService(
         deals,
         mockk<CashFlowRepository>(),
@@ -152,7 +167,10 @@ class RevaluationServiceTest {
         store,
         ledger,
         Clock.fixed(NOW, ZoneOffset.UTC),
+        dayCompletion = days,
     )
+
+    private fun step() = days.steps.last { it.step == DayStep.REVALUATION }
 
     private fun book(asOf: LocalDate, vararg fv: DealFairValue, currency: String = "CZK") =
         BookValuation(UUID.randomUUID(), asOf, currency, "sha256:t", fv.associateBy { it.dealId }, null)
@@ -161,10 +179,11 @@ class RevaluationServiceTest {
         DealFairValue(deal.id, clean?.let(::BigDecimal), clean?.let(::BigDecimal), unpriced)
 
     @Test
-    fun `no fair-value deal - nothing is read or posted`() = runBlocking<Unit> {
+    fun `no fair-value deal - the step is SKIPPED and nothing is read or posted`() = runBlocking<Unit> {
         val run = service.revalue(day)
         assertThat(run.revalued).isEmpty()
         assertThat(ledger.posted).isEmpty()
+        assertThat(step().status).isEqualTo(DayStepStatus.SKIPPED)
     }
 
     @Test
@@ -172,6 +191,8 @@ class RevaluationServiceTest {
         val irs = bookedIrs().also { deals.rows[it.id] = it }
 
         assertThat(service.revalue(day).gaps.single().reason).contains("no TIED_OUT risk snapshot")
+        assertThat(step().status).isEqualTo(DayStepStatus.FAILED)
+        assertThat(step().detail).contains("no TIED_OUT risk snapshot")
 
         engine.books[day] = book(day)
         assertThat(service.revalue(day).gaps.single().reason).contains("not in the risk engine's valuation")
@@ -186,6 +207,7 @@ class RevaluationServiceTest {
 
         assertThat(ledger.posted).isEmpty()
         assertThat(store.rows).isEmpty()
+        assertThat(step().status).isEqualTo(DayStepStatus.FAILED)
     }
 
     @Test
@@ -196,6 +218,7 @@ class RevaluationServiceTest {
             val first = service.revalue(day)
             assertThat(first.journals).isEqualTo(1)
             assertThat(first.gaps + first.failures).isEmpty()
+            assertThat(step().status).isEqualTo(DayStepStatus.DONE)
             val spec = ledger.posted.single()
             assertThat(spec.event).isEqualTo(PostingEvent.REVALUATION)
             assertThat(spec.idempotencyKey).isEqualTo("treasury:${irs.id}:revaluation:$day")

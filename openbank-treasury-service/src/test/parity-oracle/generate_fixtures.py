@@ -321,8 +321,8 @@ def build():
 # exercised on every product; a later phase adds its products here together with their ledger.
 # Mirrors REQUIRED_PRODUCTS in .github/scripts/check-treasury-parity-fixtures.py.
 DELIVERED_PRODUCTS = ("MM_PLACEMENT", "MM_BORROWING", "CNB_DEPOSIT_FACILITY", "CNB_LOMBARD", "FX_SPOT", "IRS", "FRA",
-                      "BOND", "TREASURY_BILL", "REPO", "REVERSE_REPO",
-                      "FX_FORWARD", "FX_SWAP", "BILL_OF_EXCHANGE", "LOAN")
+                      "BOND", "TREASURY_BILL", "REPO", "REVERSE_REPO", "FX_FORWARD", "FX_SWAP", "BILL_OF_EXCHANGE",
+                      "LOAN", "CASH")
 
 
 def committed():

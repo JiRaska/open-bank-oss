@@ -5,7 +5,9 @@
 package com.openbank.treasury.application.usecase
 
 import com.openbank.libs.domain.money.RoundingPolicy
+import com.openbank.treasury.application.port.out.AccountingDayClosedException
 import com.openbank.treasury.application.port.out.CashFlowRepository
+import com.openbank.treasury.application.port.out.DayCompletionRepository
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
@@ -17,6 +19,9 @@ import com.openbank.treasury.application.port.out.RevaluationRepository
 import com.openbank.treasury.application.port.out.ValuationPort
 import com.openbank.treasury.application.port.out.ValuationUnavailableException
 import com.openbank.treasury.domain.cashflow.CashFlowKind
+import com.openbank.treasury.domain.model.DayStep
+import com.openbank.treasury.domain.model.DayStepRecord
+import com.openbank.treasury.domain.model.DayStepStatus
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealState
@@ -40,11 +45,57 @@ data class RevaluationRun(
     val journals: Int,
     val gaps: List<RevaluationGap>,
     val failures: List<Throwable>,
-    /** Rows still owed to the ledger after this run (claimed, never posted). */
+    /** Rows still owed to the ledger after this run (claimed, never posted): any one FAILS the step. */
     val owed: Int = 0,
     /** Owed rows from earlier runs this run posted before measuring anything. */
     val reposted: Int = 0,
-)
+) {
+    /** The REVALUATION day step this run makes (ADR-0344 D7): a gap or a failure is FAILED with its reason. */
+    fun step(at: java.time.Instant): DayStepRecord {
+        val refused = failures.count { it is AccountingDayClosedException }
+        val problems = gaps.size + failures.size
+        if (owed > 0) {
+            return DayStepRecord(
+                asOf,
+                DayStep.REVALUATION,
+                DayStepStatus.FAILED,
+                revalued.size,
+                "$owed revaluation(s) claimed but not posted to the ledger: they are re-posted first on the next run",
+                at,
+                journals,
+                refused,
+            )
+        }
+        return when {
+            revalued.isEmpty() && problems == 0 ->
+                DayStepRecord(asOf, DayStep.REVALUATION, DayStepStatus.SKIPPED, 0, "no fair-value deal to revalue", at)
+            problems == 0 -> DayStepRecord.of(asOf, DayStep.REVALUATION, revalued.size, 0, at, journals = journals)
+            refused == problems -> DayStepRecord.of(
+                asOf,
+                DayStep.REVALUATION,
+                revalued.size,
+                problems,
+                at,
+                refused,
+                journals,
+            )
+            else -> DayStepRecord(
+                asOf,
+                DayStep.REVALUATION,
+                DayStepStatus.FAILED,
+                revalued.size,
+                (
+                    "$problems deal(s) not revalued: " +
+                        (gaps.firstOrNull()?.let { "${it.dealId}: ${it.reason}" } ?: failures.first().message.orEmpty())
+                    ).take(DayStepRecord.MAX_DETAIL),
+                at,
+                journals,
+                refused,
+            )
+        }
+    }
+}
+
 
 /**
  * ADR-0344 D7/D8 revaluation: the fair value of every FVTPL / FVOCI security and every derivative
@@ -61,7 +112,7 @@ data class RevaluationRun(
  * A row is CLAIMED before the ledger is asked. If its post is lost (ledger down, crash), the row is
  * OWED: no new date of that deal is measured against it ([PriorRevaluationUnpostedException], 409)
  * until it is posted; every whole-book run re-posts owed rows first, by their own stored change and
- * key, and a run reports the count still owed.
+ * key, and the REVALUATION day step stays FAILED while any row is owed.
  *
  * The measured amount is the CLEAN value (accrued interest is posted by the accrual run) less the
  * carrying amount — amortised cost for a security, zero for a derivative, which is carried only at
@@ -77,6 +128,7 @@ class RevaluationService(
     private val ledger: LedgerPostingPort,
     private val clock: Clock,
     private val bookCategory: suspend (bookId: String?) -> Ifrs9Category = { Ifrs9Category.AMORTISED_COST },
+    private val dayCompletion: DayCompletionRepository? = null,
 ) {
     suspend fun latestAsOf(): LocalDate? = valuation.latestAsOf()
 
@@ -98,6 +150,7 @@ class RevaluationService(
                 reposted = reposted,
                 owed = revaluations.unposted().count,
             )
+            dayCompletion?.record(run.step(clock.instant()))
             return run
         }
         val run = measure(asOf, dealId)

@@ -117,6 +117,7 @@ class TreasuryServiceProducer {
         deals: DealRepository,
         schedules: ScheduleService,
         marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
+        dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository,
         objectMapper: ObjectMapper,
         clock: Clock,
     ): com.openbank.treasury.application.usecase.FixingService =
@@ -127,6 +128,7 @@ class TreasuryServiceProducer {
             marketData,
             objectMapper,
             clock,
+            dayCompletion = dayCompletion,
         )
 
     /** ADR-0344 D5: no feed ingests the interbank indices yet; the port is where one plugs in. */
@@ -166,6 +168,7 @@ class TreasuryServiceProducer {
         revaluations: com.openbank.treasury.application.port.out.RevaluationRepository,
         ledger: LedgerPostingPort,
         references: ReferenceRepository,
+        dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository,
         clock: Clock,
     ): com.openbank.treasury.application.usecase.RevaluationService =
         com.openbank.treasury.application.usecase.RevaluationService(
@@ -176,6 +179,7 @@ class TreasuryServiceProducer {
             ledger,
             clock,
             BookCategories(references, clock)::of,
+            dayCompletion,
         )
 
     /** ADR-0344 D3: the reference-data steward; the plain service is also what deal capture validates against. */
@@ -244,6 +248,7 @@ class TreasuryServiceProducer {
         cashFlows: CashFlowRepository,
         references: ReferenceRepository,
         ledger: LedgerReadPort,
+        dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository,
         objectMapper: ObjectMapper,
         clock: Clock,
         meterRegistry: io.micrometer.core.instrument.MeterRegistry,
@@ -286,6 +291,7 @@ class TreasuryServiceProducer {
                         e.message,
                     )
             },
+            dayCompletion = dayCompletion,
             counterparty = { id ->
                 counterparties.findById(id)?.let {
                     com.openbank.treasury.application.usecase.CounterpartyIdentity(it.name, it.synthetic)

@@ -268,6 +268,35 @@ an independent-oracle parity fixture and to the original golden journals (no new
   phase 4. Rollback: switch `OPENBANK_TREASURY_REVALUATION_ENABLED` off and remove the routes; V26 and
   V27 are additive (drop the tables); posted journals stay in the ledger.
 
+## Day-end completion record and CASH delivery (ADR-0344 phase 4) — `treasury_day_completion` (V28)
+
+Each treasury run records the outcome of its step for the bank day it covered: FIXINGS
+(`FixingService.run`), ACCRUALS (`InterestAccrualScheduler`), PAYMENTS (`PaymentService.propose`),
+REVALUATION (a whole-book `RevaluationService.revalue`) and CORRECTIONS
+(`CorrectionPostingScheduler`). One row per (business date, step), unique; a later run of the same
+step on the same day replaces it under a transaction-scoped advisory lock on the pair, so two pods
+never fail the constraint and the row always states the LAST outcome.
+`GET /api/v1/treasury/day-completion/{date}` (OPA `treasury.deal.read`, existing grant, no new
+action) lists all six steps; a step with no row is PENDING with `at` null.
+
+- **STRIDE-T (a day reading finished when it is not):** a blocked fixing, an unaddressable payment,
+  a revaluation gap or an owed (claimed, never posted) revaluation each record FAILED with the
+  reason; only a run with no failure records DONE. REFUSED is recorded only when EVERY failure is
+  the ledger's `409 ACCOUNTING_DAY_CLOSED`. A single-deal on-demand revaluation records nothing,
+  since it says nothing about the rest of the book.
+- **STRIDE-R:** counts, journals posted, refusals and a detail bounded to 500 characters (domain
+  `require` and the column length); no customer data.
+- **STRIDE-D:** at most six rows per day; the read is one indexed range query.
+- **CASH:** `ProductType.DELIVERED` now holds every product, so a dealer may draft CASH; its
+  posting rules were already in the matrix (phase 2a) and its two parity fixtures are replayed.
+- **Not here:** the record is not yet REPORTED to the ledger close. Treasury's ADR-0342 day-close
+  participation (`TreasuryCloseParticipation`, the ledger client and its scheduler,
+  `rules.yaml close_participants`) is its own PR; until it lands the ledger close does not wait for
+  treasury.
+- **Residual:** MATURITIES is listed but no run records it yet, so it reads PENDING every day.
+  Rollback: V28 is additive (drop the table and its sequence); the runs record nothing once the
+  bean is removed.
+
 ## STRIDE analysis
 
 | Threat | Control | Residual risk |

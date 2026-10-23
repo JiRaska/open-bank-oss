@@ -76,6 +76,30 @@ class TreasuryResource {
     @Inject
     lateinit var objectMapper: ObjectMapper
 
+    @Inject
+    lateinit var dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository
+
+    @GET
+    @Path("/day-completion/{date}")
+    @Operation(
+        summary = "The treasury accounting day's completion record: every step with its last outcome (ADR-0344 D7)",
+    )
+    @Authorize(action = "treasury.deal.read")
+    suspend fun dayCompletion(@PathParam("date") date: LocalDate): Map<String, Any?> = mapOf(
+        "date" to date,
+        "steps" to com.openbank.treasury.domain.model.DayStepRecord.day(date, dayCompletion.day(date)).map {
+            mapOf(
+                "step" to it.step.name,
+                "status" to it.status.name,
+                "count" to it.count,
+                "journals" to it.journals,
+                "refused" to it.refused,
+                "detail" to it.detail,
+                "at" to it.at,
+            )
+        },
+    )
+
     @GET
     @Path("/deals")
     @Operation(summary = "Dealer blotter: list deals, filtered; X-Total-Count carries the match count")

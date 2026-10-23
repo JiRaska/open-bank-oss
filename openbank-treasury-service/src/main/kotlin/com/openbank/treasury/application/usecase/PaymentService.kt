@@ -7,6 +7,7 @@ package com.openbank.treasury.application.usecase
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.treasury.application.port.out.CashFlowRepository
+import com.openbank.treasury.application.port.out.DayCompletionRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerReadPort
@@ -15,6 +16,8 @@ import com.openbank.treasury.application.port.out.PaymentRepository
 import com.openbank.treasury.application.port.out.ReferenceRepository
 import com.openbank.treasury.domain.cashflow.FlowDirection
 import com.openbank.treasury.domain.model.Actor
+import com.openbank.treasury.domain.model.DayStep
+import com.openbank.treasury.domain.model.DayStepRecord
 import com.openbank.treasury.domain.payment.FundingCheck
 import com.openbank.treasury.domain.payment.FundingExceededException
 import com.openbank.treasury.domain.payment.Payment
@@ -145,12 +148,14 @@ class PaymentService(
     /** ADR-0344 D7: posts the PAYMENT journals of a SENT/SETTLED payment's flows; returns journals posted. */
     private val postOutflow: suspend (Payment) -> Int = { 0 },
     private val onOutflowFailed: (UUID, Throwable) -> Unit = { _, _ -> },
+    /** ADR-0344 D7: where a proposal run records the PAYMENTS day step; null = not recorded. */
+    private val dayCompletion: DayCompletionRepository? = null,
 ) {
     init {
         require(cutOffWindowDays in 0..MAX_WINDOW) { "the payment cut-off window is 0..$MAX_WINDOW days" }
     }
 
-    /** Propose payments for every unpaid FIXED flow paid in [date]..[date + window]. */
+    /** Propose payments for every unpaid FIXED flow paid in [date]..[date + window]. Records the PAYMENTS step. */
     suspend fun propose(date: LocalDate): ProposalRun {
         val flows = payments.unpaidFixedFlows(date, date.plusDays(cutOffWindowDays))
         val failures = mutableListOf<Throwable>()
@@ -180,6 +185,16 @@ class PaymentService(
         }
         val unaddressable = outcomes.filterIsInstance<ProposalOutcome.Unaddressable>()
             .map { "${it.counterpartyId}/${it.currency}: no effective SSI for ${it.flowIds.size} flow(s)" }
+        dayCompletion?.record(
+            DayStepRecord.of(date, DayStep.PAYMENTS, proposed.size, failures.size + unaddressable.size, clock.instant(), journals = 0)
+                .let { r ->
+                    if (unaddressable.isNotEmpty() && failures.isEmpty()) {
+                        r.copy(detail = unaddressable.joinToString("; ").take(DayStepRecord.MAX_DETAIL))
+                    } else {
+                        r
+                    }
+                },
+        )
         return ProposalRun(
             date,
             proposed,

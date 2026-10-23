@@ -64,14 +64,12 @@ enum class ProductType(
 
     companion object {
         /**
-         * ADR-0344 delivery phases: the products a dealer may draft today. Phase 0 delivered the five
-         * legacy products, phase 1a adds IRS and FRA (cash flows and fixings), phase 2a lets them
-         * settle and mature through the posting-rule matrix, phase 2b adds the securities (BOND,
-         * TREASURY_BILL) and the repo pair (REPO, REVERSE_REPO), and phase 3 adds FX forwards and
-         * swaps, bills of exchange and loans. Mirrored by the parity gate's REQUIRED_PRODUCTS.
+         * ADR-0344 delivery phases: the products a dealer may draft. Phase 0 delivered the five
+         * legacy products, phase 1a IRS and FRA, phase 2b the securities and the repo pair, phase 3
+         * FX forwards and swaps, bills of exchange and loans, and phase 4 CASH: every product type is
+         * now delivered. Mirrored by the parity gate's REQUIRED_PRODUCTS.
          */
-        val DELIVERED: Set<ProductType> = entries.filter { it.legacy }.toSet() +
-            setOf(IRS, FRA, BOND, TREASURY_BILL, REPO, REVERSE_REPO, FX_FORWARD, FX_SWAP, BILL_OF_EXCHANGE, LOAN)
+        val DELIVERED: Set<ProductType> = entries.toSet()
     }
 }
 

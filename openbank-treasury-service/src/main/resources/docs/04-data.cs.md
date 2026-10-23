@@ -55,3 +55,11 @@ Noha zaúčtování nově nese `accountingClass` + `LedgerRole` (jistina, naběh
 - **`internal_rate_sheets`** (V27) drží interní sazby schválené čtyřma očima (`/market-data/internal-rate-sheets`). Jeden ACTIVE list na jméno; schválení nahradí předchozí. Zatím se z nich nic neoceňuje.
 - `POST /api/v1/treasury/analysis/cash-flows` agreguje uložené peněžní toky podle měny (hrubě, netto nebo kumulativně). Jen čte a přepočítává jen schváleným fixingem `FX_<CCY>_<REF>`.
 - **Rollback:** V26 a V27 jsou aditivní. Tabulky lze odstranit, dokud neobsahují řádek; příkaz je v hlavičce každé migrace. Zaúčtované deníky přecenění v ledgeru zůstávají.
+
+## Záznam o dokončení dne a CASH (ADR-0344 fáze 4)
+
+- **`treasury_day_completion`** (V28) drží jeden řádek na (účetní den, krok): FIXINGS, ACCRUALS, PAYMENTS, REVALUATION, CORRECTIONS nebo MATURITIES, se stavem DONE, SKIPPED, FAILED, REFUSED nebo PENDING, počtem položek, zaúčtovanými deníky, zaúčtováními, která ledger odmítl kvůli uzavřenému dni, a popisem o nejvýše 500 znacích. Pozdější běh téhož kroku v týž den řádek nahradí, takže vždy uvádí poslední výsledek.
+- `GET /api/v1/treasury/day-completion/{date}` vypíše všech šest kroků; krok, který žádný běh nezaznamenal, je PENDING. Blokovaný fixing, platba bez instrukce, mezera v přecenění nebo dlužné přecenění se zaznamenají jako FAILED. Přecenění jednoho obchodu nezaznamená nic. MATURITIES zatím žádný běh nezaznamenává.
+- Záznam se zatím nehlásí do uzávěrky dne v ledgeru (ADR-0342); to je samostatná změna.
+- **CASH** je nyní dodaný, takže lze založit každý typ produktu a sada parity má fixtury pro všech šestnáct.
+- **Rollback:** V28 je aditivní. Odstraňte tabulku a `treasury_day_completion_seq`; příkaz je v hlavičce migrace.

@@ -55,3 +55,11 @@ A posting leg now carries `accountingClass` + `LedgerRole` (principal, accrued i
 - **`internal_rate_sheets`** (V27) hold four-eyes approved internal rates (`/market-data/internal-rate-sheets`). One ACTIVE sheet per name; approving supersedes the previous one. Nothing prices from them yet.
 - `POST /api/v1/treasury/analysis/cash-flows` aggregates the stored cash-flow ledger by currency (gross, net or cumulative). It is read-only and converts only at an approved `FX_<CCY>_<REF>` fixing.
 - **Rollback:** V26 and V27 are additive. Drop the tables while no row exists; each migration header carries the statement. Posted revaluation journals stay in the ledger.
+
+## Day-end completion record and CASH (ADR-0344 phase 4)
+
+- **`treasury_day_completion`** (V28) holds one row per (business date, step): FIXINGS, ACCRUALS, PAYMENTS, REVALUATION, CORRECTIONS or MATURITIES, with status DONE, SKIPPED, FAILED, REFUSED or PENDING, the item count, journals posted, postings the ledger refused because the day was closed, and a detail of at most 500 characters. A later run of the same step on the same day replaces the row, so it always states the last outcome.
+- `GET /api/v1/treasury/day-completion/{date}` lists all six steps; a step no run recorded is PENDING. A blocked fixing, an unaddressable payment, a revaluation gap or an owed revaluation records FAILED. A single-deal revaluation records nothing. MATURITIES has no recording run yet.
+- The record is not yet reported to the ledger's day close (ADR-0342); that is a separate change.
+- **CASH** is now delivered, so every product type can be drafted, and the parity set holds fixtures for all sixteen.
+- **Rollback:** V28 is additive. Drop the table and `treasury_day_completion_seq`; the statement is in the migration header.

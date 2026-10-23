@@ -7,6 +7,7 @@ package com.openbank.treasury.application.usecase
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.finance.cashflow.FixingSource
+import com.openbank.treasury.application.port.out.DayCompletionRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.FixingFlowRepository
@@ -27,6 +28,8 @@ import com.openbank.treasury.domain.marketdata.QualityThresholds
 import com.openbank.treasury.domain.marketdata.QualityVerdict
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.CashFlowFixed
+import com.openbank.treasury.domain.model.DayStep
+import com.openbank.treasury.domain.model.DayStepRecord
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.FixedFlowItem
 import java.math.BigDecimal
@@ -85,6 +88,8 @@ class FixingService(
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
     private val newId: () -> UUID = { Ids.newId() },
+    /** ADR-0344 D7: where the run records the FIXINGS day step; null = not recorded. */
+    private val dayCompletion: DayCompletionRepository? = null,
 ) {
     /** The fixings of [date]: what is due, what was fixed, what is blocked. [status] narrows it. */
     suspend fun fixings(date: LocalDate, status: FixingStatus?): List<FixingView> {
@@ -109,9 +114,9 @@ class FixingService(
 
     /**
      * Fix every due (index, [date]) that passes the quality gate; block the rest. A BLOCKED index
-     * opens a fixing case and fixes nothing, but nothing holds the accounting day on it yet (the
-     * day-completion record is a later ADR-0344 phase), so the day can close with flows still
-     * PROJECTED; the case is listed by `GET /fixings`. Each deal of an index is fixed in its own
+     * opens a fixing case, fixes nothing and leaves the FIXINGS day step un-DONE until it is
+     * resolved, so the day-completion record never reads finished over a PROJECTED coupon; the case
+     * is listed by `GET /fixings`. Each deal of an index is fixed in its own
      * transaction: a failure on one deal leaves the earlier deals FIXED and reports the index as
      * failed, and the next pass (idempotent: a fixed flow is no longer due) finishes it.
      */
@@ -137,6 +142,18 @@ class FixingService(
                 failures += it
             }
         }
+        // A blocked fixing holds the day as a failure would: the FIXINGS step is not DONE until
+        // the case is resolved.
+        dayCompletion?.record(
+            DayStepRecord.of(date, DayStep.FIXINGS, fixedFlows, failures.size + blocked.size, clock.instant())
+                .let {
+                    if (blocked.isNotEmpty() && failures.isEmpty()) {
+                        it.copy(detail = "${blocked.size} index fixing(s) BLOCKED by the quality gate")
+                    } else {
+                        it
+                    }
+                },
+        )
         return FixingRunResult(date, fixedFlows, fixedIndices, blocked, failures)
     }
 
