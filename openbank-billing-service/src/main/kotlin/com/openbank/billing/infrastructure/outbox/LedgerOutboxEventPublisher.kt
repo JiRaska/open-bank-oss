@@ -74,14 +74,16 @@ class LedgerOutboxEventPublisher(
             description = payload.description,
             accountingClass = accountingClassOf(payload.accountingClass, payload.idempotencyKey),
         )
+        // A re-bill (runbook 0033) posts under its OWN new key but settles the ORIGINAL fee row.
+        val feeKey = payload.rebillOf ?: payload.idempotencyKey
         val journalId = try {
             ledger.post(command)
         } catch (e: WebApplicationException) {
             if (!BillingCloseJobs.isClosedDayRejection(e)) throw e
-            refuseClosedDay(payload.idempotencyKey)
+            refuseClosedDay(feeKey)
             return
         }
-        assessments.markPosted(payload.idempotencyKey, journalId)
+        assessments.markPosted(feeKey, journalId)
     }
 
     /**
@@ -173,6 +175,11 @@ private data class FeePostIntentPayload(
     val description: String,
     val accountingClass: String? = null,
     val productRevisionId: String? = null,
+    /**
+     * Set only on a re-bill row (runbook 0033, `billing_fee_rebill`): the idempotency key of the fee
+     * the ledger refused into a closed day. [idempotencyKey] is then the new, recorded key.
+     */
+    val rebillOf: String? = null,
 )
 
 /** The `billing.fee.reversal-intent.v1` outbox payload shape (written by `BillingAssessmentRepositoryImpl`). */

@@ -225,4 +225,44 @@ class BillingCloseParticipationTest {
         assertThat(row.refusalReason).isEqualTo(BillingCloseJobs.REASON_SWEEP_ABORTED)
         assertThat(row.refusalReason).doesNotContain("unreachable")
     }
+
+    // ── catch-up for a missed cycle (#13709 review) ─────────────────────────────────────────
+
+    private fun catchUpScheduler(clockAt: Clock, svc: BillingCycleService) =
+        sweep(clockAt, "acc-1", svc = svc).apply { cron = "0 0 3 1 * ?" }
+
+    @Test
+    fun `a cycle missed on the 1st is caught up on the 2nd and filed under the due day`(): Unit = runBlocking {
+        // 2026-07-02T08:00Z: the 03:00 Prague firing on 1 July has passed and no run is recorded.
+        val svc = mockk<BillingCycleService>()
+        coEvery { svc.runCycleWithOutcome(any(), any(), any()) } returns CycleOutcome(1, 0)
+        val s = catchUpScheduler(Clock.fixed(Instant.parse("2026-07-02T08:00:00Z"), ZoneOffset.UTC), svc)
+
+        s.catchUp()
+
+        coVerify(exactly = 1) { svc.runCycleWithOutcome("2026-07", listOf("acc-1"), "CZK") }
+        assertThat(runs.rows.keys).containsExactly(cycleDay to BillingCloseJobs.CYCLE)
+    }
+
+    @Test
+    fun `a cycle that already ran this month is not run again`(): Unit = runBlocking {
+        cycleRan()
+        val svc = mockk<BillingCycleService>()
+        val s = catchUpScheduler(Clock.fixed(Instant.parse("2026-07-02T08:00:00Z"), ZoneOffset.UTC), svc)
+
+        s.catchUp()
+
+        coVerify(exactly = 0) { svc.runCycleWithOutcome(any(), any(), any()) }
+    }
+
+    @Test
+    fun `before this month's firing there is nothing to catch up`(): Unit = runBlocking {
+        // 2026-07-01T00:30Z is 02:30 in Prague: the 03:00 firing has not happened; last month's has.
+        val svc = mockk<BillingCycleService>()
+        val s = catchUpScheduler(Clock.fixed(Instant.parse("2026-07-01T00:30:00Z"), ZoneOffset.UTC), svc)
+
+        assertThat(s.missedDueDay()).isNull()
+        s.catchUp()
+        coVerify(exactly = 0) { svc.runCycleWithOutcome(any(), any(), any()) }
+    }
 }

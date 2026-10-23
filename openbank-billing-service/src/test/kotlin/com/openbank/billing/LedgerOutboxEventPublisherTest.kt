@@ -157,6 +157,24 @@ class LedgerOutboxEventPublisherTest {
         coVerify(exactly = 0) { assessments.markFailed(any()) }
     }
 
+    // Runbook 0033: a re-bill posts under its own new key and settles the ORIGINAL fee row.
+    @Test
+    fun `a re-bill row posts under the new key and marks the original fee POSTED`(): Unit = runBlocking {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        val journalId = UUID.randomUUID()
+        val commandSlot: CapturingSlot<FeeJournalCommand> = slot()
+        coEvery { ledger.post(capture(commandSlot)) } returns journalId
+        coEvery { assessments.markPosted(any(), any()) } returns Unit
+        val rebill = payload("fee-2026-07-acc-1-f1-CZK:rebill:2026-07-03")
+            .replace("}", ",\"rebillOf\":\"fee-2026-07-acc-1-f1-CZK\"}")
+
+        LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry()).publish(entry(rebill))
+
+        assertThat(commandSlot.captured.idempotencyKey).isEqualTo("fee-2026-07-acc-1-f1-CZK:rebill:2026-07-03")
+        coVerify(exactly = 1) { assessments.markPosted("fee-2026-07-acc-1-f1-CZK", journalId) }
+    }
+
     @Test
     fun `a ledger failure propagates and does not mark the fee posted`() {
         val ledger = mockk<LedgerPostingPort>()

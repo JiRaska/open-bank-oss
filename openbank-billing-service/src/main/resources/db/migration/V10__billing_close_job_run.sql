@@ -17,3 +17,20 @@ CREATE TABLE billing_close_job_run (
     completed_at    TIMESTAMPTZ   NOT NULL,
     PRIMARY KEY (business_date, job)
 );
+
+-- A fee the ledger refused with 409 ACCOUNTING_DAY_CLOSED is FAILED and never posts on its own: the
+-- day it belonged to no longer accepts postings. Recovery (runbook 0033) re-bills it into the next
+-- open day under a NEW idempotency key, approved by two people. This table is that record: which fee
+-- was re-billed, under which key, by whom and approved by whom. The outbox row it creates carries
+-- `rebillOf` = original_key, so the dispatcher marks the ORIGINAL fee POSTED with the new journal.
+-- maker <> checker is enforced here, not only by procedure.
+CREATE TABLE billing_fee_rebill (
+    rebill_key      VARCHAR(200)  PRIMARY KEY,
+    original_key    VARCHAR(160)  NOT NULL UNIQUE REFERENCES assessed_fee (idempotency_key),
+    reason          VARCHAR(200)  NOT NULL,
+    change_ticket   VARCHAR(100)  NOT NULL,
+    maker           VARCHAR(100)  NOT NULL,
+    checker         VARCHAR(100)  NOT NULL,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    CONSTRAINT billing_fee_rebill_four_eyes CHECK (maker <> checker)
+);

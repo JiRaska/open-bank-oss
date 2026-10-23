@@ -4,6 +4,10 @@
 
 package com.openbank.billing.infrastructure.scheduler
 
+import com.cronutils.model.CronType
+import com.cronutils.model.definition.CronDefinitionBuilder
+import com.cronutils.model.time.ExecutionTime
+import com.cronutils.parser.CronParser
 import com.openbank.billing.application.port.out.BillableAccountDiscoveryPort
 import com.openbank.billing.application.port.out.CloseJobRunPort
 import com.openbank.billing.application.usecase.BillingCycleService
@@ -103,6 +107,11 @@ class BillingCycleScheduler {
      */
     private var aborted = false
 
+    private val sweepInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    @ConfigProperty(name = "openbank.billing.scheduler.cron")
+    lateinit var cron: String
+
     /** Accounts assessed / failed by the sweep in flight — the day-close evidence it records. */
     private var processedInSweep = 0
     private var failedInSweep = 0
@@ -138,19 +147,85 @@ class BillingCycleScheduler {
     suspend fun sweep() = runSweep()
 
     /**
+     * Catch-up for a missed cycle (#13709 review). The cron fires at one instant a month, so a pod that
+     * is down at that instant — a deploy on the 1st, or the move of the trigger to Europe/Prague, which
+     * shifts that instant by an hour or two against the old UTC firing — skips the whole month with
+     * nothing to say so. Every tick (and two minutes after boot) this checks whether the cron's most
+     * recent firing falls in the current month and the month has no recorded cycle run; if so it runs
+     * the sweep for THAT due day. Idempotent by `cycleId` (the assessment is unique per cycle, account
+     * and currency), and a run in flight is never doubled ([sweepInFlight]).
+     */
+    @Scheduled(
+        every = "{openbank.billing.scheduler.catch-up-every:15m}",
+        delayed = "2m",
+        identity = "billing-cycle-catch-up",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
+    )
+    suspend fun catchUp() {
+        if (!enabled) return
+        val due = missedDueDay() ?: return
+        log.warnf(
+            "[billing-cycle-scheduler] cycle %s has no run although it was due on %s - catching up",
+            cycleIdFor(due),
+            due,
+        )
+        runSweep(due)
+    }
+
+    /** The current month's due day when the cron has already fired this month and no run is recorded. */
+    @Suppress("TooGenericExceptionCaught") // an unreadable cron or evidence store must not fire a cycle
+    internal suspend fun missedDueDay(): LocalDate? {
+        val zone = AccountingClock.bank(clock).zone
+        val now = clock.instant().atZone(zone)
+        val last = try {
+            ExecutionTime.forCron(CRON_PARSER.parse(cron)).lastExecution(now).orElse(null)
+        } catch (e: Exception) {
+            log.warnf("[billing-cycle-scheduler] catch-up skipped: cron not evaluable (%s)", e.javaClass.simpleName)
+            null
+        } ?: return null
+        val today = now.toLocalDate()
+        val dueDay = last.toLocalDate()
+        if (dueDay.year != today.year || dueDay.month != today.month) return null
+        val recorded = try {
+            closeJobRuns.findBetween(today.withDayOfMonth(1), today).awaitSuspending()
+        } catch (e: Exception) {
+            log.warnf(
+                "[billing-cycle-scheduler] catch-up skipped: run evidence unreadable (%s)",
+                e.javaClass.simpleName,
+            )
+            return null
+        }
+        return if (recorded.any { it.job == BillingCloseJobs.CYCLE }) null else dueDay
+    }
+
+    /**
      * The cycle-sweep logic, split out from the `@Scheduled` entrypoint so unit tests can drive it
      * directly. Note that a direct call is *not* sufficient coverage for the entrypoint itself: it
      * supplies a Vert.x context the Quarkus scheduler does not, which is exactly how #2187 hid —
      * see `BillingCycleSweepVertxContextIT`, which drives the real cron instead.
      */
-    suspend fun runSweep() {
+    suspend fun runSweep(dueDay: LocalDate? = null) {
         if (!enabled) {
             log.debug("[billing-cycle-scheduler] Disabled — skipping sweep")
             return
         }
+        // One sweep at a time across the cron trigger and the catch-up (each is SKIP on its own only).
+        if (!sweepInFlight.compareAndSet(false, true)) {
+            log.info("[billing-cycle-scheduler] a sweep is already running - skipping")
+            return
+        }
+        try {
+            sweepFor(dueDay ?: AccountingClock.bank(clock).today())
+        } finally {
+            sweepInFlight.set(false)
+        }
+    }
+
+    private suspend fun sweepFor(businessDate: LocalDate) {
         // The Prague accounting day (ADR-0207), never the UTC date: the cycle id and the day-close
         // evidence are derived from the same date, so they cannot disagree about the month or day.
-        val businessDate = AccountingClock.bank(clock).today()
+        // A catch-up passes the day the cycle was DUE, so its evidence is filed where the reporter
+        // expects it.
         val cycleId = cycleIdFor(businessDate)
         processedInSweep = 0
         failedInSweep = 0
@@ -261,6 +336,8 @@ class BillingCycleScheduler {
 
         /** Matches account-service's own default page size for the /accounts/active sweep. */
         const val DEFAULT_DISCOVERY_PAGE_SIZE = 100
+
+        private val CRON_PARSER = CronParser(CronDefinitionBuilder.instanceDefinitionFor(CronType.QUARTZ))
 
         private val CYCLE_ID_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM")
 
