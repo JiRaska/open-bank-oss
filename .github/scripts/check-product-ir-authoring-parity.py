@@ -48,13 +48,48 @@ DSL_SOURCE = "openbank-products/src/main/kotlin/com/openbank/products/catalog/Re
 TEST_CLASS = "ReferenceProductsTest"
 TEST_FILE = f"openbank-products/src/test/kotlin/com/openbank/products/{TEST_CLASS}.kt"
 PRODUCT_RE = re.compile(r'product\(\s*"([a-z][a-z0-9-]*)"')
+MODULE_BUILD = "openbank-products/build.gradle.kts"
+DISABLED_RE = re.compile(r"^\s*@(?:org\.junit\.jupiter\.api\.)?Disabled\b", re.M)
+
+
+def strip_kotlin_comments(text: str) -> str:
+    """Kotlin source with comments blanked and string literals kept, so a token in a KDoc or a `//`
+    line can never satisfy a check about code. Block comments NEST in Kotlin; this mirrors that."""
+    out: list[str] = []
+    i, depth, n = 0, 0, len(text)
+    in_str = False
+    while i < n:
+        two = text[i:i + 2]
+        if depth == 0 and not in_str and two == "//":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if not in_str and two == "/*":
+            depth += 1
+            i += 2
+            continue
+        if depth > 0:
+            if two == "*/":
+                depth -= 1
+                i += 2
+                continue
+            if text[i] == "\n":
+                out.append("\n")
+            i += 1
+            continue
+        c = text[i]
+        if c == '"' and (i == 0 or text[i - 1] != "\\"):
+            in_str = not in_str
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
 def dsl_products(root: pathlib.Path) -> set[str] | None:
     src = root / DSL_SOURCE
     if not src.is_file():
         return None
-    return set(PRODUCT_RE.findall(src.read_text(encoding="utf-8")))
+    return set(PRODUCT_RE.findall(strip_kotlin_comments(src.read_text(encoding="utf-8"))))
 
 
 def findings(root: pathlib.Path) -> tuple[list[str], list[str]]:
@@ -84,13 +119,18 @@ def findings(root: pathlib.Path) -> tuple[list[str], list[str]]:
     if not test.is_file():
         f.append(f"{TEST_FILE}: missing — the JVM half of this gate does not exist")
     else:
-        text = test.read_text(encoding="utf-8")
-        if "@Disabled" in text:
+        text = strip_kotlin_comments(test.read_text(encoding="utf-8"))
+        if DISABLED_RE.search(text):
             f.append(f"{TEST_FILE}: carries @Disabled — the JVM half is switched off")
         if "ReferenceProducts.all" not in text:
             f.append(f"{TEST_FILE}: does not iterate ReferenceProducts.all — its scope is not the DSL product set")
         if "canonicalJson()" not in text or 'Path.of("ir"' not in text:
             f.append(f"{TEST_FILE}: does not compare canonicalJson() with the committed ir/<name>.json")
+    build = root / MODULE_BUILD
+    if build.is_file():
+        code = strip_kotlin_comments(build.read_text(encoding="utf-8"))
+        if re.search(r"exclude\s*\(?[^\n]*" + TEST_CLASS, code) or re.search(r"filter\s*\{[^}]*" + TEST_CLASS, code, re.S):
+            f.append(f"{MODULE_BUILD}: excludes {TEST_CLASS} from the test task — the JVM half never runs")
     return f, names
 
 
@@ -138,15 +178,23 @@ GOOD_TEST = (
 )
 
 
-def _fixture(root: pathlib.Path, irs: dict[str, dict], dsl_names: list[str] | None, test_text: str | None = GOOD_TEST) -> None:
+def _fixture(root: pathlib.Path, irs: dict[str, dict], dsl_names: list[str] | None, test_text: str | None = GOOD_TEST,
+             dsl_text: str | None = None, build_text: str | None = None) -> None:
     for name, doc in irs.items():
         p = root / IR_DIR / f"{name}.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(doc), encoding="utf-8")
-    if dsl_names is not None:
+    if dsl_names is not None or dsl_text is not None:
         s = root / DSL_SOURCE
         s.parent.mkdir(parents=True, exist_ok=True)
-        s.write_text("\n".join(f'val x{i} = product("{n}", "C", "EUR") {{ }}' for i, n in enumerate(dsl_names)), encoding="utf-8")
+        body = dsl_text if dsl_text is not None else "\n".join(
+            f'val x{i} = product("{n}", "C", "EUR") {{ }}' for i, n in enumerate(dsl_names or [])
+        )
+        s.write_text(body, encoding="utf-8")
+    if build_text is not None:
+        b = root / MODULE_BUILD
+        b.parent.mkdir(parents=True, exist_ok=True)
+        b.write_text(build_text, encoding="utf-8")
     if test_text is not None:
         t = root / TEST_FILE
         t.parent.mkdir(parents=True, exist_ok=True)
@@ -160,11 +208,12 @@ def _ir() -> dict:
 def self_test() -> int:
     failures = 0
 
-    def case(label: str, want_exit: int, text: str, irs, dsl_names, test_text=GOOD_TEST, enforce=True) -> None:
+    def case(label: str, want_exit: int, text: str, irs, dsl_names, test_text=GOOD_TEST, enforce=True,
+             dsl_text=None, build_text=None) -> None:
         nonlocal failures
         with tempfile.TemporaryDirectory() as d:
             root = pathlib.Path(d)
-            _fixture(root, irs, dsl_names, test_text)
+            _fixture(root, irs, dsl_names, test_text, dsl_text, build_text)
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 got = run(root, None, enforce)
@@ -179,8 +228,20 @@ def self_test() -> int:
     case("a non-IR JSON file is red", 1, "not a product IR document", {"a": {"foo": 1}}, ["a"])
     case("a disabled parity test is red", 1, "carries @Disabled", {"a": _ir()}, ["a"], "@Disabled\n" + GOOD_TEST)
     case("a parity test not scoped to the DSL set is red", 1, "does not iterate ReferenceProducts.all", {"a": _ir()}, ["a"], "class ReferenceProductsTest { fun x() = 1 }")
+    # Tokens that only appear in COMMENTS must not satisfy the check (review finding M4).
+    case("required tokens only in a comment are red", 1, "does not iterate ReferenceProducts.all", {"a": _ir()}, ["a"],
+         "// ReferenceProducts.all canonicalJson() Path.of(\"ir\"\nclass ReferenceProductsTest { fun x() = 1 }")
+    case("@Disabled mentioned in a KDoc is NOT a disabled test", 0, "OK — 1 committed", {"a": _ir()}, ["a"],
+         "/** never put @Disabled here */\n" + GOOD_TEST)
+    case("@Disabled on its own line above the class is red", 1, "carries @Disabled", {"a": _ir()}, ["a"],
+         "@Disabled(\"later\")\n" + GOOD_TEST)
+    case("a DSL product named only in a comment does not count", 1, "no DSL product named 'a'", {"a": _ir()}, None, GOOD_TEST, dsl_text='// product("a", "C", "EUR")\n')
     case("no committed IR at all is red, never a vacuous pass", 1, "refusing to report a pass", {}, None, None)
     case("advisory mode reports the finding and exits 0", 0, "ADVISORY mode", {"a": _ir()}, [], GOOD_TEST, enforce=False)
+    case("a build that excludes the parity test is red", 1, "excludes ReferenceProductsTest", {"a": _ir()}, ["a"], GOOD_TEST,
+         build_text='tasks.test { filter { excludeTestsMatching("*ReferenceProductsTest") } }')
+    case("a build that only MENTIONS the test in a comment is fine", 0, "OK — 1 committed", {"a": _ir()}, ["a"], GOOD_TEST,
+         build_text='// ReferenceProductsTest is the JVM half\ntasks.test { useJUnitPlatform() }')
     # The JUnit half: a missing report and a report with no case for a product are both findings.
     with tempfile.TemporaryDirectory() as d:
         root = pathlib.Path(d)
@@ -199,7 +260,7 @@ def self_test() -> int:
     if failures:
         print(f"self-test: {failures} failure(s)")
         return 1
-    print("self-test: OK (11 cases)")
+    print("self-test: OK (17 cases)")
     return 0
 
 

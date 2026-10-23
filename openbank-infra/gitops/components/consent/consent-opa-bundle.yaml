@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: consent-service
     app.kubernetes.io/part-of: consent
   annotations:
-    openbank.tech/policy-checksum: "0e8766d21a77a07b"
+    openbank.tech/policy-checksum: "432e23fdad904a1b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1880,13 +1880,15 @@ data:
                                              # so a valid signature is authority over every account under
                                              # the product. Its own action, never the shared catalog.publish,
                                              # so this entry can never cover a non-IR publish by accident.
-                                             # Confirmed no M2M caller: the only allow rule for this action
-                                             # (rest.rego catalog-publish-ir) requires HUMAN + (ROLE_OPERATOR
-                                             # or ROLE_ADMIN) and explicitly excludes any service-account-*
-                                             # principal id; no service rego grants catalog.* to a machine
-                                             # beyond catalog.read (pension-catalog-m2m-read). Also enforced
-                                             # at the application layer independently: maker != checker in
-                                             # GenericCatalogService.publishIr.
+                                             # No M2M caller, and not only by policy: rest.rego
+                                             # catalog-publish-ir requires HUMAN + (ROLE_OPERATOR or
+                                             # ROLE_ADMIN) and excludes machines, but product-catalog runs
+                                             # AUTHZ_ENFORCE=false, so that rule is advisory there. The
+                                             # binding control is in the service: publishOfferingRevisionIrV2
+                                             # refuses any identity ServiceAccountIdentity.isVerifiedPerson
+                                             # does not positively classify as a person (fails closed), and
+                                             # GenericCatalogService enforces maker != checker. No service
+                                             # rego grants catalog.* to a machine beyond catalog.read.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
                                              # playbook version. Confirmed no M2M caller — the only allow
                                              # rule for this action (rest.rego commstyle-publish) requires

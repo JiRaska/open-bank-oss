@@ -69,6 +69,9 @@ class PinnedRevisionUnavailableException(
  *
  * - The cache is keyed by hash and immutable: a hash names exactly one canonical document, so an
  *   entry can never go stale and is never evicted or replaced. Only a verified revision enters it.
+ *   Its size is bounded by the number of distinct revisions the consumer's contracts pin (a handful
+ *   per product, each a few KB), not by traffic: a request cannot add an entry the source does
+ *   not already hold under a valid signature.
  * - Every call increments [METRIC] with one [RevisionLoadOutcome]; a registry of `null` disables
  *   metrics (a bare unit test), nothing else changes.
  * - No consumer wires this yet (ADR-0352 phase 2); phase 3 consumers construct one from their own

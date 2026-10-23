@@ -10,6 +10,7 @@ import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.product.ir.ProductIrParser
 import com.openbank.libs.product.ir.ProductRevisionIr
 import com.openbank.libs.productrevision.IrSignerPort
+import com.openbank.libs.productrevision.IrSigningException
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
@@ -29,6 +30,8 @@ import com.openbank.productcatalog.domain.catalog.SchemaViolation
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
 import com.openbank.productcatalog.infrastructure.catalog.toPlainTree
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -194,7 +197,12 @@ class GenericCatalogService(
         val draft = findRevision(revisionId)
         val ir = parseBehaviour(draft.content)
             ?: throw CatalogConflictException("revision carries no product IR; publish it through publish")
-        val signature = irSigner.sign(ir.revisionHash)
+        // Transit `sign` is a blocking HTTP call (and may log in first); never on the event loop.
+        val signature = try {
+            withContext(Dispatchers.IO) { irSigner.sign(ir.revisionHash) }
+        } catch (e: IrSigningException) {
+            throw CatalogConflictException("revision cannot be signed: ${e.message}", e)
+        }
         val evidence = RevisionIrSignature(
             revisionHash = ir.revisionHash,
             keyId = signature.keyId,

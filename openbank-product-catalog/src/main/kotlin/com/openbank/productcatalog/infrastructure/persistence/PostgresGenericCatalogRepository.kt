@@ -190,7 +190,8 @@ class PostgresGenericCatalogRepository(
             "FROM CatalogRevisionEntity WHERE offeringId = :offeringId ORDER BY number DESC, id",
             CatalogRevisionEntity::class.java,
         ).setParameter("offeringId", offeringId).resultList
-    }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
+            .flatMap { rows -> session.withIrSignatures(rows) { r -> r.toDomain() } }
+    }.awaitSuspending()
 
     override suspend fun updateDraft(revision: ProductRevision, actorId: String): ProductRevision =
         translateOptimisticFailure {

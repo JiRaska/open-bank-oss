@@ -6971,7 +6971,7 @@ gates:
     mode: advisory
     rationale: "A hash on origin/main is what the catalog may publish (ADR-0352 §7); if the committed IR and the DSL that claims to author it diverge, two authoring tools yield two hashes for one product and the review approved neither. The JVM half is a test; this half keeps that test's scope equal to the committed files."
     review_after: "2027-03-31"
-    verified: "2026-10-23 — 3 committed reference IRs each have a DSL product and the parity test; a committed IR with no DSL product, a DSL product with no committed IR and a disabled parity test each turn it red (--self-test)"
+    verified: "2026-10-23 — 3 committed reference IRs each have a DSL product and the parity test. STATIC half only: it reads comment-stripped Kotlin, so a token in a comment, an @Disabled annotation, a DSL product named only in a comment and a build that excludes the test each turn it red (--self-test, 17 cases; @Disabled added to the real ReferenceProductsTest turned the real tree red). The byte comparison itself is the JVM test in the module CI lane; this gate does not run it"
     budget_seconds: 10
     min_subjects: 3   # three reference products at introduction (2026-10-23)
     selftest: python3 .github/scripts/check-product-ir-authoring-parity.py --self-test

@@ -23,7 +23,7 @@ internal fun signatureEntity(revisionId: UUID, sig: RevisionIrSignature) = Catal
     signedAt = sig.signedAt
 }
 
-/** A single-revision read carries its IR signature (ADR-0352 §4); the list endpoints do not load it. */
+/** Every revision read carries its IR signature (ADR-0352 §4): null means unsigned, never "not loaded". */
 internal fun Mutiny.Session.withIrSignature(
     row: CatalogRevisionEntity?,
     toDomain: (CatalogRevisionEntity) -> ProductRevision,
@@ -37,3 +37,19 @@ internal fun Mutiny.Session.withIrSignature(
 /** Persists the publish-path signature in the publishing transaction; a no-op for a revision without IR. */
 internal fun Mutiny.Session.persistIrSignature(revisionId: UUID, sig: RevisionIrSignature?): Uni<Void> =
     if (sig == null) Uni.createFrom().voidItem() else persist(signatureEntity(revisionId, sig))
+
+/** The list form of [withIrSignature]: one query for every signature of [rows], in row order. */
+internal fun Mutiny.Session.withIrSignatures(
+    rows: List<CatalogRevisionEntity>,
+    toDomain: (CatalogRevisionEntity) -> ProductRevision,
+): Uni<List<ProductRevision>> = if (rows.isEmpty()) {
+    Uni.createFrom().item(emptyList())
+} else {
+    createQuery(
+        "FROM CatalogRevisionIrSignatureEntity WHERE revisionId IN :ids",
+        CatalogRevisionIrSignatureEntity::class.java,
+    ).setParameter("ids", rows.map { it.id }).resultList.map { sigs ->
+        val byRevision = sigs.associateBy { it.revisionId }
+        rows.map { row -> toDomain(row).copy(irSignature = byRevision[row.id]?.toDomain()) }
+    }
+}

@@ -1219,8 +1219,8 @@ components:
             - { type: 'null' }
           description: >-
             Publish-path signature over the product IR's canonical revisionHash (ADR-0352 §4). Present
-            on a single-revision read of a revision published through publish-ir; null otherwise and
-            on list responses.
+            on every read of a revision published through publish-ir, single or list; null means the
+            revision is unsigned.
       required:
         - id
         - offeringId

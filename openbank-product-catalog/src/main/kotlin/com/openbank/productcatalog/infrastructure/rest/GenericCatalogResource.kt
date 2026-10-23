@@ -7,7 +7,9 @@ package com.openbank.productcatalog.infrastructure.rest
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.security.Roles
+import com.openbank.productcatalog.application.CatalogForbiddenException
 import com.openbank.productcatalog.application.CatalogNotFoundException
 import com.openbank.productcatalog.application.CatalogPreconditionRequiredException
 import com.openbank.productcatalog.application.GenericCatalogService
@@ -232,7 +234,7 @@ class GenericCatalogResource(
      * `rules.yaml: four_eyes.actions`), distinct from `catalog.publish`, because it also produces the
      * publish-path signature over the IR's canonical hash. Same roles, same maker != checker rule.
      */
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.PUBLISH)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "catalog.publish-ir", resource = "#offeringId")
     override suspend fun publishOfferingRevisionIrV2(
         offeringId: UUID,
@@ -240,6 +242,12 @@ class GenericCatalogResource(
         ifMatch: String,
         request: PublishRequest,
     ): Response {
+        // Enforced HERE, not only in rest.rego: @Authorize is advisory while AUTHZ_ENFORCE=false, and a
+        // Keycloak service account can carry ROLE_OPERATOR. Fails closed: anything not positively a
+        // verified person (a non-JWT identity included) is refused.
+        if (!ServiceAccountIdentity.isVerifiedPerson(identity)) {
+            throw CatalogForbiddenException("publish-ir requires a verified human checker")
+        }
         requireRevisionOwner(service.findRevision(revisionId), offeringId)
         val published = service.publishIr(revisionId, requiredRevision(ifMatch), actor(), request.reason)
         return Response.ok(revisionResponse(published)).tag(EntityTag(published.revision.toString())).build()

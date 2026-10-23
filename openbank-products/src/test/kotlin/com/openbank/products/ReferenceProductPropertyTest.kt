@@ -5,6 +5,7 @@
 package com.openbank.products
 
 import com.openbank.libs.finance.deposit.FinanceProductArithmetic
+import com.openbank.libs.product.ir.Instruction
 import com.openbank.libs.product.ir.InstructionCanonical
 import com.openbank.libs.product.ir.IrLimits
 import com.openbank.libs.product.ir.ProductClock
@@ -41,10 +42,14 @@ class ReferenceProductPropertyTest {
                         ProductArb.event(rev).map { event -> Triple(today, state, event) }
                     }
                 }
+                var nonEmpty = 0
+                var posts = 0
                 runBlocking {
                     checkAll(PropTestConfig(iterations = 200), cases) { (today, state, event) ->
                         val clock = ProductClock(today.atStartOfDay().toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
                         val out = interpreter.evaluate(rev, state, event, clock)
+                        if (out.isNotEmpty()) nonEmpty++
+                        posts += out.count { it is Instruction.Post }
                         assertThat(out.size).isLessThanOrEqualTo(IrLimits.MAX_INSTRUCTIONS_PER_EVALUATION)
                         assertMoneyConserved(out)
                         assertThat(out).allMatch {
@@ -54,6 +59,9 @@ class ReferenceProductPropertyTest {
                             .isEqualTo(InstructionCanonical.write(out))
                     }
                 }
+                // Without these the properties above pass vacuously on 200 empty evaluations.
+                assertThat(nonEmpty).describedAs("evaluations that produced any instruction").isGreaterThan(0)
+                assertThat(posts).describedAs("Post instructions checked for money conservation").isGreaterThan(0)
             }
         }
 }

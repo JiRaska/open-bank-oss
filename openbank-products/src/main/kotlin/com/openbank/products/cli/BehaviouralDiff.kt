@@ -45,7 +45,7 @@ object BehaviouralDiff {
             for (ruleId in (outA.keys + outB.keys).toSortedSet()) {
                 val ra = outA[ruleId] ?: RuleTotals()
                 val rb = outB[ruleId] ?: RuleTotals()
-                if (ra == rb) continue
+                if (ra.sameAs(rb)) continue
                 val entry = perRule.getOrPut(ruleId) {
                     linkedMapOf("ruleId" to ruleId, "accounts" to ArrayList<Any?>())
                 }
@@ -75,6 +75,12 @@ object BehaviouralDiff {
         var rejects: Int = 0,
         var other: Int = 0,
     ) {
+        /** Scale-insensitive: `0.00` and `0` are the same movement (data-class `equals` compares BigDecimal scale). */
+        fun sameAs(other: RuleTotals): Boolean = customerDeposit.compareTo(other.customerDeposit) == 0 &&
+            posts == other.posts &&
+            rejects == other.rejects &&
+            this.other == other.other
+
         fun tree(): Map<String, Any?> = mapOf(
             "customerDeposit" to ProductIrCanonical.instructionAmount(customerDeposit),
             "posts" to posts,

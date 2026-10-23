@@ -166,13 +166,15 @@ Publishing an IR-bearing revision is its own four-eyes action, `catalog.publish-
 its canonical `revisionHash`, obtains the publish-path signature over exactly that hash and stores
 the detached signature with the revision in the same transaction. A single-revision read
 (`GET /api/v2/revisions/{id}`, `GET /api/v2/products/{offeringId}`) returns it as `irSignature`
-(`revisionHash`, `keyId`, `algorithm`, `signature`, `signedAt`); list responses do not load it.
+(`revisionHash`, `keyId`, `algorithm`, `signature`, `signedAt`), and so does every list of revisions; `null` means unsigned.
 The plain `publish` refuses a revision that carries `behaviour` (409), and `publish-ir` refuses one
 that does not, so an IR-bearing revision is never published unsigned. Maker and checker must
 differ, as for every publication.
 
-The signer is selected by `openbank.catalog.ir-signing.mode`: `openbao` (OpenBao Transit `sign`
-on a dedicated key; the deployment shape) or `hmac` (a shared-secret adapter for development and
-tests, logged as a warning at boot). A consumer verifies the signature with its own pinned-revision
+The signer is selected by `openbank.catalog.ir-signing.mode`: `disabled` (the default; `publish-ir`
+answers 409 and nothing is signed), `openbao` (OpenBao Transit `sign` on a dedicated key; the only
+deployment shape) or `hmac` (a shared-secret adapter accepted only in the dev and test launch modes;
+a production launch with it refuses to boot). Only a verified human may call `publish-ir`; the
+service checks this itself, independently of the OPA decision. A consumer verifies the signature with its own pinned-revision
 loader before evaluating a revision; the catalog is a publication authority, never a dependency on
 the posting path. The API contract version is 2.9.0; the change is additive.

@@ -144,12 +144,14 @@ Publikace revize s IR je samostatná akce čtyř očí, `catalog.publish-ir`:
 jeho kanonický `revisionHash`, získá podpis publikační cesty přesně nad tímto hashem a uloží
 oddělený podpis k revizi ve stejné transakci. Čtení jedné revize (`GET /api/v2/revisions/{id}`,
 `GET /api/v2/products/{offeringId}`) ho vrací jako `irSignature` (`revisionHash`, `keyId`,
-`algorithm`, `signature`, `signedAt`); seznamy ho nenačítají. Běžný `publish` revizi s `behaviour`
+`algorithm`, `signature`, `signedAt`), stejně jako každý seznam revizí; `null` znamená nepodepsáno. Běžný `publish` revizi s `behaviour`
 odmítne (409) a `publish-ir` odmítne revizi bez něj, takže revize s IR nikdy není publikována bez
 podpisu. Autor a schvalovatel se musí lišit jako u každé publikace.
 
-Podepisovatel se volí přes `openbank.catalog.ir-signing.mode`: `openbao` (OpenBao Transit `sign`
-na vyhrazeném klíči; nasazovaná podoba) nebo `hmac` (adaptér se sdíleným tajemstvím pro vývoj a
-testy, při startu zalogovaný jako varování). Konzument podpis ověřuje vlastním loaderem
+Podepisovatel se volí přes `openbank.catalog.ir-signing.mode`: `disabled` (výchozí; `publish-ir`
+vrací 409 a nic se nepodepisuje), `openbao` (OpenBao Transit `sign` na vyhrazeném klíči; jediná
+nasazovaná podoba) nebo `hmac` (adaptér se sdíleným tajemstvím přijímaný jen v režimech dev a
+test; produkční start s ním odmítne nastartovat). `publish-ir` smí volat jen ověřený člověk;
+služba to kontroluje sama, nezávisle na rozhodnutí OPA. Konzument podpis ověřuje vlastním loaderem
 připnuté revize před vyhodnocením; katalog je publikační autorita, nikdy závislost na účtovací
 cestě. Verze kontraktu API je 2.9.0; změna je aditivní.
