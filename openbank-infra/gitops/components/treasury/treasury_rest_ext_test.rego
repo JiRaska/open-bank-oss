@@ -297,5 +297,3 @@ test_staff_read_fixings_and_market_data if {
 	allowed(approver, "treasury.marketdata.read")
 	not allowed(agent, "treasury.marketdata.read")
 }
-
-# --- ADR-0344 D7/D8 revaluation: must-DENY first ---
