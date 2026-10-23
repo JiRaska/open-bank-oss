@@ -277,6 +277,18 @@ four_eyes:
     - settlement.create                # Human operator origination; no verified M2M caller (#10041).
     - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                          # core also enforces maker != checker for standalone installs.
+    - catalog.publish-ir               # ADR-0352 §7: publishing an IR-bearing revision — the publish
+                                         # path signs the IR's canonical revisionHash on the way out,
+                                         # so a valid signature is authority over every account under
+                                         # the product. Its own action, never the shared catalog.publish,
+                                         # so this entry can never cover a non-IR publish by accident.
+                                         # Confirmed no M2M caller: the only allow rule for this action
+                                         # (rest.rego catalog-publish-ir) requires HUMAN + (ROLE_OPERATOR
+                                         # or ROLE_ADMIN) and explicitly excludes any service-account-*
+                                         # principal id; no service rego grants catalog.* to a machine
+                                         # beyond catalog.read (pension-catalog-m2m-read). Also enforced
+                                         # at the application layer independently: maker != checker in
+                                         # GenericCatalogService.publishIr.
     - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
                                          # playbook version. Confirmed no M2M caller — the only allow
                                          # rule for this action (rest.rego commstyle-publish) requires

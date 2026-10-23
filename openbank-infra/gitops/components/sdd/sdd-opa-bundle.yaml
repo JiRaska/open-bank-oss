@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sdd-service
     app.kubernetes.io/part-of: sdd
   annotations:
-    openbank.tech/policy-checksum: "c5917aaeb346e3dc"
+    openbank.tech/policy-checksum: "d8cd5cba2c6daab1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -405,6 +405,21 @@ data:
     	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
     	role in input.principal.roles
     	input.action == "commstyle.approval.read"
+    }
+
+    # ADR-0352 §7: publishing an IR-bearing catalog revision signs its canonical revisionHash, and a
+    # valid signature is authority over every account under the product — so this is its own action
+    # (catalog.publish-ir, four_eyes.actions), never the shared catalog.publish, and human-only: the
+    # shared backend service-account carries ROLE_OPERATOR in some realms and is classified HUMAN
+    # (rules.yaml: authz_policy.principal_type_service_unreachable), so HUMAN + ROLE_OPERATOR alone
+    # would re-admit that machine identity. Maker != checker is enforced independently by
+    # product-catalog (GenericCatalogService.publishIr); this rule only decides WHO may attempt it.
+    allowed_reasons contains "catalog-publish-ir" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	not principal_is_machine
+    	input.action == "catalog.publish-ir"
     }
 
     # Pension catalog approval is a distinct human decision, never a generic publish grant.
@@ -1826,6 +1841,18 @@ data:
         - settlement.create                # Human operator origination; no verified M2M caller (#10041).
         - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                              # core also enforces maker != checker for standalone installs.
+        - catalog.publish-ir               # ADR-0352 §7: publishing an IR-bearing revision — the publish
+                                             # path signs the IR's canonical revisionHash on the way out,
+                                             # so a valid signature is authority over every account under
+                                             # the product. Its own action, never the shared catalog.publish,
+                                             # so this entry can never cover a non-IR publish by accident.
+                                             # Confirmed no M2M caller: the only allow rule for this action
+                                             # (rest.rego catalog-publish-ir) requires HUMAN + (ROLE_OPERATOR
+                                             # or ROLE_ADMIN) and explicitly excludes any service-account-*
+                                             # principal id; no service rego grants catalog.* to a machine
+                                             # beyond catalog.read (pension-catalog-m2m-read). Also enforced
+                                             # at the application layer independently: maker != checker in
+                                             # GenericCatalogService.publishIr.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
                                              # playbook version. Confirmed no M2M caller — the only allow
                                              # rule for this action (rest.rego commstyle-publish) requires
