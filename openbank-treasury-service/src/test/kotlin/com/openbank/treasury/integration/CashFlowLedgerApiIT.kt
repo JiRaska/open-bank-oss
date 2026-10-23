@@ -433,7 +433,7 @@ class CashFlowLedgerApiIT {
         """.trimIndent()
         post(
             "/deals",
-            """{"product":"BILL_OF_EXCHANGE","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
+            """{"product":"CASH","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
                "businessDayConvention":"MODIFIED_FOLLOWING","legs":$legs}""",
         ).then().statusCode(400).body("message", containsString("not delivered yet"))
     }
