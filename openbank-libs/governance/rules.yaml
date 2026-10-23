@@ -46,6 +46,9 @@ deploy_holds:
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-agent-service:
       issue: '#13304'
       reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
@@ -102,6 +105,9 @@ deploy_holds:
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-case-coordinator-agent:
       issue: '#13304'
       reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
@@ -170,6 +176,9 @@ deploy_holds:
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-engagement-service:
       issue: '#13304'
       reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
@@ -194,6 +203,9 @@ deploy_holds:
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-fx-service:
       all_of:
       - issue: '#13304'
@@ -303,6 +315,9 @@ deploy_holds:
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
         release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
+      - issue: '#11503'
+        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
+        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-sca-service:
       all_of:
       - issue: '#13304'
