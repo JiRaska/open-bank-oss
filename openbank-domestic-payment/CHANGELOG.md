@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.1...domestic-payment-v1.2.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **domestic-payment:** book via the generated transaction client and bind the answer to the request ([#13621](https://github.com/JiRaska/open-bank-oss/issues/13621)) ([c3de0a5](https://github.com/JiRaska/open-bank-oss/commit/c3de0a59fceea1653c4520d6a47a028ee21212a8))
+
 ## [1.2.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.0...domestic-payment-v1.2.1) (2026-10-16)
 
 

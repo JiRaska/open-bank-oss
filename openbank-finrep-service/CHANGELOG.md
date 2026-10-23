@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.5](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.4...finrep-service-v0.17.5) (2026-10-23)
+
+
+### Bug Fixes
+
+* **finrep:** map ČNB, lombard and nostro overdraft to FINREP sub-lines ([#13602](https://github.com/JiRaska/open-bank-oss/issues/13602)) ([d1546bb](https://github.com/JiRaska/open-bank-oss/commit/d1546bb27e1c3b79ef38beec4bda4a285f9eaddb))
+
 ## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.3...finrep-service-v0.17.4) (2026-10-18)
 
 

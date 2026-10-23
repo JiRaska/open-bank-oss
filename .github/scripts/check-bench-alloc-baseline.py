@@ -31,6 +31,14 @@ WHAT IT CHECKS
     declared in .github/gates/gates.yaml and run on every PR; the comparison itself needs a
     JMH run and is the last step of `.github/workflows/libs-bench.yml`.
 
+    LATENCY BOUNDS (ADR-0352 §8). Wall-clock is not gated in general (above), with ONE declared
+    exception: an absolute budget written into the decision record itself. `latency_bounds` in the
+    baseline file maps a benchmark to `{"p99_ms": N}`; with `--results` the benchmark's p99 (JMH
+    SampleTime `scorePercentiles["99.0"]`, converted to ms) must be below N. The bound is an
+    order-of-magnitude ceiling (ProductInterpreterBench: 2 ms for a pure function measured in
+    microseconds), so a busy runner does not reach it; a bound naming no @Benchmark, or one whose
+    benchmark ran without percentiles, is a finding.
+
     An improvement beyond the tolerance is not a failure: it prints a ratchet-down notice, and
     `--write-baseline` rewrites the file from the results so the number is never typed by hand.
 
@@ -155,6 +163,40 @@ def load_results(path: pathlib.Path) -> dict[str, float]:
     return out
 
 
+def load_latency_bounds(path: pathlib.Path) -> dict[str, float]:
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    return {str(k): float(v["p99_ms"]) for k, v in (doc.get("latency_bounds") or {}).items()}
+
+
+_UNIT_TO_MS = {"ns/op": 1e-6, "us/op": 1e-3, "ms/op": 1.0, "s/op": 1e3}
+
+
+def load_p99_ms(path: pathlib.Path) -> dict[str, float | None]:
+    """benchmark -> p99 in ms (None when the run carried no percentiles, i.e. not SampleTime)."""
+    out: dict[str, float | None] = {}
+    for entry in json.loads(path.read_text(encoding="utf-8")):
+        pm = entry.get("primaryMetric") or {}
+        pct = (pm.get("scorePercentiles") or {}).get("99.0")
+        unit = _UNIT_TO_MS.get(pm.get("scoreUnit", ""))
+        out[entry["benchmark"]] = None if pct is None or unit is None else float(pct) * unit
+    return out
+
+
+def latency_findings(declared: set[str], bounds: dict[str, float], p99: dict[str, float | None] | None) -> list[str]:
+    findings = [f"{n}: latency bound names no @Benchmark in {SOURCES}" for n in sorted(set(bounds) - declared)]
+    if p99 is None:
+        return findings
+    for name in sorted(set(bounds) & declared):
+        got = p99.get(name)
+        if name not in p99:
+            findings.append(f"{name}: has a latency bound but is missing from the results")
+        elif got is None:
+            findings.append(f"{name}: has a latency bound but the result carries no p99 (run it in SampleTime mode)")
+        elif got >= bounds[name]:
+            findings.append(f"{name}: p99 {got:.4f} ms is not below its bound {bounds[name]:.4f} ms")
+    return findings
+
+
 def allowed(baseline: float) -> float:
     return baseline + max(baseline * REL_TOLERANCE, ABS_TOLERANCE_BYTES)
 
@@ -199,6 +241,9 @@ def compare(declared: set[str], baseline: dict[str, float], results: dict[str, f
 
 
 def write_baseline(path: pathlib.Path, results: dict[str, float]) -> None:
+    bounds = {}
+    if path.is_file():
+        bounds = json.loads(path.read_text(encoding="utf-8")).get("latency_bounds") or {}
     doc = {
         "metric": f"{METRIC} (B/op)",
         "tolerance": f"max({REL_TOLERANCE:.0%}, {ABS_TOLERANCE_BYTES:.0f} B) above baseline",
@@ -208,6 +253,8 @@ def write_baseline(path: pathlib.Path, results: dict[str, float]) -> None:
         ),
         "benchmarks": {name: round(results[name], 1) for name in sorted(results)},
     }
+    if bounds:
+        doc["latency_bounds"] = {k: bounds[k] for k in sorted(bounds)}
     path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 
 
@@ -235,6 +282,7 @@ def run(root: pathlib.Path, results_path: pathlib.Path | None, enforce: bool, wr
         return 1
     baseline = load_baseline(baseline_path)
     findings, notices = compare(declared, baseline, results)
+    findings += latency_findings(declared, load_latency_bounds(baseline_path), load_p99_ms(results_path) if results_path else None)
     print(f"SUBJECTS={len(declared)}")
     if results is not None:
         width = max(len(n) for n in results)
@@ -397,6 +445,30 @@ def _self_test() -> int:
         good = got == 1 and "is missing" in buf.getvalue()
         ok &= good
         print(f"  [{'ok' if good else 'WRONG'}] a missing baseline file is red even in advisory mode")
+        _fixture(root, ["alpha"], {a: 1000.0})
+
+        # latency bounds: over is red, under is green, no percentiles is red, unknown bench is red
+        def _lat(p99_ns, bounds, with_pct=True):
+            (root / BASELINE).write_text(json.dumps({"benchmarks": {a: 1000.0}, "latency_bounds": bounds}), encoding="utf-8")
+            entry = {"benchmark": a, "primaryMetric": {"score": 1.0, "scoreUnit": "ns/op"},
+                     "secondaryMetrics": {METRIC: {"score": 1000.0}}}
+            if with_pct:
+                entry["primaryMetric"]["scorePercentiles"] = {"99.0": p99_ns}
+            rp.write_text(json.dumps([entry]), encoding="utf-8")
+            b = io.StringIO()
+            with contextlib.redirect_stdout(b):
+                rc = run(root, rp, enforce=True, write=False)
+            return rc, b.getvalue()
+        for label, args, want, text in [
+            ("a p99 over its latency bound is red", (3_000_000.0, {a: {"p99_ms": 2.0}}), 1, "p99 3.0000 ms is not below its bound 2.0000 ms"),
+            ("a p99 under its latency bound is green", (40_000.0, {a: {"p99_ms": 2.0}}), 0, "bench-alloc-baseline: OK"),
+            ("a bounded benchmark without percentiles is red", (1.0, {a: {"p99_ms": 2.0}}, False), 1, "carries no p99"),
+            ("a latency bound naming no @Benchmark is red", (1.0, {"com.example.Ghost.x": {"p99_ms": 2.0}}), 1, "latency bound names no @Benchmark"),
+        ]:
+            rc, out = _lat(*args)
+            good = rc == want and text in out
+            ok &= good
+            print(f"  [{'ok' if good else 'WRONG'}] {label}: exit {rc} (want {want})")
         _fixture(root, ["alpha"], {a: 1000.0})
 
         # the KDoc in the fixture names `@Benchmark fun ghost()` — prose must not be a benchmark
