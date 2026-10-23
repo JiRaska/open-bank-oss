@@ -4706,6 +4706,23 @@ gates:
       bash .github/scripts/libs-change-dependents.sh --selftest
       python3 .github/scripts/service-ci-library-dependents.py --self-test
 
+  # The Services CI scope selection used to be the 19000-char `detect` step in services-ci.yml,
+  # sitting exactly at the workflow-run-step-size limit: two PRs on 2026-10-22 each tripped it by
+  # adding one line and shaved the step back to 19000. The logic now lives in a script; this runs
+  # its self-test (schedule -> full fleet, PR -> changed module + fleet-scanner edge, shared build
+  # input -> full fleet, inert push -> nothing) in a throwaway git repo.
+  - id: service-ci-select-modules
+    name: "Services CI module selection (self-test)"
+    group: gitops
+    mode: enforced
+    selftest_exempt: "is-a-test-suite"
+    rationale: "The detect step's logic moved out of services-ci.yml to get headroom under workflow-run-step-size; the self-test keeps the extracted selector falsifiable."
+    review_after: "2027-04-23"
+    budget_seconds: 20
+    min_subjects: 4
+    run: |
+      bash .github/scripts/service-ci-select-modules.sh --self-test
+
   # analytics-sink owns no OLTP DB and runs no migration runner (ADR-0022): its ClickHouse DDL lives
   # once as `clickhouse/V*.sql` resources an operator applies, and once in the `clickhouse-init`
   # ConfigMap a FRESH cluster boots from. Nothing reconciles the two, and a migration that reaches
