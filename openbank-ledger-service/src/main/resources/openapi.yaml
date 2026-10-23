@@ -1461,7 +1461,12 @@ components:
         participant: { type: string }
         status:
           type: string
-          enum: [RAN, SKIPPED, REFUSED, WAIVED, MISSING]
+          description: >
+            RAN, SKIPPED and REFUSED are outcomes reported by product services.
+            WAIVED is recorded by a ledger operator; MISSING means no record exists.
+          oneOf:
+            - enum: [RAN, SKIPPED, REFUSED]
+            - enum: [WAIVED, MISSING]
         journalsPosted: { type: integer, minimum: 0 }
         itemsProcessed: { type: integer, minimum: 0 }
         reason: { type: string, nullable: true }
@@ -1781,7 +1786,9 @@ components:
       required: [accountingClass, role, currencyCode, glAccountId, glCode]
       properties:
         accountingClass: { type: string }
-        role: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, PREMIUM_DISCOUNT, FAIR_VALUE, REVALUATION_RESERVE, REALISED_GAIN, REALISED_LOSS, UNREALISED_GAIN, UNREALISED_LOSS, MEMO, MEMO_CONTRA] }
+        # x-extensible-enum, not enum: roles GROW as products are mapped (ADR-0341/ADR-0344), so a
+        # client must tolerate an unknown role in a response. Requests keep the closed enum.
+        role: { type: string, x-extensible-enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, PREMIUM_DISCOUNT, FAIR_VALUE, REVALUATION_RESERVE, REALISED_GAIN, REALISED_LOSS, UNREALISED_GAIN, UNREALISED_LOSS, MEMO, MEMO_CONTRA] }
         currencyCode: { type: string }
         glAccountId: { type: string, format: uuid }
         glCode: { type: string }
