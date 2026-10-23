@@ -72,13 +72,22 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 ## Runbooks
 
+### Durable outbound booking clock
+
+Acceptance into `SENT_TO_CLEARING` records the first booking-due timestamp in the same locked, revision-checked transaction as status and its outbox event, before the settlement activity. Retries preserve that timestamp and the existing `domestic-settlement-<paymentId>` key. Only a strictly matched completed transaction response with an identity permits the booking-proof timestamp and transaction identity to commit atomically with `SETTLED` and its outbox event. Generic status updates cannot clear a pending clock or certify coverage.
+
+`openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="DOMESTIC_CZK"}` reports the age of the oldest tracked pending marker across business statuses. It is a lower bound when coverage is incomplete, starts as NaN before a successful query, and is zero when the successfully queried tracked set is empty. A failed refresh retains the last durable timestamp and its age keeps increasing. `openbank_payment_booking_unknown_coverage{rail="DOMESTIC_CZK"}` separately counts rows without a start/proof whose coverage is unknown. Existing rows in every lifecycle state retain nullable unknown provenance without backfill; a generic write bypassing booking tracking also remains unknown across later terminal states. This count is conservative historical coverage, not proof that each counted row is unsettled. An empty tracked set does not establish all-clear while coverage is unknown.
+
+These clocks are separate from payment creation, clearing dispatch, refunds and the existing stranded gauge. No age threshold, SLA alert, historical binding, new retry key, lookup/recovery API or retention policy is introduced. Historical reconciliation and owner-approved SLA rules remain open.
+
+
 ### Unsettled internal booking outcomes
 
 `openbank_payment_unsettled_total{rail="DOMESTIC_CZK",outcome="..."}` counts unsuccessful transaction-service attempts. Its Micrometer name is `openbank.payment.unsettled`. The bounded outcomes are `mismatch`, `failed-replay`, `conflict`, `unexpected-status` and `transport-error`; five zero series are registered before any attempt. Retries count as separate attempts, not unique payments. Cancellation and matched successful responses do not increment it. `failed-replay` denotes a decoded FAILED response, not proof that this call was a replay. The metric rail label is `DOMESTIC_CZK`; the transaction request still uses `rail=DOMESTIC` and `instructionType=ONE_OFF`.
 
 Settlement requires HTTP 201, a COMPLETED transaction with an id, and a match to the submitted type, account identities, amount, currency, rail and instruction type. A failed or uncertain attempt does not advance the payment from SENT_TO_CLEARING to SETTLED. The existing provider resilience and Temporal activity policies may retry; this counter does not change those policies or count the outer exception wrapper again. Preserve `domestic-settlement-<paymentId>` during investigation: a 409 or uncertain response is not proof that no booking occurred. Establish the transaction outcome through approved reconciliation tooling before corrective action; do not rotate the key or use a new booking POST as a lookup.
 
-This counter does not add a public transaction lookup by idempotency key, a durable per-payment unsettled age, an age/SLA alert or a recovery endpoint. The existing stranded-payment gauge remains unchanged and does not establish those missing guarantees. These parts of #13623 remain open; neither a zero counter nor a successful local build proves reconciliation or deployment readiness.
+The attempt counter alone does not establish durable age or reconciliation. The separate tracked booking clock above adds partial durable coverage, not a public transaction lookup by idempotency key, an age/SLA alert or a recovery endpoint. The existing stranded-payment gauge remains unchanged and does not establish those missing guarantees. These parts of #13623 remain open; neither a zero counter nor a successful local build proves reconciliation or deployment readiness.
 
 ### Payments stuck in RECEIVED
 

@@ -72,13 +72,22 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 
 ## Runbooky
 
+### Trvalé hodiny odchozího zaúčtování
+
+Přijetí do `SENT_TO_CLEARING` uloží první okamžik splatného zaúčtování ve stejné zamčené transakci s kontrolou revize jako stav a outbox událost, před aktivitou settlementu. Retry zachová tento čas i klíč `domestic-settlement-<paymentId>`. Jen přísně odpovídající dokončená odpověď s identitou transakce dovolí atomicky uložit důkaz zaúčtování a identitu společně se stavem `SETTLED` a outbox událostí. Obecný zápis stavu nesmaže čekající hodiny ani nepotvrdí pokrytí.
+
+`openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="DOMESTIC_CZK"}` měří nejstarší sledovaný čekající záznam napříč obchodními stavy. Při neúplném pokrytí jde o dolní mez; před prvním úspěšným dotazem je NaN, prázdná úspěšně načtená sledovaná množina má nulu. Neúspěšný refresh zachová poslední trvalý čas a stáří dále roste. `openbank_payment_booking_unknown_coverage{rail="DOMESTIC_CZK"}` samostatně počítá záznamy bez začátku/důkazu s neznámým pokrytím. Historické záznamy ve všech stavech zůstávají bez backfillu s neznámou proveniencí; obecný zápis obcházející sledování také zůstane neznámý i po přechodu do terminálního stavu. Jde o konzervativní neznámé historické pokrytí, nikoli důkaz nevyřešenosti každého záznamu. Prázdná sledovaná množina při neznámém pokrytí nedokládá vyřešení všeho.
+
+Tyto hodiny se liší od vytvoření platby, clearingu, refundů i původního gauge uvízlých plateb. Nepřidávají práh stáří, SLA alarm, historické přiřazení, nový retry klíč, lookup/recovery API ani retenční pravidla. Historická reconciliation a schválení SLA pravidel vlastníkem zůstávají otevřené.
+
+
 ### Nevyřešené výsledky interního zaúčtování
 
 `openbank_payment_unsettled_total{rail="DOMESTIC_CZK",outcome="..."}` počítá neúspěšné pokusy vůči transaction-service. Název v Micrometeru je `openbank.payment.unsettled`. Povolené výsledky jsou `mismatch`, `failed-replay`, `conflict`, `unexpected-status` a `transport-error`; všech pět řad se registruje s nulou před prvním pokusem. Opakované pokusy se počítají samostatně, nejde o počet unikátních plateb. Zrušení coroutine ani úspěšná odpovídající reakce čítač nezvyšují. `failed-replay` označuje dekódovanou odpověď FAILED, nikoli důkaz, že tento požadavek byl replay. Metrika používá label `DOMESTIC_CZK`; požadavek na transakci nadále obsahuje `rail=DOMESTIC` a `instructionType=ONE_OFF`.
 
 Zaúčtování vyžaduje HTTP 201, transakci COMPLETED s identifikátorem a shodu typu, identit účtů, částky, měny, railu a typu instrukce s odeslanými údaji. Neúspěšný či nejistý pokus neposune platbu ze SENT_TO_CLEARING do SETTLED. Existující resilience vůči provideru a politika Temporal activity mohou pokus opakovat; čítač tyto politiky nemění ani znovu nezapočítává vnější obalení výjimky. Při šetření zachovejte `domestic-settlement-<paymentId>`: 409 ani nejistá odpověď nedokazují, že zaúčtování neproběhlo. Před nápravnou akcí ověřte výsledek schváleným reconciliation nástrojem; neměňte klíč ani nepoužívejte nový booking POST jako vyhledávání.
 
-Čítač nepřidává veřejné vyhledání transakce podle idempotentního klíče, trvalé stáří nevyřešené platby, alarm stáří vůči SLA ani recovery endpoint. Existující gauge uvízlých plateb zůstává beze změny a tyto chybějící záruky nedokládá. Tyto části #13623 zůstávají otevřené; nulový čítač ani úspěšný lokální build nedokazují dokončenou reconciliation nebo připravenost nasazení.
+Samotný čítač pokusů nedokládá trvalé stáří ani reconciliation. Samostatné hodiny výše přidávají částečné trvalé pokrytí, nikoli veřejné vyhledání transakce podle idempotentního klíče, alarm stáří vůči SLA nebo recovery endpoint. Existující gauge uvízlých plateb zůstává beze změny a tyto chybějící záruky nedokládá. Tyto části #13623 zůstávají otevřené; nulový čítač ani úspěšný lokální build nedokazují dokončenou reconciliation nebo připravenost nasazení.
 
 ### Platby uvíznuté v RECEIVED
 

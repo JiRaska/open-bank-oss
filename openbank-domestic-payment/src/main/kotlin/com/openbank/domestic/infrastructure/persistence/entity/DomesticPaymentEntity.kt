@@ -99,6 +99,20 @@ class DomesticPaymentEntity : PanacheEntity() {
     @Column(name = "settled_at")
     var settledAt: Instant? = null
 
+    // Internal booking metadata. Generic domain mapping deliberately does not write these fields.
+    @Column(name = "booking_first_due_at")
+    var bookingFirstDueAt: Instant? = null
+
+    @Column(name = "booking_proven_at")
+    var bookingProvenAt: Instant? = null
+
+    @Column(name = "booking_transaction_id")
+    var bookingTransactionId: UUID? = null
+
+    // NULL means pre-migration coverage is unknown; only new inserts start covered.
+    @Column(name = "booking_clock_covered")
+    var bookingClockCovered: Boolean? = true
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 

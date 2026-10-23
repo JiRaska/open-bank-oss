@@ -8,6 +8,7 @@ import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.AmlCasePort
 import com.openbank.domestic.application.port.out.AmlCaseRiskLevel
 import com.openbank.domestic.application.port.out.CustomerNotificationPort
+import com.openbank.domestic.application.port.out.DomesticBookingWrites
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.port.out.FraudScoreOutcome
@@ -61,6 +62,7 @@ import java.util.UUID
  */
 class DomesticPaymentActivitiesImplTest {
     private lateinit var paymentRepository: DomesticPaymentRepository
+    private lateinit var bookingWrites: DomesticBookingWrites
     private lateinit var eventPublisher: DomesticPaymentEventPublisher
     private lateinit var screeningPort: SanctionsScreeningPort
     private lateinit var amlCasePort: AmlCasePort
@@ -79,6 +81,7 @@ class DomesticPaymentActivitiesImplTest {
     @BeforeEach
     fun setUp() {
         paymentRepository = mockk()
+        bookingWrites = mockk()
         eventPublisher = mockk()
         screeningPort = mockk()
         amlCasePort = mockk()
@@ -88,6 +91,7 @@ class DomesticPaymentActivitiesImplTest {
         metrics = mockk(relaxed = true)
         activities = object : DomesticPaymentActivitiesImpl(
             paymentRepository,
+            bookingWrites,
             eventPublisher,
             screeningPort,
             amlCasePort,
@@ -103,6 +107,13 @@ class DomesticPaymentActivitiesImplTest {
             override fun <T> vtx(block: suspend () -> T): T = runBlocking { block() }
         }
         coEvery { paymentRepository.update(any(), any()) } answers { firstArg() }
+        // Keep existing activity state/event assertions at the mocked persistence boundary.
+        coEvery { bookingWrites.acceptForBooking(any(), any()) } coAnswers {
+            paymentRepository.update(firstArg(), secondArg())
+        }
+        coEvery { bookingWrites.completeBooking(any(), any(), any()) } coAnswers {
+            paymentRepository.update(firstArg(), thirdArg())
+        }
         every { eventPublisher.statusChangedPayload(any(), any()) } returns "{\"event\":\"status-changed\"}"
         coJustRun { amlCasePort.openCase(any()) }
         coEvery { paymentRepository.claimSchemeDispatch(any(), any()) } returns true
@@ -114,6 +125,7 @@ class DomesticPaymentActivitiesImplTest {
         settlementPort = mockk()
         activitiesWithScheme = object : DomesticPaymentActivitiesImpl(
             paymentRepository,
+            bookingWrites,
             eventPublisher,
             screeningPort,
             amlCasePort,
@@ -693,11 +705,24 @@ class DomesticPaymentActivitiesImplTest {
     }
 
     @Test
+    fun `settlePayment refuses missing proof identity and leaves booking obligation unresolved`() {
+        val pending = payment().copy(status = DomesticPaymentStatus.SENT_TO_CLEARING)
+        coEvery { paymentRepository.findById(pending.id) } returns pending
+        for (result in listOf(SettlementOutcome(false, null), SettlementOutcome(true, null))) {
+            coEvery { settlementPort.settle(pending) } returns result
+            assertThatThrownBy { activitiesWithScheme.settlePayment(pending.id) }
+                .isInstanceOf(SettlementUnavailableException::class.java)
+        }
+        coVerify(exactly = 0) { bookingWrites.completeBooking(any(), any(), any()) }
+    }
+
+    @Test
     fun `settlePayment transitions SENT_TO_CLEARING to SETTLED on success`() {
+        val provenId = UUID.randomUUID()
         val sentToClearing = payment(status = DomesticPaymentStatus.SENT_TO_CLEARING)
         coEvery { paymentRepository.findById(sentToClearing.id) } returns sentToClearing
         coEvery { settlementPort.settle(any()) } returns
-            SettlementOutcome(settled = true, transactionId = UUID.randomUUID())
+            SettlementOutcome(settled = true, transactionId = provenId)
 
         val updated = slot<DomesticPayment>()
         coEvery { paymentRepository.update(capture(updated), any()) } answers { firstArg() }
@@ -707,6 +732,7 @@ class DomesticPaymentActivitiesImplTest {
         assertThat(result).isEqualTo(DomesticPaymentStatus.SETTLED)
         assertThat(updated.captured.status).isEqualTo(DomesticPaymentStatus.SETTLED)
         coVerify(exactly = 1) { settlementPort.settle(any()) }
+        coVerify(exactly = 1) { bookingWrites.completeBooking(any(), provenId, any()) }
     }
 
     // The two tests below replace a pair that asserted the defect (#4182). They read as coverage of
