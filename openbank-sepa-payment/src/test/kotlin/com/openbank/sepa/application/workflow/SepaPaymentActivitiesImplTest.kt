@@ -16,6 +16,8 @@ import com.openbank.sepa.application.port.out.SchemeGatewayPort
 import com.openbank.sepa.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.sepa.application.port.out.SchemeSubmissionOutcome
 import com.openbank.sepa.application.port.out.ScreeningUnavailableException
+import com.openbank.sepa.application.port.out.SepaBookingAgeSnapshot
+import com.openbank.sepa.application.port.out.SepaBookingQuery
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
 import com.openbank.sepa.application.port.out.SepaPaymentRepository
 import com.openbank.sepa.application.port.out.SettlementOutcome
@@ -327,6 +329,62 @@ class SepaPaymentActivitiesImplTest {
     }
 
     @Test
+    fun `re-drive settles an accepted PROCESSING payment with an open booking clock under the same key`() {
+        val held = payment.copy(status = SepaPaymentStatus.PROCESSING)
+        coEvery { paymentRepository.findById(paymentId) } returns held
+        val booked = UUID.randomUUID()
+        coEvery { settlementPort.settle(any()) } returns SettlementOutcome(true, booked)
+        val redrive = redriveActivities(pending = true, schemeSubmissionEnabled = false)
+
+        val result = redrive.submitToScheme(paymentId)
+
+        assertThat(result).isEqualTo(SepaPaymentStatus.COMPLETED)
+        coVerify(exactly = 1) { settlementPort.settle(held) }
+        coVerify { paymentRepository.completeSettlement(held, booked, any(), any()) }
+        // Never re-submitted to the scheme and never re-written to PROCESSING: only the booking is retried.
+        coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `re-drive of a still-unproven booking keeps the payment PROCESSING`() {
+        coEvery { paymentRepository.findById(paymentId) } returns payment.copy(status = SepaPaymentStatus.PROCESSING)
+        coEvery { settlementPort.settle(any()) } throws
+            com.openbank.sepa.application.port.out.SettlementUnavailableException("mismatch")
+
+        val result = redriveActivities(pending = true).submitToScheme(paymentId)
+
+        assertThat(result).isEqualTo(SepaPaymentStatus.PROCESSING)
+        coVerify(exactly = 0) { paymentRepository.completeSettlement(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a PROCESSING payment with no tracked booking obligation is never settled by re-drive`() {
+        coEvery { paymentRepository.findById(paymentId) } returns payment.copy(status = SepaPaymentStatus.PROCESSING)
+
+        val result = redriveActivities(pending = false).submitToScheme(paymentId)
+
+        assertThat(result).isEqualTo(SepaPaymentStatus.PROCESSING)
+        coVerify(exactly = 0) { settlementPort.settle(any()) }
+    }
+
+    private fun redriveActivities(pending: Boolean, schemeSubmissionEnabled: Boolean = true) = TestableActivities(
+        paymentRepository,
+        screeningPort,
+        amlCasePort,
+        fraudScoringPort,
+        schemeGatewayPort,
+        settlementPort,
+        clock = clock,
+        metrics = metrics,
+        schemeSubmissionEnabled = schemeSubmissionEnabled,
+        bookingQuery = object : SepaBookingQuery {
+            override suspend fun bookingAgeSnapshot() = SepaBookingAgeSnapshot(null, 0)
+            override suspend fun isBookingPending(paymentId: UUID) = pending
+        },
+    )
+
+    @Test
     fun `submitToScheme rejects with the mapped reason on scheme reject (RJCT)`() {
         val validated = payment.copy(status = SepaPaymentStatus.VALIDATED)
         coEvery { paymentRepository.findById(paymentId) } returns validated
@@ -550,9 +608,14 @@ private class TestableActivities(
             override suspend fun acceptForBooking(payment: SepaPayment, outbox: SepaPaymentOutboxMessage): SepaPayment =
                 paymentRepository.update(payment, outbox)
         },
+    bookingQuery: SepaBookingQuery = object : SepaBookingQuery {
+        override suspend fun bookingAgeSnapshot() = SepaBookingAgeSnapshot(null, 0)
+        override suspend fun isBookingPending(paymentId: UUID) = false
+    },
 ) : SepaPaymentActivitiesImpl(
     paymentRepository,
     bookingWrites,
+    bookingQuery,
     screeningPort,
     amlCasePort,
     fraudScoringPort,

@@ -77,7 +77,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 Outbound settlement requires HTTP 201 and a COMPLETED transaction with an id whose type, source account, numeric amount, currency, rail and instruction type match the submitted request. The structured request maps `SCT` to `SEPA_CT` and `SCT_INST` to `SEPA_INST`, with `ONE_OFF` for both. These transaction fields do not themselves prove clearing completion or an instant-payment SLA. The existing `sepa-settlement-<payment-id>` key is unchanged. An existing booking under that key may still carry historical `SEPA_CT` or a null instruction type; a mismatched response remains unresolved. Do not infer that no old booking exists from today's strict request parsing, accept a mismatched booking, change its recorded history or submit a new key to force a retry. Establish the outcome through an approved reconciliation read path before corrective action.
 
-The counter itself supplies no durable age. The outbound booking clock and separate refund clock described below add tracked timestamps, with explicit unknown historical coverage; neither supplies an SLA threshold/alert or recovery endpoint. A public read-only transaction lookup by idempotency key, other rails, alerts and operator integration remain open parts of #13623.
+The counter itself supplies no durable age. The outbound booking clock and separate refund clock described below add tracked timestamps, with explicit unknown historical coverage; the alerts and the re-drive are described at the end of this section. transaction-service still has no public read-only lookup by idempotency key; the runbook reads its database instead.
 
 ### Unresolved inbound returns (#13623)
 
@@ -93,7 +93,7 @@ transaction ID. Check the persisted reversal outcome before repeating the origin
 create a new payment or reversal key to clear an uncertain outcome. A missing original transaction
 ID is `UNRESOLVED_ORIGINAL_TRANSACTION`; establish the original ledger identity through the existing
 reconciliation process before any further financial action. Absence of an ID does not prove no debit.
-There is no automatic rebooking, new operator endpoint, alert or recovery scheduler in this change.
+Nothing retries on its own; `SepaPaymentRefundUnsettled` fires after an hour and the runbook re-drives it.
 Legacy `RETURNED` rows are not retroactively certified refunded by this migration.
 
 The current transaction REST API has no read-only lookup by idempotency key. This change does not
@@ -125,7 +125,7 @@ The refund-only `openbank_payment_refund_unsettled_oldest_age_seconds` gauge has
 not payment creation, outbound-booking start or clearing age. Before the first successful query it
 is `NaN` (unknown); a successful empty query yields zero. Query failures preserve the last successful
 timestamp/empty snapshot and do not record refresh liveness success. Cached timestamps continue to
-age with the clock during a refresh outage. This change supplies no refund SLA threshold or alert.
+age with the clock during a refresh outage. `SepaPaymentRefundUnsettled` alerts on it (1h).
 
 ### Payments stuck in RECEIVED
 
@@ -186,4 +186,12 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 
 `openbank_payment_booking_unknown_coverage{rail="SEPA"}` separately counts rows with neither tracked start nor proof whose provenance is unknown, across all business statuses. Historical columns remain NULL without backfill; creation/submission time is not substituted. The tracked age is a lower bound when coverage is incomplete: unknown rows never suppress a known overdue age. Startup is NaN, successfully queried empty tracked set is zero, and query failure keeps the last timestamp aging. Zero age alone is not all-clear when unknown coverage is nonzero.
 
-No SLA threshold, alert, recovery action, new retry key or by-key lookup endpoint is introduced. Preserve `sepa-settlement-<paymentId>` and `sepa-reversal-<paymentId>`; reconcile ambiguity rather than creating another financial intent. Local supplied-ID fixtures do not prove a live provider response or deployed readiness.
+`SepaPaymentBookingUnsettled` alerts on it (30m); no new retry key or by-key lookup endpoint is introduced. Preserve `sepa-settlement-<paymentId>` and `sepa-reversal-<paymentId>`; reconcile ambiguity rather than creating another financial intent. Local supplied-ID fixtures do not prove a live provider response or deployed readiness.
+
+### Unsettled booking alerts, re-drive and SCT vs SCT_INST (#13623)
+
+`SepaPaymentBookingUnsettled` (open outbound booking clock older than 30m) and `SepaPaymentRefundUnsettled` (unproven return older than 1h) are in `openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml` and are tested by `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`. The operator remedy (query transaction-service by key, then reconcile, reverse or re-drive) is `docs/runbooks/0032-payment-rail-unsettled-booking.md`.
+
+Re-drive: `submitToScheme` re-enters for a `PROCESSING` payment whose booking clock is open (`booking_first_due_at` set, `booking_proven_at` null) and calls settlement again under the same `sepa-settlement-<paymentId>` key, without resubmitting to the scheme. A `PROCESSING` row with no tracked clock is never re-settled. Operators reach it with a Temporal reset of `sepa-payment-<paymentId>` to just before `SubmitToScheme`. A held return is re-driven by resubmitting the same pacs.004. Its stored intent and `sepa-reversal-<paymentId>` key are reused, and a 409, 202 or id-less reversal answer keeps it out of `RETURNED`.
+
+SCT vs SCT_INST: the settlement request carries the distinction in `rail` (`SEPA_CT` / `SEPA_INST`), not only in `description`. No fee rule or scheme report reads it from the booking: billing has no rail-keyed fee, transaction-service decides same-day booking by the payee leg and not by the rail (`SettlementScope`), and clearing-service keeps its own rail enum. The pacs.008 that `SchemeGatewayAdapter` builds carries no `PmtTpInf` (`SvcLvl SEPA`, `LclInstrm INST`) for either type, and the clearing simulator reads none. A real SCT Inst connection would need that, in `openbank-libs-iso20022`. Instant payments run on `openbank-sepa-instant`.

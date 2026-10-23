@@ -51,6 +51,8 @@ class SepaBookingClockIT {
             assertThat(row(id)["booking_first_due_at"]).isNull()
         }
         given().post("/test/booking-clock/$id/accept").then().statusCode(200)
+        // The re-drive guard (#13623) reads the same durable clock: open after acceptance, closed after proof.
+        assertThat(pendingFlag(id)).isTrue()
         val pending = row(id)
         assertThat(pending["booking_first_due_at"]).isNotNull()
         assertThat(pending["booking_proven_at"]).isNull()
@@ -67,7 +69,20 @@ class SepaBookingClockIT {
         assertThat(proven["booking_proven_at"]).isNotNull()
         assertThat(proven["booking_transaction_id"]).isEqualTo(tx.toString())
         assertThat(proven["payment_xmin"]).isEqualTo(statusOutboxXmin(id, "COMPLETED"))
+        assertThat(pendingFlag(id)).isFalse()
     }
+
+    @Test
+    fun `a PROCESSING row with no tracked obligation is never offered for settlement re-drive`() {
+        val legacy = create()
+        given().post("/test/booking-clock/$legacy/legacy-sent").then().statusCode(200)
+        assertThat(row(legacy)["status"]).isEqualTo("PROCESSING")
+        assertThat(pendingFlag(legacy)).isFalse()
+        assertThat(pendingFlag(UUID.randomUUID())).isFalse()
+    }
+
+    private fun pendingFlag(id: UUID): Boolean =
+        given().get("/test/booking-clock/$id/pending").then().statusCode(200).extract().asString().toBoolean()
 
     @Test
     fun `general status writes cannot clear pending age and legacy rows remain explicitly unknown`() {
@@ -328,6 +343,10 @@ class SepaBookingClockIT {
             repository.update(next, event(before, next))
             return "legacy"
         }
+
+        @GET
+        @Path("/{id}/pending")
+        suspend fun pending(@PathParam("id") id: UUID): String = query.isBookingPending(id).toString()
 
         @GET
         @Path("/snapshot")
