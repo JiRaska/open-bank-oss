@@ -104,7 +104,8 @@ test('every local link, fragment and image resolves on all four pages', () => {
     for (const el of d.querySelectorAll('[src], a[href], link[href]')) {
       const target = el.getAttribute('src') || el.getAttribute('href');
       if (!target || /^(https?:|mailto:|data:)/.test(target)) continue;
-      const [file, fragment] = target.split('#');
+      const [fileWithQuery, fragment] = target.split('#');
+      const file = fileWithQuery.split('?')[0];
       assert.ok(fs.existsSync(path.join(site, file || page)), `${page}: missing ${file}`);
       if (fragment && /\.html$/.test(file || page)) {
         const linked = new JSDOM(read(file || page)).window.document;
@@ -195,6 +196,7 @@ test('new logo is confined to the header on current pages; artwork and footer ma
   for (const page of ['index.html', 'platform.html', 'labs.html']) {
     const dom = new JSDOM(read(page)), d = dom.window.document;
     assert.equal(d.querySelectorAll('.brand-film').length, 1);
+    assert.ok(d.querySelector('link[rel="stylesheet"][href^="styles.css?v="]'), 'returning visitors must receive the header sizing styles');
     const film = d.querySelector('header .brand-film');
     assert.ok(film);
     assert.equal(film.closest('a').getAttribute('aria-label'), 'OpenBank home');
