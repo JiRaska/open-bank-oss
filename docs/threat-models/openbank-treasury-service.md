@@ -145,6 +145,35 @@ FIXED flows inside the cut-off window become PROPOSED payments, netted per netti
 | **T** — false receipt match | A nostro credit settles an expected receipt only from the configured nostro of its currency, only when it identifies exactly one payment, and never when the uploader is the releaser or a term author (parked and counted). | — |
 | **T** — joint limit breach | Submission and approval take one transaction-scoped (counterparty, limit currency) line lock after the deal-row lock and re-measure the others' exposure with the query `exposure()` uses (`ExposureGuard`). The loser of a race is 422 LIMIT_BREACHED with nothing committed (`LimitLineRaceIT`). | — |
 
+## Posting-rule matrix (ADR-0344 D7) — `deal_journals` matrix events (V24)
+
+The leg-described products post through `PostingMatrix`: versioned data with one row per
+`(product, event, IFRS 9 category, flow kind/direction)`, served at `GET /posting-rules`. Postings
+come from the deal's stored cash-flow ledger, never from its flat fields. Keys are
+`treasury:<dealId>:<event>:<flowId|date>`: one journal per settlement, per accrual day, per paid
+flow and per maturity. V24 widens the `deal_journals` event CHECK to the matrix events. A leg names
+`(accountingClass, role, currency)`, and the ledger resolves it through `accounting_class_gl_map`
+(ledger V35 seeds the instrument accounts and their class rows). Phase 2a delivers IRS and FRA:
+`settle` and `mature` refuse every product outside `ProductType.DELIVERED`, so the rows for
+securities, loans, FX forwards, swaps and repos stay dormant until their phase lands. A SENT or
+SETTLED outgoing payment posts its flows' PAYMENT journals at once, under the same per-flow keys
+the daily run uses. Derivatives are recognised on trade date as a commitment memo pair.
+**STRIDE-T (wrong account / unbalanced):** a flow with no matching row is refused
+(`NoPostingRuleException`), never posted to a guess. `PostingMatrixLifecycleTest` replays every
+non-legacy parity fixture's whole life and asserts that every journal balances, that only mapped
+classes are used, that every balance-sheet account the deal used is back to zero after maturity
+and that the nostro moved by exactly the deal's flows. `PostingMatrixJournalsUnchangedTest` pins
+the rendered journals to a golden file.
+**STRIDE-T (double posting):** a paid flow is recorded under its flow id and never posted again,
+and a day's accrual under its date. The ledger deduplicates on the key. `CashFlowLedgerApiIT` drives
+a past IRS through settle, accrue, pay and mature over real HTTP and Postgres and counts six
+payment keys; `PaymentRailIT` proves the outflow journal and the nostro credit after SENT.
+**Residual:** an unfixed floating flow cannot post until a fixing fixes it. A settled matrix deal
+cannot be reversed; a correction (phase 2b) is the route. If the ledger is down when a payment
+turns SENT, the outflow journals wait for the next replay or the daily run (counted by
+`openbank.treasury.payments.outflow.failed`); until then the funding check still counts the flows
+as unbooked, which errs towards refusing.
+
 ## STRIDE analysis
 
 | Threat | Control | Residual risk |
@@ -164,8 +193,9 @@ FIXED flows inside the cut-off window become PROPOSED payments, netted per netti
 
 1. No journal is posted for a deal that has not been BOOKED by a second human.
 2. A deal's approver is never its creator or submitter, and is always HUMAN (domain + DB CHECK).
-3. Every journal key is `treasury:<dealId>:<settled|matured|reversed>`; each is posted at most
-   once per deal in the ledger, however often it is retried.
+3. Every journal key is `treasury:<dealId>:<settled|matured|reversed>` (legacy, plus
+   `accrued:<date>`) or `treasury:<dealId>:<matrix event>:<flowId|date>` (ADR-0344 D7); each is
+   posted at most once per deal in the ledger, however often it is retried.
 4. Every posted journal balances per currency.
 
 ## Out of scope / follow-ups
@@ -191,3 +221,4 @@ minimum reserves (D8), and real market connectivity (D9).
 - **2026-10-22** — **ADR-0344 phase 0: reference data and the cash-flow ledger (#13599).** Adds `reference_records`/`reference_commands` (V16, V17) and the deal cash-flow ledger (V18, V19), the roles `ROLE_TREASURY_BACK_OFFICE` and `ROLE_TREASURY_REFERENCE_EDITOR`, and their REST surface and OPA rules; see the two sections above. Leg-described products are refused at draft until their phase lands. Rollback: revert the PR (the migrations are additive).
 - **2026-10-23** — **ADR-0344 phase 1a: fixings, the market-data quality gate, IRS and FRA cash flows (#13638).** Adds `observation_batches`, `index_observations`, `fixing_cases` and the fixing provenance columns (V20), the `/fixings` and `/market-data` surface, and the OPA rules for it; see the section above. IRS and FRA are drafted and fixed but not settled until phase 2. Rollback: revert the PR (V20 is additive).
 - **2026-10-23** — **ADR-0344 phase 1b: own-account payments and the institution-transfer rail (#13647).** Adds `treasury_payments`, `treasury_payment_flows` (V21), the transfer rail and intermediary BIC (V22) and a payment key reusable after cancel (V23); the `/payments` surface; role `ROLE_TREASURY_PAYMENT_RELEASER` (realm, OPA, admin-ui); the `openbank.treasury.payments` producer and the `institution-transfer-status-in` consumer with its DLQ; the nostro receipt matcher; the limit-line lock on submit and approve. Controls are in the section above. Rollback: revert; V21–V23 are additive while no payment row exists.
+- **2026-10-23** — **ADR-0344 phase 2a: the posting-rule matrix (#13667).** IRS and FRA settle, accrue, pay and mature through `PostingMatrix`; V24 widens the `deal_journals` event CHECK; a SENT payment posts its outflow journals; `GET /posting-rules` (`treasury.reference.read`, no new OPA action). Ledger V35 seeds the instrument accounts the matrix posts to. Controls are in the section above. Rollback: revert; V24 is a CHECK widening, reversible while no matrix journal row exists.

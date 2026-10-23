@@ -16,6 +16,7 @@ import com.openbank.treasury.application.port.`in`.PositionBasis
 import com.openbank.treasury.application.port.`in`.PositionReport
 import com.openbank.treasury.application.port.`in`.SimulatedMarketRun
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
+import com.openbank.treasury.application.port.out.CashFlowRepository
 import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
@@ -42,6 +43,8 @@ import com.openbank.treasury.domain.model.DealSettled
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitCheck
+import com.openbank.treasury.domain.model.MatrixPostings
+import com.openbank.treasury.domain.model.NoPostingRuleException
 import com.openbank.treasury.domain.model.PinnedReversal
 import com.openbank.treasury.domain.model.PostedJournalRecord
 import com.openbank.treasury.domain.model.PostingEvent
@@ -50,6 +53,7 @@ import com.openbank.treasury.domain.model.ProductLimitApplied
 import com.openbank.treasury.domain.model.ProductLimitPolicy
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
+import com.openbank.treasury.domain.reference.Ifrs9Category
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
@@ -93,6 +97,10 @@ class TreasuryDealService(
     private val schedules: ScheduleService? = null,
     /** ADR-0344 catalogue: the product mandate from the reference store (config seeds the rest). */
     private val mandate: (suspend () -> ProductLimitPolicy)? = null,
+    /** ADR-0344 D7: the stored cash-flow ledger the posting-rule matrix posts from. */
+    private val cashFlows: CashFlowRepository? = null,
+    /** ADR-0344 D7: the IFRS 9 category of a deal's book (reference `book` record); amortised cost when none. */
+    private val bookCategory: suspend (bookId: String?) -> Ifrs9Category = { Ifrs9Category.AMORTISED_COST },
     /**
      * ADR-0344 D6: runs before a deal is cancelled or reversed: blocks the change while a payment of
      * the deal is released, withdraws its PROPOSED payments.
@@ -319,8 +327,12 @@ class TreasuryDealService(
         key?.let { k -> replay(k, SETTLE, dealId)?.let { return it } }
         val deal = load(dealId)
         val settled = deal.settle(actor, bankToday(), clock.instant(), confirmationRequired)
-        check(settled.product.legacy) { NOT_DELIVERED.format(settled.product) }
-        val ref = post(PostingRules.settlement(settled), settled.valueDate, "treasury ${settled.product} settlement")
+        check(settled.product in ProductType.DELIVERED) { NOT_DELIVERED.format(settled.product) }
+        val ref = if (settled.product.legacy) {
+            post(PostingRules.settlement(settled), settled.valueDate, "treasury ${settled.product} settlement")
+        } else {
+            matrixSettlement(settled)
+        }
         val event = DealEvent(
             DealSettled.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -349,12 +361,16 @@ class TreasuryDealService(
         // ADR-0315 D5: catch the accrual up to maturity first, so the maturity journal clears the
         // accrued account instead of booking the whole interest to income in one amount.
         accrueThrough(deal, deal.maturityDate)
-        check(matured.product.legacy) { NOT_DELIVERED.format(matured.product) }
-        val ref = post(
-            PostingRules.maturity(matured, accruedSoFar(deal)),
-            matured.maturityDate,
-            "treasury ${matured.product} maturity",
-        )
+        check(matured.product in ProductType.DELIVERED) { NOT_DELIVERED.format(matured.product) }
+        val ref = if (matured.product.legacy) {
+            post(
+                PostingRules.maturity(matured, accruedSoFar(deal)),
+                matured.maturityDate,
+                "treasury ${matured.product} maturity",
+            )
+        } else {
+            matrixMaturity(matured)
+        }
         val event = DealEvent(
             DealMatured.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -533,9 +549,15 @@ class TreasuryDealService(
         )
     }
 
+    override suspend fun postOutflow(dealId: UUID, through: LocalDate): Int {
+        val deal = load(dealId)
+        if (deal.product.legacy || deal.state != DealState.SETTLED) return 0
+        return matrixAccrueAndPay(deal, minOf(through, deal.maturityDate))
+    }
+
     /** Post each day after the last accrued one, up to and including [through]. Returns journals posted. */
     private suspend fun accrueThrough(deal: Deal, through: LocalDate): Int {
-        if (!deal.product.legacy) return 0
+        if (!deal.product.legacy) return matrixAccrueAndPay(deal, through)
         var day = (lastAccrued(deal) ?: deal.valueDate).plusDays(1)
         var posted = 0
         while (!day.isAfter(through)) {
@@ -556,6 +578,63 @@ class TreasuryDealService(
     /** Σ of the posted dailies — exactly the cumulative accrual at the last recorded day. */
     private suspend fun accruedSoFar(deal: Deal): BigDecimal =
         lastAccrued(deal)?.let { PostingRules.accruedThrough(deal, it) } ?: BigDecimal.ZERO
+
+    // ── ADR-0344 D7: the posting-rule matrix products ─────────────────────────────────────
+
+    private suspend fun ledgerOf(deal: Deal) =
+        checkNotNull(cashFlows) { "no cash-flow store wired" }.flows(deal.id, null)
+
+    /** The commitment memo (trade-date products) and the value-date settlement; the last one is the deal's ref. */
+    private suspend fun matrixSettlement(deal: Deal): LedgerJournalRef {
+        val flows = ledgerOf(deal)
+        val category = bookCategory(deal.bookId)
+        val trade = MatrixPostings.trade(deal)?.let { post(it, deal.valueDate, "treasury ${deal.product} commitment") }
+        val settlement = MatrixPostings.settlement(deal, flows, category)
+            ?.let { post(it, deal.valueDate, "treasury ${deal.product} settlement") }
+        if (trade != null && settlement != null) deals.recordJournal(trade)
+        return settlement ?: trade ?: throw NoPostingRuleException("${deal.product} settles with nothing to post")
+    }
+
+    /** Accrue every day through [through] and post the flows paid by then; returns journals posted. */
+    private suspend fun matrixAccrueAndPay(deal: Deal, through: LocalDate): Int {
+        val flows = ledgerOf(deal)
+        val journals = deals.journals(deal.id)
+        val run = MatrixPostings.run(
+            deal,
+            flows,
+            bookCategory(deal.bookId),
+            lastMatrixAccrual(journals),
+            paidFlows(journals),
+            through,
+        )
+        run.forEach { (spec, day) ->
+            deals.recordJournal(post(spec, day, "treasury ${deal.product} ${spec.event.key} $day"))
+        }
+        return run.size
+    }
+
+    /**
+     * Every flow still unposted is paid (the last one can fall after the unadjusted maturity date),
+     * then the final exchange or principal, the memo release and any residual amortisation.
+     */
+    private suspend fun matrixMaturity(deal: Deal): LedgerJournalRef {
+        val flows = ledgerOf(deal)
+        matrixAccrueAndPay(deal, MatrixPostings.lastPaymentDate(deal, flows))
+        val category = bookCategory(deal.bookId)
+        val accruedTo = lastMatrixAccrual(deals.journals(deal.id)) ?: deal.valueDate
+        val spec =
+            MatrixPostings.maturity(deal, flows, category, MatrixPostings.amortisedThrough(deal, flows, accruedTo))
+                ?: throw NoPostingRuleException("${deal.product} matures with nothing to post")
+        return post(spec, deal.maturityDate, "treasury ${deal.product} maturity")
+    }
+
+    private fun lastMatrixAccrual(journals: List<LedgerJournalRef>): LocalDate? = journals
+        .filter { it.event == PostingEvent.ACCRUAL }
+        .maxOfOrNull { LocalDate.parse(it.idempotencyKey.substringAfterLast(':')) }
+
+    private fun paidFlows(journals: List<LedgerJournalRef>): Set<UUID> = journals
+        .filter { it.event == PostingEvent.PAYMENT || it.event == PostingEvent.AMORTISATION }
+        .map { UUID.fromString(it.idempotencyKey.substringAfterLast(':')) }.toSet()
 
     /**
      * A reversal offsets, per GL account, exactly what the deal's own journals posted to that account,

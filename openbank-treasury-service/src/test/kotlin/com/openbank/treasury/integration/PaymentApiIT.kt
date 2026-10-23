@@ -321,6 +321,12 @@ class PaymentApiIT {
     @TestSecurity(user = "rita.releaser", roles = ["ROLE_TREASURY_PAYMENT_RELEASER"])
     fun `26 - an unbooked manually settled payment still counts against funding until the ledger books it`() {
         val other = if (released == payA) payB else payA
+        val settledFlows = jdbc { c ->
+            c.prepareStatement(
+                "select deal_id, flow_id from treasury_payment_flows where payment_id = '$released'",
+            ).executeQuery()
+                .use { rs -> generateSequence { if (rs.next()) rs.getString(1) to rs.getString(2) else null }.toList() }
+        }
         val amount = jdbc { c ->
             c.prepareStatement("select amount from treasury_payments where payment_id = '$other'").executeQuery()
                 .use { rs ->
@@ -331,9 +337,15 @@ class PaymentApiIT {
         ledger.reset()
         ledger.balances[Triple("1001", "CZK", valueDate)] = amount.multiply(BigDecimal("1.5"))
         post("/payments/$other/release").then().statusCode(422).body("error", equalTo("FUNDING_EXCEEDED"))
-        // The outflow journals that stop it counting are posted by the posting-rule matrix (ADR-0344
-        // phase 2); until then only a balance covering both releases lets the second one through.
-        ledger.balances[Triple("1001", "CZK", valueDate)] = amount.multiply(BigDecimal("10"))
+        jdbc { c ->
+            settledFlows.forEach { (d, f) ->
+                c.prepareStatement(
+                    "insert into deal_journals (id, deal_id, event, idempotency_key, journal_id, posted_at) values " +
+                        "(nextval('deal_journals_seq'), '$d', 'PAYMENT', 'treasury:$d:payment:$f', " +
+                        "'${UUID.randomUUID()}', now())",
+                ).executeUpdate()
+            }
+        }
         post("/payments/$other/release").then().statusCode(200).body("status", equalTo("RAIL_NOT_SUPPORTED"))
         releasedB = other
     }

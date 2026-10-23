@@ -348,18 +348,44 @@ class CashFlowLedgerApiIT {
     @Test
     @Order(11)
     @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
-    fun `11 - a product whose phase has not landed is refused until its ADR-0344 phase delivers its posting rules`() {
-        val start = today.plusDays(10)
-        val end = start.plusYears(1)
-        val legs = """
-            [{"payReceive":"PAY","currency":"CZK","notional":10000000.00,"accrualStart":"$start","accrualEnd":"$end",
-              "accrualFrequency":"QUARTERLY","paymentFrequency":"QUARTERLY","dayCount":"ACT/360","rate":{"type":"FIXED","rate":4.0}}]
-        """.trimIndent()
-        post(
+    fun `11 - a past fixed-fixed IRS is drafted and submitted for the posting-rule matrix`() {
+        val end = today.minusDays(5)
+        val start = end.minusMonths(3)
+        fun leg(side: String, rate: String) = """{"payReceive":"$side","currency":"CZK","notional":10000000.00,
+            "accrualStart":"$start","accrualEnd":"$end","accrualFrequency":"MONTHLY","paymentFrequency":"MONTHLY",
+            "dayCount":"ACT/360","adjustPaymentDate":false,"rate":{"type":"FIXED","rate":$rate}}"""
+        matrixDeal = post(
             "/deals",
-            """{"product":"BOND","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
-               "businessDayConvention":"MODIFIED_FOLLOWING","legs":$legs}""",
-        ).then().statusCode(400).body("message", containsString("not delivered yet"))
+            """{"product":"IRS","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","tradeDate":"${start.minusDays(2)}",
+               "calendars":["CERTIS"],"legs":[${leg("PAY", "4.0")},${leg("RECEIVE", "4.5")}]}""",
+        ).then().statusCode(201).extract().path("dealId")
+        post("/deals/$matrixDeal/submit").then().statusCode(200)
+    }
+
+    @Test
+    @Order(12)
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `12 - it settles, accrues, pays and matures through the matrix, every journal recorded with its key`() {
+        post("/deals/$matrixDeal/approve").then().statusCode(200).body("state", equalTo("BOOKED"))
+        post("/deals/$matrixDeal/confirm", """{"reference":"cpty-ref-1"}""").then().statusCode(200)
+        post("/deals/$matrixDeal/settle").then().statusCode(200).body("state", equalTo("SETTLED"))
+        post("/deals/$matrixDeal/mature").then().statusCode(200).body("state", equalTo("MATURED"))
+        val events: List<String> = given().`when`().get("/api/v1/treasury/deals/$matrixDeal/journals")
+            .then().statusCode(200).extract().path("event")
+        assertThat(events).contains("trade", "accrual", "payment", "maturity")
+        // Three monthly periods on two legs: six interest payments, each posted once under its flow id.
+        assertThat(
+            count("select count(*) from deal_journals where deal_id = ? and event = 'PAYMENT'", matrixDeal),
+        ).isEqualTo(6)
+        assertThat(
+            count(
+                "select count(*) from deal_journals where deal_id = ? and idempotency_key like 'treasury:%:payment:%'",
+                matrixDeal,
+            ),
+        ).isEqualTo(6)
+        given().`when`().get("/api/v1/treasury/posting-rules").then().statusCode(200)
+            .body("findAll { it.product == 'IRS' && it.event == 'TRADE' }", hasSize<Any>(1))
+            .body("collect { it.product }.unique()", hasSize<Any>(16))
     }
 
     @Test
@@ -391,6 +417,23 @@ class CashFlowLedgerApiIT {
         given().`when`().get("/api/v1/treasury/cash-flow-overrides?status=APPROVED&limit=50")
             .then().statusCode(200).body("overrideId", hasItem(overrideId))
         given().`when`().get("/api/v1/treasury/cash-flow-overrides?limit=0").then().statusCode(400)
+    }
+
+    @Test
+    @Order(15)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `15 - a product whose phase has not landed is refused until its ADR-0344 phase delivers its posting rules`() {
+        val start = today.plusDays(10)
+        val end = start.plusYears(1)
+        val legs = """
+            [{"payReceive":"PAY","currency":"CZK","notional":10000000.00,"accrualStart":"$start","accrualEnd":"$end",
+              "accrualFrequency":"QUARTERLY","paymentFrequency":"QUARTERLY","dayCount":"ACT/360","rate":{"type":"FIXED","rate":4.0}}]
+        """.trimIndent()
+        post(
+            "/deals",
+            """{"product":"BOND","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
+               "businessDayConvention":"MODIFIED_FOLLOWING","legs":$legs}""",
+        ).then().statusCode(400).body("message", containsString("not delivered yet"))
     }
 
     private fun count(sql: String, id: String): Int = jdbc { c ->

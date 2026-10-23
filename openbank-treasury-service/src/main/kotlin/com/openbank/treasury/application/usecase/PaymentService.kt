@@ -142,10 +142,7 @@ class PaymentService(
     /** Contract 9.1 debtor agent: the bank's own BIC. */
     private val ownBic: String = DEFAULT_OWN_BIC,
     private val counterparty: suspend (String) -> CounterpartyIdentity? = { null },
-    /**
-     * ADR-0344 D7: posts the PAYMENT journals of a SENT/SETTLED payment's flows; returns journals
-     * posted. A no-op until the posting-rule matrix phase wires it.
-     */
+    /** ADR-0344 D7: posts the PAYMENT journals of a SENT/SETTLED payment's flows; returns journals posted. */
     private val postOutflow: suspend (Payment) -> Int = { 0 },
     private val onOutflowFailed: (UUID, Throwable) -> Unit = { _, _ -> },
 ) {
@@ -251,7 +248,7 @@ class PaymentService(
 
     /**
      * The status is already committed; a ledger outage here must not dead-letter it. The same keys
-     * are posted by the next replay (and, once the posting-rule matrix lands, by its daily run);
+     * are posted by the next replay and, at the latest, by the daily matrix run on the payment date;
      * until then the funding check still counts the flows as unbooked, so nothing is overdrawn.
      */
     private suspend fun outflow(p: Payment) {

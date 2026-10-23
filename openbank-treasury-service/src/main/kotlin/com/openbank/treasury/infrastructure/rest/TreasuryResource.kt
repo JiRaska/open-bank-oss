@@ -172,6 +172,12 @@ class TreasuryResource {
         deals.get(id).journals.map { JournalRefResponse(it.event.key, it.idempotencyKey, it.journalId, it.postedAt) }
 
     @GET
+    @Path("/posting-rules")
+    @Operation(summary = "The posting-rule matrix: (product, event, IFRS 9 category) to journal template (ADR-0344 D7)")
+    @Authorize(action = "treasury.reference.read")
+    fun postingRules(): List<PostingRuleDto> = deals.postingRules().map(PostingRuleDto::from)
+
+    @GET
     @Path("/deals/{id}/versions")
     @Operation(summary = "The deal's versions with a summary of what changed")
     @Authorize(action = "treasury.deal.read", resource = "#id")

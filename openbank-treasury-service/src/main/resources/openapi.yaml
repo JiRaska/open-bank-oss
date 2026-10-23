@@ -55,7 +55,10 @@ info:
   #         release by ROLE_TREASURY_PAYMENT_RELEASER only, cancel, resolve). Release is async: the
   #         rail instruction is written in the release transaction and the rail's status moves the
   #         payment on (contract 9). 422 FUNDING_EXCEEDED, 409 PAYMENT_RELEASED on a deal change.
-  version: 1.21.0
+  # 1.22.0: additive — ADR-0344 phase 2a: GET /posting-rules (the posting-rule matrix as versioned
+  #         data, PostingRule schema). IRS and FRA now settle and mature through the matrix; the
+  #         journals list carries its events (trade, settlement, accrual, payment, maturity, ...).
+  version: 1.22.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -861,6 +864,21 @@ paths:
                 maxItems: 100000
                 items: { $ref: '#/components/schemas/JournalRef' }
         '404': { description: No such deal }
+
+  /api/v1/treasury/posting-rules:
+    get:
+      tags: [Treasury]
+      operationId: listPostingRules
+      summary: 'The posting-rule matrix: (product, event, IFRS 9 category) to journal template (ADR-0344 D7)'
+      responses:
+        '200':
+          description: Every posting rule of every product, versioned
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 10000
+                items: { $ref: '#/components/schemas/PostingRule' }
 
   /api/v1/treasury/reference/{kind}:
     get:
@@ -1848,6 +1866,30 @@ components:
                 currency: { type: string }
                 exposureAfter: { type: number }
                 headroomAfter: { type: number }
+    PostingRule:
+      type: object
+      required: [product, event, recognition, lines, version]
+      properties:
+        product: { $ref: '#/components/schemas/ProductType' }
+        event:
+          type: string
+          x-extensible-enum: [SETTLED, ACCRUED, MATURED, REVERSED, TRADE, SETTLEMENT, ACCRUAL, FIXING, PAYMENT,
+                              AMORTISATION, REVALUATION, MATURITY, EARLY_TERMINATION, CORRECTION]
+        ifrs9Category: { type: [string, 'null'], enum: [AMORTISED_COST, FVOCI, FVTPL, null], description: 'null = every category' }
+        recognition: { type: string, enum: [TRADE_DATE, SETTLEMENT_DATE] }
+        flowKind: { type: [string, 'null'], description: 'the flow kind the row applies to; null = any' }
+        flowDirection: { type: [string, 'null'], enum: [IN, OUT, null] }
+        lines:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            properties:
+              side: { type: string, enum: [DEBIT, CREDIT] }
+              accountingClass: { type: string, maxLength: 64, description: 'ledger accounting class (ADR-0341 D3); DEBT_SECURITY resolves by the book''s IFRS 9 category. The ledger maps class + role + currency to a GL account.' }
+              accountingRole: { type: string, maxLength: 32 }
+              amountExpression: { type: string }
+        version: { type: integer }
     JournalRef:
       type: object
       properties:
