@@ -104,3 +104,11 @@ Bez libs by stejná otázka znamenala review samostatných implementací napří
 ## Compliance matrix v centrálních docs
 
 Update `docs/strategy/07-compliance-matrix.md` row "openbank-libs" odkazuje na tento dokument jako evidence pillar. Při auditech CNB / EBA bude inspector dostávat odkaz na `/services/libs/docs/06-compliance.md` (admin UI rendering této sekce).
+
+## Bezpečnostně citlivé cesty: platby treasury (ADR-0344, fáze 1b)
+
+`rules.yaml: security_sensitive_paths` nově uvádí v treasury `domain/payment/**` a
+`infrastructure/payment/**` v kategorii `auth_crypto_payment`. Tento kód drží idempotenční klíče
+plateb, čtyřoké uvolnění, advisory zámek kontroly krytí a hlídané nárokování toků. PR, který na něj
+sáhne, proto vyžaduje lidskou odpověď v bezpečnostním checklistu, stejně jako každá jiná platební
+cesta ve flotile.
