@@ -102,8 +102,9 @@ class TreasuryDealService(
     /** ADR-0344 D7: the IFRS 9 category of a deal's book (reference `book` record); amortised cost when none. */
     private val bookCategory: suspend (bookId: String?) -> Ifrs9Category = { Ifrs9Category.AMORTISED_COST },
     /**
-     * ADR-0344 D6: runs before a deal is cancelled or reversed: blocks the change while a payment of
-     * the deal is released, withdraws its PROPOSED payments.
+     * ADR-0344 D6: runs before a deal is cancelled or reversed (a correction guards its changed flows
+     * itself, see CorrectionCommit): blocks the change while a payment of the deal is released,
+     * withdraws its PROPOSED payments.
      */
     private val paymentGuard: (suspend (dealId: UUID) -> Unit)? = null,
 ) : TreasuryDealUseCase {
@@ -191,6 +192,21 @@ class TreasuryDealService(
         } else {
             deal
         }
+    }
+
+    override suspend fun vetCorrection(
+        target: Deal,
+        override: com.openbank.treasury.domain.model.LimitOverride?,
+    ): Pair<Deal, LimitCheck?> {
+        val vetted = vetTerms(target)
+        val productCheck = policy().evaluate(vetted)
+        if (productCheck.breached) throw com.openbank.treasury.domain.model.ProductLimitBreachedException(productCheck)
+        if (!vetted.consumesLimitWhenLive) return vetted to null
+        val check = limitCheck(vetted)
+        if (check.breached && (override == null || check.exposureAfter > override.coversExposureUpTo)) {
+            throw com.openbank.treasury.domain.model.LimitBreachedException(check)
+        }
+        return vetted to check
     }
 
     override suspend fun submit(dealId: UUID, actor: Actor, key: String?): Deal {
