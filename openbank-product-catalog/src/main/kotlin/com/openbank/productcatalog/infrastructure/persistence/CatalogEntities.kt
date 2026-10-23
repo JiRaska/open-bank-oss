@@ -320,7 +320,7 @@ class BankV1ProductMappingEntity {
     }
 }
 
-/** ADR-0352 §4: the publish-path signature over an IR-bearing revision's canonical hash (V15). */
+/** ADR-0352 §4: the publish-path signature over an IR-bearing revision's canonical hash (V16). */
 @Entity
 @Table(name = "catalog_revision_ir_signatures")
 class CatalogRevisionIrSignatureEntity {

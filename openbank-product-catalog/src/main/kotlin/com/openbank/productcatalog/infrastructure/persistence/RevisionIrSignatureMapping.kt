@@ -10,7 +10,7 @@ import io.smallrye.mutiny.Uni
 import org.hibernate.reactive.mutiny.Mutiny
 import java.util.UUID
 
-/** Row <-> domain mapping for the ADR-0352 publish-path signature (V15). */
+/** Row <-> domain mapping for the ADR-0352 publish-path signature (V16). */
 internal fun CatalogRevisionIrSignatureEntity.toDomain() =
     RevisionIrSignature(revisionHash, keyId, algorithm, signature, signedAt)
 

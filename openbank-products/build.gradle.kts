@@ -58,7 +58,7 @@ kover {
         verify {
             rule {
                 bound {
-                    // measured 97.8 % (443/453) at introduction (2026-10-23), minus headroom; raise-only (ADR-0020)
+                    // 97.8 % (443/453) measured at introduction (2026-10-23), minus headroom; raise-only (ADR-0020)
                     minValue = 95
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
