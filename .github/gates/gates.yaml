@@ -6905,11 +6905,11 @@ gates:
   # so a new benchmark cannot go uncompared and a removed one cannot leave a stale number. The
   # B/op comparison itself is the last step of .github/workflows/libs-bench.yml (needs a JMH run).
   - id: libs-bench-alloc-baseline
-    name: "libs JMH allocation baseline covers every benchmark (advisory)"
+    name: "libs JMH allocation baseline covers every benchmark (enforced)"
     group: kotlin
-    mode: advisory
+    mode: enforced
+    review_after: "2027-01-23"
     rationale: "An allocation regression in Money, the idempotency fingerprint or the audit hash chain is paid on every request by every service and is invisible to every test; a baseline only protects the benchmarks it actually lists, so its scope is derived from the sources."
-    review_after: "2026-12-15"
     verified: "2026-09-30 — static: 19 @Benchmark, 17 baseline entries + 2 UNSTABLE (MoneyBench.allocate/split, bimodal across forks, reported only), exit 0; --results from three local -f 1 runs all OK (worst compared spread 1.9 %, CanonicalJsonBench.write); the pre-change run against the same baseline is red on all five hex-site benchmarks (+99 % to +971 %)"
     budget_seconds: 10
     min_subjects: 15   # 19 @Benchmark methods 2026-09-30
@@ -6917,7 +6917,7 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-bench-alloc-baseline.py"]
     run: |
-      python3 .github/scripts/check-bench-alloc-baseline.py --root .
+      python3 .github/scripts/check-bench-alloc-baseline.py --root . --enforce
 
   # ADR-0352 §8 — product IR (Product as Code, phase 1). Three gates:
   #   product-ir-determinism  the golden set is indexed, well-formed and fed to GoldenDeterminismTest,

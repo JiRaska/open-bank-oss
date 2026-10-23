@@ -1,8 +1,8 @@
 # Library compatibility, fuzzing and recovery
 
 Shared libraries are validated independently as well as through consuming services. Changes to
-the six code-bearing modules (`domain`, `runtime`, `lending`, `iso20022`, `temporal`, `testing`)
-must preserve their public JVM contracts and pass their existing lint and coverage ratchets.
+the source-bearing libraries, currently `domain`, `runtime`, `finance`, `lending`, `iso20022`,
+`temporal` and `testing`, must preserve their public JVM contracts and pass their existing lint and coverage ratchets.
 The umbrella module re-exports libraries and has no separate public classes to snapshot.
 
 ## ABI checks
@@ -71,8 +71,8 @@ run with no finding is evidence for that run, not proof that every possible inpu
 
 ## CI evidence and delivery
 
-`libs-quality.yml` builds/tests all six libraries, checks ABI snapshots and existing coverage
-floors, runs the standalone fuzz corpus tests and uploads JUnit results. `cflite-pr.yml` runs the
+`libs-quality.yml` derives build/test/ABI/coverage tasks from source-bearing library modules,
+checks ABI snapshots and existing coverage floors, runs the standalone fuzz corpus tests and uploads JUnit results. `cflite-pr.yml` runs the
 coverage-guided targets; its result must be inspected separately from the deterministic tests.
 Four intentionally disabled negative conformance fixtures in `libs-testing` are reported as
 skipped; the conformance self-test exercises their rejection directly.
@@ -82,3 +82,31 @@ Deployment excludes recognized test-only edges; CI includes them. Unknown syntax
 dependency ownership selects the complete supplied fleet. Code updates use coherent consumer
 images and the existing staged rollout. Broader fleet rollback and external contract evidence
 remain separate from library-level recovery tests; see [ADR-0346](../../docs/adr/0346-shared-library-delivery-and-quality-evidence.md).
+
+## Blocking evidence and module discovery
+
+`library_quality_scope.py` discovers source-bearing library directories rather than maintaining a
+fixed module list. New libraries must enable ABI validation and commit a nonempty canonical snapshot;
+missing ABI or coverage tasks fail the actual Gradle invocation. Benchmark and detekt plugin modules
+are build tools with independent lanes, not consumer runtime libraries. Finance retains its existing
+96% coverage floor. The planner fixtures prove that an unknown future library is selected and one
+without ABI evidence is rejected.
+
+The required Services CI `all-green` gate additionally checks the exact PR head's completed
+`libs-quality.yml`, `cflite-pr.yml` and `libs-bench.yml` workflow results for applicable paths.
+Missing/in-progress evidence waits within a bounded deadline; cancellation, failure and skipped runs
+cannot stand in for a pass. Only the pinned workflow paths and `pull_request` event count. The same
+path filters trigger all three proof workflows. API unavailability fails closed.
+
+Coverage-guided fuzz failures are no longer advisory. Allocation comparisons use `--enforce`;
+wall-clock timing remains report-only except for explicitly declared product interpreter bounds.
+`check-bench-alloc-baseline.py --ratchet-baseline --results <jmh.json>` lowers only the measured
+existing allocation entries, preserves unrelated budgets/latency metadata and rejects increases or
+invalid measurements. Use repeated comparable forks before committing a measured ratchet.
+
+The ISO output allocation ratchet was measured on 2026-10-23 at source `d1546bb27e` (quality
+changes do not alter XML production code): JMH 1.37, Temurin 25.0.4.1, SerialGC, 512 MiB heap,
+5 forks, 3 × 1-second warmup and 3 × 1-second measurements. Fork means were approximately
+20,800–20,880 B/op; the combined result was 20,864.2 B/op. Only that measured allocation entry
+was lowered from 63,432.3 B/op; unrelated budgets and the declared interpreter latency bound
+were retained. Timing was measured under concurrent workstation load and is not a latency claim.

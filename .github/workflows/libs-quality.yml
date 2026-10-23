@@ -6,7 +6,18 @@ on:
     paths:
       - "openbank-libs*/**"
       - "fuzz/**"
+      - ".clusterfuzzlite/**"
+      - ".github/workflows/services-ci.yml"
       - ".github/workflows/libs-quality.yml"
+      - ".github/workflows/libs-bench.yml"
+      - ".github/workflows/cflite-pr.yml"
+      - ".github/scripts/library_quality_scope.py"
+      - ".github/scripts/test_library_quality_scope.py"
+      - ".github/scripts/check_library_quality_evidence.py"
+      - ".github/scripts/test_library_quality_evidence.py"
+      - ".github/scripts/check-bench-alloc-baseline.py"
+      - ".github/scripts/test_bench_ratchet.py"
+
   workflow_dispatch: {}
 
 permissions:
@@ -32,14 +43,11 @@ jobs:
           cache-read-only: true
       - name: Build every library with ABI, coverage, recovery and old-consumer proofs
         run: |
-          ./gradlew \
-            :openbank-libs-domain:build :openbank-libs-domain:koverVerify \
-            :openbank-libs-runtime:build :openbank-libs-runtime:koverVerify \
-            :openbank-libs-lending:build :openbank-libs-lending:koverVerify \
-            :openbank-libs-iso20022:build :openbank-libs-iso20022:koverVerify \
-            :openbank-libs-temporal:build :openbank-libs-temporal:koverVerify \
-            :openbank-libs-testing:build :openbank-libs-testing:koverVerify \
-            --continue --console=plain
+          python3 .github/scripts/test_bench_ratchet.py
+          python3 .github/scripts/test_library_quality_scope.py
+          python3 .github/scripts/library_quality_scope.py > /tmp/library-proof-tasks
+          mapfile -t proof_tasks < /tmp/library-proof-tasks
+          ./gradlew "${proof_tasks[@]}" --continue --console=plain
       - name: Exercise the fuzz oracle on its corpus and deterministic mutations
         run: ./gradlew -p fuzz/ossfuzz test --console=plain
       - name: Upload compatibility and recovery evidence

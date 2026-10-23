@@ -2,28 +2,31 @@
 # Shared-libs JMH benchmarks: run them, keep the numbers, compare ALLOCATION to the baseline.
 #
 # Gated: gc.alloc.rate.norm (B/op) against openbank-libs-benchmarks/alloc-baseline.json, by
-#        .github/scripts/check-bench-alloc-baseline.py (advisory; rules.yaml:
+#        .github/scripts/check-bench-alloc-baseline.py (enforced; rules.yaml:
 #        libs_bench_alloc_baseline). Allocation per op is a property of the code.
 # Never gated: ns/op. It is a property of the runner; the JSON is uploaded for reading only.
 #
-# A path-filtered workflow cannot be a required check, and this one is not meant to be: the
-# half that needs no JVM (benchmarks in source == entries in the baseline) is declared in
-# .github/gates/gates.yaml and runs on every PR. This workflow is the half that needs a JMH run.
-# It is a workflow of its own, not a job in services-ci.yml, because GitHub then does the path
-# filtering without starting a runner on PRs that touch none of these paths.
+# The required Services CI all-green gate checks these exact-head results on applicable PRs.
 
 name: Libs benchmarks
 
 on:
   pull_request:
     paths:
-      - "openbank-libs-domain/**"
-      - "openbank-libs-runtime/**"
-      - "openbank-libs-iso20022/**"
-      - "openbank-libs-benchmarks/**"
-      - "openbank-libs/gradle/libs.versions.toml"
-      - ".github/scripts/check-bench-alloc-baseline.py"
+      - "openbank-libs*/**"
+      - "fuzz/**"
+      - ".clusterfuzzlite/**"
+      - ".github/workflows/services-ci.yml"
+      - ".github/workflows/libs-quality.yml"
       - ".github/workflows/libs-bench.yml"
+      - ".github/workflows/cflite-pr.yml"
+      - ".github/scripts/library_quality_scope.py"
+      - ".github/scripts/test_library_quality_scope.py"
+      - ".github/scripts/check_library_quality_evidence.py"
+      - ".github/scripts/test_library_quality_evidence.py"
+      - ".github/scripts/check-bench-alloc-baseline.py"
+      - ".github/scripts/test_bench_ratchet.py"
+
   workflow_dispatch: {}
 
 permissions:
@@ -35,7 +38,7 @@ concurrency:
 
 jobs:
   jmh:
-    name: JMH allocation baseline (advisory)
+    name: JMH allocation baseline (enforced)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -71,7 +74,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Compare B/op to the committed baseline (advisory)
+      - name: Enforce the committed allocation baseline
         run: |
           python3 .github/scripts/check-bench-alloc-baseline.py \
-            --results openbank-libs-benchmarks/build/reports/jmh/results.json
+            --results openbank-libs-benchmarks/build/reports/jmh/results.json --enforce

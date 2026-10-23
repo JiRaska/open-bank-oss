@@ -577,11 +577,24 @@ jobs:
     timeout-minutes: 20
     permissions:
       actions: read
+      pull-requests: read
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Require exact-head library ABI, fuzz and allocation evidence
+        if: github.event_name == 'pull_request' && needs.changes.outputs.admission == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUALITY_REPO: ${{ github.repository }}
+          QUALITY_PR: ${{ github.event.pull_request.number }}
+          QUALITY_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 .github/scripts/test_library_quality_evidence.py
+          python3 .github/scripts/check_library_quality_evidence.py \
+            --repo "$QUALITY_REPO" --pr "$QUALITY_PR" --head "$QUALITY_HEAD"
+
       - name: Verify roster retry offline fixtures
         run: python3 .github/scripts/test-service-ci-roster-retry.py
       - name: Verify no service failed
