@@ -111,6 +111,12 @@ BASELINE: dict[str, str] = {
         "#668 — mis-pairing: a three-value frequency vs the product IR Cadence.",
     "openbank-customer-edge:ANNUAL,AT_MATURITY,MONTHLY,QUARTERLY,SEMI_ANNUAL":
         "#668 — mis-pairing: a deposit interest-payment frequency vs the product IR Cadence.",
+    # ADR-0344 D1: treasury's leg `Frequency` is libs-finance's frequency vocabulary
+    # (`com.openbank.libs.finance.schedule.Frequency`, a sealed class parsed from exactly these names,
+    # not a Kotlin enum), so the gate finds no enum to pair it with and falls back to the product IR
+    # Cadence it shares calendar words with.
+    "openbank-treasury-service:ANNUAL,DAILY,MONTHLY,ONCE,QUARTERLY,SEMI_ANNUAL,WEEKLY":
+        "ADR-0344 D1 — mis-pairing: a leg frequency (libs-finance Frequency names) vs the product IR Cadence.",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
     # values are the `channel` of the app-interaction attribution response
     # (GET /api/v1/campaigns/interactions/{interactionRef}/attribution), which resolves ONLY an

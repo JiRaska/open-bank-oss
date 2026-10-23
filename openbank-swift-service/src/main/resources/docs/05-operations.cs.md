@@ -78,6 +78,12 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 
 ## Runbooky
 
+### Nevyřešené výsledky interního zaúčtování
+
+`openbank_payment_unsettled_total{rail="SWIFT",outcome="..."}` počítá neúspěšné pokusy vůči transaction-service. Povolené hodnoty jsou `mismatch`, `failed-replay`, `conflict`, `unexpected-status` a `transport-error`; všech pět řad se registruje s nulou před prvním pokusem. Opakované pokusy se počítají samostatně, nejde tedy o počet unikátních zpráv. Zrušení coroutine ani úspěšná odpovídající reakce čítač nezvyšují. `failed-replay` označuje dekódovanou odpověď FAILED, nikoli důkaz, že tento požadavek byl replay.
+
+Zaúčtování vyžaduje HTTP 201, transakci COMPLETED s identifikátorem a shodu s odeslanými údaji. Ostatní výsledky neprokazují dokončení zaúčtování; nezávislý ACK/odmítnutí může změnit obchodní stav. Při šetření zachovejte klíč `swift-settlement-<messageId>`: 409 ani nejistá odpověď nedokazují dokončené zaúčtování. Před nápravnou akcí ověřte výsledek schváleným reconciliation nástrojem; neměňte klíč ani nepoužívejte nový booking POST jako vyhledávání. Veřejné vyhledání transakce podle idempotentního klíče ani alarm stáří vůči SLA tato změna čítače nepřidává; zůstávají součástí #13623.
+
 ### Outbox lag / události neproudí
 
 1. Počet pending: `SELECT count(*) FROM swift_outbox WHERE status='PENDING'`.
@@ -127,3 +133,22 @@ naslepo znovu a známý převod se nikdy neodmítne: nejasné odeslání se ře�
 UETR. Sweeper (`institution-transfer.resolution.*`: `every`, `initial-delay`, `min-age`,
 `batch-size`) se ptá na neznámá odeslání a SENT převody starší než `min-age`. Záznam, který konzument
 nezpracuje, jde do dead-letter podle konfigurace kanálu.
+
+## Hodiny odchozího zaúčtování (#13623)
+
+Přijetí MT103 uloží první čas splatnosti zaúčtování atomicky se SENT a existující stavovou
+událostí před voláním transaction-service. Chybějící účet povinnost neuzavírá. Pouze striktně
+ověřená odpověď 201 COMPLETED s identitou transakce dovolí atomicky uložit lokální důkaz,
+COMPLETED a stavovou událost. Souběžný ACK/odmítnutí nebo změna revize blokuje zastaralé
+dokončení; stav callbacku se nepřepisuje. Chybějící lokální důkaz neznamená, že poskytovatel
+nezaúčtoval. Rekonciliace používá původní klíč `swift-settlement-<messageId>`; nový retry ani klíč
+nevzniká.
+
+`openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SWIFT"}` je dolní mez stáří
+nejstarší sledované povinnosti bez lokálního důkazu. Zůstává číselná i při nenulové
+`openbank_payment_booking_unknown_coverage{rail="SWIFT"}` pro nepokryté historické řádky MT103.
+Dotaz nefiltruje obchodní stav: ACKNOWLEDGED/REJECTED není důkaz zaúčtování. Před prvním
+úspěšným dotazem je hodnota NaN, známá prázdná sledovaná množina má nulu nezávisle na neznámém
+pokrytí. Chyba dotazu zachová čas v cache, stáří dále roste a nezaznamená se úspěch workflow.
+Nullable sloupce nedoplňují smyšlené historické časy. Změna nepřidává SLA, alert, veřejné API,
+automatické historické opravy ani finanční opakování.
