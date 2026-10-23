@@ -18,7 +18,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
-/** `swift_institution_transfers` (V11). Every column named explicitly (`entity-column-names`). */
+/** `swift_institution_transfers` (V12). Every column named explicitly (`entity-column-names`). */
 @Entity
 @Table(name = "swift_institution_transfers")
 class InstitutionTransferEntity {
