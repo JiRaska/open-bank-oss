@@ -416,6 +416,25 @@ jobs:
           retention-days: 14
           overwrite: true
 
+      # Last step, success() only: the all-green aggregate requires one of these per
+      # selected service and reads them via the artifact service, not the REST quota.
+      - name: Record service build success marker
+        if: success() && inputs.ref == ''
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/marker"
+          printf '{"service":"%s","sha":"%s","result":"success","attempt":%s}\n' \
+            "$SERVICE" "$GITHUB_SHA" "$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/marker/marker.json"
+      - name: Upload service build success marker
+        if: success() && inputs.ref == ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: service-build-ok-${{ inputs.service }}
+          path: ${{ runner.temp }}/marker/marker.json
+          retention-days: 3
+          overwrite: true
+
   # ── publish-evidence: commit-addressed Test Intelligence store (#13201) ─────────────────
   # admin-ui reads each component's evidence for the commit it is RUNNING from
   # `<store>/<component>/<sha8>/test-intelligence.json`. This job publishes that object from

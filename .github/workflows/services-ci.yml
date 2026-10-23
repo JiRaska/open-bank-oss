@@ -309,8 +309,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Verify roster retry offline fixtures
-        run: python3 .github/scripts/test-service-ci-roster-retry.py
+      - name: Verify success-marker check offline fixtures
+        run: python3 .github/scripts/test-check-service-build-markers.py
       - name: Verify no service failed
         run: |
           if [ "${{ needs.changes.result }}" != 'success' ] || [ "${{ needs.changes.outputs.admission }}" != 'true' ]; then
@@ -333,72 +333,22 @@ jobs:
           echo "All changed services built green (or nothing to build)."
       # `needs.build.result` can report success when a reusable matrix child was cancelled
       # before receiving a runner (run 37347641780: Treasury cancelled, all-green passed).
-      # Audit every selected build in this exact attempt instead of trusting that summary.
+      # The jobs API would show it, but it spends the shared installation quota and
+      # exhausting that quota reddened this REQUIRED check on green PRs. Instead each
+      # build leg uploads a success marker as its last step (_service-ci.yml); a cancelled,
+      # failed or unscheduled leg leaves none. Artifact download does not use the REST quota.
+      - name: Download service build success markers
+        if: needs.changes.outputs.any == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: service-build-ok-*
+          path: ${{ runner.temp }}/service-build-markers
       - name: Require every selected service build to pass
         if: needs.changes.outputs.any == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
           SERVICES_JSON: ${{ needs.changes.outputs.services }}
-          JOB_FILE: ${{ runner.temp }}/service-ci-jobs.ndjson
-        run: |
-          set -euo pipefail
-          source .github/scripts/gh-retry.sh
-          export GH_RETRY_MAX_WAIT_SECONDS=900 GH_RETRY_DEAD_LETTER=0
-          rm -f -- "$JOB_FILE" "${JOB_FILE}.candidate"
-          trap 'rm -f -- "${JOB_FILE}.candidate"' EXIT
-          read_roster() {
-            local rc
-            if gh api --paginate \
-              "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
-              --jq '.jobs[] | {name,conclusion}' > "${JOB_FILE}.candidate"; then
-              mv -- "${JOB_FILE}.candidate" "$JOB_FILE"
-            else
-              rc=$?
-              rm -f -- "${JOB_FILE}.candidate"
-              return "$rc"
-            fi
-          }
-          validate_roster() {
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          services = json.loads(os.environ["SERVICES_JSON"])
-          if not isinstance(services, list) or not services or len(services) != len(set(services)):
-              raise SystemExit("Invalid selected-service matrix")
-          expected = {f"build ({service}) / {service} (build)" for service in services}
-          observed = {}
-          for line in Path(os.environ["JOB_FILE"]).read_text().splitlines():
-              job = json.loads(line)
-              name = job["name"]
-              if name.startswith("build (") and name.endswith(" (build)"):
-                  observed.setdefault(name, []).append(job["conclusion"])
-          missing = sorted(expected - set(observed))
-          extra = sorted(set(observed) - expected)
-          if extra:
-              raise SystemExit(f"Service build roster mismatch: missing={missing}, extra={extra}")
-          bad = {name: verdicts for name, verdicts in observed.items() if verdicts != ["success"]}
-          if bad:
-              raise SystemExit(f"Service builds without one successful verdict: {bad}")
-          if missing:
-              print(f"Service build roster incomplete: missing={missing}")
-              raise SystemExit(78)
-          print(f"Verified {len(expected)} selected service builds in this workflow attempt")
-          PY
-          }
-          gh_retry 2 -- read_roster
-          if validate_roster; then
-            exit 0
-          else
-            rc=$?
-            if [[ "$rc" -ne 78 ]]; then exit "$rc"; fi
-          fi
-          # Rerun carry-forward jobs can appear after the aggregate starts. Re-read once,
-          # preserving exact roster/verdict checks and allowing no second quota-reset wait.
-          sleep 15
-          gh_retry 1 -- read_roster
-          validate_roster
+          MARKER_DIR: ${{ runner.temp }}/service-build-markers
+        run: python3 .github/scripts/check-service-build-markers.py
 
   # Nightly-only: turn a failed full-fleet build into an actionable, deduplicated issue.
   # Runs solely for the scheduled run so PR/push failures (already visible as red checks)
