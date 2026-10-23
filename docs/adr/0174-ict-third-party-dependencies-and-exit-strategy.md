@@ -137,6 +137,22 @@ architectural property, not evidence.
   record DeepInfra-direct as the as-built, in the house style ADR-0027 already set with its "As-built
   deltas (honest record)". *(Pending)*
 
+## Amendment 2026-10-21: typed-decision model providers (ADR-0348)
+
+[ADR-0348](0348-typed-decision-models-a-third-inference-class-for-calibrated-schema-bound-triage-decisions.md)
+adds a third inference class behind `TypedDecisionPort`. It changes this register in three ways:
+
+- **No entry today.** No typed-decision provider is contracted or called, so §1 gains no row. A
+  provider becomes a row in the same PR that first wires an adapter to a non-sandbox environment, and
+  the row is named for the provider in the register only, never in charters or service config
+  (ADR-0348 D9).
+- **Criticality is non-critical by construction**, on the same grounds as §4: every failure of the
+  port is `Abstained`, and an abstain routes the item to the human path that exists today. A provider
+  outage lengthens a queue; it moves no money and clears no control (ADR-0348 D4/D5).
+- **Exit position, per §5:** *swap the adapter, or fall back to an in-process ONNX model trained on
+  the labels the shadow period produced.* As with the LLM exit, this is untested until an adapter
+  exists; D4 of this ADR (test one exit) applies to it in the same way.
+
 ## Alternatives considered
 
 - **Multi-cloud.** The textbook Art. 28 answer to concentration risk. Rejected: this is a
