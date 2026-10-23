@@ -15,6 +15,10 @@
 # namespace (`runs-on`, rules.yaml: ci_runners) and are NOT issue labels — keep them out.
 
 labels:
+  # --- PR span (rules.yaml: pr_span_limits, check-pr-component-span.py) -------------------
+  - name: integration-branch
+    color: "fbca04"
+    description: "PR into a long-lived integration branch; exempt from the span limit, never based on main."
   # --- merge train (ADR-0343, merge-train.yml) -----------------------------------------
   - name: merge-train
     color: "0e8a16"

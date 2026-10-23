@@ -13,7 +13,8 @@ import {
   type PlatformView,
   type VersionItem,
 } from '@/lib/platform-view'
-import { platformVersions, type EksLifecycle } from '@/lib/platform-versions'
+import { readAdminUiContentSnapshot, contentSourceMetadata } from '@/lib/evidence/contentSource'
+import { platformVersions, type PlatformVersions, type EksLifecycle } from '@/lib/platform-versions'
 
 export const PROM_TIMEOUT_MS = 3000
 export const LIVE_CACHE_MS = 60_000
@@ -123,7 +124,7 @@ export function parseImageVersion(component: string, image: string): string | nu
 }
 
 /** Aggregate running-container image rows into distinct running versions per component. */
-export interface LiveImageVersion extends LiveVersion { observedAt: string }
+export interface LiveImageVersion extends LiveVersion { observedAt: string; source?: 'prometheus-runtime-build-info' }
 
 export function aggregateImages(rows: { image: string; container?: string; namespace?: string; count: number; observedAt: string }[]): Record<string, LiveImageVersion[]> {
   const out: Record<string, Map<string, { count: number; observedAt: string }>> = {}
@@ -187,6 +188,7 @@ export const QUERIES = {
   // One sample per container, with its scrape timestamp as the value. Restrict to the
   // kube-state-metrics running condition; stopped/terminating pod specs are not runtime evidence.
   images: 'timestamp(kube_pod_container_info and on (namespace, pod, container) (kube_pod_container_status_running == 1))',
+  karpenterBuild: 'timestamp(karpenter_build_info{namespace="kube-system",container="controller"})',
   podsRunning: 'sum by (namespace) (kube_pod_status_phase{phase="Running"})',
   daemonSetsReady: 'sum by (namespace, daemonset) (kube_daemonset_status_number_ready)',
 } as const
@@ -207,7 +209,7 @@ export interface LiveSnapshot {
 
 export async function fetchLiveSnapshot(fetchImpl: FetchLike = fetch, now: () => Date = () => new Date()): Promise<LiveSnapshot> {
   const settled = await Promise.allSettled(Object.values(QUERIES).map(q => promQuery(q, fetchImpl)))
-  const [apiserver, kubelet, nodeTypes, ready, total, images, pods, daemonSets] = settled
+  const [apiserver, kubelet, nodeTypes, ready, total, images, karpenterBuild, pods, daemonSets] = settled
   const errors = settled.flatMap(s => (s.status === 'rejected' ? [String(s.reason)] : []))
   const rows = (s: PromiseSettledResult<PromRow[]>): PromRow[] | null => (s.status === 'fulfilled' ? s.value : null)
 
@@ -239,6 +241,27 @@ export async function fetchLiveSnapshot(fetchImpl: FetchLike = fetch, now: () =>
     })
     .map(r => ({ image: r.image, container: r.container, namespace: r.namespace, count: 1, observedAt: new Date(r.sampledAtMs).toISOString() }))
   const components = aggregateImages(freshImageRows)
+  // The controller reports its own runtime build version. kube-state-metrics may expose
+  // only a platform digest, which cannot safely be mapped back to a desired image tag.
+  const karpenterVersions = (rows(karpenterBuild) ?? []).filter(r => {
+    const ageMs = fetchedAt.getTime() - r.value * 1000
+    return r.metric.namespace === 'kube-system' && r.metric.container === 'controller'
+      && /^v?\d+\.\d+\.\d+$/.test(r.metric.version ?? '')
+      && Number.isFinite(r.value) && ageMs >= -30_000 && ageMs <= IMAGE_SAMPLE_MAX_AGE_MS
+  }).map(r => ({ version: r.metric.version.replace(/^v/, ''), count: 1, observedAt: new Date(r.value * 1000).toISOString() }))
+  if (karpenterVersions.length > 0) {
+    const versions = new Map<string, LiveImageVersion>()
+    for (const sample of karpenterVersions) {
+      const previous = versions.get(sample.version)
+      versions.set(sample.version, {
+        ...sample,
+        source: 'prometheus-runtime-build-info',
+        count: (previous?.count ?? 0) + 1,
+        observedAt: previous && previous.observedAt > sample.observedAt ? previous.observedAt : sample.observedAt,
+      })
+    }
+    components.karpenter = [...versions.values()].sort((a, b) => b.count - a.count)
+  }
 
   const readyRows = rows(ready)
   const totalRows = rows(total)
@@ -259,7 +282,7 @@ export async function fetchLiveSnapshot(fetchImpl: FetchLike = fetch, now: () =>
   // "Available" means Prometheus actually returned running workloads or a version; an empty
   // answer is a missing scrape target, which must read as unavailable, not as "nothing runs".
   if (errors.length > 0) console.error('[live-platform-versions] prometheus query failures:', errors.join('; '))
-  const available = freshImageRows.length > 0 || kubernetes !== null || kubelets !== null
+  const available = freshImageRows.length > 0 || karpenterVersions.length > 0 || kubernetes !== null || kubelets !== null
   return {
     available,
     fetchedAt: fetchedAt.toISOString(),
@@ -335,8 +358,7 @@ export async function getEksLifecycle(fetchImpl: FetchLike = fetch, nowMs: numbe
 
 const minor = (v: string): string => v.split('.').slice(0, 2).join('.')
 
-export function buildView(live: LiveSnapshot, eksSource: PlatformView['eksLifecycleSource']): PlatformView {
-  const pv = platformVersions
+export function buildView(live: LiveSnapshot, eksSource: PlatformView['eksLifecycleSource'], pv: PlatformVersions | null = platformVersions): PlatformView {
   const declaredFor: Record<string, { v: string | null; src: string | null }> = {
     kubernetes: { v: pv?.kubernetesVersion ?? null, src: pv?.sources.kubernetesVersion ?? null },
     loki: { v: pv?.loki.appVersion ?? null, src: pv?.sources.loki ?? null },
@@ -393,6 +415,11 @@ export function buildView(live: LiveSnapshot, eksSource: PlatformView['eksLifecy
 }
 
 export async function getPlatformView(fetchImpl: FetchLike = fetch): Promise<PlatformView> {
-  const [live, eol] = await Promise.all([getLiveSnapshot(fetchImpl), getEksLifecycle(fetchImpl)])
-  return buildView(live, eol?.source ?? 'snapshot')
+  const [live, eol, content] = await Promise.all([getLiveSnapshot(fetchImpl), getEksLifecycle(fetchImpl), readAdminUiContentSnapshot()])
+  const declared = content.snapshot?.content.platformVersions
+  const provenance = declared ? content : { status: 'unavailable' as const, snapshot: null, provenance: null, error: content.error ?? 'Published content has no platform declarations' }
+  return {
+    ...buildView(live, eol?.source ?? 'snapshot', declared ?? platformVersions),
+    declarationSource: contentSourceMetadata(provenance, { imageFallbackAvailable: platformVersions !== null }),
+  }
 }
