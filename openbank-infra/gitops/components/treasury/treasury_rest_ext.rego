@@ -25,6 +25,7 @@
 #   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
 #   treasury.fixing.read, treasury.marketdata.read — treasury staff (ADR-0344 D5)
 #   treasury.marketdata.import, treasury.fixing.manual, treasury.fixing.run — ROLE_TREASURY_BACK_OFFICE
+#   treasury.revaluation.read — treasury staff; treasury.revaluation.run — ROLE_TREASURY_BACK_OFFICE (ADR-0344 D7/D8)
 #   treasury.marketdata.approve               — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
 #   treasury.payment.propose, .cancel        — ROLE_TREASURY_BACK_OFFICE (.cancel also ROLE_TREASURY_APPROVER)
 #   treasury.payment.resolve                  — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
@@ -91,6 +92,8 @@ allowed_reasons contains "treasury-staff-read" if {
 		"treasury.marketdata.read",
 		# ADR-0344 D6: own-account payments.
 		"treasury.payment.read",
+		# ADR-0344 D7/D8: the revaluation record of a date.
+		"treasury.revaluation.read",
 	}
 }
 
@@ -222,7 +225,7 @@ allowed_reasons contains "treasury-schedule-preview" if {
 allowed_reasons contains "treasury-back-office-market-data" if {
 	treasury_staff
 	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
-	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run"}
+	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run", "treasury.revaluation.run"}
 }
 
 allowed_reasons contains "treasury-approver-market-data" if {

@@ -66,10 +66,11 @@ enum class ProductType(
         /**
          * ADR-0344 delivery phases: the products a dealer may draft today. Phase 0 delivered the five
          * legacy products, phase 1a adds IRS and FRA (cash flows and fixings), and phase 2a lets them
-         * settle and mature through the posting-rule matrix. Mirrored by the parity gate's
-         * REQUIRED_PRODUCTS.
+         * settle and mature through the posting-rule matrix; phase 3 adds FX forwards and swaps,
+         * bills of exchange and loans. Mirrored by the parity gate's REQUIRED_PRODUCTS.
          */
-        val DELIVERED: Set<ProductType> = entries.filter { it.legacy }.toSet() + setOf(IRS, FRA)
+        val DELIVERED: Set<ProductType> = entries.filter { it.legacy }.toSet() +
+            setOf(IRS, FRA, FX_FORWARD, FX_SWAP, BILL_OF_EXCHANGE, LOAN)
     }
 }
 

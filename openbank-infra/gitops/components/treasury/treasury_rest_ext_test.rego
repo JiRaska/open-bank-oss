@@ -335,3 +335,20 @@ test_only_approvers_resolve_a_released_payment if {
 	allowed(approver, "treasury.payment.resolve")
 	allowed(senior, "treasury.payment.resolve")
 }
+
+# --- ADR-0344 D7/D8 revaluation: must-DENY first ---
+
+test_revaluation_run_is_back_office_only if {
+	not allowed(dealer, "treasury.revaluation.run")
+	not allowed(approver, "treasury.revaluation.run")
+	every p in [shared_sa, renamed_sa, agent, nobody] {
+		not allowed(p, "treasury.revaluation.run")
+	}
+
+	# Reads: as every treasury `.read`, a ROLE_OPERATOR holder reaches it through operator-read-any.
+	every p in [renamed_sa, agent, nobody] {
+		not allowed(p, "treasury.revaluation.read")
+	}
+	allowed(back_office, "treasury.revaluation.run")
+	allowed(dealer, "treasury.revaluation.read")
+}

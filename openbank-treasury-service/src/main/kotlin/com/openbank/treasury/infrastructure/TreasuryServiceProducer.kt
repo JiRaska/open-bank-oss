@@ -145,6 +145,39 @@ class TreasuryServiceProducer {
         clock: Clock,
     ): CashFlowUseCase = CashFlowService(deals, cashFlows, schedules, objectMapper, clock)
 
+    /** Contract 8.4: cash-flow analysis over the stored ledger. */
+    @Produces
+    @ApplicationScoped
+    fun cashFlowAnalysisService(
+        cashFlows: CashFlowRepository,
+        marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
+        references: ReferenceRepository,
+    ): com.openbank.treasury.application.usecase.CashFlowAnalysisService =
+        com.openbank.treasury.application.usecase.CashFlowAnalysisService(cashFlows, marketData, references)
+
+    /** ADR-0344 D7/D8: revaluation off the risk engine's valuation, posted through the matrix. */
+    @Produces
+    @ApplicationScoped
+    @Suppress("LongParameterList")
+    fun revaluationService(
+        deals: DealRepository,
+        cashFlows: CashFlowRepository,
+        valuation: com.openbank.treasury.application.port.out.ValuationPort,
+        revaluations: com.openbank.treasury.application.port.out.RevaluationRepository,
+        ledger: LedgerPostingPort,
+        references: ReferenceRepository,
+        clock: Clock,
+    ): com.openbank.treasury.application.usecase.RevaluationService =
+        com.openbank.treasury.application.usecase.RevaluationService(
+            deals,
+            cashFlows,
+            valuation,
+            revaluations,
+            ledger,
+            clock,
+            BookCategories(references, clock)::of,
+        )
+
     /** ADR-0344 D3: the reference-data steward; the plain service is also what deal capture validates against. */
     @Produces
     @ApplicationScoped

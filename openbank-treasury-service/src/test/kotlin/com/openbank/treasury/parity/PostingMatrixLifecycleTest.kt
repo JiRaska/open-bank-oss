@@ -25,6 +25,7 @@ import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 import java.math.BigDecimal
+import java.time.LocalDate
 
 /**
  * ADR-0344 D7: every leg-described product settles, accrues, pays and matures through the
@@ -115,6 +116,28 @@ class PostingMatrixLifecycleTest {
             assertThat(PostingMatrix.hasEvent(it, PostingEvent.REVALUATION)).describedAs("$it revalues").isTrue()
         }
         assertThat(PostingMatrix.hasEvent(ProductType.LOAN, PostingEvent.REVALUATION)).isFalse()
+    }
+
+    @Test
+    fun `a derivative revaluation posts a gain to the asset and a loss to the liability, both through P&L`() {
+        val irs = ParityFixtures.deal(matrixFixtures.first { it["product"].asText() == "IRS" }["deal"])
+        val day = LocalDate.of(2026, 12, 31)
+        val gain = checkNotNull(
+            MatrixPostings.revaluation(irs, BigDecimal("1500.00"), irs.currency, day, Ifrs9Category.FVTPL),
+        )
+        assertThat(gain.lines.map { it.glCode() to it.side }).containsExactlyInAnyOrder(
+            LedgerMapGolden.gl("DERIVATIVE_ASSET", "FAIR_VALUE", irs.currency) to Side.DEBIT,
+            LedgerMapGolden.gl("TREASURY_TRADING_RESULT", "UNREALISED_GAIN", irs.currency) to Side.CREDIT,
+        )
+        val loss = checkNotNull(
+            MatrixPostings.revaluation(irs, BigDecimal("-200.00"), irs.currency, day, Ifrs9Category.FVTPL),
+        )
+        assertThat(loss.lines.map { it.glCode() to it.side }).containsExactlyInAnyOrder(
+            LedgerMapGolden.gl("TREASURY_TRADING_RESULT", "UNREALISED_LOSS", irs.currency) to Side.DEBIT,
+            LedgerMapGolden.gl("DERIVATIVE_LIABILITY", "FAIR_VALUE", irs.currency) to Side.CREDIT,
+        )
+        assertThat(MatrixPostings.revaluation(irs, BigDecimal.ZERO, irs.currency, day, Ifrs9Category.FVTPL)).isNull()
+        assertThat(gain.idempotencyKey).isEqualTo("treasury:${irs.id}:revaluation:$day")
     }
 
     @Test

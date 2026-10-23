@@ -6,10 +6,14 @@ package com.openbank.treasury.parity
 
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.MatrixPostings
+import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.PostingLine
+import com.openbank.treasury.domain.model.PostingMatrix
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.reference.Ifrs9Category
 import kotlinx.coroutines.runBlocking
+import java.math.BigDecimal
+import java.time.LocalDate
 
 /** Every journal of every matrix fixture's life, rendered with ids replaced by stable ordinals. */
 object MatrixJournalRender {
@@ -39,6 +43,12 @@ object MatrixJournalRender {
                 if (!deal.product.settlesOnOneDay) {
                     MatrixPostings.maturity(deal, flows, category, MatrixPostings.amortisedThrough(deal, flows, last))
                         ?.let(journals::add)
+                }
+                if (PostingMatrix.hasEvent(product, PostingEvent.REVALUATION)) {
+                    listOf(BigDecimal("1500.00"), BigDecimal("-200.00")).forEach { change ->
+                        MatrixPostings.revaluation(deal, change, deal.currency, LocalDate.of(2026, 12, 31), category)
+                            ?.let(journals::add)
+                    }
                 }
                 journals.map { j ->
                     var key = j.idempotencyKey.replace(deal.id.toString(), "D")
