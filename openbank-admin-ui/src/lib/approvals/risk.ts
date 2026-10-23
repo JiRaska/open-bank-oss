@@ -39,6 +39,7 @@ const FOUR_EYES_VERBS: ReadonlySet<string> = new Set([
 const FOUR_EYES_ACTIONS: ReadonlySet<string> = new Set([
   'settlement.create',
   'catalog.publish',
+  'catalog.publish-ir',
   'commstyle.publish',
   'opsmessage.compose',
   'campaign.activate',

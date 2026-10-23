@@ -9,6 +9,7 @@ import com.openbank.productcatalog.domain.catalog.ProductOffering
 import com.openbank.productcatalog.domain.catalog.ProductRevision
 import com.openbank.productcatalog.domain.catalog.ProductSpecification
 import com.openbank.productcatalog.domain.catalog.RevisionApproval
+import com.openbank.productcatalog.domain.catalog.RevisionIrSignature
 import com.openbank.productcatalog.domain.catalog.SchemaRef
 import java.time.Instant
 import java.util.UUID
@@ -45,6 +46,8 @@ interface GenericCatalogRepository {
         reason: String,
         contentHash: String,
         at: Instant,
+        /** ADR-0352 §4: present only for an IR-bearing revision published through `publish-ir`; stored as evidence. */
+        irSignature: RevisionIrSignature? = null,
     ): ProductRevision
     suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision?
 
