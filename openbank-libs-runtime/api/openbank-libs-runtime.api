@@ -1453,6 +1453,107 @@ public final class com/openbank/libs/persistence/outbox/TraceparentCapture {
 	public final fun parentContext (Ljava/lang/String;)Lio/opentelemetry/context/Context;
 }
 
+public final class com/openbank/libs/productrevision/HmacIrSigner : com/openbank/libs/productrevision/IrSignatureVerifierPort, com/openbank/libs/productrevision/IrSignerPort {
+	public static final field ALGORITHM Ljava/lang/String;
+	public static final field Companion Lcom/openbank/libs/productrevision/HmacIrSigner$Companion;
+	public fun <init> ([BLjava/lang/String;)V
+	public fun sign (Ljava/lang/String;)Lcom/openbank/libs/productrevision/IrSignature;
+	public fun verify (Ljava/lang/String;Lcom/openbank/libs/productrevision/IrSignature;)Z
+}
+
+public final class com/openbank/libs/productrevision/HmacIrSigner$Companion {
+}
+
+public final class com/openbank/libs/productrevision/IrSignature {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/productrevision/IrSignature;
+	public static synthetic fun copy$default (Lcom/openbank/libs/productrevision/IrSignature;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/productrevision/IrSignature;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlgorithm ()Ljava/lang/String;
+	public final fun getKeyId ()Ljava/lang/String;
+	public final fun getSignature ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/openbank/libs/productrevision/IrSignatureVerifierPort {
+	public abstract fun verify (Ljava/lang/String;Lcom/openbank/libs/productrevision/IrSignature;)Z
+}
+
+public abstract interface class com/openbank/libs/productrevision/IrSignerPort {
+	public abstract fun sign (Ljava/lang/String;)Lcom/openbank/libs/productrevision/IrSignature;
+}
+
+public final class com/openbank/libs/productrevision/IrSigningException : java/lang/RuntimeException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
+public final class com/openbank/libs/productrevision/OpenBaoTransitIrSigner : com/openbank/libs/productrevision/IrSignatureVerifierPort, com/openbank/libs/productrevision/IrSignerPort {
+	public static final field ALGORITHM Ljava/lang/String;
+	public static final field Companion Lcom/openbank/libs/productrevision/OpenBaoTransitIrSigner$Companion;
+	public fun <init> (Lcom/openbank/libs/security/OpenBaoTransport;Ljava/lang/String;Lcom/openbank/libs/security/OpenBaoTokenSource;Ljava/lang/String;Lcom/fasterxml/jackson/databind/ObjectMapper;)V
+	public synthetic fun <init> (Lcom/openbank/libs/security/OpenBaoTransport;Ljava/lang/String;Lcom/openbank/libs/security/OpenBaoTokenSource;Ljava/lang/String;Lcom/fasterxml/jackson/databind/ObjectMapper;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun sign (Ljava/lang/String;)Lcom/openbank/libs/productrevision/IrSignature;
+	public fun verify (Ljava/lang/String;Lcom/openbank/libs/productrevision/IrSignature;)Z
+}
+
+public final class com/openbank/libs/productrevision/OpenBaoTransitIrSigner$Companion {
+}
+
+public final class com/openbank/libs/productrevision/PinnedRevisionLoader {
+	public static final field Companion Lcom/openbank/libs/productrevision/PinnedRevisionLoader$Companion;
+	public static final field METRIC Ljava/lang/String;
+	public fun <init> (Lcom/openbank/libs/productrevision/SignedRevisionSource;Lcom/openbank/libs/productrevision/IrSignatureVerifierPort;Lio/micrometer/core/instrument/MeterRegistry;)V
+	public synthetic fun <init> (Lcom/openbank/libs/productrevision/SignedRevisionSource;Lcom/openbank/libs/productrevision/IrSignatureVerifierPort;Lio/micrometer/core/instrument/MeterRegistry;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun cachedHashes ()Ljava/util/Set;
+	public final fun load (Ljava/lang/String;)Lcom/openbank/libs/product/ir/ProductRevisionIr;
+}
+
+public final class com/openbank/libs/productrevision/PinnedRevisionLoader$Companion {
+}
+
+public final class com/openbank/libs/productrevision/PinnedRevisionUnavailableException : java/lang/RuntimeException {
+	public fun <init> (Lcom/openbank/libs/productrevision/RevisionLoadOutcome;Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Lcom/openbank/libs/productrevision/RevisionLoadOutcome;Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getOutcome ()Lcom/openbank/libs/productrevision/RevisionLoadOutcome;
+	public final fun getRevisionHash ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/productrevision/RevisionLoadOutcome : java/lang/Enum {
+	public static final field CACHE_HIT Lcom/openbank/libs/productrevision/RevisionLoadOutcome;
+	public static final field HASH_MISMATCH Lcom/openbank/libs/productrevision/RevisionLoadOutcome;
+	public static final field INVALID_IR Lcom/openbank/libs/productrevision/RevisionLoadOutcome;
+	public static final field LOADED Lcom/openbank/libs/productrevision/RevisionLoadOutcome;
+	public static final field MISSING Lcom/openbank/libs/productrevision/RevisionLoadOutcome;
+	public static final field SIGNATURE_INVALID Lcom/openbank/libs/productrevision/RevisionLoadOutcome;
+	public static final field VERIFIER_UNAVAILABLE Lcom/openbank/libs/productrevision/RevisionLoadOutcome;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getTag ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/productrevision/RevisionLoadOutcome;
+	public static fun values ()[Lcom/openbank/libs/productrevision/RevisionLoadOutcome;
+}
+
+public final class com/openbank/libs/productrevision/SignedRevisionCopy {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/productrevision/IrSignature;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/productrevision/IrSignature;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/productrevision/IrSignature;)Lcom/openbank/libs/productrevision/SignedRevisionCopy;
+	public static synthetic fun copy$default (Lcom/openbank/libs/productrevision/SignedRevisionCopy;Ljava/lang/String;Lcom/openbank/libs/productrevision/IrSignature;ILjava/lang/Object;)Lcom/openbank/libs/productrevision/SignedRevisionCopy;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIrJson ()Ljava/lang/String;
+	public final fun getSignature ()Lcom/openbank/libs/productrevision/IrSignature;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/openbank/libs/productrevision/SignedRevisionSource {
+	public abstract fun fetch (Ljava/lang/String;)Lcom/openbank/libs/productrevision/SignedRevisionCopy;
+}
+
 public final class com/openbank/libs/resilience/KeyedCall {
 	public static final field INSTANCE Lcom/openbank/libs/resilience/KeyedCall;
 	public final fun classify (ZLjakarta/ws/rs/ProcessingException;)Ljava/lang/RuntimeException;
