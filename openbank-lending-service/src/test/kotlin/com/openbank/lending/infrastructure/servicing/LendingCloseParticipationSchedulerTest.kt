@@ -69,7 +69,7 @@ class LendingCloseParticipationSchedulerTest {
             accrualEvery = accrualEvery,
             provisioningEvery = provisioningEvery,
             lookbackDays = 3,
-        ).apply { staleAfter = java.time.Duration.ofHours(2) }
+        ).apply { drainBudget = java.time.Duration.ofMinutes(10) }
 
     @BeforeEach
     fun stubPanacheSession() {
@@ -217,7 +217,7 @@ class LendingCloseParticipationSchedulerTest {
         val pragueDay = LocalDate.of(2026, 10, 3)
         val asked = mutableListOf<LocalDate>()
         val accrual = mockk<AccrueInterestUseCase> {
-            every { accrueDueInterest(any(), any()) } answers {
+            every { accrueDueInterest(any(), any(), any()) } answers {
                 asked += firstArg<LocalDate>()
                 Uni.createFrom().item(AccrualOutcome(firstArg(), installmentsAccrued = 1, journalsPosted = 1))
             }
@@ -298,7 +298,7 @@ class LendingCloseParticipationSchedulerTest {
     @Test
     fun `a pass marks itself in flight before accruing`() {
         val accrual = mockk<AccrueInterestUseCase>()
-        every { accrual.accrueDueInterest(any(), any()) } answers {
+        every { accrual.accrueDueInterest(any(), any(), any()) } answers {
             assertThat(runs.inFlight.keys).contains(today to LendingCloseJobs.ACCRUAL)
             Uni.createFrom().item(AccrualOutcome(today, 0))
         }
@@ -312,7 +312,7 @@ class LendingCloseParticipationSchedulerTest {
     @Test
     fun `a truncated batch is drained within the pass and the day records RAN`() {
         val accrual = mockk<AccrueInterestUseCase>()
-        every { accrual.accrueDueInterest(today, 2) } returnsMany listOf(
+        every { accrual.accrueDueInterest(today, 2, any()) } returnsMany listOf(
             Uni.createFrom().item(AccrualOutcome(today, 2, 2, truncated = true)),
             Uni.createFrom().item(AccrualOutcome(today, 1, 1, truncated = false)),
         )
@@ -338,7 +338,7 @@ class LendingCloseParticipationSchedulerTest {
         )
         val asked = mutableListOf<LocalDate>()
         val accrual = mockk<AccrueInterestUseCase>()
-        every { accrual.accrueDueInterest(any(), any()) } answers {
+        every { accrual.accrueDueInterest(any(), any(), any()) } answers {
             asked += firstArg<LocalDate>()
             Uni.createFrom().item(AccrualOutcome(firstArg(), 7, 7))
         }
@@ -350,6 +350,49 @@ class LendingCloseParticipationSchedulerTest {
         assertThat(caughtUp.refused).isZero()
         assertThat(caughtUp.refusalReason).isNull()
         assertThat(caughtUp.itemsProcessed).isEqualTo(507)
+    }
+
+    // #13708 review: a pass that crashed mid-way leaves running=TRUE; the next pass must heal the day.
+    @Test
+    fun `a day a crashed pass left in flight is re-run as of that day and re-recorded RAN`() {
+        val dayD = today.minusDays(1)
+        runs.markStarted(dayD, LendingCloseJobs.ACCRUAL, clock.instant().minusSeconds(3 * 3600)).await().indefinitely()
+        val asked = mutableListOf<LocalDate>()
+        val accrual = mockk<AccrueInterestUseCase>()
+        every { accrual.accrueDueInterest(any(), any(), any()) } answers {
+            asked += firstArg<LocalDate>()
+            Uni.createFrom().item(AccrualOutcome(firstArg(), 2, 2))
+        }
+        InterestAccrualScheduler(accrual, 500, clock, noOpDomainMetrics(), runs).runAccrualPass()
+            .await().indefinitely()
+
+        assertThat(asked).containsExactly(dayD, today)
+        assertThat(runs.inFlight).isEmpty()
+        val healed = runs.runs.getValue(dayD to LendingCloseJobs.ACCRUAL)
+        assertThat(healed.refused).isZero()
+        assertThat(healed.itemsProcessed).isEqualTo(2)
+        // Booked in the OPEN day: D's row carries no journals, today's carries both passes' journals.
+        assertThat(healed.journalsPosted).isZero()
+        assertThat(runs.runs.getValue(today to LendingCloseJobs.ACCRUAL).journalsPosted).isEqualTo(4)
+    }
+
+    @Test
+    fun `a marker younger than the derived stale threshold is a live pass and is not re-run`() {
+        val dayD = today.minusDays(1)
+        // stale-after = drain budget 10m x (lookback 3 + 1) + 30m = 70m; 60m old is still live.
+        runs.markStarted(dayD, LendingCloseJobs.ACCRUAL, clock.instant().minusSeconds(60 * 60)).await().indefinitely()
+        val asked = mutableListOf<LocalDate>()
+        val accrual = mockk<AccrueInterestUseCase>()
+        every { accrual.accrueDueInterest(any(), any(), any()) } answers {
+            asked += firstArg<LocalDate>()
+            Uni.createFrom().item(AccrualOutcome(firstArg(), 0))
+        }
+        InterestAccrualScheduler(accrual, 500, clock, noOpDomainMetrics(), runs).runAccrualPass()
+            .await().indefinitely()
+
+        assertThat(asked).containsExactly(today)
+        assertThat(LendingCloseJobs.staleAfter(java.time.Duration.ofMinutes(10), 3))
+            .isEqualTo(java.time.Duration.ofMinutes(70))
     }
 
     @Test
@@ -368,7 +411,7 @@ class LendingCloseParticipationSchedulerTest {
     )
 
     private fun accrualScheduler(result: Uni<AccrualOutcome>): InterestAccrualScheduler {
-        val accrual = mockk<AccrueInterestUseCase> { every { accrueDueInterest(any(), any()) } returns result }
+        val accrual = mockk<AccrueInterestUseCase> { every { accrueDueInterest(any(), any(), any()) } returns result }
         return InterestAccrualScheduler(
             accrual,
             batchSize = 500,

@@ -28,6 +28,25 @@ CREATE TABLE lending_close_job_run (
 -- The reporter asks, per accounting day, how many allowance journals provisioning queued for it are
 -- still in the outbox. lending_outbox is exempt from SENT retention (ADR-0329), so it only grows: index
 -- exactly that question instead of scanning the table every hour.
-CREATE INDEX idx_lending_outbox_allowance_accounting_date
+--
+-- Plain CREATE INDEX, not CONCURRENTLY, deliberately (#13708 review):
+--   * Flyway runs this at boot inside a transaction, and CONCURRENTLY cannot run in one. Split into a
+--     non-transactional migration, it must still wait for every open transaction on the table to end,
+--     and at boot the service's own pools are connecting at that moment: account-service measured
+--     exactly that race cancelling a CONCURRENTLY boot build (its V10 header). It would fail the deploy.
+--   * The plain build holds a SHARE lock: outbox WRITES on lending_outbox wait for the build, reads and
+--     the rest of the service do not. Every lending outbox write is the tail of a business transaction
+--     that already tolerates the dispatcher's own seconds-long backlog, and the build reads each row
+--     once (a partial index over one event type, one text key), so it costs one sequential scan of the
+--     table: seconds for hundreds of thousands of rows. The table's live row count was NOT measured for
+--     this change; the sandbox book is small.
+--   * If the table is ever large enough for that scan to matter, build it out of band first, then this
+--     migration is a no-op (IF NOT EXISTS):
+--         CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lending_outbox_allowance_accounting_date
+--             ON lending_outbox ((CAST(payload AS jsonb) ->> 'accountingDate'))
+--             WHERE event_type = 'lending.allowance.posting';
+-- Rollback: DROP INDEX IF EXISTS idx_lending_outbox_allowance_accounting_date; (queries stay correct,
+-- only slower).
+CREATE INDEX IF NOT EXISTS idx_lending_outbox_allowance_accounting_date
     ON lending_outbox ((CAST(payload AS jsonb) ->> 'accountingDate'))
     WHERE event_type = 'lending.allowance.posting';

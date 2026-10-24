@@ -84,7 +84,7 @@ class LendingWorkflowLivenessTest {
         val registry = SimpleMeterRegistry()
         val clock = Clock.fixed(Instant.parse("2026-07-01T04:00:00Z"), ZoneOffset.UTC)
         val accrual = object : AccrueInterestUseCase {
-            override fun accrueDueInterest(asOf: LocalDate, limit: Int) =
+            override fun accrueDueInterest(asOf: LocalDate, limit: Int, deadline: Instant?) =
                 Uni.createFrom().item(AccrualOutcome(asOf = asOf, installmentsAccrued = 2))
         }
         val scheduler =
@@ -122,7 +122,7 @@ class LendingWorkflowLivenessTest {
         val registry = SimpleMeterRegistry()
         val clock = Clock.fixed(Instant.parse("2026-07-01T04:00:00Z"), ZoneOffset.UTC)
         val accrual = object : AccrueInterestUseCase {
-            override fun accrueDueInterest(asOf: LocalDate, limit: Int) =
+            override fun accrueDueInterest(asOf: LocalDate, limit: Int, deadline: Instant?) =
                 Uni.createFrom().item(AccrualOutcome(asOf = asOf, installmentsAccrued = 0))
         }
         val scheduler =
@@ -147,7 +147,7 @@ class LendingWorkflowLivenessTest {
         val registry = SimpleMeterRegistry()
         val clock = Clock.fixed(Instant.parse("2026-07-01T04:00:00Z"), ZoneOffset.UTC)
         val accrual = object : AccrueInterestUseCase {
-            override fun accrueDueInterest(asOf: LocalDate, limit: Int): Uni<AccrualOutcome> =
+            override fun accrueDueInterest(asOf: LocalDate, limit: Int, deadline: Instant?): Uni<AccrualOutcome> =
                 Uni.createFrom().failure(IllegalStateException("ledger down"))
         }
         val scheduler =

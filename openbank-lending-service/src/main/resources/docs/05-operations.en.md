@@ -145,7 +145,7 @@ day and job (`accrual`, `provisioning`).
 | a pass has not run, is in flight, or allowance rows are still in the outbox | nothing yet - the ledger holds the day |
 | accrual answered `409 ACCOUNTING_DAY_CLOSED`, failed, or stayed truncated after its drain budget | REFUSED with a fixed category |
 | provisioning left exposures unprovisioned, could not count coverage, or failed; an allowance row went DEAD | REFUSED with a fixed category |
-| an in-flight marker older than `lending.close.stale-after` (2h) | REFUSED `pass started and never completed` |
+| an in-flight marker older than drain-budget × (lookback + 1) + 30m (70m by default) | REFUSED `pass started and never completed`; the next accrual pass re-runs that day and re-records it |
 | both intervals `off` | SKIPPED |
 
 The accrual drains truncated batches within `lending.servicing.accrual.drain-budget` (PT10M) and

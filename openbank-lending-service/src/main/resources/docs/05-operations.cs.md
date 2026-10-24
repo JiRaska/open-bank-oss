@@ -142,7 +142,7 @@ den a úlohu (`accrual`, `provisioning`).
   ledger den drží.
 - Odmítnutí `409 ACCOUNTING_DAY_CLOSED`, selhání, neúplné pokrytí, DEAD řádek outboxu nebo běh
   zkrácený dávkovým limitem i po vyčerpání rozpočtu: REFUSED s pevnou kategorií.
-- Značka běhu starší než `lending.close.stale-after` (2h): REFUSED `pass started and never completed`.
+- Značka běhu starší než drain-budget × (lookback + 1) + 30 min (výchozí 70 min): REFUSED `pass started and never completed`; další běh výpočtu úroků ten den dopočítá a zapíše jako RAN.
 - Oba intervaly vypnuté (`off`): SKIPPED.
 
 Výpočet úroků zpracovává zkrácené dávky v rámci rozpočtu (`drain-budget` PT10M, `max-drain-rounds`

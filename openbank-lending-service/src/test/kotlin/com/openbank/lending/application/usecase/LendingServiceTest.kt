@@ -787,6 +787,9 @@ class LendingServiceTest {
         // Income is recognized at due date as an accrual (no cash leg), for each installment's interest.
         assertThat(postings.map { it.kind }.toSet()).containsExactly(PostingKind.INTEREST_ACCRUAL)
         assertThat(postings.map { it.amount }).containsExactly(eur("120.00"), eur("110.54"))
+        // ADR-0342: dated in the OPEN Prague accounting day, never left for the adapter's UTC fallback.
+        assertThat(postings.map { it.accountingDate })
+            .containsOnly(com.openbank.libs.domain.calendar.AccountingClock.bank(clock).today())
         verify(exactly = 2) { installments.markAccrued(any(), any()) }
         verify(exactly = 2) { events.emit(any<LendingOutboxMessage>()) }
     }
@@ -815,6 +818,33 @@ class LendingServiceTest {
         verify(exactly = 0) { ledger.post(any()) }
         verify(exactly = 1) { installments.markAccrued(any(), any()) }
         verify(exactly = 0) { events.emit(any<LendingOutboxMessage>()) }
+    }
+
+    // #13708 review: the drain budget is checked INSIDE a batch, not only between batches.
+    @Test
+    fun `accrual stops inside a batch once the deadline has passed and reports the pass truncated`() {
+        val loanId = LoanId.random()
+        val due = (1..3).map { n ->
+            LoanInstallment(
+                loanId = loanId,
+                number = n,
+                dueDate = LocalDate.parse("2026-07-01"),
+                openingBalance = eur("100.00"),
+                principal = eur("100.00"),
+                interest = eur("0.00"),
+                payment = eur("100.00"),
+                closingBalance = eur("0.00"),
+            )
+        }
+        every { installments.findAccruable(any(), any()) } returns Uni.createFrom().item(due)
+        every { installments.markAccrued(any(), any()) } returns Uni.createFrom().item(1)
+
+        val stopped = service.accrueDueInterest(LocalDate.parse("2026-08-01"), 500, clock.instant())
+            .await().indefinitely()
+
+        assertThat(stopped.installmentsAccrued).isZero()
+        assertThat(stopped.truncated).isTrue()
+        verify(exactly = 0) { installments.markAccrued(any(), any()) }
     }
 
     // ADR-0342: a pass the batch cap cut short must say so, or it is recorded RAN over unbooked interest.
