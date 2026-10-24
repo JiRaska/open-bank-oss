@@ -39,7 +39,8 @@ object LendingCloseJobs {
     private const val HTTP_CONFLICT = 409
 
     /** Slack on top of the longest legitimate pass, for scheduling jitter and the final writes. */
-    val STALE_MARGIN: Duration = Duration.ofMinutes(30)
+    private const val STALE_MARGIN_MINUTES = 30L
+    val STALE_MARGIN: Duration = Duration.ofMinutes(STALE_MARGIN_MINUTES)
 
     /**
      * How long an in-flight marker may stand before it means "the pass died". Derived, never

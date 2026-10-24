@@ -6,6 +6,7 @@ The filename and caller IDs are independent of attempts: GitHub carries forward 
 successful dependencies on partial reruns. A selected cancelled/missing build is never
 substituted with a success artifact from an earlier attempt.
 """
+import argparse
 import importlib.util
 import json
 import os
@@ -15,6 +16,28 @@ from pathlib import Path
 SPEC = importlib.util.spec_from_file_location('service_jobs', Path(__file__).with_name('generate-service-ci-jobs.py'))
 service_jobs = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(service_jobs)
+
+
+RENDERER_PROOF_PATHS = {
+    '.github/workflows/services-ci.yml',
+    '.github/scripts/generate-service-ci-jobs.py',
+    '.github/scripts/check-service-build-results.py',
+    '.github/scripts/test-check-service-build-results.py',
+}
+
+
+def renderer_selected(paths, event):
+    """Select renderer proofs independently of the Gradle module inventory."""
+    if event not in {'pull_request', 'push', 'schedule', 'workflow_dispatch'}:
+        raise ValueError('unknown renderer selection event')
+    if (not isinstance(paths, (list, tuple)) or any(
+            not isinstance(path, str) or not path or path.startswith('/')
+            or any(part in {'', '.', '..'} for part in path.split('/'))
+            or any(ord(char) < 32 for char in path) for path in paths)):
+        raise ValueError('invalid renderer changed-file inventory')
+    return (event in {'schedule', 'workflow_dispatch'}
+            or any(path.startswith('openbank-document-renderer/')
+                   or path in RENDERER_PROOF_PATHS for path in paths))
 
 
 def verify(services, needs, event, ref, modules=None):
@@ -37,6 +60,14 @@ def verify(services, needs, event, ref, modules=None):
         scope = changes.get('outputs', {})
         if not isinstance(scope, dict) or scope.get('any') != ('true' if services else 'false'):
             problems.append('selected inventory and any-build scope disagree')
+        renderer = scope.get('renderer-changed') if isinstance(scope, dict) else None
+        if not isinstance(renderer, str) or renderer not in {'true', 'false'}:
+            problems.append('renderer scope is missing or invalid')
+        else:
+            record = needs.get('renderer-tests')
+            wanted = 'success' if renderer == 'true' else 'skipped'
+            if not isinstance(record, dict) or record.get('result') != wanted:
+                problems.append(f'renderer-tests: selected scope requires {wanted}')
     contract_required = event in {'push', 'workflow_dispatch'} and ref == 'refs/heads/main'
     for branch in service_jobs.LANES:
         for module in modules:
@@ -93,7 +124,14 @@ def unique_object(pairs):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--select-renderer', action='store_true')
+    args = parser.parse_args()
     try:
+        if args.select_renderer:
+            selected = renderer_selected(os.environ['FILES'].splitlines(), os.environ['GITHUB_EVENT_NAME'])
+            print('renderer-changed=' + str(selected).lower())
+            return 0
         services = json.loads(os.environ['SERVICES_JSON'], object_pairs_hook=unique_object)
         needs = json.loads(os.environ['NEEDS_JSON'], object_pairs_hook=unique_object)
         problems = verify(services, needs, os.environ['GITHUB_EVENT_NAME'], os.environ['GITHUB_REF'])
