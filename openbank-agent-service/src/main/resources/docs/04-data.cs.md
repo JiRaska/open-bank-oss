@@ -5,7 +5,7 @@
 `openbank-agent-service` je **bezstavová vrstva uvažování a směrování**. Má:
 
 - ❌ **Žádné JPA / Hibernate entity** — vlastní tabulky čte a zapisuje čistým JDBC.
-- ✅ **Flyway migrace** — `agent_proposal` je HITL schvalovací fronta (ADR-0031 D4); `agent_audit_outbox` je odolné předání AI provenance; `agent_merge_record` je důkaz zaznamenaného lidského merge fáze 3.
+- ✅ **Flyway migrace** — `agent_proposal` je HITL schvalovací fronta (ADR-0031 D4); `agent_audit_outbox` je odolné předání AI provenance; `agent_merge_record` je důkaz skutečného merge a odděleného lidského schválení fáze 3.
 - ✅ **Auditní outbox** — před retry doručením do Kafky ukládá producer event id a předaný auditní envelope.
 
 Per-service governance manifest ([`governance.yaml`](../../../../openbank-agent-service/governance.yaml)) deklaruje:
@@ -20,9 +20,9 @@ Per-service governance manifest ([`governance.yaml`](../../../../openbank-agent-
 | `retentionPolicy` | `1 year` |
 | `evidenceExported` | `false` |
 
-> **Rozsah úložiště:** `PostgreSQL` / `openbank_agent` pokrývá HITL frontu, odolné předání AI provenance (`agent_proposal`, `agent_audit_outbox`) i důkaz zaznamenaného lidského merge (`agent_merge_record`) ve schématu `public` služby. Rate-limit čítače v `CharterRateLimiter` (`ConcurrentHashMap`, vynulované při restartu podu) zůstávají **in-memory** a nejsou distribuované. **V kódu není žádné zapojení Redisu**; distribuovaný charter/run stav zůstává follow-upem.
+> **Rozsah úložiště:** `PostgreSQL` / `openbank_agent` pokrývá HITL frontu, odolné předání AI provenance (`agent_proposal`, `agent_audit_outbox`) i důkaz skutečného merge a odděleného lidského schválení (`agent_merge_record`) ve schématu `public` služby. Rate-limit čítače v `CharterRateLimiter` (`ConcurrentHashMap`, vynulované při restartu podu) zůstávají **in-memory** a nejsou distribuované. **V kódu není žádné zapojení Redisu**; distribuovaný charter/run stav zůstává follow-upem.
 
-## `agent_merge_record` — zaznamenané lidské merge (ADR-0031 fáze 3)
+## `agent_merge_record` — skutečný merge a lidské schválení (ADR-0031 fáze 3)
 
 Jeden řádek na každý mergovaný PR autora agentem, ingestovaný mimo pásmo CI workflow `record-agent-merge` přes `POST /api/v1/agent-merge-records` ([03 — API](./03-api.md)). Žádná bankovní data, žádný obsah PR (tělo/diff) — i auditní payload nese pouze fakta o merge.
 
@@ -33,7 +33,7 @@ Jeden řádek na každý mergovaný PR autora agentem, ingestovaný mimo pásmo 
 | `pr_number` | bigint **UNIQUE** | pojistka proti znovudoručení — insert je `ON CONFLICT DO NOTHING`; constraint zároveň slouží jako lookup index pro `pr_number` |
 | `pr_url` | text | |
 | `head_branch` | varchar(256) | |
-| `merged_by` | varchar(128) | člověk, který merge provedl — smysl existence tabulky |
+| `merged_by` | varchar(128) | skutečný vykonavatel na GitHubu; lidské schválení je oddělené |
 | `merged_at` | timestamptz | čas merge (event time) |
 | `title` | text | titulek PR |
 | `proposal_id` | UUID, nullable | měkký odkaz na `agent_proposal`, pokud ho volající dokáže zjistit — bez FK |
@@ -41,6 +41,14 @@ Jeden řádek na každý mergovaný PR autora agentem, ingestovaný mimo pásmo 
 | `source` | varchar(64) | např. `github-actions` |
 
 Index `(agent_id, merged_at DESC)` obsluhuje historii merge jednoho agenta. Migrace `V6__agent_merge_record.sql`; rollback `DROP TABLE agent_merge_record;` (řádky případně nejdřív exportujte — poznámka k rollbacku žije v migraci).
+
+
+V7 přidává `merged_by_type`, `merged_by_id`, skutečná `head_sha` / `merge_commit_sha` a oddělená
+pole lidského schválení (`approved_by`, `approved_by_id`, `approved_at`, URL důkazu a id workflow /
+statusu). Staré řádky mají výchozí `HUMAN` bez vymyšlených důkazů. Historické pozorování pro rozsah
+PR uchovává id a časy uzlů PR/merge události; nikdy neznamená schválení přesného HEAD. App důkaz
+zůstává při opakování neměnný; jiná identita/důkaz je konflikt. Rollback musí uchovat tyto řádky a
+sloupce a zastavit App ingest před návratem nekompatibilního readeru.
 
 ## Přechodný / in-process stav
 
@@ -65,7 +73,7 @@ Služba kromě vlastních důkazních tabulek emituje **AI-atribuované audit ev
 |---|---|---|---|
 | `ModelGateway` | `agent.model.complete` | `AI_AGENT` | `model_id`, `model_provider`, `model_version`, `sensitivity`, **`prompt_hash` (SHA-256, ne syrový prompt)**, `stop_reason`, `input_tokens`, `output_tokens` |
 | `AgentPolicyGate` | `agent.mcp.tool_call` | `AI_AGENT` | `tool`, `capability`, `policy_decision` (ALLOW/DENY), `reason`, `resourceId` |
-| `MergeRecordService` | `agent.pr.merged` | `HUMAN` (actorId = `merged_by`) | `pr_number`, `head_branch`, `agent_id`, `merged_at`, `source` — publikováno **pouze když byl řádek skutečně vložen**, takže znovu doručený webhook neemituje duplicitní auditní záznam |
+| `MergeRecordService` | `agent.pr.merged` | `HUMAN` nebo `SERVICE` podle skutečného vykonavatele (actorId = `merged_by`); oddělená autorizace v payloadu | `pr_number`, `head_branch`, `agent_id`, `merged_at`, `source` — publikováno **pouze když byl řádek skutečně vložen**, takže znovu doručený webhook neemituje duplicitní auditní záznam |
 
 Retenci a tamper-evident řetězec vlastní `audit-service`, ne tato služba.
 
