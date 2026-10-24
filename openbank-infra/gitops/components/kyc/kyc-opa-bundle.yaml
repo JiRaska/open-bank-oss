@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyc-service
     app.kubernetes.io/part-of: kyc
   annotations:
-    openbank.tech/policy-checksum: "da544bd2daaebc9a"
+    openbank.tech/policy-checksum: "00c5002031b1aa62"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2182,6 +2182,7 @@ data:
             - risk.snapshot.list
             - risk.valuation.read
             - risk.market-risk.read
+            - risk.pricing.read
             - risk.curve-set.read
         ROLE_FINANCE:
           grant:
@@ -2189,6 +2190,7 @@ data:
             - risk.snapshot.list
             - risk.valuation.read
             - risk.market-risk.read
+            - risk.pricing.read
             - risk.curve-set.read
 
     shared_m2m_write_prohibition:

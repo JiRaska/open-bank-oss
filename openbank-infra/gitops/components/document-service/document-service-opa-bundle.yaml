@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: document-service
     app.kubernetes.io/part-of: documents
   annotations:
-    openbank.tech/policy-checksum: "128e5a9a6c6c8a04"
+    openbank.tech/policy-checksum: "ff8ac6b79b12f210"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1800,6 +1800,7 @@ data:
             - risk.snapshot.list
             - risk.valuation.read
             - risk.market-risk.read
+            - risk.pricing.read
             - risk.curve-set.read
         ROLE_FINANCE:
           grant:
@@ -1807,6 +1808,7 @@ data:
             - risk.snapshot.list
             - risk.valuation.read
             - risk.market-risk.read
+            - risk.pricing.read
             - risk.curve-set.read
 
     shared_m2m_write_prohibition:

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sdd-service
     app.kubernetes.io/part-of: sdd
   annotations:
-    openbank.tech/policy-checksum: "62254a290e3baf55"
+    openbank.tech/policy-checksum: "da5f2e8247f9f317"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2252,6 +2252,7 @@ data:
             - risk.snapshot.list
             - risk.valuation.read
             - risk.market-risk.read
+            - risk.pricing.read
             - risk.curve-set.read
         ROLE_FINANCE:
           grant:
@@ -2259,6 +2260,7 @@ data:
             - risk.snapshot.list
             - risk.valuation.read
             - risk.market-risk.read
+            - risk.pricing.read
             - risk.curve-set.read
 
     shared_m2m_write_prohibition:

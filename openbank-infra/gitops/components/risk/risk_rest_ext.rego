@@ -7,6 +7,7 @@
 #   risk.snapshot.list    — GET  /snapshots (the run list)
 #   risk.valuation.read   — GET  /snapshots/{id}/valuation (ADR-0344 D8)
 #   risk.market-risk.read — GET  /snapshots/{id}/sensitivity, /var, /fx-position (treasury desk reports)
+#   risk.pricing.read     — POST /pricing (stateless pre-trade pricing; treasury dealer/approvers)
 #   risk.snapshot.read    — GET  /snapshots/{id} and every other per-snapshot analysis
 #                           (granted by base rest.rego `operator-read-any`, ROLE_OPERATOR/ADMIN)
 #   risk.snapshot.create  — POST /snapshots
@@ -94,4 +95,15 @@ allowed_reasons contains "treasury-desk-risk-report-read" if {
 	}
 	role in input.principal.roles
 	input.action in {"risk.snapshot.list", "risk.valuation.read", "risk.market-risk.read"}
+}
+
+# Pre-trade pricing (POST /pricing) is core dealing: the dealer and the approvers see the price
+# before a deal is submitted or booked. Stateless, persists nothing, bounded. Its own action, so
+# this grants no curve-set read or upload. Back office does not price. Real staff only.
+allowed_reasons contains "treasury-desk-risk-pricing" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
+	role in input.principal.roles
+	input.action == "risk.pricing.read"
 }

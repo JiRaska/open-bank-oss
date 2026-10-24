@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: standing-order-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "44e2132701135bb0"
+    openbank.tech/policy-checksum: "acc00f97fdb0f5a6"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2192,6 +2192,7 @@ data:
             - risk.snapshot.list
             - risk.valuation.read
             - risk.market-risk.read
+            - risk.pricing.read
             - risk.curve-set.read
         ROLE_FINANCE:
           grant:
@@ -2199,6 +2200,7 @@ data:
             - risk.snapshot.list
             - risk.valuation.read
             - risk.market-risk.read
+            - risk.pricing.read
             - risk.curve-set.read
 
     shared_m2m_write_prohibition:

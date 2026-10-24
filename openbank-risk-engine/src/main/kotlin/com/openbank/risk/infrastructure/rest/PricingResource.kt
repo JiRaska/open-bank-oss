@@ -44,10 +44,23 @@ class PricingResource {
     lateinit var valuation: ValuationUseCase
 
     @POST
+    // Pre-trade pricing is core dealing: the treasury desk (dealer, approver, senior approver) prices
+    // before submitting. Its own action, risk.pricing.read, so the desk gets no curve-set read or
+    // upload; risk_rest_ext.rego grants it to the desk, humans only.
+    @RolesAllowed(
+        Roles.API,
+        Roles.OPERATOR,
+        Roles.ADMIN,
+        "ROLE_RISK",
+        "ROLE_FINANCE",
+        "ROLE_TREASURY_DEALER",
+        "ROLE_TREASURY_APPROVER",
+        "ROLE_TREASURY_SENIOR_APPROVER",
+    )
     @Operation(
         summary = "Price HYPOTHETICAL legs on a curve set: PV, PV by leg, PV01, DV01 buckets, FX delta; no persistence",
     )
-    @Authorize(action = "risk.curve-set.read", resource = "")
+    @Authorize(action = "risk.pricing.read", resource = "")
     suspend fun price(request: PricingRequest?): Response {
         val body = requireNotNull(request) { "request body is required" }
         val asOf = try {

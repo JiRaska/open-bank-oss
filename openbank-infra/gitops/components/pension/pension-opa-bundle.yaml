@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pension-service
     app.kubernetes.io/part-of: pension
   annotations:
-    openbank.tech/policy-checksum: "356edf84c37d508d"
+    openbank.tech/policy-checksum: "a83c2888fa52acda"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2425,6 +2425,7 @@ data:
             - risk.snapshot.list
             - risk.valuation.read
             - risk.market-risk.read
+            - risk.pricing.read
             - risk.curve-set.read
         ROLE_FINANCE:
           grant:
@@ -2432,6 +2433,7 @@ data:
             - risk.snapshot.list
             - risk.valuation.read
             - risk.market-risk.read
+            - risk.pricing.read
             - risk.curve-set.read
 
     shared_m2m_write_prohibition:

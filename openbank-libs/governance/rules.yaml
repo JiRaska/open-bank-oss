@@ -3881,6 +3881,7 @@ authz:
         - risk.snapshot.list
         - risk.valuation.read
         - risk.market-risk.read
+        - risk.pricing.read
         - risk.curve-set.read
     ROLE_FINANCE:
       grant:
@@ -3888,6 +3889,7 @@ authz:
         - risk.snapshot.list
         - risk.valuation.read
         - risk.market-risk.read
+        - risk.pricing.read
         - risk.curve-set.read
 
 # PROMOTED TO A TOP-LEVEL KEY (2026-08-07). rest.rego reads this as
