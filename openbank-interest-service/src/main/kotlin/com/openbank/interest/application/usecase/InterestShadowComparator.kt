@@ -73,27 +73,26 @@ class InterestShadowComparator(private val interpreter: ProductInterpreter) {
         }
     }
 
-    private fun accrual(revision: ProductRevisionIr, termsRuleId: String, legacy: ShadowLegacyAccrual) =
-        when {
-            !legacy.decidedByPin -> listOf(InterestShadowResult.Unmapped("override-rate"))
-            revision.interest!!.rateType == RateType.TIERED && revision.interest!!.tiers.size > 1 ->
-                listOf(InterestShadowResult.Unmapped("tiered-rate"))
-            else -> {
-                val rule = scheduledRule(revision, Action.AccrueInterest)
-                if (rule == null) {
-                    listOf(InterestShadowResult.Unmapped("accrue-rule"))
-                } else {
-                    val state = ProductState(
-                        currency = legacy.currency,
-                        balance = legacy.balance,
-                        openedOn = legacy.accrualDate,
-                    )
-                    val posts = evaluate(revision, rule, state, legacy.accrualDate).filter { it.ruleId == termsRuleId }
-                    val ir = sum(posts, AccountingClass.INTEREST_EXPENSE, PostingDirection.DEBIT)
-                    listOf(compared(termsRuleId, legacy.accruedAmount, ir))
-                }
+    private fun accrual(revision: ProductRevisionIr, termsRuleId: String, legacy: ShadowLegacyAccrual) = when {
+        !legacy.decidedByPin -> listOf(InterestShadowResult.Unmapped("override-rate"))
+        revision.interest!!.rateType == RateType.TIERED && revision.interest!!.tiers.size > 1 ->
+            listOf(InterestShadowResult.Unmapped("tiered-rate"))
+        else -> {
+            val rule = scheduledRule(revision, Action.AccrueInterest)
+            if (rule == null) {
+                listOf(InterestShadowResult.Unmapped("accrue-rule"))
+            } else {
+                val state = ProductState(
+                    currency = legacy.currency,
+                    balance = legacy.balance,
+                    openedOn = legacy.accrualDate,
+                )
+                val posts = evaluate(revision, rule, state, legacy.accrualDate).filter { it.ruleId == termsRuleId }
+                val ir = sum(posts, AccountingClass.INTEREST_EXPENSE, PostingDirection.DEBIT)
+                listOf(compared(termsRuleId, legacy.accruedAmount, ir))
             }
         }
+    }
 
     private fun capitalisation(revision: ProductRevisionIr, legacy: ShadowLegacyCapitalization): InterestShadowResult {
         val rule = scheduledRule(revision, Action.CapitaliseInterest)
