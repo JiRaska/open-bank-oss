@@ -375,3 +375,5 @@ em{font-style:normal;color:var(--cyan-2)}
 .nav-brand img{width:48px;height:auto;filter:none}
 .footer-brand img{width:48px;height:auto}
 .hero-logo{filter:none;animation:none}
+
+@media(max-width:680px){.proof-grid{grid-template-columns:minmax(0,1fr)}}
