@@ -63,6 +63,26 @@ action, allowed by `rest.rego` only to a human with `ROLE_OPERATOR` or
 `ROLE_ADMIN` who is not a machine principal. Maker and checker must differ,
 which product-catalog enforces separately.
 
+## Shadow comparison (phase 3)
+
+`ProductShadowRecorder` (`openbank-libs-runtime`, package `productrevision`) is the shared
+metrics surface for a service that evaluates the IR in **shadow mode**. That means
+asynchronously, from an outbox row written in the same transaction as the authoritative
+decision. The shadow never runs inside the posting transaction, and its result never changes
+what the legacy code decided.
+
+| Metric | Meaning |
+|---|---|
+| `openbank_product_shadow_inputs_total` | inputs queued, counted after the authoritative transaction commits |
+| `openbank_product_shadow_compared_total` | inputs where the IR result was compared with the authoritative one |
+| `openbank_product_shadow_diverged_total` | comparisons that disagreed |
+| `openbank_product_shadow_not_comparable_total{reason}` | inputs that could not be compared. The `reason` is one value of the closed `ShadowNotComparable` set: no IR, revision unavailable, verification disabled, verification failed, verifier unavailable, rule unmapped, or IR evaluation failed |
+
+Inputs arriving while `compared` stays flat is the "shadow compared nothing" state. An
+all-not-comparable shadow reads as quiet, not as broken, so it gets its own alert
+(`ProductShadowComparedNothing`), alongside `ProductShadowStalled` and
+`ProductShadowDiverged`. billing-service is the first consumer.
+
 ## Testing
 
 openbank-libs-testing holds the golden-scenario runner, `ProductArb` property
