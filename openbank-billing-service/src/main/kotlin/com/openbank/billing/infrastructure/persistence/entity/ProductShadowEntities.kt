@@ -49,6 +49,21 @@ class ProductShadowInputEntity : PanacheEntityBase() {
     @Column(name = "segment")
     var segment: String? = null
 
+    @Column(name = "evaluated_at")
+    var evaluatedAt: Instant? = null
+
+    @Column(name = "evaluation_zone")
+    var evaluationZone: String? = null
+
+    @Column(name = "opened_at")
+    var openedAt: Instant? = null
+
+    @Column(name = "scheduled_cadence")
+    var scheduledCadence: String? = null
+
+    @Column(name = "scheduled_trigger")
+    var scheduledTrigger: String? = null
+
     @Column(name = "legacy_fees", nullable = false)
     lateinit var legacyFees: String
 

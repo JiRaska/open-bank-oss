@@ -18,8 +18,6 @@ import com.openbank.libs.productrevision.RevisionLoadOutcome
 import com.openbank.libs.productrevision.SignedRevisionCopy
 import com.openbank.libs.productrevision.shadow.ProductShadowRecorder
 import com.openbank.libs.productrevision.shadow.ShadowNotComparable
-import java.time.Clock
-import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -39,7 +37,6 @@ class ProductShadowService(
     verifier: IrSignatureVerifierPort?,
     private val comparator: FeeShadowComparator,
     private val recorder: ProductShadowRecorder,
-    private val clock: Clock,
     meters: io.micrometer.core.instrument.MeterRegistry? = null,
     private val maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
 ) {
@@ -88,7 +85,7 @@ class ProductShadowService(
             }
         }
         val results = try {
-            comparator.compare(revision, input, Instant.now(clock))
+            comparator.compare(revision, input)
         } catch (e: ProductEvaluationException) {
             log.warnf("product shadow: IR of %s not evaluable: %s", revision.productCode, e.message)
             return notComparable(ShadowNotComparable.IR_EVALUATION_FAILED)

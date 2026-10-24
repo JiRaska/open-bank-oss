@@ -8,10 +8,13 @@ import com.openbank.billing.domain.ProductShadowInput
 import com.openbank.libs.product.WaiveAttribute
 import com.openbank.libs.product.ir.AccountingClass
 import com.openbank.libs.product.ir.Action
+import com.openbank.libs.product.ir.Cadence
 import com.openbank.libs.product.ir.Hook
 import com.openbank.libs.product.ir.Instruction
+import com.openbank.libs.product.ir.MaturityAction
 import com.openbank.libs.product.ir.PostingDirection
 import com.openbank.libs.product.ir.Predicate
+import com.openbank.libs.product.ir.PredicateEvaluator
 import com.openbank.libs.product.ir.ProductClock
 import com.openbank.libs.product.ir.ProductEvaluationException
 import com.openbank.libs.product.ir.ProductEvent
@@ -19,8 +22,8 @@ import com.openbank.libs.product.ir.ProductInterpreter
 import com.openbank.libs.product.ir.ProductRevisionIr
 import com.openbank.libs.product.ir.ProductState
 import java.math.BigDecimal
-import java.time.Instant
-import java.time.ZoneOffset
+import java.time.LocalDate
+import java.time.ZoneId
 
 /** The outcome of holding one legacy fee decision against the product IR. */
 sealed interface FeeShadowResult {
@@ -53,32 +56,37 @@ sealed interface FeeShadowResult {
  */
 class FeeShadowComparator(private val interpreter: ProductInterpreter) {
 
-    fun compare(revision: ProductRevisionIr, input: ProductShadowInput, at: Instant): List<FeeShadowResult> {
-        val clock = ProductClock(at, ZoneOffset.UTC)
-        val state = ProductState(
-            currency = input.currency,
-            balance = input.balance ?: BigDecimal.ZERO,
-            openedOn = clock.today(),
-            segment = input.segment,
-            monthlyTurnover = input.monthlyTurnover,
-            aggregatePocketBalance = input.aggregatePocketBalance,
-        )
-        val chargingRules = revision.hooks[Hook.SCHEDULED].orEmpty()
-            .mapNotNull { rule -> (rule.action as? Action.ChargeFee)?.let { it.feeRuleId to rule } }
-            .toMap()
+    fun compare(revision: ProductRevisionIr, input: ProductShadowInput): List<FeeShadowResult> {
         val legacyCodes = input.legacyFees.map { it.feeId }.toSet()
+        val irOnly = revision.fees.filter { it.feeCode !in legacyCodes }.map { FeeShadowResult.Unmapped(it.feeCode) }
+        val unknownFacts = input.legacyFees.map { FeeShadowResult.UnknownInput(it.feeId) } + irOnly
+        // The caller's processing instant is deliberately irrelevant to economic evaluation.
+        val capturedAt = input.evaluatedAt
+            ?: return unknownFacts
+        val zone = input.evaluationZone?.let { runCatching { ZoneId.of(it) }.getOrNull() }
+            ?: return unknownFacts
+        val clock = ProductClock(capturedAt, zone)
+        val state = frozenState(input, zone)
+        val chargingRules = revision.hooks[Hook.SCHEDULED].orEmpty()
+            .filter { it.trigger == input.scheduledTrigger && it.action is Action.ChargeFee }
+            .groupBy { (it.action as Action.ChargeFee).feeRuleId }
         val results = input.legacyFees.map { legacy ->
             val fee = revision.fees.firstOrNull { it.feeCode == legacy.feeId }
-            val rule = fee?.let { chargingRules[it.ruleId] }
-            if (fee == null || rule?.trigger == null) {
+            val candidates = fee?.let { chargingRules[it.ruleId] }.orEmpty()
+            val rule = candidates.firstOrNull()
+            if (fee == null) {
                 FeeShadowResult.Unmapped(legacy.feeId)
-            } else if (input.balance == null &&
-                revision.requiresBalance(rule.trigger)
-            ) {
+            } else if (input.scheduledTrigger == null) {
+                // Cadence alone does not establish which IR schedule tag actually fired.
+                FeeShadowResult.UnknownInput(legacy.feeId)
+            } else if (rule == null) {
+                FeeShadowResult.Unmapped(legacy.feeId)
+            } else if (revision.requiresUnknownFacts(rule.trigger, input, state, clock)) {
                 FeeShadowResult.UnknownInput(legacy.feeId)
             } else {
                 val out = interpreter.evaluate(revision, state, ProductEvent(Hook.SCHEDULED, tag = rule.trigger), clock)
-                val posts = out.filterIsInstance<Instruction.Post>().filter { it.ruleId == rule.ruleId }
+                val chargingIds = candidates.map { it.ruleId }.toSet()
+                val posts = out.filterIsInstance<Instruction.Post>().filter { it.ruleId in chargingIds }
                 // Money conservation, asserted by the CONSUMER as well as the interpreter (ADR-0352 §8):
                 // an unbalanced Post is an interpreter defect and is never compared as if it were a decision.
                 if (posts.any { !it.isBalancedPerCurrency() }) {
@@ -97,27 +105,106 @@ class FeeShadowComparator(private val interpreter: ProductInterpreter) {
                 FeeShadowResult.Compared(legacy.feeId, fee.ruleId, diverged, legacy.chargedAmount, irCharged)
             }
         }
-        val irOnly = revision.fees.filter { it.feeCode !in legacyCodes }.map { FeeShadowResult.Unmapped(it.feeCode) }
         return results + irOnly
     }
 
-    // evaluate() executes every rule for this trigger, including their instruction-limit effects.
-    // Do not invent a balance for any of them, but leave unrelated triggers comparable.
-    private fun ProductRevisionIr.requiresBalance(trigger: String?): Boolean =
-        hooks[Hook.SCHEDULED].orEmpty().filter { it.trigger == trigger }.any { rule ->
-            rule.whenPredicate.requiresBalance() ||
-                when (val action = rule.action) {
-                    is Action.ChargeFee -> fees.firstOrNull { it.ruleId == action.feeRuleId }?.waiver.requiresBalance()
-                    Action.AccrueInterest, Action.Mature, Action.EarlyWithdrawalPenalty -> true
-                    else -> false
-                }
-        }
+    private fun frozenState(input: ProductShadowInput, zone: ZoneId) = ProductState(
+        currency = input.currency,
+        balance = input.balance ?: BigDecimal.ZERO,
+        // This placeholder is unobservable: unknownAction below refuses every actual
+        // trigger whose actions can read openedOn when the captured fact is absent.
+        openedOn = input.openedAt?.atZone(zone)?.toLocalDate() ?: LocalDate.MIN,
+        segment = input.segment,
+        monthlyTurnover = input.monthlyTurnover,
+        aggregatePocketBalance = input.aggregatePocketBalance,
+    )
 
-    private fun Predicate?.requiresBalance(): Boolean = when (this) {
-        is Predicate.Comparison -> attribute == WaiveAttribute.BALANCE
-        is Predicate.And -> operands.any { it.requiresBalance() }
-        is Predicate.Or -> operands.any { it.requiresBalance() }
-        is Predicate.Not -> operand.requiresBalance()
+    /** Follows the interpreter's real guard order, including a terminal Reject. */
+    private fun ProductRevisionIr.requiresUnknownFacts(
+        trigger: String?,
+        input: ProductShadowInput,
+        state: ProductState,
+        clock: ProductClock,
+    ): Boolean {
+        val facts = FrozenPredicateFacts(input, state, clock.today())
+        for (rule in hooks[Hook.SCHEDULED].orEmpty().filter { it.trigger == trigger }) {
+            val guard = rule.whenPredicate?.let(facts::truth)
+            if (rule.whenPredicate != null && guard == null) return true
+            if (guard == false) continue
+            if (unknownAction(rule.action, input, facts)) return true
+            if (rule.action is Action.Reject) return false
+        }
+        return false
+    }
+
+    private fun ProductRevisionIr.unknownAccrual(input: ProductShadowInput, facts: FrozenPredicateFacts): Boolean {
+        val balance = input.balance ?: return true
+        if (balance.signum() == 0) return false
+        return interest?.bonus?.predicate?.let { facts.truth(it) == null } ?: false
+    }
+
+    private fun ProductRevisionIr.unknownAction(
+        action: Action,
+        input: ProductShadowInput,
+        facts: FrozenPredicateFacts,
+    ): Boolean = when (action) {
+        is Action.ChargeFee -> fees.firstOrNull { it.ruleId == action.feeRuleId }?.waiver
+            ?.let { facts.truth(it) == null } ?: false
+        Action.AccrueInterest -> unknownAccrual(input, facts)
+        // A present interest section reads accruedInterest, not yet supplied by the legacy snapshot.
+        Action.CapitaliseInterest -> interest != null
+        Action.Mature ->
+            interest != null ||
+                (
+                    termDeposit?.maturityAction == MaturityAction.PAY_OUT &&
+                        input.balance == null
+                    )
+        is Action.Schedule ->
+            action.cadence == Cadence.AT_MATURITY &&
+                input.openedAt == null
+        // A scheduled event carries no posting: this action returns before reading state.
+        Action.EarlyWithdrawalPenalty -> false
         else -> false
     }
+}
+
+/** Missing facts stay unknown under Not; decisive known And/Or branches need no invented values. */
+private class FrozenPredicateFacts(
+    private val input: ProductShadowInput,
+    private val state: ProductState,
+    private val today: LocalDate,
+) {
+    fun truth(predicate: Predicate): Boolean? = when (predicate) {
+        is Predicate.And -> combined(predicate.operands, conjunction = true)
+        is Predicate.Or -> combined(predicate.operands, conjunction = false)
+        is Predicate.Not -> truth(predicate.operand)?.not()
+        else -> leaf(predicate)
+    }
+
+    private fun combined(operands: List<Predicate>, conjunction: Boolean): Boolean? {
+        var unknown = false
+        for (operand in operands) {
+            val value = truth(operand)
+            if (value == !conjunction) return !conjunction
+            if (value == null) unknown = true
+        }
+        return if (unknown) null else conjunction
+    }
+
+    private fun leaf(predicate: Predicate): Boolean? = when (predicate) {
+        // No authoritative history snapshot is supplied yet; no empty history is asserted.
+        is Predicate.NoEvents, is Predicate.CountEvents, is Predicate.SumEvents, is Predicate.BalanceMin -> null
+        is Predicate.Comparison -> if (missing(predicate.attribute)) null else evaluate(predicate)
+        else -> evaluate(predicate)
+    }
+
+    private fun missing(attribute: WaiveAttribute): Boolean = when (attribute) {
+        WaiveAttribute.BALANCE -> input.balance == null
+        WaiveAttribute.MONTHLY_TURNOVER -> input.monthlyTurnover == null
+        WaiveAttribute.AGGREGATE_POCKET_BALANCE -> input.aggregatePocketBalance == null
+        WaiveAttribute.SEGMENT -> input.segment == null
+        WaiveAttribute.CURRENCY -> false
+    }
+
+    private fun evaluate(predicate: Predicate): Boolean = PredicateEvaluator.test(predicate, state, null, today)
 }

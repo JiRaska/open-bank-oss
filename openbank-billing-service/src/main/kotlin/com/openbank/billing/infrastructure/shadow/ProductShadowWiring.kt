@@ -27,7 +27,6 @@ import jakarta.inject.Singleton
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.net.URI
 import java.nio.file.Path
-import java.time.Clock
 import java.util.Optional
 
 /**
@@ -105,7 +104,6 @@ class ProductShadowWiring(
         copies: RevisionIrCopyPort,
         catalog: CatalogRevisionIrPort,
         meters: MeterRegistry,
-        clock: Clock,
     ): ProductShadowService = ProductShadowService(
         queue = queue,
         copies = copies,
@@ -113,7 +111,6 @@ class ProductShadowWiring(
         verifier = verifier(),
         comparator = FeeShadowComparator(ProductInterpreter(FinanceProductArithmetic)),
         recorder = ProductShadowRecorder(meters, CONSUMER),
-        clock = clock,
         meters = meters,
     )
 

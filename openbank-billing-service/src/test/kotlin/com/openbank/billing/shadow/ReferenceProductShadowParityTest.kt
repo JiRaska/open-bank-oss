@@ -21,7 +21,6 @@ import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 import java.math.BigDecimal
-import java.time.Instant
 
 /**
  * The shadow's parity contract (ADR-0352 phase 3): for the public reference products, the LEGACY
@@ -32,7 +31,6 @@ import java.time.Instant
 class ReferenceProductShadowParityTest {
 
     private val comparator = FeeShadowComparator(ProductInterpreter(FinanceProductArithmetic))
-    private val at = Instant.parse("2026-10-31T23:00:00Z")
 
     /** The legacy representation of each reference product's maintenance fee: amount and waiver text. */
     private data class LegacyFee(val product: ProductDefinition, val amount: String, val condition: String)
@@ -57,7 +55,7 @@ class ReferenceProductShadowParityTest {
                 )
                 val waived = reason == WaiveReason.WAIVED_BY_CONDITION
                 val decision = ShadowLegacyFee("MAINT", if (waived) BigDecimal.ZERO else BigDecimal(fee.amount), waived)
-                val results = comparator.compare(revision, ShadowFixtures.input(balance, listOf(decision)), at)
+                val results = comparator.compare(revision, ShadowFixtures.input(balance, listOf(decision)))
                 if (balance == null) {
                     assertThat(results.single()).isInstanceOf(FeeShadowResult.UnknownInput::class.java)
                     continue

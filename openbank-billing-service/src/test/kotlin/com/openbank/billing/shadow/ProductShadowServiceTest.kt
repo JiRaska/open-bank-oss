@@ -24,9 +24,6 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
 import java.util.UUID
 
 class ProductShadowServiceTest {
@@ -71,8 +68,8 @@ class ProductShadowServiceTest {
         verifier,
         FeeShadowComparator(ProductInterpreter(FinanceProductArithmetic)),
         ProductShadowRecorder(registry, "billing"),
-        Clock.fixed(Instant.parse("2026-10-31T23:00:00Z"), ZoneOffset.UTC),
-        registry, maxAttempts = 2,
+        registry,
+        maxAttempts = 2,
     )
 
     private fun count(name: String, vararg tags: String) = registry.find(name).tags(*tags).counter()?.count() ?: 0.0
@@ -157,5 +154,17 @@ class ProductShadowServiceTest {
         }).runOnce(10)
         assertThat(fetches).isEqualTo(1)
         assertThat(queue.completed.values).containsOnly("AGREED")
+    }
+
+    @Test
+    fun `old null snapshot facts finish once as observable unknown without retry`(): Unit = runBlocking {
+        val queue = Queue(ShadowFixtures.input("500", listOf(ShadowFixtures.charged())).copy(evaluatedAt = null))
+        val worker = service(queue, { signed(it) })
+        assertThat(worker.runOnce(10)).isEqualTo(1)
+        assertThat(queue.completed.values).containsExactly("INPUT_UNKNOWN")
+        assertThat(queue.retried).isEmpty()
+        assertThat(worker.runOnce(10)).isZero()
+        assertThat(count(ProductShadowRecorder.NOT_COMPARABLE, "reason", "input_unknown")).isEqualTo(1.0)
+        assertThat(registry.find(ProductShadowRecorder.COMPARED).counters()).isEmpty()
     }
 }

@@ -38,6 +38,11 @@ internal object ProductShadowRows {
         monthlyTurnover = input.monthlyTurnover
         aggregatePocketBalance = input.aggregatePocketBalance
         segment = input.segment
+        evaluatedAt = input.evaluatedAt
+        evaluationZone = input.evaluationZone
+        openedAt = input.openedAt
+        scheduledCadence = input.scheduledCadence
+        scheduledTrigger = input.scheduledTrigger
         legacyFees = CanonicalJson.write(
             input.legacyFees.map {
                 mapOf("feeId" to it.feeId, "chargedAmount" to it.chargedAmount.toPlainString(), "waived" to it.waived)
@@ -58,6 +63,11 @@ internal object ProductShadowRows {
         monthlyTurnover = e.monthlyTurnover,
         aggregatePocketBalance = e.aggregatePocketBalance,
         segment = e.segment,
+        evaluatedAt = e.evaluatedAt,
+        evaluationZone = e.evaluationZone,
+        openedAt = e.openedAt,
+        scheduledCadence = e.scheduledCadence,
+        scheduledTrigger = e.scheduledTrigger,
         legacyFees = (IrJson.parse(e.legacyFees) as List<*>).map { item ->
             val fee = item as Map<*, *>
             ShadowLegacyFee(
@@ -122,6 +132,11 @@ class ProductShadowQueueRepositoryImpl(private val sf: Mutiny.SessionFactory, pr
         row.monthlyTurnover = null
         row.aggregatePocketBalance = null
         row.segment = null
+        row.evaluatedAt = null
+        row.evaluationZone = null
+        row.openedAt = null
+        row.scheduledCadence = null
+        row.scheduledTrigger = null
     }
 
     override suspend fun retryLater(id: UUID, outcome: String) = update(id) { row ->

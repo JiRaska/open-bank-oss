@@ -5,6 +5,7 @@
 package com.openbank.billing.domain
 
 import java.math.BigDecimal
+import java.time.Instant
 
 /** One fee as the legacy path decided it: what the shadow comparator holds the product IR to. */
 data class ShadowLegacyFee(val feeId: String, val chargedAmount: BigDecimal, val waived: Boolean)
@@ -25,4 +26,12 @@ data class ProductShadowInput(
     val aggregatePocketBalance: BigDecimal?,
     val segment: String?,
     val legacyFees: List<ShadowLegacyFee>,
+    /** Null on pre-migration rows: unknown, never reconstructed from worker time. */
+    val evaluatedAt: Instant? = null,
+    val evaluationZone: String? = null,
+    val openedAt: Instant? = null,
+    /** Actual invocation provenance; not inferred from an arbitrary cycle-id string. */
+    val scheduledCadence: String? = null,
+    /** Actual fired IR tag, when supplied by a schedule-aware caller; never guessed from cadence. */
+    val scheduledTrigger: String? = null,
 )

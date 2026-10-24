@@ -41,14 +41,20 @@ import java.math.BigDecimal
  * [com.openbank.billing.domain.FeeJournalCommand]s (idempotently keyed).
  */
 @ApplicationScoped
-class FeeAssessmentService(
+class FeeAssessmentService @jakarta.inject.Inject constructor(
     private val accounts: AccountContextPort,
     private val revisions: ProductRevisionPort,
     private val pins: AccountRevisionPinPort,
     private val meters: MeterRegistry,
+    private val clock: java.time.Clock = java.time.Clock.systemUTC(),
 ) {
 
-    suspend fun assess(cycleId: String, accountId: String, currency: String): BillingAssessment {
+    suspend fun assess(
+        cycleId: String,
+        accountId: String,
+        currency: String,
+        scheduledCadence: String? = null,
+    ): BillingAssessment {
         // Fail-closed (#13226): a currency the ledger has no fee-income account for would only ever 422 at
         // the ledger and wedge its outbox row. Refuse it here, counted by reason -- never a zero charge.
         if (!FeeIncomeCurrencies.isMapped(currency)) {
@@ -102,26 +108,37 @@ class FeeAssessmentService(
         val assessed = terms.fees.map { fee ->
             assessOne(cycleId, accountId, currency, fee, billing.context, terms.revisionId, accountingClass)
         }
-        return BillingAssessment(
+        val assessment = BillingAssessment(
             cycleId = cycleId,
             accountId = accountId,
             currency = currency,
             skipped = false,
             skipReason = null,
             assessedFees = assessed,
-            shadowInput = ProductShadowInput(
-                cycleId = cycleId,
-                accountId = accountId,
-                currency = currency,
-                productRevisionId = terms.revisionId,
-                balance = billing.context.balance,
-                monthlyTurnover = billing.context.monthlyTurnover,
-                aggregatePocketBalance = billing.context.aggregatePocketBalance,
-                segment = billing.context.segment,
-                legacyFees = assessed.map { ShadowLegacyFee(it.feeId, it.chargedAmount, it.waived) },
-            ),
         )
+        return assessment.copy(shadowInput = shadowInput(assessment, billing, terms.revisionId, scheduledCadence))
     }
+
+    private fun shadowInput(
+        assessment: BillingAssessment,
+        billing: AccountBilling,
+        revisionId: String,
+        scheduledCadence: String?,
+    ) = ProductShadowInput(
+        cycleId = assessment.cycleId,
+        accountId = assessment.accountId,
+        currency = assessment.currency,
+        productRevisionId = revisionId,
+        balance = billing.context.balance,
+        monthlyTurnover = billing.context.monthlyTurnover,
+        aggregatePocketBalance = billing.context.aggregatePocketBalance,
+        segment = billing.context.segment,
+        legacyFees = assessment.assessedFees.map { ShadowLegacyFee(it.feeId, it.chargedAmount, it.waived) },
+        evaluatedAt = clock.instant(),
+        evaluationZone = clock.zone.id,
+        openedAt = billing.openedAt,
+        scheduledCadence = scheduledCadence,
+    )
 
     private sealed interface Pin {
         data class Found(val revisionId: String) : Pin

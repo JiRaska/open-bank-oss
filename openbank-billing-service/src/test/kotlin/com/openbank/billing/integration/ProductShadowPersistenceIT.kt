@@ -91,11 +91,41 @@ class ProductShadowPersistenceIT {
             val revisionId = UUID.randomUUID().toString()
             assessments.persistWithPostingIntent(assessment(accountId, revisionId, withShadow = true))
 
+            dataSource.connection.use { c ->
+                c.prepareStatement(
+                    "SELECT a.xmin::text, f.xmin::text, o.xmin::text, s.xmin::text " +
+                        "FROM billing_cycle_assessment a JOIN assessed_fee f ON f.assessment_id = a.id " +
+                        "JOIN billing_outbox o ON o.aggregate_id = f.id " +
+                        "JOIN billing_product_shadow_input s ON s.assessment_id = a.id WHERE a.account_id = ?",
+                ).use { st ->
+                    st.setString(1, accountId)
+                    st.executeQuery().use { rs ->
+                        assertThat(rs.next()).isTrue()
+                        assertThat(listOf(rs.getString(2), rs.getString(3), rs.getString(4)))
+                            .containsOnly(rs.getString(1))
+                    }
+                }
+            }
+            // Idempotent replay must not replace frozen facts with a later evaluation.
+            val replay = assessment(accountId, revisionId, withShadow = true)
+            assessments.persistWithPostingIntent(
+                replay.copy(
+                    shadowInput = replay.shadowInput!!.copy(
+                        evaluatedAt = java.time.Instant.parse("2026-11-01T00:00:00Z"),
+                        evaluationZone = "Europe/Prague",
+                    ),
+                ),
+            )
             val claimed = queue.claim(1000).filter { it.input.accountId == accountId }
             assertThat(claimed).hasSize(1)
             val input = claimed.single().input
             assertThat(input.productRevisionId).isEqualTo(revisionId)
             assertThat(input.balance).isEqualByComparingTo("500.00")
+            assertThat(input.evaluatedAt).isEqualTo(java.time.Instant.parse("2026-10-20T12:00:00Z"))
+            assertThat(input.evaluationZone).isEqualTo("UTC")
+            assertThat(input.openedAt).isEqualTo(java.time.Instant.parse("2025-01-01T00:00:00Z"))
+            assertThat(input.scheduledCadence).isEqualTo("MONTHLY")
+            assertThat(input.scheduledTrigger).isEqualTo("FEE_MAINT")
             assertThat(input.legacyFees.single().chargedAmount).isEqualByComparingTo("4.90")
             // Claimed: a second run within the lease does not see it again.
             assertThat(queue.claim(1000).map { it.input.accountId }).doesNotContain(accountId)
@@ -104,7 +134,7 @@ class ProductShadowPersistenceIT {
             assertThat(queue.claim(1000).map { it.input.accountId }).doesNotContain(accountId)
             dataSource.connection.use { c ->
                 c.prepareStatement(
-                    "SELECT status, outcome, balance, segment FROM billing_product_shadow_input WHERE account_id = ?",
+                    "SELECT status, outcome, balance, segment, evaluated_at, evaluation_zone, opened_at, scheduled_cadence, scheduled_trigger FROM billing_product_shadow_input WHERE account_id = ?",
                 ).use { st ->
                     st.setString(1, accountId)
                     st.executeQuery().use { rs ->
@@ -114,6 +144,7 @@ class ProductShadowPersistenceIT {
                         // Data minimisation: the account facts are erased once compared.
                         assertThat(rs.getBigDecimal(3)).isNull()
                         assertThat(rs.getString(4)).isNull()
+                        for (column in 5..9) assertThat(rs.getObject(column)).isNull()
                     }
                 }
             }
@@ -158,6 +189,30 @@ class ProductShadowPersistenceIT {
                     )
                 }.exceptionOrNull()
                 assertThat(failure).hasMessageContaining("immutable")
+            }
+        }
+    }
+
+    @Test
+    fun `a rejected shadow row rolls back the assessment fee and posting intent together`(): Unit = onVertxContext {
+        val accountId = "acc-shadow-rollback-${UUID.randomUUID()}"
+        val value = assessment(accountId, UUID.randomUUID().toString(), withShadow = true)
+        // The shadow is persisted last; its VARCHAR(64) constraint fails in the real transaction.
+        val rejected = value.copy(shadowInput = value.shadowInput!!.copy(accountId = "x".repeat(65)))
+        assertThat(runCatching { assessments.persistWithPostingIntent(rejected) }.exceptionOrNull()).isNotNull()
+        dataSource.connection.use { c ->
+            c.prepareStatement(
+                "SELECT (SELECT count(*) FROM billing_cycle_assessment WHERE account_id = ?), " +
+                    "(SELECT count(*) FROM assessed_fee WHERE account_id = ?), " +
+                    "(SELECT count(*) FROM billing_outbox WHERE payload::text LIKE ?)",
+            ).use { st ->
+                st.setString(1, accountId)
+                st.setString(2, accountId)
+                st.setString(3, "%$accountId%")
+                st.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    for (column in 1..3) assertThat(rs.getLong(column)).isZero()
+                }
             }
         }
     }
