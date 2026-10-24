@@ -88,6 +88,15 @@ class CashFlowEntity : PanacheEntity() {
     @Column(name = "payment_id")
     var paymentId: String? = null
 
+    @Column(name = "fixing_source")
+    var fixingSource: String? = null
+
+    @Column(name = "fixing_sha256")
+    var fixingSha256: String? = null
+
+    @Column(name = "fixed_at")
+    var fixedAt: java.time.Instant? = null
+
     /** Optimistic lock (V19): a stale copy of the row fails at flush instead of overwriting it. */
     @Version
     @Column(name = "row_version", nullable = false)
