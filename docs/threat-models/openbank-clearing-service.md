@@ -102,7 +102,7 @@ not change any existing request's outcome until explicitly flipped.
   role, network edge or trust boundary, and no migration (batch references stay unique by suffix).
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -143,7 +143,7 @@ not change any existing request's outcome until explicitly flipped.
   Rollback: `DROP SEQUENCE`.
 - **2026-07-08** — ADR-0155 four-eyes enforcement rollout (issue #413), mirroring the
   sepa-payment pilot. New endpoint `PATCH /api/v1/clearing/approvals/{id}` +
-  `ApprovalConfig` (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate
+  ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`) (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate
   (openbank-libs-runtime, shared, opt-in) on `clearingBatch.settle`. New STRIDE supplement
   §4a. `authz.four-eyes.enforce` defaults `false` — no behavior change to any existing
   request in this PR; flipping it is a tracked follow-up. No DB schema change (Redis,
@@ -251,3 +251,7 @@ not change any existing request's outcome until explicitly flipped.
   SEPA_SCT_INST cycle (33 characters) no longer fails on insert (**DoS** of that rail). No new
   endpoint, caller, privilege or event; no producer outside the service submits items today.
   Rollback: revert the commit, then the V12 rollback note.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.

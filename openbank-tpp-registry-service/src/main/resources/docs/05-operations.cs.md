@@ -85,6 +85,10 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 
 Releasovaná komponenta (má `version.txt`, aktuálně `0.3.0`). Verzování/changelog vlastní release-please z Conventional Commits — neupravuj ručně `version.txt` ani `CHANGELOG.md`. `openapi.yaml:info.version` je samostatná osa API kontraktu (ADR-0048).
 
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

@@ -6,6 +6,8 @@
 // platform-version view served by /api/platform-versions. No version is typed here: every value
 // arrives from a live query or from the generated platform-versions.json.
 
+import type { ContentSourceMetadata } from './evidence/contentSource'
+
 export type DriftStatus = 'match' | 'drift' | 'live-unavailable' | 'not-declared' | 'unknown'
 
 export interface LiveVersion { version: string; count: number }
@@ -25,10 +27,28 @@ export interface NodeSummary {
   byType: { instanceType: string; capacityType: string | null; count: number }[]
 }
 
+/** Repository declarations only; none of these fields establishes a running workload. */
+export interface DeclaredPlatformApplication {
+  kind: 'application' | 'unknown'
+  name: string | null
+  namespace: string | null
+  sourceFile: string
+  sources: ({ kind: 'helm-chart'; chart: string } | { kind: 'manifest-path'; path: string } | { kind: 'unknown' })[]
+  workloadMapping: 'unknown'
+}
+
 export interface Inventory {
-  gitops: { apps: string[]; components: string[]; clickhouse: boolean; istio: boolean; cilium: boolean }
-  /** Environments whose IaC instantiates the resource type; empty = not defined/used anywhere. */
-  iac: Record<'route53' | 'cloudfront' | 'acm' | 'alb' | 'cloudtrail' | 'awsConfig' | 'objectLock', string[]>
+  gitops: {
+    apps: string[]; components: string[]; clickhouse: boolean; istio: boolean; cilium: boolean
+    /** Optional for compatibility with previously generated snapshots. */
+    applications?: DeclaredPlatformApplication[]
+  }
+  /** Environments whose IaC declares the resource type; not evaluated Terraform instances. */
+  iac: Record<'route53' | 'cloudfront' | 'acm' | 'alb' | 'cloudtrail' | 'awsConfig' | 'objectLock', string[]> & {
+    helmReleases?: string[]
+    helmReleaseDeclarations?: { environment: string; sourceFile: string; address: string; instanceExpansion: 'unknown' }[]
+    moduleTraversalGaps?: { environment: string; modulePath: string; reason: 'cycle' | 'unresolved-local-module' | 'external-or-dynamic-source' }[]
+  }
 }
 
 export interface PlatformView {
@@ -41,7 +61,9 @@ export interface PlatformView {
   /** Live Running pods per namespace / ready DaemonSet pods per `ns/name`; null when Prometheus is down. */
   podsRunningByNamespace: Record<string, number> | null
   daemonSetsReady: Record<string, number> | null
-  /** Build-time facts derived from gitops/apps and IaC (see scripts/lib/platform-versions.mjs). */
+  /** Provenance of repository declarations; independent from the live observation timestamp. */
+  declarationSource?: ContentSourceMetadata
+  /** Reviewed repository declarations derived from gitops/apps and IaC. */
   inventory: Inventory | null
   declaredNodeGroup: { instanceType: string; desiredSize: number; minSize: number; maxSize: number } | null
   eksLifecycleSource: 'live (endoflife.date)' | 'snapshot'

@@ -66,11 +66,6 @@ quarkus:
   # HTTP port, so nothing was wrong with the probe PATH — only with the port it was asked for.
   # 8085 matches every other service in the fleet (ledger, transaction, …), so the manifest was
   # right and the service configuration was the half that never landed.
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   smallrye-openapi:
     path: /q/openapi
   swagger-ui:

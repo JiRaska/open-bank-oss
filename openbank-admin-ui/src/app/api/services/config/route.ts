@@ -92,6 +92,7 @@ async function probeDiscovered(d: { name: string; namespace: string; port: numbe
   const status = d.ready ? 'UP' : 'DOWN'
   return {
     name: d.name,
+    namespace: d.namespace,
     port: d.port,
     config: config ?? null,
     health: { status, checks: health?.checks ?? [] },

@@ -40,6 +40,10 @@ Testovací závislost `pact.consumer` používá stávající verzi katalogu. Sa
 
 Čtvrtý consumer kontrakt pokrývá `POST /api/v1/sca/challenges/{id}/consume`: shodný hash dokumentu a ceremonie vrací 200, jiný hash 409, neznámá výzva 404 a chybějící identita 401. Skutečný `ScaVerificationAdapter` volá anonymního klienta připojeného k Pact mock serveru a ověřuje úspěšnou či zamítnutou verifikaci. Folder i broker provider test sdílejí stejný syntetický stav COMPLETED, dosud nespotřebované výzvy DOCUMENT_SIGNING; samostatná neautentizovaná provider třída přehrává interakci 401. Fixture před každou interakcí obnovuje stav výzvy, takže samostatně nedokazuje, že odmítnuté spotřebování ponechalo uložený stav nespotřebovaný. Testy neověřují podpis zařízení, produkční OIDC filtr klienta, platné podpisy JWT, vynucované OPA ani zamítnutí přístupu k cizí party. Všechny čtyři SCA interakce vyžadují doložený počet skutečně provedených testů; chybějící Pact či přeskočený broker test nejsou důkazem kompatibility.
 
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

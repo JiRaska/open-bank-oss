@@ -397,7 +397,10 @@ gates:
     group: lint
     mode: enforced
     min_subjects: 30   # 63 shell scripts today (2026-08-09)
-    budget_seconds: 30   # 5.7s over 63 scripts
+    # Re-derived 2026-10-20 per derive-gate-observability-budgets.py: ceil(max(p95*3, max*1.5, 5)).
+    # 25 CI runs: min 12.6 / p50 19.4 / p95 26.8 / max 30.2s over 104 scripts (30s budget
+    # failed a clean run at 30.2s). p95*3 = 80.4 -> 81.
+    budget_seconds: 81
     run: |
       # BOTH script trees. `.github/scripts` was out of scope until #4337, so the 42 shell
       # files implementing the gates themselves — the code every other gate's verdict rests
@@ -484,6 +487,96 @@ gates:
     run: |
       python3 .github/scripts/check-adr-proposed-staleness.py --root . --today "$(date -u +%F)"
 
+  # ADR-0344 read `delivery-status: planned` while code for its decisions landed, and its Delivery
+  # check block was prose nobody ran. This runs every extracted block (docs/adr/checks/<nnnn>.sh,
+  # derived by gen-adr-delivery-checks.py) in a checkout of origin/main and compares the result
+  # with the front-matter claim. Measured at authoring on origin/main 94852ab283: ADR-0344 1 pass /
+  # 4 fail / 1 unmeasured (consistent with planned), ADR-0317 1 pass / 2 fail (consistent with partial).
+  - id: adr-delivery-scripts
+    name: "ADR delivery-status agrees with its executed Delivery check (advisory)"
+    group: gitops
+    mode: advisory
+    budget_seconds: 60
+    verified: "2026-10-22 — 0 findings on origin/main 94852ab283; ADR-0344 and ADR-0317 measured, both consistent"
+    rationale: >-
+      delivery-status is a claim and a Delivery check block is its falsifier; as prose nobody runs it,
+      so the registry and the tree drift apart until a hand audit notices. Executing the block on
+      origin/main makes "planned while every check passes" and "shipped while none does" visible.
+    review_after: "2027-01-31"
+    min_subjects: 1
+    selftest_inputs: [".github/scripts/check-adr-delivery-scripts.sh", ".github/scripts/gen-adr-delivery-checks.py"]
+    selftest: |
+      bash .github/scripts/check-adr-delivery-scripts.sh --self-test
+    selftest_expect: pass
+    run: |
+      bash .github/scripts/check-adr-delivery-scripts.sh --ref origin/main
+
+  # A functional-requirements file per service: each catalogue item a row with status + evidence.
+  # A BUILT row whose evidence is absent or does not resolve is the lie this makes impossible.
+  - id: requirements-traceability
+    name: "service requirements.yaml rows are well-formed and BUILT evidence resolves (advisory)"
+    group: gitops
+    mode: advisory
+    needs_base: optional
+    budget_seconds: 30
+    verified: "2026-10-22 — 0 findings; 45 treasury rows seeded from ADR-0344's catalogue (2 BUILT, 12 PARTIAL, 31 MISSING)"
+    rationale: >-
+      ADR-0344's functional baseline had no link from an item to the code delivering it, so 38 items
+      had to be audited by hand to learn which existed. A requirements file with resolvable evidence
+      makes that audit a gate run.
+    review_after: "2027-01-31"
+    min_subjects: 1
+    selftest_inputs: [".github/scripts/check-requirements-traceability.py"]
+    selftest: |
+      python3 .github/scripts/check-requirements-traceability.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-requirements-traceability.py --root . --diff-base "${PR_DIFF_BASE:-}"
+
+  # One feature PR reached 698 files across 9 released components (74377 changed lines) and 149
+  # conflicts before anything counted it. Limits in rules.yaml: pr_span_limits.
+  - id: pr-component-span
+    name: "releasing PR stays within the component-span and line limits (rules.yaml pr_span_limits, enforced)"
+    group: supplychain
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    budget_seconds: 30
+    rationale: >-
+      A releasing PR spanning many released components cannot be reviewed as one unit, conflicts
+      with everything, and lands one squash commit in many changelogs. Work that must land together
+      goes through an integration branch labelled integration-branch, which must not be based on main.
+    review_after: "2027-04-22"
+    min_subjects: 1
+    selftest_inputs: [".github/scripts/check-pr-component-span.py"]
+    selftest: |
+      python3 .github/scripts/check-pr-component-span.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-pr-component-span.py --diff-base "${PR_DIFF_BASE}" --pr "${PR_NUMBER}"
+
+  # A file byte-identical to another open PR's copy (both differing from main) is a copy: the e2e
+  # treasury branch carried 75 of #13408's 104 files that way. Names the overlap; never blocks.
+  - id: pr-shared-files
+    name: "files byte-identical to another open PR are named (advisory)"
+    group: supplychain
+    mode: advisory
+    when: pull_request
+    needs_base: required
+    budget_seconds: 90
+    verified: "2026-10-22 — known positive: 1425639b38 vs e447d5ad25 reports 75 of #13408's 104 files"
+    rationale: >-
+      Two PRs carrying the same file both read as authored work and both conflict once one merges;
+      git and CI see two independent green additions. Comparing blobs across open PR heads names it.
+    review_after: "2027-03-31"
+    min_subjects: 1
+    selftest_inputs: [".github/scripts/check-pr-shared-files.sh"]
+    selftest: |
+      bash .github/scripts/check-pr-shared-files.sh --self-test
+    selftest_expect: pass
+    run: |
+      bash .github/scripts/check-pr-shared-files.sh --pr "${PR_NUMBER}" --base "${PR_DIFF_BASE}"
+
   # ==== gitops =========================================================
   - id: deploy-hold-image-pins
     name: "held services cannot change GitOps image pins (issue #11503)"
@@ -553,7 +646,6 @@ gates:
     run: |
       set -e
       bash .github/scripts/supersede-deploy-prs.sh --self-test
-      python3 .github/scripts/test-supersede-hold-union.py
 
   # Deploy window: bot deploy PRs arm auto-merge at most once per window so deploy traffic
   # stops restarting every open PR's required checks under the strict up-to-date rule.
@@ -2743,13 +2835,13 @@ gates:
       python3 .github/scripts/check-gates-not-deregistered.py --enforce
 
   - id: dockerfile-runtime-only
-    name: "Dockerfiles are runtime-only, declare EXPOSE, share the deploy base (#3016/#3354, enforced)"
+    name: "Dockerfiles are runtime-only, share the deploy base, port from application.yaml (#3016/#3354, enforced)"
     group: registry
     mode: enforced
     selftest: |
       python3 .github/scripts/check-dockerfile-no-build-stage.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-dockerfile-no-build-stage.py"]
+    selftest_inputs: [".github/scripts/check-dockerfile-no-build-stage.py", ".github/scripts/service-port.py"]
     run: |
       # This lived as an inline step in ci.yml's `ui-build` job, which runs only when
       # openbank-admin-ui/, */governance.yaml or the governance schema changed. So the gate
@@ -2997,8 +3089,9 @@ gates:
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
+      python3 .github/scripts/test-merge-train-owner-approval.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/merge-train.py"]
+    selftest_inputs: [".github/scripts/merge-train.py", ".github/scripts/test-merge-train-owner-approval.py", ".github/workflows/merge-train-owner-approval.yml", "openbank-libs/governance/rules.yaml"]
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
 
@@ -3967,6 +4060,30 @@ gates:
   #
   # Scope is DERIVED from rules.yaml money_path_services, not hand-kept: check-clock-injection
   # lists 8 of the 20 and reads as passing about the 12 it never looks at.
+  # ADR-0342 D2 (#13167): the day-close participant set is named in three places — rules.yaml
+  # close_participants, the ledger's openbank.ledger.close.participants, and the services that
+  # construct a CloseParticipationReporter. Drift between them is silent in each module: the ledger
+  # waits forever for a name nobody reports, or a reporter gets 404/403 and the close passes
+  # without it. Advisory on arrival while the participant check itself is in shadow.
+  - id: close-participants-declared
+    name: "day-close participants agree across rules.yaml, ledger config and reporters (ADR-0342, advisory)"
+    group: kotlin
+    mode: advisory
+    budget_seconds: 30  # one rglob over */src/main/**.kt; measured ~2s locally
+    verified: "2026-10-18 — 1 participant (interest) declared in rules.yaml, ledger application.yaml and wired by InterestCloseParticipationScheduler; 0 findings; --self-test flags principal drift, a missing reporter and an undeclared ledger participant"
+    rationale: >-
+      The participant set is the denominator of the day-close completeness check; a set kept in
+      three files without a comparison drifts exactly like the hand-kept gate scopes this repo has
+      measured before.
+    review_after: "2027-01-17"
+    min_subjects: 1   # interest is the first participant (2026-10-17)
+    selftest_inputs: [".github/scripts/check-close-participants.py"]
+    selftest: |
+      python3 .github/scripts/check-close-participants.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-close-participants.py
+
   - id: accounting-clock-gate
     name: "accounting-clock gate — one business-date authority (ADR-0207 D1, enforced)"
     group: kotlin
@@ -4680,6 +4797,36 @@ gates:
       bash .github/scripts/libs-change-dependents.sh --selftest
       python3 .github/scripts/service-ci-library-dependents.py --self-test
 
+  # The Services CI scope selection used to be the 19000-char `detect` step in services-ci.yml,
+  # sitting exactly at the workflow-run-step-size limit: two PRs on 2026-10-22 each tripped it by
+  # adding one line and shaved the step back to 19000. The logic now lives in a script; this runs
+  # its self-test (schedule -> full fleet, PR -> changed module + fleet-scanner edge, shared build
+  # input -> full fleet, inert push -> nothing) in a throwaway git repo.
+  - id: service-ci-explicit-jobs
+    name: "Services CI explicit caller graph matches canonical modules (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "Individual platform job results avoid both rate-limited REST rosters and stale artifact successes across partial reruns; generated callers must cover every canonical module and preserve bounded lanes."
+    review_after: "2027-04-23"
+    budget_seconds: 10
+    min_subjects: 83
+    selftest: |
+      python3 .github/scripts/generate-service-ci-jobs.py --self-test
+      python3 .github/scripts/test-check-service-build-results.py
+    run: python3 .github/scripts/generate-service-ci-jobs.py --check
+
+  - id: service-ci-select-modules
+    name: "Services CI module selection (self-test)"
+    group: gitops
+    mode: enforced
+    selftest_exempt: "is-a-test-suite"
+    rationale: "The detect step's logic moved out of services-ci.yml to get headroom under workflow-run-step-size; the self-test keeps the extracted selector falsifiable."
+    review_after: "2027-04-23"
+    budget_seconds: 20
+    min_subjects: 4
+    run: |
+      bash .github/scripts/service-ci-select-modules.sh --self-test
+
   # analytics-sink owns no OLTP DB and runs no migration runner (ADR-0022): its ClickHouse DDL lives
   # once as `clickhouse/V*.sql` resources an operator applies, and once in the `clickhouse-init`
   # ConfigMap a FRESH cluster boots from. Nothing reconciles the two, and a migration that reaches
@@ -5173,6 +5320,24 @@ gates:
     selftest_inputs: [".github/scripts/check-kafka-dotted-keys.py"]
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
+
+  - id: metric-name-prefix
+    name: "metric names start with openbank. (observability audit 2026-10-17, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 15
+    rationale: >-
+      An unprefixed Micrometer name escapes every openbank_* selector and is invisible to
+      check-alert-metric-emitted.py. Seven existed on 2026-10-17 (three found by the audit, two
+      more by this gate itself); all were renamed with their readers, so the baseline is empty
+      and the gate is prevention only.
+    review_after: '2027-04-17'
+    min_subjects: 100   # 198 literal metric names measured 2026-10-17
+    selftest: python3 .github/scripts/check-metric-name-prefix.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-metric-name-prefix.py"]
+    run: |
+      python3 .github/scripts/check-metric-name-prefix.py --root .
 
   # ADR-0337: a second ledger-service deployment (the pension company's books) runs the bank's
   # image, so every scheduler and outbound edge in it is live by default. The switch list is
@@ -6731,6 +6896,7 @@ gates:
       - ".github/scripts/test-agent-admission.py"
       - ".github/scripts/await-admin-ui-source-validation.py"
       - ".github/scripts/test-await-admin-ui-source-validation.py"
+      - ".github/scripts/shard-verification-modules.py"
       - ".github/workflows/admin-ui-deploy.yml"
       - ".github/workflows/auto-deploy.yml"
       - ".github/workflows/platform-images.yml"
@@ -6739,6 +6905,7 @@ gates:
       python3 .github/scripts/test-infracost-scope.py
       python3 .github/scripts/test-agent-admission.py
       python3 .github/scripts/test-await-admin-ui-source-validation.py
+      python3 .github/scripts/shard-verification-modules.py --self-test
     run: python3 .github/scripts/check-workflow-supply-chain.py
 
   # ADR-0320 P3: field encryption lives in com.openbank.libs.security.FieldProtector
@@ -6782,6 +6949,82 @@ gates:
     selftest_inputs: [".github/scripts/check-bench-alloc-baseline.py"]
     run: |
       python3 .github/scripts/check-bench-alloc-baseline.py --root .
+
+  # ADR-0352 §8 — product IR (Product as Code, phase 1). Three gates:
+  #   product-ir-determinism  the golden set is indexed, well-formed and fed to GoldenDeterminismTest,
+  #                           which runs every scenario twice in one JVM (openbank-libs-testing);
+  #                           the cross-irVersion half is a NO-OP while one version is supported and
+  #                           the script prints that on every run instead of passing silently.
+  #   product-ir-run-limits   every committed IR document and golden scenario is inside the schema
+  #                           maxima, read from product-ir/v1.schema.json itself.
+  #   product-ir-purity       ProductIrPurityRule (detekt) is registered and active, and no source
+  #                           under com.openbank.libs.product imports I/O, clock, logging or metrics.
+  # All three ENFORCED since the end of phase 2 (2026-10-23), as ADR-0352 §8 decides — before any
+  # consumer switches (phase 3). A fourth, product-ir-authoring-parity, starts advisory below.
+  - id: product-ir-determinism
+    name: "product IR golden set is indexed and deterministic (ADR-0352, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A golden scenario the index does not list is one the determinism test never opens; the JVM half compares two in-process runs byte for byte, and this half keeps its scope equal to the committed files."
+    review_after: "2027-04-30"
+    verified: "2026-10-23 — 9 scenarios indexed across 2 product-golden dirs (libs-testing 6, openbank-products 3), GoldenDeterminismTest + ProductGoldenScenariosTest green; an unindexed scenario file, an index entry with no file and an unsupported irVersion each turn it red (--self-test, 2026-10-23); flipped to enforced at the end of phase 2"
+    budget_seconds: 10
+    min_subjects: 6   # six golden scenarios at introduction (2026-10-22); nine on 2026-10-23
+    selftest: python3 .github/scripts/check-product-ir-determinism.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-product-ir-determinism.py"]
+    run: |
+      python3 .github/scripts/check-product-ir-determinism.py --root . --enforce
+
+  - id: product-ir-run-limits
+    name: "committed product IR and golden scenarios stay inside the schema maxima (ADR-0352, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "The parser rejects an over-limit revision at load time, but a committed fixture nobody's test loads is never parsed; this reads every one on every PR and takes the limits from the schema so the two cannot drift."
+    review_after: "2027-04-30"
+    verified: "2026-10-23 — 16 documents (2 IR fixtures, 3 compiled reference IRs, 2 test copies in libs-runtime and product-catalog, 9 scenarios) within limits; a scenario with 17 tiers is red with '17 tiers exceeds the limit 16' (--self-test); flipped to enforced at the end of phase 2"
+    budget_seconds: 15
+    min_subjects: 8   # 2 IR fixtures + 6 golden scenarios at introduction (2026-10-22); 16 on 2026-10-23
+    selftest: python3 .github/scripts/check-product-ir-run-limits.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-product-ir-run-limits.py"]
+    run: |
+      python3 .github/scripts/check-product-ir-run-limits.py --root . --enforce
+
+  # ADR-0352 §5, §11: the DSL is sugar and the committed IR JSON is the artifact. Two authoring
+  # paths exist today (the Kotlin DSL and raw JSON); MCP/Studio join in phases 5-6. This gate holds
+  # the static half of "every path yields the same canonical bytes": every committed ir/<name>.json
+  # has a DSL product of that name and ReferenceProductsTest (the JVM half, which compiles the DSL and
+  # compares canonical bytes with the committed file) exists, is not disabled and covers the set.
+  - id: product-ir-authoring-parity
+    name: "committed product IR equals the DSL that authored it, canonical byte for byte (ADR-0352, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "A hash on origin/main is what the catalog may publish (ADR-0352 §7); if the committed IR and the DSL that claims to author it diverge, two authoring tools yield two hashes for one product and the review approved neither. The JVM half is a test; this half keeps that test's scope equal to the committed files."
+    review_after: "2027-03-31"
+    verified: "2026-10-23 — 3 committed reference IRs each have a DSL product and the parity test. STATIC half only: it reads comment-stripped Kotlin, so a token in a comment, an @Disabled annotation, a DSL product named only in a comment and a build that excludes the test each turn it red (--self-test, 17 cases; @Disabled added to the real ReferenceProductsTest turned the real tree red). The byte comparison itself is the JVM test in the module CI lane; this gate does not run it"
+    budget_seconds: 10
+    min_subjects: 3   # three reference products at introduction (2026-10-23)
+    selftest: python3 .github/scripts/check-product-ir-authoring-parity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-product-ir-authoring-parity.py"]
+    run: |
+      python3 .github/scripts/check-product-ir-authoring-parity.py --root .
+
+  - id: product-ir-purity
+    name: "product interpreter package is pure: detekt rule active, no I/O/clock/logging/metrics imports (ADR-0352)"
+    group: kotlin
+    mode: enforced
+    rationale: "The interpreter is the same code in production, simulation and CI only while it reads nothing but its arguments; a custom detekt rule that is not active in the overlay never runs, so the wiring is checked here too."
+    review_after: "2027-04-30"
+    verified: "2026-10-22 — 11 files under com.openbank.libs.product clean; adding 'import java.io.File' to ProductInterpreter.kt turns it red"
+    budget_seconds: 10
+    min_subjects: 10  # 11 main sources under com.openbank.libs.product at introduction (2026-10-22)
+    selftest: python3 .github/scripts/check-product-ir-purity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-product-ir-purity.py"]
+    run: |
+      python3 .github/scripts/check-product-ir-purity.py --root .
 
 
   - id: dr-restore-orchestration

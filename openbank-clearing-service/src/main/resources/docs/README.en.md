@@ -40,3 +40,7 @@ The separate broker verifier remains conditional on a non-empty `pactbroker.url`
 verification needs no broker credentials. The replay checks HTTP and JSON compatibility using
 test identities and configured test authorization settings. It does not establish production
 OIDC, ownership, or OPA enforcement.
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

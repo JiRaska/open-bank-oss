@@ -119,6 +119,21 @@ governance primitive — they consume what ADR-0031/0141 already produce:
    becomes the concrete precondition ADR-0142 (credit decisioning) must
    reference before it can move past "Proposed."
 
+## Amendment 2026-10-21: typed-decision models (ADR-0348)
+
+[ADR-0348](0348-typed-decision-models-a-third-inference-class-for-calibrated-schema-bound-triage-decisions.md) D7 extends the evals gate from charters to typed-decision use cases:
+
+- A typed-decision use case registers a **calibration eval**: a frozen labelled set plus metric
+  ceilings and floors, namely expected calibration error, Brier score against a class-prior
+  baseline, and AUTO-band precision per output value.
+- It replays on every change to the model version, the output schema or the threshold policy, and
+  blocks the change on regression, the same contract the charter evals already have.
+- A use case whose `autoAcceptAt` is `1.0` (no AUTO band) needs the eval registered but not passing;
+  lowering the threshold needs it passing. That split is what the `typed-decision-thresholds` check
+  asserts.
+- The EU AI Act inventory lists each typed-decision use case as its own AI system, so the generated
+  mapping picks it up without a hand edit.
+
 ## Alternatives considered
 
 - **Store prompts in Langfuse (the SaaS observability tool declared in
