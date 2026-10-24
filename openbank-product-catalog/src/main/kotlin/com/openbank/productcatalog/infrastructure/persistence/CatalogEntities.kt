@@ -152,6 +152,10 @@ class CatalogPriceEntity {
 
     @Column(name = "effective_to")
     var effectiveTo: Instant? = null
+
+    /** #13230; null on components authored before roles existed. */
+    @Column(name = "role")
+    var role: String? = null
 }
 
 @Entity
@@ -314,4 +318,24 @@ class BankV1ProductMappingEntity {
     private companion object {
         const val UNINITIALISED_DRAFT_REVISION = -2L
     }
+}
+
+/** ADR-0352 §4: the publish-path signature over an IR-bearing revision's canonical hash (V16). */
+@Entity
+@Table(name = "catalog_revision_ir_signatures")
+class CatalogRevisionIrSignatureEntity {
+    @Id
+    @Column(name = "revision_id")
+    lateinit var revisionId: UUID
+
+    @Column(name = "revision_hash")
+    lateinit var revisionHash: String
+
+    @Column(name = "key_id")
+    lateinit var keyId: String
+    lateinit var algorithm: String
+    lateinit var signature: String
+
+    @Column(name = "signed_at")
+    lateinit var signedAt: Instant
 }

@@ -137,7 +137,7 @@ class FeedbackPublisherTest {
 
         publisher().emit(submission())
 
-        val counter = registry.find("feedback_submissions")
+        val counter = registry.find("openbank.feedback.submissions")
             .tag("category", "BUG")
             .tag("screenshot_status", "STORED")
             .counter()
@@ -150,6 +150,6 @@ class FeedbackPublisherTest {
 
         publisher().emit(submission())
 
-        assertThat(registry.find("feedback_emit_failures").counter()?.count()).isEqualTo(1.0)
+        assertThat(registry.find("openbank.feedback.emit_failures").counter()?.count()).isEqualTo(1.0)
     }
 }

@@ -4,6 +4,7 @@ import { closeSync, constants, fstatSync, mkdtempSync, openSync, readFileSync, r
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { collectRepositoryDocumentation } from './collect-repository-documentation.mjs'
 import { isAdminUiContentSnapshot, ADMIN_UI_CONTENT_MAX_BYTES } from '../src/lib/evidence/contentSnapshot.ts'
 
 const SOURCE_SHA = /^[0-9a-f]{40}$/
@@ -69,6 +70,8 @@ export function collectAdminUiContent({
   repoRoot = REPO,
   sourceSha,
   now = Date.now,
+  includeRepositoryDocumentation = false,
+  includePlatformDeclarations = false,
   includeClusterTopology = process.env.OPENBANK_ADMIN_UI_CONTENT_INCLUDE_CLUSTER_TOPOLOGY === 'true',
 } = {}) {
   const root = resolve(repoRoot)
@@ -82,12 +85,20 @@ export function collectAdminUiContent({
       .map(item => ({ slug: item.path, yaml: item.content }))
     const libsDocs = filesIn(root, 'openbank-libs/docs', '.md', name => `openbank-libs/docs/${name}`)
       .map(item => ({ path: item.path, markdown: item.content }))
+    const catalog = generateJson(root, temporaryDirectory, 'catalog', 'generate-catalog.mjs')
+    const repositoryDocumentation = includeRepositoryDocumentation ? collectRepositoryDocumentation({
+      root, catalog, readSource: readBoundedSourceFile,
+      events: generateJson(root, temporaryDirectory, 'events', 'generate-events.mjs'),
+    }) : undefined
     const snapshot = {
       schemaVersion: 1,
       sourceSha,
       collectedAt: new Date(now()).toISOString(),
       content: {
-        catalog: generateJson(root, temporaryDirectory, 'catalog', 'generate-catalog.mjs'),
+        // Additive producer fields stay off until compatible readers have rolled out.
+        ...(includePlatformDeclarations ? { platformVersions: generateJson(root, temporaryDirectory, 'platform-versions', 'generate-platform-versions.mjs') } : {}),
+        ...(repositoryDocumentation ? { repositoryDocumentation } : {}),
+        catalog,
         serviceGraph: generateJson(root, temporaryDirectory, 'service-graph', 'generate-service-graph.mjs'),
         governance: generateJson(root, temporaryDirectory, 'governance', 'generate-governance.mjs'),
         securityGraph: generateJson(root, temporaryDirectory, 'security-graph', 'generate-security-graph.mjs'),
@@ -114,7 +125,7 @@ export function collectAdminUiContent({
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   try {
     const { sourceSha, out } = parseArgs(process.argv.slice(2))
-    const bytes = collectAdminUiContent({ sourceSha })
+    const bytes = collectAdminUiContent({ sourceSha, includeRepositoryDocumentation: process.env.OPENBANK_CONTENT_REPOSITORY_DOCUMENTATION === 'true', includePlatformDeclarations: process.env.OPENBANK_CONTENT_PLATFORM_DECLARATIONS === 'true' })
     writeFileSync(out, bytes, { mode: 0o600 })
     process.stdout.write(`Collected admin-ui source content (${bytes.byteLength} bytes) for ${sourceSha}\n`)
   } catch (error) {

@@ -163,8 +163,9 @@ export const PERMISSIONS = {
   "catalog:read":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.CATALOG_READ, ROLES.CATALOG_AUTHOR, ROLES.CATALOG_PUBLISH],
   "catalog:author":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_AUTHOR],
   "catalog:publish":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_PUBLISH],
-  "catalog:pension:legal-approve": [ROLES.PENSION_LEGAL_APPROVER],
-  "catalog:pension:product-approve": [ROLES.PENSION_PRODUCT_OWNER],
+  // Keyed by the role code a pack approval policy declares (#13429); product-catalog enforces.
+  "catalog:revision-approve:LEGAL_COUNSEL": [ROLES.PENSION_LEGAL_APPROVER],
+  "catalog:revision-approve:PRODUCT_OWNER": [ROLES.PENSION_PRODUCT_OWNER],
   // Parties / KYC / Onboarding — party-service's list/search/detail GETs accept
   // VIEWER/OPERATOR/ADMIN/KYC only (PartyResource.kt). Compliance and the
   // split KYC opener/reviewer roles use their own case endpoints and must not

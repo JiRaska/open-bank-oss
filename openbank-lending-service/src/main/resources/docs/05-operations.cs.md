@@ -114,9 +114,17 @@ Dočasnou proměnnou prostředí z GitOps odstraň až poté, co **každá** cí
 ### Flyway checksum mismatch při startu
 Nikdy nepřepisuj nasazenou migraci. Nastav dočasně `QUARKUS_FLYWAY_REPAIR_AT_START=true`, nech DB ustálit a pak odstraň.
 
+## Pojmenování metrik
+
+Vlastní čítače Micrometeru nesou předponu `openbank.` (vynucuje CI brána `metric-name-prefix`). Čítače SLA originace se scrapují jako `openbank_lending_origination_docs_sla_reminder_total` a `openbank_lending_origination_four_eyes_sla_escalation_total`; dřívější názvy `lending_origination_*` bez předpony se po nasazení této verze už nevydávají, takže externí dotazy na ně je nutné upravit.
+
 ## Deploy
 
 GitOps (ArgoCD) dle platformního vzoru. Při konfliktech image-tagů ber `--ours` (čerstvě sestavený tag), `--theirs` pro RBAC/config/env (CLAUDE.md). Verzování a changelog vlastní release-please z Conventional Commits — nikdy ručně needituj `version.txt` ani `CHANGELOG.md`.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
 
 ## Sdílené závislosti sestavení
 

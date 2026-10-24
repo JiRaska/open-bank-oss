@@ -22,17 +22,9 @@ import java.time.Clock
 import java.time.OffsetDateTime
 
 /**
- * NOT a CDI bean by itself — same per-service `@Produces` wiring pattern as
- * [com.openbank.libs.idempotency.impl.RedisIdempotencyStore] (see its KDoc for
- * why: not every service configures Redis, so a libs-side bean would break
- * ArC augmentation fleet-wide).
- *
- *     @ApplicationScoped
- *     class ApprovalConfig {
- *         @Produces @ApplicationScoped
- *         fun approvalStore(redis: ReactiveRedisDataSource, clock: Clock): ApprovalStore =
- *             RedisApprovalStore(redis, clock)
- *     }
+ * NOT a CDI bean by itself: [RedisApprovalStoreProducer] produces it, only in services that set
+ * `openbank.approval.store=redis` at build time (see its KDoc for why the gate exists — not every
+ * service runs Redis, and [ApprovalStore] bean presence switches four-eyes on).
  *
  * Layout — every key lives under `approval-v2:<namespace>:`, the namespace defaulting to
  * `quarkus.application.name`, so services sharing one Redis never see each other's records:

@@ -112,11 +112,11 @@ def findings(name, doc):
         output = changes.get('outputs', {}).get('verification-modules', '')
         if 'steps.detect.outputs.verification-modules' not in output:
             errors.append('changes must export the module verification plan from its detector')
-        matrix_output = changes.get('outputs', {}).get('verification-modules-json', '')
+        matrix_output = changes.get('outputs', {}).get('verification-shards-json', '')
         strategy = verification.get('strategy', {})
         matrix = strategy.get('matrix', {})
-        if ('steps.detect.outputs.verification-modules-json' not in matrix_output
-                or 'fromJSON(needs.changes.outputs.verification-modules-json)' not in matrix.get('module', '')):
+        if ('steps.detect.outputs.verification-shards-json' not in matrix_output
+                or 'fromJSON(needs.changes.outputs.verification-shards-json)' not in matrix.get('shard', '')):
             errors.append('verification metadata must shard the changed module plan')
         if strategy.get('fail-fast') is not False:
             errors.append('verification metadata must report every shard, even after one fails')
@@ -125,8 +125,8 @@ def findings(name, doc):
                 or "needs.changes.outputs.verification-modules != ''" not in verification_if):
             errors.append('verification metadata must allocate a runner only for a successful non-empty plan')
         verification_run = '\n'.join(step.get('run', '') for step in verification.get('steps', []))
-        if '--modules "${{ matrix.module }}" --enforce' not in verification_run:
-            errors.append('each metadata shard must verify its selected module')
+        if '--modules "${{ matrix.shard.modules }}" --enforce' not in verification_run:
+            errors.append('each metadata shard must verify its selected modules')
         aggregate_run = '\n'.join(step.get('run', '') for step in aggregate.get('steps', []))
         if ('needs.changes.result' not in aggregate_run or 'scope is unknown' not in aggregate_run):
             errors.append('all-green must fail closed when changed-service detection has no verdict')

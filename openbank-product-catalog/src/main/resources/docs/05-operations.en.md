@@ -71,6 +71,26 @@ The bearer-only route permission selects the authentication mechanism; endpoint 
 and any separately configured authorization checks still apply. Do not treat successful mTLS
 handshake or this route setting as evidence that a particular authorization policy was enforced.
 
+### OPA authorization decision point (ADR-0034)
+
+`openbank.authz.opa-pdp-producer.enabled: true` opts the service in to the libs-runtime OPA
+sidecar `PolicyDecisionPoint`, so `@Authorize` endpoints (the AI-agent read bridge,
+`query.catalog.readonly`) consult the sidecar at `OPA_URL` + `OPA_PATH`. The GitOps Deployment
+runs the sidecar with the `product-catalog-opa-bundle` policy. `AUTHZ_ENFORCE` defaults to
+`false` (advisory): a denied or unreachable decision is logged at WARN and the request proceeds.
+Only with `AUTHZ_ENFORCE=true` does a deny reject the request.
+
+The decision and management API listens only on pod loopback (`127.0.0.1:8181`). Kubelet probes use the separate read-only diagnostic listener on port 8282; that listener exposes health/metrics, not policy or data APIs. Same-namespace network access does not expose the decision listener.
+
+Under enforced OPA, `ROLE_API` alone does not grant `catalog.read` or `catalog.list`,
+including the banking product/fee compatibility endpoints. These actions also protect the
+generic catalog: API clients relying on `ROLE_API` alone need an existing named/scoped grant
+(such as the pension service with `CATALOG_SCOPE_READ`). Inherited main operator/admin read
+grants are unchanged. Human `ROLE_VIEWER` reads remain
+available; a machine or unknown identity cannot use that staff grant. The synthetic catalog
+reader retains only its named, scoped read grant. This intentionally rejects generic API
+clients rather than broadening the main policy's scope boundary.
+
 ## Health checks
 
 - **Liveness:** `:8085/q/health/live` — JVM + ArC up.
@@ -115,6 +135,10 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 ## Release
 
 Released component (has `version.txt`). Versioning/changelog are owned by release-please from Conventional Commits ([ADR 0029](../../../../docs/adr/0029-versioning-release-and-governance-as-code.md)). Do not hand-edit `version.txt` in a feature PR. API-contract changes bump `openapi.yaml:info.version` independently ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
 
 ## Shared build dependencies
 

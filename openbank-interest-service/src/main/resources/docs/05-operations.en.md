@@ -109,6 +109,31 @@ Cause: no `interest_rate_configs` row active for the product on `toDate`. Action
 
 By design: `interest-service` moves no cash. The `interest.withholding.remitted.v1` event delegates the odvod to the downstream tax/reporting consumer, which flips the batch to `SETTLED`. Check the consumer, not this service.
 
+## Catalog revision pins (ADR-0341)
+
+With catalog sync on, an account accrues from the published revision it was **pinned** to, never from
+"the currently effective" rate. A row in `account_rate_revision_pins` commits together with the account's first
+successful catalog-sourced accrual. Rate resolution, first pin and the accrual write share one
+transaction owned by a dedicated accrual unit-of-work port; failed accrual persistence must roll
+the pin back. The transaction adapter is required by CDI, with no production pass-through fallback. A natural-key conflict is resolved
+by reading the committed winner only after the failed transaction has rolled back. V20 backfilled a pin for every existing account from its latest non-reversed
+accrual under a catalog-sourced config; operator-managed accounts get no pin and keep operator semantics.
+
+Accrual rate lookup filters the requested currency. The read-only effective-rate lookup without
+a currency keeps its currency-agnostic behavior. Optional filtering is constructed before binding
+parameters, so a null-test placeholder cannot fail PostgreSQL type inference. Account override,
+product fallback and effective-date ordering are unchanged.
+
+**Fail-closed behaviour.** An account is refused (`POST /accrue` answers `409`) when a pin row exists but its
+revision does not resolve to a cached rate config, or when the account has catalog accrual history but no
+pin. The catalog rate is never used: the account accrues nothing. In the daily run the account counts as
+**failed**, logs a WARN and increments `openbank.interest.accrual.catalog.revision.unresolved`; the run is
+therefore incomplete, the close-job record is REFUSED, and the ledger **holds the accounting day** rather than
+closing it without that interest. The alert `InterestAccrualCatalogRevisionUnresolved` fires on the counter.
+Repair the cache (or the missing pin) and re-run for the same business date; the accrual is idempotent per
+account and day. A catalog-sourced effective rate met for an unpinned account fails closed the same way and
+is counted once, by `openbank.interest.accrual.catalog.rate.unpinned`, which should stay at zero.
+
 ## Tech-stack matrix
 
 Auto-surfaced in `/api/v1/info` (from `libs.versions.toml`):
@@ -126,6 +151,16 @@ Auto-surfaced in `/api/v1/info` (from `libs.versions.toml`):
 - Per-service path-scoped CI: test (unit + Testcontainers PostgreSQL/Valkey per JVM, in-memory Kafka), `quarkusBuild` fast-jar, SBOM, image build/push, ArgoCD picks up the tag.
 - **Release axis** (release-please) is driven by `version.txt` + Conventional Commits; **API-contract axis** is `openapi.yaml: info.version` (ADR-0048). Do not force them equal.
 - GitOps: for image-tag merge conflicts take `--ours` (the freshly-built tag); for RBAC/config take `--theirs` or resolve manually.
+
+## Day-close participation (ADR-0342)
+
+Interest reports to the ledger as participant `interest`. The business date of every accrual and capitalization run is the ledger's accounting day (`Europe/Prague`, via `AccountingClock`), not the UTC calendar date, so a run between 00:00 and 02:00 Prague time is recorded under the day the ledger is actually closing. A capitalization run in which any pair was refused (closed-day 409) or failed for another reason is recorded as not complete and reported `REFUSED` with the counts and fixed failure categories; only a fully capitalized run is reported `RAN`. The same holds for accrual: an account whose accrual threw, or whose balance account-service could not supply, makes the run `REFUSED`, and so does a stranded capitalization claim that recovery could not complete. A `REFUSED` or failed day is not retried by itself; the only ways out are re-running the job for the SAME Prague business date (manual `POST /accrue/all` and `/capitalize` default to that date and are idempotent per account and date) or an operator waiver on the ledger's day-end page. `openbank_workflow_last_success_age_seconds{workflow="interest-close-participation"}` is refreshed only when the ledger accepted the tick's reports, so an unreachable ledger or a persistent 403/404 lets the staleness alert fire.
+
+Automatic day-close evidence and its new aggregate warnings contain only business dates, counts and fixed failure categories (including the account-listing flag). Customer/account/product identifiers and raw upstream exception or refusal text are not copied into this new report flow. This is not a claim that all older interest-service logs are anonymized. Ledger waiver reasons and the operator identity remain intentional audit personal data; do not put customer details in a waiver reason. Shadow remains the default and this does not authorize activation.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
 
 ## Shared build dependencies
 
