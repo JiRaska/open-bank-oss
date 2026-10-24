@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: risk-engine
     app.kubernetes.io/part-of: risk
   annotations:
-    openbank.tech/policy-checksum: "46175a983333d378"
+    openbank.tech/policy-checksum: "963dec3f594d43d6"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -803,6 +803,7 @@ data:
     # Actions gated (RiskResource):
     #   risk.snapshot.list    — GET  /snapshots (the run list)
     #   risk.valuation.read   — GET  /snapshots/{id}/valuation (ADR-0344 D8)
+    #   risk.market-risk.read — GET  /snapshots/{id}/sensitivity, /var, /fx-position (treasury desk reports)
     #   risk.snapshot.read    — GET  /snapshots/{id} and every other per-snapshot analysis
     #                           (granted by base rest.rego `operator-read-any`, ROLE_OPERATOR/ADMIN)
     #   risk.snapshot.create  — POST /snapshots
@@ -875,6 +876,21 @@ data:
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-treasury")
     	input.action in {"risk.snapshot.list", "risk.valuation.read"}
+    }
+
+    # ADR-0344 workbench reports: the treasury desk (dealer, approver, senior approver, back office) reads
+    # the reports of the book it trades — the run list, the valuation, and sensitivity / VaR / FX position
+    # (risk.market-risk.read). Nothing else: no capital, liquidity, IRRBB, limits, positions, curve sets,
+    # and no write. Real staff only: an AI agent is not HUMAN and a service-account is a machine.
+    allowed_reasons contains "treasury-desk-risk-report-read" if {
+    	input.principal.type == "HUMAN"
+    	not principal_is_machine
+    	some role in {
+    		"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER",
+    		"ROLE_TREASURY_SENIOR_APPROVER", "ROLE_TREASURY_BACK_OFFICE",
+    	}
+    	role in input.principal.roles
+    	input.action in {"risk.snapshot.list", "risk.valuation.read", "risk.market-risk.read"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2190,7 +2206,9 @@ data:
         # service's own *_rest_ext.rego with `not principal_is_machine` (the verified input.principal.service_account flag).
         # The risk-engine curve-set list reuses `.read` (resource ""). The snapshot LIST and the
         # per-snapshot VALUATION carry their own actions (risk.snapshot.list, risk.valuation.read,
-        # ADR-0344 D8) so a named machine can be granted exactly those two paths and nothing else. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+        # ADR-0344 D8) so a named machine can be granted exactly those two paths and nothing else.
+        # Sensitivity, VaR and FX position carry risk.market-risk.read, so the treasury desk can be granted
+        # its book's reports (risk_rest_ext.rego, humans only) without capital, liquidity, IRRBB or limits. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
         # here on purpose: every treasury action, the reads included, is granted in
         # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
         # treasury depends on this matrix.
@@ -2199,12 +2217,14 @@ data:
             - risk.snapshot.read
             - risk.snapshot.list
             - risk.valuation.read
+            - risk.market-risk.read
             - risk.curve-set.read
         ROLE_FINANCE:
           grant:
             - risk.snapshot.read
             - risk.snapshot.list
             - risk.valuation.read
+            - risk.market-risk.read
             - risk.curve-set.read
 
     shared_m2m_write_prohibition:
