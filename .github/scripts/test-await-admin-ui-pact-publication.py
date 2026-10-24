@@ -131,7 +131,8 @@ class PublicationWaitTest(unittest.TestCase):
         results = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(results)
         modules = ["openbank-account-service", "openbank-treasury-service"]
-        needs = {"changes": {"result": "success", "outputs": {"any": "true"}}}
+        needs = {"changes": {"result": "success", "outputs": {"any": "true", "renderer-changed": "false"}},
+                 "renderer-tests": {"result": "skipped", "outputs": {}}}
         for lane in results.service_jobs.LANES:
             for module in modules:
                 active = lane == "pr"
