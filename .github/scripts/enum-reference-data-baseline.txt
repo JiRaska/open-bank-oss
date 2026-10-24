@@ -103,3 +103,6 @@ numeric openbank-risk-engine TimeBucket Y3_TO_5Y  # #13440
 numeric openbank-risk-engine TimeBucket Y5_TO_10Y  # #13440
 duplicate openbank-sepa-payment Outcome  # #13669
 duplicate openbank-swift-service Outcome  # #13669
+duplicate openbank-libs-iso20022 InstitutionTransferRail  # #13757
+duplicate openbank-libs-iso20022 SettlementRail  # #13757
+duplicate openbank-treasury-service SettlementRail  # #13757
