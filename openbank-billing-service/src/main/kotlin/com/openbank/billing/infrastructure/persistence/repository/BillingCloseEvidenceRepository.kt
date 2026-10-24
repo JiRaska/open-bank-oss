@@ -6,8 +6,10 @@ package com.openbank.billing.infrastructure.persistence.repository
 
 import com.openbank.billing.application.port.out.BillingCloseEvidencePort
 import com.openbank.billing.application.port.out.CycleFeePostings
+import com.openbank.billing.application.port.out.FeeRebillPort
 import com.openbank.libs.close.CloseJobRun
 import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import org.hibernate.reactive.mutiny.Mutiny
 import java.time.Instant
@@ -20,7 +22,21 @@ import java.time.ZoneOffset
  * interest-service's, plus the posting status of one cycle's assessed fees read from `assessed_fee`.
  */
 @ApplicationScoped
-class BillingCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : BillingCloseEvidencePort {
+class BillingCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) :
+    BillingCloseEvidencePort,
+    FeeRebillPort {
+
+    /**
+     * The runbook sets the original fee to PENDING in the same transaction that writes the re-bill
+     * outbox row, so an authorised re-bill finds it PENDING (or FAILED again, if the open day closed
+     * before dispatch) and never with a journal.
+     */
+    override suspend fun isAuthorised(rebillKey: String, originalKey: String): Boolean = sf.withSession { s ->
+        s.createNativeQuery<Number>(REBILL_SQL)
+            .setParameter(1, rebillKey)
+            .setParameter(2, originalKey)
+            .singleResult
+    }.map { (it as Number).toInt() == 1 }.awaitSuspending()
 
     override fun record(run: CloseJobRun): Uni<Unit> = sf.withTransaction { s ->
         s.createNativeQuery<Int>(UPSERT_SQL)
@@ -105,6 +121,11 @@ class BillingCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : Bi
         const val SELECT_SQL =
             "SELECT business_date, job, items_processed, journals_posted, refused, refusal_reason, completed_at " +
                 "FROM billing_close_job_run WHERE business_date BETWEEN ?1 AND ?2 ORDER BY business_date, job"
+
+        const val REBILL_SQL =
+            "SELECT count(*) FROM billing_fee_rebill r JOIN assessed_fee f ON f.idempotency_key = r.original_key " +
+                "WHERE r.rebill_key = ?1 AND r.original_key = ?2 " +
+                "AND f.posting_status IN ('PENDING', 'FAILED') AND f.journal_id IS NULL"
 
         // A reversed fee still had its charge journal booked, so it counts as posted.
         const val POSTINGS_SQL =

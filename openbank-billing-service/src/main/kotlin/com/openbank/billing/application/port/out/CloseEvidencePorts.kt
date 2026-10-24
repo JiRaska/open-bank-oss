@@ -34,6 +34,15 @@ interface CycleFeePostingsPort {
     fun postingsFor(cycleId: String): Uni<CycleFeePostings>
 }
 
+/**
+ * Authorisation of a re-bill outbox row (runbook 0033). A row carrying `rebillOf` settles the ORIGINAL
+ * fee with a journal posted under a new key, so it must have been approved: a `billing_fee_rebill` row
+ * binding exactly that new key to that original, and the original must still be unbooked.
+ */
+fun interface FeeRebillPort {
+    suspend fun isAuthorised(rebillKey: String, originalKey: String): Boolean
+}
+
 /** Everything the day-close reporter reads: the cycle run evidence and the cycle's fee postings. */
 interface BillingCloseEvidencePort :
     CloseJobRunPort,

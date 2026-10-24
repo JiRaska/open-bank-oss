@@ -107,6 +107,19 @@ class BillingCycleScheduler {
      */
     private var aborted = false
 
+    /**
+     * One sweep at a time IN THIS JVM, across the cron trigger and the catch-up. Deliberately not a
+     * cluster lock, and safe because of two facts, both checked when this was written (#13709 review):
+     *  - billing runs as ONE replica (`gitops/components/billing/billing-service.yaml`: a Deployment,
+     *    `replicas: 1`), so in steady state there is no second JVM to overlap with;
+     *  - during a rolling update two pods can briefly coexist, and a double sweep then costs duplicate
+     *    work, never a double charge: an assessment is unique per (cycle, account, currency) and
+     *    `persistWithPostingIntent` recovers the unique-constraint race into an idempotent replay, so
+     *    the second sweep re-reads the first one's rows.
+     * A cluster lock (libs `PostgresClusterLock`) was not used: it runs its block inside ONE
+     * transaction, which the per-account `sf.withTransaction` calls would join, turning one account's
+     * failure into a rollback of the whole batch. Scaling billing past one replica must revisit this.
+     */
     private val sweepInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
 
     @ConfigProperty(name = "openbank.billing.scheduler.cron")

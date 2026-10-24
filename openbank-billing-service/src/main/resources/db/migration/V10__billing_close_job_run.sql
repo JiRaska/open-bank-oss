@@ -32,5 +32,6 @@ CREATE TABLE billing_fee_rebill (
     maker           VARCHAR(100)  NOT NULL,
     checker         VARCHAR(100)  NOT NULL,
     created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    CONSTRAINT billing_fee_rebill_four_eyes CHECK (maker <> checker)
+    -- Compared trimmed and case-folded: "Alice " and "alice" are the same person.
+    CONSTRAINT billing_fee_rebill_four_eyes CHECK (lower(btrim(maker)) <> lower(btrim(checker)))
 );

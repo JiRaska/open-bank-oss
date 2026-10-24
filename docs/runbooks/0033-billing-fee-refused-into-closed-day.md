@@ -49,8 +49,13 @@ investigate it.
 This is a data change on a money-path table. Run it under an approved change ticket.
 
 1. The **maker** pastes the step 1a output (the key list) into the ticket.
-2. A different person, the **checker**, approves it. `billing_fee_rebill` enforces `maker <> checker`,
-   so the same person cannot be both.
+2. A different person, the **checker**, approves it. `billing_fee_rebill` enforces
+   `lower(btrim(maker)) <> lower(btrim(checker))`, so the same person cannot be both, however the
+   name is cased or padded.
+   The dispatcher posts a re-bill row only if a `billing_fee_rebill` row binds exactly its new key to
+   its `rebillOf` and the original fee is still unbooked. A hand-written outbox row without that record
+   is refused before it reaches the ledger, and counted in `openbank_billing_fee_rebill_refused_total`.
+   It then retries until it is DEAD, and runbook 0026 takes over from there.
 3. The maker runs, in ONE transaction, for exactly the approved keys:
 
 ```sql

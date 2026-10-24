@@ -9,6 +9,7 @@ import com.openbank.billing.application.port.out.LedgerPostingPort
 import com.openbank.billing.domain.FeeJournalCommand
 import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.billing.infrastructure.outbox.LedgerOutboxEventPublisher
+import com.openbank.billing.infrastructure.outbox.UnauthorisedRebillException
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -169,10 +170,59 @@ class LedgerOutboxEventPublisherTest {
         val rebill = payload("fee-2026-07-acc-1-f1-CZK:rebill:2026-07-03")
             .replace("}", ",\"rebillOf\":\"fee-2026-07-acc-1-f1-CZK\"}")
 
-        LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry()).publish(entry(rebill))
+        // Approved: the store holds exactly this (new key -> original) pairing.
+        val approved = com.openbank.billing.application.port.out.FeeRebillPort { rebillKey, originalKey ->
+            rebillKey == "fee-2026-07-acc-1-f1-CZK:rebill:2026-07-03" && originalKey == "fee-2026-07-acc-1-f1-CZK"
+        }
+        LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry(), approved)
+            .publish(entry(rebill))
 
         assertThat(commandSlot.captured.idempotencyKey).isEqualTo("fee-2026-07-acc-1-f1-CZK:rebill:2026-07-03")
         coVerify(exactly = 1) { assessments.markPosted("fee-2026-07-acc-1-f1-CZK", journalId) }
+    }
+
+    // #13709 review: an outbox row is just text. A hand-written row naming any `rebillOf` must not
+    // settle that fee: without an approved billing_fee_rebill record it is refused BEFORE the ledger
+    // sees it, counted, and nothing is marked.
+    @Test
+    fun `a hand-written re-bill row with no approved record is refused before posting and counted`() {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        val meters = SimpleMeterRegistry()
+        val forged = payload("fee-2026-07-acc-9-f1-CZK:rebill:2026-07-03")
+            .replace("}", ",\"rebillOf\":\"fee-2026-07-acc-9-f1-CZK\"}")
+        val nothingApproved = com.openbank.billing.application.port.out.FeeRebillPort { _, _ -> false }
+
+        assertThatThrownBy {
+            runBlocking {
+                LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), meters, nothingApproved)
+                    .publish(entry(forged))
+            }
+        }.isInstanceOf(UnauthorisedRebillException::class.java)
+
+        coVerify(exactly = 0) { ledger.post(any()) }
+        coVerify(exactly = 0) { assessments.markPosted(any(), any()) }
+        assertThat(meters.get("openbank.billing.fee.rebill.refused").counter().count()).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `the store-less constructor refuses every re-bill (fail closed)`() {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        val rebill = payload("fee-2026-07-acc-1-f1-CZK:rebill:2026-07-03")
+            .replace("}", ",\"rebillOf\":\"fee-2026-07-acc-1-f1-CZK\"}")
+
+        assertThatThrownBy {
+            runBlocking {
+                LedgerOutboxEventPublisher(
+                    ledger,
+                    assessments,
+                    noOpEmitter(),
+                    SimpleMeterRegistry(),
+                ).publish(entry(rebill))
+            }
+        }.isInstanceOf(UnauthorisedRebillException::class.java)
+        coVerify(exactly = 0) { ledger.post(any()) }
     }
 
     @Test
