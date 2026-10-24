@@ -47,7 +47,7 @@ class CatalogPensionOidcApprovalIT {
     @Test
     @Order(3)
     fun `pension service JWT gains scoped read and unrelated service JWT is forbidden`() {
-        val path = "/api/v2/offerings/${UUID.randomUUID()}/revisions/${UUID.randomUUID()}/pension-approvals"
+        val path = "/api/v2/offerings/${UUID.randomUUID()}/revisions/${UUID.randomUUID()}/approvals"
         given().get(path).then().statusCode(401)
         val unrelated = serviceToken("unrelated-service")
         assertThat(jwtPayload(unrelated).path("scope").asText().split(' ')).contains("catalog:read")
@@ -119,7 +119,7 @@ class CatalogPensionOidcApprovalIT {
     @Order(2)
     fun `real legal and product JWTs pass only their own approval role with requested scope`() {
         val revisionId = requireNotNull(seededRevisionId)
-        val path = "/api/v2/offerings/${requireNotNull(seededOfferingId)}/revisions/$revisionId/pension-approvals"
+        val path = "/api/v2/offerings/${requireNotNull(seededOfferingId)}/revisions/$revisionId/approvals"
         val legal = humanToken("legal-reviewer", "openid profile pension:legal-approve")
         val product = humanToken("product-reviewer", "openid profile pension:product-approve")
         val missingScope = humanToken("legal-reviewer", "openid profile")

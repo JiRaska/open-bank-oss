@@ -4999,14 +4999,6 @@ catalog_kernel_neutrality:
     - {path: com/openbank/productcatalog/infrastructure/insurance/InsuranceTermLifeInteroperabilityAdapter.kt, reason: "insurance pack external-standard mapper (ADR-0257: packs contribute mappers)"}
     - {path: com/openbank/productcatalog/infrastructure/catalog/CatalogReferenceOfferingSeeder.kt, reason: "pack reference-offering fixtures (ADR-0341)"}
     - {path: com/openbank/productcatalog/infrastructure/persistence/BankV1PackGuard.kt, reason: "v1 adapter needs the banking pack"}
-    - path: com/openbank/productcatalog/infrastructure/rest/PensionRevisionApprovalResource.kt
-      reason: "deprecated alias of /approvals while admin-ui and OPA migrate"
-      expires: 2027-01-31
-      tracking: "#13429"
-  # Deprecated v2 wire names the kernel must still map during their compatibility window.
-  deprecated_wire_aliases:
-    - {name: pensionApprovalDigest, expires: 2027-01-31, tracking: "#13429"}
-    - {name: pensionApprovedEffectiveTo, expires: 2027-01-31, tracking: "#13429"}
 
 # ---------------------------------------------------------------------------------------
 # Merge train (ADR-0343). The train serves a PR only when the ruleset-required contexts are

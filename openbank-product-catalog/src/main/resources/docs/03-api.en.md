@@ -55,9 +55,8 @@ a strong numeric `If-Match`: missing is 428 and stale/concurrent is 412.
 The exact product-type schema can declare an `approvalPolicy` for revision approval.
 It exposes the required role codes, whether `effectiveFrom` is required, and required
 attributes; it does not expose the internal authority used to authorize the caller.
-Clients use the generic revision-approval endpoints for such schemas. The deprecated
-`pension-approvals` aliases remain available during the client transition and must
-not be removed until deployed consumers have moved to the generic endpoints.
+Clients use the generic revision-approval endpoints for such schemas. The former
+`pension-approvals` aliases were removed once every deployed consumer had moved (#13429).
 
 | Method | Path | Purpose |
 |---|---|---|

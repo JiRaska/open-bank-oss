@@ -425,9 +425,6 @@ class GenericCatalogResource(
         revision = revision.revision,
         approvalDigest = revision.approvalDigest,
         approvedEffectiveTo = revision.approvedEffectiveTo?.atOffset(ZoneOffset.UTC),
-        // Deprecated wire aliases of the two fields above (#13429); removed with the compatibility window.
-        pensionApprovalDigest = revision.approvalDigest,
-        pensionApprovedEffectiveTo = revision.approvedEffectiveTo?.atOffset(ZoneOffset.UTC),
         irSignature = revision.irSignature?.let {
             GeneratedIrSignature(
                 revisionHash = it.revisionHash,

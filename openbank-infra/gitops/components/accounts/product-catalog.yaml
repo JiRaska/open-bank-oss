@@ -71,7 +71,7 @@ spec:
         instrumentation.opentelemetry.io/inject-java: "openbank"
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-product-catalog-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a38f96da250e1ae1"
+        openbank.tech/policy-checksum: "b58c4450faf1b1ef"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -192,7 +192,7 @@ spec:
               memory: 512Mi
         # OPA policy-decision sidecar (ADR-0034, issue #12823). Serves data.openbank.rest.allow
         # for product-catalog's @Authorize endpoints (catalog.read/list/create/update/author/
-        # publish, catalog.pensionApproval.*). Bundle mounted from product-catalog-opa-bundle.
+        # publish, catalog.revisionApproval.*). Bundle mounted from product-catalog-opa-bundle.
         - name: opa
           image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent

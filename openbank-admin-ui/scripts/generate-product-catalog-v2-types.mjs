@@ -29,8 +29,6 @@ const selected = new Set([
   'SchemaViolation', 'ValidateCatalogRequest', 'ValidateCatalogResponse', 'CatalogValidationProblem',
   'CatalogEvent', 'CatalogEventPage',
   'RevisionApprovalRequest', 'RevisionApprovalResponse', 'RevisionApprovalPolicy', 'RevisionApprovalRole',
-  // Deprecated alias operations (#13429); drop with them from openapi.yaml.
-  'PensionApprovalRequest', 'PensionApprovalResponse',
 ])
 
 function typeOf(schema = {}) {

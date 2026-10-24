@@ -141,7 +141,7 @@ authority. Registered policies are append-only per schema version.
 
 A schema with a policy publishes only when every declared role has approved the exact content digest.
 Each role must be approved by a different principal, and never by the maker. Approvals go through
-`/api/v2/offerings/{o}/revisions/{r}/approvals/{role}`. `/pension-approvals` is a deprecated alias.
+`/api/v2/offerings/{o}/revisions/{r}/approvals/{role}`.
 
 Deployment config binds each authority to the scope and realm role a token must carry together:
 `openbank.catalog.approval.authorities.<AUTHORITY>`.

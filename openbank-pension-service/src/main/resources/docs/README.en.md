@@ -106,10 +106,8 @@ declarations and this test do not prove that a cluster Certificate is ready.
 ## Catalog revision approvals
 
 The strategy-instrument catalog adapter reads generic revision approvals and the
-`approvalDigest` from product-catalog. The older `pension-approvals` alias remains
-served by the catalog during the transition, but this service no longer calls it.
-Roll out the updated pension client before retiring the alias in a later catalog
-change; the catalog must keep both routes available until then.
+`approvalDigest` from product-catalog. The catalog no longer serves the former
+`pension-approvals` alias (#13429).
 
 ## Published DIP catalog regression
 
