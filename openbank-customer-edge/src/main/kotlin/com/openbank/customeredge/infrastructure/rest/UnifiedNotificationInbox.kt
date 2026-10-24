@@ -168,8 +168,6 @@ internal class UnifiedNotificationInbox(
         return PartyPage(items, page.path("total").asLong(), page.path("unreadCount").asLong())
     }
 
-    private fun remaining(deadline: Long): Long = (deadline - nanoTime()).coerceAtLeast(0)
-
     private companion object {
         const val MAX_CONCURRENT_FEEDS = 16
         const val MAX_QUEUED_FEEDS = 128

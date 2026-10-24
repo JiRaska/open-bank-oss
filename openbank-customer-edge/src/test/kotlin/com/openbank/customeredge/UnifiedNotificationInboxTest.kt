@@ -20,8 +20,11 @@ import org.jboss.logging.MDC
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class UnifiedNotificationInboxTest {
     private val mapper = ObjectMapper()
@@ -80,7 +83,7 @@ class UnifiedNotificationInboxTest {
     }
 
     @Test
-    fun `slow upstream cannot schedule a large inventory or outlive aggregate deadline`() {
+    fun `silent upstream reaches the actual aggregate timeout without unbounded fanout`() {
         val calls = AtomicInteger()
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(any(), any()) } answers {
@@ -96,11 +99,69 @@ class UnifiedNotificationInboxTest {
             TimeUnit.MILLISECONDS.toNanos(100),
         ).list(List(200) { UUID.randomUUID() }, 20)
         assertThat(response.status).isEqualTo(502)
+        assertThat(response.entity).isEqualTo(mapOf("code" to "NOTIFICATIONS_UNAVAILABLE"))
         assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)).isLessThan(2_000)
         assertThat(calls.get()).isLessThanOrEqualTo(16)
-        val atDeadline = calls.get()
-        Thread.sleep(100)
-        assertThat(calls.get()).isEqualTo(atDeadline)
+        // Cancellation does not join in-flight workers. The separate controlled-expiry test
+        // establishes no further adapter work after all initial entries and stub-exit acks.
+    }
+
+    @Test
+    fun `expired aggregate cancels initial feeds without reading the remaining inventory`() {
+        val initialEntries = CountDownLatch(16)
+        val releaseOne = CountDownLatch(1)
+        val blocked = CountDownLatch(1)
+        val exited = CountDownLatch(16)
+        val calls = AtomicInteger()
+        val now = AtomicLong()
+        val budget = TimeUnit.SECONDS.toNanos(10)
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } answers {
+            val position = calls.incrementAndGet()
+            initialEntries.countDown()
+            try {
+                if (position == 1) {
+                    check(releaseOne.await(5, TimeUnit.SECONDS)) { "first feed was not released" }
+                    page(UUID.fromString(secondArg()), "2026-10-08T10:00:00Z", 1)
+                } else {
+                    check(blocked.await(5, TimeUnit.SECONDS)) { "initial feed was not cancelled" }
+                    error("blocked feed must be interrupted by aggregate cancellation")
+                }
+            } finally {
+                exited.countDown()
+            }
+        }
+        val caller = Executors.newSingleThreadExecutor()
+        try {
+            val result = caller.submit<Response> {
+                UnifiedNotificationInbox(upstream, mapper, "http://notifications", budget, now::get)
+                    .list(List(200) { UUID.randomUUID() }, 20)
+            }
+            // Prime all initial calls before expiring the virtual clock. An entry counter after
+            // cancel is not a submission counter: a descheduled, already-running task can reach
+            // a MockK answer later. No arbitrary post-return sleep can establish worker exit.
+            assertThat(initialEntries.await(5, TimeUnit.SECONDS)).isTrue()
+            assertThat(calls.get()).isEqualTo(16)
+            assertThat(result.isDone).isFalse()
+            now.set(budget)
+            val expiredAt = System.nanoTime()
+            // A valid completed page wakes the completion loop after expiry. It must not be
+            // returned partially or replenish the remaining 184 feeds.
+            releaseOne.countDown()
+            val response = result.get(2, TimeUnit.SECONDS)
+            assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - expiredAt)).isLessThan(2_000)
+            assertThat(response.status).isEqualTo(502)
+            assertThat(response.entity).isEqualTo(mapOf("code" to "NOTIFICATIONS_UNAVAILABLE"))
+            // These acknowledgements belong to interruptible test stubs, not a guarantee that
+            // production HTTP cancellation joins an exchange or retracts a request already sent.
+            assertThat(exited.await(2, TimeUnit.SECONDS)).isTrue()
+            assertThat(calls.get()).isEqualTo(16)
+        } finally {
+            releaseOne.countDown()
+            blocked.countDown()
+            caller.shutdownNow()
+            check(caller.awaitTermination(2, TimeUnit.SECONDS))
+        }
     }
 
     @Test
@@ -174,7 +235,6 @@ class UnifiedNotificationInboxTest {
         val now = java.util.concurrent.atomic.AtomicLong()
         val upstream = mockk<UpstreamClient>()
         val budgets = mutableListOf<Long>()
-        var nowNanos = 0L
         every { upstream.get(any(), any(), any()) } answers {
             val budget = thirdArg<Long>()
             budgets += budget
@@ -187,7 +247,7 @@ class UnifiedNotificationInboxTest {
         }
         MDC.put("synthetic", "true")
         try {
-            val inbox = UnifiedNotificationInbox(
+            val response = UnifiedNotificationInbox(
                 upstream,
                 mapper,
                 "http://notifications",
