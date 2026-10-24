@@ -13,6 +13,8 @@ import { EntityChip } from '@/components/entities/EntityChip'
 import { Can } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { validateAccountBalance, validateAccountDetail } from '@/lib/accounts/detailContract'
 import type { Account, AccountBalance } from '@/types'
 
@@ -31,7 +33,7 @@ export default function AccountDetailPage() {
   const [account, setAccount]   = useState<Account | null>(null)
   const [balance, setBalance]   = useState<AccountBalance | null>(null)
   const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState<string | null>(null)
+  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind; detail?: string } | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [acting, setActing]     = useState(false)
   const actionInFlight = useRef(false)
@@ -45,23 +47,42 @@ export default function AccountDetailPage() {
 
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current
-    setLoading(true); setError(null)
+    setLoading(true); setUnavailable(null)
     try {
       const [acc, bal] = await Promise.allSettled([
-        accountApi.get(id),
+        fetch(svcUrl('account-service', `/api/v1/accounts/${encodeURIComponent(id)}`), { cache: 'no-store' }),
         accountApi.getBalance(id),
       ])
       if (sequence !== loadSequence.current) return
-      if (acc.status !== 'fulfilled') throw new Error(acc.reason?.message ?? 'Failed to load account')
-      const verifiedAccount = validateAccountDetail(acc.value, id)
+      if (acc.status !== 'fulfilled') {
+        setUnavailable({ kind: 'unreachable' })
+        return
+      }
+      if (!acc.value.ok) {
+        const kind = await classifyBffFailure(acc.value)
+        if (sequence !== loadSequence.current) return
+        setUnavailable({ kind })
+        return
+      }
+      let accountEvidence: unknown
+      try {
+        accountEvidence = await acc.value.json()
+      } catch {
+        if (sequence !== loadSequence.current) return
+        setUnavailable({ kind: 'error' })
+        return
+      }
+      if (sequence !== loadSequence.current) return
+      const verifiedAccount = validateAccountDetail(accountEvidence, id)
       if (!verifiedAccount) {
-        throw new Error(unverifiableAccountMessage)
+        setUnavailable({ kind: 'error', detail: unverifiableAccountMessage })
+        return
       }
       setAccount(verifiedAccount)
       setBalance(bal.status === 'fulfilled' ? validateAccountBalance(bal.value, verifiedAccount) : null)
-    } catch (e: unknown) {
+    } catch {
       if (sequence !== loadSequence.current) return
-      setError(e instanceof Error ? e.message : 'Failed to load account')
+      setUnavailable({ kind: 'unreachable' })
     } finally {
       if (sequence === loadSequence.current) setLoading(false)
     }
@@ -115,10 +136,22 @@ export default function AccountDetailPage() {
     </div>
   )
 
-  if (error) return (
-    <div style={{ padding: '20px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: 'var(--r-lg)', display: 'flex', gap: '10px' }}>
-      <AlertCircle size={15} style={{ color: 'var(--danger)', flexShrink: 0 }}/>
-      <span style={{ fontSize: '13px', color: 'var(--danger)' }}>{error}</span>
+  if (unavailable) return (
+    <div>
+      <PageHeader
+        title={t('Detail účtu', 'Account detail')}
+        subtitle={t('Účet se nepodařilo načíst.', 'The account could not be loaded.')}
+      />
+      <DataUnavailable kind={unavailable.kind} service="Account-service" feature={t('detail účtu', 'account detail')} detail={unavailable.detail} lang={language}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading} aria-busy={loading} aria-label={t('Zkusit znovu načíst účet', 'Retry loading account')}>
+            <RefreshCw size={13} aria-hidden="true" /> {t('Zkusit znovu', 'Retry')}
+          </button>
+          <Link href="/accounts" className="btn btn-secondary">
+            <ArrowLeft size={13} aria-hidden="true" /> {t('Zpět na účty', 'Back to accounts')}
+          </Link>
+        </div>
+      </DataUnavailable>
     </div>
   )
 

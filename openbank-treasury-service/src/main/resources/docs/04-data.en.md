@@ -11,3 +11,7 @@ This page currently documents only the outbox lifecycle; the rest of the data mo
 - Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
 - Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
 - Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.
+
+## Postings name an accounting class, not a GL code (ADR-0341 D3)
+
+A posting leg now carries `accountingClass` + `LedgerRole` (principal, accrued interest, interest income/expense) + currency and no GL code; the ledger resolves the account from its own map. Each `ProductType` declares its accounting class (e.g. `INTERBANK_PLACEMENT`, `CNB_LOMBARD_BORROWING`), and nostro reconciliation uses `TreasuryChart.nostroCode`. A legacy-posting oracle test pins that the resulting journals are unchanged.

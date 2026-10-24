@@ -11,15 +11,20 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { Gift } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
 import { getJson, PENSION, pensionUrl, sendJson } from '@/components/pension/api'
-import { queueRowSchema, stateContributionDeadlinesSchema, type StateContributionDeadlines } from '@/components/pension/contracts'
-import { refusalText } from '@/components/pension/model'
-import { PensionQueue } from '@/components/pension/PensionQueue'
+import {
+  incentiveStatusSchema, pensionContractListSchema, queueRowSchema, stateContributionDeadlinesSchema, stateReturnListSchema,
+  type IncentiveStatus, type PensionContract, type StateContributionDeadlines, type StateReturn,
+} from '@/components/pension/contracts'
+import { refusalText, statusLabel } from '@/components/pension/model'
+import { PartySearch, type PartyHit, partyDisplayName } from '@/components/party/PartySearch'
+import { PAGE_SIZE, PensionQueue } from '@/components/pension/PensionQueue'
 import { hasPermission } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
@@ -31,14 +36,15 @@ export default function PensionIncentiveBatchesPage() {
   )
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/
+const CLAIM_LIMIT = 100
 
 function StateContribution() {
   const { t } = useLanguage()
   const { data: session } = useSession()
   const roles = useMemo(() => session?.user?.roles ?? [], [session?.user?.roles])
   const canOperate = hasPermission(roles, 'pension:operate')
-  const [returnStatus, setReturnStatus] = useState('DUE')
+  const [returnStatus, setReturnStatus] = useState('CONFIRMED')
   return (
     <div>
       <PageHeader
@@ -47,6 +53,7 @@ function StateContribution() {
         icon={<Gift size={20} aria-hidden="true" />}
       />
       <Deadlines />
+      {canOperate && <ClaimRun />}
       <PensionQueue
         title={t('Dávky žádostí', 'Claim batches')}
         url={pensionUrl('/funding/operations/claim-batches')}
@@ -67,20 +74,8 @@ function StateContribution() {
           <option value="SETTLED">{t('Vypořádané', 'Settled')}</option>
         </select>
       </div>
-      <PensionQueue
-        title={t('Vratky státního příspěvku (§ 18)', 'State-contribution returns (§ 18)')}
-        url={pensionUrl('/funding/operations/state-contribution/returns', { status: returnStatus })}
-        service={PENSION}
-        feature={t('vratky státního příspěvku', 'state-contribution returns')}
-        columns={[
-          { key: 'cause', cs: 'Důvod', en: 'Cause' },
-          { key: 'amount', cs: 'Částka', en: 'Amount' },
-          { key: 'currency', cs: 'Měna', en: 'Currency' },
-          { key: 'discoveredOn', cs: 'Zjištěno', en: 'Discovered' },
-          { key: 'dueBy', cs: 'Splatné do', en: 'Due by' },
-        ]}
-      />
-      {canOperate && <SettleReturn />}
+      <Returns status={returnStatus} canOperate={canOperate} />
+      {canOperate && <FileReturnReport />}
       <PensionQueue
         title={t('Hlášení vratek', 'Return reports')}
         url={pensionUrl('/funding/operations/state-contribution/return-reports')}
@@ -92,6 +87,7 @@ function StateContribution() {
           { key: 'createdAt', cs: 'Vytvořeno', en: 'Created' },
         ]}
       />
+      <ClientIncentives canOperate={canOperate} />
     </div>
   )
 }
@@ -124,27 +120,264 @@ function Deadlines() {
   )
 }
 
-/** Record that a return was paid back to the state agency. */
-function SettleReturn() {
-  const { t } = useLanguage()
-  const [id, setId] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!UUID.test(id.trim())) { setMessage({ tone: 'danger', text: t('ID vratky musí být UUID.', 'The return id must be a UUID.') }); return }
-    setBusy(true)
-    const res = await sendJson('POST', pensionUrl(`/funding/operations/state-contribution/returns/${encodeURIComponent(id.trim())}/settle`), undefined, queueRowSchema)
-    setBusy(false)
-    setMessage(res.ok
+type Notice = { tone: 'success' | 'danger'; text: string }
+
+function NoticeLine({ notice }: { notice: Notice | null }) {
+  if (!notice) return null
+  return <div role="status" style={{ width: '100%', fontSize: 12, color: notice.tone === 'danger' ? 'var(--danger-text)' : 'var(--success-text)' }}>{notice.text}</div>
+}
+
+/** Returns table: the operator settles a CONFIRMED return by clicking its row, never by typing an id. */
+function Returns({ status, canOperate }: { status: string; canOperate: boolean }) {
+  const { t, language } = useLanguage()
+  const [rows, setRows] = useState<StateReturn[] | null>(null)
+  const [kind, setKind] = useState<UnavailableKind | null>(null)
+  const [shown, setShown] = useState(PAGE_SIZE)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
+  const load = useCallback(async () => {
+    const res = await getJson(pensionUrl('/funding/operations/state-contribution/returns', { status }), stateReturnListSchema)
+    if (!res.ok) { setKind(res.kind); setRows(null); return }
+    setKind(null)
+    setRows(res.data)
+    setShown(PAGE_SIZE)
+  }, [status])
+  useEffect(() => { void load() }, [load])
+  const settle = async (id: string) => {
+    setBusyId(id)
+    const res = await sendJson('POST', pensionUrl(`/funding/operations/state-contribution/returns/${encodeURIComponent(id)}/settle`), undefined, queueRowSchema)
+    setBusyId(null)
+    setNotice(res.ok
       ? { tone: 'success', text: t('Vratka je vypořádána.', 'The return is settled.') }
       : { tone: 'danger', text: refusalText(res, t('Vypořádání vratky', 'Settling the return'), t) })
+    if (res.ok) void load()
+  }
+  const feature = t('vratky státního příspěvku', 'state-contribution returns')
+  return (
+    <section className="card" style={{ marginBottom: 16, overflowX: 'auto' }}>
+      <h2 style={{ fontSize: 15, margin: '0 0 8px' }}>{t('Vratky státního příspěvku (§ 18)', 'State-contribution returns (§ 18)')}</h2>
+      {kind ? <DataUnavailable kind={kind} service={PENSION} feature={feature} lang={language} dense />
+        : rows === null ? null
+        : rows.length === 0 ? <DataUnavailable kind="no_data" service={PENSION} feature={feature} lang={language} dense />
+        : (
+          <>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Smlouva', 'Contract')}</th>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Stav', 'Status')}</th>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Důvod', 'Cause')}</th>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Částka', 'Amount')}</th>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Zjištěno', 'Discovered')}</th>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Splatné do', 'Due by')}</th>
+                  {canOperate && <th scope="col" />}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.slice(0, shown).map(row => (
+                  <tr key={row.id}>
+                    <td><Link href={`/pension/contracts/${encodeURIComponent(row.contractId)}`}>{row.contractId}</Link></td>
+                    <td>{statusLabel(row.status, t)}</td>
+                    <td>{row.cause}</td>
+                    <td>{row.amount} {row.currency}</td>
+                    <td>{row.discoveredOn ?? '—'}</td>
+                    <td>{row.dueBy ?? '—'}</td>
+                    {canOperate && (
+                      <td>
+                        {row.status === 'CONFIRMED' && (
+                          <button type="button" className="btn btn-secondary btn-sm" disabled={busyId === row.id} onClick={() => void settle(row.id)}>
+                            {t('Vypořádat', 'Settle')}
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {rows.length > shown && (
+              <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 12 }} onClick={() => setShown(s => s + PAGE_SIZE)}>
+                {t('Načíst další', 'Load more')}
+              </button>
+            )}
+          </>
+        )}
+      <NoticeLine notice={notice} />
+    </section>
+  )
+}
+
+/** Files the monthly return report with every DUE return (POST …/return-reports {month}). */
+function FileReturnReport() {
+  const { t } = useLanguage()
+  const [month, setMonth] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<Notice | null>(null)
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!MONTH.test(month.trim())) { setNotice({ tone: 'danger', text: t('Měsíc zadejte jako RRRR-MM.', 'Enter the month as YYYY-MM.') }); return }
+    setBusy(true)
+    const res = await sendJson('POST', pensionUrl('/funding/operations/state-contribution/return-reports'), { month: month.trim() }, queueRowSchema)
+    setBusy(false)
+    if (!res.ok) { setNotice({ tone: 'danger', text: refusalText(res, t('Podání hlášení', 'Filing the report'), t) }); return }
+    setNotice({
+      tone: 'success',
+      text: res.data.filed === true ? t('Hlášení vratek bylo podáno.', 'The return report was filed.') : t('Žádná vratka k nahlášení.', 'No returns were due for this month.'),
+    })
   }
   return (
     <form className="card" onSubmit={submit} style={{ marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-      <input className="input" value={id} onChange={e => setId(e.target.value)} placeholder={t('ID vratky (UUID)', 'Return id (UUID)')} aria-label={t('ID vratky', 'Return id')} style={{ flex: '1 1 320px' }} />
-      <button type="submit" className="btn btn-secondary btn-sm" disabled={busy}>{t('Vypořádat vratku', 'Settle return')}</button>
-      {message && <div role="status" style={{ width: '100%', fontSize: 12, color: message.tone === 'danger' ? 'var(--danger-text)' : 'var(--success-text)' }}>{message.text}</div>}
+      <input className="input" value={month} onChange={e => setMonth(e.target.value)} placeholder={t('Měsíc (RRRR-MM)', 'Month (YYYY-MM)')} aria-label={t('Měsíc hlášení', 'Report month')} />
+      <button type="submit" className="btn btn-secondary btn-sm" disabled={busy}>{t('Podat hlášení vratek', 'File return report')}</button>
+      <NoticeLine notice={notice} />
     </form>
+  )
+}
+
+/** Generates the claims of a closed month and files them (POST …/claim-runs {period}). */
+function ClaimRun() {
+  const { t } = useLanguage()
+  const [period, setPeriod] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<Notice | null>(null)
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!MONTH.test(period.trim())) { setNotice({ tone: 'danger', text: t('Období zadejte jako RRRR-MM.', 'Enter the period as YYYY-MM.') }); return }
+    setBusy(true)
+    const res = await sendJson('POST', pensionUrl('/funding/operations/claim-runs'), { period: period.trim() }, queueRowSchema)
+    setBusy(false)
+    setNotice(res.ok
+      ? { tone: 'success', text: t(`Žádosti vytvořeny: ${String(res.data.claimsCreated ?? 0)}.`, `Claims created: ${String(res.data.claimsCreated ?? 0)}.`) }
+      : { tone: 'danger', text: refusalText(res, t('Dávka žádostí', 'The claim run'), t) })
+  }
+  return (
+    <form className="card" onSubmit={submit} style={{ marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      <input className="input" value={period} onChange={e => setPeriod(e.target.value)} placeholder={t('Uzavřený měsíc (RRRR-MM)', 'Closed month (YYYY-MM)')} aria-label={t('Období žádostí', 'Claim period')} />
+      <button type="submit" className="btn btn-secondary btn-sm" disabled={busy}>{t('Vytvořit a podat žádosti', 'Generate and file claims')}</button>
+      <NoticeLine notice={notice} />
+    </form>
+  )
+}
+
+/**
+ * Find a client by name (party-service search), list their pension contracts, open one's incentive
+ * claims and balances, and return a RECEIVED claim to the agency. A pasted id still works because
+ * PartySearch passes a UUID straight through.
+ */
+function ClientIncentives({ canOperate }: { canOperate: boolean }) {
+  const { t, language } = useLanguage()
+  const [party, setParty] = useState<PartyHit | null>(null)
+  const [contracts, setContracts] = useState<PensionContract[] | null>(null)
+  const [contractsKind, setContractsKind] = useState<UnavailableKind | null>(null)
+  const [contractId, setContractId] = useState<string | null>(null)
+  const [status, setStatus] = useState<IncentiveStatus | null>(null)
+  const [statusKind, setStatusKind] = useState<UnavailableKind | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
+
+  const loadStatus = useCallback(async (id: string) => {
+    const res = await getJson(pensionUrl(`/contracts/${encodeURIComponent(id)}/incentives`), incentiveStatusSchema)
+    if (!res.ok) { setStatusKind(res.kind); setStatus(null); return }
+    setStatusKind(null)
+    setStatus(res.data)
+  }, [])
+
+  const choose = async (hit: PartyHit) => {
+    setParty(hit); setContracts(null); setContractsKind(null); setContractId(null); setStatus(null); setStatusKind(null); setNotice(null)
+    const res = await getJson(pensionUrl('/contracts', { q: hit.id, limit: String(CLAIM_LIMIT) }), pensionContractListSchema)
+    if (!res.ok) { setContractsKind(res.kind); return }
+    setContracts(res.data.filter(c => c.participantPartyId === hit.id))
+  }
+  const open = (id: string) => { setContractId(id); setStatus(null); setNotice(null); void loadStatus(id) }
+  const returnClaim = async (claimId: string) => {
+    setBusyId(claimId)
+    const res = await sendJson('POST', pensionUrl(`/funding/operations/claims/${encodeURIComponent(claimId)}/return`), undefined, queueRowSchema)
+    setBusyId(null)
+    setNotice(res.ok
+      ? { tone: 'success', text: t('Příspěvek byl vrácen státu.', 'The incentive was returned to the state.') }
+      : { tone: 'danger', text: refusalText(res, t('Vrácení příspěvku', 'Returning the incentive'), t) })
+    if (res.ok && contractId) void loadStatus(contractId)
+  }
+
+  return (
+    <section style={{ marginBottom: 16 }}>
+      <h2 style={{ fontSize: 15, margin: '0 0 8px' }}>{t('Příspěvky klienta', 'Client incentives')}</h2>
+      <PartySearch onSelect={hit => void choose(hit)} selectedId={party?.id} />
+      {party && (
+        <div className="card" style={{ marginBottom: 16, overflowX: 'auto' }}>
+          <div style={{ fontSize: 13, marginBottom: 8 }}>{t('Klient', 'Client')}: <strong>{partyDisplayName(party)}</strong></div>
+          {contractsKind ? <DataUnavailable kind={contractsKind} service={PENSION} feature={t('smlouvy klienta', 'client contracts')} lang={language} dense />
+            : contracts === null ? null
+            : contracts.length === 0 ? <DataUnavailable kind="no_data" service={PENSION} feature={t('smlouvy klienta', 'client contracts')} lang={language} dense />
+            : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead><tr>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Smlouva', 'Contract')}</th>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Produkt', 'Product')}</th>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Stav', 'Status')}</th>
+                  <th scope="col" />
+                </tr></thead>
+                <tbody>
+                  {contracts.slice(0, PAGE_SIZE).map(c => (
+                    <tr key={c.contractId}>
+                      <td><Link href={`/pension/contracts/${encodeURIComponent(c.contractId)}`}>{c.contractId}</Link></td>
+                      <td>{c.productLine}</td>
+                      <td>{statusLabel(c.status, t)}</td>
+                      <td><button type="button" className="btn btn-secondary btn-sm" onClick={() => open(c.contractId)}>{t('Zobrazit příspěvky', 'Show incentives')}</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+        </div>
+      )}
+      {contractId && (
+        <div className="card" style={{ overflowX: 'auto' }}>
+          {statusKind ? <DataUnavailable kind={statusKind} service={PENSION} feature={t('příspěvky smlouvy', 'contract incentives')} lang={language} dense />
+            : status === null ? null
+            : status.claims.length === 0 ? <DataUnavailable kind="no_data" service={PENSION} feature={t('příspěvky smlouvy', 'contract incentives')} lang={language} dense />
+            : (
+              <>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead><tr>
+                    <th scope="col" style={{ textAlign: 'left' }}>{t('Příspěvek', 'Incentive')}</th>
+                    <th scope="col" style={{ textAlign: 'left' }}>{t('Období', 'Period')}</th>
+                    <th scope="col" style={{ textAlign: 'left' }}>{t('Požadováno', 'Claimed')}</th>
+                    <th scope="col" style={{ textAlign: 'left' }}>{t('Přijato', 'Received')}</th>
+                    <th scope="col" style={{ textAlign: 'left' }}>{t('Stav', 'Status')}</th>
+                    {canOperate && <th scope="col" />}
+                  </tr></thead>
+                  <tbody>
+                    {status.claims.slice(0, CLAIM_LIMIT).map(c => (
+                      <tr key={c.id}>
+                        <td>{c.incentiveId}</td>{/* raw-id-ok: incentive code (e.g. STATE_CONTRIBUTION), not an entity id */}
+                        <td>{c.period}</td>
+                        <td>{c.claimedAmount} {c.currency}</td>
+                        <td>{c.receivedAmount ?? '—'}</td>
+                        <td>{statusLabel(c.status, t)}{c.rejectionReason ? ` (${c.rejectionReason})` : ''}</td>
+                        {canOperate && (
+                          <td>
+                            {c.status === 'RECEIVED' && (
+                              <button type="button" className="btn btn-secondary btn-sm" disabled={busyId === c.id} onClick={() => void returnClaim(c.id)}>
+                                {t('Vrátit státu', 'Return to state')}
+                              </button>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ marginTop: 8, fontSize: 12 }}>
+                  {status.balances.map(b => (
+                    <div key={b.incentiveId}>{b.incentiveId}: {t('přijato', 'received')} {b.received}, {t('vráceno', 'returned')} {b.returned}, {t('čistě', 'net')} {b.net}</div>
+                  ))}
+                </div>
+              </>
+            )}
+          <NoticeLine notice={notice} />
+        </div>
+      )}
+    </section>
   )
 }

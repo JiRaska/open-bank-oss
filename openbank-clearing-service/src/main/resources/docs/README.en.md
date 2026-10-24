@@ -24,3 +24,7 @@ This documentation is published directly by the service at the management endpoi
 - **Idempotency:** `Idempotency-Key` accepted as a CORS/allowed header; Redis (Valkey) is wired as a dependency
 - **Auth:** Keycloak OIDC; per-operation `@RolesAllowed` (least-privilege); `settle` also `@Authorize` via OPA (advisory)
 - **Money-path:** **YES** — this service is in `rules.yaml: money_path_services` (2 approvals + threat model required)
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

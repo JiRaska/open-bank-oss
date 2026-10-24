@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: mcp-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "122b388c2c76173f"
+    openbank.tech/policy-checksum: "5525d03b55a6888e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -329,6 +329,47 @@ data:
     	input.action == "opsmessage.approval.decide"
     }
 
+    # ADR-0333 D6: reviewed customer notification copy is drafted by staff (the maker side).
+    # Keep this outside notification.*: customer-edge has that whole prefix, and its M2M
+    # identity must never be able to change copy shown to a customer. Publishing is NOT here:
+    # the checker is a distinct job function (ADR-0285 D6), see commstemplate-publish below.
+    allowed_reasons contains "operator-manage-notification-template" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action in {
+            "commstemplate.create",
+            "commstemplate.read",
+            "commstemplate.preview",
+        }
+    }
+
+    # ADR-0333 D6 checker side, same role family as commstyle-publish (ADR-0285 D6): publishing
+    # customer notification copy belongs to ROLE_COMMS_APPROVER (ADMIN as break-glass), never to
+    # ROLE_OPERATOR, so one operator cannot author and release copy alone by colluding with a
+    # second operator account. Maker != checker is ALSO enforced by notification-service
+    # (ManagedTemplateResource.publish and the `created_by <> actor` predicate in the UPDATE);
+    # this rule only decides WHO may attempt the call.
+    allowed_reasons contains "commstemplate-publish" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action == "commstemplate.publish"
+    }
+
+    # The approver must be able to see the draft it publishes; a lone ROLE_COMMS_APPROVER has no
+    # ROLE_OPERATOR, so the maker rule above would not admit it (same reason as
+    # commstyle-read-publish-approval).
+    allowed_reasons contains "commstemplate-approver-read" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action in {"commstemplate.read", "commstemplate.preview"}
+    }
+
     # ADR-0285 D3/D6: publishing a style/playbook version. Own role family (`ROLE_COMMS_APPROVER`),
     # not `ROLE_OPERATOR` — the checker of the bank's VOICE is a distinct job function from an
     # operator's account/payment writes, and D6 declares the roles separately for exactly that
@@ -366,6 +407,21 @@ data:
     	input.action == "commstyle.approval.read"
     }
 
+    # ADR-0352 §7: publishing an IR-bearing catalog revision signs its canonical revisionHash, and a
+    # valid signature is authority over every account under the product — so this is its own action
+    # (catalog.publish-ir, four_eyes.actions), never the shared catalog.publish, and human-only: the
+    # shared backend service-account carries ROLE_OPERATOR in some realms and is classified HUMAN
+    # (rules.yaml: authz_policy.principal_type_service_unreachable), so HUMAN + ROLE_OPERATOR alone
+    # would re-admit that machine identity. Maker != checker is enforced independently by
+    # product-catalog (GenericCatalogService.publishIr); this rule only decides WHO may attempt it.
+    allowed_reasons contains "catalog-publish-ir" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	not principal_is_machine
+    	input.action == "catalog.publish-ir"
+    }
+
     # Pension catalog approval is a distinct human decision, never a generic publish grant.
     # The endpoint checks the requested legal/product role and immutable JWT actor identity.
     allowed_reasons contains "pension-catalog-decide-approval" if {
@@ -385,6 +441,25 @@ data:
     	"CATALOG_SCOPE_READ" in input.principal.roles
     }
 
+    # Generic role-qualified revision approval (#13429). Which role a revision needs and which
+    # authority proves it is pack data checked by product-catalog; OPA only requires a verified human
+    # holding SOME approval authority (the derived CATALOG_REVISION_APPROVER marker).
+    allowed_reasons contains "catalog-revision-decide-approval" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "catalog.revisionApproval.decide"
+    	input.resource.id
+    	"CATALOG_REVISION_APPROVER" in input.principal.roles
+    }
+
+    allowed_reasons contains "catalog-revision-read-approval" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "catalog.revisionApproval.read"
+    	input.resource.id
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    }
+
     # A named human legal/product reviewer needs the catalog workspace before deciding a revision.
     # The read role is derived from that reviewer's verified realm role by product-catalog; it is
     # never a realm-wide default or an assignable CATALOG_SCOPE_READ role.
@@ -393,7 +468,7 @@ data:
     	not startswith(input.principal.id, "service-account-")
     	input.action == "catalog.read"
     	"CATALOG_SCOPE_READ" in input.principal.roles
-    	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER"}
+    	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "CATALOG_REVISION_APPROVER"}
     	role in input.principal.roles
     }
 
@@ -412,7 +487,7 @@ data:
         input.principal.id == "service-account-openbank-pension"
         "ROLE_API" in input.principal.roles
         "CATALOG_SCOPE_READ" in input.principal.roles
-        input.action == "catalog.pensionApproval.read"
+        input.action in {"catalog.pensionApproval.read", "catalog.revisionApproval.read"}
         input.resource.id
         input.attributes.azp == "openbank-pension"
         input.attributes.preferred_username == "service-account-openbank-pension"
@@ -799,6 +874,66 @@ data:
     	glob_match(pattern, input.tool)
     }
 
+    # ADR-0031 D9 phase 3: object-shaped charter grants ({tier, resources}). The background/
+    # control-plane agents (flaky-test-hunter, finops-agent, ...) declare tools.allow / tools.deny
+    # this way, which the string-pattern rules above can never match (see the schema note on
+    # allowed_or_denied_patterns). Those agents are not fronted by the MCP gateway, but
+    # flaky-test-hunter's GitHub PR path queries THIS package directly as its PDP. The caller
+    # declares its intended action's tier as input.tier (its own in-process charter check binds
+    # tool -> tier before querying, so this rule re-validates only the (tier, resource) grant
+    # against the served charter data). No input.tier, no grant: deny-by-default is preserved,
+    # and the MCP / REST paths above are unchanged because they never send input.tier.
+    #
+    # input.tier is caller-DECLARED, so the grant must not trust it on its own: the tool has to be
+    # a member of that tier's tool set in agents.yaml tool_tiers. Without that binding a caller
+    # declaring tier=read with a granted resource got charter_allowed for ANY tool string -- a write,
+    # a REST action, anything not hard-denied -- because charter_allowed is the decision shared by
+    # the MCP and REST paths. The deny side stays unbound on purpose: a wider deny fails closed, and
+    # charters deny tiers (write, execute) that tool_tiers does not enumerate.
+    charter_allowed if tier_resource_charter_allowed
+
+    charter_denied if tier_resource_charter_denied
+
+    tier_resource_charter_allowed if {
+    	input.tool in tier_tools(input.tier)
+    	some entry in tier_resource_allow_entries
+    	entry.tier == input.tier
+    	tier_resource_resources_granted(entry.resources)
+    }
+
+    tier_resource_charter_denied if {
+    	some entry in tier_resource_deny_entries
+    	entry.tier == input.tier
+    	tier_resource_resources_granted(entry.resources)
+    }
+
+    # The grantable tiers, each spelled out (gen-agents-opa-data.py projects data.agents statically,
+    # so no dynamic index). A tier not listed here -- write, execute, deny, or any typo -- has no
+    # tool set and therefore grants nothing.
+    tier_tools("read") := data.agents.tool_tiers.read
+
+    tier_tools("write_proposal") := data.agents.tool_tiers.write_proposal
+
+    # Only OBJECT-shaped entries carry .tier; for a plain-string entry `entry.tier` is undefined
+    # and the body fails, so string-pattern charters are never collected here.
+    tier_resource_allow_entries contains entry if {
+    	some a in charter
+    	some entry in a.tools.allow
+    	entry.tier
+    }
+
+    tier_resource_deny_entries contains entry if {
+    	some a in charter
+    	some entry in a.tools.deny
+    	entry.tier
+    }
+
+    # Resources are globs ("*", "github-*"); glob_match also covers the exact and bare-"*" cases.
+    tier_resource_resources_granted(resources) if {
+    	some pattern in resources
+    	glob_match(pattern, input.resource)
+    }
+
     # rest.rego's "agent-charter-allows" rule reuses this package for a REST call from an
     # AI_AGENT principal by setting input.tool := input.action -- the raw REST action string
     # an @Authorize-annotated endpoint declares (e.g. "ledger.list", "account.read"). Charters
@@ -884,6 +1019,8 @@ data:
 
     reason := "hard-denied tool tier" if hard_denied
 
+    else := "denied by charter tier/resource grant" if tier_resource_charter_denied
+
     else := "denied by charter" if charter_denied
 
     else := "skill not in agent allowlist" if not skill_ok
@@ -913,8 +1050,33 @@ data:
     # Derived paths (read out of the .rego sources, never listed by hand):
     #   data.agents.agents  (each element projected to: id, skills, tools.allow, tools.deny)
     #   data.agents.tool_tiers.deny
+    #   data.agents.tool_tiers.read
+    #   data.agents.tool_tiers.write_proposal
 
     tool_tiers:
+      read:
+      - query.ledger.readonly
+      - query.gl.readonly
+      - query.catalog.readonly
+      - read.logs
+      - read.governance
+      - query.compliance.readonly
+      - query.payments.readonly
+      - query.interest.readonly
+      - query.disputes.readonly
+      - query.observability.readonly
+      - query.balance.readonly
+      - query.transaction.readonly
+      - query.account.readonly
+      - query.consent.readonly
+      - verify.mandate
+      write_proposal:
+      - draft.ticket
+      - gh.pr.open
+      - draft.adr
+      - git.branch
+      - git.commit.signed
+      - run.skill
       deny:
       - money.transfer
       - money.post.ledger
@@ -1547,6 +1709,20 @@ data:
         - settlement.create                # Human operator origination; no verified M2M caller (#10041).
         - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                              # core also enforces maker != checker for standalone installs.
+        - catalog.publish-ir               # ADR-0352 §7: publishing an IR-bearing revision — the publish
+                                             # path signs the IR's canonical revisionHash on the way out,
+                                             # so a valid signature is authority over every account under
+                                             # the product. Its own action, never the shared catalog.publish,
+                                             # so this entry can never cover a non-IR publish by accident.
+                                             # No M2M caller, and not only by policy: rest.rego
+                                             # catalog-publish-ir requires HUMAN + (ROLE_OPERATOR or
+                                             # ROLE_ADMIN) and excludes machines, but product-catalog runs
+                                             # AUTHZ_ENFORCE=false, so that rule is advisory there. The
+                                             # binding control is in the service: publishOfferingRevisionIrV2
+                                             # refuses any identity ServiceAccountIdentity.isHumanStaff does
+                                             # not positively classify as interactive staff (fails closed), and
+                                             # GenericCatalogService enforces maker != checker. No service
+                                             # rego grants catalog.* to a machine beyond catalog.read.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
                                              # playbook version. Confirmed no M2M caller — the only allow
                                              # rule for this action (rest.rego commstyle-publish) requires
@@ -1685,6 +1861,10 @@ data:
       # service-account through operator-read-any (#12547). Retire it only after old images are gone.
       operator_read_any_excluded_actions:
         - tax.filing.read
+        - commstemplate.read
+        # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
+        # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
+        - card.details.read
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

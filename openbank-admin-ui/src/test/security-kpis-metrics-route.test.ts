@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { promises as fs } from 'fs'
 import os from 'os'
 import path from 'path'
+import { createHash } from 'node:crypto'
 
 // /api/security/kpis/metrics — Prometheus text exposition over the same snapshot
 // as /api/security/kpis. The invariants that must never blur:
@@ -18,11 +19,16 @@ let tmpDir: string
 
 beforeEach(async () => {
   vi.resetModules()
+  delete process.env.OPENBANK_EVIDENCE_STORE_URL
+  delete process.env.OPENBANK_SECURITY_KPIS_SNAPSHOT_URL
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kpis-metrics-'))
 })
 
 afterEach(() => {
   delete process.env.OPENBANK_SECURITY_KPIS
+  delete process.env.OPENBANK_EVIDENCE_STORE_URL
+  delete process.env.OPENBANK_SECURITY_KPIS_SNAPSHOT_URL
+  vi.unstubAllGlobals()
 })
 
 async function loadGet() {
@@ -53,6 +59,28 @@ const FULL_SNAPSHOT = {
 }
 
 describe('GET /api/security/kpis/metrics', () => {
+  it('scrapes the independently published snapshot using its original timestamp', async () => {
+    const collectedAt = new Date(Date.now() - 60_000).toISOString()
+    const snapshot = { ...FULL_SNAPSHOT, generatedAt: collectedAt }
+    const bytes = JSON.stringify(snapshot)
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    const pointer = {
+      schemaVersion: 1, snapshot: `snapshots/125-1-${sha256}.json`, sha256,
+      sourceSha: 'c'.repeat(40), runId: 125, runAttempt: 1, collectedAt,
+      expiresAt: new Date(Date.now() + 2 * 864e5).toISOString(), complete: true,
+    }
+    process.env.OPENBANK_EVIDENCE_STORE_URL = 'https://evidence.example/store'
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => String(input).endsWith('/current.json')
+      ? Response.json(pointer)
+      : new Response(bytes, { status: 200 })))
+
+    const res = await (await loadGet())()
+    const body = await res.text()
+    expect(res.status).toBe(200)
+    expect(body).toContain(`openbank_security_kpi_generated_timestamp_seconds{team="security"} ${Math.floor(Date.parse(collectedAt) / 1000)}`)
+    expect(body).toContain('openbank_security_kpi_netpol_coverage_pct{team="security"} 80')
+  })
+
   it('exposes every available KPI as a labelled gauge with HELP/TYPE', async () => {
     const { status, body, contentType } = await scrape(JSON.stringify(FULL_SNAPSHOT))
     expect(status).toBe(200)

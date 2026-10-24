@@ -6,6 +6,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeftRight, Search, SearchX, RefreshCw, Filter, X } from 'lucide-react'
+import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
+import { isValidIban, normalizeIban } from '@/lib/validation/iban'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -49,6 +51,8 @@ interface TransactionResultPage extends TransactionSearchResult {
   hasNextPage: boolean
 }
 
+interface ClientAccount { id: string; iban?: string | null; accountNumber?: string | null; currency?: string | null; status?: string | null }
+
 export default function TransactionsPage() {
   const { t, language } = useLanguage()
   const [showFilters, setShowFilters] = useState(false)
@@ -61,6 +65,12 @@ export default function TransactionsPage() {
 
   // Search fields
   const [accountId, setAccountId]         = useState('')
+  const [accountLabel, setAccountLabel]   = useState('')
+  const [client, setClient]               = useState<PartyHit | null>(null)
+  const [clientAccounts, setClientAccounts] = useState<ClientAccount[] | null>(null)
+  const [accountsLoading, setAccountsLoading] = useState(false)
+  const [accountsFailed, setAccountsFailed] = useState(false)
+  const [ibanHint, setIbanHint]           = useState<string | null>(null)
   const [iban, setIban]                   = useState('')
   const [bban, setBban]                   = useState('')
   const [referenceNumber, setReferenceNumber] = useState('')
@@ -105,6 +115,11 @@ export default function TransactionsPage() {
 
   async function search(offset = 0) {
     if (invalidSearchRange) return
+    if (iban.trim() && !isValidIban(iban)) {
+      setIbanHint(t('Kontrolní číslice IBANu nesedí — zkontrolujte zadání.', 'IBAN check digits don’t match — please verify the value.'))
+      return
+    }
+    setIbanHint(null)
     const generation = ++searchGeneration.current
     activeRequest.current?.abort()
     const controller = new AbortController()
@@ -119,7 +134,7 @@ export default function TransactionsPage() {
     try {
       const params = new URLSearchParams()
       if (accountId)     params.set('accountId', accountId)
-      if (iban)          params.set('iban', iban)
+      if (iban)          params.set('iban', normalizeIban(iban))
       if (bban)          params.set('bban', bban)
       if (referenceNumber) params.set('referenceNumber', referenceNumber)
       if (endToEndId)    params.set('endToEndId', endToEndId)
@@ -191,16 +206,38 @@ export default function TransactionsPage() {
     setDateTo(''); setAmountMin(''); setAmountMax('')
   }
 
+  async function pickClient(party: PartyHit) {
+    invalidatePendingSearch()
+    setClient(party); setAccountId(''); setAccountLabel(''); setClientAccounts(null); setAccountsFailed(false)
+    setAccountsLoading(true)
+    try {
+      const res = await fetch(svcUrl('account-service', `/api/v1/accounts?partyId=${encodeURIComponent(party.id)}&limit=${PAGE_SIZE}`), { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+      if (!res.ok) { setAccountsFailed(true); return }
+      const body = await res.json() as unknown
+      const rows = Array.isArray(body) ? body : (body as { data?: unknown })?.data
+      setClientAccounts(Array.isArray(rows) ? (rows as ClientAccount[]).slice(0, PAGE_SIZE) : [])
+    } catch {
+      setAccountsFailed(true)
+    } finally {
+      setAccountsLoading(false)
+    }
+  }
+
+  function pickAccount(a: ClientAccount) {
+    updateSearchField(setAccountId, a.id)
+    setAccountLabel(a.iban || a.accountNumber || '')
+  }
+
   function clearSearchCriteria() {
     clearFilters()
-    setAccountId('')
+    setAccountId(''); setAccountLabel(''); setClient(null); setClientAccounts(null); setAccountsFailed(false); setIbanHint(null)
   }
 
   return (
     <div>
       <PageHeader
         title={t('Transakční deník', 'Transaction Ledger')}
-        subtitle={t('BIAN vyhledávání — Account ID, IBAN, BBAN, reference, protistrana, částka, datum', 'BIAN-aligned search — Account ID, IBAN, BBAN, reference, counterparty, amount, date range')}
+        subtitle={t('BIAN vyhledávání — klient, účet, IBAN, BBAN, reference, protistrana, částka, datum', 'BIAN-aligned search — client, account, IBAN, BBAN, reference, counterparty, amount, date range')}
         icon={<ArrowLeftRight size={18} aria-hidden="true" />}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Transakce', 'Transactions')}</span></div>}
       />
@@ -213,16 +250,35 @@ export default function TransactionsPage() {
       </Can>
 
       <div className="card" style={{ marginBottom: '16px' }}>
+        <div style={{ padding: '14px 16px 0' }}>
+          <PartySearch
+            selectedId={client?.id}
+            busy={accountsLoading}
+            onSelect={p => void pickClient(p)}
+            placeholder={t('Jméno, příjmení, rodné číslo nebo e-mail klienta', 'Client name, surname, birth number or e-mail')}
+          />
+          {accountsLoading && <div role="status" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('Načítám účty klienta…', 'Loading the client’s accounts…')}</div>}
+          {accountsFailed && <DataUnavailable kind="unreachable" service="account-service" feature={t('Účty klienta', 'Client accounts')} lang={language} dense />}
+          {clientAccounts && clientAccounts.length === 0 && <DataUnavailable kind="no_data" feature={t('Účty klienta', 'Client accounts')} lang={language} dense />}
+          {clientAccounts && clientAccounts.length > 0 && (
+            <div role="listbox" aria-label={t('Účty klienta', 'Client accounts')} style={{ marginTop: '8px' }}>
+              {clientAccounts.map(a => (
+                <button key={a.id} type="button" role="option" aria-selected={a.id === accountId} className={a.id === accountId ? 'btn btn-primary' : 'btn btn-secondary'} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', marginBottom: '4px' }} onClick={() => pickAccount(a)}>
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>{a.iban || a.accountNumber || t('Účet', 'Account')}</span>
+                  <span style={{ fontSize: '11px' }}>{[a.currency, a.status].filter(Boolean).join(' · ')}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {accountId && (
+            <div style={{ marginTop: '8px', fontSize: '12px' }}>
+              {t('Vybraný účet', 'Selected account')}: <strong>{accountLabel || (client ? partyDisplayName(client) : '')}</strong>
+              <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: '8px' }} onClick={() => { updateSearchField(setAccountId, ''); setAccountLabel('') }}>{t('Zrušit výběr', 'Clear selection')}</button>
+            </div>
+          )}
+        </div>
         {/* Primary search bar */}
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '8px 8px 0 0', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
-            <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-            <label className="sr-only" htmlFor="transaction-account-id">{t('Hledat podle ID účtu', 'Search by account ID')}</label>
-            <input id="transaction-account-id" className="input" style={{ paddingLeft: '30px', width: '100%' }}
-              placeholder={t('ID účtu (UUID)…', 'Account ID (UUID)…')}
-              value={accountId} onChange={e => updateSearchField(setAccountId, e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && search()} />
-          </div>
           <div style={{ position: 'relative', flex: 1, minWidth: '180px' }}>
             <label className="sr-only" htmlFor="transaction-iban">{t('Filtrovat podle IBAN', 'Filter by IBAN')}</label>
             <input id="transaction-iban" className="input" style={{ width: '100%' }}
@@ -247,6 +303,7 @@ export default function TransactionsPage() {
           </button>
         </div>
 
+        {ibanHint && <div role="alert" style={{ padding: '8px 16px', fontSize: '12px', color: 'var(--danger-text)' }}>{ibanHint}</div>}
         {invalidDateRange && <div id="transaction-date-range-error" role="alert" style={{ padding: '10px 16px', color: 'var(--danger-text)', background: 'var(--danger-bg)', borderBottom: '1px solid var(--danger-border)', fontSize: '12px' }}>
           {t('Datum od musí být nejpozději datem do.', 'The start date must be on or before the end date.')}
         </div>}
@@ -402,7 +459,7 @@ export default function TransactionsPage() {
             className="transaction-search-empty"
             icon={<Search size={22} />}
             title={t('Najděte transakci podle údajů, které máte po ruce', 'Find a transaction using the details you have')}
-            description={t('Začněte ID účtu, IBANem nebo BBANem. Rozšířené filtry podporují také referenci, protistranu, období, částku a stav.', 'Start with an account ID, IBAN or BBAN. Advanced filters also support reference, counterparty, date range, amount and status.')}
+            description={t('Začněte vyhledáním klienta a výběrem účtu, nebo zadejte IBAN či BBAN. Rozšířené filtry podporují také referenci, protistranu, období, částku a stav.', 'Start by finding a client and picking an account, or type an IBAN or BBAN. Advanced filters also support reference, counterparty, date range, amount and status.')}
           />
         )}
       </div>

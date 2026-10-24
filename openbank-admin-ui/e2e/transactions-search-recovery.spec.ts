@@ -116,7 +116,7 @@ test.describe('Transaction ledger search recovery', () => {
     await expect(page.locator('#transaction-date-range-error')).toContainText('The start date must be on or before the end date.')
     const search = page.getByRole('button', { name: 'Search transactions' })
     await expect(search).toBeDisabled()
-    await page.getByLabel('Search by account ID').press('Enter')
+    await page.getByLabel('Filter by IBAN').press('Enter')
     expect(requestedUrls).toHaveLength(0)
 
     await page.getByLabel('Date to').fill('2026-09-30')
@@ -124,7 +124,7 @@ test.describe('Transaction ledger search recovery', () => {
     await page.getByLabel('Amount to (CZK)').fill('100')
     await expect(page.locator('#transaction-amount-range-error')).toContainText('The minimum amount cannot exceed the maximum amount.')
     await expect(search).toBeDisabled()
-    await page.getByLabel('Search by account ID').press('Enter')
+    await page.getByLabel('Filter by IBAN').press('Enter')
     expect(requestedUrls).toHaveLength(0)
 
     await page.getByLabel('Amount to (CZK)').fill('300')

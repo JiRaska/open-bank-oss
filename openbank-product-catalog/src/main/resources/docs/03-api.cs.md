@@ -126,3 +126,32 @@ Legacy 404 odpovědi zachovávají `{ "error": "<zpráva>" }` kvůli existujíc�
 
 - Verzování v URL: kompatibilní `/api/v1`, nejnovější `/api/v2`.
 - Verze OpenAPI kontraktu (`openapi.yaml:info.version`) je osa API kontraktu; jakákoli breaking změna ji musí zvednout dle klasifikace `oasdiff` a aktualizovat kontrakt + kontraktní test ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+
+## Publikovaná revize původního produktu (ADR-0341)
+
+`GET /api/v2/legacy-products/{productId}/published-revision` určí publikovanou revizi katalogu pro bankovní produkt v1 podle jeho v1 identifikátoru, pro volající, kteří produkt znají jen podle `productId` účtu. Volitelný parametr `effectiveAt` určuje okamžik; bez něj se vrátí revize platná nyní. Volající si připne vrácené `id` revize a pozdější čtení používají připnutí, ne toto vyhledání. Pokud produkt neexistuje nebo žádná jeho revize ještě není publikovaná, vrací 404. Vyžaduje roli pro čtení katalogu. Verze kontraktu API je 2.5.0; změna je aditivní.
+
+## Produktový IR a podepsaná publikace (ADR-0352)
+
+Obsah revize může nést `behaviour`: spustitelné chování produktu jako dokument Product IR v1
+(úrok, bonusový predikát nad historií událostí účtu, poplatky s výjimkami, splatnost termínovaného
+vkladu a sankce za předčasný výběr). IR validuje při každém zápisu draftu sdílený parser z
+`openbank-libs-domain`; neplatný dokument se nikdy nestane draftem (400) a `behaviour` je pokryto
+`contentHash` i `approvalDigest` stejně jako zbytek obsahu.
+
+Publikace revize s IR je samostatná akce čtyř očí, `catalog.publish-ir`:
+`POST /api/v2/offerings/{offeringId}/revisions/{revisionId}/publish-ir` IR zvaliduje, spočítá
+jeho kanonický `revisionHash`, získá podpis publikační cesty přesně nad tímto hashem a uloží
+oddělený podpis k revizi ve stejné transakci. Čtení jedné revize (`GET /api/v2/revisions/{id}`,
+`GET /api/v2/products/{offeringId}`) ho vrací jako `irSignature` (`revisionHash`, `keyId`,
+`algorithm`, `signature`, `signedAt`), stejně jako každý seznam revizí; `null` znamená nepodepsáno. Běžný `publish` revizi s `behaviour`
+odmítne (409) a `publish-ir` odmítne revizi bez něj, takže revize s IR nikdy není publikována bez
+podpisu. Autor a schvalovatel se musí lišit jako u každé publikace.
+
+Podepisovatel se volí přes `openbank.catalog.ir-signing.mode`: `disabled` (výchozí; `publish-ir`
+vrací 409 a nic se nepodepisuje), `openbao` (OpenBao Transit `sign` na vyhrazeném klíči; jediná
+nasazovaná podoba) nebo `hmac` (adaptér se sdíleným tajemstvím přijímaný jen v režimech dev a
+test; produkční start s ním odmítne nastartovat). `publish-ir` smí volat jen ověřený člověk;
+služba to kontroluje sama, nezávisle na rozhodnutí OPA. Konzument podpis ověřuje vlastním loaderem
+připnuté revize před vyhodnocením; katalog je publikační autorita, nikdy závislost na účtovací
+cestě. Verze kontraktu API je 2.9.0; změna je aditivní.

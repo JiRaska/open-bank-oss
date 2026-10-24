@@ -17,6 +17,7 @@ import com.openbank.ledger.application.port.`in`.ReplayBookedChangesCommand
 import com.openbank.ledger.application.port.`in`.ReplayBookedChangesResult
 import com.openbank.ledger.application.port.`in`.ReplayBookedChangesUseCase
 import com.openbank.ledger.application.port.`in`.ReverseJournalCommand
+import com.openbank.ledger.application.usecase.AccountingClassService
 import com.openbank.ledger.domain.model.AccountCurrencyBalance
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
@@ -65,6 +66,7 @@ class LedgerResource(
     private val clock: Clock,
     private val ledgerUseCase: LedgerUseCase,
     private val replayUseCase: ReplayBookedChangesUseCase,
+    private val accountingClasses: AccountingClassService,
 ) {
 
     @GET
@@ -195,7 +197,7 @@ class LedgerResource(
             entryDate = LocalDate.parse(request.entryDate),
             valueDate = LocalDate.parse(request.valueDate),
             description = request.description,
-            lines = request.requireLines().map { it.toCommand() },
+            lines = request.requireLines().map { it.toCommand(accountingClasses) },
             postedBy = request.createdBy,
             // The filter sets this property only after authenticating a configured canary
             // principal. Never accept a caller-supplied header or coroutine MDC as synthetic.
@@ -248,8 +250,16 @@ class LedgerResource(
     }
 }
 
+/**
+ * A leg names its GL account in exactly one of two ways: `glAccountId` (the chart, as before) or
+ * `accountingClass` + `accountingRole` (ADR-0341 D3), which the ledger resolves through its own
+ * accountingClass -> GL map using the leg's `currencyCode`. A product service that posts by class
+ * carries no literal account; both or neither is a 400.
+ */
 data class PostJournalLineRequest(
-    val glAccountId: UUID,
+    val glAccountId: UUID? = null,
+    val accountingClass: String? = null,
+    val accountingRole: String? = null,
     val side: String,
     val amount: BigDecimal,
     val currencyCode: String,
@@ -258,8 +268,8 @@ data class PostJournalLineRequest(
     val baseCurrencyCode: String,
     val subAccountId: UUID? = null,
 ) {
-    fun toCommand() = JournalLineRequest(
-        glAccountId = glAccountId,
+    suspend fun toCommand(classes: AccountingClassService) = JournalLineRequest(
+        glAccountId = resolveGlAccount(classes),
         side = JournalSide.valueOf(side),
         amount = amount,
         currencyCode = currencyCode,
@@ -268,6 +278,18 @@ data class PostJournalLineRequest(
         baseCurrencyCode = baseCurrencyCode,
         subAccountId = subAccountId,
     )
+
+    private suspend fun resolveGlAccount(classes: AccountingClassService): UUID {
+        val byClass = accountingClass != null || accountingRole != null
+        require(glAccountId == null || !byClass) {
+            "a journal line names its account by glAccountId OR by accountingClass+accountingRole, not both"
+        }
+        if (glAccountId != null) return glAccountId
+        require(accountingClass != null && accountingRole != null) {
+            "a journal line needs glAccountId, or both accountingClass and accountingRole"
+        }
+        return classes.resolve(accountingClass, accountingRole, currencyCode).glAccountId
+    }
 }
 
 data class PostJournalRequest(

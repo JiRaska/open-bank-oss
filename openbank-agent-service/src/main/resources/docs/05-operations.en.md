@@ -8,8 +8,8 @@
 ```
 
 - **Packaging:** fast-jar (never uber-jar — the runtime stage COPYs `quarkus-app/`). Generic build/push: `openbank-infra/scripts/build-push-service.sh openbank-agent-service` (host-side `quarkusBuild`, not in-Docker Gradle).
-- **Image:** see [`Dockerfile`](../../../../openbank-agent-service/Dockerfile) — fast-jar runtime stage.
-- **No DB:** there are no Flyway migrations to apply at startup, so the usual Flyway checksum/repair runbooks do not apply here.
+- **Image:** see [`Dockerfile.deploy`](../../../../.github/workflows/Dockerfile.deploy) — fast-jar runtime stage.
+- **DB:** Flyway migrations `V1`–`V6` apply at startup (proposal queue, kill-switch, audit outbox, merge records — see [04 — Data](./04-data.md)); the usual Flyway checksum/repair runbooks apply like for any JDBC service.
 
 ## Configuration (environment)
 
@@ -31,7 +31,7 @@ The committed config ships only the **offline `mock-echo`** provider, so build a
 
 | Port | Purpose |
 |---|---|
-| 8109 | application HTTP (`/mcp`, `/agent/*`) |
+| 8109 | application HTTP (`/mcp`, `/agent/*`, `/api/v1/agent-merge-records`) |
 | 8085 | management — `/q/health/*`, `/q/metrics`, `/q/openapi`, `/q/openbank/docs` (root-path `/q`) |
 
 ## Health probes
@@ -50,7 +50,7 @@ The committed config ships only the **offline `mock-echo`** provider, so build a
 
 - Cloud-agnostic substrate, GitOps via ArgoCD, scale-to-zero by default for the lowest tier the service's trigger allows ([ADR-0057](../../../../docs/adr/0057-scale-to-zero-workload-tiers-and-finops-classifier.md)).
 - agent-service is **not** a money-path service, so it is **not** pinned to the always-on T0 tier. It is request-triggered (admin UI / MCP client) with no event-loop dependency, so it is a candidate for a **scale-to-zero** tier; the actual tier is **derived from measured traffic**, not hand-assigned, and the declared-vs-measured gate keeps it honest. (Exact tier: derived in CI — TBD here.)
-- Stateless + no DB ⇒ cold start is cheap and safe; there is no data to recover, so RPO is effectively N/A for this service.
+- Stateless reasoning layer + no banking state ⇒ cold start is cheap; the owned evidence tables ([04 — Data](./04-data.md)) are ordinary Postgres data with no domain state to reconcile after a restart.
 
 ## SLO (proposed)
 
@@ -79,10 +79,25 @@ Expected under `advisory` only if a tool is unmapped (deny-by-default) or no `X-
 ### Flip enforcement on
 Set `AGENT_POLICY_ENFORCEMENT=block` in the deployment env once an OPA sidecar is present in the target. No redeploy of code needed; the kill-switch / charter changes live in `agents.yaml` + OPA bundle.
 
+### Recorded human merge ingest (ADR-0031 phase 3)
+The `record-agent-merge` GitHub Actions workflow POSTs every merged agent PR to `POST /api/v1/agent-merge-records` with a `ROLE_MERGE_RECORDER` service credential. Ingest is idempotent by `prNumber`: a redelivered webhook inserts nothing (`ON CONFLICT DO NOTHING`) and returns `200` with the original record and `inserted=false`, with **no second audit event**. If merges are missing from the evidence: check the workflow run log first (a rejected or unauthenticated POST fails loudly there), then the ingest credential's role and the service's Postgres reachability.
+
 ## Version & release
 
-Released component (`version.txt` present) — current `1.5.0`. Versioning is owned by release-please from Conventional Commits; do not hand-edit `version.txt` or `CHANGELOG.md`. API-contract bumps (`openapi.yaml: info.version`) are classified from the OpenAPI diff, independent of the release version (ADR-0048).
+Released component (`version.txt` present) — current `1.27.4`. Versioning is owned by release-please from Conventional Commits; do not hand-edit `version.txt` or `CHANGELOG.md`. API-contract bumps (`openapi.yaml: info.version`) are classified from the OpenAPI diff, independent of the release version (ADR-0048).
 
 ## AML service mTLS in production
 
 The production AML REST client uses the named `aml-authority` TLS configuration and the AML service's client-authenticated listener on port 8443. The deployment supplies a client certificate and the private CA trust bundle; TLS 1.3 is required. If AML calls fail after rollout, check the client certificate and CA mount, the production REST-client URL, and the network policy path to that listener together. Local development and tests continue to use their HTTP fixtures; a passing local HTTP test alone does not prove the deployed TLS handshake.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Kafka consumer group override
+
+The consumer group id and offset reset for this service's Kafka channels are not set as YAML keys in `application.yaml`, because SmallRye Config quotes dotted leaf keys and the connector never reads them. They are supplied by a properties-file override ConfigMap loaded through `QUARKUS_CONFIG_LOCATIONS`. The reference pattern for this is card-issuance-service's `party-events-in` channel; the `application.yaml` comments point at it. This is a documentation and comment change only. No configuration value or runtime behaviour changes.

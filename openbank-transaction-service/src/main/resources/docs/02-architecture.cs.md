@@ -180,3 +180,7 @@ sequenceDiagram
 3. **Žádné podvojné účetnictví zde** — GL žije v ledger-service; tato služba zaúčtovává a reverzuje journaly přes fault-tolerant klienta.
 4. **Idempotence end-to-end** — `idempotencyKey` volajícího, unique DB constraint, klíč zaúčtování v ledgeru, tag kompenzačního vrácení.
 5. **Čistota domény** — přechody ságy a pravidla datumu zúčtování jsou čistá doménová logika bez frameworku.
+
+## Heartbeat naplánované úlohy
+
+Úloha (obnovu gauge zaseknutých sag (každých 30 s)) registruje celoflotilový heartbeat `stuck-saga-gauge-refresh` (`DomainMetrics.registerWorkflowLiveness`, nasazený při startu) a úspěch zapisuje jen na cestě úspěchu: zastavená obnova by zmrazila `openbank.transaction.sagas.stuck` na poslední hodnotě, což vypadá jako zdravý počet; stáří heartbeatu to odhalí. `WorkflowLivenessStale` upozorní, když stáří překročí dvojnásobek očekávaného intervalu.

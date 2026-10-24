@@ -25,6 +25,9 @@ spec:
       labels:
         app.kubernetes.io/name: flaky-test-hunter
         app.kubernetes.io/part-of: flaky-test-hunter
+      annotations:
+        # Generated with the bundle: subPath mounts require a pod rollout on policy changes.
+        openbank.tech/policy-checksum: "b6c3072111d47d4a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -37,7 +40,7 @@ spec:
         - name: flaky-test-hunter
           # Pending first CI build (ADR-0168 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-bc607f53
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-acb8cfd0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -61,20 +64,19 @@ spec:
               value: temporal-frontend.temporal.svc:7233
             - name: TEMPORAL_ENABLED
               value: "true"
-            # The periodic sweep. Set EXPLICITLY here rather than left to the application.yaml
-            # default, because this is the only place an operator looks to answer "when does this
-            # agent run" — and until now the answer was "it doesn't". The agent was trigger-only,
-            # so its findings table was empty, which renders as "nothing to act on" rather than
-            # "nothing has ever looked".
-            # weekly on Sunday at 06:30 UTC, offset from the other control-plane agents, which share one LiteLLM
-            # gateway and one Prometheus and each carry their own daily token budget.
-            # Six fields (second minute hour day month weekday) — Quarkus, not crontab.
-            - name: FLAKY_TEST_HUNTER_CHECK_CRON
-              value: "0 30 6 ? * SUN"
+            # No sweep cron, on purpose (2026-10-17). This pod mounts no repository checkout and
+            # no test-results artifacts, so the weekly sweep it used to run scanned an empty tree
+            # and had never produced a finding. "When does this agent run" is now answered by the
+            # Admin UI: every Test Intelligence snapshot it collects is posted to
+            # /api/v1/flaky-test-hunter/evidence/analyze, which is this agent's only real input.
             - name: GITHUB_API_URL
               value: https://api.github.com
             - name: GITHUB_REPO
               value: JiRaska/open-bank-oss
+            # Phase-2 mechanism delivery: stop PR writes. False returns DENY rather than
+            # bypassing policy; controlled activation and runtime evidence are separate rollout work.
+            - name: FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED
+              value: "false"
             # Optional fine-grained token: until OpenBao is seeded, the phase-3 writer fails closed
             # and no pull request is opened. It is deliberately separate from every other agent's
             # credential, so revoking this one stops only this bounded development capability.
@@ -111,6 +113,72 @@ spec:
               port: management
             initialDelaySeconds: 20
             periodSeconds: 30
+        # The PR-path gate queries this pod's agents-only policy bundle over localhost:8181.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.21.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Keep decision and management APIs inside this pod; probes use the diagnostic listener.
+            - --addr=127.0.0.1:8181
+            - --diagnostic-addr=0.0.0.0:8282
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+            - name: opa-diagnostics
+              containerPort: 8282
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: opa-diagnostics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: opa-diagnostics
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: flaky-test-hunter-opa-bundle
 ---
 apiVersion: v1
 kind: Service

@@ -40,6 +40,7 @@ import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import com.openbank.party.domain.model.PepDeclaration
 import com.openbank.party.domain.model.TaxResidency
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -53,6 +54,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
@@ -182,6 +184,13 @@ class PartyPactFolderProviderVerificationTest {
             context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }
         if (anonymous) {
             testIdentityAssociation.setTestIdentity(null)
+        }
+        // ADR-0340 B1: the tax-facts route's in-code guard admits ONLY the verified
+        // service-account-openbank-tax-reporting identity, so the replay must present exactly that
+        // (JWT with azp bound to the service-account username, ROLE_API) instead of the class-level
+        // pact-verifier identity.
+        if (context.interaction.providerStates.any { it.name == TAX_FACTS_STATE }) {
+            testIdentityAssociation.setTestIdentity(taxReportingIdentity())
         }
         context.verifyInteraction()
     }
@@ -479,6 +488,12 @@ class PartyPactFolderProviderVerificationTest {
 
         /** Must match PartyTaxProfilePactConsumerTest.NEGATIVE_AUTH_STATE (ADR-0279 #3 401 leg). */
         private const val NEGATIVE_AUTH_STATE = "no valid caller identity is presented"
+
+        /** Must match TaxReportingPartyPactConsumerTest.STATE (ADR-0340 B1, the TIN boundary). */
+        private const val TAX_FACTS_STATE = "a reportable party has declared a tax-residency profile with a TIN"
+
+        /** Must match TaxReportingPartyPactConsumerTest.PARTY_ID. */
+        private val TAX_REPORTING_PARTY_ID = UUID.fromString("62000000-0000-0000-0000-000000000062")
     }
 
     /**
@@ -572,5 +587,84 @@ class PartyPactFolderProviderVerificationTest {
                 amlStatus = AmlStatus.CLEARED,
             ),
         )
+    }
+
+    /**
+     * Seeds the party + tax-residency profile tax-reporting-service's CRS/FATCA TIN boundary pact
+     * pins (pact: "a reportable party has declared a tax-residency profile with a TIN"). DE is
+     * declared FIRST because the contract pins taxResidencies[0] = DE + TIN (array matching is
+     * ordered and the resource answers in declaration order) — crsStatus REPORTABLE, fatcaStatus
+     * NON_US, exactly the values the contract binds. Declared through the use-case (not a repository
+     * insert) so the derived party facts update by the production path. Idempotent on the profile:
+     * each @State setup runs twice per interaction and a second declaration would bump the version
+     * past the pact's 1.
+     */
+    @State(TAX_FACTS_STATE)
+    fun reportablePartyWithTaxResidencyProfile() = runOnVertxContext {
+        if (partyRepository.findById(TAX_REPORTING_PARTY_ID) == null) {
+            partyRepository.save(
+                Party(
+                    id = TAX_REPORTING_PARTY_ID,
+                    partyType = PartyType.INDIVIDUAL,
+                    status = PartyStatus.ACTIVE,
+                    legalName = "Pact Tax Resident",
+                    tradingName = null,
+                    dateOfBirth = null,
+                    nationality = null,
+                    taxId = null,
+                    registrationNumber = null,
+                    email = "pact-tax-resident@pact.openbank.invalid",
+                    phone = null,
+                    address = null,
+                    kycStatus = KycStatus.APPROVED,
+                    createdAt = Instant.now(),
+                    updatedAt = Instant.now(),
+                    amlStatus = AmlStatus.CLEARED,
+                ),
+            )
+        }
+        if (partyAmlProfileUseCase.getAmlProfile(TAX_REPORTING_PARTY_ID) != null) {
+            return@runOnVertxContext
+        }
+        partyAmlProfileUseCase.declareAmlProfile(
+            DeclareAmlProfileCommand(
+                partyId = TAX_REPORTING_PARTY_ID,
+                declaration = AmlProfileDeclaration(
+                    purposes = setOf(AccountPurpose.SAVINGS),
+                    purposeNote = null,
+                    incomeSources = setOf(IncomeSource.EMPLOYMENT),
+                    incomeNote = null,
+                    occupation = Occupation.EMPLOYED,
+                    occupationNote = null,
+                    expectedMonthlyTurnover = ExpectedMonthlyTurnover.UP_TO_30K,
+                    cashIntensive = false,
+                    pep = PepDeclaration(isPep = false, category = null, detail = null),
+                    taxResidencies = listOf(TaxResidency("DE", "123456789"), TaxResidency("CZ", null)),
+                    usPerson = false,
+                    truthful = true,
+                ),
+                declaredBy = "pact-verifier",
+            ),
+        )
+    }
+
+    /**
+     * The replay identity for the TIN-boundary interaction: the verified service-account JWT the
+     * in-code guard admits (#12448 — azp bound to the service-account username, subject present).
+     */
+    private fun taxReportingIdentity(): QuarkusSecurityIdentity {
+        val name = "service-account-openbank-tax-reporting"
+        val jwt = object : JsonWebToken {
+            private val claims = mapOf(
+                "azp" to "openbank-tax-reporting",
+                "preferred_username" to name,
+                "sub" to "tax-reporting-sa-subject",
+            )
+
+            override fun getName(): String = name
+            override fun getClaimNames(): Set<String> = claims.keys
+            override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+        }
+        return QuarkusSecurityIdentity.builder().setPrincipal(jwt).addRole("ROLE_API").build()
     }
 }

@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.4.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.3.1...product-catalog-v1.4.0) (2026-10-23)
+
+
+### Features
+
+* **products:** Product as Code phase 2 — openbank-products, signed publish-ir, pinned-revision loader (ADR-0352) ([#13644](https://github.com/JiRaska/open-bank-oss/issues/13644)) ([44b68d0](https://github.com/JiRaska/open-bank-oss/commit/44b68d002817537e5fbb1699522b8b1568b3d0ff))
+
+## [1.3.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.3.0...product-catalog-v1.3.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **product-catalog:** give @Authorize a decision point via an OPA sidecar ([#12896](https://github.com/JiRaska/open-bank-oss/issues/12896)) ([65e47cd](https://github.com/JiRaska/open-bank-oss/commit/65e47cd5420f61a2436c6e608ca915c05058c013))
+
+## [1.3.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.2.0...product-catalog-v1.3.0) (2026-10-21)
+
+
+### Features
+
+* **product-catalog:** expose schema approval policy; move consumers off pension-approval aliases ([#13496](https://github.com/JiRaska/open-bank-oss/issues/13496)) ([6174564](https://github.com/JiRaska/open-bank-oss/commit/61745645e041c190e49bfe9d01d384a80bc7bce9))
+
+## [1.2.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.1.0...product-catalog-v1.2.0) (2026-10-20)
+
+
+### Features
+
+* **product-catalog:** revision approval policy is pack data; enforce an industry-neutral kernel ([#13433](https://github.com/JiRaska/open-bank-oss/issues/13433)) ([795391c](https://github.com/JiRaska/open-bank-oss/commit/795391c5c0845410899e51c2de5a3a07e46d5fed))
+
+## [1.1.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.0.1...product-catalog-v1.1.0) (2026-10-18)
+
+
+### Features
+
+* **product-catalog:** closed accounting and regulatory class, treasury and DPS/DIP offerings (ADR-0341) ([#13206](https://github.com/JiRaska/open-bank-oss/issues/13206)) ([f401ccb](https://github.com/JiRaska/open-bank-oss/commit/f401ccb476003668645a4ddb867f534c44f00f02))
+
 ## [1.0.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.0.0...product-catalog-v1.0.1) (2026-10-14)
 
 

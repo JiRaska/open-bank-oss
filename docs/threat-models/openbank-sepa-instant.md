@@ -86,6 +86,7 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-17** — **`TransactionServiceClient` is now GENERATED from transaction-service's `openapi.yaml` (ADR-0319).** The hand-written interface and DTOs were replaced by a sub-interface of the client built in `openbank-client-transaction`; the settlement debit keeps its fields and its checks (a 2xx counts as a booking only when its transaction matches the request and is COMPLETED), and every other answer still ends as `SettlementUnavailableException`: calls go through the outcome facade (`TransactionClient`), which proves the status first, and only a 201 whose body is readable and matches the request maps to a result (200/202, 409, 400/422, an unreadable body, a 5xx and a dropped connection are all unproven and retried). The `Idempotency-Key` header this client used to send is no longer sent: transaction-service reads no such header (idempotency is the body's `idempotencyKey`, unchanged), so nothing downstream depended on it. **STRIDE-T/S (trust boundary):** the outbound call is the same route, the same NAMED oidc-client `m2m` (Keycloak client `openbank-sepa-instant`) and the same `SyntheticTaintClientFilter` registration, pinned by `M2mOidcClientIdentityWiringTest` and by the consumer pact (literal `/api/v1/transactions`, replayed by transaction-service's `@PactFolder` class). No new credential, no new scope, no new network path. Rollback: revert the commit (the hand-written client returns).
 - **2026-09-30** — Fraud verdict mapping (#4403 prerequisite, PR #11614). `FraudScoringAdapter.mapVerdict`
   folded any verdict outside `ALLOW | CHALLENGE | REVIEW | DECLINE` — including a blank one — into
   a non-synthetic `ALLOW`, so an unreadable answer from fraud-service was indistinguishable from a
@@ -106,7 +107,7 @@ not change any existing request's outcome until explicitly flipped.
   documents in libs-runtime, fixed in #11033/#11047).
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -179,7 +180,7 @@ not change any existing request's outcome until explicitly flipped.
   - **Rollback**: revert the commit; the previous behaviour was a silent synthetic ALLOW.
 
 - **2026-05-30** — Added `sct_inst_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/
-  surface/boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
+  surface/boundary. Risk class = **availability**, mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`).
   Rollback: `DROP SEQUENCE`.
 - **2026-06-11** — Added outbox-backlog gauge (`openbank.outbox.backlog`, tagged `service="sepa-instant"`)
   + `countProcessable()` on the outbox port (ADR-0077 / ADR-0079). Touches the **I — information
@@ -209,7 +210,7 @@ not change any existing request's outcome until explicitly flipped.
   dependency introduced, no behavior change. Attack surface, trust boundaries, and STRIDE rows above are
   unaffected. No DB change; rollback = revert the commit.
 - **2026-07-08** — ADR-0155 four-eyes enforcement, rolled out from the sepa-payment pilot
-  (issue #413). New endpoint `PATCH /api/v1/sepa-instant/approvals/{id}` + `ApprovalConfig`
+  (issue #413). New endpoint `PATCH /api/v1/sepa-instant/approvals/{id}` + ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`)
   (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate (openbank-libs-runtime,
   shared, opt-in) on `sctInstPayment.recall`. New STRIDE supplement §4a. `authz.four-eyes.enforce`
   defaults `false` — no behavior change to any existing request in this PR; flipping it is a
@@ -330,3 +331,7 @@ and NetworkPolicy peer remain through Phase 5.
   and run a compatible relay if the old app is restored because it has no dispatcher.
   Remove the table only after an approved per-row disposition and a verified empty
   recoverable set; never replay historical payment events automatically.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.

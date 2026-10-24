@@ -94,6 +94,7 @@ import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # --------------------------------------------------------------------------- waiver
@@ -154,6 +155,9 @@ def _line_comments(text: str, marker: str) -> list[tuple[int, str]]:
     return out
 
 
+_C_SCAN_SPECIAL = re.compile(r"[\"'/\n]")
+
+
 def c_comments(text: str) -> list[tuple[int, str]]:
     # Kotlin BLOCK COMMENTS NEST — a KDoc containing `/*` does not close at the first `*/`.
     # Depth-counting mirrors that; a naive find("*/") would truncate the block and hide
@@ -175,12 +179,12 @@ def c_comments(text: str) -> list[tuple[int, str]]:
             i += 1
             continue
         if depth:
-            if text.startswith("/*", i):
+            if ch == "/" and text.startswith("/*", i):
                 depth += 1
                 buf.append("/*")
                 i += 2
                 continue
-            if text.startswith("*/", i):
+            if ch == "*" and text.startswith("*/", i):
                 depth -= 1
                 i += 2
                 if depth == 0:
@@ -201,19 +205,22 @@ def c_comments(text: str) -> list[tuple[int, str]]:
             in_str = ch
             i += 1
             continue
-        if text.startswith("//", i):
+        if ch == "/" and text.startswith("//", i):
             j = text.find("\n", i)
             j = n if j < 0 else j
             out.append((line_no, text[i + 2:j]))
             i = j
             continue
-        if text.startswith("/*", i):
+        if ch == "/" and text.startswith("/*", i):
             depth = 1
             start = line_no
             buf = []
             i += 2
             continue
-        i += 1
+        # Skip ordinary code in one regex search; delimiters that can change scanner
+        # state and newlines remain visible to the existing state machine above.
+        match = _C_SCAN_SPECIAL.search(text, i + 1)
+        i = n if match is None else match.start()
     return out
 
 
@@ -281,6 +288,7 @@ REPO_SLUG = re.compile(r"\bJiRaska/([A-Za-z0-9._-]+)\b")
 # both reported as notices and never as findings — see resolve_repo for why 404 cannot
 # mean "deleted" under a repo-scoped CI token.
 FLAGGED = ("archived",)
+REPO_LOOKUP_WORKERS = 4
 
 
 def resolve_repo(slug: str) -> tuple[str, str]:
@@ -328,6 +336,18 @@ def resolve_repo(slug: str) -> tuple[str, str]:
     return ("archived", "repository is ARCHIVED") if archived else ("ok", "")
 
 
+def resolve_repos(slugs: set[str], want_network: bool) -> dict[str, tuple[str, str]]:
+    """Resolve distinct repository slugs with bounded concurrency and stable keys."""
+    ordered = sorted(slugs)
+    if not want_network:
+        return {slug: ("unknown", "network skipped") for slug in ordered}
+    if not ordered:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(REPO_LOOKUP_WORKERS, len(ordered))) as executor:
+        results = executor.map(resolve_repo, ordered)
+        return dict(zip(ordered, results, strict=True))
+
+
 # --------------------------------------------------------------------------- scanning
 
 # DERIVED artifacts are not scanned. Every `*-opa-bundle*.yaml` embeds rules.yaml verbatim,
@@ -367,8 +387,14 @@ class Finding:
 def scan_text(path: str, text: str, top_level: set[str], resolvable,
               slug_state: dict[str, tuple[str, str]] | None = None) -> list[Finding]:
     """Pure core, shared by the repo scan and the self-test."""
+    return scan_comments(path, comments_of(path, text), top_level, resolvable, slug_state)
+
+
+def scan_comments(path: str, comments: list[tuple[int, str]], top_level: set[str], resolvable,
+                  slug_state: dict[str, tuple[str, str]] | None = None) -> list[Finding]:
+    """Check one parsed comment stream without rescanning the source file."""
     out: list[Finding] = []
-    for line, comment in comments_of(path, text):
+    for line, comment in comments:
         if WAIVER.search(comment):
             continue
         for cand in path_candidates(comment, top_level):
@@ -419,22 +445,21 @@ def run(root: Path, want_network: bool) -> list[Finding]:
             text = (root / f).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        for line, comment in comments_of(f, text):
+        parsed_comments = comments_of(f, text)
+        for line, comment in parsed_comments:
             if WAIVER.search(comment):
                 continue
             for m in REPO_SLUG.finditer(comment):
                 slugs.add(m.group(1))
                 hits.append((f, line, m.group(1)))
-        raw.extend(scan_text(f, text, top_level, resolvable))
+        raw.extend(scan_comments(f, parsed_comments, top_level, resolvable))
 
     # R1: drop build outputs git already knows about.
     ignored = gitignored(root, sorted({x.ref for x in raw if x.rule == "path"}))
     findings = [x for x in raw if not (x.rule == "path" and x.ref in ignored)]
 
     # R2: resolve each distinct slug ONCE, then attribute.
-    state: dict[str, tuple[str, str]] = {}
-    for slug in sorted(slugs):
-        state[slug] = resolve_repo(slug) if want_network else ("unknown", "network skipped")
+    state = resolve_repos(slugs, want_network)
     # `invisible` is surfaced too, not silently dropped: a reader who sees only "OK" would
     # reasonably assume every slug was checked, and one of them was not.
     unknown = [s for s, (st, _) in state.items() if st in ("unknown", "invisible")]

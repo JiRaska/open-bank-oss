@@ -289,7 +289,7 @@ export default function ApprovalsPage() {
             <label htmlFor="approval-domain-search" style={{ display: 'block', marginBottom: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{t('Hledat ve frontě', 'Search queue')}</label>
             <div style={{ position: 'relative' }}>
               <Search aria-hidden="true" size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-              <input id="approval-domain-search" className="input" type="search" value={domainQuery} onChange={event => setDomainQuery(event.target.value)} placeholder={t('ID, akce, zdroj nebo maker', 'ID, action, resource or maker')} style={{ width: '100%', paddingLeft: 32 }} />
+              <input id="approval-domain-search" className="input" type="search" value={domainQuery} onChange={event => setDomainQuery(event.target.value)} placeholder={t('Akce, zdroj nebo žadatel', 'Action, resource or requester')} style={{ width: '100%', paddingLeft: 32 }} />
             </div>
           </div>
           <div style={{ flex: '1 1 180px' }}>
@@ -390,7 +390,7 @@ export default function ApprovalsPage() {
             <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>
               {t('Čeká', 'Pending')}
             </span>
-            {workbenchHref && <Link href={workbenchHref} className="btn btn-secondary" aria-label={t(`Otevřít řízenou kontrolu žádosti ${item.id}`, `Open governed review for approval ${item.id}`)} style={{ fontSize: 11, textDecoration: 'none' }}>
+            {workbenchHref && <Link href={workbenchHref} className="btn btn-secondary" aria-label={t('Otevřít řízenou kontrolu žádosti', 'Open governed review for this approval')} style={{ fontSize: 11, textDecoration: 'none' }}>
               {t('Otevřít řízenou kontrolu', 'Open governed review')} <ExternalLink aria-hidden="true" size={12} />
             </Link>}
           </div>

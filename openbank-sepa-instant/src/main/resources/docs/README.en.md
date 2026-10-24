@@ -27,3 +27,7 @@ The outbox sections describe the #12181 source candidate. They do not establish 
 - **Auth:** Keycloak OIDC (client `openbank-services`); OPA authz (ADR-0034) advisory by default; `@Authorize` on recall
 - **Money-path:** YES — listed in `rules.yaml: money_path_services`; ADR-0057 tier **T0 (always-on)**; threat model at `docs/threat-models/openbank-sepa-instant.md`
 - **Screening gate:** synchronous sanctions screening of debtor + creditor names on submit (ADR-0032), fail-closed
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

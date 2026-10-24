@@ -1,8 +1,8 @@
 # API
 
-The REST/RPC contract is formalised in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.5.0**). The service is **internal** — it is **not** exposed via the API Gateway to external TPPs.
+The REST/RPC contract is formalised in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.15.0**). The service is **internal** — it is **not** exposed via the API Gateway to external TPPs.
 
-Two version axes apply (ADR-0048): the release version (`version.txt` = `1.5.0`) and the API-contract version (`openapi.yaml: info.version` = `1.5.0`, `openbank.api.version = "1"`). They are independent.
+Two version axes apply (ADR-0048): the release version (`version.txt` = `1.27.4`) and the API-contract version (`openapi.yaml: info.version` = `1.15.0`, `openbank.api.version = "1"`). They are independent.
 
 ## Surfaces
 
@@ -11,6 +11,8 @@ Two version axes apply (ADR-0048): the release version (`version.txt` = `1.5.0`)
 | MCP server | `POST /mcp` | JSON-RPC 2.0 over HTTP | `X-Agent-Id` identity (deny-by-default if absent) |
 | Admin assistant | `POST /agent/chat` | JSON | Keycloak OIDC; runs as `ui-assistant` |
 | Model registry | `GET /agent/models` | JSON | Keycloak OIDC |
+| Catalog review capability/review | `GET` / `POST` `/agent/catalog-reviews` | JSON | Keycloak OIDC; operator/admin/compliance |
+| Merge-record evidence | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (roles below) |
 | Health | `GET /q/health/live`, `/q/health/ready` | JSON | none (management port 8085) |
 
 ## MCP — `POST /mcp`
@@ -74,12 +76,40 @@ The loop enforces the `ui-assistant` charter: a runs-per-day pre-flight check (o
 
 Returns the default model id and every enabled model in the gateway registry: `{ default, models: [{ id, provider, sensitivity }] }` where `sensitivity ∈ {HOSTED, SELF_HOSTED}`.
 
+## Catalog Intelligence — `/agent/catalog-reviews`
+
+Both operations require `ROLE_OPERATOR`, `ROLE_ADMIN`, or `ROLE_COMPLIANCE`.
+
+- **`GET /agent/catalog-reviews`** returns the catalog-review capability: whether a configured route is eligible, its mode, configured default model id, and the eligible model descriptors. The list is derived from the service model registry and deployment policy; it does not probe the provider or guarantee that an upstream model is currently healthy. The UI reads this response rather than embedding model ids.
+- **`POST /agent/catalog-reviews`** accepts `offeringId` and `revisionId` UUIDs, plus an optional `model` from the capability allow-list. If omitted, the service uses the configured default. The service fetches that exact catalog revision, requires it to remain `DRAFT`, and rejects snapshots over 64,000 characters. The model receives the pinned snapshot with tools disabled. The only persisted result is a `PROPOSED` item in the human-in-the-loop queue; the operation does not write, publish, or retire catalog content.
+
+Hosted review is a catalog-only sandbox exception. `catalog-review.allow-hosted-models` defaults to `false`; the sandbox deployment explicitly enables it. When enabled, the server permits only registered `openai-compat` models whose configured endpoint matches the in-cluster LiteLLM gateway. It uses the already configured default and existing LiteLLM budget controls; it adds no provider credential or direct-provider route. In deployments without the opt-in, catalog review retains the existing self-hosted sensitive-context requirement. This exception does not change routing for other agent workflows.
+
+Invalid identifiers, non-DRAFT revisions, oversized snapshots, or a model outside the allow-list return `400`; no eligible configured route or an unavailable model returns `503`. A successful response includes the proposal id/state, context hash, bounded findings, and the model id used.
+
+## Recorded human merges — `/api/v1/agent-merge-records`
+
+ADR-0031 phase 3 "recorded human merge" evidence: a durable record of **who merged an agent-authored PR** (table in [04 — Data](./04-data.md)). Records enter **out-of-band** — the `record-agent-merge` GitHub Actions workflow POSTs every merged agent PR with the pipeline's `ROLE_MERGE_RECORDER` service credential. The agent never self-reports its own merges.
+
+- **`POST /api/v1/agent-merge-records`** — `ROLE_MERGE_RECORDER` only (the caller is the CI pipeline, not an interactive operator; least privilege — not even `ROLE_ADMIN` may write merge evidence). Body: `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title` (all required), plus optional `proposalId` (UUID — soft link to `agent_proposal`) and `source` (default `unknown`). Idempotent by `prNumber`: a redelivered webhook inserts nothing (`ON CONFLICT DO NOTHING`) and the response returns the already-stored record with `inserted=false`.
+- **`GET /api/v1/agent-merge-records?agentId=`** — `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_COMPLIANCE`. Newest first; the optional `agentId` narrows the list to one agent's merges.
+
 ## Error model
 
 - **MCP / RPC:** JSON-RPC `error` object with standard codes — `-32700` parse, `-32600` invalid request, `-32601` method not found, `-32602` invalid params, `-32603` internal.
 - **Tool-level:** errors *inside* a tool (bad arguments, downstream unreachable, policy deny) are returned as a `ToolCallResult` with `isError=true` and a human-readable `text`, distinct from RPC-level errors, so the model can recover.
 - **Chat-level:** model rate-limit / outage degrades to a friendly `reply` (HTTP 200), never a raw 5xx.
+- **REST ingest:** a missing/blank required field or a non-UUID `proposalId` on the merge-record ingest maps to `400` through the shared `IllegalArgumentException` mapping (libs-runtime), never a 500.
 
 ## Versioning
 
 `X-API-Version` / `X-Service-Version` headers and `/api/v1/info` are served by `openbank-libs`. The MCP protocol version (`2024-11-05`) is negotiated separately on `initialize` and is independent of the HTTP API version.
+
+## Balance holds downstream contract
+
+`get_balance_holds` calls `GET /api/v1/balances/{accountId}/holds` and passes the `holds` array
+through unchanged, including sensitive reason/reference metadata. The balance provider filters
+released/expired rows without releasing funds. The consumer Pact covers an active hold, an empty
+result and propagation of a missing-identity 401; its canonical contract test is discovered by
+Pact drift CI. These fixtures do not prove a live token, customer-edge header forwarding or a
+production OPA decision. The provider retains its existing RBAC/OPA and optional customer-owner guard.

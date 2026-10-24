@@ -25,9 +25,11 @@ permissions:
   contents: read
 
 concurrency:
-  # A newer push to main supersedes this run: its decisions would be made against a stale main.
+  # A newer push to main supersedes decisions against the previous main. Scheduled and
+  # manual fallbacks must not cancel admitted work. GitHub can still replace a pending
+  # member of this group; this does not guarantee queue ordering or fairness.
   group: auto-update-armed-prs
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   update:

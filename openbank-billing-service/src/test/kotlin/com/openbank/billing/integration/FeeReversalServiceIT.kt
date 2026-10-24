@@ -67,6 +67,7 @@ class FeeReversalServiceIT {
             chargedAmount = BigDecimal("150.00"),
             waived = false,
             reason = WaiveReason.NOT_WAIVABLE,
+            accountingClass = "CUSTOMER_DEPOSIT_DEMAND",
         )
         val assessment =
             BillingAssessment(cycleId, accountId, "CZK", skipped = false, skipReason = null, assessedFees = listOf(fee))
@@ -123,6 +124,7 @@ class FeeReversalServiceIT {
                         chargedAmount = BigDecimal.ZERO,
                         waived = true,
                         reason = WaiveReason.WAIVED_BY_CONDITION,
+                        accountingClass = "CUSTOMER_DEPOSIT_DEMAND",
                     ),
                 ),
             )

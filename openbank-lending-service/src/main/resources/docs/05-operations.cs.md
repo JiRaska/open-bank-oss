@@ -103,9 +103,29 @@ Pro úvěry, jejichž účetní historie se do hlavní knihy nikdy nedostala (#6
 6. **Storno**: každý zápis stornujte v ledger-service (`reverseJournal`) podle klíče `loan:<id>:…`.
 Zápisy se účtují k datu cut-overu, s původním datem události ve `valueDate`. Pouze hlavní kniha: na účet klienta se nic nepřipisuje.
 
+### Pozdní migrace opravných položek V26 (#13026)
+
+V26 se dostala do main až po V27. Při `validate-on-migrate: false` může výchozí pořadí Flyway ponechat V26 neaplikovanou, přestože migrace při startu skončí úspěšně. GitOps Rollout služby dočasně nastavuje `QUARKUS_FLYWAY_OUT_OF_ORDER=true`, aby i databáze s V27 vytvořila `provisioning_cycle_attempt` a `provisioning_cycle_run.current_attempt_id`.
+
+Zachovej deployment holdy a kontroly povýšení image. Před schváleným nasazením ověř `flyway_schema_history` každé cílové databáze; historie zdrojů ani CI nedokládají nasazený stav. Po migraci ověř úspěšné záznamy V26/V27, schéma pokusů a zachování souhrnů opravných položek i podpisových hashů. Opakovaná migrace nesmí zdvojit zpětně doplněné záznamy V26.
+
+Dočasnou proměnnou prostředí z GitOps odstraň až poté, co **každá** cílová databáze eviduje úspěšnou V26. Přesnou výjimku kontroly historického pořadí ponech, dokud Git stále dokládá dřívější příchod V27. Zachovej identity potvrzených SQL migrací; obnova nepoužívá Flyway repair ani přečíslování. Návrat schématu popisuje V26 a před odstraněním vyžaduje export historie pokusů.
+
 ### Flyway checksum mismatch při startu
 Nikdy nepřepisuj nasazenou migraci. Nastav dočasně `QUARKUS_FLYWAY_REPAIR_AT_START=true`, nech DB ustálit a pak odstraň.
+
+## Pojmenování metrik
+
+Vlastní čítače Micrometeru nesou předponu `openbank.` (vynucuje CI brána `metric-name-prefix`). Čítače SLA originace se scrapují jako `openbank_lending_origination_docs_sla_reminder_total` a `openbank_lending_origination_four_eyes_sla_escalation_total`; dřívější názvy `lending_origination_*` bez předpony se po nasazení této verze už nevydávají, takže externí dotazy na ně je nutné upravit.
 
 ## Deploy
 
 GitOps (ArgoCD) dle platformního vzoru. Při konfliktech image-tagů ber `--ours` (čerstvě sestavený tag), `--theirs` pro RBAC/config/env (CLAUDE.md). Verzování a changelog vlastní release-please z Conventional Commits — nikdy ručně needituj `version.txt` ani `CHANGELOG.md`.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

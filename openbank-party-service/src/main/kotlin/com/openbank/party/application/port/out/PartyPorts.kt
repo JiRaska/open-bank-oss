@@ -76,7 +76,19 @@ interface PartyRepository {
      * [com.openbank.libs.api.search.SearchRequest] (paired with `ESCAPE '\'`); the impl
      * lower-cases it and wraps it in `%…%`. Fetches up to [limit] rows after [afterId].
      */
-    suspend fun searchByBusinessKeys(escapedTerm: String, limit: Int, afterId: UUID?): List<Party>
+    suspend fun searchByBusinessKeys(
+        escapedTerm: String,
+        limit: Int,
+        afterId: UUID?,
+        birthDates: List<String> = emptyList(),
+    ): List<Party>
+
+    /**
+     * EXACT match of a normalised national identifier (lower-case, separators stripped) against
+     * tax id / registration number, and a phone number's last 9 digits. Never a substring: an
+     * identifier is not browsable by prefix.
+     */
+    suspend fun findByIdentifier(normalized: String, limit: Int): List<Party>
 
     suspend fun countAll(): Long
 

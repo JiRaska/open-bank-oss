@@ -159,6 +159,33 @@ allowed_reasons contains "service-party-account-read" if {
 	input.action == "account.list"
 }
 
+# #8481 / ADR-0341 — interest-service's own machine identity (client `openbank-interest`, ROLE_API
+# plus the narrow `catalog:read` scope that product-catalog maps to CATALOG_SCOPE_READ) reads the
+# published catalog: the event stream, a revision by its immutable id, and the offering it belongs
+# to (CatalogInterestProfileSynchronizer). Every one of those is action catalog.read - nothing
+# here reaches catalog.author, catalog.publish or the approval decisions. The shared
+# openbank-services principal gets no catalog grant; the scope alone is insufficient for OPA.
+allowed_reasons contains "service-interest-catalog-read" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-interest")
+	"CATALOG_SCOPE_READ" in input.principal.roles
+	input.action == "catalog.read"
+}
+
+# ADR-0340 B — tax-reporting-service's own machine identity (client `openbank-tax-reporting`,
+# ROLE_API only) walks the fleet-wide ACTIVE roster for the CRS/FATCA assembly
+# (CrsFatcaReportingSources.activeAccounts -> GET /accounts/active). account.list only: balances
+# come from balance-service's own statement route, so this grant never reaches a balance or a
+# single-account read.
+allowed_reasons contains "service-tax-reporting-account-read" if {
+	input.principal.type == "HUMAN"
+
+	# Absent marker retains the legacy ABI; explicit null is not a verified marker.
+	not input.principal.service_account == null
+	machine_named("service-account-openbank-tax-reporting")
+	input.action == "account.list"
+}
+
 # ADR-0335 D2 — declared callers of the ownership projection. pension-service's own client (`openbank-pension`, ROLE_API only) verifies that a
 # payout/own-account IBAN belongs to the participant and is active. It gets the ownership
 # projection (AccountOwnershipResource: the answer is exactly {owned, active}, identical for an

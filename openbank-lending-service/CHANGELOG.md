@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.43.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.43.1...lending-service-v0.43.2) (2026-10-21)
+
+
+### Bug Fixes
+
+* **customer-edge:** prefix unprefixed metrics with openbank. and gate new ones ([#13193](https://github.com/JiRaska/open-bank-oss/issues/13193)) ([ca69f24](https://github.com/JiRaska/open-bank-oss/commit/ca69f2451fee91827db7fb179bde3b4244b0455c))
+
+## [0.43.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.43.0...lending-service-v0.43.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **lending:** record provisioning-cycle attempts across restart and rollover ([#12315](https://github.com/JiRaska/open-bank-oss/issues/12315)) ([8fb8d99](https://github.com/JiRaska/open-bank-oss/commit/8fb8d994ae9d8987ca3750e1a6d1d15c5dec25b0))
+
 ## [0.43.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.42.0...lending-service-v0.43.0) (2026-10-16)
 
 

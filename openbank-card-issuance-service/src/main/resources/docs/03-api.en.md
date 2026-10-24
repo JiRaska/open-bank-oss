@@ -21,7 +21,7 @@ All endpoints require a **Keycloak Bearer token** (realm `openbank`). Operations
 | `POST /cards/{id}/resume` | `ROLE_OPERATOR`, `ROLE_ADMIN` |
 | `POST /cards/{id}/block` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_COMPLIANCE` |
 | `POST /cards/{id}/cancel` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_COMPLIANCE` |
-| `GET /cards/{id}/secure-details` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN` |
+| `GET /cards/{id}/secure-details` | `ROLE_OPERATOR`, and only customer-edge's own service account (no staff access) |
 | `GET /cards/party/{partyId}/entitlements` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN` |
 
 ## Idempotence

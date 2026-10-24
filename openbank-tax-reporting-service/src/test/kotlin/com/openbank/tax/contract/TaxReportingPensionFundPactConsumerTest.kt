@@ -139,7 +139,7 @@ class TaxReportingPensionFundPactConsumerTest {
                     FUND_ID,
                     ReportingPeriod(Periodicity.MONTH, LocalDate.parse("2026-09-30")),
                 )
-            }
+            }.values
             assertThat(values.keys).containsExactlyInAnyOrderElementsOf(definition.datapoints)
         }
     }

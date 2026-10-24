@@ -43,6 +43,7 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 | `GET /accounts` | `accounts:read` | list the caller's accounts |
 | `GET /accounts/{accountId}` | `accounts:read` | 403 if not owner |
 | `GET /balances/{accountId}` | `accounts:read` | 403 if not owner |
+| `GET, PUT /balances/{accountId}/{currency}/low-balance-alert` | `accounts:read` / `accounts:write` | Owner only; PUT sets `enabled`, `threshold`, `rearmMargin`; GET is 404 until configured. Delivery is default-off and inbox-only. |
 | `GET /transactions?accountId=&limit=&cursor=` | `accounts:read` | ownership-enforced; `cursor` URL-encoded |
 | `GET /statements/{accountId}` | `accounts:read` | period-close list |
 | `GET /statements/{accountId}/{currency}/{legalSequence}?format=` | `accounts:read` | render camt.053 / MT940 / PDF; format & currency allow-listed |
@@ -182,6 +183,7 @@ The communication upstream is supplied through `COMMUNICATION_SERVICE_URL` at ru
 
 - `GET /products` projects catalog retirement offerings; `POST /simulations` returns an illustrative projection, without binding a contract. Simulations use a fresh upstream key.
 - `POST /applications` and `POST /transfers-in` start onboarding. Birth date and residency come from the party record; an incomplete profile returns 422 `PARTY_PROFILE_INCOMPLETE`.
+- Opening an application takes no provider from the app: the edge supplies the deployment's configured provider legal entity (`OPENBANK_EDGE_PENSION_PROVIDER_ENTITY_ID`, which must equal pension-service's own) alongside the birth date and residency it reads from the party record. A `providerEntityId` sent by the app is ignored. When none is configured, both application and transfer-in creation return the documented JSON `error` and `code` fields with 503 `PENSION_PROVIDER_NOT_CONFIGURED` before anything goes upstream.
 - Applications expose detail, recommendation, questionnaire, strategy selection, KID acceptance, signing and withdrawal. Signing forwards the challenge to pension-service, which consumes it against the application evidence.
 - Contracts expose detail, pause/resume, strategy election, payment reference, contribution mandates (set-up and cancel) and tax summary (which carries the state-contribution status per tax year).
 - `CustomerPensionChangeResource` adds the follow-up flows of `docs/ux/pension-client-flows.md` (pension-service API 1.2.0): the questionnaire (question set, draft, profile, warnings and their acknowledgement), contribution-schedule and beneficiary preview and change, annual and payout statements, payout eligibility, and annuity offers, selection and cancellation.

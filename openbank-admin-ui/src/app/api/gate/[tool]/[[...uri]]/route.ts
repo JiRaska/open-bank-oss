@@ -32,9 +32,9 @@ export const dynamic = "force-dynamic"
  * the post-login destination and only when it stays under that tool's own prefix.
  *
  * Envoy issues the check with the ORIGINAL method (and no body), so every method answers.
- * Excluded from the middleware for the same reason as the nginx route (`src/proxy.ts`
- * matcher `api/gate` covers this subtree): the middleware's own redirect would not carry
- * the deep link, and the gate runs the same session check itself.
+ * Matched by `src/proxy.ts` but selectively passed through before console authentication
+ * and trailing-slash canonicalization: the middleware's own redirect would not carry the
+ * deep link, and the gate runs the same session check itself.
  */
 async function gate(req: NextRequest, ctx: { params: Promise<{ tool: string; uri?: string[] }> }): Promise<NextResponse> {
   const { tool } = await ctx.params
