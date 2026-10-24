@@ -128,8 +128,12 @@ dependencies {
     // SecurityIdentity for ApprovalEndpointConformance; services supply it at test runtime.
     compileOnly("io.quarkus.security:quarkus-security")
     compileOnly("io.smallrye.config:smallrye-config-source-yaml")
+    // @Produces / @Singleton on TraceContractRecorder; every consuming service has the CDI API.
+    compileOnly("io.quarkus:quarkus-arc")
     testImplementation(enforcedPlatform(libs.quarkus.bom))
     testImplementation("io.smallrye.config:smallrye-config-source-yaml")
+    testImplementation(libs.quarkus.junit5)
+    testImplementation("io.quarkus:quarkus-arc")
 
     testImplementation(libs.mockk)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
