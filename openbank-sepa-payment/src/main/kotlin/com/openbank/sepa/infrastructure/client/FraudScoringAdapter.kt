@@ -4,10 +4,10 @@
 
 package com.openbank.sepa.infrastructure.client
 
+import com.openbank.libs.fincrime.FraudVerdict
 import com.openbank.sepa.application.port.out.FraudScoreCommand
 import com.openbank.sepa.application.port.out.FraudScoreOutcome
 import com.openbank.sepa.application.port.out.FraudScoringPort
-import com.openbank.sepa.application.port.out.FraudVerdict
 import com.openbank.sepa.infrastructure.observability.FraudScoringMetrics
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -103,13 +103,7 @@ class FraudScoringAdapter(@RestClient private val client: FraudScoreClient, priv
      * OpenAPI enum constrains the wire today, but that is a property of the schema, and a caller
      * that one day enforces the verdict would be relying on this mapper.
      */
-    private fun mapVerdict(remote: String?): FraudVerdict = when (remote?.uppercase()) {
-        "ALLOW" -> FraudVerdict.ALLOW
-        "CHALLENGE" -> FraudVerdict.CHALLENGE
-        "REVIEW" -> FraudVerdict.REVIEW
-        "DECLINE" -> FraudVerdict.DECLINE
-        else -> FraudVerdict.UNKNOWN
-    }
+    private fun mapVerdict(remote: String?): FraudVerdict = FraudVerdict.fromWire(remote)
 
     companion object {
         /**

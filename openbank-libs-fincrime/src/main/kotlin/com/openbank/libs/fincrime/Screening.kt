@@ -2,16 +2,32 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-package com.openbank.domestic.domain.screening
+package com.openbank.libs.fincrime
 
 /** Which side of the payment a screened name belongs to. */
 enum class ScreeningRole { DEBTOR, CREDITOR }
 
 /**
- * Local mirror of the sanctions-service check status, so the domestic-payment domain never imports the
- * other service's package. The adapter maps the remote `SanctionsCheckStatus` onto this.
+ * Status of one name screened against the sanctions lists — sanctions-service's published check
+ * status (ADR-0353 D4). sanctions-service owns its meaning; the rails read it off the wire.
  */
-enum class ScreeningMatchStatus { CLEAR, POTENTIAL_HIT, HIT, WHITELISTED, ESCALATED }
+enum class ScreeningMatchStatus {
+    CLEAR,
+    POTENTIAL_HIT,
+    HIT,
+    WHITELISTED,
+    ESCALATED,
+    ;
+
+    companion object {
+        /**
+         * Total, fail-closed parse of a wire value: an absent or unrecognised status is [ESCALATED]
+         * (which [ScreeningPolicy] blocks), never [CLEAR] (ADR-0032, ADR-0353 D5).
+         */
+        fun fromWire(value: String?): ScreeningMatchStatus =
+            entries.firstOrNull { it.name == value?.trim()?.uppercase() } ?: ESCALATED
+    }
+}
 
 /** Outcome of screening a single name against the sanctions lists. */
 data class ScreeningResult(
@@ -26,8 +42,9 @@ data class ScreeningResult(
 enum class ScreeningDecision { CLEAR, REVIEW, BLOCK }
 
 /**
- * Pure, framework-free decision over a payment's screening results (ADR-0032 §B). The block
- * threshold mirrors the sanctions service's own `isHighRisk` so the two never drift:
+ * Pure decision over a payment's screening results (ADR-0032 §B), one copy for every rail
+ * (ADR-0353 D4). The block threshold is the sanctions service's own `isHighRisk` bound, so the
+ * two never drift:
  *
  *  - **BLOCK**  — any HIT, any ESCALATED, or a POTENTIAL_HIT strictly above [POTENTIAL_HIT_BLOCK_THRESHOLD].
  *  - **REVIEW** — any POTENTIAL_HIT at or below the threshold (false-positive candidate → human review).

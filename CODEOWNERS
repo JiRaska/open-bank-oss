@@ -55,6 +55,7 @@
 /openbank-libs-domain/                  @JiRaska
 /openbank-libs-lending/                 @JiRaska
 /openbank-libs-finance/                 @JiRaska
+/openbank-libs-fincrime/                @JiRaska
 /openbank-libs-iso20022/                @JiRaska
 /openbank-libs-runtime/                 @JiRaska
 /openbank-libs-benchmarks/              @JiRaska
