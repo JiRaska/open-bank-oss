@@ -48,9 +48,100 @@ class FeeShadowComparatorTest {
     }
 
     @Test
-    fun `an unknown balance is charged by both sides, as the legacy evaluator fails closed`() {
-        val r = single(null, ShadowFixtures.charged()) as FeeShadowResult.Compared
-        assertThat(r.diverged).isFalse()
+    fun `an unknown balance is not treated as a known zero`() {
+        assertThat(single(null, ShadowFixtures.charged())).isInstanceOf(FeeShadowResult.UnknownInput::class.java)
+    }
+
+    @Test
+    fun `unknown balance is not a measured LT waiver decision`() {
+        unknownBalanceIsNotCompared("LT", "1000.00")
+    }
+
+    @Test
+    fun `unknown balance is not a measured zero equality waiver decision`() {
+        unknownBalanceIsNotCompared("EQ", "0.00")
+    }
+
+    private fun unknownBalanceIsNotCompared(operator: String, threshold: String) {
+        val ir = ProductIrParser.parse(
+            ShadowFixtures.IR.replace("\"GTE\"", "\"$operator\"")
+                .replace("\"1000.00\"", "\"$threshold\""),
+        )
+        val legacy = com.openbank.libs.product.WaiverEvaluator.evaluate(
+            "Balance ${if (operator == "LT") "<" else "="} $threshold EUR",
+            com.openbank.libs.product.FeeContext(balance = null, currency = "EUR"),
+        )
+        assertThat(legacy).isEqualTo(com.openbank.libs.product.WaiveReason.CONTEXT_UNKNOWN)
+        val result = comparator.compare(ir, ShadowFixtures.input(null, listOf(ShadowFixtures.charged())), at).single()
+        assertThat(result).isNotInstanceOf(FeeShadowResult.Compared::class.java)
+        val knownZero = comparator.compare(
+            ir,
+            ShadowFixtures.input("0.00", listOf(ShadowFixtures.waived())),
+            at,
+        ).single()
+        assertThat(knownZero).isInstanceOf(FeeShadowResult.Compared::class.java)
+        assertThat((knownZero as FeeShadowResult.Compared).diverged).isFalse()
+    }
+
+    @Test
+    fun `missing balance still compares a fee without a waiver or with a known segment waiver`() {
+        val noWaiver = revision.copy(fees = revision.fees.map { it.copy(waiver = null) })
+        val withoutWaiver = comparator.compare(
+            noWaiver,
+            ShadowFixtures.input(null, listOf(ShadowFixtures.charged())),
+            at,
+        )
+        assertThat((withoutWaiver.single() as FeeShadowResult.Compared).diverged).isFalse()
+        val segmentWaiver = revision.copy(
+            fees = revision.fees.map {
+                it.copy(
+                    waiver = com.openbank.libs.product.ir.Predicate.Comparison(
+                        com.openbank.libs.product.WaiveAttribute.SEGMENT,
+                        com.openbank.libs.product.WaiveOperator.EQ,
+                        textValue = "RETAIL",
+                    ),
+                )
+            },
+        )
+        val input = ShadowFixtures.input(null, listOf(ShadowFixtures.waived())).copy(segment = "RETAIL")
+        assertThat(
+            (comparator.compare(segmentWaiver, input, at).single() as FeeShadowResult.Compared).diverged,
+        ).isFalse()
+    }
+
+    @Test
+    fun `nested balance guards affect only their scheduled trigger`() {
+        val rule = revision.hooks.getValue(com.openbank.libs.product.ir.Hook.SCHEDULED).single()
+        val nested = com.openbank.libs.product.ir.Predicate.Not(
+            com.openbank.libs.product.ir.Predicate.Or(
+                listOf(
+                    com.openbank.libs.product.ir.Predicate.And(listOf(revision.fees.single().waiver!!)),
+                ),
+            ),
+        )
+        val noWaiver = revision.copy(fees = revision.fees.map { it.copy(waiver = null) })
+        val relevant = noWaiver.copy(
+            hooks = noWaiver.hooks +
+                (com.openbank.libs.product.ir.Hook.SCHEDULED to listOf(rule.copy(whenPredicate = nested))),
+        )
+        val input = ShadowFixtures.input(null, listOf(ShadowFixtures.charged()))
+        assertThat(comparator.compare(relevant, input, at).single())
+            .isInstanceOf(FeeShadowResult.UnknownInput::class.java)
+        val unrelated = noWaiver.copy(
+            hooks = noWaiver.hooks +
+                (
+                    com.openbank.libs.product.ir.Hook.SCHEDULED to listOf(
+                        rule,
+                        rule.copy(
+                            ruleId = "unrelated",
+                            trigger = "OTHER",
+                            whenPredicate = nested,
+                            action = com.openbank.libs.product.ir.Action.Notify("test", emptyMap()),
+                        ),
+                    )
+                    ),
+        )
+        assertThat((comparator.compare(unrelated, input, at).single() as FeeShadowResult.Compared).diverged).isFalse()
     }
 
     @Test

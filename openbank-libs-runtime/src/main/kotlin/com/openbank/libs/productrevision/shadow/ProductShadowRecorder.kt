@@ -31,6 +31,9 @@ enum class ShadowNotComparable {
     /** A legacy decision has no counterpart rule in the IR (or the reverse): the mapping is incomplete. */
     RULE_UNMAPPED,
 
+    /** A required comparison input was not captured; no economic decision can be compared. */
+    INPUT_UNKNOWN,
+
     /**
      * The interpreter refused to evaluate (a run limit), or produced a `Post` that is not balanced per
      * currency. An interpreter defect, never a ledger error to discover later (ADR-0352 §8).

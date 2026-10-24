@@ -109,11 +109,16 @@ class ProductShadowService(
     private fun record(productCode: String, results: List<FeeShadowResult>): String {
         var diverged = false
         var unmapped = false
+        var unknownInput = false
         for (r in results) {
             when (r) {
                 is FeeShadowResult.Compared -> {
                     recorder.compared(productCode, r.ruleId, r.diverged)
                     diverged = diverged || r.diverged
+                }
+                is FeeShadowResult.UnknownInput -> {
+                    recorder.notComparable(ShadowNotComparable.INPUT_UNKNOWN)
+                    unknownInput = true
                 }
                 is FeeShadowResult.Unmapped -> {
                     recorder.notComparable(ShadowNotComparable.RULE_UNMAPPED)
@@ -124,6 +129,7 @@ class ProductShadowService(
         return when {
             diverged -> "DIVERGED"
             unmapped -> "RULE_UNMAPPED"
+            unknownInput -> "INPUT_UNKNOWN"
             else -> "AGREED"
         }
     }

@@ -1565,6 +1565,7 @@ public final class com/openbank/libs/productrevision/shadow/ProductShadowRecorde
 }
 
 public final class com/openbank/libs/productrevision/shadow/ShadowNotComparable : java/lang/Enum {
+	public static final field INPUT_UNKNOWN Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
 	public static final field IR_EVALUATION_FAILED Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
 	public static final field NO_IR Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
 	public static final field REVISION_UNAVAILABLE Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;

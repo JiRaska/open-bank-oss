@@ -90,6 +90,16 @@ class ProductShadowServiceTest {
     }
 
     @Test
+    fun `a required unknown balance is explicitly not comparable and never counted as agreement`(): Unit = runBlocking {
+        val queue = Queue(ShadowFixtures.input(null, listOf(ShadowFixtures.charged())))
+        service(queue, { signed(it) }).runOnce(10)
+        assertThat(queue.completed.values).containsExactly("INPUT_UNKNOWN")
+        assertThat(count(ProductShadowRecorder.NOT_COMPARABLE, "reason", "input_unknown")).isEqualTo(1.0)
+        assertThat(registry.find(ProductShadowRecorder.COMPARED).counters()).isEmpty()
+        assertThat(registry.find(ProductShadowRecorder.DIVERGED).counters()).isEmpty()
+    }
+
+    @Test
     fun `a revision without IR, or with verification off, compares nothing and says why`(): Unit = runBlocking {
         val noIr = Queue(ShadowFixtures.input("500.00", listOf(ShadowFixtures.charged())))
         service(noIr, { StoredRevisionIr(it, false, null, null, null) }).runOnce(10)

@@ -76,7 +76,7 @@ what the legacy code decided.
 | `openbank_product_shadow_inputs_total` | inputs queued, counted after the authoritative transaction commits |
 | `openbank_product_shadow_compared_total` | inputs where the IR result was compared with the authoritative one |
 | `openbank_product_shadow_diverged_total` | comparisons that disagreed |
-| `openbank_product_shadow_not_comparable_total{reason}` | inputs that could not be compared. The `reason` is one value of the closed `ShadowNotComparable` set: no IR, revision unavailable, verification disabled, verification failed, verifier unavailable, rule unmapped, or IR evaluation failed |
+| `openbank_product_shadow_not_comparable_total{reason}` | inputs that could not be compared. The `reason` is one value of the closed `ShadowNotComparable` set: no IR, revision unavailable, verification disabled, verification failed, verifier unavailable, rule unmapped, required input unknown, or IR evaluation failed |
 
 Inputs arriving while `compared` stays flat is the "shadow compared nothing" state. An
 all-not-comparable shadow reads as quiet, not as broken, so it gets its own alert

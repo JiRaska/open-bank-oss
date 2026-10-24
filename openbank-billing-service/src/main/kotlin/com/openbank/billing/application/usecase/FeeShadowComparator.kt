@@ -5,11 +5,13 @@
 package com.openbank.billing.application.usecase
 
 import com.openbank.billing.domain.ProductShadowInput
+import com.openbank.libs.product.WaiveAttribute
 import com.openbank.libs.product.ir.AccountingClass
 import com.openbank.libs.product.ir.Action
 import com.openbank.libs.product.ir.Hook
 import com.openbank.libs.product.ir.Instruction
 import com.openbank.libs.product.ir.PostingDirection
+import com.openbank.libs.product.ir.Predicate
 import com.openbank.libs.product.ir.ProductClock
 import com.openbank.libs.product.ir.ProductEvaluationException
 import com.openbank.libs.product.ir.ProductEvent
@@ -33,6 +35,9 @@ sealed interface FeeShadowResult {
 
     /** No IR fee (or no scheduled rule charging it) for a legacy fee, or an IR fee legacy never assessed. */
     data class Unmapped(val feeCode: String) : FeeShadowResult
+
+    /** An input required by this fee is unknown; no economic comparison was made. */
+    data class UnknownInput(val feeCode: String) : FeeShadowResult
 }
 
 /**
@@ -67,6 +72,10 @@ class FeeShadowComparator(private val interpreter: ProductInterpreter) {
             val rule = fee?.let { chargingRules[it.ruleId] }
             if (fee == null || rule?.trigger == null) {
                 FeeShadowResult.Unmapped(legacy.feeId)
+            } else if (input.balance == null &&
+                revision.requiresBalance(rule.trigger)
+            ) {
+                FeeShadowResult.UnknownInput(legacy.feeId)
             } else {
                 val out = interpreter.evaluate(revision, state, ProductEvent(Hook.SCHEDULED, tag = rule.trigger), clock)
                 val posts = out.filterIsInstance<Instruction.Post>().filter { it.ruleId == rule.ruleId }
@@ -90,5 +99,25 @@ class FeeShadowComparator(private val interpreter: ProductInterpreter) {
         }
         val irOnly = revision.fees.filter { it.feeCode !in legacyCodes }.map { FeeShadowResult.Unmapped(it.feeCode) }
         return results + irOnly
+    }
+
+    // evaluate() executes every rule for this trigger, including their instruction-limit effects.
+    // Do not invent a balance for any of them, but leave unrelated triggers comparable.
+    private fun ProductRevisionIr.requiresBalance(trigger: String?): Boolean =
+        hooks[Hook.SCHEDULED].orEmpty().filter { it.trigger == trigger }.any { rule ->
+            rule.whenPredicate.requiresBalance() ||
+                when (val action = rule.action) {
+                    is Action.ChargeFee -> fees.firstOrNull { it.ruleId == action.feeRuleId }?.waiver.requiresBalance()
+                    Action.AccrueInterest, Action.Mature, Action.EarlyWithdrawalPenalty -> true
+                    else -> false
+                }
+        }
+
+    private fun Predicate?.requiresBalance(): Boolean = when (this) {
+        is Predicate.Comparison -> attribute == WaiveAttribute.BALANCE
+        is Predicate.And -> operands.any { it.requiresBalance() }
+        is Predicate.Or -> operands.any { it.requiresBalance() }
+        is Predicate.Not -> operand.requiresBalance()
+        else -> false
     }
 }

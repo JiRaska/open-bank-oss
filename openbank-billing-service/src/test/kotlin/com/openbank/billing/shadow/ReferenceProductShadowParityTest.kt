@@ -58,6 +58,10 @@ class ReferenceProductShadowParityTest {
                 val waived = reason == WaiveReason.WAIVED_BY_CONDITION
                 val decision = ShadowLegacyFee("MAINT", if (waived) BigDecimal.ZERO else BigDecimal(fee.amount), waived)
                 val results = comparator.compare(revision, ShadowFixtures.input(balance, listOf(decision)), at)
+                if (balance == null) {
+                    assertThat(results.single()).isInstanceOf(FeeShadowResult.UnknownInput::class.java)
+                    continue
+                }
                 val result = results.single() as FeeShadowResult.Compared
                 assertThat(result.diverged)
                     .describedAs(
@@ -66,7 +70,7 @@ class ReferenceProductShadowParityTest {
                     .isFalse()
                 compared++
             }
-            assertThat(compared).isEqualTo(balances.size)
+            assertThat(compared).isEqualTo(balances.count { it != null })
         }
     }
 
