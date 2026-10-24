@@ -18,6 +18,7 @@ import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.hasSize
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -33,7 +34,8 @@ import java.util.UUID
  * ADR-0344 D2/D4 over real HTTP and Postgres. Submission stores the cash-flow ledger and its
  * `treasury.cashflow.generated` event in the SAME transaction as the deal (one `xmin`); the rows
  * are read back by plain JDBC; an override is four-eyes (the proposer and an AI agent are refused)
- * and keeps the original beside it; a leg-described product is refused until its phase lands.
+ * and keeps the original beside it; a leg-described IRS stores PROJECTED floating rows; a product
+ * whose ADR-0344 phase has not landed is refused.
  */
 @QuarkusTest
 @QuarkusTestResource(CashFlowLedgerApiIT.NoDispatch::class)
@@ -290,7 +292,63 @@ class CashFlowLedgerApiIT {
     @Test
     @Order(10)
     @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
-    fun `10 - a leg-described product is refused until its ADR-0344 phase delivers its posting rules`() {
+    fun `10 - an IRS submits and stores FIXED coupons and PROJECTED floating rows with fixing dates`() {
+        val start = today.plusDays(10)
+        val end = start.plusYears(1)
+        val legs = """
+            [{"payReceive":"PAY","currency":"CZK","notional":10000000.00,"accrualStart":"$start","accrualEnd":"$end",
+              "accrualFrequency":"QUARTERLY","paymentFrequency":"QUARTERLY","dayCount":"ACT/360","rate":{"type":"FIXED","rate":4.0}},
+             {"payReceive":"RECEIVE","currency":"CZK","notional":10000000.00,"accrualStart":"$start","accrualEnd":"$end",
+              "accrualFrequency":"QUARTERLY","paymentFrequency":"QUARTERLY","dayCount":"ACT/360",
+              "rate":{"type":"FLOATING","index":"PRIBOR_3M","spread":0.10,"resetFrequency":"QUARTERLY"}}]
+        """.trimIndent()
+        val irs: String = post(
+            "/deals",
+            """{"product":"IRS","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
+               "businessDayConvention":"MODIFIED_FOLLOWING","legs":$legs}""",
+        ).then().statusCode(201).body("legs", hasSize<Any>(2)).body("legs[1].rate.index", equalTo("PRIBOR_3M"))
+            .extract().path("dealId")
+        post("/deals/$irs/submit").then().statusCode(200).body("scheduleVersion", equalTo(1))
+        // A flat principal that disagrees with the legs would let the limit checks measure a
+        // different deal from the one the schedule books: refused.
+        post(
+            "/deals",
+            """{"product":"IRS","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","principal":1.00,"legs":$legs}""",
+        ).then().statusCode(400).body("message", containsString("principal"))
+        assertThat(
+            count(
+                "select count(*) from deal_cash_flows where deal_id = ? and state = 'FIXED' and kind = 'INTEREST'",
+                irs,
+            ),
+        ).isEqualTo(4)
+        assertThat(
+            count(
+                "select count(*) from deal_cash_flows where deal_id = ? and state = 'PROJECTED' and amount is null and fixing_date is not null",
+                irs,
+            ),
+        ).isEqualTo(4)
+        given().`when`().get("/api/v1/treasury/reference/dependencies/index/PRIBOR_3M").then().statusCode(200)
+            .body("dependants.id", hasItem(irs))
+        // A HYPOTHETICAL deal is priced only.
+        val hypo: String = post(
+            "/deals",
+            """{"product":"IRS","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","kind":"HYPOTHETICAL","legs":$legs}""",
+        ).then().statusCode(201).extract().path("dealId")
+        post(
+            "/deals/$hypo/schedule-preview",
+        ).then().statusCode(200).body("flows.findAll { it.amount == null }", hasSize<Any>(4))
+            .body("flows[0].amount", org.hamcrest.Matchers.anything())
+        post("/deals/$hypo/submit").then().statusCode(409)
+        given().`when`().get(
+            "/api/v1/treasury/deals/$hypo/cash-flows",
+        ).then().statusCode(200).body("scheduleVersion", equalTo(0))
+            .body("scheduleHash", nullValue())
+    }
+
+    @Test
+    @Order(11)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `11 - a product whose phase has not landed is refused until its ADR-0344 phase delivers its posting rules`() {
         val start = today.plusDays(10)
         val end = start.plusYears(1)
         val legs = """
@@ -299,7 +357,7 @@ class CashFlowLedgerApiIT {
         """.trimIndent()
         post(
             "/deals",
-            """{"product":"IRS","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
+            """{"product":"BOND","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
                "businessDayConvention":"MODIFIED_FOLLOWING","legs":$legs}""",
         ).then().statusCode(400).body("message", containsString("not delivered yet"))
     }
