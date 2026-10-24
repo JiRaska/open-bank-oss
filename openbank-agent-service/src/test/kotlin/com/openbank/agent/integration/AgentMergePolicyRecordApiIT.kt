@@ -138,6 +138,8 @@ class AgentMergePolicyRecordApiIT {
             .post("/api/v1/agent-merge-records/app").then().statusCode(400)
         given().contentType("application/json").body(body + ("authorization" to appAuthorization()))
             .post("/api/v1/agent-merge-records/app-policy").then().statusCode(400)
+        given().contentType("application/json").body(body + ("authorization" to appAuthorization()))
+            .post("/api/v1/agent-merge-records/app").then().statusCode(400)
         given().contentType("application/json").body(body + ("headBranch" to "codex/fixture"))
             .post("/api/v1/agent-merge-records/app-policy").then().statusCode(400)
         given().get("/api/v1/agent-merge-records/capabilities").then().statusCode(200)

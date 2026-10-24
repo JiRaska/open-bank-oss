@@ -1106,6 +1106,9 @@ components:
         authorization:
           $ref: '#/components/schemas/MergeAuthorization'
           description: Required separate human authorization evidence; never substitutes the actual merge executor.
+        policyAuthorization:
+          type: "null"
+          description: The policy proof uses /app-policy; mixed non-null proof families are rejected.
         mergedAt:
           type: string
           format: date-time

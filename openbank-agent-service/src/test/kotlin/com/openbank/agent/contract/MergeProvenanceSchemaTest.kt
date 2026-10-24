@@ -149,6 +149,8 @@ class MergeProvenanceSchemaTest {
         val policySchema = schema("PolicyAppMergeRecordIngestRequest")
         assertThat(policySchema.validate(mapper.valueToTree(policyApp))).isEmpty()
         assertThat(validate(app + ("authorization" to proof))).isNotEmpty()
+        assertThat(validate(app + ("policyAuthorization" to proof))).isNotEmpty()
+        assertThat(validate(app + ("policyAuthorization" to null))).isEmpty()
         assertThat(policySchema.validate(mapper.valueToTree(policyApp + ("authorization" to exactProof)))).isNotEmpty()
         assertThat(policySchema.validate(mapper.valueToTree(policyApp - "policyAuthorization"))).isNotEmpty()
         assertThat(
