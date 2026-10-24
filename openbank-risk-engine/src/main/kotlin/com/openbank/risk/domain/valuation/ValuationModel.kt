@@ -45,7 +45,10 @@ object ValuationModel {
     fun money(value: BigDecimal): BigDecimal = value.setScale(MONEY_SCALE, RoundingMode.HALF_EVEN)
 }
 
-/** ADR-0344 D2: only ACTUAL deals post, pay and enter regulatory measures. Owned by `openbank-libs-finance`. */
+/**
+ * ADR-0344 D2: only ACTUAL deals post, pay and enter regulatory measures. One vocabulary owned by
+ * openbank-libs-finance, which treasury books with and this engine values with.
+ */
 typealias DealKind = com.openbank.libs.finance.deal.DealKind
 
 /** Where a deal's flows came from (ADR-0344 D4): treasury's stored ledger, or derived here. */
