@@ -23,3 +23,7 @@ Self-published at `/q/openbank/docs` (Docs-as-Service — see [ADR 0019](../../.
 - **Outbox:** `balance_outbox` → Kafka `openbank.balance.events`
 - **Consumers:** account-service (cache update). Low-balance customer alerts are planned in ADR-0333; notification-service does not currently consume this event.
 - **Producers for us:** transaction-service event-driven balance update after every accepted transaction
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

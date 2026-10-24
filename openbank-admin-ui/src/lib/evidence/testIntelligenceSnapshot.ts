@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { EvidenceState, TestIntelligenceReport } from '../types/test-intelligence'
 
-const SHA = /^[0-9a-f]{40}$/
 const COMPONENT = /^openbank-[a-z0-9-]{2,60}$/
 const STATES = new Set<EvidenceState>(['passed', 'failed', 'skipped', 'not-run', 'stale', 'blocked', 'unknown'])
 const KINDS = new Set(['unit', 'integration', 'contract', 'e2e', 'trace', 'mutation', 'simulation', 'performance', 'synthetic', 'visual'])

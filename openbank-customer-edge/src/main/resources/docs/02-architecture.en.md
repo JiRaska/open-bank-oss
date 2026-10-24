@@ -109,6 +109,7 @@ The customer (customers-realm) token is **never forwarded** — upstreams valida
 - **Singleton `HttpClient`** for the application lifetime — one shared connection pool, no per-request thread/fd leak.
 - **HTTP/1.1 forced** — the JDK default (HTTP/2 over cleartext h2c) breaks POST-with-body during the upgrade handshake against the in-cluster servers, surfacing as spurious 502s.
 - **Explicit timeouts** — connect timeout on the builder (`connect-timeout-ms`, default 5000), per-request timeout (`request-timeout-ms`, default 10000).
+- **Unified notification inbox deadline** — the merged party feed shares one 10 s aggregate deadline; each upstream read gets only the time still remaining, so sequential synthetic reads shrink their per-call timeout instead of running in fresh waves. The deadline reads an injected monotonic ticker (`System::nanoTime` in production), which lets tests drive it in virtual time.
 - **`@ConfigProperty` field injection (not constructor params)** — Kotlin constructor default values shadow Arc injection, which silently left the client secret `""` → every token fetch 401. Field injection runs after construction and applies config reliably.
 - **M2M token cache** — `client_credentials` token cached until 60 s before expiry; refresh is `@Synchronized`.
 - **Operation variants** — `get` (JSON), `getRaw` (preserves upstream Content-Type for camt.053 XML / MT940 / PDF, read as `ByteArray` to avoid charset corruption), `post` (idempotency-aware), `postAnonymous` (onboarding, no party header).

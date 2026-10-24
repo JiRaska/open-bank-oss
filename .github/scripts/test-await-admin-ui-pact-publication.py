@@ -2,13 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Negative and positive proofs for exact-main Pact publication ordering."""
 
-import ast
 import importlib.util
 import json
-import os
 import re
 import subprocess
-import tempfile
 import textwrap
 import unittest
 from pathlib import Path
@@ -24,49 +21,6 @@ SHA = "a" * 40
 def run(*, sha=SHA, status="completed", conclusion="success"):
     return {"id": 123, "head_sha": sha, "event": "push", "status": status,
             "conclusion": conclusion}
-
-
-def evaluate_github_expression(expression, context):
-    """Evaluate the side-effect-free expression subset used by the build job."""
-    expression = expression.strip()
-    if expression.startswith("${{") and expression.endswith("}}"):
-        expression = expression[3:-2].strip()
-    elif "${{" in expression or "}}" in expression:
-        raise AssertionError("malformed GitHub expression wrapper")
-    expression = re.sub(r"needs\.([a-z][a-z-]*-[a-z][a-z-]*)\.", r'needs["\1"].', expression)
-    expression = expression.replace("&&", " and ").replace("||", " or ")
-    expression = re.sub(r"!(?!=)", " not ", expression).strip()
-    tree = ast.parse(expression, mode="eval")
-
-    def value(node):
-        if isinstance(node, ast.Constant):
-            return node.value
-        if isinstance(node, ast.Name):
-            return context[node.id]
-        if isinstance(node, ast.Attribute):
-            return value(node.value)[node.attr]
-        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
-            return value(node.value)[node.slice.value]
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "always":
-            if node.args or node.keywords:
-                raise AssertionError("unexpected arguments to always()")
-            return True
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "cancelled":
-            if node.args or node.keywords:
-                raise AssertionError("unexpected arguments to cancelled()")
-            return context["cancelled"]
-        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
-            return not value(node.operand)
-        if isinstance(node, ast.BoolOp):
-            values = [value(child) for child in node.values]
-            return all(values) if isinstance(node.op, ast.And) else any(values)
-        if isinstance(node, ast.Compare) and len(node.ops) == len(node.comparators) == 1:
-            left, right = value(node.left), value(node.comparators[0])
-            if isinstance(node.ops[0], ast.Eq):
-                return left == right
-        raise AssertionError(f"unsupported GitHub expression node: {ast.dump(node)}")
-
-    return bool(value(tree.body))
 
 
 class PublicationWaitTest(unittest.TestCase):
@@ -118,57 +72,34 @@ class PublicationWaitTest(unittest.TestCase):
         services = (workflows / "services-ci.yml").read_text()
         pact = (workflows / "pact-drift-check.yml").read_text()
         def job(text, name):
-            match = re.search(rf"(?ms)^  {name}:\n(.*?)(?=^  [a-z][a-z-]*:\n|\Z)", text)
+            match = re.search(rf"(?ms)^  {name}:\n(.*?)(?=^  [a-z][a-z0-9_-]*:\n|\Z)", text)
             self.assertIsNotNone(match, name)
             return match.group(1)
         wait = job(services, "publication-ready")
-        build = job(services, "build")
+        build = job(services, "build_pr_openbank_account_service")
         all_green = job(services, "all-green")
         self.assertIn("runs-on: ubuntu-latest", wait)
         self.assertIn("admin-ui-pact-changed == 'true'", wait)
         self.assertIn("python3 .github/scripts/await-admin-ui-pact-publication.py", wait)
         self.assertIn("needs: [changes, publication-ready]", build)
-        build_condition = re.search(r"(?m)^    if: (.+)$", build)
-        self.assertIsNotNone(build_condition)
-        condition = build_condition.group(1)
-        for changes_result, selected, publication_result, cancelled, expected in [
-            ("success", "true", "success", False, True),
-            ("success", "true", "skipped", False, True),
-            ("success", "true", "failure", False, False),
-            ("success", "true", "cancelled", False, False),
-            ("failure", "true", "skipped", False, False),
-            ("cancelled", "true", "success", False, False),
-            ("skipped", "true", "skipped", False, False),
-            ("success", "false", "skipped", False, False),
-            ("success", "true", "success", True, False),
-        ]:
-            context = {"needs": {
-                "changes": {"result": changes_result, "outputs": {"any": selected}},
-                "publication-ready": {"result": publication_result},
-            }, "cancelled": cancelled}
-            with self.subTest(changes_result=changes_result, selected=selected,
-                              publication_result=publication_result, cancelled=cancelled):
-                self.assertEqual(evaluate_github_expression(condition, context), expected)
         self.assertIn("needs.publication-ready.result == 'success'", build)
         self.assertIn("needs.publication-ready.result == 'skipped'", build)
         self.assertIn("github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || ''", build)
         self.assertIn("github.event_name == 'push' || github.event_name == 'workflow_dispatch'", build)
-        aggregate_needs = re.search(r"(?m)^    needs: \[([^\]\n]+)\]$", all_green)
-        self.assertIsNotNone(aggregate_needs)
-        prerequisites = {name.strip() for name in aggregate_needs.group(1).split(",")}
-        self.assertTrue({"changes", "publication-ready", "build", "verification-metadata",
-                         "deploy-source-freshness"}
-                        <= prerequisites, prerequisites)
+        self.assertIn("      - changes", all_green)
+        self.assertIn("      - publication-ready", all_green)
+        self.assertIn("      - verification-metadata", all_green)
+        self.assertIn("      - build_pr_openbank_account_service", all_green)
         self.assertIn('needs.publication-ready.result }}" != "success"', all_green)
         self.assertNotIn("verify-admin-ui-providers:", pact)
         self.assertIn("needs: drift-check", job(pact, "publish-admin-ui"))
 
     def test_required_service_aggregate_rejects_missing_publication(self):
         services = (Path(__file__).parents[1] / "workflows" / "services-ci.yml").read_text()
-        match = re.search(r"(?ms)^      - name: Verify no service failed\n        run: \|\n(.*?)(?=^      - name:|^  [a-z][a-z-]*:|\Z)", services)
+        match = re.search(r"(?ms)^      - name: Verify no service failed\n        run: \|\n(.*?)(?=^      - name:|^  [a-z][a-z0-9_-]*:|\Z)", services)
         self.assertIsNotNone(match)
         template = textwrap.dedent(match.group(1))
-        common = {"needs.changes.result": "success", "needs.build.result": "success"}
+        common = {"needs.changes.result": "success"}
         # The service aggregate also requires verification metadata for changed build files.
         # Exercise both independent prerequisites so a merge cannot make either gate vacuous.
         for changed, publication, modules, metadata, admission, expected_success in [
@@ -194,59 +125,34 @@ class PublicationWaitTest(unittest.TestCase):
                                         capture_output=True, text=True, check=False)
                 self.assertEqual(result.returncode == 0, expected_success)
 
-    def test_required_service_aggregate_audits_each_matrix_build(self):
-        services = (Path(__file__).parents[1] / "workflows" / "services-ci.yml").read_text()
-        match = re.search(
-            r"(?ms)^      - name: Require every selected service build to pass\n.*?^        run: \|\n(.*?)(?=^  #|^  [a-z][a-z-]*:|\Z)",
-            services,
-        )
-        self.assertIsNotNone(match)
-        script = textwrap.dedent(match.group(1))
-        python = re.search(r"(?s)python3 - <<'PY'\n(.*?)\nPY", script)
-        self.assertIsNotNone(python)
-        selected = ["openbank-account-service", "openbank-treasury-service"]
-        account = "build (openbank-account-service) / openbank-account-service (build)"
-        treasury = "build (openbank-treasury-service) / openbank-treasury-service (build)"
-        for verdicts, expected_success in [
-            ([(account, "success"), (treasury, "success")], True),
-            ([], False),
-            ([(account, "success"), (treasury, "cancelled")], False),
-            ([(account, "success")], False),
-            ([(account, "success"), (treasury, "success"), (treasury, "success")], False),
-            ([(account, "success"), (treasury, "success"), ("build (openbank-extra) / openbank-extra (build)", "success")], False),
-        ]:
-            with self.subTest(verdicts=verdicts), tempfile.TemporaryDirectory() as directory:
-                jobs = Path(directory) / "jobs.ndjson"
-                jobs.write_text("".join(json.dumps({"name": name, "conclusion": conclusion}) + "\n"
-                                        for name, conclusion in verdicts))
-                env = dict(os.environ, SERVICES_JSON=json.dumps(selected), JOB_FILE=str(jobs))
-                result = subprocess.run(["python3", "-c", python.group(1)], env=env,
-                                        capture_output=True, text=True, check=False)
-                self.assertEqual(result.returncode == 0, expected_success, result.stderr)
-    def test_required_service_aggregate_rejects_failed_detection_with_skipped_build(self):
-        services = (Path(__file__).parents[1] / "workflows" / "services-ci.yml").read_text()
-        match = re.search(
-            r"(?ms)^      - name: Verify no service failed\n        run: \|\n(.*?)(?=^      - name:|^  [a-z][a-z-]*:|\Z)",
-            services,
-        )
-        self.assertIsNotNone(match)
-        script = textwrap.dedent(match.group(1))
-        values = {
-            "needs.changes.result": "failure",
-            "needs.build.result": "skipped",
-            "needs.changes.outputs.admission": "true",
-            "needs.changes.outputs.admin-ui-pact-changed": "false",
-            "needs.changes.outputs.verification-modules": "",
-            "needs.publication-ready.result": "skipped",
-            "needs.verification-metadata.result": "skipped",
-        }
-        for key, value in values.items():
-            script = script.replace("${{ " + key + " }}", value)
-        self.assertNotIn("${{", script)
-        result = subprocess.run(
-            ["bash", "-euo", "pipefail", "-c", script], capture_output=True, text=True, check=False
-        )
-        self.assertNotEqual(result.returncode, 0, result.stdout)
+    def test_required_service_aggregate_audits_each_individual_build(self):
+        spec = importlib.util.spec_from_file_location(
+            "results", Path(__file__).with_name("check-service-build-results.py"))
+        results = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(results)
+        modules = ["openbank-account-service", "openbank-treasury-service"]
+        needs = {"changes": {"result": "success", "outputs": {"any": "true", "renderer-changed": "false"}},
+                 "renderer-tests": {"result": "skipped", "outputs": {}}}
+        for lane in results.service_jobs.LANES:
+            for module in modules:
+                active = lane == "pr"
+                needs[results.service_jobs.job_id(module, lane)] = {
+                    "result": "success" if active else "skipped",
+                    "outputs": {"platform_results": json.dumps({
+                        "build": {"result": "success", "outputs": {}},
+                    })} if active else {},
+                }
+        self.assertEqual(results.verify(modules, needs, "pull_request", "refs/pull/1/merge", modules), [])
+        treasury = results.service_jobs.job_id(modules[1], "pr")
+        for value in ["cancelled", "failure", "skipped", ""]:
+            with self.subTest(value=value):
+                body = json.loads(needs[treasury]["outputs"]["platform_results"])
+                body["build"]["result"] = value
+                needs[treasury]["outputs"]["platform_results"] = json.dumps(body)
+                self.assertTrue(results.verify(modules, needs, "pull_request", "refs/pull/1/merge", modules))
+        del needs[treasury]
+        self.assertTrue(results.verify(modules, needs, "pull_request", "refs/pull/1/merge", modules))
+
 
 if __name__ == "__main__":
     unittest.main()

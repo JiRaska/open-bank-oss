@@ -20,19 +20,22 @@ is_inert_service_path() {
       # This Terraform environment has its own Platform OpenTofu workflow.
       # GitOps manifests remain relevant: JVM tests read some ConfigMaps and policies.
       return 0 ;;
-    openbank-admin-ui/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
-      return 0 ;;
     .github/scripts/check-authz-enforce-money-path.py|.github/scripts/check-flyway-version-commit-order.py|.github/scripts/check-public-workload-ha.py|.github/scripts/check-tofu-image-pull-through.py|.github/scripts/auto-update-armed-prs.py|.github/scripts/deploy-window-inputs.sh|.github/scripts/supersede-deploy-prs.sh|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/gates/gates.yaml|.github/gates/workflow-write-permissions-baseline.txt|.github/canary-rollout-realisable-baseline.txt|.github/public-workload-ha-baseline.txt|.github/scripts/collect-admin-ui-test-evidence.py|.github/scripts/test-collect-admin-ui-test-evidence.py|.github/scripts/select_admin_ui_evidence_datasets.py|.github/scripts/select_admin_ui_evidence_datasets_test.py|.github/scripts/await-admin-ui-source-validation.py|.github/scripts/test-await-admin-ui-source-validation.py|.github/scripts/reconcile-test-evidence.py|.github/scripts/reconcile_test_evidence_test.py|.github/scripts/check-readiness-collectors-agree.py)
       # Exact governance, Pact and evidence paths are inert; unknown helpers stay relevant.
       return 0 ;;
     .github/scripts/test-service-ci-job-roster.py|.github/scripts/test-service-ci-path-selection.py)
       # The changes job exercises this test; its source is not a Gradle/Pact input.
       return 0 ;;
+    openbank-document-renderer/requirements.txt)
+      # Main's Python sidecar lock remains outside the JVM lane.
+      return 0 ;;
+    openbank-admin-ui/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
+      return 0 ;;
     .github/workflows/*)
       # The copied runtime Dockerfile is a build input for every Gradle image.
       # Other workflows remain inert unless they are the service CI recipes.
       case "$1" in
-        .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/workflows/Dockerfile.deploy) return 1 ;;
+        .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/workflows/_service-ci-pr.yml|.github/workflows/Dockerfile.deploy) return 1 ;;
         *) return 0 ;;
       esac ;;
     *) return 1 ;;
@@ -77,10 +80,24 @@ pact_build_modules_self_test() {
     || { echo "selector self-test: GitOps test input must remain relevant" >&2; return 1; }
   ! is_inert_service_path "openbank-infra/aws/envs/unknown/main.tf" \
     || { echo "selector self-test: unowned infrastructure must retain safe fallback" >&2; return 1; }
+  is_inert_service_path "openbank-document-renderer/requirements.txt" \
+    || { echo "selector self-test: Python renderer lock is not a JVM build input" >&2; return 1; }
+  ! is_inert_service_path "openbank-document-renderer/requirements.txt.backup" \
+    || { echo "selector self-test: unknown renderer sibling must retain safe fallback" >&2; return 1; }
+  ! is_inert_service_path "openbank-unknown-component/requirements.txt" \
+    || { echo "selector self-test: unknown component must retain safe fallback" >&2; return 1; }
+  ! is_inert_service_path "openbank-document-renderer/build.gradle.kts" \
+    || { echo "selector self-test: new renderer Gradle input must remain relevant" >&2; return 1; }
+  ! is_inert_service_path "build.gradle.kts" \
+    || { echo "selector self-test: root Gradle input must remain relevant" >&2; return 1; }
+  global_service_build_input_changed "build.gradle.kts" \
+    || { echo "selector self-test: root Gradle input must select the full fleet" >&2; return 1; }
   is_inert_service_path ".github/workflows/security-regression-test.yml" \
     || { echo "selector self-test: unrelated workflow must be inert" >&2; return 1; }
   ! is_inert_service_path ".github/workflows/services-ci.yml" \
     || { echo "selector self-test: service CI recipe must remain relevant" >&2; return 1; }
+  ! is_inert_service_path ".github/workflows/_service-ci-pr.yml" \
+    || { echo "selector self-test: generated PR service CI recipe must remain relevant" >&2; return 1; }
   ! is_inert_service_path ".github/workflows/Dockerfile.deploy" \
     || { echo "selector self-test: canonical image recipe must remain relevant" >&2; return 1; }
   global_service_build_input_changed ".github/workflows/Dockerfile.deploy" \

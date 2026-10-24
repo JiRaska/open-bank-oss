@@ -7,6 +7,7 @@ package com.openbank.sepa.application.port.out
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
+import com.openbank.sepa.domain.model.SepaReturnIntent
 import java.time.Instant
 import java.util.UUID
 
@@ -42,6 +43,24 @@ interface SepaPaymentRepository {
     suspend fun findByEndToEndId(endToEndId: String): SepaPayment?
 
     suspend fun list(status: SepaPaymentStatus?, debtorAccountId: UUID?, limit: Int, offset: Int): List<SepaPayment>
+
+    /** Commit first intent before any ledger call. Existing immutable intent wins on retries. */
+    suspend fun beginReturn(paymentId: UUID, intent: SepaReturnIntent): SepaPayment
+
+    /** Persist only the latest unresolved classification; retain first receipt and request identity. */
+    suspend fun markReturnUnresolved(paymentId: UUID, cause: String): SepaPayment
+
+    /**
+     * Complete only the exact snapshot whose settlement adapter proved a matched booking. Reloads
+     * under lock so an intent committed during network IO is retained. The message factory receives
+     * the actual committed revision, never the pre-network revision.
+     */
+    suspend fun completeSettlement(
+        requestedPayment: SepaPayment,
+        transactionId: UUID,
+        completedAt: Instant,
+        statusMessage: (SepaPayment) -> SepaPaymentOutboxMessage,
+    ): SepaPayment
 
     /** Update a payment and enqueue a domain-event outbox message, atomically. */
     suspend fun update(payment: SepaPayment, outboxMessage: SepaPaymentOutboxMessage): SepaPayment

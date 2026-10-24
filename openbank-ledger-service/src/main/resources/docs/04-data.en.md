@@ -21,7 +21,7 @@ Dedicated PostgreSQL database **`openbank_ledger`** (reactive PG client for the 
 
 ### Seeded GL accounts
 
-V1 seeds cash/deposit/interest/fee accounts (1000, 1001, 2000, 2001, 2002, 3000, 4000, 4001). V3 adds well-known stable-UUID posting accounts (1100 cash clearing, 2100 deposit control CZK). V5 adds per-currency deposit-control (2101 EUR, 2102 USD, 2103 GBP), FX position accounts (1990–1993), exchange-rate differences P&L (5900), FX margin income (4002). V6 adds per-currency CZK counter-value accounts (1995–1997) for daily revaluation.
+V1 seeds cash/deposit/interest/fee accounts (1000, 1001, 2000, 2001, 2002, 3000, 4000, 4001). V3 adds well-known stable-UUID posting accounts (1100 cash clearing, 2100 deposit control CZK). V5 adds per-currency deposit-control (2101 EUR, 2102 USD, 2103 GBP), FX position accounts (1990–1993), exchange-rate differences P&L (5900), FX margin income (4002). V6 adds per-currency CZK counter-value accounts (1995–1997) for daily revaluation. V15 adds stable fee income 4003 (CZK); V34 adds its per-currency siblings 4004 (EUR), 4005 (USD), 4006 (GBP) and maps `FEE_INCOME_ACCOUNT` to them, so fee income is booked in the fee's own currency (#13226).
 
 ## Flyway migrations
 
@@ -36,6 +36,7 @@ V1 seeds cash/deposit/interest/fee accounts (1000, 1001, 2000, 2001, 2002, 3000,
 | `V6__fx_revaluation_counter_value_accounts` | CZK counter-value accounts 1995–1997 (ADR-0046) | delete seeded rows |
 | `V7__add_sub_account_id_to_journal_lines` | nullable `sub_account_id` + partial index (ADR-0039 Phase B) | documented in-file: drop index + column (backward-compatible) |
 | `V8__journal_partition_lifecycle` | pre-create 2027/2028 partitions, `partition_lifecycle_audit` table | drop partitions/table |
+| `V34__per_currency_fee_income_accounts` | fee income 4004 EUR / 4005 USD / 4006 GBP + `FEE_INCOME_ACCOUNT` map rows; aborts if fee-income and deposit-control currencies differ (#13226) | delete the map rows and accounts, only before any journal line references them |
 
 **Never edit a migration after it is applied to a live DB** — Flyway checksum mismatch crashes startup (use `QUARKUS_FLYWAY_REPAIR_AT_START=true` as a temporary remedy, then remove).
 

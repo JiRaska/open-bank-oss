@@ -146,8 +146,9 @@ def prepare(root, sha, marker, jvm_manifest):
         ).splitlines())
     except (OSError, subprocess.CalledProcessError):
         raise PublicationFailure("freshness-proof") from None
-    # The workflow receipt is the exact JVM set validated against the shard archives.
-    # It covers the whole repo, while `files` is deliberately only the Admin UI bundle.
+    # The workflow receipt is the exact JVM set validated against the selected archives.
+    # Full runs include the repo-wide set; proven Admin UI-only runs include the discovered
+    # producer closure for that consumer. `files` remains the complete Admin UI publication bundle.
     if manifest != sorted(set(manifest)) or not set(manifest) <= tracked:
         raise PublicationFailure("freshness-proof")
     jvm_files = set(manifest)

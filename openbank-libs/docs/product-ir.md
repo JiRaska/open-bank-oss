@@ -1,0 +1,80 @@
+# Product IR v1 (ADR-0352, phase 1)
+
+`com.openbank.libs.product.ir` in openbank-libs-domain turns a deposit product's
+behaviour into data: a typed IR document, validated against
+`product-ir/v1.schema.json`, hashed over its canonical form and executed by one
+pure interpreter. No service evaluates a revision yet; phase 2 adds signing and
+the pinned-revision loader (below) and the `openbank-products` content module.
+
+## The pieces
+
+- `ProductIrParser` parses and validates a document. It rejects unknown keys, a
+  missing or duplicate `ruleId`, values beyond the run limits in `IrLimits`, a
+  decimal more precise than its canonical scale, a `REJECT` outside
+  `prePosting`, and a same-cycle schedule cycle.
+- `ProductIrCanonical` writes the canonical form: `CanonicalJson` key order, no
+  whitespace, fixed-scale decimal strings, null members dropped.
+  `revisionHash` is the SHA-256 of those bytes.
+- `ProductInterpreter.evaluate(revision, state, event, clock)` returns
+  instructions (`Post`, `Reject`, `Schedule`, `Notify`, `Reprice`), each carrying
+  `ruleId`, `revisionHash` and `irVersion`. It reads only its arguments, holds
+  the 64-instruction cap, refuses an unbalanced `Post`, and returns only the
+  `Reject` when a posting is rejected.
+- Arithmetic goes through the `ProductArithmetic` port, implemented by
+  `FinanceProductArithmetic` in openbank-libs-finance. Rounding is named by
+  `RoundingPolicy`; the accrual reproduces interest-service's current
+  expression bit-exactly.
+
+## Signing and loading (phase 2)
+
+`com.openbank.libs.productrevision` in openbank-libs-runtime signs a published
+revision and lets a consumer load it only after verification.
+
+- `IrSignature(keyId, algorithm, signature)` is a detached signature over the
+  64-hex `revisionHash` string, not over the JSON bytes. `algorithm` names the
+  scheme so a verifier refuses what it cannot interpret; `keyId` lets rotation
+  keep older revisions verifiable.
+- `IrSignerPort` signs; `IrSignatureVerifierPort` verifies. Only the catalog's
+  publish of an IR-bearing revision holds a signer wired to a real key.
+  Consumers get a verify-only port.
+- `OpenBaoTransitIrSigner` implements both over OpenBao Transit `sign`/`verify`
+  on an asymmetric key (`ed25519` or `ecdsa-p256`). The publish identity gets
+  `update` on the sign path, consumers only on the verify path, and nobody gets
+  `create` on keys. A 403 refreshes the token and retries once, then fails
+  closed. `verify` returns `false` for a wrong signature but throws
+  `IrSigningException` when OpenBao is unavailable, so "could not check" never
+  reads as "checked and failed". It is a plain class, not a CDI bean; the
+  owning service produces it.
+- `HmacIrSigner` (HMAC-SHA256) is for development and tests only. A shared
+  secret cannot show who signed, so a deployment must use the Transit signer.
+- `PinnedRevisionLoader` loads a revision by `revisionHash` from a local
+  `SignedRevisionSource` the consumer owns (never a live catalog call). It
+  parses the IR, checks that its canonical hash equals the pin, and verifies
+  the signature before returning. Any failure throws
+  `PinnedRevisionUnavailableException`, and the consumer must not post. Verified
+  revisions go into an immutable cache keyed by hash.
+- Each load increments `openbank_product_revision_load_total` with an `outcome`
+  tag: `cache_hit`, `loaded`, `missing`, `invalid_ir`, `hash_mismatch`,
+  `signature_invalid` or `verifier_unavailable`. A failed verification has its
+  own value and never shares one with success.
+
+Governance for the publish step: `catalog.publish-ir` is its own four-eyes
+action, allowed by `rest.rego` only to a human with `ROLE_OPERATOR` or
+`ROLE_ADMIN` who is not a machine principal. Maker and checker must differ,
+which product-catalog enforces separately.
+
+## Testing
+
+openbank-libs-testing holds the golden-scenario runner, `ProductArb` property
+generators and `assertMoneyConserved`. Golden scenarios live under
+`product-golden/` in that module's resources and must be listed in its
+`index.txt`.
+
+## Gates
+
+| Gate | Mode | Fails on |
+|---|---|---|
+| `product-ir-determinism` | enforced | a scenario missing from the index, an unsupported `irVersion`, a disabled determinism test |
+| `product-ir-run-limits` | enforced | a committed IR or scenario over the schema maxima |
+| `product-ir-authoring-parity` | advisory until 2027-03-31 | a committed `ir/<name>.json` with no DSL product, or canonical DSL output that differs from the committed file |
+| `product-ir-purity` | enforced | an I/O, clock, logging or metrics import under the package, or the detekt rule not active |

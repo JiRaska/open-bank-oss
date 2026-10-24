@@ -27,6 +27,8 @@ internal class UnifiedNotificationInbox(
     private val mapper: ObjectMapper,
     private val serviceUrl: String,
     private val aggregateTimeoutNanos: Long = TimeUnit.SECONDS.toNanos(UNIFIED_NOTIFICATION_TIMEOUT_SECONDS),
+    // Monotonic ticker; tests substitute a virtual clock so deadline maths is not wall-time bound.
+    private val nanoTime: () -> Long = System::nanoTime,
 ) {
     private data class Item(val node: ObjectNode, val createdAt: Instant)
     private data class PartyPage(val items: List<Item>, val total: Long, val unread: Long)
@@ -34,7 +36,7 @@ internal class UnifiedNotificationInbox(
         fun remainingNanos(): Long = (expiresAtNanos - nanoTime()).coerceAtLeast(0)
     }
 
-    fun list(parties: List<UUID>, limit: Int): Response = listWithClock(parties, limit, System::nanoTime)
+    fun list(parties: List<UUID>, limit: Int): Response = listWithClock(parties, limit, nanoTime)
 
     /** Uses an injectable monotonic source for deterministic deadline tests. */
     internal fun listWithClock(parties: List<UUID>, limit: Int, nanoTime: () -> Long): Response {
@@ -165,6 +167,8 @@ internal class UnifiedNotificationInbox(
         }
         return PartyPage(items, page.path("total").asLong(), page.path("unreadCount").asLong())
     }
+
+    private fun remaining(deadline: Long): Long = (deadline - nanoTime()).coerceAtLeast(0)
 
     private companion object {
         const val MAX_CONCURRENT_FEEDS = 16
