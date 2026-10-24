@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ml, ai-agents, architecture, privacy-gdpr]
-summary: "Typed-decision models (schema-bound enum output plus a calibrated probability) become a third inference class behind one TypedDecisionPort, for triage and ranking only: a deterministic floor, data-held thresholds, fail-closed abstain."
+summary: "Typed-decision models (schema-bound typed output plus a calibrated probability) become a third inference class behind one TypedDecisionPort, for triage and ranking only: a deterministic floor, data-held thresholds, fail-closed abstain."
 ---
 
 # ADR-0348 — Typed-decision models: a third inference class for calibrated, schema-bound triage decisions
@@ -28,11 +28,11 @@ The platform has two inference classes today, and each was decided deliberately:
   prompt-injection surface".
 
 ADR-0139 decided the money-path risk plane; ADR-0031/0089 decided the assist plane. Neither covers a
-third shape that has become available: a model that reads **unstructured input** (free text, a
-loosely shaped record) and returns **one value from a closed, pre-declared schema together with a
-calibrated probability**, in a single pass and at a small fraction of an LLM call's latency and
-cost. It sits between the two existing classes: it needs no bespoke training set to be useful,
-unlike ONNX, and it cannot return a string to be parsed, unlike an LLM. This ADR is needed because
+third integration shape: a model that reads **unstructured input** (free text or a loosely
+shaped record) and returns **one schema-constrained value and a probability that must be
+calibrated on this use case**. This is a contract boundary, not a guarantee about provider
+architecture, latency, cost or training needs. Measure those properties against the local
+baseline; structured LLM and trained ONNX adapters can both implement the port. This ADR is needed because
 the platform has several high-volume decisions of exactly that shape that are today either made
 by hand or not made at all:
 
@@ -54,11 +54,14 @@ treats calibration as something to measure here, not something to assume.
 We will introduce **typed-decision models** as a third inference class, governed as follows.
 
 **D1 — One port, framework-free.** `openbank-libs-domain` gains
-`com.openbank.libs.decision.typed.TypedDecisionPort`:
+`com.openbank.libs.inference.typed.TypedDecisionPort` initially beside
+`com.openbank.libs.llm` in `openbank-libs-domain` (the package is new, not existing).
+The `decision` namespace belongs to lending under ADR-0317. The contract moves with the AI-plane contracts to `openbank-libs-agent` in
+ADR-0317 phase 2 (#11056); it does not justify a second module by itself:
 
 ```kotlin
 interface TypedDecisionPort {
-    suspend fun <O : Enum<O>> decide(request: TypedDecisionRequest<O>): TypedDecision<O>
+    suspend fun <O : Any> decide(request: TypedDecisionRequest<O>): TypedDecision<O>
 }
 
 sealed interface TypedDecision<out O> {
@@ -67,26 +70,37 @@ sealed interface TypedDecision<out O> {
 }
 ```
 
-The output type is a Kotlin enum the *caller* declares; the adapter maps the provider's schema
-onto it and **rejects any value outside it as `Abstained(SCHEMA_VIOLATION)`**, never coerces it.
+The caller supplies a typed decoder and an immutable `OutputSchemaRef` (id, revision, hash).
+Business vocabularies are data: a code/value is valid only in that pinned schema revision.
+Closed execution semantics may use Kotlin enums; the port does not require them. The adapter
+**rejects unknown codes, incompatible revisions or invalid values as `Abstained(SCHEMA_VIOLATION)`**;
+it never coerces them. Schema validation is bounded and uses trusted local references.
+Probability must be finite and within [0, 1]; a provider's self-reported confidence is not
+calibration evidence.
 No provider name, SDK type or endpoint appears in the domain or application layer; adapters live in
 `infrastructure/` of the consuming service (ADR-0002) or in `openbank-libs-runtime`.
 
-**D2 — The output schema is code, versioned like an event.** Each use case declares its output enum
-and a `schemaVersion`. Adding a value is MINOR; removing or renaming one is MAJOR and needs a new
-version beside the old, the same rule events follow.
+**D2 — Output schemas and vocabularies are versioned artifacts.** Each use case pins a bounded
+schema and vocabulary revision. Business categories live in data; stable code identifiers carry
+no display text or numeric band in their identity. Existing strict enums remain compatibility
+adapters until their consumers migrate. Classify changes from actual API/event compatibility
+and consumer tests: adding a value can break a strict consumer, so it is not automatically MINOR.
+Replay retains old schemas and decoders; a missing revision abstains, never selects latest.
 
 **D3 — Thresholds are data, not code.** Each use case has a versioned threshold policy
-(`autoAcceptAt`, `reviewBelow`), held in the service's configuration and changed only through
+(`mode`, `autoEnabled`, `autoAcceptAt`, `reviewBelow`), held in the service's configuration and changed only through
 four-eyes (the ADR-0155 approval flow). Three bands:
 
 | Band | Condition | Effect |
 |---|---|---|
-| `AUTO` | `probability ≥ autoAcceptAt` | the decision is applied |
+| `AUTO` | approved `mode = AUTO`, `autoEnabled = true`, valid calibration, and `probability ≥ autoAcceptAt` | the decision is applied |
 | `HUMAN_REVIEW` | between | a person decides; the model's value is shown as a suggestion |
 | `ABSTAIN` | below `reviewBelow`, or `Abstained` | handled as if no model existed |
 
-A use case starts with `autoAcceptAt = 1.0`, i.e. **no AUTO band**, and earns one only through D7.
+A use case starts in `SHADOW` with `autoEnabled = false`; `SUGGEST` may show proposals only.
+A probability of 1.0 is reachable, so a threshold of 1.0 does **not** disable AUTO. Enabling AUTO
+requires D7 evidence and independent approval bound to the model/schema/policy hashes. Missing
+policy, revoked approval or stale calibration disables AUTO at runtime as well as in CI.
 
 **D4 — Deterministic floor, as in ADR-0139 and ADR-0213.** A typed decision may *route, rank or
 tighten*. It may never loosen a deterministic rule or stand in for a control a rule or a human owns.
@@ -106,8 +120,7 @@ probability and band in the record. ADR-0322's closed `DecisionClass` gains `TRI
 `AUTO | HUMAN_REVIEW | ABSTAIN`. That is a change to `DecisionRecord.kt` delivered with the first
 consumer, not a free-form payload key.
 
-**D7 — Calibration is measured here, before any AUTO band exists.** A use case may set
-`autoAcceptAt < 1.0` only after a shadow period on its own labelled data shows, in an eval committed
+**D7 — Calibration is measured here, before any AUTO band exists.** A use case may enable AUTO only after a shadow period on its own labelled data shows, in an eval committed
 under the ADR-0148 evals registry: expected calibration error and Brier score under the use case's
 declared ceiling, and AUTO-band precision at or above its declared floor. The eval replays on every
 model or threshold change and blocks promotion on regression.
@@ -162,10 +175,14 @@ entry under ADR-0174 only when one is contracted.
 
 **Neutral**
 - No runtime change until a consumer ADR adopts the port; the first is complaint intake triage.
+- Implementation and falsification tests: #13778. ADR-0354 records the financial-crime
+  boundary and the distinction between executable enums and versioned business vocabulary.
 - Gate: `model-residency-claims` (enforced) gains the typed-decision endpoints; a new
   `typed-decision-thresholds` check asserts that every declared use case either has
-  `autoAcceptAt: 1.0` or a passing calibration eval in the evals registry. Advisory until the first
-  consumer ships, with a `target_enforce_date` per ADR-0144.
+  `autoEnabled: false` or matching, passing calibration and independent approval evidence.
+  Planned in #13778; enforced before any AUTO consumer ships. Fixtures cover disabled AUTO at
+  probability 1.0, NaN/infinity, unknown codes, missing revisions and stale evidence. A planned
+  gate is not an existing control; runtime validation remains authoritative.
 
 ### Delivery check
 
