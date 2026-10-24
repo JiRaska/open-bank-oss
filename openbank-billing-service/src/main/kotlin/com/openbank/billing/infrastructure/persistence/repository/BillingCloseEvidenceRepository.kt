@@ -4,9 +4,8 @@
 
 package com.openbank.billing.infrastructure.persistence.repository
 
-import com.openbank.billing.application.port.out.CloseJobRunPort
+import com.openbank.billing.application.port.out.BillingCloseEvidencePort
 import com.openbank.billing.application.port.out.CycleFeePostings
-import com.openbank.billing.application.port.out.CycleFeePostingsPort
 import com.openbank.libs.close.CloseJobRun
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -21,9 +20,7 @@ import java.time.ZoneOffset
  * interest-service's, plus the posting status of one cycle's assessed fees read from `assessed_fee`.
  */
 @ApplicationScoped
-class BillingCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) :
-    CloseJobRunPort,
-    CycleFeePostingsPort {
+class BillingCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : BillingCloseEvidencePort {
 
     override fun record(run: CloseJobRun): Uni<Unit> = sf.withTransaction { s ->
         s.createNativeQuery<Int>(UPSERT_SQL)

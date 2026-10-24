@@ -33,3 +33,6 @@ data class CycleFeePostings(val pending: Int, val posted: Int, val failed: Int)
 interface CycleFeePostingsPort {
     fun postingsFor(cycleId: String): Uni<CycleFeePostings>
 }
+
+/** Everything the day-close reporter reads: the cycle run evidence and the cycle's fee postings. */
+interface BillingCloseEvidencePort : CloseJobRunPort, CycleFeePostingsPort

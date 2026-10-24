@@ -8,8 +8,7 @@ import com.cronutils.model.CronType
 import com.cronutils.model.definition.CronDefinitionBuilder
 import com.cronutils.model.time.ExecutionTime
 import com.cronutils.parser.CronParser
-import com.openbank.billing.application.port.out.CloseJobRunPort
-import com.openbank.billing.application.port.out.CycleFeePostingsPort
+import com.openbank.billing.application.port.out.BillingCloseEvidencePort
 import com.openbank.libs.close.CloseJobRun
 import com.openbank.libs.close.CloseParticipationAssembler
 import com.openbank.libs.close.CloseParticipationReport
@@ -53,8 +52,7 @@ import java.time.LocalDate
  */
 @ApplicationScoped
 class BillingCloseParticipationScheduler(
-    private val closeJobRuns: CloseJobRunPort,
-    private val feePostings: CycleFeePostingsPort,
+    private val evidence: BillingCloseEvidencePort,
     sink: CloseParticipationSink,
     meterRegistry: MeterRegistry,
     clock: Clock,
@@ -62,10 +60,8 @@ class BillingCloseParticipationScheduler(
     @ConfigProperty(name = "openbank.billing.scheduler.enabled", defaultValue = "false")
     private val cycleEnabled: Boolean,
     @ConfigProperty(name = "openbank.billing.scheduler.cron") private val cycleCron: String,
+    @ConfigProperty(name = "openbank.billing.close.lookback-days", defaultValue = "3") private val lookbackDays: Long,
 ) {
-    // Field-injected, not a 9th constructor parameter (detekt LongParameterList fires AT 9).
-    @ConfigProperty(name = "openbank.billing.close.lookback-days", defaultValue = "3")
-    var lookbackDays: Long = DEFAULT_LOOKBACK_DAYS
 
     private val log = Logger.getLogger(BillingCloseParticipationScheduler::class.java)
     private val reporter = CloseParticipationReporter(BillingCloseJobs.PARTICIPANT, sink, meterRegistry)
@@ -110,7 +106,7 @@ class BillingCloseParticipationScheduler(
         val from = today.minusDays(lookbackDays)
         val to = today.minusDays(1)
         val days = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }.toList()
-        return closeJobRuns.findBetween(from, to).flatMap { runs ->
+        return evidence.findBetween(from, to).flatMap { runs ->
             Multi.createFrom().iterable(days)
                 .onItem().transformToUniAndConcatenate { day -> assemble(day, runs) }
                 .collect().asList()
@@ -134,7 +130,7 @@ class BillingCloseParticipationScheduler(
             log.infof("billing day-close for %s not reported: the cycle has not run", day)
             return Uni.createFrom().nullItem()
         }
-        return feePostings.postingsFor(BillingCycleScheduler.cycleIdFor(day)).map { postings ->
+        return evidence.postingsFor(BillingCycleScheduler.cycleIdFor(day)).map { postings ->
             if (postings.pending > 0) {
                 log.infof(
                     "billing day-close for %s not reported: %d fee posting(s) still pending",
@@ -165,7 +161,6 @@ class BillingCloseParticipationScheduler(
 
     private companion object {
         const val WORKFLOW_NAME = "billing-close-participation"
-        const val DEFAULT_LOOKBACK_DAYS = 3L
         val OFF_VALUES = setOf("off", "disabled")
         const val SKIP_NOT_DUE = "no billing cycle is scheduled on this day"
         const val SKIP_DISABLED = "billing cycle sweep is switched off"

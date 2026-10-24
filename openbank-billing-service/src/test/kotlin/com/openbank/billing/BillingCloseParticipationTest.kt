@@ -6,9 +6,9 @@ package com.openbank.billing
 
 import com.openbank.billing.application.port.out.BillableAccountDiscoveryPort
 import com.openbank.billing.application.port.out.BillableAccountsPage
+import com.openbank.billing.application.port.out.BillingCloseEvidencePort
 import com.openbank.billing.application.port.out.CloseJobRunPort
 import com.openbank.billing.application.port.out.CycleFeePostings
-import com.openbank.billing.application.port.out.CycleFeePostingsPort
 import com.openbank.billing.application.usecase.BillingCycleService
 import com.openbank.billing.application.usecase.BillingCycleService.CycleOutcome
 import com.openbank.billing.infrastructure.scheduler.BillingCloseJobs
@@ -65,8 +65,7 @@ class BillingCloseParticipationTest {
     private val cycleDay = LocalDate.of(2026, 7, 1)
 
     private fun reporter(enabled: Boolean = true) = BillingCloseParticipationScheduler(
-        closeJobRuns = runs,
-        feePostings = object : CycleFeePostingsPort {
+        evidence = object : BillingCloseEvidencePort, CloseJobRunPort by runs {
             override fun postingsFor(cycleId: String): Uni<CycleFeePostings> {
                 postingsAsked += cycleId
                 return Uni.createFrom().item(postings)
@@ -82,6 +81,7 @@ class BillingCloseParticipationTest {
         domainMetrics = noOpDomainMetrics(),
         cycleEnabled = enabled,
         cycleCron = "0 0 3 1 * ?",
+        lookbackDays = 3,
     )
 
     private fun noOpDomainMetrics(): DomainMetrics {
