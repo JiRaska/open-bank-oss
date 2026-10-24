@@ -28,11 +28,11 @@ The platform has two inference classes today, and each was decided deliberately:
   prompt-injection surface".
 
 ADR-0139 decided the money-path risk plane; ADR-0031/0089 decided the assist plane. Neither covers a
-third shape that has become available: a model that reads **unstructured input** (free text, a
-loosely shaped record) and returns **one value from a closed, pre-declared schema together with a
-calibrated probability**, in a single pass and at a small fraction of an LLM call's latency and
-cost. It sits between the two existing classes: it needs no bespoke training set to be useful,
-unlike ONNX, and it cannot return a string to be parsed, unlike an LLM. This ADR is needed because
+third integration shape: a model that reads **unstructured input** (free text or a loosely
+shaped record) and returns **one schema-constrained value and a probability that must be
+calibrated on this use case**. This is a contract boundary, not a guarantee about provider
+architecture, latency, cost or training needs. Measure those properties against the local
+baseline; structured LLM and trained ONNX adapters can both implement the port. This ADR is needed because
 the platform has several high-volume decisions of exactly that shape that are today either made
 by hand or not made at all:
 

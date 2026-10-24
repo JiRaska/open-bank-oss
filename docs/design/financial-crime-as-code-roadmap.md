@@ -60,7 +60,7 @@ cross-layer traces below; it does not claim manual semantic certification of eve
 - 0347's claim that the enum ratchet enforces no hard-coded money constants is too broad:
   the checker scans enum names/value overlap only. 0354 records the limitation and the
   future pack conformance gate; no false claim of present enforcement is substituted.
-- Pending ADR-0353 / PR #13766 distinguishes rating/severity correctly; #13770 centralizes
+- Pending vocabulary decision in PR #13766 distinguishes rating/severity correctly; #13770 centralizes
   protocol vocabulary. Its shared severity is compatibility, not the final data catalogue.
   This PR does not modify another agent's branch or claim those PRs are merged.
 
