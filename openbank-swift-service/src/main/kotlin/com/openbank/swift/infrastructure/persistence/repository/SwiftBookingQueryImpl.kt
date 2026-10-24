@@ -18,7 +18,8 @@ class SwiftBookingQueryImpl : SwiftBookingQuery {
                 "select new com.openbank.swift.application.port.out.SwiftBookingAgeSnapshot(" +
                     "min(p.bookingFirstDueAt), count(case when p.bookingFirstDueAt is null " +
                     "and (p.bookingClockCovered is null or p.bookingClockCovered = false) then p.id else null end)) " +
-                    "from SwiftMessageEntity p where p.messageType = :bookingType and p.bookingProvenAt is null",
+                    "from SwiftMessageEntity p where p.messageType = :bookingType and p.bookingProvenAt is null " +
+                    "and p.bookingWaivedAt is null",
                 SwiftBookingAgeSnapshot::class.java,
             ).setParameter("bookingType", SwiftMessageType.MT103).singleResult
         }
