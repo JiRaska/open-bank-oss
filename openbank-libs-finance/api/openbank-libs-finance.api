@@ -194,6 +194,20 @@ public final class com/openbank/libs/finance/cashflow/UsedFixing {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/openbank/libs/finance/deal/DealKind : java/lang/Enum {
+	public static final field ACTUAL Lcom/openbank/libs/finance/deal/DealKind;
+	public static final field Companion Lcom/openbank/libs/finance/deal/DealKind$Companion;
+	public static final field HYPOTHETICAL Lcom/openbank/libs/finance/deal/DealKind;
+	public static final field PLANNED Lcom/openbank/libs/finance/deal/DealKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/finance/deal/DealKind;
+	public static fun values ()[Lcom/openbank/libs/finance/deal/DealKind;
+}
+
+public final class com/openbank/libs/finance/deal/DealKind$Companion {
+	public final fun parse (Ljava/lang/String;)Lcom/openbank/libs/finance/deal/DealKind;
+}
+
 public final class com/openbank/libs/finance/deposit/DepositInterest {
 	public static final field INSTANCE Lcom/openbank/libs/finance/deposit/DepositInterest;
 	public final fun capitalise (Ljava/math/BigDecimal;Lcom/openbank/libs/domain/money/CurrencyCode;Lcom/openbank/libs/domain/money/RoundingPolicy;)Ljava/math/BigDecimal;
@@ -725,10 +739,15 @@ public abstract interface class com/openbank/libs/finance/schedule/Frequency {
 }
 
 public final class com/openbank/libs/finance/schedule/Frequency$Companion {
+	public final fun codeOf (Lcom/openbank/libs/finance/schedule/Frequency;)Ljava/lang/String;
 	public final fun getANNUAL ()Lcom/openbank/libs/finance/schedule/Frequency;
+	public final fun getDAILY ()Lcom/openbank/libs/finance/schedule/Frequency;
 	public final fun getMONTHLY ()Lcom/openbank/libs/finance/schedule/Frequency;
+	public final fun getNAMED ()Ljava/util/Map;
 	public final fun getQUARTERLY ()Lcom/openbank/libs/finance/schedule/Frequency;
 	public final fun getSEMI_ANNUAL ()Lcom/openbank/libs/finance/schedule/Frequency;
+	public final fun getWEEKLY ()Lcom/openbank/libs/finance/schedule/Frequency;
+	public final fun named (Ljava/lang/String;)Lcom/openbank/libs/finance/schedule/Frequency;
 }
 
 public final class com/openbank/libs/finance/schedule/Frequency$Days : com/openbank/libs/finance/schedule/Frequency {
