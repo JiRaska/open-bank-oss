@@ -70,6 +70,7 @@ class FeeShadowComparator(
         val legacyCodes = input.legacyFees.map { it.feeId }.toSet()
         val irOnly = revision.fees.filter { it.feeCode !in legacyCodes }.map { FeeShadowResult.Unmapped(it.feeCode) }
         val unknownFacts = input.legacyFees.map { FeeShadowResult.UnknownInput(it.feeId) } + irOnly
+        if (revision.currency != input.currency) return unknownFacts
         // The caller's processing instant is deliberately irrelevant to economic evaluation.
         val capturedAt = input.evaluatedAt
             ?: return unknownFacts
@@ -82,10 +83,13 @@ class FeeShadowComparator(
             .filter { it.trigger == trigger && it.action is Action.ChargeFee }
             .groupBy { (it.action as Action.ChargeFee).feeRuleId }
         val results = input.legacyFees.map { legacy ->
-            val fee = revision.fees.firstOrNull { it.feeCode == legacy.feeId }
+            val matchingFees = revision.fees.filter { it.feeCode == legacy.feeId }
+            val fee = matchingFees.singleOrNull()
             val candidates = fee?.let { chargingRules[it.ruleId] }.orEmpty()
             val rule = candidates.firstOrNull()
-            if (fee == null) {
+            if (matchingFees.size > 1) {
+                FeeShadowResult.UnknownInput(legacy.feeId)
+            } else if (fee == null) {
                 FeeShadowResult.Unmapped(legacy.feeId)
             } else if (trigger == null) {
                 // The fired cadence names no schedule tag, or more than one: which one fired is unknown.
@@ -98,18 +102,7 @@ class FeeShadowComparator(
                 val out = interpreter.evaluate(revision, state, ProductEvent(Hook.SCHEDULED, tag = rule.trigger), clock)
                 val chargingIds = candidates.map { it.ruleId }.toSet()
                 val posts = out.filterIsInstance<Instruction.Post>().filter { it.ruleId in chargingIds }
-                // Money conservation, asserted by the CONSUMER as well as the interpreter (ADR-0352 §8):
-                // an unbalanced Post is an interpreter defect and is never compared as if it were a decision.
-                if (posts.any { !it.isBalancedPerCurrency() }) {
-                    throw ProductEvaluationException("rule ${rule.ruleId} produced an unbalanced Post")
-                }
-                val irCharged = posts
-                    .flatMap { it.lines }
-                    .filter {
-                        it.accountingClass == AccountingClass.CUSTOMER_DEPOSIT &&
-                            it.direction == PostingDirection.DEBIT
-                    }
-                    .fold(BigDecimal.ZERO) { a, l -> a + l.amount }
+                val irCharged = customerDebits(posts, rule.ruleId)
                 val irWaived = irCharged.signum() == 0
                 val diverged = irWaived != legacy.waived ||
                     (!irWaived && irCharged.compareTo(legacy.chargedAmount) != 0)
@@ -117,6 +110,19 @@ class FeeShadowComparator(
             }
         }
         return results + irOnly
+    }
+
+    /** Consumer-side money conservation remains independent of the interpreter. */
+    private fun customerDebits(posts: List<Instruction.Post>, ruleId: String): BigDecimal {
+        if (posts.any { !it.isBalancedPerCurrency() }) {
+            throw ProductEvaluationException("rule $ruleId produced an unbalanced Post")
+        }
+        return posts.flatMap { it.lines }
+            .filter {
+                it.accountingClass == AccountingClass.CUSTOMER_DEPOSIT &&
+                    it.direction == PostingDirection.DEBIT
+            }
+            .fold(BigDecimal.ZERO) { amount, line -> amount + line.amount }
     }
 
     private fun frozenState(input: ProductShadowInput, zone: ZoneId) = ProductState(
@@ -221,14 +227,19 @@ private class FrozenPredicateFacts(
 }
 
 /**
- * The schedule tag the legacy cycle fired, derived from the IR's own SCHEDULE actions: a tag is
- * established only when exactly one SCHEDULE into the scheduled hook declares [cadence]. Cadence alone
- * cannot tell two same-cadence tags apart, so an ambiguous or absent match is `null` (not comparable).
+ * Counterfactual dispatch for a legacy cycle, never evidence that an IR schedule actually fired.
+ * Only one unconditional ON_OPEN registration is supported. Opening guards cannot be re-evaluated
+ * with today's facts, and any possible opening rejection discards emitted schedule instructions.
+ * Duplicate registrations retain their multiplicity; neither cadence nor a shared tag resolves it.
  */
 internal fun ProductRevisionIr.uniqueScheduledTag(cadence: String?): String? {
-    if (cadence == null) return null
-    val tags = hooks.values.flatten().map { it.action }.filterIsInstance<Action.Schedule>()
-        .filter { it.hook == Hook.SCHEDULED && it.cadence.name == cadence }
-        .map { it.tag }.distinct()
-    return tags.singleOrNull()
+    if (cadence == null || hooks[Hook.ON_OPEN].orEmpty().any { it.action is Action.Reject }) return null
+    val producers = hooks.flatMap { (hook, rules) ->
+        rules.mapNotNull { rule ->
+            (rule.action as? Action.Schedule)?.takeIf { it.hook == Hook.SCHEDULED }?.let { Triple(hook, rule, it) }
+        }
+    }
+    val producer = producers.filter { it.third.cadence.name == cadence }.singleOrNull() ?: return null
+    if (producer.first != Hook.ON_OPEN || producer.second.whenPredicate != null) return null
+    return producer.third.tag.takeIf { tag -> producers.count { it.third.tag == tag } == 1 }
 }
