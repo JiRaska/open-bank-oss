@@ -179,6 +179,12 @@ class DealRepositoryImpl(
         Panache.withTransaction {
             val row = lockedRow(deal.id, limitGuard)
             row.flatMap { existing ->
+                if (existing != null && existing.rowVersion != deal.rowVersion) {
+                    throw com.openbank.treasury.application.port.out.DealChangedException(
+                        "deal ${deal.id} changed since it was read (row version ${existing.rowVersion}, " +
+                            "this change was made on ${deal.rowVersion}); reload and retry",
+                    )
+                }
                 val entity = existing ?: DealEntity().apply {
                     dealId = deal.id
                     createdAt = deal.createdAt
@@ -207,28 +213,30 @@ class DealRepositoryImpl(
                             }
                         }
                     }
+                    // Flush inside the transaction: the @Version bump is what the returned copy carries.
+                    .flatMap { Panache.getSession().flatMap { it.flush() } }
+                    .map { entity.rowVersion }
             }
-        }.awaitSuspending()
-        return deal
+        }.awaitSuspending().let { stored -> return deal.copy(rowVersion = stored) }
     }
 
     /**
-     * The deal row, locked when the change consumes a limit line. Lock order everywhere: the deal
-     * row, then the limit line, so two writes on one line never deadlock.
+     * The deal row, ALWAYS locked for a whole-row save (so the version comparison in [save] judges
+     * the row as it stands and no concurrent save can interleave), plus the limit line when the
+     * change consumes one. Lock order everywhere: the deal row, then the limit line, so two writes
+     * on one line never deadlock.
      */
     private fun lockedRow(
         dealId: UUID,
         limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
-    ): Uni<DealEntity?> {
-        if (limitGuard == null) return find("dealId", dealId).firstResult()
-        return find("dealId", dealId).withLock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE).firstResult()
+    ): Uni<DealEntity?> =
+        find("dealId", dealId).withLock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE).firstResult()
             .flatMap { locked ->
                 limitGuard?.let { g ->
                     Panache.getSession().flatMap { exposureUnderLock(it, dealId, g) }.map { locked }
                 }
                     ?: Uni.createFrom().item(locked)
             }
-    }
 
     /** One `deal_versions` row per terms version; the schedule columns follow the latest generation. */
     private fun versionRow(deal: Deal, actor: String): Uni<Void> =
@@ -601,6 +609,7 @@ class DealRepositoryImpl(
             version = dealVersion,
             scheduleVersion = scheduleVersion,
             scheduleHash = scheduleHash,
+            rowVersion = rowVersion,
         ).let { d -> if (d.product.legacy) d.copy(legs = LegacyLegs.derive(d)) else d }
     }
 

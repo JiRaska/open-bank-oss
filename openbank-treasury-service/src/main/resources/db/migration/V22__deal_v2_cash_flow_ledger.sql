@@ -198,3 +198,8 @@ FROM (VALUES
 -- An override command records the override it produced (`OVERRIDE_APPROVE:<uuid>`), so a replay
 -- answers with that override.
 ALTER TABLE deal_commands ALTER COLUMN action TYPE VARCHAR(80);
+
+-- Optimistic lock on the deal row: every whole-row save compares the version its copy was read at
+-- (409 DEAL_CHANGED when the row moved on), so a draft edit racing a submission, or two edits,
+-- cannot overwrite a change they never saw.
+ALTER TABLE deals ADD COLUMN row_version BIGINT NOT NULL DEFAULT 0;
