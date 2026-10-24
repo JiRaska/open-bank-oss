@@ -77,6 +77,7 @@ jobs:
       admission: ${{ steps.admit.outputs.proceed }}
       services: ${{ steps.detect.outputs.services }}
       any: ${{ steps.detect.outputs.any }}
+      renderer-changed: ${{ steps.detect.outputs.renderer-changed }}
       verification-modules: ${{ steps.detect.outputs.verification-modules }}
       verification-modules-json: ${{ steps.detect.outputs.verification-modules-json }}
       verification-shards-json: ${{ steps.detect.outputs.verification-shards-json }}
@@ -125,6 +126,8 @@ jobs:
           bash .github/scripts/service-ci-select-modules.sh
           CHANGED=$(cat "$SELECT_OUT/changed.txt")
           FILES=$(cat "$SELECT_OUT/files.txt")
+          export FILES
+          python3 .github/scripts/check-service-build-results.py --select-renderer >> "$GITHUB_OUTPUT"
 
           # grep -v exits 1 when CHANGED is empty (PR touched no service module);
           # `|| true` stops `set -e` from aborting — empty is valid (build nothing).
@@ -160,6 +163,23 @@ jobs:
             python3 .github/scripts/check-service-docs-freshness_test.py
           fi
           python3 .github/scripts/check-service-docs-freshness.py --base "$BASE_SHA" --head "$HEAD_SHA"
+
+  renderer-tests:
+    name: Renderer font and request security tests
+    needs: changes
+    if: needs.changes.result == 'success' && needs.changes.outputs.admission == 'true' && needs.changes.outputs.renderer-changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build renderer test environment with locked dependencies
+        run: docker build --target test --tag renderer-tests:local openbank-document-renderer
+      - name: Execute the full renderer suite without external network
+        run: docker run --rm --network none renderer-tests:local
 
   publication-ready:
     name: Await exact-SHA Admin UI Pact publication
@@ -2446,6 +2466,7 @@ jobs:
       - changes
       - publication-ready
       - verification-metadata
+      - renderer-tests
       - build_pr_openbank_account_service
       - build_pr_openbank_agent_service
       - build_pr_openbank_aml_service
@@ -2639,7 +2660,7 @@ jobs:
             --repo "$QUALITY_REPO" --pr "$QUALITY_PR" --head "$QUALITY_HEAD"
 
       - name: Verify individual build-result offline fixtures
-        run: python3 .github/scripts/test-check-service-build-results.py ResultsTest
+        run: python3 .github/scripts/test-check-service-build-results.py ResultsTest RendererSelectionTest
       - name: Verify no service failed
         run: |
           if [ "${{ needs.changes.result }}" != 'success' ] || [ "${{ needs.changes.outputs.admission }}" != 'true' ]; then

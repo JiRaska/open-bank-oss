@@ -54,7 +54,7 @@ def caller_block(modules):
 
 
 def needs_block(modules):
-    ids = ['changes', 'publication-ready', 'verification-metadata']
+    ids = ['changes', 'publication-ready', 'verification-metadata', 'renderer-tests']
     ids += [job_id(module, lane) for lane in LANES for module in modules]
     return '    needs:\n' + '\n'.join('      - ' + name for name in ids)
 
