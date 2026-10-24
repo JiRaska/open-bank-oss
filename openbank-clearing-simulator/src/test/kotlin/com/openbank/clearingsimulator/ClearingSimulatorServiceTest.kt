@@ -72,7 +72,7 @@ class ClearingSimulatorServiceTest {
         assertThat(result.settled).isTrue()
         assertThat(result.statusReportXml).contains("<TxSts>ACSC</TxSts>")
         val read = Pacs008Reader().read(xml)
-        assertThat(read.serviceLevelCode).isEqualTo("SEPA")
+        assertThat(read.serviceLevelCodes).containsExactly("SEPA")
         assertThat(read.isInstant).isFalse()
     }
 
@@ -85,7 +85,7 @@ class ClearingSimulatorServiceTest {
         assertThat(result.statusReportXml).contains("<TxSts>ACSC</TxSts>")
         assertThat(result.creditNotificationXml!!).contains("<EndToEndId>E2E-0001</EndToEndId>")
         val read = Pacs008Reader().read(xml)
-        assertThat(read.serviceLevelCode).isEqualTo("SEPA")
+        assertThat(read.serviceLevelCodes).containsExactly("SEPA")
         assertThat(read.localInstrumentCode).isEqualTo("INST")
         assertThat(read.isInstant).isTrue()
     }

@@ -96,29 +96,30 @@ class Pacs008PaymentTypeInformationTest {
         val sct = reader.read(golden("pacs008-sct.xml"))
         val inst = reader.read(golden("pacs008-sct-inst.xml"))
 
-        assertThat(none.serviceLevelCode).isNull()
+        assertThat(none.serviceLevelCodes).isEmpty()
         assertThat(none.localInstrumentCode).isNull()
         assertThat(none.isInstant).isFalse()
-        assertThat(sct.serviceLevelCode).isEqualTo("SEPA")
+        assertThat(sct.serviceLevelCodes).containsExactly("SEPA")
         assertThat(sct.localInstrumentCode).isNull()
         assertThat(sct.isInstant).isFalse()
-        assertThat(inst.serviceLevelCode).isEqualTo("SEPA")
+        assertThat(inst.serviceLevelCodes).containsExactly("SEPA")
         assertThat(inst.localInstrumentCode).isEqualTo("INST")
         assertThat(inst.isInstant).isTrue()
         // The other recovered fields do not depend on the block.
-        assertThat(sct.copy(serviceLevelCode = null)).isEqualTo(none)
+        assertThat(sct.copy(serviceLevelCodes = emptyList())).isEqualTo(none)
     }
 
     @Test
     fun `the legacy constructors and copies keep their meaning`() {
         val received = ReceivedCreditTransfer("M", "E", null, BigDecimal.ONE, "EUR", "C", "IBAN", "BIC", "DIBAN")
-        assertThat(received.serviceLevelCode).isNull()
+        assertThat(received.serviceLevelCodes).isEmpty()
         assertThat(received.localInstrumentCode).isNull()
 
-        val inst = received.copy(localInstrumentCode = "INST")
+        val inst = received.copy(serviceLevelCodes = listOf("SEPA"), localInstrumentCode = "INST")
         val legacyCopied = inst.copy("M2", "E", null, BigDecimal.ONE, "EUR", "C", "IBAN", "BIC", "DIBAN")
         assertThat(legacyCopied.messageId).isEqualTo("M2")
         assertThat(legacyCopied.localInstrumentCode).isEqualTo("INST")
+        assertThat(legacyCopied.serviceLevelCodes).containsExactly("SEPA")
 
         val withType = legacy().copy(paymentTypeInformation = PaymentTypeInformation.SEPA_INSTANT)
         val legacyInstructionCopy = withType.copy(
@@ -138,5 +139,60 @@ class Pacs008PaymentTypeInformationTest {
         assertThatThrownBy { PaymentTypeInformation("SEPA", "X".repeat(36)) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThat(PaymentTypeInformation("SEPA", "X".repeat(35)).localInstrumentCode).hasSize(35)
+    }
+
+    private fun withPmtTpInf(block: String): String =
+        golden("pacs008-without-payment-type.xml").replace("</PmtId>", "</PmtId>$block")
+
+    @Test
+    fun `INST without a SEPA service level is not instant`() {
+        val xml =
+            withPmtTpInf("<PmtTpInf><SvcLvl><Cd>NURG</Cd></SvcLvl><LclInstrm><Cd>INST</Cd></LclInstrm></PmtTpInf>")
+        assertThat(validator.validate(xml)).isEqualTo(Iso20022ValidationResult.Valid)
+
+        val read = reader.read(xml)
+
+        assertThat(read.localInstrumentCode).isEqualTo("INST")
+        assertThat(read.isSepa).isFalse()
+        assertThat(read.isInstant).isFalse()
+    }
+
+    @Test
+    fun `INST with no service level at all is not instant`() {
+        val read = reader.read(withPmtTpInf("<PmtTpInf><LclInstrm><Cd>INST</Cd></LclInstrm></PmtTpInf>"))
+
+        assertThat(read.serviceLevelCodes).isEmpty()
+        assertThat(read.isInstant).isFalse()
+    }
+
+    @Test
+    fun `every service level is returned, and SEPA in second place still counts`() {
+        val xml = withPmtTpInf(
+            "<PmtTpInf><SvcLvl><Cd>NURG</Cd></SvcLvl><SvcLvl><Cd>SEPA</Cd></SvcLvl>" +
+                "<LclInstrm><Cd>INST</Cd></LclInstrm></PmtTpInf>",
+        )
+        assertThat(validator.validate(xml)).isEqualTo(Iso20022ValidationResult.Valid)
+
+        val read = reader.read(xml)
+
+        assertThat(read.serviceLevelCodes).containsExactly("NURG", "SEPA")
+        assertThat(read.isSepa).isTrue()
+        assertThat(read.isInstant).isTrue()
+    }
+
+    @Test
+    fun `a Cd outside the transaction's PmtTpInf is not read as the payment type`() {
+        // A stray SvcLvl/LclInstrm elsewhere in the transaction (here nested under Dbtr, which a
+        // descendant search would find first) must not be taken for the payment type.
+        val xml = golden("pacs008-without-payment-type.xml").replace(
+            "<Nm>Alice Debtor</Nm>",
+            "<Nm>Alice Debtor</Nm><SvcLvl><Cd>SEPA</Cd></SvcLvl><LclInstrm><Cd>INST</Cd></LclInstrm>",
+        )
+
+        val read = reader.read(xml)
+
+        assertThat(read.serviceLevelCodes).isEmpty()
+        assertThat(read.localInstrumentCode).isNull()
+        assertThat(read.isInstant).isFalse()
     }
 }

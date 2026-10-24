@@ -21,8 +21,12 @@ data class ReceivedCreditTransfer(
     val creditorIban: String,
     val creditorAgentBic: String,
     val debtorIban: String,
-    /** `PmtTpInf/SvcLvl/Cd` (first occurrence), or `null` when the message carries none. */
-    val serviceLevelCode: String? = null,
+    /**
+     * Every `PmtTpInf/SvcLvl/Cd` of the transaction, in document order. `SvcLvl` is 0..n in
+     * `PaymentTypeInformation28`, so a message may carry `SEPA` after another code; read the whole
+     * list (or [isSepa]), never just the first. Empty when the message carries none.
+     */
+    val serviceLevelCodes: List<String> = emptyList(),
     /** `PmtTpInf/LclInstrm/Cd`, or `null` when the message carries none. */
     val localInstrumentCode: String? = null,
 ) {
@@ -40,7 +44,7 @@ data class ReceivedCreditTransfer(
         debtorIban: String,
     ) : this(
         messageId, endToEndId, transactionId, amount, currency, creditorName, creditorIban,
-        creditorAgentBic, debtorIban, null, null,
+        creditorAgentBic, debtorIban, emptyList(), null,
     )
 
     /** The pre-#13663 all-arguments `copy`, retained for binary compatibility; keeps the payment type. */
@@ -57,11 +61,22 @@ data class ReceivedCreditTransfer(
         debtorIban: String,
     ): ReceivedCreditTransfer = ReceivedCreditTransfer(
         messageId, endToEndId, transactionId, amount, currency, creditorName, creditorIban,
-        creditorAgentBic, debtorIban, serviceLevelCode, localInstrumentCode,
+        creditorAgentBic, debtorIban, serviceLevelCodes, localInstrumentCode,
     )
 
-    /** True when the message is flagged as SCT Inst (`LclInstrm/Cd=INST`). */
-    val isInstant: Boolean get() = localInstrumentCode == "INST"
+    /** True when any `SvcLvl/Cd` is `SEPA`. */
+    val isSepa: Boolean get() = SEPA in serviceLevelCodes
+
+    /**
+     * True only for an SCT Inst as the EPC rulebook defines it: a `SEPA` service level AND
+     * `LclInstrm/Cd=INST`. `INST` without `SEPA` is some other scheme's instrument, not SCT Inst.
+     */
+    val isInstant: Boolean get() = isSepa && localInstrumentCode == INST
+
+    private companion object {
+        const val SEPA = "SEPA"
+        const val INST = "INST"
+    }
 }
 
 /** Thrown when a `pacs.008` cannot be parsed into a [ReceivedCreditTransfer] (missing/malformed field). */
@@ -85,7 +100,9 @@ class Pacs008Reader {
         val root = doc.documentElement
         val tx = root.firstByLocal("CdtTrfTxInf") ?: missing("CdtTrfTxInf")
         val amountEl = tx.firstByLocal("IntrBkSttlmAmt") ?: missing("IntrBkSttlmAmt")
-        val pmtTpInf = tx.firstByLocal("PmtTpInf")
+        // Scoped to this transaction's own PmtTpInf by direct-child steps, never a descendant
+        // search: a SvcLvl/LclInstrm/Cd anywhere else in the document must not be read as the type.
+        val pmtTpInf = tx.directChild("PmtTpInf")
 
         return ReceivedCreditTransfer(
             messageId = root.requireText("MsgId"),
@@ -99,8 +116,10 @@ class Pacs008Reader {
             creditorIban = tx.requireChild("CdtrAcct").requireText("IBAN"),
             creditorAgentBic = tx.requireChild("CdtrAgt").requireText("BICFI"),
             debtorIban = tx.requireChild("DbtrAcct").requireText("IBAN"),
-            serviceLevelCode = pmtTpInf?.firstByLocal("SvcLvl")?.firstByLocal("Cd")?.trimmedText(),
-            localInstrumentCode = pmtTpInf?.firstByLocal("LclInstrm")?.firstByLocal("Cd")?.trimmedText(),
+            serviceLevelCodes = pmtTpInf?.directChildren("SvcLvl")
+                ?.mapNotNull { it.directChild("Cd")?.trimmedText() }
+                .orEmpty(),
+            localInstrumentCode = pmtTpInf?.directChild("LclInstrm")?.directChild("Cd")?.trimmedText(),
         )
     }
 
@@ -128,6 +147,18 @@ class Pacs008Reader {
         throw Pacs008ParseException("pacs.008 missing required element: $local")
 
     private fun Element.firstByLocal(local: String): Element? = getElementsByTagNameNS(NS, local).item(0) as? Element
+
+    private fun Element.directChildren(local: String): List<Element> {
+        val out = mutableListOf<Element>()
+        var n = firstChild
+        while (n != null) {
+            if (n is Element && n.namespaceURI == NS && n.localName == local) out += n
+            n = n.nextSibling
+        }
+        return out
+    }
+
+    private fun Element.directChild(local: String): Element? = directChildren(local).firstOrNull()
 
     private fun Element.trimmedText(): String = textContent.trim()
 
