@@ -104,6 +104,20 @@ class RiskResource {
 
     /** Bounded list for the console (#10618); the mismatches themselves are on the run manifest. */
     @GET
+    // ADR-0344 slice 7 workbench: the treasury desk reads its own book's reports (list, valuation,
+    // sensitivity, VaR, FX position) and nothing else on this class; risk_rest_ext.rego grants the
+    // desk exactly risk.snapshot.list, risk.valuation.read and risk.market-risk.read, humans only.
+    @RolesAllowed(
+        Roles.API,
+        Roles.OPERATOR,
+        Roles.ADMIN,
+        "ROLE_RISK",
+        "ROLE_FINANCE",
+        "ROLE_TREASURY_DEALER",
+        "ROLE_TREASURY_APPROVER",
+        "ROLE_TREASURY_SENIOR_APPROVER",
+        "ROLE_TREASURY_BACK_OFFICE",
+    )
     @Operation(summary = "The most recently recorded snapshot runs, newest first (limit 1..100, default 25)")
     @Authorize(action = "risk.snapshot.list", resource = "")
     suspend fun list(@QueryParam("limit") limit: Int?): Response =
@@ -249,6 +263,18 @@ class RiskResource {
      */
     @GET
     @Path("/{id}/valuation")
+    // Treasury desk report read (see list()).
+    @RolesAllowed(
+        Roles.API,
+        Roles.OPERATOR,
+        Roles.ADMIN,
+        "ROLE_RISK",
+        "ROLE_FINANCE",
+        "ROLE_TREASURY_DEALER",
+        "ROLE_TREASURY_APPROVER",
+        "ROLE_TREASURY_SENIOR_APPROVER",
+        "ROLE_TREASURY_BACK_OFFICE",
+    )
     @Operation(summary = "Per-deal and per-book PV, accrued, clean and dirty of the own treasury book; 409 if UNTIED")
     @Authorize(action = "risk.valuation.read", resource = "#id")
     suspend fun valuation(
@@ -264,8 +290,20 @@ class RiskResource {
      */
     @GET
     @Path("/{id}/sensitivity")
+    // Treasury desk report read (see list()).
+    @RolesAllowed(
+        Roles.API,
+        Roles.OPERATOR,
+        Roles.ADMIN,
+        "ROLE_RISK",
+        "ROLE_FINANCE",
+        "ROLE_TREASURY_DEALER",
+        "ROLE_TREASURY_APPROVER",
+        "ROLE_TREASURY_SENIOR_APPROVER",
+        "ROLE_TREASURY_BACK_OFFICE",
+    )
     @Operation(summary = "PV01, key-rate DV01 by bucket set and FX delta of the own treasury book; 409 if UNTIED")
-    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    @Authorize(action = "risk.market-risk.read", resource = "#id")
     suspend fun sensitivity(
         @PathParam("id") id: UUID,
         @QueryParam("bookId") bookId: String?,
@@ -286,8 +324,20 @@ class RiskResource {
      */
     @GET
     @Path("/{id}/var")
+    // Treasury desk report read (see list()).
+    @RolesAllowed(
+        Roles.API,
+        Roles.OPERATOR,
+        Roles.ADMIN,
+        "ROLE_RISK",
+        "ROLE_FINANCE",
+        "ROLE_TREASURY_DEALER",
+        "ROLE_TREASURY_APPROVER",
+        "ROLE_TREASURY_SENIOR_APPROVER",
+        "ROLE_TREASURY_BACK_OFFICE",
+    )
     @Operation(summary = "Historical-simulation VaR and ES of the own treasury book, or the data gap; 409 if UNTIED")
-    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    @Authorize(action = "risk.market-risk.read", resource = "#id")
     suspend fun valueAtRisk(
         @PathParam("id") id: UUID,
         @QueryParam("bookId") bookId: String?,
@@ -306,8 +356,20 @@ class RiskResource {
     /** Net present value of the own book per currency, in that currency and in CZK, with its FX delta. */
     @GET
     @Path("/{id}/fx-position")
+    // Treasury desk report read (see list()).
+    @RolesAllowed(
+        Roles.API,
+        Roles.OPERATOR,
+        Roles.ADMIN,
+        "ROLE_RISK",
+        "ROLE_FINANCE",
+        "ROLE_TREASURY_DEALER",
+        "ROLE_TREASURY_APPROVER",
+        "ROLE_TREASURY_SENIOR_APPROVER",
+        "ROLE_TREASURY_BACK_OFFICE",
+    )
     @Operation(summary = "FX position (net PV per currency) of the own treasury book; 409 if UNTIED")
-    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    @Authorize(action = "risk.market-risk.read", resource = "#id")
     suspend fun fxPosition(
         @PathParam("id") id: UUID,
         @QueryParam("bookId") bookId: String?,

@@ -6,6 +6,8 @@
 # Actions gated (RiskResource):
 #   risk.snapshot.list    — GET  /snapshots (the run list)
 #   risk.valuation.read   — GET  /snapshots/{id}/valuation (ADR-0344 D8)
+#   risk.market-risk.read — GET  /snapshots/{id}/sensitivity, /var, /fx-position (treasury desk reports)
+#   risk.pricing.read     — POST /pricing (stateless pre-trade pricing; treasury dealer/approvers)
 #   risk.snapshot.read    — GET  /snapshots/{id} and every other per-snapshot analysis
 #                           (granted by base rest.rego `operator-read-any`, ROLE_OPERATOR/ADMIN)
 #   risk.snapshot.create  — POST /snapshots
@@ -78,4 +80,30 @@ allowed_reasons contains "treasury-m2m-risk-valuation-read" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-treasury")
 	input.action in {"risk.snapshot.list", "risk.valuation.read"}
+}
+
+# ADR-0344 workbench reports: the treasury desk (dealer, approver, senior approver, back office) reads
+# the reports of the book it trades — the run list, the valuation, and sensitivity / VaR / FX position
+# (risk.market-risk.read). Nothing else: no capital, liquidity, IRRBB, limits, positions, curve sets,
+# and no write. Real staff only: an AI agent is not HUMAN and a service-account is a machine.
+allowed_reasons contains "treasury-desk-risk-report-read" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	some role in {
+		"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER",
+		"ROLE_TREASURY_SENIOR_APPROVER", "ROLE_TREASURY_BACK_OFFICE",
+	}
+	role in input.principal.roles
+	input.action in {"risk.snapshot.list", "risk.valuation.read", "risk.market-risk.read"}
+}
+
+# Pre-trade pricing (POST /pricing) is core dealing: the dealer and the approvers see the price
+# before a deal is submitted or booked. Stateless, persists nothing, bounded. Its own action, so
+# this grants no curve-set read or upload. Back office does not price. Real staff only.
+allowed_reasons contains "treasury-desk-risk-pricing" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
+	role in input.principal.roles
+	input.action == "risk.pricing.read"
 }

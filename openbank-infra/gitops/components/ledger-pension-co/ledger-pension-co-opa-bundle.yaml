@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger-pension-co
   annotations:
-    openbank.tech/policy-checksum: "75fd9c1901ec9afa"
+    openbank.tech/policy-checksum: "2ad92f3b99cb0e22"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2457,7 +2457,9 @@ data:
         # service's own *_rest_ext.rego with `not principal_is_machine` (the verified input.principal.service_account flag).
         # The risk-engine curve-set list reuses `.read` (resource ""). The snapshot LIST and the
         # per-snapshot VALUATION carry their own actions (risk.snapshot.list, risk.valuation.read,
-        # ADR-0344 D8) so a named machine can be granted exactly those two paths and nothing else. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+        # ADR-0344 D8) so a named machine can be granted exactly those two paths and nothing else.
+        # Sensitivity, VaR and FX position carry risk.market-risk.read, so the treasury desk can be granted
+        # its book's reports (risk_rest_ext.rego, humans only) without capital, liquidity, IRRBB or limits. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
         # here on purpose: every treasury action, the reads included, is granted in
         # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
         # treasury depends on this matrix.
@@ -2466,12 +2468,16 @@ data:
             - risk.snapshot.read
             - risk.snapshot.list
             - risk.valuation.read
+            - risk.market-risk.read
+            - risk.pricing.read
             - risk.curve-set.read
         ROLE_FINANCE:
           grant:
             - risk.snapshot.read
             - risk.snapshot.list
             - risk.valuation.read
+            - risk.market-risk.read
+            - risk.pricing.read
             - risk.curve-set.read
 
     shared_m2m_write_prohibition:

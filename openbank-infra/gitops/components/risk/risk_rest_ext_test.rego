@@ -107,8 +107,8 @@ finance_user := {"service_account": false, "type": "HUMAN", "id": "u-fin", "role
 # Mirrors rules.yaml authz.role_action_matrix for the two department roles (the CI trio loads no
 # data document). The live-bundle decision is re-checked with `opa eval` over rules-opa-data.yaml.
 dept_rules := {"authz": {"role_action_matrix": {
-	"ROLE_RISK": {"grant": ["risk.snapshot.read", "risk.snapshot.list", "risk.valuation.read", "risk.curve-set.read"]},
-	"ROLE_FINANCE": {"grant": ["risk.snapshot.read", "risk.snapshot.list", "risk.valuation.read", "risk.curve-set.read"]},
+	"ROLE_RISK": {"grant": ["risk.snapshot.read", "risk.snapshot.list", "risk.valuation.read", "risk.market-risk.read", "risk.pricing.read", "risk.curve-set.read"]},
+	"ROLE_FINANCE": {"grant": ["risk.snapshot.read", "risk.snapshot.list", "risk.valuation.read", "risk.market-risk.read", "risk.pricing.read", "risk.curve-set.read"]},
 }}}
 
 test_risk_may_read_snapshots_and_curve_sets if {
@@ -149,8 +149,8 @@ test_service_account_with_risk_role_is_denied_writes if {
 	}
 }
 
-test_treasury_roles_grant_nothing_in_risk if {
-	every action in ["risk.snapshot.read", "risk.snapshot.list", "risk.valuation.read", "risk.curve-set.read", "risk.snapshot.create"] {
+test_treasury_roles_grant_nothing_in_risk_but_the_desk_reports if {
+	every action in ["risk.snapshot.read", "risk.curve-set.read", "risk.snapshot.create", "risk.curve-set.create"] {
 		not rest.allow with input as {
 			"principal": {"service_account": false, "type": "HUMAN", "id": "u-tr", "roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"]},
 			"action": action,
@@ -246,4 +246,110 @@ test_risk_staff_may_list_and_value if {
 # Same ROLE_API, different machine (finrep): the curve grant is by identity, not by role.
 test_other_api_service_account_is_denied_curve_read if {
 	not rest.allow with input as {"principal": finrep_m2m, "action": "risk.curve-set.read"}
+}
+
+# ── ADR-0344 workbench: the treasury desk reads its own book's reports ─────────────────────
+desk_roles := ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_TREASURY_BACK_OFFICE"]
+
+desk_reads := ["risk.snapshot.list", "risk.valuation.read", "risk.market-risk.read"]
+
+test_each_desk_role_may_read_each_report if {
+	every role in desk_roles {
+		every a in desk_reads {
+			rest.allow with input as {
+				"principal": {"service_account": false, "type": "HUMAN", "id": "u-desk", "roles": [role]},
+				"action": a,
+			}
+		}
+	}
+}
+
+# Must-DENY: every other risk action — the per-snapshot analyses behind risk.snapshot.read
+# (capital, liquidity, IRRBB, limits, positions), curve sets, and every write.
+test_each_desk_role_is_denied_every_non_report_risk_action if {
+	every role in desk_roles {
+		every a in ["risk.snapshot.read", "risk.curve-set.read", "risk.snapshot.create", "risk.curve-set.create"] {
+			not rest.allow with input as {
+				"principal": {"service_account": false, "type": "HUMAN", "id": "u-desk", "roles": [role]},
+				"action": a,
+			}
+		}
+	}
+}
+
+test_desk_roles_on_an_ai_agent_or_a_service_account_get_no_report if {
+	every a in desk_reads {
+		not rest.allow with input as {
+			"principal": {"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": desk_roles},
+			"action": a,
+		}
+		not rest.allow with input as {
+			"principal": {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": desk_roles},
+			"action": a,
+		}
+	}
+}
+
+test_risk_and_finance_keep_the_market_risk_reads if {
+	every p in [risk_user, finance_user] {
+		rest.allow with input as {"principal": p, "action": "risk.market-risk.read"}
+			with data.rules as dept_rules
+	}
+}
+
+test_finrep_m2m_gets_no_market_risk_read if {
+	not rest.allow with input as {"principal": finrep_m2m, "action": "risk.market-risk.read"}
+}
+
+# ── Pre-trade pricing for the dealing desk ─────────────────────────────────────────────────
+pricing_roles := ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"]
+
+test_dealer_and_approvers_may_price if {
+	every role in pricing_roles {
+		rest.allow with input as {
+			"principal": {"service_account": false, "type": "HUMAN", "id": "u-desk", "roles": [role]},
+			"action": "risk.pricing.read",
+		}
+	}
+}
+
+test_back_office_may_not_price if {
+	not rest.allow with input as {
+		"principal": {"service_account": false, "type": "HUMAN", "id": "u-bo", "roles": ["ROLE_TREASURY_BACK_OFFICE"]},
+		"action": "risk.pricing.read",
+	}
+}
+
+# Pricing opens no curve-set read or upload to the desk.
+test_pricing_roles_get_no_curve_set_access if {
+	every role in pricing_roles {
+		every a in ["risk.curve-set.read", "risk.curve-set.create"] {
+			not rest.allow with input as {
+				"principal": {"service_account": false, "type": "HUMAN", "id": "u-desk", "roles": [role]},
+				"action": a,
+			}
+		}
+	}
+}
+
+test_pricing_roles_on_an_agent_or_a_machine_cannot_price if {
+	not rest.allow with input as {
+		"principal": {"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": pricing_roles},
+		"action": "risk.pricing.read",
+	}
+	not rest.allow with input as {
+		"principal": {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": pricing_roles},
+		"action": "risk.pricing.read",
+	}
+}
+
+test_risk_finance_and_operators_keep_pricing if {
+	every p in [risk_user, finance_user] {
+		rest.allow with input as {"principal": p, "action": "risk.pricing.read"}
+			with data.rules as dept_rules
+	}
+	rest.allow with input as {
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"action": "risk.pricing.read",
+	}
 }
