@@ -87,6 +87,8 @@ STATUS_CONTEXT = "merge-train"
 RECORD_CONTEXT = "merge-train/record"          # publish's record of the tree it pushed
 BOT_LOGIN = "openbank-gitops-bot[bot]"          # the only creator whose statuses/PRs are trusted
 EXCLUDED_BRANCH_PREFIXES = ("codex/",)
+OWNER_APPROVAL_CONTEXT = "merge-train/owner-approval"
+OWNER_APPROVAL_WORKFLOW = pathlib.Path(".github/workflows/merge-train-owner-approval.yml")
 CARRIER_LABEL = "merge-train"
 TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -385,6 +387,18 @@ def extra_verdict(states: list[str | None]) -> str | None:
     return "success" if any(s in OK_STATES for s in states) else states[0]
 
 
+def owner_approval_valid(number: int, ref: str, app: dict | None) -> bool:
+    """Only the latest App status on this exact head can admit an owner-approved codex PR.
+
+    app_statuses() authenticates the producer and SHA. The canonical description additionally
+    binds the PR number, so two PRs sharing a head cannot borrow each other's approval.
+    """
+    if not any(ref.startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES):
+        return True
+    return (type(number) is int and number > 0
+            and (app or {}).get(OWNER_APPROVAL_CONTEXT) == ("success", f"owner-approved PR #{number}"))
+
+
 def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
               app: dict[str, tuple[str, str]] | None = None, untrainable=None,
               extra: list[str] | None = None) -> tuple[bool, str]:
@@ -403,9 +417,8 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
     if not pr.get("same_repo", True):
         return False, "head is a fork"
     ref = pr.get("head_ref") or ""
-    for pre in EXCLUDED_BRANCH_PREFIXES:
-        if ref.startswith(pre):
-            return False, f"excluded prefix {pre}"
+    if not owner_approval_valid(pr.get("number"), ref, app):
+        return False, "codex PR needs owner approval on this exact head"
     for f in pr.get("files") or []:
         if unsafe_path(f):
             return False, "a path contains a control character — manual lane, never a train"
@@ -1000,6 +1013,44 @@ def ruleset_guard(rules, app_id) -> str | None:
     return None
 
 
+def owner_approval_error(repo: str, number: int, head: str, decision: str,
+                         env: dict, metadata: dict, pr: dict) -> str | None:
+    """Fail closed before writing a decision; the workflow performs the same actor checks pre-token."""
+    owner = metadata.get("owner") or {}
+    if (metadata.get("full_name") != repo or owner.get("type") != "User"
+            or env.get("GITHUB_REPOSITORY") != repo
+            or env.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
+            or env.get("GITHUB_REF") != "refs/heads/main"
+            or env.get("GITHUB_RUN_ATTEMPT") != "1"
+            or env.get("GITHUB_ACTOR") != owner.get("login")
+            or env.get("GITHUB_TRIGGERING_ACTOR") != owner.get("login")
+            or env.get("GITHUB_ACTOR_ID") != str(owner.get("id"))):
+        return "only a first-attempt main dispatch by the live User repository owner may decide"
+    if type(number) is not int or number < 1 or not isinstance(head, str) or not SHA_RE.fullmatch(head) or decision not in ("approve", "revoke"):
+        return "invalid PR number, full head SHA or decision"
+    target, base = pr.get("head") or {}, pr.get("base") or {}
+    if (pr.get("number") != number
+            or (decision == "approve" and (pr.get("state") != "open" or pr.get("draft")))
+            or target.get("sha") != head or (target.get("repo") or {}).get("full_name") != repo
+            or base.get("ref") != "main" or (base.get("repo") or {}).get("full_name") != repo
+            or not any((target.get("ref") or "").startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES)):
+        return "decision requires an open, non-draft, same-repository codex PR to main at the supplied head"
+    return None
+
+
+def mode_owner_approval(gh, number: int, head: str, decision: str) -> None:
+    metadata = get(f"/repos/{gh.repo}")
+    pr = gh.pr(number)
+    error = owner_approval_error(gh.repo, number, head, decision, os.environ, metadata, pr)
+    if error:
+        raise SystemExit(f"::error::{error}")
+    state = "success" if decision == "approve" else "failure"
+    description = f"owner-{'approved' if decision == 'approve' else 'revoked'} PR #{number}"
+    # This is a decision record, never a CI verdict or the required merge-train context.
+    gh.post_status(head, state, description, context=OWNER_APPROVAL_CONTEXT)
+    log(f"owner decision: {decision} PR #{number} at {head}")
+
+
 class GitHub:
     """Every GitHub read and write. The self-test substitutes a fake with the same methods."""
 
@@ -1114,6 +1165,12 @@ class GitHub:
 
     def merge(self, n: int, head: str) -> str | None:
         """Squash-merge pinned to the verified head sha (the API's `sha` = --match-head-commit)."""
+        pr = self.pr(n)
+        if pr["head"]["sha"] != head:
+            return None
+        if not owner_approval_valid(n, pr["head"]["ref"], None):
+            if not pr.get("auto_merge") or not owner_approval_valid(n, pr["head"]["ref"], self.app_statuses(head)):
+                return None
         code, data = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/merge", {"merge_method": "squash", "sha": head})
         return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
 
@@ -1642,7 +1699,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             expected = live_main
             for n, head in chain[1]:
                 pr = gh.pr(n)
-                if pr.get("state") != "open" or pr["head"]["sha"] != head:
+                if (pr.get("state") != "open" or pr["head"]["sha"] != head
+                        or not owner_approval_valid(n, pr["head"]["ref"], gh.app_statuses(head))):
                     log(f"#{n} changed since the train was verified; stopping")
                     break
                 if not shadow and gh.main_sha() != expected:
@@ -1785,12 +1843,6 @@ def last_merge_was_strict(gh, git, base: str) -> bool:
     return gh.app_statuses(head).get(STATUS_CONTEXT, ("", ""))[1].startswith("strict lane:")
 
 
-def clock_now() -> float:
-    """The single wall-clock read behind every expiry decision (reservation stall/ceiling, train turn).
-    A seam so the self-test can pin it; production returns time.time() unchanged."""
-    return time.time()
-
-
 def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now: float | None = None) -> str | None:
     """Why the strict lane must not START a reservation (update-branch) this tick, or None. Lane
     fairness (ADR-0343): (1) an open carrier is the train's in-flight turn — a reservation started
@@ -1802,7 +1854,7 @@ def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now:
         return "a train carrier is open over main"
     if not train_waiting or not last_merge_was_strict(gh, git, base):
         return None
-    now = clock_now() if now is None else now
+    now = time.time() if now is None else now
     ct = git("show", "-s", "--format=%ct", base, check=False).stdout.strip()
     if not ct.isdigit() or now - int(ct) > TRAIN_TURN_S:
         return None
@@ -1891,7 +1943,7 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
     Main red (ADR-0343): a "waiting" PR never holds (it cannot go green until main is fixed). A FIX
     (`fixes`) holds only once its combined head contains live main, like every other PR — first, as
     strict_lane serves it first; behind main it holds nothing, since it never merges from there."""
-    now = clock_now() if now is None else now
+    now = time.time() if now is None else now
     holder, timed_out = None, []
     fixes = fixes or {}
     ordered = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)
@@ -2114,6 +2166,11 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         if gh.main_sha() != base:
             log(f"#{n:>6} strict    main moved since it was read — next tick")
             break
+        live_pr = gh.pr(n)
+        if (live_pr["head"]["sha"] != head
+                or not owner_approval_valid(n, live_pr["head"]["ref"], gh.app_statuses(head))):
+            log(f"#{n:>6} strict    head or owner approval changed — next tick")
+            continue
         if fix:
             desc = f"strict lane: fix for {', '.join(fix)} red on main {base[:12]}, verified on its up-to-date head"
             log(f"#{n:>6} strict    fix for {', '.join(fix)} red on main {base[:12]}: combined head verified, merging")
@@ -2180,6 +2237,31 @@ def job_sections(text: str) -> dict[str, str]:
     return {parts[i]: parts[i + 1] for i in range(1, len(parts) - 1, 2)}
 
 
+def owner_approval_declaration_errors(text: str) -> list[str]:
+    code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+    sec = job_sections(code).get("decide", "")
+    guard = ("if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' "
+             "&& github.actor == github.repository_owner && github.triggering_actor == github.repository_owner "
+             "&& github.run_attempt == 1")
+    must = [guard, "ref: main", "persist-credentials: false", "actions/create-github-app-token@",
+            "show HEAD:.github/scripts/merge-train.py", "python3 -I -S", '" owner-approval',
+            '--pr "$OWNER_PR" --head "$OWNER_HEAD" --decision "$OWNER_DECISION"']
+    errors = [f"owner approval writer missing {needle}" for needle in must if needle not in sec]
+    if "group: merge-train-owner-approval-${{ github.event_name }}-${{ github.ref }}" not in code or "cancel-in-progress: false" not in code:
+        errors.append("owner decisions must serialize separately from untrusted PR verification")
+    if sec.count("actions/checkout@") != 1 or sec.count("ref: main") != 1:
+        errors.append("owner approval writer must check out main exactly once")
+    if sec.count("run:") != 1:
+        errors.append("owner approval writer must have only its isolated decision command")
+    for forbidden in ("github.head_ref", "github.event.", "download-artifact", "gh pr merge", "gh pr review",
+                      "contents: write", "statuses: write", "pull_request_target:"):
+        if forbidden in code:
+            errors.append(f"owner approval writer forbids {forbidden}")
+    if "python3 .github/" in sec:
+        errors.append("owner approval writer must run only its isolated main script")
+    return errors
+
+
 def check_declaration() -> int:
     if not WORKFLOW.exists():
         print(f"::error::{WORKFLOW} missing")
@@ -2213,6 +2295,7 @@ def check_declaration() -> int:
     rules = pathlib.Path(RULES_FILE)
     if not parse_extra_gates(rules.read_text() if rules.exists() else ""):
         fails.append(f"{RULES_FILE}: merge_train.extra_gates must declare at least one check (parsed as empty)")
+    fails += owner_approval_declaration_errors(OWNER_APPROVAL_WORKFLOW.read_text() if OWNER_APPROVAL_WORKFLOW.exists() else "")
     for f in fails:
         print(f"::error::merge-train.yml declaration: {f}")
     n = len(TOP) + 6 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
@@ -2222,6 +2305,29 @@ def check_declaration() -> int:
 
 
 # --------------------------------------------------------------------------- self-test
+@contextlib.contextmanager
+def _synthetic_clock(epoch: int = 1767225600):
+    """Keep synthetic git commits and ticks on one explicit clock, independent of suite duration.
+
+    Reservation scenarios advance tick time explicitly relative to their commit; elapsed runner
+    time is not modeled CI inactivity. Production clocks and commit environments are unchanged.
+    """
+    original_time, original_env = time.time, base_env
+
+    def dated_env():
+        env = original_env()
+        env.update({"GIT_AUTHOR_DATE": f"{epoch} +0000", "GIT_COMMITTER_DATE": f"{epoch} +0000"})
+        return env
+
+    time.time = lambda: epoch
+    globals()["base_env"] = dated_env
+    try:
+        yield
+    finally:
+        time.time = original_time
+        globals()["base_env"] = original_env
+
+
 SYN_GENERATOR = ".github/scripts/regen.py"
 SYN_GENERATOR_SRC = (
     "import json,os,pathlib\n"
@@ -2477,15 +2583,15 @@ def _synthetic_origin(root: str) -> None:
               "docs/d.md": "d\n"})
 
 
-def _self_test_cases() -> int:
-    global clock_now
+def self_test() -> int:
     fails: list[str] = []
+    last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
     ran: list[str] = []
 
     def check(label: str, cond: bool, detail: str = "") -> None:
         ran.append(label)
         if not cond:
-            fails.append(f"{label}: {detail}")
+            fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
 
     # ---- qualifies -----------------------------------------------------------------------
     req = ["all-green", "Gitleaks", STATUS_CONTEXT]
@@ -2799,7 +2905,7 @@ def _self_test_cases() -> int:
         env = generator_env()
         check("generator env: no *TOKEN*, no RUNNER_TEMP, isolated git config",
               not any("TOKEN" in k for k in env) and "RUNNER_TEMP" not in env and env["GIT_CONFIG_GLOBAL"] == os.devnull)
-        with tempfile.TemporaryDirectory() as root:
+        with _synthetic_clock(), tempfile.TemporaryDirectory() as root:
             origin = os.path.join(root, "origin")
             _synthetic_origin(origin)
             gh = FakeGitHub(origin, root)
@@ -2852,6 +2958,32 @@ def _self_test_cases() -> int:
                 gh.statuses.clear()
                 gh.g("checkout", "-q", "-f", "main")
                 gh.g("reset", "-q", "--hard", base0)
+
+            # Owner-approved codex paths use the real train/strict machinery, never a shortcut.
+            gh.g("branch", "codex/owner-feature", "p1")
+            gh.g("branch", "codex/owner-workflow", "pW")
+            gh.add_pr(70, "codex/owner-feature", "2026-01-01")
+            _, st = tick()
+            check("owner: unapproved codex head creates no train", st == "idle" and not gh.merged)
+            h = gh.prs[70]["head"]["sha"]
+            gh.post_status(h, "success", "owner-approved PR #70", OWNER_APPROVAL_CONTEXT)
+            tick()  # carrier produced while approved
+            gh.post_status(h, "failure", "owner-revoked PR #70", OWNER_APPROVAL_CONTEXT)
+            tick()
+            check("owner: revoked codex carrier cannot merge", not gh.merged, str(gh.merged))
+            reset()
+            gh.add_pr(70, "codex/owner-feature", "2026-01-01")
+            gh.post_status(h, "success", "owner-approved PR #70", OWNER_APPROVAL_CONTEXT)
+            drain()
+            check("owner: approved codex feature uses verified train", gh.merged == [70], str(gh.merged))
+            reset()
+            gh.add_pr(71, "codex/owner-workflow", "2026-01-01")
+            h = gh.prs[71]["head"]["sha"]
+            gh.post_status(h, "success", "owner-approved PR #71", OWNER_APPROVAL_CONTEXT)
+            tick()
+            check("owner: approved codex workflow uses strict lane", gh.merged == [71]
+                  and gh.app_statuses(h).get(STATUS_CONTEXT, ("", ""))[1].startswith("strict lane:"), str(gh.merged))
+            reset()
 
             # 4-PR batch, #3 bad: bisect across ticks isolates #3; 1, 2, 4 merge.
             open_only("p1", "p2", "p3", "p4")
@@ -3664,6 +3796,8 @@ def _self_test_cases() -> int:
             # PROGRESS-BASED RESERVATION (#13400): the reservation ends when the holder's CI STALLS or
             # passes the ceiling, never because it is slow. #13204 lapsed at 64 min on three heads
             # whose Services CI was green at 67.8 min, and was update-branched again each time.
+            real_time = time.time
+
             def reservation_at(offset_s, last_activity_ago_s=None, checks=None):
                 """Settle with the clock `offset_s` past the reserved head's commit; its newest check-run
                 activity `last_activity_ago_s` before that (None: no check run ever started). `checks`
@@ -3674,13 +3808,12 @@ def _self_test_cases() -> int:
                 ct = int(gh.g("show", "-s", "--format=%ct", head).stdout.strip())
                 if last_activity_ago_s is not None:
                     gh.activity[head] = ct + offset_s - last_activity_ago_s
-                global clock_now
-                pinned = clock_now
-                clock_now = lambda: float(ct + offset_s)
+                last_reservation.update(ct=ct, now=ct + offset_s, activity=gh.activity.get(head))
+                time.time = lambda: ct + offset_s
                 try:
                     return settle_now()
                 finally:
-                    clock_now = pinned
+                    time.time = real_time
                     gh.head_checks.clear()
                     gh.activity.clear()
 
@@ -3709,34 +3842,15 @@ def _self_test_cases() -> int:
             check("reservation: a head committed in the future times out even with live CI activity",
                   34 in s["fast"] and s.get("timed_out") == [35], str(s))
             reset()
-            # DETERMINISM (this file's own clock): the stall-expiry verdicts must not depend on the real
-            # wall clock. Re-run the same cases with time.time() pushed 20 min and 5 h ahead and require
-            # identical verdicts. A fixture that reads time.time() directly would flip here.
-            def verdicts():
-                out = []
-                for off, act in ((90 * 60, 2 * 60), (RESERVATION_STALL_S + 5 * 60, None), (30 * 60, 60),
-                                 (RESERVATION_CEILING_S + 60, 60)):
-                    r = reservation_at(off, act)
-                    out.append((bool(r["in_flight"]), list(r["fast"]), r.get("timed_out")))
-                    reset()
-                # default clock path (no reservation_at override): a fresh pending holder is live
-                open_only("pW", "pF")
-                gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
-                r = settle_now()
-                out.append((bool(r["in_flight"]), list(r["fast"]), r.get("timed_out")))
-                gh.head_checks.clear()
-                reset()
-                return out
-            baseline = verdicts()
-            real_time_fn = time.time
-            try:
-                for skew in (20 * 60, 5 * 3600):
-                    time.time = lambda skew=skew: real_time_fn() + skew
-                    skewed = verdicts()
-                    check(f"reservation: verdicts are identical with the real clock advanced {skew // 60} min",
-                          skewed == baseline, f"{baseline} != {skewed}")
-            finally:
-                time.time = real_time_fn
+            # The pin is live: a fresh fixture head carries exactly the pinned instant, so the default
+            # clock sees it as age 0 whatever the suite's real duration. If git ignored the pinned date
+            # (or a read bypassed it) the head would be stale or future-dated and every holder would
+            # time out. `open_only` cuts the heads, so measure one.
+            open_only("pW", "pF")
+            ct_pin = int(gh.g("show", "-s", "--format=%ct", gh.prs[35]["head"]["sha"]).stdout.strip())
+            check("clock pin: a fixture head is stamped with the pinned instant (age 0 on the default clock)",
+                  ct_pin == int(time.time()), f"head ct={ct_pin} time.time={time.time():.0f}")
+            reset()
 
             # GREEN IS DONE, NOT STALLED: #13608 went green ~05:50Z, nothing ran after it, and the next tick
             # read the silence as a stall and released a mergeable holder to the back of the queue.
@@ -3773,14 +3887,14 @@ def _self_test_cases() -> int:
             reset()
 
             # (b) the committer time is the author's: a head dated in the future holds nothing.
-            pinned_clock = clock_now
-            clock_now = lambda: pinned_clock() - 3600
+            real_time = time.time
+            time.time = lambda: real_time() - 3600
             try:
                 open_only("pW", "pF")
                 gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
                 s = settle_now()
             finally:
-                clock_now = pinned_clock
+                time.time = real_time
                 gh.head_checks.clear()
             check("reservation timeout: a head committed in the future holds no reservation",
                   34 in s["fast"] and s.get("timed_out") == [35], str(s))
@@ -4343,38 +4457,9 @@ def _self_test_cases() -> int:
 
 
 # --------------------------------------------------------------------------- main
-FIXED_INSTANT = 1767268800  # 2026-01-01T12:00:00Z: every self-test fixture is stamped relative to this
-
-
-def self_test() -> int:
-    """Run the cases with the clock and every fixture commit date pinned to FIXED_INSTANT, so a slow
-    run (> RESERVATION_STALL_S) or one near a boundary cannot make its own pending holders look stalled."""
-    global clock_now, base_env
-    real_clock, real_base_env = clock_now, base_env
-    stamp = f"@{FIXED_INSTANT} +0000"  # "@" = git's unambiguous raw form; a bare 10-digit number is guessed at
-
-    def pinned_env() -> dict[str, str]:
-        return {**real_base_env(), "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp}
-
-    clock_now, base_env = (lambda: float(FIXED_INSTANT)), pinned_env
-    try:
-        # The pin is only real if this git honours it: a fixture commit that silently took the real
-        # time would be "future-dated" against the pinned clock and every holder would time out.
-        with tempfile.TemporaryDirectory() as probe:
-            for cmd in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "pin probe"]):
-                sh(["git", "-c", "core.hooksPath=/dev/null", *cmd], cwd=probe, env=base_env())
-            got = sh(["git", "show", "-s", "--format=%ct", "HEAD"], cwd=probe, env=base_env()).stdout.strip()
-        if got != str(FIXED_INSTANT):
-            print(f"  [FAIL] clock pin: git stamped a fixture commit {got!r}, wanted {FIXED_INSTANT}")
-            return 1
-        return _self_test_cases()
-    finally:
-        clock_now, base_env = real_clock, real_base_env
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle"])
+    ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle", "owner-approval"])
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--check-declaration", action="store_true")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
@@ -4387,6 +4472,9 @@ def main() -> int:
     ap.add_argument("--workdir", default="")
     ap.add_argument("--run-url", default=os.environ.get("MERGE_TRAIN_RUN_URL", ""))
     ap.add_argument("--shadow", action="store_true", help="settle: post statuses and comments, never merge (phase 0)")
+    ap.add_argument("--pr", type=int, default=0, help="owner-approval: exact PR number")
+    ap.add_argument("--head", default="", help="owner-approval: full current head SHA")
+    ap.add_argument("--decision", choices=["approve", "revoke"], default="approve")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
@@ -4397,6 +4485,9 @@ def main() -> int:
     if "GH_TOKEN" not in os.environ:
         ap.error("GH_TOKEN is required (read-only for build, the App token for publish/settle)")
     gh = GitHub(args.repo, args.branch, args.run_url)
+    if args.mode == "owner-approval":
+        mode_owner_approval(gh, args.pr, args.head, args.decision)
+        return 0
     workdir = args.workdir or os.getcwd()
     if args.mode == "build":
         if not args.out:

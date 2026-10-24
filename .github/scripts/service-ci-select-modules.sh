@@ -103,7 +103,7 @@ select_modules() {
                 if grep -qE "(^| )${p}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $p"; else SCOPE_OK=0; fi
               done <<< "$modules" ;;
             openbank-libs/governance/*) : ;;
-            .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-select-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) : ;;
+            .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/workflows/_service-ci-pr.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-select-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) : ;;
             openbank-*/*)
               m="${f%%/*}"
               if grep -qE "(^| )${m}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $m"; else SCOPE_OK=0; fi ;;

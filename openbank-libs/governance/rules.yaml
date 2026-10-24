@@ -5013,6 +5013,15 @@ catalog_kernel_neutrality:
 # Missing or unparseable = the train serves nothing (fail closed) and --check-declaration fails.
 # ---------------------------------------------------------------------------------------
 merge_train:
+  # A decision record is separate from CI. It lifts only the codex prefix exclusion;
+  # normal/strict lane routing, required/extra gates and the pinned merge producer remain.
+  owner_approval:
+    workflow: .github/workflows/merge-train-owner-approval.yml
+    context: merge-train/owner-approval
+    actor: user_repository_owner
+    bind: [repository, pull_request, head_sha]
+    stale_on_push: true
+    revocable: true
   extra_gates:
     - {workflow: .github/workflows/security.yml, check: Trivy}
 
