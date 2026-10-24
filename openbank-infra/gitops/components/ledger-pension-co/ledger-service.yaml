@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-ledger-pension-co-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "88dc8b81f31f3ae6"
+        openbank.tech/policy-checksum: "d7a96d2d9242ad05"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -106,12 +106,12 @@ spec:
             # producer has nowhere to connect even if the dispatcher were switched on).
             - name: MP_MESSAGING_OUTGOING_LEDGER_EVENTS_OUT_TOPIC
               value: openbank.ledger-pension-co.journal.posted.disabled
-            # Defer the underlying Kafka producer initialization until first use. The connector
-            # still creates its wrapper and serialization resources at boot; lazy-client does
-            # not disable the channel or prevent a later send from creating the producer.
-            # Keep dispatch disabled and the isolated topic above as separate safeguards.
-            - name: MP_MESSAGING_OUTGOING_LEDGER_EVENTS_OUT_LAZY_CLIENT
-              value: "true"
+            # No Kafka client at all: `enabled=false` builds no producer (the @Channel Emitter
+            # still injects). lazy-client=true did NOT do this (it still dials localhost at boot),
+            # and a bare MP_MESSAGING_OUTGOING_*_LAZY_CLIENT env var for a key application.yaml
+            # does not define aborts boot (SRMSG00071); this one is backed by application.yaml.
+            - name: LEDGER_EVENTS_OUT_ENABLED
+              value: "false"
             # Quarkus disables a @Scheduled method whose config-expression cron resolves to "off".
             # Sub-ledger tie-out of the bank's deposit-control accounts 2100–2103 (ADR-0039 B).
             - name: OPENBANK_LEDGER_TIEOUT_CRON

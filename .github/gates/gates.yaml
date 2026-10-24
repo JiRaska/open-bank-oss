@@ -3140,8 +3140,9 @@ gates:
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
+      python3 .github/scripts/test-merge-train-owner-approval.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/merge-train.py", "openbank-libs/governance/rules.yaml"]
+    selftest_inputs: [".github/scripts/merge-train.py", ".github/scripts/test-merge-train-owner-approval.py", ".github/workflows/merge-train-owner-approval.yml", "openbank-libs/governance/rules.yaml"]
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
 
@@ -4855,6 +4856,19 @@ gates:
   # adding one line and shaved the step back to 19000. The logic now lives in a script; this runs
   # its self-test (schedule -> full fleet, PR -> changed module + fleet-scanner edge, shared build
   # input -> full fleet, inert push -> nothing) in a throwaway git repo.
+  - id: service-ci-explicit-jobs
+    name: "Services CI explicit caller graph matches canonical modules (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "Individual platform job results avoid both rate-limited REST rosters and stale artifact successes across partial reruns; generated callers must cover every canonical module and preserve bounded lanes."
+    review_after: "2027-04-23"
+    budget_seconds: 10
+    min_subjects: 83
+    selftest: |
+      python3 .github/scripts/generate-service-ci-jobs.py --self-test
+      python3 .github/scripts/test-check-service-build-results.py
+    run: python3 .github/scripts/generate-service-ci-jobs.py --check
+
   - id: service-ci-select-modules
     name: "Services CI module selection (self-test)"
     group: gitops
@@ -7000,37 +7014,57 @@ gates:
   #                           maxima, read from product-ir/v1.schema.json itself.
   #   product-ir-purity       ProductIrPurityRule (detekt) is registered and active, and no source
   #                           under com.openbank.libs.product imports I/O, clock, logging or metrics.
-  # The first two are advisory until the end of phase 2 (ADR-0144 target 2026-12-31); purity is
-  # enforced from phase 1, as the ADR decides.
+  # All three ENFORCED since the end of phase 2 (2026-10-23), as ADR-0352 §8 decides — before any
+  # consumer switches (phase 3). A fourth, product-ir-authoring-parity, starts advisory below.
   - id: product-ir-determinism
-    name: "product IR golden set is indexed and deterministic (ADR-0352, advisory)"
+    name: "product IR golden set is indexed and deterministic (ADR-0352, enforced)"
     group: kotlin
-    mode: advisory
+    mode: enforced
     rationale: "A golden scenario the index does not list is one the determinism test never opens; the JVM half compares two in-process runs byte for byte, and this half keeps its scope equal to the committed files."
-    review_after: "2026-12-31"
-    verified: "2026-10-22 — 6 scenarios indexed, GoldenDeterminismTest green (6 dynamic cases); an unindexed scenario file, an index entry with no file and an unsupported irVersion each turn it red"
+    review_after: "2027-04-30"
+    verified: "2026-10-23 — 9 scenarios indexed across 2 product-golden dirs (libs-testing 6, openbank-products 3), GoldenDeterminismTest + ProductGoldenScenariosTest green; an unindexed scenario file, an index entry with no file and an unsupported irVersion each turn it red (--self-test, 2026-10-23); flipped to enforced at the end of phase 2"
     budget_seconds: 10
-    min_subjects: 6   # six golden scenarios at introduction (2026-10-22)
+    min_subjects: 6   # six golden scenarios at introduction (2026-10-22); nine on 2026-10-23
     selftest: python3 .github/scripts/check-product-ir-determinism.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-product-ir-determinism.py"]
     run: |
-      python3 .github/scripts/check-product-ir-determinism.py --root .
+      python3 .github/scripts/check-product-ir-determinism.py --root . --enforce
 
   - id: product-ir-run-limits
-    name: "committed product IR and golden scenarios stay inside the schema maxima (ADR-0352, advisory)"
+    name: "committed product IR and golden scenarios stay inside the schema maxima (ADR-0352, enforced)"
     group: kotlin
-    mode: advisory
+    mode: enforced
     rationale: "The parser rejects an over-limit revision at load time, but a committed fixture nobody's test loads is never parsed; this reads every one on every PR and takes the limits from the schema so the two cannot drift."
-    review_after: "2026-12-31"
-    verified: "2026-10-22 — 8 documents (2 IR fixtures, 6 scenarios) within limits; a scenario with 17 tiers is red with '17 tiers exceeds the limit 16'"
+    review_after: "2027-04-30"
+    verified: "2026-10-23 — 16 documents (2 IR fixtures, 3 compiled reference IRs, 2 test copies in libs-runtime and product-catalog, 9 scenarios) within limits; a scenario with 17 tiers is red with '17 tiers exceeds the limit 16' (--self-test); flipped to enforced at the end of phase 2"
     budget_seconds: 15
-    min_subjects: 8   # 2 IR fixtures + 6 golden scenarios at introduction (2026-10-22)
+    min_subjects: 8   # 2 IR fixtures + 6 golden scenarios at introduction (2026-10-22); 16 on 2026-10-23
     selftest: python3 .github/scripts/check-product-ir-run-limits.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-product-ir-run-limits.py"]
     run: |
-      python3 .github/scripts/check-product-ir-run-limits.py --root .
+      python3 .github/scripts/check-product-ir-run-limits.py --root . --enforce
+
+  # ADR-0352 §5, §11: the DSL is sugar and the committed IR JSON is the artifact. Two authoring
+  # paths exist today (the Kotlin DSL and raw JSON); MCP/Studio join in phases 5-6. This gate holds
+  # the static half of "every path yields the same canonical bytes": every committed ir/<name>.json
+  # has a DSL product of that name and ReferenceProductsTest (the JVM half, which compiles the DSL and
+  # compares canonical bytes with the committed file) exists, is not disabled and covers the set.
+  - id: product-ir-authoring-parity
+    name: "committed product IR equals the DSL that authored it, canonical byte for byte (ADR-0352, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "A hash on origin/main is what the catalog may publish (ADR-0352 §7); if the committed IR and the DSL that claims to author it diverge, two authoring tools yield two hashes for one product and the review approved neither. The JVM half is a test; this half keeps that test's scope equal to the committed files."
+    review_after: "2027-03-31"
+    verified: "2026-10-23 — 3 committed reference IRs each have a DSL product and the parity test. STATIC half only: it reads comment-stripped Kotlin, so a token in a comment, an @Disabled annotation, a DSL product named only in a comment and a build that excludes the test each turn it red (--self-test, 17 cases; @Disabled added to the real ReferenceProductsTest turned the real tree red). The byte comparison itself is the JVM test in the module CI lane; this gate does not run it"
+    budget_seconds: 10
+    min_subjects: 3   # three reference products at introduction (2026-10-23)
+    selftest: python3 .github/scripts/check-product-ir-authoring-parity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-product-ir-authoring-parity.py"]
+    run: |
+      python3 .github/scripts/check-product-ir-authoring-parity.py --root .
 
   - id: product-ir-purity
     name: "product interpreter package is pure: detekt rule active, no I/O/clock/logging/metrics imports (ADR-0352)"

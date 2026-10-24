@@ -14,7 +14,7 @@
 # makes a single fresh pod, or one scrape of a value that has just crossed the line, unable to fire:
 # the whole window must sit above the SLA. A cold pod reads NaN, which compares false and never
 # fires; a sweep that stops refreshing is WorkflowLivenessStale's job (`sepa-booking-age`,
-# `sepa-refund-unsettled-age`, `domestic-booking-age`), not this rule's.
+# `sepa-refund-unsettled-age`, `domestic-booking-age`, `swift-booking-age`), not this rule's.
 #
 # The age is a LOWER bound: rows with unknown historical coverage are counted separately in
 # openbank_payment_booking_unknown_coverage and never suppress a known overdue age.
@@ -113,3 +113,40 @@ spec:
               outcome under domestic-settlement-<paymentId> in transaction-service, then reconcile, reverse
               or re-drive. openbank_payment_unsettled_total{rail="DOMESTIC_CZK"} says which answer it got.
             runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0032-payment-rail-unsettled-booking.md#domestic-payment-outbound-booking"
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-swift-unsettled-alerts
+  namespace: payments
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: swift-service
+spec:
+  groups:
+    - name: openbank.swift.unsettled
+      rules:
+        - alert: SwiftBookingUnsettled
+          # SLA 30m. The obligation starts at scheme acceptance (ACSC -> SENT): the MT103 has left and the
+          # ordering customer's debit is not booked. swift-service makes ONE transaction-service call, with no
+          # retry and no re-drive path, so a message whose clock is still open a few minutes later is held for
+          # good. The age also covers two cases the outcome counter never sees: a message with no ordering
+          # account id, and an unparseable value date, both return not-settled without calling
+          # transaction-service. An MT103 carries an explicit value date (field 32A) the debit has to be booked
+          # by, so 30m leaves the operator the same business day, matching SEPA's outbound SLA.
+          expr: |
+            max by (rail) (
+              min_over_time(openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SWIFT"}[10m])
+            ) > 1800
+          labels:
+            severity: critical
+            service: swift-service
+          annotations:
+            subject_period: 30s
+            summary: "SWIFT message accepted by the scheme but its debit is unbooked for over 30 minutes"
+            description: >-
+              The oldest SWIFT message with an open booking clock has waited at least {{ $value | humanizeDuration }}.
+              It is held in SENT; nothing retries it and swift-service has no re-drive path. Read the outcome
+              under swift-settlement-<messageId> in transaction-service, then reconcile or reverse.
+              openbank_payment_unsettled_total{rail="SWIFT"} says which answer it got.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0032-payment-rail-unsettled-booking.md#swift-outbound-booking"

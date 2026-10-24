@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury
   annotations:
-    openbank.tech/policy-checksum: "f0da7079cf3ca1ec"
+    openbank.tech/policy-checksum: "701f2489b579f530"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -407,6 +407,21 @@ data:
     	input.action == "commstyle.approval.read"
     }
 
+    # ADR-0352 §7: publishing an IR-bearing catalog revision signs its canonical revisionHash, and a
+    # valid signature is authority over every account under the product — so this is its own action
+    # (catalog.publish-ir, four_eyes.actions), never the shared catalog.publish, and human-only: the
+    # shared backend service-account carries ROLE_OPERATOR in some realms and is classified HUMAN
+    # (rules.yaml: authz_policy.principal_type_service_unreachable), so HUMAN + ROLE_OPERATOR alone
+    # would re-admit that machine identity. Maker != checker is enforced independently by
+    # product-catalog (GenericCatalogService.publishIr); this rule only decides WHO may attempt it.
+    allowed_reasons contains "catalog-publish-ir" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	not principal_is_machine
+    	input.action == "catalog.publish-ir"
+    }
+
     # Pension catalog approval is a distinct human decision, never a generic publish grant.
     # The endpoint checks the requested legal/product role and immutable JWT actor identity.
     allowed_reasons contains "pension-catalog-decide-approval" if {
@@ -796,37 +811,8 @@ data:
     #       approver role, never the dealer; the domain also refuses the deal's creator and submitter)
     #   treasury.deal.override-limit              — ROLE_TREASURY_SENIOR_APPROVER only (ADR-0315 D4)
     #   treasury.nostro.read                      — treasury dealers, approvers and admins (#10896)
-    #   treasury.reference.read                   — treasury staff, and the reference editor (ADR-0344 D3)
-    #   treasury.cashflow.read, treasury.calendar.read — treasury staff, never the reference editor (ADR-0344 D4)
-    #   treasury.reference.propose, .import       — ROLE_TREASURY_REFERENCE_EDITOR or ROLE_TREASURY_BACK_OFFICE
-    #   treasury.reference.approve                — ROLE_TREASURY_APPROVER; for kind `counterparty` (limits)
-    #                                               ROLE_TREASURY_SENIOR_APPROVER only
-    #   treasury.reference.reject, .verify        — ROLE_TREASURY_APPROVER
-    #   treasury.cashflow.override.propose, treasury.position.close — ROLE_TREASURY_BACK_OFFICE
-    #   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
-    #   treasury.fixing.read, treasury.marketdata.read, treasury.payment.read — treasury staff, never the
-    #                                               reference editor (ADR-0344 D5/D6)
-    #   treasury.payment.read                     — also ROLE_TREASURY_PAYMENT_RELEASER (its ONLY read)
-    #   treasury.marketdata.import, treasury.fixing.manual, treasury.fixing.run — ROLE_TREASURY_BACK_OFFICE
-    #   treasury.marketdata.approve               — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
-    #   treasury.payment.propose                  — ROLE_TREASURY_BACK_OFFICE
-    #   treasury.payment.cancel                   — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
-    #   treasury.payment.resolve                  — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
-    #   treasury.payment.release                  — ROLE_TREASURY_PAYMENT_RELEASER only (ADR-0344 D6; the
-    #                                               domain refuses the deal's creator and every term author)
-    #   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
-    #   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
     #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
     #                                               balance; it is still back-office evidence, #10896)
-    #   treasury.portfolio.inspect                — treasury dealers, approvers and admins, and
-    #                                               tax-reporting's OWN client (ADR-0337 amendment)
-    #   treasury.portfolio.upload                 — ROLE_TREASURY_APPROVER (the custodian's semt.002)
-    #
-    # treasury.portfolio.inspect is the one treasury read a MACHINE reaches, so it deliberately does not
-    # end in `.read`: base rest.rego's operator-read-any and compliance-read-any grant every `.read` to
-    # any HUMAN-classified principal holding ROLE_OPERATOR / ROLE_COMPLIANCE, which the shared
-    # service-account does in at least one realm. A non-read verb is served ONLY by the identity-scoped
-    # rules below (the fleet convention since pension-fund.holding.inspect, #12481).
     #
     # Four-eyes (approver != creator) is enforced in the domain (ADR-0315 D3); these rules decide only
     # WHO may attempt each step. Dealer and approver are separate roles on purpose: a dealer cannot
@@ -865,110 +851,22 @@ data:
 
     allowed_reasons contains "treasury-staff-read" if {
     	treasury_staff
-    	some role in {
-    		"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER",
-    		"ROLE_TREASURY_BACK_OFFICE", "ROLE_ADMIN",
-    	}
+    	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_ADMIN"}
     	role in input.principal.roles
     	input.action in {
     		"treasury.deal.read",
     		"treasury.counterparty.read",
     		"treasury.position.read",
     		"treasury.nostro.read",
-    		# ADR-0337 amendment: the custodian's period-end statement of holdings.
-    		"treasury.portfolio.inspect",
     		# ADR-0315 D9: the simulated counterparties' SYNTHETIC quotes (GET /quotes).
     		"treasury.quote.read",
-    		# ADR-0344: reference data, the cash-flow ledger and the event calendar.
-    		"treasury.reference.read",
-    		"treasury.cashflow.read",
-    		"treasury.calendar.read",
-    		# ADR-0344 D5: fixings and market data (factor history, quality, batches).
-    		"treasury.fixing.read",
-    		"treasury.marketdata.read",
-    		# ADR-0344 D6: own-account payments.
-    		"treasury.payment.read",
     	}
-    }
-
-    # Least privilege: the reference editor maintains code lists, so its ONLY read is reference data.
-    # It must not reach deals, counterparties' exposure, positions, nostro, portfolio or quotes.
-    allowed_reasons contains "treasury-reference-read" if {
-    	treasury_staff
-    	"ROLE_TREASURY_REFERENCE_EDITOR" in input.principal.roles
-    	input.action == "treasury.reference.read"
     }
 
     allowed_reasons contains "treasury-dealer-write" if {
     	treasury_staff
     	"ROLE_TREASURY_DEALER" in input.principal.roles
     	input.action in {"treasury.deal.draft", "treasury.deal.submit", "treasury.deal.cancel"}
-    }
-
-    # ADR-0344 D3/D4/D10: back office and the reference editor PROPOSE; the approver DECIDES. No role
-    # here both writes and activates. The domain additionally refuses the proposer as decider and any
-    # non-human as decider; AI agents get nothing from this file (their charter is the one grant).
-    allowed_reasons contains "treasury-reference-propose" if {
-    	treasury_staff
-    	some role in {"ROLE_TREASURY_REFERENCE_EDITOR", "ROLE_TREASURY_BACK_OFFICE"}
-    	role in input.principal.roles
-    	input.action in {"treasury.reference.propose", "treasury.reference.import"}
-    }
-
-    allowed_reasons contains "treasury-reference-decide" if {
-    	treasury_staff
-    	"ROLE_TREASURY_APPROVER" in input.principal.roles
-    	input.action in {"treasury.reference.reject", "treasury.reference.verify"}
-    }
-
-    # Approving any kind but `counterparty`: the approver.
-    allowed_reasons contains "treasury-reference-approve" if {
-    	treasury_staff
-    	"ROLE_TREASURY_APPROVER" in input.principal.roles
-    	input.action == "treasury.reference.approve"
-    	not reference_kind_is_counterparty
-    }
-
-    # A counterparty record carries the credit limits the booking check reads, so activating one is a
-    # limit decision and needs the SENIOR approver — never a cheaper path than the senior limit
-    # override. The domain refines this (only a raise strictly needs the senior); the policy is the
-    # coarser, safe side of the same rule.
-    allowed_reasons contains "treasury-reference-approve-counterparty" if {
-    	treasury_staff
-    	"ROLE_TREASURY_SENIOR_APPROVER" in input.principal.roles
-    	input.action == "treasury.reference.approve"
-    	reference_kind_is_counterparty
-    }
-
-    reference_kind_is_counterparty if input.resource.id == "counterparty"
-
-    allowed_reasons contains "treasury-back-office-write" if {
-    	treasury_staff
-    	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
-    	input.action in {
-    		"treasury.cashflow.override.propose",
-    		"treasury.deal.send-confirmation",
-    		"treasury.position.close",
-    	}
-    }
-
-    allowed_reasons contains "treasury-approver-cashflow" if {
-    	treasury_staff
-    	"ROLE_TREASURY_APPROVER" in input.principal.roles
-    	input.action in {
-    		"treasury.cashflow.override.approve",
-    		"treasury.cashflow.override.reject",
-    		"treasury.deal.send-confirmation",
-    	}
-    }
-
-    # Schedule preview runs the schedule engine: real work per call, so only the roles that build or
-    # check a ticket (dealer, back office) may ask for it — not every reader.
-    allowed_reasons contains "treasury-schedule-preview" if {
-    	treasury_staff
-    	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_BACK_OFFICE"}
-    	role in input.principal.roles
-    	input.action == "treasury.deal.preview"
     }
 
     allowed_reasons contains "treasury-approver-cancel" if {
@@ -1008,83 +906,6 @@ data:
     	treasury_staff
     	"ROLE_TREASURY_APPROVER" in input.principal.roles
     	input.action == "treasury.nostro.upload"
-    }
-
-    # ADR-0337 amendment: the custodian's semt.002 is the source of record for PSP 34-12 PS, so only a
-    # back-office approver supplies it — the same rule, and the same reason, as the nostro camt.053.
-    allowed_reasons contains "treasury-portfolio-upload" if {
-    	treasury_staff
-    	"ROLE_TREASURY_APPROVER" in input.principal.roles
-    	input.action == "treasury.portfolio.upload"
-    }
-
-    # tax-reporting, and ONLY tax-reporting, reads the period-end portfolio for PSP 34-12 PS. Gated on
-    # its own identity (Keycloak service-account-<clientId>), never on a role every machine may hold;
-    # its whole grant here is this one read — never the upload, never any other treasury action.
-    treasury_portfolio_reader_account := "service-account-openbank-tax-reporting"
-
-    allowed_reasons contains "service-tax-reporting-portfolio-read" if {
-    	input.principal.type == "HUMAN"
-    	machine_named(treasury_portfolio_reader_account)
-
-    	# Undefined is legacy; explicit null is not a verified or absent marker.
-    	not input.principal.service_account == null
-    	"ROLE_API" in input.principal.roles
-    	input.action == "treasury.portfolio.inspect"
-    }
-
-    # ADR-0344 D5: back office imports observations, proposes manual fixings and runs the fixing pass;
-    # an approver (a different human, checked in the domain and the database) activates them. No role
-    # both writes and activates market data; machines and AI agents get nothing from this file.
-    allowed_reasons contains "treasury-back-office-market-data" if {
-    	treasury_staff
-    	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
-    	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run"}
-    }
-
-    allowed_reasons contains "treasury-approver-market-data" if {
-    	treasury_staff
-    	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
-    	role in input.principal.roles
-    	input.action == "treasury.marketdata.approve"
-    }
-
-    # ADR-0344 D6: back office proposes and cancels own-account payments; ONLY the payment releaser
-    # releases one — no dealer, approver, admin, machine or agent. The domain adds that the releaser is
-    # neither a deal's creator nor a term author.
-    allowed_reasons contains "treasury-back-office-payment" if {
-    	treasury_staff
-    	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
-    	input.action in {"treasury.payment.propose", "treasury.payment.cancel"}
-    }
-
-    allowed_reasons contains "treasury-approver-payment-cancel" if {
-    	treasury_staff
-    	"ROLE_TREASURY_APPROVER" in input.principal.roles
-    	input.action == "treasury.payment.cancel"
-    }
-
-    # A released payment is resolved (MANUALLY_SETTLED / RETURNED) by an approver; the domain refuses
-    # its releaser and every term author.
-    allowed_reasons contains "treasury-approver-payment-resolve" if {
-    	treasury_staff
-    	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
-    	role in input.principal.roles
-    	input.action == "treasury.payment.resolve"
-    }
-
-    # Least privilege: the releaser reads the payments it may release and nothing else (no deals,
-    # counterparties, positions, nostro or market data); the release itself is the rule below.
-    allowed_reasons contains "treasury-payment-releaser-read" if {
-    	treasury_staff
-    	"ROLE_TREASURY_PAYMENT_RELEASER" in input.principal.roles
-    	input.action == "treasury.payment.read"
-    }
-
-    allowed_reasons contains "treasury-payment-release" if {
-    	treasury_staff
-    	"ROLE_TREASURY_PAYMENT_RELEASER" in input.principal.roles
-    	input.action == "treasury.payment.release"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2001,6 +1822,20 @@ data:
         - settlement.create                # Human operator origination; no verified M2M caller (#10041).
         - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                              # core also enforces maker != checker for standalone installs.
+        - catalog.publish-ir               # ADR-0352 §7: publishing an IR-bearing revision — the publish
+                                             # path signs the IR's canonical revisionHash on the way out,
+                                             # so a valid signature is authority over every account under
+                                             # the product. Its own action, never the shared catalog.publish,
+                                             # so this entry can never cover a non-IR publish by accident.
+                                             # No M2M caller, and not only by policy: rest.rego
+                                             # catalog-publish-ir requires HUMAN + (ROLE_OPERATOR or
+                                             # ROLE_ADMIN) and excludes machines, but product-catalog runs
+                                             # AUTHZ_ENFORCE=false, so that rule is advisory there. The
+                                             # binding control is in the service: publishOfferingRevisionIrV2
+                                             # refuses any identity ServiceAccountIdentity.isHumanStaff does
+                                             # not positively classify as interactive staff (fails closed), and
+                                             # GenericCatalogService enforces maker != checker. No service
+                                             # rego grants catalog.* to a machine beyond catalog.read.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
                                              # playbook version. Confirmed no M2M caller — the only allow
                                              # rule for this action (rest.rego commstyle-publish) requires
@@ -2384,23 +2219,18 @@ data:
         # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
         # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
         # service's own *_rest_ext.rego with `not principal_is_machine` (the verified input.principal.service_account flag).
-        # The risk-engine curve-set list reuses `.read` (resource ""). The snapshot LIST and the
-        # per-snapshot VALUATION carry their own actions (risk.snapshot.list, risk.valuation.read,
-        # ADR-0344 D8) so a named machine can be granted exactly those two paths and nothing else. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+        # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
+        # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
         # here on purpose: every treasury action, the reads included, is granted in
         # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
         # treasury depends on this matrix.
         ROLE_RISK:
           grant:
             - risk.snapshot.read
-            - risk.snapshot.list
-            - risk.valuation.read
             - risk.curve-set.read
         ROLE_FINANCE:
           grant:
             - risk.snapshot.read
-            - risk.snapshot.list
-            - risk.valuation.read
             - risk.curve-set.read
 
     shared_m2m_write_prohibition:

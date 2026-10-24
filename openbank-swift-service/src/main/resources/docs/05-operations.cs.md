@@ -82,7 +82,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 
 `openbank_payment_unsettled_total{rail="SWIFT",outcome="..."}` počítá neúspěšné pokusy vůči transaction-service. Povolené hodnoty jsou `mismatch`, `failed-replay`, `conflict`, `unexpected-status` a `transport-error`; všech pět řad se registruje s nulou před prvním pokusem. Opakované pokusy se počítají samostatně, nejde tedy o počet unikátních zpráv. Zrušení coroutine ani úspěšná odpovídající reakce čítač nezvyšují. `failed-replay` označuje dekódovanou odpověď FAILED, nikoli důkaz, že tento požadavek byl replay.
 
-Zaúčtování vyžaduje HTTP 201, transakci COMPLETED s identifikátorem a shodu s odeslanými údaji. Ostatní výsledky neprokazují dokončení zaúčtování; nezávislý ACK/odmítnutí může změnit obchodní stav. Při šetření zachovejte klíč `swift-settlement-<messageId>`: 409 ani nejistá odpověď nedokazují dokončené zaúčtování. Před nápravnou akcí ověřte výsledek schváleným reconciliation nástrojem; neměňte klíč ani nepoužívejte nový booking POST jako vyhledávání. Veřejné vyhledání transakce podle idempotentního klíče ani alarm stáří vůči SLA tato změna čítače nepřidává; zůstávají součástí #13623.
+Zaúčtování vyžaduje HTTP 201, transakci COMPLETED s identifikátorem a shodu s odeslanými údaji. Ostatní výsledky neprokazují dokončení zaúčtování; nezávislý ACK/odmítnutí může změnit obchodní stav. Při šetření zachovejte klíč `swift-settlement-<messageId>`: 409 ani nejistá odpověď nedokazují dokončené zaúčtování. Před nápravnou akcí ověřte výsledek schváleným reconciliation nástrojem; neměňte klíč ani nepoužívejte nový booking POST jako vyhledávání. transaction-service stále nemá veřejné vyhledání podle idempotentního klíče; runbook čte jeho databázi. Alarm nezaúčtované zprávy popisuje sekce níže.
 
 ### Outbox lag / události neproudí
 
@@ -139,8 +139,12 @@ nejstarší sledované povinnosti bez lokálního důkazu. Zůstává číselná
 Dotaz nefiltruje obchodní stav: ACKNOWLEDGED/REJECTED není důkaz zaúčtování. Před prvním
 úspěšným dotazem je hodnota NaN, známá prázdná sledovaná množina má nulu nezávisle na neznámém
 pokrytí. Chyba dotazu zachová čas v cache, stáří dále roste a nezaznamená se úspěch workflow.
-Nullable sloupce nedoplňují smyšlené historické časy. Změna nepřidává SLA, alert, veřejné API,
+Nullable sloupce nedoplňují smyšlené historické časy. Alarmuje na ně `SwiftBookingUnsettled` (30 min, níže); nepřibývá veřejné API,
 automatické historické opravy ani finanční opakování.
+
+### Alarm nezaúčtované zprávy (#13623)
+
+`SwiftBookingUnsettled` alarmuje, když jsou nejstarší otevřené hodiny zaúčtování MT103 starší než 30 minut (`openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`, testy v `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`). swift-service volá transaction-service jednou za přijatou zprávu, nikdy neopakuje a nemá cestu re-drive (#13686), takže stáří je jediný signál, který se k operátorovi dostane. Platí to i pro zprávu bez id účtu příkazce nebo s nečitelným datem valuty, kterou čítač výsledků nevidí. Náprava (dotaz do transaction-service podle klíče, pak reconcile nebo reverse) je v sekci SWIFT v `docs/runbooks/0032-payment-rail-unsettled-booking.md`. `ack`/`reject` hodiny nezavírají a nesmí se jimi alarm umlčet.
 
 ## Vlastní převody banky uvolněné treasury
 
