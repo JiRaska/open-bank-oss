@@ -129,3 +129,23 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Účast na uzávěrce dne (ADR-0342, #13167)
+
+Lending hlásí každý dokončený účetní den (pražský čas) do ledger-service jako účastník `lending`
+(`LendingCloseParticipationScheduler`, každou hodinu v :40; `lending.close.report-cron`, zpětné okno
+`lending.close.lookback-days`, výchozí 3). Podkladem je `lending_close_job_run` (V28): jeden řádek na
+den a úlohu (`accrual`, `provisioning`).
+
+- Obě úlohy proběhly, nic nebylo odmítnuto a deníky opravných položek jsou doručeny: RAN.
+- Úloha neproběhla, právě běží nebo deníky opravných položek čekají v outboxu: zatím se nehlásí nic,
+  ledger den drží.
+- Odmítnutí `409 ACCOUNTING_DAY_CLOSED`, selhání, neúplné pokrytí, DEAD řádek outboxu nebo běh
+  zkrácený dávkovým limitem i po vyčerpání rozpočtu: REFUSED s pevnou kategorií.
+- Značka běhu starší než `lending.close.stale-after` (2h): REFUSED `pass started and never completed`.
+- Oba intervaly vypnuté (`off`): SKIPPED.
+
+Výpočet úroků zpracovává zkrácené dávky v rámci rozpočtu (`drain-budget` PT10M, `max-drain-rounds`
+100) a každý běh nejprve dopočítá dřívější dny v okně, které zůstaly REFUSED kvůli zkrácení, a zapíše
+je jako RAN. Den ve stavu REFUSED drží uzávěrku do pozdějšího RAN nebo výjimky operátora v ledgeru.
+Hlášení po uzavření dne se uloží jako `late` a den nepohne.
