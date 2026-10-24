@@ -79,11 +79,10 @@ ENTRYPOINT ["python", "app.py"]
 # Exercise the shipped native libraries and non-root user. Test dependencies stay
 # in this target; the default production target retains the runtime image alone.
 FROM runtime AS test
-USER root
 COPY tests/requirements.txt /tmp/test-requirements.txt
-RUN python -m pip install --no-cache-dir --require-hashes -r /tmp/test-requirements.txt
+RUN python -m pip install --no-cache-dir --require-hashes --target /tmp/test-dependencies -r /tmp/test-requirements.txt
+ENV PYTHONPATH="/tmp/test-dependencies"
 COPY tests /app/tests
-USER openbank
 ENTRYPOINT ["python", "-m", "pytest"]
 CMD ["-q", "-o", "cache_dir=/tmp/pytest-cache", "tests"]
 
