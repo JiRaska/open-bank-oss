@@ -4351,13 +4351,22 @@ def self_test() -> int:
     run (> RESERVATION_STALL_S) or one near a boundary cannot make its own pending holders look stalled."""
     global clock_now, base_env
     real_clock, real_base_env = clock_now, base_env
-    stamp = f"{FIXED_INSTANT} +0000"
+    stamp = f"@{FIXED_INSTANT} +0000"  # "@" = git's unambiguous raw form; a bare 10-digit number is guessed at
 
     def pinned_env() -> dict[str, str]:
         return {**real_base_env(), "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp}
 
     clock_now, base_env = (lambda: float(FIXED_INSTANT)), pinned_env
     try:
+        # The pin is only real if this git honours it: a fixture commit that silently took the real
+        # time would be "future-dated" against the pinned clock and every holder would time out.
+        with tempfile.TemporaryDirectory() as probe:
+            for cmd in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "pin probe"]):
+                sh(["git", "-c", "core.hooksPath=/dev/null", *cmd], cwd=probe, env=base_env())
+            got = sh(["git", "show", "-s", "--format=%ct", "HEAD"], cwd=probe, env=base_env()).stdout.strip()
+        if got != str(FIXED_INSTANT):
+            print(f"  [FAIL] clock pin: git stamped a fixture commit {got!r}, wanted {FIXED_INSTANT}")
+            return 1
         return _self_test_cases()
     finally:
         clock_now, base_env = real_clock, real_base_env
