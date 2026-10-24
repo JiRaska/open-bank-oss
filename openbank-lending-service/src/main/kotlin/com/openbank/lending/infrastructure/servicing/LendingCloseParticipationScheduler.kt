@@ -4,9 +4,8 @@
 
 package com.openbank.lending.infrastructure.servicing
 
-import com.openbank.lending.application.port.out.AllowancePostingsPort
-import com.openbank.lending.application.port.out.CloseJobRunPort
 import com.openbank.lending.application.port.out.InFlightRun
+import com.openbank.lending.application.port.out.LendingCloseEvidencePort
 import com.openbank.libs.close.CloseJobRun
 import com.openbank.libs.close.CloseParticipationAssembler
 import com.openbank.libs.close.CloseParticipationReport
@@ -59,22 +58,22 @@ import java.time.LocalDate
  */
 @ApplicationScoped
 class LendingCloseParticipationScheduler(
-    private val closeJobRuns: CloseJobRunPort,
-    private val allowancePostings: AllowancePostingsPort,
+    private val evidence: LendingCloseEvidencePort,
     sink: CloseParticipationSink,
     meterRegistry: MeterRegistry,
     private val clock: Clock,
     private val domainMetrics: DomainMetrics,
     @ConfigProperty(name = "lending.servicing.accrual.every") private val accrualEvery: String,
     @ConfigProperty(name = "lending.provisioning.cycle.every") private val provisioningEvery: String,
+    @ConfigProperty(name = "lending.close.lookback-days", defaultValue = "3") private val lookbackDays: Long,
 ) {
-    // Field-injected, not constructor parameters: detekt LongParameterList fires AT 9.
-    @ConfigProperty(name = "lending.close.lookback-days", defaultValue = "3")
-    var lookbackDays: Long = DEFAULT_LOOKBACK_DAYS
-
-    /** An in-flight marker older than this is a pass that died (twice the default drain budget, plus margin). */
+    /**
+     * An in-flight marker older than this is a pass that died (twice the default drain budget, plus
+     * margin). Field-injected `lateinit` rather than a 9th constructor parameter (detekt
+     * LongParameterList fires AT 9) and without a Kotlin default (gate `configproperty-kotlin-defaults`).
+     */
     @ConfigProperty(name = "lending.close.stale-after", defaultValue = "PT2H")
-    var staleAfter: Duration = DEFAULT_STALE_AFTER
+    lateinit var staleAfter: Duration
 
     private val log = Logger.getLogger(LendingCloseParticipationScheduler::class.java)
     private val reporter = CloseParticipationReporter(LendingCloseJobs.PARTICIPANT, sink, meterRegistry)
@@ -119,8 +118,8 @@ class LendingCloseParticipationScheduler(
         val from = today.minusDays(lookbackDays)
         val to = today.minusDays(1)
         val days = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }.toList()
-        return closeJobRuns.findBetween(from, to).flatMap { runs ->
-            closeJobRuns.inFlightBetween(from, to).flatMap { inFlight ->
+        return evidence.findBetween(from, to).flatMap { runs ->
+            evidence.inFlightBetween(from, to).flatMap { inFlight ->
                 Multi.createFrom().iterable(days)
                     .onItem().transformToUniAndConcatenate { day -> assemble(day, runs, inFlight) }
                     .collect().asList()
@@ -156,7 +155,7 @@ class LendingCloseParticipationScheduler(
         if (provisioning == null || LendingCloseJobs.PROVISIONING !in due) {
             return Uni.createFrom().item(assembleOrLog(day, due, forDay))
         }
-        return allowancePostings.postingsFor(day).map { postings ->
+        return evidence.postingsFor(day).map { postings ->
             if (postings.pending > 0) {
                 log.infof(
                     "lending day-close for %s not reported: %d allowance journal(s) still in the outbox",
@@ -197,8 +196,6 @@ class LendingCloseParticipationScheduler(
 
     private companion object {
         const val WORKFLOW_NAME = "lending-close-participation"
-        const val DEFAULT_LOOKBACK_DAYS = 3L
-        val DEFAULT_STALE_AFTER: Duration = Duration.ofHours(2)
 
         /** The values Quarkus reads as "never run" for `every`. */
         val OFF_VALUES = setOf("off", "disabled")

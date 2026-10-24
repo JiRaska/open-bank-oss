@@ -5,9 +5,8 @@
 package com.openbank.lending.infrastructure.persistence.repository
 
 import com.openbank.lending.application.port.out.AllowancePostings
-import com.openbank.lending.application.port.out.AllowancePostingsPort
-import com.openbank.lending.application.port.out.CloseJobRunPort
 import com.openbank.lending.application.port.out.InFlightRun
+import com.openbank.lending.application.port.out.LendingCloseEvidencePort
 import com.openbank.libs.close.CloseJobRun
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -26,9 +25,7 @@ import java.time.ZoneOffset
  * pass marks itself in flight before it starts.
  */
 @ApplicationScoped
-class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) :
-    CloseJobRunPort,
-    AllowancePostingsPort {
+class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : LendingCloseEvidencePort {
 
     override fun markStarted(businessDate: LocalDate, job: String, at: Instant): Uni<Unit> = sf.withTransaction { s ->
         s.createNativeQuery<Int>(START_SQL)

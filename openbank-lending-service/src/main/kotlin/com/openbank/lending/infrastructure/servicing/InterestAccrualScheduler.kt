@@ -60,12 +60,34 @@ class InterestAccrualScheduler @Inject constructor(
     private val domainMetrics: DomainMetrics,
     private val closeJobRuns: CloseJobRunPort,
     @ConfigProperty(name = "lending.servicing.accrual.drain-budget", defaultValue = "PT10M")
-    private val drainBudget: Duration = DEFAULT_DRAIN_BUDGET,
+    private val drainBudget: Duration,
     @ConfigProperty(name = "lending.servicing.accrual.max-drain-rounds", defaultValue = "100")
-    private val maxDrainRounds: Int = DEFAULT_MAX_DRAIN_ROUNDS,
+    private val maxDrainRounds: Int,
     @ConfigProperty(name = "lending.close.lookback-days", defaultValue = "3")
-    private val lookbackDays: Long = DEFAULT_LOOKBACK_DAYS,
+    private val lookbackDays: Long,
 ) {
+    /**
+     * For direct construction in tests only. Kotlin defaults on the @ConfigProperty parameters would
+     * diverge from `defaultValue` silently (gate `configproperty-kotlin-defaults`), so the defaults live
+     * here, spelled with the same values.
+     */
+    constructor(
+        accrual: AccrueInterestUseCase,
+        batchSize: Int,
+        clock: Clock,
+        domainMetrics: DomainMetrics,
+        closeJobRuns: CloseJobRunPort,
+    ) : this(
+        accrual,
+        batchSize,
+        clock,
+        domainMetrics,
+        closeJobRuns,
+        DEFAULT_DRAIN_BUDGET,
+        DEFAULT_MAX_DRAIN_ROUNDS,
+        DEFAULT_LOOKBACK_DAYS,
+    )
+
     private val log = Logger.getLogger(InterestAccrualScheduler::class.java)
 
     // Nullable, not `lateinit`: the gauge is a diagnostic, and a money-path job must never fail
