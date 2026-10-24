@@ -179,7 +179,7 @@ class JournalHistorySnapshotIT {
                 "fromDate" to "2026-10-01",
                 "throughDate" to "2026-10-31",
             ),
-        ).post(PATH).then().statusCode(403)
+        ).header("Idempotency-Key", UUID.randomUUID().toString()).post(PATH).then().statusCode(403)
         given().get("$PATH/${UUID.randomUUID()}").then().statusCode(403)
     }
 
@@ -337,6 +337,9 @@ class JournalHistorySnapshotIT {
                     "fromDate" to "2190-10-01",
                     "throughDate" to "2190-10-31",
                 ),
+            ).header(
+                "Idempotency-Key",
+                UUID.randomUUID().toString(),
             ).post(PATH).then().statusCode(201).extract().jsonPath()
             val id = manifest.getString("snapshotId")
             connection().use { c ->
@@ -594,6 +597,9 @@ class JournalHistorySnapshotIT {
 
     private fun capture(expected: Int = 201): JsonPath = given().contentType("application/json").body(
         mapOf("accountId" to account, "currency" to "CZK", "fromDate" to "2026-10-01", "throughDate" to "2026-10-31"),
+    ).header(
+        "Idempotency-Key",
+        UUID.randomUUID().toString(),
     ).post(PATH).then().statusCode(expected).extract().jsonPath()
 
     private fun page(id: String, after: Int, limit: Int): JsonPath = given()

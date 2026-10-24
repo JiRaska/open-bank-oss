@@ -41,7 +41,19 @@ paths:
         from one database view; never posts money or classifies an IR event. Coverage is explicitly
         ATTACHED_LEDGER_VIEW_ONLY, not account lifetime or complete classified history. A source-free
         result is returned inline with persisted=false and is not retained server-side.
+        A retry with the same Idempotency-Key and body replays the first response
+        (X-Idempotency-Replayed: true); a different body under the same key is 409.
       security: [{bearerAuth: []}]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Caller-chosen key binding a retry to the first capture.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '^[A-Za-z0-9._:-]+$'
       requestBody:
         required: true
         content:
@@ -61,6 +73,7 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/v1/journals/history-snapshots/{snapshotId}:
     get:
       tags: [Ledger]

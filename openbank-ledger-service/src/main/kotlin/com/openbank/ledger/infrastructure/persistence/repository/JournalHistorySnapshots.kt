@@ -5,6 +5,7 @@
 package com.openbank.ledger.infrastructure.persistence.repository
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -50,7 +51,7 @@ class JournalHistorySnapshots(private val mapper: ObjectMapper) {
         fromDate: LocalDate,
         throughDate: LocalDate,
     ): JournalHistoryManifest {
-        val id = UUID.randomUUID()
+        val id = Ids.newId()
         val json = Panache.withTransaction {
             Panache.getSession().flatMap { session ->
                 session.createNativeQuery<Any>("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ").executeUpdate()
