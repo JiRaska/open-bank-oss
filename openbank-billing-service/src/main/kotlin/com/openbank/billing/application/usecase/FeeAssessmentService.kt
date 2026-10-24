@@ -15,6 +15,8 @@ import com.openbank.billing.domain.AssessedFee
 import com.openbank.billing.domain.BillableFee
 import com.openbank.billing.domain.BillingAssessment
 import com.openbank.billing.domain.FeeIncomeCurrencies
+import com.openbank.billing.domain.ProductShadowInput
+import com.openbank.billing.domain.ShadowLegacyFee
 import com.openbank.libs.product.FeeContext
 import com.openbank.libs.product.WaiveReason
 import com.openbank.libs.product.WaiverEvaluator
@@ -107,6 +109,17 @@ class FeeAssessmentService(
             skipped = false,
             skipReason = null,
             assessedFees = assessed,
+            shadowInput = ProductShadowInput(
+                cycleId = cycleId,
+                accountId = accountId,
+                currency = currency,
+                productRevisionId = terms.revisionId,
+                balance = billing.context.balance,
+                monthlyTurnover = billing.context.monthlyTurnover,
+                aggregatePocketBalance = billing.context.aggregatePocketBalance,
+                segment = billing.context.segment,
+                legacyFees = assessed.map { ShadowLegacyFee(it.feeId, it.chargedAmount, it.waived) },
+            ),
         )
     }
 

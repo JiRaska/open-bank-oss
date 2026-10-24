@@ -106,7 +106,20 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
   ledger; the audit chain (ADR-0133) is tamper-evident.
 - **Repudiation** — every assessment and posting emits an audit record; `postedBy` is captured.
 - **Information disclosure** — `FeeContext` (balance/segment) is processed transiently and not
-  re-persisted beyond the audit record; transport is TLS; reads are OPA-authorized.
+  re-persisted beyond the audit record, with ONE bounded exception since ADR-0352 phase 3: the
+  product-IR shadow freezes the account's balance, monthly turnover, pocket balance and segment in
+  `billing_product_shadow_input`, committed with the assessment, so the comparator can re-decide the
+  same facts later. They are erased (set to NULL) when the comparison completes, leaving only the
+  outcome; a row stuck PENDING keeps them until it completes or exhausts its retries. The comparator's
+  metrics carry consumer, product code, rule id and a reason only, never an account, amount or
+  balance. Transport is TLS; reads are OPA-authorized.
+- **Tampering (product IR, ADR-0352 phase 3)** — the shadow evaluates a revision's IR only after the
+  libs-runtime `PinnedRevisionLoader` has re-derived its canonical hash and verified the publish-path
+  signature; an unsigned, mis-signed or edited copy is counted `not_comparable{reason="verification_failed"}`
+  and never compared. Verification defaults to `disabled` (nothing compared, counted as such); `hmac`
+  is refused at boot in a production launch; `openbao` uses a Transit role holding `verify` only, so
+  billing can never sign. The local copy table `billing_product_revision_ir` is immutable by trigger.
+  The shadow posts nothing and changes no legacy decision.
 - **Denial of service** — assessment is idempotent and bounded per cycle; a redrive replays to the
   same ledger journal rather than amplifying. **Availability (self-inflicted):** a transient DB blip
   can poison the reactive pg pool, and Quarkus leaves every pool self-heal lever off by default, so
@@ -229,6 +242,8 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
     (`partyId`) read off an already-trusted response.
 
 ## 6. Change log
+
+- **2026-10-23** — **Product-IR shadow comparator** (ADR-0352 phase 3, billing first; shadow only, no switch). Each non-skipped assessment queues its frozen inputs and legacy decision in `billing_product_shadow_input` in the same transaction (V10); an asynchronous scheduler re-decides them with the signed IR of the account's pinned revision (local immutable copy in `billing_product_revision_ir`, read from product-catalog once per revision, off the posting path) and records agreement per rule (`openbank_product_shadow_*`, alerts in `prometheus-rules-product-shadow.yaml`). New data: frozen account facts, erased on completion (see Information disclosure). New outbound call: product-catalog `GET /api/v2/revisions/{id}` from the comparator only, same client and identity as the existing revision read. New config: `openbank.billing.product-shadow.*`, verification `disabled` by default.
 
 - **2026-10-03** — **Fleet SENT retention excludes billing pending #12311** (ADR-0329, #12187). The shared `OutboxSentRetentionJob` can purge other services, but `BillingOutboxRepositoryImpl.sentRetentionExempt=true` preserves billing's annual-summary rerun guard. `billing_outbox` SENT payloads therefore remain until a durable account/year issuance key is deployed. The exemption is paired with a reason in the enforced fleet gate; remove both only after the migration and real-DB purge/rerun tests in #12311 are merged. No billing endpoint, caller or privilege changes in this phase.
 
