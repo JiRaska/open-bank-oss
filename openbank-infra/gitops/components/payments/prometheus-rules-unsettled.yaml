@@ -128,9 +128,9 @@ spec:
       rules:
         - alert: SwiftBookingUnsettled
           # SLA 30m. The obligation starts at scheme acceptance (ACSC -> SENT): the MT103 has left and the
-          # ordering customer's debit is not booked. swift-service makes ONE transaction-service call, with no
-          # retry and no re-drive path, so a message whose clock is still open a few minutes later is held for
-          # good. The age also covers two cases the outcome counter never sees: a message with no ordering
+          # ordering customer's debit is not booked. swift-service makes one transaction-service call, then the
+          # #13686 re-drive sweep retries it (same key, backoff 2m doubling, 10 attempts). A transport blip is
+          # booked within minutes; a clock still open at 30m is a deterministic answer or an exhausted re-drive. The age also covers two cases the outcome counter never sees: a message with no ordering
           # account id, and an unparseable value date, both return not-settled without calling
           # transaction-service. An MT103 carries an explicit value date (field 32A) the debit has to be booked
           # by, so 30m leaves the operator the same business day, matching SEPA's outbound SLA.
@@ -146,7 +146,8 @@ spec:
             summary: "SWIFT message accepted by the scheme but its debit is unbooked for over 30 minutes"
             description: >-
               The oldest SWIFT message with an open booking clock has waited at least {{ $value | humanizeDuration }}.
-              It is held in SENT; nothing retries it and swift-service has no re-drive path. Read the outcome
+              It is held in SENT and the re-drive sweep has not proven it either; it retries the same key,
+              which cannot fix a deterministic answer. Read the outcome
               under swift-settlement-<messageId> in transaction-service, then reconcile or reverse.
               openbank_payment_unsettled_total{rail="SWIFT"} says which answer it got.
             runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0032-payment-rail-unsettled-booking.md#swift-outbound-booking"

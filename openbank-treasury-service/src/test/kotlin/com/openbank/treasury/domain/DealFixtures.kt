@@ -8,8 +8,8 @@ import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
-import com.openbank.treasury.domain.model.DayCount
 import com.openbank.treasury.domain.model.Deal
+import com.openbank.treasury.domain.model.DealCalendars
 import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.ProductLimit
@@ -83,7 +83,7 @@ object DealFixtures {
         rate: String = "25.125000",
         side: FxSide = FxSide.BUY,
         tradeDate: LocalDate = MONDAY,
-        valueDate: LocalDate = DayCount.spotDate(tradeDate),
+        valueDate: LocalDate = DealCalendars.spotDate(tradeDate, "EUR"),
         by: Actor = dealer,
     ): Deal = Deal.draft(
         id = UUID.fromString("0191c0de-0000-7000-8000-00000000f0f0"),

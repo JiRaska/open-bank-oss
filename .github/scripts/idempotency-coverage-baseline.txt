@@ -110,6 +110,7 @@ openbank-standing-order-service POST /api/v1/standing-orders/{id}/pause  # lifec
 openbank-standing-order-service POST /api/v1/standing-orders/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-swift-service POST /api/v1/swift/{id}/ack  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-swift-service POST /api/v1/swift/{id}/reject  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/deals/{id}/schedule-preview  # read-only preview; persists nothing, replay is harmless — ADR-0344 contract 8.1 exception
 openbank-vop-service POST /api/v1/vop/verify  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 
 # card-issuance joined money_path_services in ADR-0283 phase 0 (#8808). Nothing about these seven
