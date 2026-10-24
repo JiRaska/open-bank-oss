@@ -34,7 +34,7 @@ import java.util.UUID
 @Path("/api/v1/treasury/deals/{id}/cash-flows")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed(Roles.ADMIN, DEALER, APPROVER, SENIOR_APPROVER, BACK_OFFICE, REFERENCE_EDITOR)
+@RolesAllowed(Roles.ADMIN, DEALER, APPROVER, SENIOR_APPROVER, BACK_OFFICE)
 class CashFlowResource {
 
     @Inject
