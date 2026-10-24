@@ -566,6 +566,47 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
 
 ## 10. Change log
 
+- **2026-10-23** — **Lending is a day-close participant (ADR-0342, #13167).** New outbound edge:
+  `PUT /api/v1/ledger/accounting-days/{date}/participants/lending` to ledger-service, over the same
+  `ledger-service` base URL and named oidc-client `m2m` (Keycloak `openbank-lending`) as the existing
+  journal POST — no new credential, client or port. The ledger authorizes it as its OWN action
+  `ledger.close.participate` (rule `service-close-participation`, which binds each account to its one
+  participant name), never the generic `ledger.create`. New table
+  `lending_close_job_run` (V28) recording, per Prague accounting day, that the accrual and
+  provisioning passes ran and what they did; a new hourly `LendingCloseParticipationScheduler`
+  folds those rows into the report. **STRIDE-S:** the ledger accepts a `lending` report only from
+  `service-account-openbank-lending`. **STRIDE-T/R:** the report is derived from the service's own
+  persisted runs, never caller input; a due pass with no recorded run produces NO report, so a late
+  or crashed pass holds the ledger's close. An accrual the ledger refuses with `409
+  ACCOUNTING_DAY_CLOSED` (D4) is recorded REFUSED with that category; any other failed pass, and a
+  provisioning pass that leaves exposures unprovisioned or cannot count coverage, is REFUSED with a
+  fixed category, never RAN. An accrual pass the batch cap cut short (the use case reads one row
+  past the batch as a probe) is REFUSED `due installment(s) left unaccrued`, so a capped pass cannot
+  report a complete day. Both passes now take their as-of date from the Prague accounting day
+  (`AccountingClock.bank`) once at the start and file their evidence under that same date, so a pass
+  crossing midnight, or a UTC pod, cannot accrue for one day and report another. Reasons carry categories and counts only — no loan id, party id or
+  exception text leaves the service. **STRIDE-D:** a ledger outage only delays the report (re-offered
+  every tick, the day waits and pages). **Review hardening:** (1) provisioning's allowance journals
+  are dispatched by the outbox, so the day is not reported while any `lending.allowance.posting` row
+  for it (payload `accountingDate`, indexed in V28) is still PENDING/DISPATCHING/FAILED; SENT rows
+  are its journals and DEAD rows (the outbox gave up, a closed-day 409 included) make the day
+  REFUSED. (2) Each pass marks itself in flight before working; the day is not reported while the
+  marker stands (a pass running across midnight cannot be overtaken by an earlier RAN row), and a
+  marker older than the derived stale threshold (`LendingCloseJobs.staleAfter`, see (5)) is reported REFUSED `pass started and never
+  completed`, so a crash cannot hold the day unresolvably. (3) The accrual drains truncated batches
+  within `drain-budget` / `max-drain-rounds`, and each pass first re-drains every earlier day in the
+  lookback still REFUSED as truncated, as of that day, re-recording it RAN once nothing is left. (4) A
+  report the ledger receives after it TIED_OUT or LOCKED the day is stored `late = true` and never
+  moves the day (`DayCloseParticipantsIT`: a later REFUSED is stored late). (5) Final review: a pass that crashed mid-way is healed — its stale in-flight marker joins the
+  catch-up set, so the next pass re-runs that day and re-records it. The stale threshold is DERIVED,
+  `drain-budget × (lookback + 1) + 30m`, so it can never be configured below the longest live pass, and
+  the drain deadline is checked per installment inside a batch. The ledger refuses postings into a
+  day past cutoff (only OPEN accepts; `409 ACCOUNTING_DAY_CLOSED` under enforce), so accrual journals
+  are dated in the CURRENT Prague day: a catch-up for D books D's remainder in the open day, D's row
+  records the installments covered and today's row the journals. The V28 partial index is a plain,
+  boot-time CREATE INDEX (rationale and out-of-band CONCURRENTLY recipe in its header). The ledger keeps the check in `shadow`; flipping
+  to enforce is an owner step. Rollback: revert the application while preserving additive V28 run
+  evidence; schema removal needs a separate reviewed retention plan.
 - **2026-10-14** — **Explicit origination commands: withdraw / submit-documents / sign, KYC-validity expiry, four-eyes SLA escalation** (ADR-0211 D3 slice; refs #12748). Four new endpoints: desk `POST /api/v1/lending/applications/{id}/withdraw|submit-documents|sign` under new actions `lending.withdraw` / `lending.submitDocuments` / `lending.sign` (desk-role sets in `lending_rest_ext.rego` plus the edge `prohibited` veto, 37 rego tests), and the customer edge `POST /api/v1/lending/intake/applications/{id}/withdraw` reusing the existing `lending.intake` action. **Elevation of privilege / spoofing:** the actor is the JWT subject on the desk endpoints and the vouched edge principal on intake; the intake endpoint looks the application up owner-filtered so a customer touching another party's id gets the same 404 as a missing one — existence is not disclosed across the trust boundary. **Tampering / repudiation:** `sign` persists the signature-artefact hash (V27 adds nullable `loan_application.signature_artefact_hash`, additive, rollback = `DROP COLUMN`) via a same-claim compare-and-set (`compareAndSetSignature`, mirroring `claimDecision`), so the row either carries the hash the decision claimed or the sign fails closed; the hash corroborates the signature evidence without storing the artefact itself. **Withdrawal boundary (ADR-0211, not ADR-0215):** application withdrawal is available only pre-disbursement — `SIGNED` and every terminal state refuse with 422 through the state machine, which remains the single authority on lawful transitions; the statutory post-disbursement cooling-off unwind stays a live-loan path (ADR-0215). **Four-eyes SLA:** a new `FOUR_EYES` timer branch escalates after 5 days — it emits a `credit.application.four_eyes_sla_escalation` evidence event and increments `openbank.lending.origination.four_eyes_sla_escalation`; it NEVER auto-approves (no human edge leaves the graph) and is idempotent by aggregate re-read, so replay cannot double-escalate. **KYC validity:** a new `KYC_PENDING` branch expires the application via the existing `expireIfInState` after 30 days to `EXPIRED`. Timer constants live in the workflow source because `run`/`stateEntered` signatures are frozen by in-flight histories — replay safety, not config. The state machine gained property tests (jqwik) over lawful walks and human-only edges. No new caller, topic, network-policy edge or machine privilege. Money-path: the PR needs two approvals. Rollback: revert; V27 is additive.
 - **2026-10-03** — **Evidence bundle reads the audit chain; `lending_outbox` joins SENT retention** (#11900, ADR-0214 D3, ADR-0329). `GET /applications/{id}/evidence` now calls audit-service's `GET /api/v1/audit/evidence/{id}` with the caller's own bearer (`CallerTokenClientHeadersFactory`), never the m2m client: no service identity is granted the audit trail, and audit-service's rule refuses service accounts outright. **STRIDE-T/R:** the bundle is now the tamper-evident chain, each event with its recomputed hash status, instead of a mutable delivery buffer — an edited row shows as `MISMATCH`. **STRIDE-I:** the residual recorded on the entry below is closed in code: nothing reads a SENT `lending_outbox` row any more, and the repository implements `SentOutboxRetention`. The purge itself stays switched OFF (`LENDING_OUTBOX_RETENTION_ENABLED=false`) until the outbox↔chain parity check in 05-operations passes, because events sent before audit-service subscribed (2026-07-31) may exist only here. **STRIDE-D:** audit-service unreachable makes the evidence read 503 — deliberately no fallback to a partial local bundle. New egress lending→audit over audit-service's private-CA mTLS listener (8443, `audit-authority`, client identity `lending-internal-tls`) — the request carries a bearer token, so never plaintext (ASVS V9.1); NetworkPolicy regenerated.
 - **2026-10-03** — **`lending_outbox` is EXEMPT from fleet SENT-row retention** (ADR-0329). Every other outbox now purges SENT rows after 7 days; this one does not, because its SENT rows are the ADR-0214 evidence bundle (`GET /applications/{id}/evidence` reads them through `findByAggregateId`) and purging them would empty that bundle. Residual risk, recorded rather than fixed here: loan-event payloads (applicant and credit data) stay in this table for the life of the database. Closing it needs the evidence moved to a store with its own retention; the exemption sits in `check-outbox-sent-retention.py` and fails CI once lending opts in.
