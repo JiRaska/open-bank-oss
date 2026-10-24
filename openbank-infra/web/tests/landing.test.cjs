@@ -252,8 +252,8 @@ test('all entry pages use current brand assets, including archive and social met
     assert.ok(fs.existsSync(path.join(site, share.pathname)));
   }
   const d = new JSDOM(read('index.html')).window.document;
-  assert.equal(d.querySelector('.phone-stage img').getAttribute('src'), 'assets/app-cards-lipa.png');
-  assert.match(d.querySelector('.phone-figure figcaption').textContent, /demo data/);
+  assert.equal(d.querySelector('.phone-stage img').getAttribute('src'), 'assets/app-iphone-20261024.png');
+  assert.match(d.querySelector('.phone-figure figcaption').textContent, /Actual iPhone screenshot/);
   const provenance = JSON.parse(read('assets/lipa-provenance.json'));
   for (const asset of provenance.assets) {
     const actual = require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(site, 'assets', asset.file))).digest('hex');

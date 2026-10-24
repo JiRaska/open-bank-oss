@@ -3,10 +3,10 @@
   "source_repository": "https://github.com/JiRaska/openbank-app",
   "vector_source": "design-system/brand/lipa",
   "app_preview": {
-    "source": "composeApp/src/androidUnitTest/screenshots/cards-wallet-visible-light.png",
-    "renderer": "CardsWalletScreenshotTest.loadedCardIsVisibleInWallet / CardsScreen",
-    "data": "FakeCardsApi, FakeScaApi and FakeTransactionApi; synthetic fixtures",
-    "treatment": "Unmodified rendered pixels, not a device capture"
+    "source": "Owner-supplied iPhone screenshot, 2026-10-24",
+    "treatment": "Original PNG copied byte-for-byte; no generated or edited UI",
+    "width": 1179,
+    "height": 2556
   },
   "illustration_edit": {
     "method": "Built-in imagegen; original scene and text preserved, brand patches replaced using the approved mark",
@@ -46,16 +46,16 @@
       "sha256": "095f17c8bbe186c1cf9b25b066cfbbe8aff8ba00f2a3e43f89373682e08e5809"
     },
     {
-      "file": "app-cards-lipa.png",
-      "sha256": "35a5e9742e17a04e00f16f31ef36fdb75dc941057d3fcdbc37b1b2dc158742fe"
-    },
-    {
       "file": "explorers-lipa.webp",
       "sha256": "13e4089abf59afa5638786bd3de0a74c399511e57d1d958e411df8ab81c7e9b5"
     },
     {
       "file": "labs-kernel-lipa.webp",
       "sha256": "17bb2aaf63fb2dcc0a257585bb00a94c44327e27c7b09e270d9a4e83291fa914"
+    },
+    {
+      "file": "app-iphone-20261024.png",
+      "sha256": "8e069b87dbfb68f889954356e629967fa3e6e898632732893c998e1c9669faa6"
     }
   ]
 }

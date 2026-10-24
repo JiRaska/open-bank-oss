@@ -26,9 +26,9 @@ Open `http://127.0.0.1:8766`. Check the homepage, TestFlight form, demo dialogs,
   opening the sandbox instructions from Labs.
 - `classic.html`, `classic.css`: previous homepage, visibly historical and excluded from indexing.
   Old links to `platform.html` now reach the current platform page.
-- `assets/app-cards-lipa.png`: unmodified Compose render of the app's Cards screen from
-  `CardsWalletScreenshotTest.loadedCardIsVisibleInWallet`, with synthetic API fixtures.
-  It shows the Lípa release UI; the caption distinguishes this render from a device capture.
+- `assets/app-iphone-20261024.png`: the owner's actual iPhone screenshot supplied on
+  24 October 2026, copied byte-for-byte with no image edits. It shows the home screen
+  and replaces the earlier Compose test render. The capture date is explicit.
 - `assets/lipa-{mark,lockup-light,lockup-dark,icon}.svg`: approved vector exports from
   the app's `design-system/brand/lipa`. The icon PNGs and root `favicon.ico` derive from
   that same master. Do not redraw the symbol or typeset a substitute wordmark.
