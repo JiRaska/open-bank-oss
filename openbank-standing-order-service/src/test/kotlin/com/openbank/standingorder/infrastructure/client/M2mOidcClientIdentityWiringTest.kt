@@ -19,5 +19,8 @@ class M2mOidcClientIdentityWiringTest : M2mOidcClientIdentityWiringConformance()
 
     override val clientId = "openbank-standing-order"
 
-    override val namedClients: List<Class<*>> = listOf(TransactionServiceClient::class.java, SepaPaymentClient::class.java)
+    override val namedClients: List<Class<*>> = listOf(
+        TransactionServiceClient::class.java,
+        SepaPaymentClient::class.java,
+    )
 }

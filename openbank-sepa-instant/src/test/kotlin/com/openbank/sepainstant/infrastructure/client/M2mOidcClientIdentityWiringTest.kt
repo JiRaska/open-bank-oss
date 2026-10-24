@@ -24,7 +24,10 @@ class M2mOidcClientIdentityWiringTest : M2mOidcClientIdentityWiringConformance()
 
     override val clientId = "openbank-sepa-instant"
 
-    override val namedClients: List<Class<*>> = listOf(TransactionServiceClient::class.java, AmlServiceClient::class.java)
+    override val namedClients: List<Class<*>> = listOf(
+        TransactionServiceClient::class.java,
+        AmlServiceClient::class.java,
+    )
 
     @Test
     fun `the not-yet-migrated rest-clients keep the default (shared) client`() {

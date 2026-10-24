@@ -36,12 +36,21 @@ class M2mOidcClientIdentityWiringConformanceTest {
         clients: List<Class<*>> = listOf(NamedClient::class.java),
         default: String = "openbank-services",
         name: String = "m2m",
-    ) = object : M2mOidcClientIdentityWiringConformance() {
-        override val configResource = "m2m-conformance-fixture.yaml"
+    ) = object : M2mOidcClientIdentityWiringConformance(name, "m2m-conformance-fixture.yaml", default) {
         override val clientId = id
         override val namedClients = clients
-        override val defaultClientId = default
-        override val oidcClientName = name
+    }
+
+    @Test
+    fun `a service-style subclass is pinned to application-yaml and cannot be pointed elsewhere`() {
+        val serviceStyle = object : M2mOidcClientIdentityWiringConformance() {
+            override val clientId = "openbank-fixture"
+            override val namedClients = listOf<Class<*>>(NamedClient::class.java)
+        }
+        // libs-testing has no application.yaml: the public constructor reads that name and nothing else.
+        assertThatThrownBy {
+            serviceStyle.`the named oidc-client authenticates as its own client with its own secret`()
+        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("application.yaml")
     }
 
     @Test

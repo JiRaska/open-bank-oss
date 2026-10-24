@@ -7114,9 +7114,10 @@ gates:
     rationale: >-
       Per-service copies drift independently (HibernateSequenceGuardTest had three byte variants,
       M2mOidcClientIdentityWiringTest 15 shapes) and every fix has to be repeated N times. A baselined
-      group may shrink but not spread, and a new group fails.
+      group may not spread, a shrunk or vanished one fails until its baseline is lowered, and a
+      new group fails.
     review_after: "2027-04-23"
-    verified: "2026-10-23 — self-test has a 3-module package-only copy (flagged), a 2-module one, a one-line variation, a grown baselined group (flagged) and a shrunk one (note only); on origin/main with an empty baseline it reports TraceContractRecorder (20), TraceContractProfile (11) and MockAuthzProducer (3)"
+    verified: "2026-10-23 — self-test has a 3-module package-only copy (flagged), a 2-module one, a one-line variation, a grown baselined group (flagged), a shrunk and a vanished one (both flagged: lower the baseline) and a package directory named build (scanned); on origin/main with an empty baseline it reports TraceContractRecorder (20), TraceContractProfile (11) and MockAuthzProducer (3)"
     budget_seconds: 30
     min_subjects: 1380   # 2760 distinct test-file contents measured 2026-10-23; half
     selftest: python3 .github/scripts/check-duplicate-test-files.py --self-test

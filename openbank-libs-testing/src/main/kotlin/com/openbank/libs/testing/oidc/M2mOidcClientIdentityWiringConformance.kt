@@ -27,22 +27,27 @@ import org.yaml.snakeyaml.Yaml
  * non-empty and [clientId] must equal the value in `application.yaml`.
  */
 @Suppress("FunctionNaming") // one backticked @Test per case, as ApprovalEndpointConformance
-abstract class M2mOidcClientIdentityWiringConformance {
-
+abstract class M2mOidcClientIdentityWiringConformance internal constructor(
     /** `quarkus.oidc-client.<this>` and the `@OidcClientFilter` value the clients select. */
-    protected open val oidcClientName: String = "m2m"
+    protected val oidcClientName: String,
+    /** Classpath resource holding `quarkus.oidc-client`. */
+    private val configResource: String,
+    /** `quarkus.oidc-client.client-id` the default client still carries. */
+    private val defaultClientId: String,
+) {
+
+    /**
+     * The three fleet-wide values are pinned: a service subclass cannot reach the internal
+     * constructor, so it cannot point the checks at a weaker name, file or default. Only the kit's
+     * own self-test passes others.
+     */
+    constructor() : this("m2m", "application.yaml", "openbank-services")
 
     /** The Keycloak client id this service authenticates as, e.g. `openbank-account`. */
     protected abstract val clientId: String
 
     /** Every rest-client that must select the named oidc-client and not register the default filter. */
     protected abstract val namedClients: List<Class<*>>
-
-    /** `quarkus.oidc-client.client-id` the default client still carries. */
-    protected open val defaultClientId: String = "openbank-services"
-
-    /** Classpath resource holding `quarkus.oidc-client`; overridden only by the kit's own self-test. */
-    protected open val configResource: String = "application.yaml"
 
     private val oidcClient: Map<*, *> by lazy {
         val stream = checkNotNull(javaClass.classLoader.getResourceAsStream(configResource)) {

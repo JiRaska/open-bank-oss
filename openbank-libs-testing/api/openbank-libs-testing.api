@@ -173,13 +173,10 @@ public abstract class com/openbank/libs/testing/mtls/ProductionListenerProfile :
 }
 
 public abstract class com/openbank/libs/testing/oidc/M2mOidcClientIdentityWiringConformance {
-	public fun <init> ()V
 	protected fun assertNamedClientExtras (Ljava/util/Map;)V
 	protected abstract fun getClientId ()Ljava/lang/String;
-	protected fun getConfigResource ()Ljava/lang/String;
-	protected fun getDefaultClientId ()Ljava/lang/String;
 	protected abstract fun getNamedClients ()Ljava/util/List;
-	protected fun getOidcClientName ()Ljava/lang/String;
+	protected final fun getOidcClientName ()Ljava/lang/String;
 	protected final fun namedClientConfig ()Ljava/util/Map;
 	public final fun the default client stays the shared one until the remaining edges migrate ()V
 	public final fun the migrated rest-clients select the named oidc-client and not the default one ()V

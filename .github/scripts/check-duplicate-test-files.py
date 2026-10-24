@@ -15,9 +15,9 @@ marker class is not worth a kit). Only `src/test` Kotlin and Java files count, o
 top-level `openbank-*` directory.
 
 Ratchet: a group with MORE than two modules fails unless its basename is in BASELINE, and a baselined
-basename may not spread to more modules than recorded. A group that has shrunk or disappeared is
-reported as a reminder to lower the entry; it does not fail, so two PRs that each remove copies can
-land in either order.
+basename may not spread to more modules than recorded. Strictly shrink-only: an entry whose real count is lower than recorded
+(or zero) FAILS with "lower the baseline", so the allowance cannot silently grow back. A PR that
+removes copies therefore edits BASELINE in the same change.
 """
 from __future__ import annotations
 
@@ -35,14 +35,13 @@ import gatelib
 
 MAX_MODULES = 2
 MIN_BYTES = 400
-SKIP_DIRS = {".git", "build", "node_modules", ".gradle", "worktrees", ".claude"}
 PACKAGE_LINE = re.compile(rb"(?m)^package .*$")
 
 # basename -> the most modules that may carry an identical copy. Debt recorded 2026-10-23 (#13169).
 BASELINE: dict[str, int] = {
     "MockAuthzProducer.kt": 3,
-    # Removed by the TraceContract consolidation (libs-testing `trace` package); keep until it lands,
-    # then delete these two lines.
+    # Removed by the TraceContract consolidation (libs-testing `trace` package); the PR that lands
+    # it deletes these two lines, because a shrunk entry fails.
     "TraceContractRecorder.kt": 20,
     "TraceContractProfile.kt": 11,
 }
@@ -56,7 +55,7 @@ def groups(root: pathlib.Path) -> dict[str, list[tuple[str, str]]]:
         if not tests.is_dir():
             continue
         for dirpath, dirnames, filenames in os.walk(tests):
-            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+            dirnames.sort()  # every directory under src/test counts: `build` can be a package name
             for name in sorted(filenames):
                 if not name.endswith((".kt", ".java")):
                     continue
@@ -95,9 +94,12 @@ def check(root: pathlib.Path, baseline: dict[str, int] = BASELINE) -> tuple[list
                 f"(#13169) — the copy is spreading"
             )
         elif len(modules) < allowed:
-            notes.append(f"{base}: down to {len(modules)} modules; lower its BASELINE entry from {allowed}")
+            findings.append(
+                f"{base}: down to {len(modules)} modules, baseline still allows {allowed} — lower the baseline "
+                f"to {len(modules)} so the debt cannot grow back"
+            )
     for base in sorted(set(baseline) - seen_basenames):
-        notes.append(f"{base}: no longer duplicated; delete its BASELINE entry")
+        findings.append(f"{base}: no longer duplicated — lower the baseline: delete its BASELINE entry")
     return findings, notes, subjects
 
 
@@ -138,10 +140,21 @@ def self_test() -> int:
     if len(findings) != 1 or "spreading" not in findings[0]:
         print(f"SELF-TEST FAIL: a baselined group that grew must fail: {findings}")
         ok = False
-    findings, notes, _ = run(3, baseline={"Helper.kt": 5, "Gone.kt": 3})
-    if findings or len(notes) != 2:
-        print(f"SELF-TEST FAIL: shrunk/vanished baseline entries must be reminders only: {findings} {notes}")
+    findings, _, _ = run(3, baseline={"Helper.kt": 5})
+    if len(findings) != 1 or "lower the baseline" not in findings[0]:
+        print(f"SELF-TEST FAIL: a shrunk baseline entry must fail: {findings}")
         ok = False
+    findings, _, _ = run(2, baseline={"Helper.kt": 3})
+    if len(findings) != 1 or "lower the baseline" not in findings[0]:
+        print(f"SELF-TEST FAIL: a vanished group's baseline entry must fail: {findings}")
+        ok = False
+    with tempfile.TemporaryDirectory() as d:  # a package literally named `build` is still a test file
+        root = pathlib.Path(d)
+        for i in range(3):
+            write(root, f"openbank-s{i}", f"build/svc{i}/Helper.kt", f"package build.svc{i}\n\n" + BODY)
+        if not check(root, {})[0]:
+            print("SELF-TEST FAIL: a `build` package directory under src/test must be scanned")
+            ok = False
     with tempfile.TemporaryDirectory() as d:  # the size floor
         root = pathlib.Path(d)
         for i in range(3):
@@ -162,8 +175,6 @@ def main() -> int:
         return self_test()
     findings, notes, subjects = check(pathlib.Path(args.root))
     gatelib.subjects(subjects, "distinct test-file contents compared across modules")
-    for n in notes:
-        print(f"  note: {n}")
     for f in findings:
         print(f"  {f}")
     if findings:
