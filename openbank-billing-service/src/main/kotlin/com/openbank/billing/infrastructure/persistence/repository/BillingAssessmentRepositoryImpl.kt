@@ -19,6 +19,7 @@ import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.libs.product.WaiveReason
 import com.openbank.libs.productrevision.shadow.ProductShadowRecorder
+import com.openbank.libs.productrevision.shadow.ShadowNotComparable
 import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -110,8 +111,8 @@ class BillingAssessmentRepositoryImpl(
         // operator over a to-typed-array (detekt SpreadOperator) and mirrors this repo's own
         // multi-entity-one-transaction convention (see ComplaintRepositoryImpl.save:
         // s.persist(entity).flatMap { s.persist(outbox.toEntity()) }).
-        val allEntities: List<Any> =
-            listOf(assessmentEntity) + feeEntities + outboxEntities + shadowRows(assessment, assessmentEntity.id, now)
+        val shadowEntities = shadowRows(assessment, assessmentEntity.id, now)
+        val allEntities: List<Any> = listOf(assessmentEntity) + feeEntities + outboxEntities + shadowEntities
         try {
             sf.withTransaction { s, _ ->
                 allEntities.fold(Uni.createFrom().voidItem() as Uni<*>) { acc, entity ->
@@ -124,7 +125,7 @@ class BillingAssessmentRepositoryImpl(
             return recoverConcurrentReplay(e, assessment)
         }
 
-        if (assessment.shadowInput != null) shadow.inputQueued()
+        if (shadowEntities.isNotEmpty()) shadow.inputQueued()
         return assessmentEntity.toDomain(feeEntities)
     }
 
@@ -151,10 +152,30 @@ class BillingAssessmentRepositoryImpl(
      * it only after the commit, never on the replay path, so the "queued, none processed" alert sees the
      * inputs that really exist.
      */
-    private fun shadowRows(assessment: BillingAssessment, assessmentId: UUID, now: Instant) =
-        listOfNotNull(assessment.shadowInput?.let { ProductShadowRows.entity(assessmentId, it, now) })
+    /**
+     * Building the shadow row is a pure mapping that can still fail on a malformed input (a revision id that
+     * is not a UUID, an unserialisable amount). That is a shadow-only fault and must never reach the money
+     * path: the assessment commits without its shadow row, and the miss is counted as `INPUT_UNKNOWN`, so
+     * a shadow that compares nothing still reads as not-comparable rather than as quiet.
+     */
+    private fun shadowRows(assessment: BillingAssessment, assessmentId: UUID, now: Instant): List<Any> {
+        val input = assessment.shadowInput ?: return emptyList()
+        return runCatching { ProductShadowRows.entity(assessmentId, input, now) }.fold(
+            onSuccess = { listOf(it) },
+            onFailure = {
+                log.warnf(
+                    "product shadow input not recorded for assessment %s: %s",
+                    assessmentId,
+                    it.javaClass.simpleName,
+                )
+                shadow.notComparable(ShadowNotComparable.INPUT_UNKNOWN)
+                emptyList()
+            },
+        )
+    }
 
     private val shadow = ProductShadowRecorder(meters, ProductShadowWiring.CONSUMER)
+    private val log = org.jboss.logging.Logger.getLogger(BillingAssessmentRepositoryImpl::class.java)
 
     /**
      * TOCTOU recovery (fix-review finding): [BillingCycleService.assessAndPost] calls

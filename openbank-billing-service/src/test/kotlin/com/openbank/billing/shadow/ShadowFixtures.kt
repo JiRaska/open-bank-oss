@@ -31,7 +31,7 @@ object ShadowFixtures {
             segment = null,
             legacyFees = legacy,
             evaluatedAt = java.time.Instant.parse("2026-10-20T12:00:00Z"),
-            evaluationZone = "UTC",
+            evaluationZone = "Z",
             openedAt = java.time.Instant.parse("2025-01-01T00:00:00Z"),
             scheduledCadence = "MONTHLY",
             scheduledTrigger = "FEE_MAINT",

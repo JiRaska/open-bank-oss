@@ -122,7 +122,7 @@ class ProductShadowPersistenceIT {
             assertThat(input.productRevisionId).isEqualTo(revisionId)
             assertThat(input.balance).isEqualByComparingTo("500.00")
             assertThat(input.evaluatedAt).isEqualTo(java.time.Instant.parse("2026-10-20T12:00:00Z"))
-            assertThat(input.evaluationZone).isEqualTo("UTC")
+            assertThat(input.evaluationZone).isEqualTo("Z")
             assertThat(input.openedAt).isEqualTo(java.time.Instant.parse("2025-01-01T00:00:00Z"))
             assertThat(input.scheduledCadence).isEqualTo("MONTHLY")
             assertThat(input.scheduledTrigger).isEqualTo("FEE_MAINT")
@@ -189,6 +189,24 @@ class ProductShadowPersistenceIT {
                     )
                 }.exceptionOrNull()
                 assertThat(failure).hasMessageContaining("immutable")
+            }
+        }
+    }
+
+    @Test
+    fun `an unmappable shadow input never fails the assessment it shadows`(): Unit = onVertxContext {
+        val accountId = "acc-shadow-unmappable-${UUID.randomUUID()}"
+        val value = assessment(accountId, UUID.randomUUID().toString(), withShadow = true)
+        val unmappable = value.copy(shadowInput = value.shadowInput!!.copy(productRevisionId = "not-a-uuid"))
+        assessments.persistWithPostingIntent(unmappable)
+        assertThat(queue.claim(1000).map { it.input.accountId }).doesNotContain(accountId)
+        dataSource.connection.use { c ->
+            c.prepareStatement("SELECT count(*) FROM billing_cycle_assessment WHERE account_id = ?").use { st ->
+                st.setString(1, accountId)
+                st.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getLong(1)).isEqualTo(1)
+                }
             }
         }
     }

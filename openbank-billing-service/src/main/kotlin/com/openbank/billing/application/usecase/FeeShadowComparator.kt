@@ -5,6 +5,7 @@
 package com.openbank.billing.application.usecase
 
 import com.openbank.billing.domain.ProductShadowInput
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.product.WaiveAttribute
 import com.openbank.libs.product.ir.AccountingClass
 import com.openbank.libs.product.ir.Action
@@ -24,6 +25,7 @@ import com.openbank.libs.product.ir.ProductState
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 
 /** The outcome of holding one legacy fee decision against the product IR. */
 sealed interface FeeShadowResult {
@@ -54,7 +56,15 @@ sealed interface FeeShadowResult {
  *
  * Pure: the interpreter, the inputs and an explicit evaluation instant; no I/O.
  */
-class FeeShadowComparator(private val interpreter: ProductInterpreter) {
+class FeeShadowComparator(
+    private val interpreter: ProductInterpreter,
+    /**
+     * The zones a frozen input may name. The recorded zone is a fact about how the legacy decision
+     * evaluated, so it is matched against this closed set rather than parsed: an unknown zone makes the
+     * input not comparable instead of being re-zoned here (ADR-0207 D1: no zone is declared locally).
+     */
+    private val admissibleZones: Set<ZoneId> = setOf(ZoneOffset.UTC, AccountingClock.BANK_ZONE),
+) {
 
     fun compare(revision: ProductRevisionIr, input: ProductShadowInput): List<FeeShadowResult> {
         val legacyCodes = input.legacyFees.map { it.feeId }.toSet()
@@ -63,12 +73,13 @@ class FeeShadowComparator(private val interpreter: ProductInterpreter) {
         // The caller's processing instant is deliberately irrelevant to economic evaluation.
         val capturedAt = input.evaluatedAt
             ?: return unknownFacts
-        val zone = input.evaluationZone?.let { runCatching { ZoneId.of(it) }.getOrNull() }
+        val zone = admissibleZones.firstOrNull { it.id == input.evaluationZone }
             ?: return unknownFacts
         val clock = ProductClock(capturedAt, zone)
         val state = frozenState(input, zone)
+        val trigger = input.scheduledTrigger ?: revision.uniqueScheduledTag(input.scheduledCadence)
         val chargingRules = revision.hooks[Hook.SCHEDULED].orEmpty()
-            .filter { it.trigger == input.scheduledTrigger && it.action is Action.ChargeFee }
+            .filter { it.trigger == trigger && it.action is Action.ChargeFee }
             .groupBy { (it.action as Action.ChargeFee).feeRuleId }
         val results = input.legacyFees.map { legacy ->
             val fee = revision.fees.firstOrNull { it.feeCode == legacy.feeId }
@@ -76,8 +87,8 @@ class FeeShadowComparator(private val interpreter: ProductInterpreter) {
             val rule = candidates.firstOrNull()
             if (fee == null) {
                 FeeShadowResult.Unmapped(legacy.feeId)
-            } else if (input.scheduledTrigger == null) {
-                // Cadence alone does not establish which IR schedule tag actually fired.
+            } else if (trigger == null) {
+                // The fired cadence names no schedule tag, or more than one: which one fired is unknown.
                 FeeShadowResult.UnknownInput(legacy.feeId)
             } else if (rule == null) {
                 FeeShadowResult.Unmapped(legacy.feeId)
@@ -207,4 +218,17 @@ private class FrozenPredicateFacts(
     }
 
     private fun evaluate(predicate: Predicate): Boolean = PredicateEvaluator.test(predicate, state, null, today)
+}
+
+/**
+ * The schedule tag the legacy cycle fired, derived from the IR's own SCHEDULE actions: a tag is
+ * established only when exactly one SCHEDULE into the scheduled hook declares [cadence]. Cadence alone
+ * cannot tell two same-cadence tags apart, so an ambiguous or absent match is `null` (not comparable).
+ */
+internal fun ProductRevisionIr.uniqueScheduledTag(cadence: String?): String? {
+    if (cadence == null) return null
+    val tags = hooks.values.flatten().map { it.action }.filterIsInstance<Action.Schedule>()
+        .filter { it.hook == Hook.SCHEDULED && it.cadence.name == cadence }
+        .map { it.tag }.distinct()
+    return tags.singleOrNull()
 }

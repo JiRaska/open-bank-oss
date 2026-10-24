@@ -141,6 +141,16 @@ class FeeShadowComparatorTest {
     }
 
     @Test
+    fun `a recorded zone outside the admissible set is not comparable, never re-zoned`() {
+        val base = ShadowFixtures.input("500.00", listOf(ShadowFixtures.charged()))
+        assertThat(comparator.compare(revision, base).single()).isInstanceOf(FeeShadowResult.Compared::class.java)
+        listOf("America/New_York", "not-a-zone", null).forEach { zone ->
+            assertThat(comparator.compare(revision, base.copy(evaluationZone = zone)).single())
+                .isInstanceOf(FeeShadowResult.UnknownInput::class.java)
+        }
+    }
+
+    @Test
     fun `a fee on only one side is unmapped, never agreed`() {
         val results = comparator.compare(
             revision,
@@ -155,6 +165,29 @@ class FeeShadowComparatorTest {
     fun `an old queued row without captured time is not compared`() {
         val input = ShadowFixtures.input("500", listOf(ShadowFixtures.charged())).copy(evaluatedAt = null)
         assertThat(comparator.compare(revision, input).single()).isInstanceOf(FeeShadowResult.UnknownInput::class.java)
+    }
+
+    @Test
+    fun `a production-shaped input (cadence only, no tag) compares when exactly one tag has that cadence`() {
+        val input = ShadowFixtures.input("500.00", listOf(ShadowFixtures.charged())).copy(scheduledTrigger = null)
+        val r = comparator.compare(revision, input).single() as FeeShadowResult.Compared
+        assertThat(r.diverged).isFalse()
+        assertThat(r.ruleId).isEqualTo("fee.maintenance")
+    }
+
+    @Test
+    fun `two schedule tags sharing the fired cadence are ambiguous, not guessed`() {
+        val ambiguous = ProductIrParser.parse(
+            ShadowFixtures.IR.replace(
+                "\"cadence\":\"MONTHLY\"}}],",
+                "\"cadence\":\"MONTHLY\"}},{\"ruleId\":\"open.schedule-other\",\"action\":{\"type\":\"SCHEDULE\",\"hook\":\"scheduled\",\"tag\":\"OTHER\",\"cadence\":\"MONTHLY\"}}],",
+            ).replace(
+                "\"feeRuleId\":\"fee.maintenance\"}}]}}",
+                "\"feeRuleId\":\"fee.maintenance\"}},{\"ruleId\":\"scheduled.other\",\"trigger\":\"OTHER\",\"action\":{\"type\":\"CHARGE_FEE\",\"feeRuleId\":\"fee.maintenance\"}}]}}",
+            ),
+        )
+        val input = ShadowFixtures.input("500.00", listOf(ShadowFixtures.charged())).copy(scheduledTrigger = null)
+        assertThat(comparator.compare(ambiguous, input).single()).isInstanceOf(FeeShadowResult.UnknownInput::class.java)
     }
 
     @Test
