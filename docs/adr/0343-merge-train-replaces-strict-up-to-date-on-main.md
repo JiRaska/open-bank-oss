@@ -510,6 +510,10 @@ The stall rule applies only while the holder's required contexts are pending; a 
 
 While a strict reservation's CI is running and that head has never yielded, settle lets the train build and publish one carrier from green candidates; publish records the yield as the App's `merge-train/strict-deferral` status on the strict head, a green carrier merges past it only under that record, the update-branch that follows inherits it through the first parent, and a green strict head is never pre-empted — so the strict PR still merges within two CI cycles.
 
+### Amendment (2026-10-24) — reviewed gate code rides a train, never with a regeneration commit (#13400)
+
+`.github/scripts/check-*.py`, `.github/scripts/check-*.sh` and `.github/gates/gates.yaml` leave the strict lane (allow-list `GATE_CODE_GLOBS`; any other `.github/` path stays strict). A carrier's CI runs the combined head, so a gate change is judged with the code it judges, as in the strict lane, and bisect isolates a culprit. The one strict-lane property a train lacked is that main's gates prove the regeneration commit, so a train carrying gate code carries no regeneration commit: build keeps the oldest member's class and defers the other without a notice, and publish rejects the mix. Check scripts that prove a derived output, run in the pinned extra gate's workflow, or judge a carrier or the merge contract stay strict (`PRIVILEGED_GATE_CODE`, re-derived from the tree by the self-test).
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
