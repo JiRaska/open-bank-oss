@@ -12,7 +12,7 @@
 // become a typed `ReportSourceError`; operational logs contain fixed failure categories only.
 
 import 'server-only'
-import { inCluster, resolveInClusterBaseUrl } from '@/lib/discovery'
+import { inCluster, resolveInClusterService } from '@/lib/discovery'
 import { getProxyAllowlist } from '@/lib/services/fleet'
 import { ReportSourceError, type ReportSourceClient } from '@/lib/regulatory/generatedReports'
 
@@ -20,9 +20,10 @@ async function baseUrl(service: string): Promise<string> {
   const allowlist = getProxyAllowlist()
   if (!Object.hasOwn(allowlist, service)) throw new ReportSourceError('not_deployed', service, 'not in the service catalog')
   if (inCluster()) {
-    const url = await resolveInClusterBaseUrl(service)
-    if (!url) throw new ReportSourceError('not_deployed', service, 'not deployed in this cluster')
-    return url
+    const resolution = await resolveInClusterService(service)
+    if (resolution.state === 'found') return resolution.baseUrl
+    if (resolution.state === 'not_found') throw new ReportSourceError('not_deployed', service, 'not deployed in this cluster')
+    throw new ReportSourceError('discovery_unavailable', service, 'cluster service discovery is incomplete')
   }
   const svc = allowlist[service]
   const host = process.env.SERVICES_HOST === 'container' ? svc.container : (process.env.SERVICES_HOST ?? 'localhost')

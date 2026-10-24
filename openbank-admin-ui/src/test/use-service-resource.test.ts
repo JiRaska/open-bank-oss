@@ -44,6 +44,19 @@ describe('useServiceResource', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('does not auto-wake on incomplete discovery because deployment state is unknown', async () => {
+    const fetchMock = vi.fn(async () => jsonRes(503, { error: 'discovery_unavailable' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() =>
+      useServiceResource('/api/svc/x/api/v1/items', { retryDelayMs: 1, maxWakeRetries: 3 }),
+    )
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.unavailable).toEqual({ kind: 'discovery_unavailable', status: 503 })
+    expect(result.current.waking).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('auto-wakes a scaled-to-zero service: retries the 503 then fills in', async () => {
     let call = 0
     const fetchMock = vi.fn(async () => {

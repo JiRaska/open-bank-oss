@@ -42,3 +42,7 @@ proti skutečnému HTTP a testovací databázi připravené přes JDBC. Chyběj�
 selhat. Ověření přes broker zůstává podmíněné nastavením `pactbroker.url`; adresářové přehrání
 broker nepotřebuje. Testovací identity, vypnuté testovací OIDC a poradní autorizace
 neprokazují produkční autorizaci JWT/OPA. Změna nepřidává endpoint ani aktivaci za běhu.
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

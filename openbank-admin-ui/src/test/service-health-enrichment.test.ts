@@ -4,11 +4,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/discovery', () => ({
-  discoverServices: vi.fn(),
+  discoverServicesSnapshot: vi.fn(),
   prettyLabel: vi.fn((name: string) => name),
 }))
 
-import { discoverServices } from '@/lib/discovery'
+import { discoverServicesSnapshot } from '@/lib/discovery'
 
 type Discovered = {
   name: string
@@ -69,7 +69,7 @@ async function accountEntryWhenVersion(expectedVersion: string) {
 describe('Kubernetes health metadata enrichment', () => {
   beforeEach(() => {
     vi.resetModules()
-    vi.mocked(discoverServices).mockResolvedValue([service()] as never)
+    vi.mocked(discoverServicesSnapshot).mockResolvedValue({ status: 'complete', services: [service()] as never })
     delete process.env.SERVICES_HOST
   })
 
@@ -135,7 +135,7 @@ describe('Kubernetes health metadata enrichment', () => {
     await routeGet()
     firstInfo.resolve(infoResponse('4.0.0'))
     await flushPromises()
-    vi.mocked(discoverServices).mockResolvedValue([service('registry/openbank-account:two')] as never)
+    vi.mocked(discoverServicesSnapshot).mockResolvedValue({ status: 'complete', services: [service('registry/openbank-account:two')] as never })
     const changed = await accountEntry(routeGet())
     expect(changed.version).toBeNull()
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -169,12 +169,12 @@ describe('Kubernetes health metadata enrichment', () => {
     }))
     const fetchMock = vi.fn(async () => infoResponse('bounded'))
     vi.stubGlobal('fetch', fetchMock)
-    vi.mocked(discoverServices).mockResolvedValue(services as never)
+    vi.mocked(discoverServicesSnapshot).mockResolvedValue({ status: 'complete', services: services as never })
     await routeGet()
     await flushPromises()
 
     const newest = { ...service(), name: 'service-512' }
-    vi.mocked(discoverServices).mockResolvedValue([...services, newest] as never)
+    vi.mocked(discoverServicesSnapshot).mockResolvedValue({ status: 'complete', services: [...services, newest] as never })
     await routeGet()
     await flushPromises()
     const third = await routeGet()
@@ -191,12 +191,12 @@ describe('Kubernetes health metadata enrichment', () => {
       .mockResolvedValueOnce(infoResponse('fresh-after-return'))
     vi.stubGlobal('fetch', fetchMock)
     await routeGet()
-    vi.mocked(discoverServices).mockResolvedValue([] as never)
+    vi.mocked(discoverServicesSnapshot).mockResolvedValue({ status: 'complete', services: [] })
     await routeGet()
     lateInfo.resolve(infoResponse('late-stale'))
     await flushPromises()
 
-    vi.mocked(discoverServices).mockResolvedValue([service()] as never)
+    vi.mocked(discoverServicesSnapshot).mockResolvedValue({ status: 'complete', services: [service()] as never })
     const returned = await accountEntry(routeGet())
     expect(returned.version).toBeNull()
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -243,7 +243,7 @@ describe('Kubernetes health metadata enrichment', () => {
   })
 
   it('preserves off-cluster static health and synchronous info enrichment', async () => {
-    vi.mocked(discoverServices).mockResolvedValue(null)
+    vi.mocked(discoverServicesSnapshot).mockResolvedValue({ status: 'static', services: [] })
     process.env.SERVICES_HOST = 'localhost'
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
       if (String(input).includes('/q/health/ready')) return new Response('{"status":"UP"}', { status: 200 })

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.10](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.9...pid-service-v0.10.10) (2026-10-19)
+
+
+### Bug Fixes
+
+* **pid:** add minimized body-based external identifier lookup ([#13388](https://github.com/JiRaska/open-bank-oss/issues/13388)) ([2c92595](https://github.com/JiRaska/open-bank-oss/commit/2c925952168a8e2060ac74fbb0e0b3fc75146911))
+
 ## [0.10.9](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.8...pid-service-v0.10.9) (2026-10-14)
 
 

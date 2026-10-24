@@ -42,3 +42,7 @@ real HTTP and a JDBC-seeded test database. Missing committed JSON must fail. Bro
 verification remains conditional on `pactbroker.url`; the folder replay requires no broker.
 Test identities, disabled test OIDC and advisory authorization do not prove production
 JWT/OPA authorization. This adds no endpoint or runtime activation.
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

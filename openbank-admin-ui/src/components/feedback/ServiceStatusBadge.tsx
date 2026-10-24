@@ -22,25 +22,27 @@ interface Props {
   waking?: boolean
   unavailable?: ServiceUnavailable | null
   /** Bilingual labels for the state, supplied by the page (it owns the language). */
-  copy: { up: string; idle: string; down: string; checking: string }
+  copy: { up: string; idle: string; down: string; checking: string; unknown?: string }
 }
 
 export function ServiceStatusBadge({ label, loading, waking, unavailable, copy }: Props) {
   // idle = deployed but asleep (scale-to-zero) or actively waking; visually calm
   // (blue moon), never the red "down" treatment.
   const idle = waking || unavailable?.kind === 'scaled_to_zero'
-  const down = !idle && !!unavailable && unavailable.kind !== 'no_data'
+  const unknown = unavailable?.kind === 'discovery_unavailable'
+  const down = !idle && !unknown && !!unavailable && unavailable.kind !== 'no_data'
   const checking = loading && !unavailable
 
-  const state = checking ? 'checking' : idle ? 'idle' : down ? 'down' : 'up'
+  const state = checking ? 'checking' : idle ? 'idle' : unknown ? 'unknown' : down ? 'down' : 'up'
   const style = {
     up:       { bg: 'var(--success-bg)', fg: 'var(--success-text)', bd: 'var(--success-border)', icon: <CheckCircle2 size={10} /> },
     idle:     { bg: 'var(--info-bg, var(--surface-3))', fg: 'var(--info-text, var(--text-secondary))', bd: 'var(--info-border, var(--border))', icon: <Moon size={10} /> },
     down:     { bg: 'var(--danger-bg)', fg: 'var(--danger-text)', bd: 'var(--danger-border)', icon: <XCircle size={10} /> },
     checking: { bg: 'var(--surface-3)', fg: 'var(--text-tertiary)', bd: 'var(--border)', icon: <Clock size={10} /> },
+    unknown:  { bg: 'var(--warning-bg)', fg: 'var(--warning-text)', bd: 'var(--warning-border)', icon: <Clock size={10} /> },
   }[state]
 
-  const title = copy[state]
+  const title = state === 'unknown' ? copy.unknown ?? copy.checking : copy[state]
 
   return (
     <span

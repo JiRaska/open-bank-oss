@@ -304,7 +304,7 @@ class RetirementCatalogPackResourceTest {
         listOf(
             "UPDATE catalog_revisions SET content = jsonb_set(content, '{attributes,instrumentClasses}', '[\"BOND_FUNDS\"]'::jsonb) WHERE id = ?",
             "UPDATE catalog_revisions SET effective_from = TIMESTAMPTZ '2027-07-01T00:00:00Z' WHERE id = ?",
-            "UPDATE catalog_revisions SET pension_approval_digest = repeat('0', 64) WHERE id = ?",
+            "UPDATE catalog_revisions SET approval_digest = repeat('0', 64) WHERE id = ?",
         ).forEach { sql ->
             assertThatThrownBy {
                 dataSource.connection.use { connection ->
@@ -408,7 +408,7 @@ class RetirementCatalogPackResourceTest {
         } When { post("$base/pension-approvals/PRODUCT_OWNER") } Then { statusCode(201) }
         dataSource.connection.use { connection ->
             connection.prepareStatement(
-                "SELECT role, issuer, subject FROM pension_revision_approvals WHERE revision_id = ? ORDER BY role",
+                "SELECT role, issuer, subject FROM catalog_revision_role_approvals WHERE revision_id = ? ORDER BY role",
             ).use { statement ->
                 statement.setObject(1, revisionId)
                 statement.executeQuery().use { rows ->
@@ -546,7 +546,7 @@ class RetirementCatalogPackResourceTest {
 
     private fun approvalDigest(revisionId: UUID): String = dataSource.connection.use { connection ->
         connection.prepareStatement(
-            "SELECT pension_approval_digest FROM catalog_revisions WHERE id = ?",
+            "SELECT approval_digest FROM catalog_revisions WHERE id = ?",
         ).use { statement ->
             statement.setObject(1, revisionId)
             statement.executeQuery().use { rows ->
@@ -594,7 +594,7 @@ class RetirementCatalogPackResourceTest {
             }
             val digest = com.openbank.productcatalog.infrastructure.catalog.CatalogJson(mapper).sha256(revision)
             connection.prepareStatement(
-                "INSERT INTO pension_revision_approvals " +
+                "INSERT INTO catalog_revision_role_approvals " +
                     "(id, revision_id, role, issuer, subject, digest, reason, approved_at) " +
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ).use { statement ->

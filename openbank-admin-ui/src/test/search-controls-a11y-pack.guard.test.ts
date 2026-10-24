@@ -13,10 +13,12 @@ describe('operator search accessibility contract', () => {
       sanctions: 'Hledat sankční kontroly',
       'product-catalog': 'Hledat v katalogu produktů',
       audit: 'Technické ID (pokročilé)',
-      pid: 'Hledat PID případy',
     }
     for (const [route, label] of Object.entries(expected)) {
       expect(page(route)).toContain(`aria-label={t('${label}'`)
     }
+    expect(page('pid')).toContain("aria-label={t('Přesná hodnota identifikátoru', 'Exact identifier value')}")
+    expect(page('pid')).toContain("{t('Typ identifikátoru', 'Identifier type')}")
+    expect(page('pid')).toContain('onSubmit={submitLookup}')
   })
 })

@@ -3,12 +3,16 @@
 """Regression checks for source admission before OIDC and image building."""
 
 import importlib.util
+import io
 import os
 import subprocess
 import tempfile
 import unittest
+import urllib.error
 import urllib.parse
+import urllib.request
 from pathlib import Path
+from unittest import mock
 
 SCRIPT = Path(__file__).with_name("await-admin-ui-source-validation.py")
 spec = importlib.util.spec_from_file_location("source_validation", SCRIPT)
@@ -85,10 +89,73 @@ class SourceValidationTest(unittest.TestCase):
     def verify(self):
         validation.wait_for_validation(self.api, REPO, SHA, max_wait=0)
 
+    def test_github_fetch_reports_rate_limit_headers_without_response_secrets(self):
+        url = f"https://api.github.com/repos/{REPO}/actions/runs?branch=main"
+        error = urllib.error.HTTPError(url, 403, "Forbidden", {
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": "1790000123",
+            "Retry-After": "60",
+            "Authorization": "Bearer response-secret",
+        }, io.BytesIO(b"body-secret"))
+        self.addCleanup(error.close)
+        fetch = validation.github_fetch("request-secret")
+        with mock.patch.object(urllib.request, "urlopen", side_effect=error) as urlopen, \
+                self.assertRaises(RuntimeError) as raised:
+            fetch(f"repos/{REPO}/actions/runs?branch=main")
+        message = str(raised.exception)
+        self.assertIn(f"/repos/{REPO}/actions/runs?branch=main", message)
+        self.assertIn("HTTP 403", message)
+        self.assertIn("rate-limit-remaining=0", message)
+        self.assertIn("rate-limit-reset=1790000123", message)
+        self.assertIn("retry-after=60", message)
+        self.assertNotIn("request-secret", message)
+        self.assertNotIn("response-secret", message)
+        self.assertNotIn("body-secret", message)
+        self.assertEqual(urlopen.call_count, 1)
+
+    def test_github_fetch_keeps_generic_403_and_401_terminal_without_quota_headers(self):
+        for status in (403, 401):
+            with self.subTest(status=status):
+                url = f"https://api.github.com/repos/{REPO}/actions/runs"
+                error = urllib.error.HTTPError(url, status, "Unauthorized", {},
+                                               io.BytesIO(b"secret error body"))
+                self.addCleanup(error.close)
+                fetch = validation.github_fetch("request-secret")
+                with mock.patch.object(urllib.request, "urlopen", side_effect=error) as urlopen, \
+                        self.assertRaises(RuntimeError) as raised:
+                    fetch(f"repos/{REPO}/actions/runs")
+                self.assertIn(f"HTTP {status}", str(raised.exception))
+                self.assertNotIn("rate-limit-remaining", str(raised.exception))
+                self.assertNotIn("secret", str(raised.exception))
+                self.assertEqual(urlopen.call_count, 1)
+
+    def test_github_fetch_invalid_json_is_terminal_and_does_not_echo_body(self):
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        fetch = validation.github_fetch("request-secret")
+        with mock.patch.object(urllib.request, "urlopen",
+                               return_value=Response(b'{"secret":"body-secret"')) as urlopen, \
+                self.assertRaisesRegex(RuntimeError, "returned invalid JSON") as raised:
+            fetch(f"repos/{REPO}/actions/runs")
+        self.assertIn(f"/repos/{REPO}/actions/runs", str(raised.exception))
+        self.assertNotIn("body-secret", str(raised.exception))
+        self.assertEqual(urlopen.call_count, 1)
+
     def test_pact_readiness_uses_workflow_path_source_and_github_glob_semantics(self):
         patterns = validation.pact_push_path_patterns(
             SCRIPT.parents[1] / "workflows" / "pact-drift-check.yml")
         self.assertIn("!openbank-libs/governance/**", patterns)
+        for path in (
+            "openbank-ledger-service/src/test/kotlin/com/openbank/ledger/integration/PensionCoInstanceSwitchesIT.kt",
+            "openbank-infra/gitops/components/ledger-pension-co/ledger-service.yaml",
+            "openbank-infra/gitops/components/ledger-pension-co/chart-of-accounts.yaml",
+        ):
+            self.assertTrue(validation.path_matches_pact_push([path], patterns))
         self.assertTrue(validation.path_matches_pact_push(
             ["openbank-admin-ui/src/page.tsx"], patterns))
         self.assertFalse(validation.path_matches_pact_push(
@@ -130,6 +197,19 @@ class SourceValidationTest(unittest.TestCase):
         self.api.jobs[3] = [job("Detect changed services"), job("all-green", conclusion="failure")]
         with self.assertRaises(RuntimeError):
             validation.validation_ready(self.api, REPO, SHA)
+
+    def test_completed_workflow_with_missing_or_unfinished_required_job_is_pending(self):
+        # Actions may expose a successful workflow run before the jobs endpoint
+        # has indexed all jobs or their final states. Neither state authorizes a
+        # build; a later workflow_run completion retries the check.
+        self.api.jobs[3] = [job("Detect changed services")]
+        self.assertFalse(validation.validation_ready(self.api, REPO, SHA))
+
+        self.api.jobs[3] = [
+            job("Detect changed services"),
+            job("all-green", status="in_progress", conclusion=None),
+        ]
+        self.assertFalse(validation.validation_ready(self.api, REPO, SHA))
 
     def test_services_ci_aggregate_is_found_after_first_jobs_api_page(self):
         self.api.jobs[3] = [job("Detect changed services")]

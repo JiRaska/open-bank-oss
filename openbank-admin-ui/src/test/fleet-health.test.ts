@@ -55,4 +55,14 @@ describe('dashboard fleet-health summary', () => {
     expect(fleetHealthState(summary)).toBe('degraded')
   })
 
+  it('counts missing roster members as unknown when discovery coverage is partial', () => {
+    const summary = summarizeFleetHealth([
+      { deployed: true, up: true, latencyMs: 8 },
+      { deployed: null, up: false, latencyMs: null },
+      { deployed: false, up: false, latencyMs: null },
+    ])
+    expect(summary).toMatchObject({ total: 3, deployed: 1, healthy: 1, unknown: 1, notDeployed: 1 })
+    expect(fleetHealthState(summary)).toBe('unavailable')
+  })
+
 })

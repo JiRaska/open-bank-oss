@@ -84,6 +84,10 @@ Auditní konzument odebírá `openbank.fx.cnb-policy-rate.published` spolu s ost
 
 Auditní API v produkci používá bearer autentizaci na HTTP i mTLS listeneru. Důvěryhodný klientský certifikát je podmínkou TLS spojení, ale nenahrazuje bearer token volajícího. Bez bearer přihlašovacích údajů API vrací HTTP 401; role endpointu a OPA nadále rozhodují, co smí přihlášený volající číst. Test parity listenerů načítá produkční konfiguraci a přes skutečné HTTP ověřuje přístup bez certifikátu, pouze s certifikátem i s platným bearer tokenem.
 
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

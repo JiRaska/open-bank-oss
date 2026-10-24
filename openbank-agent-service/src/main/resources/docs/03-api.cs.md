@@ -11,6 +11,7 @@ Platí dvě verzovací osy (ADR-0048): release verze (`version.txt` = `1.27.4`) 
 | MCP server | `POST /mcp` | JSON-RPC 2.0 přes HTTP | identita `X-Agent-Id` (deny-by-default při absenci) |
 | Admin asistent | `POST /agent/chat` | JSON | Keycloak OIDC; běží jako `ui-assistant` |
 | Registr modelů | `GET /agent/models` | JSON | Keycloak OIDC |
+| Capability / kontrola katalogu | `GET` / `POST` `/agent/catalog-reviews` | JSON | Keycloak OIDC; operator/admin/compliance |
 | Důkazní záznamy merge | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (role viz níže) |
 | Health | `GET /q/health/live`, `/q/health/ready` | JSON | žádné (management port 8085) |
 
@@ -74,6 +75,17 @@ Smyčka vynucuje charter `ui-assistant`: pre-flight kontrolu runs-per-day (přes
 ## `GET /agent/models`
 
 Vrací default id modelu a každý povolený model v registru gateway: `{ default, models: [{ id, provider, sensitivity }] }` kde `sensitivity ∈ {HOSTED, SELF_HOSTED}`.
+
+## Catalog Intelligence — `/agent/catalog-reviews`
+
+Obě operace vyžadují roli `ROLE_OPERATOR`, `ROLE_ADMIN` nebo `ROLE_COMPLIANCE`.
+
+- **`GET /agent/catalog-reviews`** vrací capability kontroly katalogu: zda je nakonfigurovaná trasa způsobilá, její režim, nakonfigurované výchozí id modelu a povolené popisy modelů. Seznam vychází z registru modelů služby a zásad nasazení; endpoint neověřuje dostupnost poskytovatele ani nezaručuje, že upstream model právě odpovídá. UI přebírá modely z této odpovědi a id modelů nezakóduje napevno.
+- **`POST /agent/catalog-reviews`** přijímá UUID `offeringId` a `revisionId` a volitelné `model` z allow-listu capability. Pokud chybí, služba použije nakonfigurovaný výchozí model. Načte přesně určenou revizi katalogu, ověří, že je stále ve stavu `DRAFT`, a odmítne snapshot delší než 64 000 znaků. Model dostane připnutý snapshot bez nástrojů. Jediným uloženým výsledkem je položka `PROPOSED` ve frontě human-in-the-loop; operace nemění, nepublikuje ani neruší obsah katalogu.
+
+Hostovaná kontrola je výjimkou pouze pro katalog a sandbox. `catalog-review.allow-hosted-models` má výchozí hodnotu `false`; sandbox deployment ji zapíná výslovně. Při zapnutí server povolí pouze registrované modely `openai-compat`, jejichž nakonfigurovaný endpoint odpovídá in-cluster gateway LiteLLM. Použije již nakonfigurovaný výchozí model a existující rozpočtové limity LiteLLM; nepřidává přihlašovací údaje poskytovatele ani přímou trasu k poskytovateli. V nasazeních bez tohoto opt-inu zůstává pro kontrolu katalogu zachován požadavek na self-hosted model pro citlivý kontext. Výjimka nemění směrování ostatních agentních workflow.
+
+Neplatné identifikátory, revize mimo stav `DRAFT`, příliš velký snapshot nebo model mimo allow-list vracejí `400`; chybějící způsobilá nakonfigurovaná trasa nebo nedostupný model vrací `503`. Úspěšná odpověď obsahuje id/stav návrhu, hash kontextu, omezené nálezy a použité id modelu.
 
 ## Zaznamenané lidské merge — `/api/v1/agent-merge-records`
 

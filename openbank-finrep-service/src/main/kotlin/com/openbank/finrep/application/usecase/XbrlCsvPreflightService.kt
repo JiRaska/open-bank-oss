@@ -31,6 +31,18 @@ class XbrlCsvPreflightService(private val finrepUseCase: FinrepUseCase) : XbrlCs
                     ),
                 )
             }
+            val unverified = template.cells
+                .map { "${template.templateId}/${it.rowRef}/${it.colRef}" }
+                .filter { it in EbaReportingFramework42.UNVERIFIED_DATAPOINT_CELLS }
+            if (unverified.isNotEmpty()) {
+                add(
+                    XbrlCsvBlocker(
+                        code = "UNVERIFIED_DATAPOINT_ID",
+                        reason = "Emitted cells ${unverified.joinToString()} have no verified EBA datapoint id " +
+                            "(#13603) and must not be submitted.",
+                    ),
+                )
+            }
             if (!template.isBalanced) {
                 add(
                     XbrlCsvBlocker(

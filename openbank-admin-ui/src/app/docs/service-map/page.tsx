@@ -10,6 +10,8 @@ import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import { buildRegistry, k8sNameOf, type CatalogFleetModule, type ServiceEntry } from '@/lib/services/registry'
 import { edgeGeometry, pathId, type Pt, type Half } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
@@ -348,13 +350,16 @@ export default function ServiceMapPage() {
   // The node set is DERIVED: every runnable module in the code-generated catalog (the same
   // /api/catalog/services artifact the other service views use), never a list typed into this page.
   const [registry, setRegistry] = useState<ServiceEntry[]>([])
+  const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const [apiTitles, setApiTitles] = useState<Record<string, string>>({})
   useEffect(() => {
     let alive = true
     fetch('/api/catalog/services', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
-      .then((data: { services?: (CatalogFleetModule & { apiTitle?: string | null })[] } | null) => {
-        if (!alive || !Array.isArray(data?.services)) return
+      .then((data: { services?: (CatalogFleetModule & { apiTitle?: string | null })[]; contentSource?: ContentSourceMetadata } | null) => {
+        if (!alive || !data) return
+        setContentSource(data.contentSource ?? null)
+        if (!Array.isArray(data.services)) return
         setRegistry(buildRegistry(data.services))
         setApiTitles(Object.fromEntries(data.services.filter(m => m.apiTitle).map(m => [m.name, String(m.apiTitle)])))
       })
@@ -642,6 +647,8 @@ export default function ServiceMapPage() {
         subtitle={t(`Animovaná mapa toku dat napříč ${SERVICES.length} službami, infrastrukturou a 3. stranami · sync i async · najeďte myší na uzel pro zvýraznění cesty`, `Animated data-flow map across ${SERVICES.length} services, infrastructure and 3rd parties · sync and async · hover a node to highlight its path`)}
         icon={<Network aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
       />
+
+      <ContentSourceNote source={contentSource} />
 
       <CatalogDriftBanner present={CATALOG_PRESENT} />
 

@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
-const source = readFileSync(path.resolve(__dirname, '../app/docs/bcp/page.tsx'), 'utf8')
+const pageSource = readFileSync(path.resolve(__dirname, '../app/docs/bcp/page.tsx'), 'utf8')
+const modelSource = readFileSync(path.resolve(__dirname, '../lib/bcp/continuityModel.ts'), 'utf8')
+const source = `${pageSource}\n${modelSource}`
 
 describe('BCP semantic theme contract', () => {
   it('uses shared light/dark semantic colors without local palette literals', () => {

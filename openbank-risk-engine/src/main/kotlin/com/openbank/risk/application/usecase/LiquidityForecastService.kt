@@ -9,8 +9,11 @@ import com.openbank.risk.application.port.`in`.LiquidityForecastAnalysis
 import com.openbank.risk.application.port.`in`.LiquidityForecastUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.domain.cashflow.BehaviouralModel
+import com.openbank.risk.domain.cashflow.CashFlow
+import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.liquidity.LiquidityForecast
 import com.openbank.risk.domain.liquidity.LiquidityParameters
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -23,6 +26,8 @@ class LiquidityForecastService(
     private val curveSets: CurveSetUseCase,
     private val model: BehaviouralModel,
     private val parameters: LiquidityParameters,
+    /** PLANNED treasury deals' flows (ADR-0344 D2), counted as contractual; null when not wired. */
+    private val planned: (suspend (LocalDate, CurveSet) -> List<CashFlow>)? = null,
 ) : LiquidityForecastUseCase {
 
     override suspend fun forecast(runId: UUID, curveSetId: UUID, horizonDays: Int): LiquidityForecastAnalysis {
@@ -42,7 +47,16 @@ class LiquidityForecastService(
             curveSet,
             model,
             parameters,
-            LiquidityForecast.ofSnapshot(positions, instruments, run.asOf, curveSet, model, parameters, horizonDays),
+            LiquidityForecast.ofSnapshot(
+                positions,
+                instruments,
+                run.asOf,
+                curveSet,
+                model,
+                parameters,
+                horizonDays,
+                planned?.invoke(run.asOf, curveSet).orEmpty(),
+            ),
         )
     }
 }

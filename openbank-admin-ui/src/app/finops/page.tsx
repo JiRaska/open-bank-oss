@@ -100,6 +100,16 @@ function HeapBar({ pct, efficiency }: { pct: number | null; efficiency: string }
   )
 }
 
+function compareEksVersionsNewestFirst(left: string, right: string): number {
+  const leftParts = left.split('.').map(Number)
+  const rightParts = right.split('.').map(Number)
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (rightParts[index] ?? 0) - (leftParts[index] ?? 0)
+    if (difference !== 0) return difference
+  }
+  return 0
+}
+
 // Per-day cloud spend trend — a hand-rolled inline SVG area chart (matches the
 // panel's other hand-rolled bars; no chart lib). This is the series the team
 // otherwise reads only in the AWS console. Higher spend is tinted as the
@@ -569,7 +579,10 @@ function FinOpsContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lifecycle.versions.map(v => (
+                  {[...lifecycle.versions]
+                    .sort((left, right) => compareEksVersionsNewestFirst(left.version, right.version))
+                    .slice(0, 5)
+                    .map(v => (
                     <tr key={v.version}
                       style={{
                         borderBottom: '1px solid var(--border)',

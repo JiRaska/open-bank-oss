@@ -6,6 +6,7 @@
 flowchart LR
   Service[Quarkus služba] --> Runtime[openbank-libs-runtime]
   Runtime --> Domain[openbank-libs-domain]
+  Finance[openbank-libs-finance] --> Domain
   Legacy[openbank-libs kompatibilitní zastřešení] --> Runtime
   Legacy --> Domain
   Runtime --> DocsResource[DocsResource /q/openbank/docs]
@@ -14,6 +15,8 @@ flowchart LR
 ```
 
 `openbank-libs-domain` obsahuje sdílené doménové primitivy a porty. Jeho build definuje hranici bez frameworku; modul nesmí importovat Quarkus ani CDI. `openbank-libs-runtime` obsahuje frameworkové adaptéry, HTTP resource a CDI zapojení. Konzumentům exportuje doménové typy. Kořenový `openbank-libs` zůstává kompatibilitním zastřešením starších závislostí; zdrojové kódy knihovny již nevlastní.
+
+`openbank-libs-finance` používá z doménového jádra `BusinessCalendar` a `BusinessDayConvention` pro finanční harmonogramy. Vlastní enum pro to nemá; pravidla harmonogramu berou přímo enum z jádra. `UNADJUSTED` ponechá datum beze změny i o svátku; pořadí a chování čtyř dosavadních konvencí zůstává stejné. Zavírací dny kalendáře a případné mimořádné svátky vstupují do otisku harmonogramu, takže jejich změna může změnit jeho verzi.
 
 Služba vlastní dokumenty v `src/main/resources/docs/`. Společná Gradle konvence při `processResources` vytvoří `00-build.md` a zabalí jej vedle ručně psaných Markdown souborů. `ClasspathMarkdownLoader` čte tyto zdroje z classpath, `DocsCatalog` vybírá jazykové varianty a počítá otisky, `DocsResource` publikuje index, metadata a dokumenty z běžícího buildu. Admin UI čte běžící endpoint přes Kubernetes discovery. Zobrazená dokumentace služby tak odpovídá nasazenému image.
 
@@ -36,6 +39,10 @@ Kořenový build používá Gradle subprojekty. Služby zpravidla deklarují `im
 ## Vlastnictví topicu sazeb ČNB
 
 `openbank-libs-domain` mapuje `openbank.fx.cnb-policy-rate.published` na `fx-service` v `TopicProducers`. Tím zaznamenává producenta pro sdílenou analytiku a kontroly správy; knihovna událost sama nepublikuje ani neodebírá. Producentem je cesta příjmu sazeb ve FX, zatímco risk engine a audit-service odebírají fakta a auditní stopu. Při přejmenování topicu nebo změně vlastníka aktualizujte i mapování.
+
+## Producenti zapínaní při buildu
+
+`RedisApprovalStoreProducer` (`ApprovalStore` pro čtyři oči, zapíná `openbank.approval.store: redis`) a `OpaPolicyDecisionPointProducer` (PDP pro OPA sidecar, zapíná `openbank.authz.opa-pdp-producer.enabled: true`) jsou podmíněné `@IfBuildProperty` a bez vlastnosti vypnuté. Ani jeden není `@DefaultBean`: služba, která je zapne a zároveň si ponechá vlastního producenta, neprojde `quarkusBuild` kvůli nejednoznačné závislosti. Na přítomnosti beanu záleží, protože `AuthorizeInterceptor` zapíná čtyři oči, jakmile `ApprovalStore` existuje.
 
 ## Trace kontext outboxu
 

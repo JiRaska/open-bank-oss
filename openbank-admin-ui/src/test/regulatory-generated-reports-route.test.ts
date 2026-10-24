@@ -10,18 +10,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/auth', () => ({ auth: vi.fn() }))
 vi.mock('@/lib/discovery', () => ({
   inCluster: () => true,
-  resolveInClusterBaseUrl: vi.fn(async (name: string) => `http://${name}.test:8080`),
+  resolveInClusterService: vi.fn(async (name: string) => ({ state: 'found', service: {}, baseUrl: `http://${name}.test:8080`, coverage: 'partial' })),
 }))
 vi.mock('@/lib/services/fleet', () => ({
   getProxyAllowlist: () => ({ 'transaction-service': { container: 'tx', port: 8080 } }),
 }))
 
 import { auth } from '@/auth'
+import { resolveInClusterService } from '@/lib/discovery'
 
 const ctx = (reportId: string) => ({ params: Promise.resolve({ reportId }) })
 
 describe('GET /api/regulatory/returns/[reportId]', () => {
-  beforeEach(() => { vi.resetModules() })
+  beforeEach(() => {
+    vi.resetModules()
+    vi.mocked(resolveInClusterService).mockImplementation(async (name: string) => ({ state: 'found', service: {} as never, baseUrl: `http://${name}.test:8080`, coverage: 'partial' }))
+  })
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
   it('generates the report with the operator bearer on every upstream call', async () => {
@@ -72,6 +76,20 @@ describe('GET /api/regulatory/returns/[reportId]', () => {
     expect((await res.json()).error).toMatch(/^Unknown service/)
   })
 
+  it('does not label a source undeployed when Kubernetes discovery is incomplete', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 't', roles: ['ROLE_ADMIN'] } } as never)
+    vi.mocked(resolveInClusterService).mockResolvedValue({ state: 'unknown', coverage: 'partial' })
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const { GET } = await import('@/app/api/regulatory/returns/[reportId]/route')
+
+    const res = await GET(new Request('http://ui/api/regulatory/returns/sdat-payments?period=2026-09'), ctx('sdat-payments'))
+
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: 'discovery_unavailable' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('rejects an invalid period', async () => {
     vi.mocked(auth).mockResolvedValue({ user: { accessToken: 't', roles: ['ROLE_ADMIN'] } } as never)
     const { GET } = await import('@/app/api/regulatory/returns/[reportId]/route')
@@ -83,11 +101,12 @@ describe('GET /api/regulatory/returns/[reportId]', () => {
 describe('regulatory report failure log privacy', () => {
   const detail = 'synthetic-customer@example.test\r\nFORGED %s %o transaction=synthetic-123'
   const failures = [
-    { kind: 'not_deployed', status: 404, error: 'Unknown service: transaction-service' },
-    { kind: 'unauthorized', status: 403, error: 'unauthorized' },
-    { kind: 'unreachable', status: 502, error: 'upstream_unreachable' },
-    { kind: 'result_limit', status: 500, error: 'result_limit' },
-    { kind: 'error', status: 500, error: 'upstream_error' },
+    { kind: 'not_deployed', status: 404, body: { error: 'Unknown service: transaction-service', service: 'transaction-service' } },
+    { kind: 'discovery_unavailable', status: 503, body: { error: 'discovery_unavailable' } },
+    { kind: 'unauthorized', status: 403, body: { error: 'unauthorized', service: 'transaction-service' } },
+    { kind: 'unreachable', status: 502, body: { error: 'upstream_unreachable', service: 'transaction-service' } },
+    { kind: 'result_limit', status: 500, body: { error: 'result_limit', service: 'transaction-service' } },
+    { kind: 'error', status: 500, body: { error: 'upstream_error', service: 'transaction-service' } },
   ] as const
 
   beforeEach(() => {
@@ -100,7 +119,7 @@ describe('regulatory report failure log privacy', () => {
     vi.unstubAllGlobals()
   })
 
-  it.each(failures)('preserves $kind response without logging source detail', async ({ kind, status, error }) => {
+  it.each(failures)('preserves $kind response without logging source detail', async ({ kind, status, body }) => {
     vi.doMock('@/lib/regulatory/generatedReports', async importOriginal => {
       const actual = await importOriginal<typeof import('@/lib/regulatory/generatedReports')>()
       return {
@@ -115,7 +134,7 @@ describe('regulatory report failure log privacy', () => {
     const res = await GET(new Request('http://ui/api/regulatory/returns/sdat-payments?period=2026-09'), ctx('sdat-payments'))
 
     expect(res.status).toBe(status)
-    expect(await res.json()).toEqual({ error, service: 'transaction-service' })
+    expect(await res.json()).toEqual(body)
     expect(generateReport).toHaveBeenCalledWith('sdat-payments', '2026-09', expect.objectContaining({
       get: expect.any(Function), request: expect.any(Function),
     }), expect.any(Object))

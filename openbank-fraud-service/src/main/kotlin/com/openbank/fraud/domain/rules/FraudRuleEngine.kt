@@ -7,15 +7,19 @@ package com.openbank.fraud.domain.rules
 import com.openbank.fraud.domain.model.FraudScore
 import com.openbank.fraud.domain.model.FraudVerdict
 import com.openbank.fraud.domain.model.ScoreRequest
-import java.math.BigDecimal
 
 /**
- * A single deterministic, versioned fraud rule (ADR-0084 §3 — rules first, ML later). Rules are
- * code-reviewed config, never a UI-editable engine, so every change is a money-path PR.
+ * A single deterministic, versioned fraud rule (ADR-0084 §3 — rules first, ML later). Rule LOGIC is
+ * code-reviewed, never a UI-editable engine, so every change to it is a money-path PR. The money
+ * thresholds the amount rules compare against are NOT code: they arrive as the active
+ * [FraudThresholdSet] (ADR-0347), versioned data activated four-eyes at runtime.
  */
 fun interface FraudRule {
-    /** Returns a partial contribution to the score, or null when the rule does not fire. */
-    fun evaluate(request: ScoreRequest): RuleHit?
+    /**
+     * Returns a partial contribution to the score, or null when the rule does not fire. [thresholds]
+     * is null when no threshold set is active; a rule that needs one then fails closed.
+     */
+    fun evaluate(request: ScoreRequest, thresholds: FraudThresholdSet?): RuleHit?
 }
 
 /** The outcome of one rule firing: a score delta, the implied verdict and a human-readable reason. */
@@ -32,7 +36,7 @@ data class RuleHit(val scoreDelta: Int, val verdict: FraudVerdict, val reason: S
  * [FraudRuleEngine.RULE_VERSION].
  */
 object BaselineAllowRule : FraudRule {
-    override fun evaluate(request: ScoreRequest): RuleHit =
+    override fun evaluate(request: ScoreRequest, thresholds: FraudThresholdSet?): RuleHit =
         RuleHit(scoreDelta = 0, verdict = FraudVerdict.ALLOW, reason = "baseline-allow")
 }
 
@@ -44,7 +48,7 @@ object BaselineAllowRule : FraudRule {
 object VelocityH1ReviewRule : FraudRule {
     private const val H1_CAP = 10L
 
-    override fun evaluate(request: ScoreRequest): RuleHit? {
+    override fun evaluate(request: ScoreRequest, thresholds: FraudThresholdSet?): RuleHit? {
         if (request.velocityH1Count < H1_CAP) return null
         return RuleHit(scoreDelta = 30, verdict = FraudVerdict.REVIEW, reason = "velocity-h1-cap")
     }
@@ -57,7 +61,7 @@ object VelocityH1ReviewRule : FraudRule {
 object VelocityH24ReviewRule : FraudRule {
     private const val H24_CAP = 50L
 
-    override fun evaluate(request: ScoreRequest): RuleHit? {
+    override fun evaluate(request: ScoreRequest, thresholds: FraudThresholdSet?): RuleHit? {
         if (request.velocityH24Count < H24_CAP) return null
         return RuleHit(scoreDelta = 20, verdict = FraudVerdict.REVIEW, reason = "velocity-h24-cap")
     }
@@ -71,24 +75,18 @@ object VelocityH24ReviewRule : FraudRule {
  *
  * **Per-currency, not a single global figure** (fixed after adversarial review of the initial PR:
  * a currency-neutral raw-amount threshold let a large EUR payment sail under a CZK-calibrated cap —
- * CZK and EUR differ by roughly 25x). [THRESHOLDS_BY_CURRENCY] are a first-pass calibration, not
- * regulatorily-derived figures — same disclosure spirit as the PD/LGD placeholders in the lending
- * ADRs — and are expected to be tuned once shadow-mode metrics establish a false-positive baseline.
+ * CZK and EUR differ by roughly 25x). The figures live in the active [FraudThresholdSet] under
+ * [FraudThresholdSet.LARGE_SINGLE_TRANSACTION] (ADR-0347); version 1 of that set is the first-pass
+ * calibration these rules shipped with as code constants, seeded unchanged by `V9`.
  *
  * **Fails CLOSED for an unmapped currency** (REVIEW fires unconditionally), matching the existing
  * fail-closed convention elsewhere in the repo (e.g. `WaiverEvaluator`): what the rule cannot safely
- * evaluate is flagged for a human, never silently waived through.
+ * evaluate is flagged for a human, never silently waived through. No active threshold set at all is
+ * the same case for every currency.
  */
 object LargeSingleTransactionReviewRule : FraudRule {
-    // First-pass calibration only — not risk-team-approved figures. CZK/EUR chosen to roughly track
-    // the ~25x CZK:EUR value gap so the same real-world risk tier trips both currencies alike.
-    private val THRESHOLDS_BY_CURRENCY: Map<String, BigDecimal> = mapOf(
-        "CZK" to BigDecimal("500000"),
-        "EUR" to BigDecimal("20000"),
-    )
-
-    override fun evaluate(request: ScoreRequest): RuleHit? {
-        val threshold = THRESHOLDS_BY_CURRENCY[request.currency]
+    override fun evaluate(request: ScoreRequest, thresholds: FraudThresholdSet?): RuleHit? {
+        val threshold = thresholds?.thresholdFor(FraudThresholdSet.LARGE_SINGLE_TRANSACTION, request.currency)
             ?: return RuleHit(
                 scoreDelta = 25,
                 verdict = FraudVerdict.REVIEW,
@@ -117,14 +115,8 @@ object LargeSingleTransactionReviewRule : FraudRule {
  * doubt.
  */
 object VelocityH1HighValueReviewRule : FraudRule {
-    // First-pass calibration only — not risk-team-approved figures. See LargeSingleTransactionReviewRule.
-    private val THRESHOLDS_BY_CURRENCY: Map<String, BigDecimal> = mapOf(
-        "CZK" to BigDecimal("1000000"),
-        "EUR" to BigDecimal("40000"),
-    )
-
-    override fun evaluate(request: ScoreRequest): RuleHit? {
-        val threshold = THRESHOLDS_BY_CURRENCY[request.currency]
+    override fun evaluate(request: ScoreRequest, thresholds: FraudThresholdSet?): RuleHit? {
+        val threshold = thresholds?.thresholdFor(FraudThresholdSet.VELOCITY_H1_AMOUNT, request.currency)
             ?: return RuleHit(
                 scoreDelta = 35,
                 verdict = FraudVerdict.REVIEW,
@@ -153,23 +145,14 @@ object VelocityH1HighValueReviewRule : FraudRule {
  * other amount-based rules: an unmapped currency means the rule cannot safely evaluate the amount,
  * so a genuinely new payee is flagged for a human rather than silently waived through.
  *
- * [THRESHOLDS_BY_CURRENCY] are first-pass, non-calibrated placeholders — not risk-team-approved
- * figures — set at roughly half of [LargeSingleTransactionReviewRule]'s thresholds as a starting
- * point; expected to be tuned once shadow-mode metrics establish a false-positive baseline, same
- * disclosure spirit as the other v3/v4 amount rules.
+ * The figures live in the active [FraudThresholdSet] under [FraudThresholdSet.NEW_PAYEE_HIGH_AMOUNT]
+ * (ADR-0347). Version 1 seeds them at roughly half of [LargeSingleTransactionReviewRule]'s, the
+ * starting point these rules shipped with as code constants.
  */
 object NewPayeeHighAmountReviewRule : FraudRule {
-    // First-pass calibration only — not risk-team-approved figures. Roughly half of
-    // LargeSingleTransactionReviewRule's CZK/EUR thresholds: a first payment to a never-seen payee
-    // is inherently higher-risk than the same amount to an established payee.
-    private val THRESHOLDS_BY_CURRENCY: Map<String, BigDecimal> = mapOf(
-        "CZK" to BigDecimal("250000"),
-        "EUR" to BigDecimal("10000"),
-    )
-
-    override fun evaluate(request: ScoreRequest): RuleHit? {
+    override fun evaluate(request: ScoreRequest, thresholds: FraudThresholdSet?): RuleHit? {
         if (!request.isNewPayee) return null
-        val threshold = THRESHOLDS_BY_CURRENCY[request.currency]
+        val threshold = thresholds?.thresholdFor(FraudThresholdSet.NEW_PAYEE_HIGH_AMOUNT, request.currency)
             ?: return RuleHit(
                 scoreDelta = 30,
                 verdict = FraudVerdict.REVIEW,
@@ -209,8 +192,18 @@ object FraudRuleEngine {
     private val SEVERITY: List<FraudVerdict> =
         listOf(FraudVerdict.ALLOW, FraudVerdict.CHALLENGE, FraudVerdict.REVIEW, FraudVerdict.DECLINE)
 
-    fun score(request: ScoreRequest): FraudScore {
-        val hits = RULES.mapNotNull { it.evaluate(request) }
+    /**
+     * Score [request] against the rules, reading money thresholds from [thresholds] — the set active
+     * at the moment of scoring, resolved by the caller (ADR-0347).
+     *
+     * A null [thresholds] means no set is active, which no healthy deployment reaches (`V9` seeds
+     * version 1). It fails CLOSED as REVIEW, never DECLINE: every amount rule sees an unmapped
+     * currency and flags for a human, and [THRESHOLDS_UNAVAILABLE] names the actual cause on the
+     * audit row so an analyst is not left reading "unmapped currency" for CZK.
+     */
+    fun score(request: ScoreRequest, thresholds: FraudThresholdSet?): FraudScore {
+        val ruleHits = RULES.mapNotNull { it.evaluate(request, thresholds) }
+        val hits = if (thresholds == null) ruleHits + THRESHOLDS_UNAVAILABLE_HIT else ruleHits
         val totalScore = hits.sumOf { it.scoreDelta }
         val verdict = hits.map { it.verdict }.maxByOrNull { SEVERITY.indexOf(it) } ?: FraudVerdict.ALLOW
         val reasons = hits.map { it.reason }
@@ -219,6 +212,13 @@ object FraudRuleEngine {
             score = totalScore,
             reasons = reasons,
             ruleVersion = RULE_VERSION,
+            thresholdSetVersion = thresholds?.version,
         )
     }
+
+    /** Reason recorded when no threshold set is active (see [score]). */
+    const val THRESHOLDS_UNAVAILABLE: String = "threshold-set-unavailable"
+
+    private val THRESHOLDS_UNAVAILABLE_HIT =
+        RuleHit(scoreDelta = 0, verdict = FraudVerdict.REVIEW, reason = THRESHOLDS_UNAVAILABLE)
 }

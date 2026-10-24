@@ -270,7 +270,21 @@ export async function fetchAllServiceSnapshotsEvidence(): Promise<ServiceSnapsho
     if (typeof data !== 'object' || data === null || !Array.isArray((data as { services?: unknown }).services)) {
       return { ok: false, failure: 'error' }
     }
-    const services = (data as { services: unknown[] }).services
+    const healthEvidence = data as { services: unknown[]; source?: unknown; discoveryStatus?: unknown }
+    if (healthEvidence.source === 'kubernetes') {
+      if (healthEvidence.discoveryStatus !== 'complete') {
+        // Partial, unavailable, and malformed inventory can contain useful
+        // positive observations, but cannot establish the absence of services.
+        return { ok: false, failure: 'discovery_unavailable' }
+      }
+    } else if (healthEvidence.source === 'static') {
+      if (healthEvidence.discoveryStatus !== 'static') {
+        return { ok: false, failure: 'discovery_unavailable' }
+      }
+    } else {
+      return { ok: false, failure: 'discovery_unavailable' }
+    }
+    const services = healthEvidence.services
     if (!services.every(isHealthEntry)) return { ok: false, failure: 'error' }
     if (new Set(services.map(healthEntryIdentity)).size !== services.length) {
       return { ok: false, failure: 'error' }

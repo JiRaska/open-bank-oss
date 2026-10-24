@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.0...agent-service-v1.31.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **agent:** enable sandbox catalog reviews through existing LiteLLM models ([#13390](https://github.com/JiRaska/open-bank-oss/issues/13390)) ([dc4ecc9](https://github.com/JiRaska/open-bank-oss/commit/dc4ecc9788d925b64230712a36b46e45f025f5ef))
+
 ## [1.31.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.30.1...agent-service-v1.31.0) (2026-10-19)
 
 

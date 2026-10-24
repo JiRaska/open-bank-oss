@@ -8,7 +8,7 @@ openapi: "3.1.0"
 info:
   title: OpenBank Agent Service API (MCP)
 
-  version: "1.15.0"
+  version: "1.16.0"
   description: |
     Model Context Protocol (MCP) 2.0 server exposing OpenBank domain operations as AI-callable tools.
     All requests use JSON-RPC 2.0 over HTTP POST `/mcp`.
@@ -23,10 +23,11 @@ info:
     behind a provider-agnostic model gateway. The model call never happens in the browser — the
     UI posts to `/agent/chat`, the loop runs each tool through the OPA policy gate, and every
     model completion emits an AI-attributed audit event. `/agent/models` lists the registered
-    models. The demo ships a single offline mock provider; adding a real model is a config entry,
-    not a code change. `POST /agent/catalog-reviews` turns one exact DRAFT revision into a
-    human-reviewed proposal: it has no catalog mutation path and refuses to send private draft
-    content to a hosted model.
+    models. The registry includes an offline mock and configured LiteLLM routes; adding a model is
+    a config entry, not a code change. `POST /agent/catalog-reviews` turns one exact DRAFT revision
+    into a human-reviewed proposal without a catalog mutation path. Hosted routing is allowed only
+    for this workflow when its catalog-only sandbox opt-in is enabled; other sensitive workflows
+    keep their existing self-hosted routing policy.
 
     This is an internal service — not exposed via API Gateway to external TPPs.
   license:
@@ -230,6 +231,26 @@ paths:
                         sensitivity: "HOSTED"
 
   /agent/catalog-reviews:
+    get:
+      tags: [catalog-review]
+      operationId: catalogReviewCapability
+      summary: Report models allowed for catalog draft review
+      description: |
+        Returns the server-side catalog-review model allow-list and configured default. Hosted
+        models are eligible only when the catalog-only sandbox opt-in is enabled and the model
+        is registered through the in-cluster LiteLLM gateway. This policy does not alter model
+        routing for other sensitive agent workflows.
+      responses:
+        "200":
+          description: Current review capability derived from the enabled model registry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReviewCapability'
+        "401":
+          description: Missing or invalid operator bearer
+        "403":
+          description: Authenticated caller is not permitted to inspect catalog-review capability
     post:
       tags: [catalog-review]
       operationId: createCatalogReview
@@ -237,9 +258,11 @@ paths:
       description: |
         ADR-0259 P6a. Fetches the exact v2 offering revision named by `offeringId` and
         `revisionId`, requires it to still be DRAFT, then gives that fixed snapshot to a
-        self-hosted model with no tools. The response is an immutable PROPOSED record in the
-        existing HITL queue plus bounded findings. It never creates, replaces, publishes or
-        retires catalog content, determines eligibility, or enumerates private offers.
+        capability-approved model with no tools. In the sandbox only, this may be one of the
+        configured hosted models routed through the existing LiteLLM gateway. The response is an
+        immutable PROPOSED record in the existing HITL queue plus bounded findings. It never
+        creates, replaces, publishes or retires catalog content, determines eligibility, or
+        enumerates private offers.
       requestBody:
         required: true
         content:
@@ -262,7 +285,7 @@ paths:
         "404":
           description: Offering or revision not found
         "503":
-          description: No self-hosted review model is available
+          description: No capability-approved review model is available
 
   /agent/oversight/run:
     post:
@@ -683,6 +706,24 @@ components:
           items:
             $ref: '#/components/schemas/ModelInfo'
 
+    CatalogReviewCapability:
+      type: object
+      required: [available, models]
+      properties:
+        available:
+          type: boolean
+        mode:
+          type: string
+          nullable: true
+          enum: [sandbox-hosted, self-hosted]
+        defaultModel:
+          type: string
+          nullable: true
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelInfo'
+
     CatalogReviewRequest:
       type: object
       required: [offeringId, revisionId]
@@ -696,7 +737,8 @@ components:
           format: uuid
         model:
           type: string
-          description: Optional registered self-hosted model id. Omit to use the self-hosted default.
+          description: Optional id from the catalog-review capability allow-list. Omit to use its
+            configured default.
 
     CatalogReviewFinding:
       type: object
