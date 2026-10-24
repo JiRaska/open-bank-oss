@@ -184,7 +184,8 @@ class ConformancePackApprovalPolicyIT {
             statusCode(200)
             body("state", equalTo("PUBLISHED"))
             body("approvalDigest", notNullValue())
-            body("pensionApprovalDigest", notNullValue())
+            // The deprecated pension* wire alias is gone (#13429); only the generic field is served.
+            body("pensionApprovalDigest", nullValue())
         }
     }
 

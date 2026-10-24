@@ -201,13 +201,13 @@ class RetirementCatalogPackResourceTest {
             body("""{"reason":"reviewed instrument class coverage"}""")
             header("If-Match", "\"0\"")
         } When { post(publishPath) } Then { statusCode(409) }
-        insertPensionApproval(revisionId, "LEGAL_COUNSEL", "legal-subject")
+        insertRoleApproval(revisionId, "LEGAL_COUNSEL", "legal-subject")
         Given {
             contentType("application/json")
             body("""{"reason":"reviewed instrument class coverage"}""")
             header("If-Match", "\"0\"")
         } When { post(publishPath) } Then { statusCode(409) }
-        insertPensionApproval(revisionId, "PRODUCT_OWNER", "product-subject")
+        insertRoleApproval(revisionId, "PRODUCT_OWNER", "product-subject")
         Given {
             contentType("application/json")
             body("""{"reason":"reviewed instrument class coverage"}""")
@@ -225,7 +225,7 @@ class RetirementCatalogPackResourceTest {
             body("content.attributes.instrumentClasses", equalTo(listOf("BOND_FUNDS", "EQUITY_FUNDS")))
         }
         Given { this } When {
-            get("/api/v2/offerings/$offeringId/revisions/$revisionId/pension-approvals")
+            get("/api/v2/offerings/$offeringId/revisions/$revisionId/approvals")
         } Then {
             statusCode(200)
             body("size()", equalTo(2))
@@ -240,8 +240,8 @@ class RetirementCatalogPackResourceTest {
             effectiveFrom = "2027-02-01T00:00:00Z",
         )
         setMaker(staleRevision, "independent-retirement-maker")
-        insertPensionApproval(staleRevision, "LEGAL_COUNSEL", "legal-subject")
-        insertPensionApproval(staleRevision, "PRODUCT_OWNER", "product-subject")
+        insertRoleApproval(staleRevision, "LEGAL_COUNSEL", "legal-subject")
+        insertRoleApproval(staleRevision, "PRODUCT_OWNER", "product-subject")
         setDraftReviewStatus(staleRevision, "ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW")
         setDraftReviewStatus(staleRevision, "LEGAL_AND_COMMERCIAL_REVIEWED")
         Given {
@@ -261,8 +261,8 @@ class RetirementCatalogPackResourceTest {
             effectiveFrom = "2027-04-01T00:00:00Z",
         )
         setMaker(sameActorRevision, "independent-retirement-maker")
-        insertPensionApproval(sameActorRevision, "LEGAL_COUNSEL", "shared-subject")
-        insertPensionApproval(sameActorRevision, "PRODUCT_OWNER", "shared-subject")
+        insertRoleApproval(sameActorRevision, "LEGAL_COUNSEL", "shared-subject")
+        insertRoleApproval(sameActorRevision, "PRODUCT_OWNER", "shared-subject")
         Given {
             contentType("application/json")
             body("""{"reason":"same actor must not suffice"}""")
@@ -290,8 +290,8 @@ class RetirementCatalogPackResourceTest {
             effectiveFrom = "2027-06-01T00:00:00Z",
         )
         setMaker(revisionId, "independent-retirement-maker")
-        insertPensionApproval(revisionId, "LEGAL_COUNSEL", "legal-subject")
-        insertPensionApproval(revisionId, "PRODUCT_OWNER", "product-subject")
+        insertRoleApproval(revisionId, "LEGAL_COUNSEL", "legal-subject")
+        insertRoleApproval(revisionId, "PRODUCT_OWNER", "product-subject")
         Given {
             contentType("application/json")
             header("If-Match", "\"0\"")
@@ -320,8 +320,8 @@ class RetirementCatalogPackResourceTest {
         } Then {
             statusCode(200)
             body("content.attributes.instrumentClasses", equalTo(listOf("BOND_FUNDS", "EQUITY_FUNDS")))
-            body("pensionApprovalDigest", equalTo(digest))
-            body("pensionApprovedEffectiveTo", nullValue())
+            body("approvalDigest", equalTo(digest))
+            body("approvedEffectiveTo", nullValue())
         }
     }
 
@@ -356,7 +356,7 @@ class RetirementCatalogPackResourceTest {
             attributes = attributes,
             effectiveFrom = "2027-05-01T00:00:00Z",
         )
-        val base = "/api/v2/offerings/$offeringId/revisions/$revisionId/pension-approvals"
+        val base = "/api/v2/offerings/$offeringId/revisions/$revisionId/approvals"
         Given {
             contentType("application/json")
             header("If-Match", "\"0\"")
@@ -400,12 +400,12 @@ class RetirementCatalogPackResourceTest {
             contentType("application/json")
             header("If-Match", "\"0\"")
             body("""{"reason":"independent product review"}""")
-        } When { post("$base/pension-approvals/LEGAL_COUNSEL") } Then { statusCode(403) }
+        } When { post("$base/approvals/LEGAL_COUNSEL") } Then { statusCode(403) }
         Given {
             contentType("application/json")
             header("If-Match", "\"0\"")
             body("""{"reason":"independent product review"}""")
-        } When { post("$base/pension-approvals/PRODUCT_OWNER") } Then { statusCode(201) }
+        } When { post("$base/approvals/PRODUCT_OWNER") } Then { statusCode(201) }
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 "SELECT role, issuer, subject FROM catalog_revision_role_approvals WHERE revision_id = ? ORDER BY role",
@@ -437,7 +437,7 @@ class RetirementCatalogPackResourceTest {
         } Then {
             statusCode(200)
             body("id", equalTo(revisionId.toString()))
-            body("pensionApprovalDigest", equalTo(approvalDigest(revisionId)))
+            body("approvalDigest", equalTo(approvalDigest(revisionId)))
         }
     }
 
@@ -571,7 +571,7 @@ class RetirementCatalogPackResourceTest {
     }
 
     @Suppress("NestedBlockDepth")
-    private fun insertPensionApproval(revisionId: UUID, role: String, subject: String) {
+    private fun insertRoleApproval(revisionId: UUID, role: String, subject: String) {
         dataSource.connection.use { connection ->
             val revision = connection.prepareStatement(
                 "SELECT offering_id, schema_id, schema_version, effective_from, effective_to, " +

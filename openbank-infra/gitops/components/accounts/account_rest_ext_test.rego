@@ -272,7 +272,7 @@ test_interest_catalog_read_needs_scope_role if {
 }
 
 test_interest_catalog_grant_is_read_only if {
-	every action in ["catalog.author", "catalog.publish", "catalog.pensionApproval.decide"] {
+	every action in ["catalog.author", "catalog.publish", "catalog.revisionApproval.decide"] {
 		not rest.allow.allow with input as {"principal": interest_catalog, "action": action, "resource": {"type": "catalog", "id": "r-1"}}
 			with data.rules as rules_mock
 	}

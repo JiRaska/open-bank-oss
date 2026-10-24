@@ -122,7 +122,7 @@ ani autoritu. Zaregistrovaná politika je pro danou verzi schématu jen append-o
 
 Revize schématu s politikou se publikuje až tehdy, když přesný digest obsahu schválí každá deklarovaná
 role. Každou roli musí schválit jiný principal, a nikdy maker. Schválení probíhá přes
-`/api/v2/offerings/{o}/revisions/{r}/approvals/{role}`. `/pension-approvals` je zastaralý alias.
+`/api/v2/offerings/{o}/revisions/{r}/approvals/{role}`.
 
 Konfigurace nasazení váže každou autoritu na scope a realm roli, které musí nést tentýž token:
 `openbank.catalog.approval.authorities.<AUTHORITY>`.

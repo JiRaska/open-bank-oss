@@ -114,7 +114,7 @@ class AuthorizeInterceptorTest {
     @Authorize(action = "payment.create", attributes = ["time-of-day", "client-ip"])
     fun dummyMethodWithAttrs() = Unit
 
-    @Authorize(action = "catalog.pensionApproval.read", attributes = ["azp", "subject", "preferred_username"])
+    @Authorize(action = "catalog.revisionApproval.read", attributes = ["azp", "subject", "preferred_username"])
     fun dummyMethodWithServiceTokenAttrs() = Unit
 
     data class DummyRequest(val granteeId: String, val scopes: List<String>)

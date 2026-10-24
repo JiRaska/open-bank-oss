@@ -31,7 +31,7 @@ class CatalogScopeAuthorizationTest {
     @OidcSecurity(claims = [Claim(key = "scope", value = "openid")])
     fun pensionLegalRealmRoleWithoutApprovalScopeCannotApprove() {
         val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
-            "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
+            "/revisions/00000000-0000-0000-0000-000000000002/approvals"
         given().contentType("application/json").header("If-Match", "\"0\"")
             .body("""{"reason":"review"}""")
             .post("$base/PRODUCT_OWNER").then().statusCode(403)
@@ -54,7 +54,7 @@ class CatalogScopeAuthorizationTest {
     )
     fun pensionLegalRoleAndScopeAllowOnlyLegalApproval() {
         val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
-            "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
+            "/revisions/00000000-0000-0000-0000-000000000002/approvals"
         given().contentType("application/json").header("If-Match", "\"0\"")
             .body("""{"reason":"review"}""")
             .post("$base/PRODUCT_OWNER").then().statusCode(403)
@@ -75,7 +75,7 @@ class CatalogScopeAuthorizationTest {
             .body("""{"reason":"review"}""")
             .post(
                 "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
-                    "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals/LEGAL_COUNSEL",
+                    "/revisions/00000000-0000-0000-0000-000000000002/approvals/LEGAL_COUNSEL",
             ).then().statusCode(403)
     }
 
@@ -97,7 +97,7 @@ class CatalogScopeAuthorizationTest {
         given().get("/api/v2/offerings").then().statusCode(200)
         given().get(
             "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
-                "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals",
+                "/revisions/00000000-0000-0000-0000-000000000002/approvals",
         ).then().statusCode(404)
     }
 
@@ -109,7 +109,7 @@ class CatalogScopeAuthorizationTest {
             .body("""{"reason":"review"}""")
             .post(
                 "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
-                    "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals/LEGAL_COUNSEL",
+                    "/revisions/00000000-0000-0000-0000-000000000002/approvals/LEGAL_COUNSEL",
             ).then().statusCode(403)
     }
 
@@ -126,7 +126,7 @@ class CatalogScopeAuthorizationTest {
             .body("""{"reason":"review"}""")
             .post(
                 "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
-                    "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals/LEGAL_COUNSEL",
+                    "/revisions/00000000-0000-0000-0000-000000000002/approvals/LEGAL_COUNSEL",
             ).then().statusCode(403)
     }
 
@@ -146,7 +146,7 @@ class CatalogScopeAuthorizationTest {
     )
     fun machineUsernameCannotBeMaskedByHumanDisplayName() {
         val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
-            "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
+            "/revisions/00000000-0000-0000-0000-000000000002/approvals"
         given().get(base).then().statusCode(403)
         given().contentType("application/json").header("If-Match", "\"0\"")
             .body("""{"reason":"review"}""")
@@ -169,7 +169,7 @@ class CatalogScopeAuthorizationTest {
     )
     fun nonAdminClientCannotReadOrApproveDespiteHumanRoleAndScope() {
         val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
-            "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
+            "/revisions/00000000-0000-0000-0000-000000000002/approvals"
         given().get("/api/v2/offerings").then().statusCode(403)
         given().get(base).then().statusCode(403)
         given().contentType("application/json").header("If-Match", "\"0\"")
@@ -186,7 +186,7 @@ class CatalogScopeAuthorizationTest {
             .then().statusCode(404)
         given().get(
             "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
-                "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals",
+                "/revisions/00000000-0000-0000-0000-000000000002/approvals",
         ).then().statusCode(403)
         given().contentType("application/json")
             .body(
@@ -218,7 +218,7 @@ class CatalogScopeAuthorizationTest {
             .then().statusCode(404)
         given().get(
             "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
-                "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals",
+                "/revisions/00000000-0000-0000-0000-000000000002/approvals",
         ).then().statusCode(404)
         given().contentType("application/json")
             .body("""{"code":"PENSION_M2M_DENIED","schemaRef":{"id":"org.openbank.insurance.term-life","version":1}}""")

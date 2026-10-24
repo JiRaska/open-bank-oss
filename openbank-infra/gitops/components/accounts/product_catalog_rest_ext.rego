@@ -4,11 +4,11 @@
 # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
 # Actions gated (ProductCatalogResource, FeesResource, GenericCatalogResource,
-# CatalogEventCursorResource, PensionRevisionApprovalResource):
+# CatalogEventCursorResource, RevisionApprovalResource):
 #   catalog.read / catalog.list   — product, fee, offering and revision reads
 #   catalog.create / catalog.update / catalog.author — maker-side authoring
 #   catalog.publish               — checker publishes an approved revision
-#   catalog.pensionApproval.*     — granted by base rest.rego (pension-catalog-* reasons)
+#   catalog.revisionApproval.*    — granted by base rest.rego (catalog-revision-* reasons)
 #
 # These reasons mirror the endpoints' @RolesAllowed sets, which remain the outer gate and are
 # narrower per endpoint (e.g. GenericCatalogResource reads admit no ROLE_API). Maker/checker

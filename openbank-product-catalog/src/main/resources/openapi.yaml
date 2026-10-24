@@ -10,7 +10,7 @@ info:
   # `behaviour` (product IR v1), ProductRevision gains an optional `irSignature`, and
   # POST .../revisions/{revisionId}/publish-ir publishes an IR-bearing revision signed (four-eyes
   # action catalog.publish-ir). The plain publish refuses an IR-bearing revision with 409.
-  version: 2.9.0
+  version: 2.10.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -44,8 +44,6 @@ tags:
     description: Generated runtime contract for the governed generic catalog
   - name: Revision Approvals
     description: Independent role-qualified approval evidence for schemas whose pack declares an approval policy
-  - name: Pension Approvals
-    description: Deprecated alias of Revision Approvals (#13429)
 security:
   - bearerAuth: []
 paths:
@@ -691,55 +689,6 @@ paths:
         '409': { $ref: '#/components/responses/CatalogConflict' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
         '428': { $ref: '#/components/responses/PreconditionRequired' }
-  /api/v2/offerings/{offeringId}/revisions/{revisionId}/pension-approvals:
-    get:
-      tags: [Pension Approvals]
-      operationId: listPensionRevisionApprovalsV2
-      deprecated: true
-      summary: Deprecated alias of listRevisionApprovalsV2 (#13429)
-      parameters:
-        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
-      responses:
-        '200':
-          description: Approval metadata matching the revision's current content and effective interval
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/PensionApprovalResponse' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/CatalogNotFound' }
-  /api/v2/offerings/{offeringId}/revisions/{revisionId}/pension-approvals/{role}:
-    post:
-      tags: [Pension Approvals]
-      operationId: approvePensionRevisionV2
-      deprecated: true
-      summary: Deprecated alias of approveRevisionV2 (#13429)
-      parameters:
-        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: role, in: path, required: true, schema: { type: string, enum: [LEGAL_COUNSEL, PRODUCT_OWNER] } }
-        - { $ref: '#/components/parameters/IfMatchRequired' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/PensionApprovalRequest' }
-      responses:
-        '201':
-          description: Immutable approval evidence recorded
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/PensionApprovalResponse' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/CatalogNotFound' }
-        '409': { $ref: '#/components/responses/CatalogConflict' }
-        '412': { $ref: '#/components/responses/PreconditionFailed' }
-        '428': { $ref: '#/components/responses/PreconditionRequired' }
   /api/v2/products/{offeringId}:
     get:
       tags: [Catalog V2]
@@ -888,22 +837,6 @@ components:
       required: [role, digest, approvedAt]
       properties:
         role: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
-        digest: { type: string, pattern: '^[0-9a-f]{64}$' }
-        approvedAt: { type: string, format: date-time }
-    PensionApprovalRequest:
-      deprecated: true
-      type: object
-      additionalProperties: false
-      required: [reason]
-      properties:
-        reason: { type: string, minLength: 1, maxLength: 4096 }
-    PensionApprovalResponse:
-      deprecated: true
-      type: object
-      additionalProperties: false
-      required: [role, digest, approvedAt]
-      properties:
-        role: { type: string, enum: [LEGAL_COUNSEL, PRODUCT_OWNER] }
         digest: { type: string, pattern: '^[0-9a-f]{64}$' }
         approvedAt: { type: string, format: date-time }
     LegacyError:
@@ -1200,16 +1133,6 @@ components:
           type: [string, 'null']
           format: date-time
           description: Effective-to the approvers saw; a successor may shorten effectiveTo, never this.
-        pensionApprovalDigest:
-          type: [string, 'null']
-          pattern: '^[0-9a-f]{64}$'
-          deprecated: true
-          description: Deprecated alias of approvalDigest (#13429).
-        pensionApprovedEffectiveTo:
-          type: [string, 'null']
-          format: date-time
-          deprecated: true
-          description: Deprecated alias of approvedEffectiveTo (#13429).
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         revision: { type: integer, format: int64, minimum: 0 }

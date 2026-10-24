@@ -189,7 +189,7 @@ class CatalogPactProviderFixtures(
     /** Synthetic published DIP revision with two immutable, role-qualified approvals. */
     fun publishedPensionStrategyApprovalsExist() = dataSource.connection.use { connection ->
         val content = mapper.readTree(PENSION_REVISION_CONTENT)
-        val approvalDigest = pensionApprovalDigest(content)
+        val approvalDigest = revisionApprovalDigest(content)
         connection.prepareStatement(
             "INSERT INTO catalog_specifications " +
                 "(id, code, schema_id, schema_version, created_at, lock_version) VALUES (?, ?, ?, 2, ?, 0) " +
@@ -244,7 +244,7 @@ class CatalogPactProviderFixtures(
         }
     }
 
-    private fun pensionApprovalDigest(content: JsonNode) = catalogJson.sha256(
+    private fun revisionApprovalDigest(content: JsonNode) = catalogJson.sha256(
         mapper.createObjectNode().apply {
             put("offeringId", PENSION_OFFERING_ID.toString())
             put("revisionId", PENSION_REVISION_ID.toString())

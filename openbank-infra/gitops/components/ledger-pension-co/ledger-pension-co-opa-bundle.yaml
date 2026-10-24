@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger-pension-co
   annotations:
-    openbank.tech/policy-checksum: "d7a96d2d9242ad05"
+    openbank.tech/policy-checksum: "6b94de6209df582e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -422,25 +422,6 @@ data:
     	input.action == "catalog.publish-ir"
     }
 
-    # Pension catalog approval is a distinct human decision, never a generic publish grant.
-    # The endpoint checks the requested legal/product role and immutable JWT actor identity.
-    allowed_reasons contains "pension-catalog-decide-approval" if {
-    	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
-    	input.action == "catalog.pensionApproval.decide"
-    	input.resource.id
-    	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER"}
-    	role in input.principal.roles
-    }
-
-    allowed_reasons contains "pension-catalog-read-approval" if {
-    	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
-    	input.action == "catalog.pensionApproval.read"
-    	input.resource.id
-    	"CATALOG_SCOPE_READ" in input.principal.roles
-    }
-
     # Generic role-qualified revision approval (#13429). Which role a revision needs and which
     # authority proves it is pack data checked by product-catalog; OPA only requires a verified human
     # holding SOME approval authority (the derived CATALOG_REVISION_APPROVER marker).
@@ -487,7 +468,7 @@ data:
         input.principal.id == "service-account-openbank-pension"
         "ROLE_API" in input.principal.roles
         "CATALOG_SCOPE_READ" in input.principal.roles
-        input.action in {"catalog.pensionApproval.read", "catalog.revisionApproval.read"}
+        input.action == "catalog.revisionApproval.read"
         input.resource.id
         input.attributes.azp == "openbank-pension"
         input.attributes.preferred_username == "service-account-openbank-pension"
