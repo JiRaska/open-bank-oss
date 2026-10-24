@@ -1492,7 +1492,7 @@ components:
       enum: [ONCE, DAILY, WEEKLY, MONTHLY, QUARTERLY, SEMI_ANNUAL, ANNUAL]
     ReferenceKind:
       type: string
-      enum: [calendar, index, counterparty, ssi, netting, security, book, bucket-set, regulatory-code]
+      x-extensible-enum: [calendar, index, counterparty, ssi, netting, security, book, bucket-set, regulatory-code]
     ReferenceStatus:
       type: string
       enum: [PENDING, ACTIVE, SUPERSEDED, REJECTED]
@@ -1551,6 +1551,8 @@ components:
         - $ref: '#/components/schemas/BookPayload'
         - $ref: '#/components/schemas/BucketSetPayload'
         - $ref: '#/components/schemas/RegulatoryCodePayload'
+        - $ref: '#/components/schemas/ProductTypePayload'
+        - $ref: '#/components/schemas/GenericReferencePayload'
     CalendarPayload:
       type: object
       required: [code, baseCalendar]
@@ -1650,3 +1652,23 @@ components:
         list: { type: string, enum: [CNB, DISIFE23, EMIR_PRODUCT, LCR, NSFR, TRADE_REPORTING, CLASSIFICATION] }
         code: { type: string }
         label: { type: string }
+    ProductTypePayload:
+      type: object
+      description: 'product-type: the mandate per product (migrated from configuration); authoritative over the configured seed'
+      required: [code, permitted]
+      properties:
+        code: { type: string }
+        permitted: { type: boolean }
+        allowedCurrencies: { type: array, items: { type: string } }
+        maxPrincipal: { type: object, additionalProperties: { type: number }, description: Per currency }
+        maxTenorDays: { type: [integer, 'null'] }
+    GenericReferencePayload:
+      type: object
+      description: >-
+        The kinds without a dedicated schema yet: a JSON object whose `code` (or `id`) is the record
+        key, plus `name`; other fields are stored as given.
+      properties:
+        code: { type: string }
+        id: { type: string }
+        name: { type: string }
+      additionalProperties: true
