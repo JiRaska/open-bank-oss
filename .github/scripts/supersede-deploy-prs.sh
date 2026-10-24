@@ -66,24 +66,16 @@ set -euo pipefail
 # ── ancestry ────────────────────────────────────────────────────────────────────────────────────
 # Extract the 40-hex commit a deploy branch pins. Anything else yields "" and is treated as unknown.
 sha_of_branch() {
-  local sha="${1#"$2"}" run
-  # auto-deploy isolates candidates by producer run (#13460): `<sha>-run<digits>`. Strip exactly
-  # that suffix; anything else after the sha leaves the remainder non-hex, so it stays unknown.
-  case "$sha" in
-    *-run*)
-      run="${sha##*-run}"
-      case "$run" in
-        ''|*[!0-9]*) printf ''; return ;;
-      esac
-      sha="${sha%-run"$run"}"
-      ;;
+  local sha
+  case "$1" in
+    "$2"*) sha="${1#"$2"}" ;;
+    *) return 0 ;;
   esac
-  # 40 hex characters exactly. A truncated, suffixed or hand-cut branch name yields "" (unknown),
-  # and unknown must never mean "close it" — that was the pre-#6231 behaviour.
-  case "$sha" in
-    *[!0-9a-f]*) printf '' ;;
-    *) if [ "${#sha}" -eq 40 ]; then printf '%s' "$sha"; else printf ''; fi ;;
-  esac
+  # The workflow adds a positive run ID for unique carrier branches. It does not change the
+  # pinned source commit. Preserve legacy names; every other suffix remains unknown.
+  if [[ "$sha" =~ ^([0-9a-f]{40})(-run[1-9][0-9]*)?$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
 }
 
 # Ask GitHub how `head` relates to `base`: ahead | behind | identical | diverged.
@@ -1050,6 +1042,21 @@ HOOK
       echo "self-test case 29 OK (run-suffixed branches parse; malformed suffixes stay unknown)"
     fi
   fi
+
+  # Reconcile source branches require an exact producer prefix, full source SHA and
+  # canonical positive run ID. Preserve main's owner-hold/no-copy cases above.
+  local bad_branch
+  for bad_branch in "$NEW" "wrong-$NEW-run1" "$P${NEW:0:39}-run1" "$P$NEW-run" \
+      "$P$NEW-runx" "$P$NEW-run0" "$P$NEW-run01" "$P$NEW-run-1" "$P$NEW-run1-extra"; do
+    if [ -n "$(sha_of_branch "$bad_branch" "$P")" ]; then
+      echo "SELF-TEST FAIL reconcile parser: unsupported branch format was accepted"; ok=1
+    fi
+  done
+  if [ "$(sha_of_branch "$P$NEW" "$P")" != "$NEW" ] || \
+      [ "$(sha_of_branch "$P$NEW-run39500952309" "$P")" != "$NEW" ]; then
+    echo "SELF-TEST FAIL reconcile parser: canonical or legacy source format stopped working"; ok=1
+  fi
+  echo "self-test reconcile parser checked (strict prefix, complete SHA, canonical positive run ID, legacy preserved)"
 
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"

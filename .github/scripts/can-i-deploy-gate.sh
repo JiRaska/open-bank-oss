@@ -27,12 +27,14 @@
 #
 # INPUTS (environment, supplied by the calling step)
 #   SERVICES                 JSON array of changed service names        (required)
+#   IMAGE_TAGS/IMAGE_DIGESTS  maps produced by the exact build-push step
 #   EVENT_NAME               github.event_name                          (required)
 #   INPUT_CODEPLOY           github.event.inputs.codeploy, may be empty
 #   INPUT_CODEPLOY_PACT_VERSIONS
 #                            optional JSON object mapping a co-deployed service to an exact
 #                            Pact version that this gate proves equivalent to GITHUB_SHA
 #   PACT_BROKER_URL/_USERNAME/_PASSWORD, PACT_STANDALONE_VERSION        (job env)
+#   RECONCILE_SOURCE_REQUIRED  true for schedule/reconcile dispatch; requires exact source proof
 #   GITHUB_OUTPUT            written for: gate_ran, deployable, and the rest below
 #
 # Behaviour is byte-identical to the inlined version: the body below is the step's script
@@ -49,9 +51,195 @@ set -uo pipefail
 # when a flaky pact-CLI download killed the gate (issue #1348).
 echo "gate_ran=true" >> "$GITHUB_OUTPUT"
 SERVICES="${SERVICES:?}"
+reconcile_present='{}'
+block_class='{}'
+block_reason='{}'
+reconcile_blocked='[]'
+reconcile_source_blocked=0
+
+refuse_reconcile_source() {
+  local svc="$1"
+  local why="Broker has no Pacticipant and no verified Pact source"
+  echo "::error::reconcile source refused for ${svc}: ${why}"
+  reconcile_source_blocked=1
+  reconcile_blocked="$(jq -cn --argjson old "$reconcile_blocked" --arg svc "$svc" '$old + [$svc] | unique')"
+  block_class="$(jq -cn --argjson old "$block_class" --arg svc "$svc" '$old + {($svc): "NOT_ASKED"}')"
+  block_reason="$(jq -cn --argjson old "$block_reason" --arg svc "$svc" --arg why "$why" '$old + {($svc): $why}')"
+}
+
+# Reconcile builds the current workflow SHA, while its usable Pact may have been published by
+# an earlier path-scoped Services CI run. A Broker tag alone is not provenance. Resolve and
+# verify eligible service sources: exact current SHA, or an older exact-main Services
+# CI SHA whose service tree is byte-identical to the image being built. Known absent Pacticipants
+# are individually refused; ambiguous source, API failure, failed child job, or a non-equivalent
+# tree aborts before any Pact verdict
+# or Broker setup mutation. gitops-pr treats gate_ran=true + deployable=[] as fail-closed.
+if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
+  source_failure=0
+  if [ "${GITHUB_REF:-}" != "refs/heads/main" ]; then
+    echo "::error::reconcile source proof is valid only for a workflow run on refs/heads/main"
+    source_failure=1
+  fi
+  explicit_sources="${INPUT_CODEPLOY_PACT_VERSIONS:-}"
+  use_explicit_sources=false
+  if ! jq -e '
+    type == "array" and length > 0 and
+    all(.[]; type == "string" and test("^openbank-[a-z0-9-]+$")) and
+    length == (unique | length)
+  ' >/dev/null <<< "$SERVICES"; then
+    echo "::error::reconcile service list is malformed or ambiguous"
+    source_failure=1
+  fi
+  # These maps are outputs of the successful build-push job. The gate waits for push,
+  # signature, scan, SBOM and provenance; the verifier requires exact service coverage and
+  # full pushed digests so an overwritten mutable tag cannot change what gets selected.
+  if ! python3 .github/scripts/verify-reconcile-image-map.py \
+      "$SERVICES" "${IMAGE_TAGS:-}" "${IMAGE_DIGESTS:-}" "${BUILD_IMAGE_TAG:-}" "$GITHUB_SHA"; then
+    echo "::error::reconcile image evidence is missing, ambiguous, or not built from ${GITHUB_SHA}"
+    source_failure=1
+  fi
+  if [ "${INPUT_CODEPLOY:-}" = "true" ] && [ -n "$explicit_sources" ] && [ "$explicit_sources" != "{}" ]; then
+    if ! jq -e --argjson services "$SERVICES" \
+      'type == "object" and (keys | sort) == ($services | sort)' >/dev/null <<< "$explicit_sources"; then
+      echo "::error::reconcile source map must map exactly the requested services"
+      source_failure=1
+    else
+      use_explicit_sources=true
+    fi
+  fi
+  historical_services='[]'
+  source_probe_map='{}'
+  historical_source_map='{}'
+  if [ "$source_failure" -eq 0 ] && [ "$use_explicit_sources" != true ]; then
+    for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+      present="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+      source_probe_map="$(jq -cn --argjson old "$source_probe_map" --arg svc "$svc" \
+        --arg present "$present" '$old + {($svc): $present}')"
+      case "$present" in
+        yes|equivalent:*) ;;
+        no)
+          historical_services="$(jq -cn --argjson old "$historical_services" \
+            --arg svc "$svc" '$old + [$svc]')"
+          ;;
+        absent)
+          refuse_reconcile_source "$svc"
+          ;;
+        *)
+          echo "::error::reconcile source refused for ${svc}: no exact or tree-equivalent Pact source (${present})"
+          source_failure=1
+          ;;
+      esac
+    done
+  fi
+  if [ "$source_failure" -eq 0 ] && [ "$(jq -r 'length' <<< "$historical_services")" -gt 0 ]; then
+    historical_source_map="$(python3 .github/scripts/verify-successful-service-ci.py \
+      --resolve-reconcile-sources "$historical_services" "$GITHUB_SHA")" || {
+      echo "::error::reconcile source refused: no verified historical Services CI source for every requested service"
+      source_failure=1
+    }
+    if [ "$source_failure" -eq 0 ] && ! jq -e --argjson services "$historical_services" '
+      type == "object" and (keys | sort) == ($services | sort) and
+      all(.[]; type == "object" and
+        (.sha | type == "string" and test("^[0-9a-f]{40}$")) and
+        (.run_id | type == "string" and length > 0) and
+        (.attempt | type == "number" and . > 0))
+    ' >/dev/null <<< "$historical_source_map"; then
+      echo "::error::reconcile source refused: historical source resolver returned incomplete or malformed evidence"
+      source_failure=1
+    fi
+  fi
+  if [ "$source_failure" -eq 0 ]; then
+    for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+      # Known absence refuses only this member; the full image-map keyset was checked above.
+      if jq -e --arg svc "$svc" 'index($svc) != null' >/dev/null <<< "$reconcile_blocked"; then
+        continue
+      fi
+      source_ci_verified=false
+      if [ "$use_explicit_sources" = true ]; then
+        source_sha="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$explicit_sources")"
+        present="yes"
+      else
+        present="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$source_probe_map")"
+        case "$present" in
+          yes) source_sha="$GITHUB_SHA" ;;
+          equivalent:*) source_sha="${present#equivalent:}" ;;
+          no)
+            source_sha="$(jq -er --arg svc "$svc" '.[$svc].sha' <<< "$historical_source_map")"
+            resolved="$(jq -c --arg svc "$svc" '.[$svc]' <<< "$historical_source_map")"
+            present="equivalent:${source_sha}"
+            source_ci_verified=true
+            echo "  ✓ ${svc} will use exact successful Services CI/Pact source ${source_sha} from run $(jq -r '.run_id' <<< "$resolved")"
+            ;;
+          absent)
+            # Reconcile is retried independently of the original push. Without a
+            # registered Pacticipant there is no durable contract verdict to bind
+            # to this image; a later registration could make the same image unsafe
+            # after this job has already handed its result to gitops-pr.
+            refuse_reconcile_source "$svc"
+            continue
+            ;;
+          *)
+            echo "::error::reconcile source refused for ${svc}: no exact or tree-equivalent Pact source (${present})"
+            source_failure=1
+            continue
+            ;;
+        esac
+      fi
+      if ! grep -qE '^[0-9a-f]{40}$' <<< "$source_sha"; then
+        echo "::error::reconcile source refused for ${svc}: source is not a full 40-hex SHA"
+        source_failure=1
+        continue
+      fi
+      if [ "$source_sha" != "$GITHUB_SHA" ] \
+         && ! bash .github/scripts/pact-version-tree-equivalent.sh "$svc" "$source_sha" "$GITHUB_SHA"; then
+        echo "::error::reconcile source refused for ${svc}: source tree is not equivalent to the current image tree"
+        source_failure=1
+        continue
+      fi
+      if [ "$use_explicit_sources" = true ]; then
+        exact_present="$(EVENT_NAME=push PACT_WAIT_PER_SERVICE_SECONDS=0 \
+          bash .github/scripts/probe-pact-version.sh "$svc" "$source_sha")"
+        if [ "$exact_present" != "yes" ]; then
+          echo "::error::reconcile source refused for ${svc}: explicit Pact version is not verifiably present (${exact_present})"
+          source_failure=1
+          continue
+        fi
+      fi
+      if [ "$source_ci_verified" != true ] \
+         && ! python3 .github/scripts/verify-successful-service-ci.py "$svc" "$source_sha"; then
+        source_failure=1
+        continue
+      fi
+      reconcile_present="$(jq -cn --argjson old "$reconcile_present" --arg svc "$svc" \
+        --arg present "$present" '$old + {($svc): $present}')"
+    done
+  fi
+  if [ "$source_failure" -ne 0 ]; then
+    echo "deployable=[]" >> "$GITHUB_OUTPUT"
+    echo "blocked=${SERVICES}" >> "$GITHUB_OUTPUT"
+    {
+      echo "### can-i-deploy: reconcile source evidence missing"
+      echo "No can-i-deploy verdict or GitOps image-pin mutation was allowed because at least one service lacked exact image evidence, successful exact-main Services CI build/contract evidence, or a verifiable Pact source."
+      echo "Requested services: \`$(echo "$SERVICES" | jq -r 'join(" ")')\`."
+    } >> "$GITHUB_STEP_SUMMARY"
+    exit 1
+  fi
+  if [ "$reconcile_source_blocked" -eq 1 ] && {
+    [ "$(jq 'length' <<< "$reconcile_blocked")" -eq "$(jq 'length' <<< "$SERVICES")" ] ||
+    { [ "$EVENT_NAME" = workflow_dispatch ] && [ "${INPUT_CODEPLOY:-}" = true ]; }
+  }; then
+    # No eligible member, or an explicitly atomic co-deploy set cannot be proven in full.
+    echo "deployable=[]" >> "$GITHUB_OUTPUT"
+    echo "blocked=${SERVICES}" >> "$GITHUB_OUTPUT"
+    echo "### Reconcile refused: no complete Pact source for the requested set" >> "$GITHUB_STEP_SUMMARY"
+    exit 1
+  fi
+  echo "Verified exact build-push image evidence for the full set and successful exact-main CI/Pact source for every eligible reconcile service."
+fi
+
 arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) o=osx ;; *) o=linux ;; esac
-CLI="/tmp/pact/pact/bin/pact-broker"
+CLI="${PACT_CLI:-/tmp/pact/pact/bin/pact-broker}"
 # Download only on a cache miss (the "Cache pact standalone CLI" step restores /tmp/pact
 # on a hit). This removes the flaky github.com release download — the single point of
 # failure that fail-closes the whole gate (issue #1348/#1009) — from every run after the
@@ -106,8 +294,6 @@ echo "${PACT_WAIT_BUDGET_SECONDS:-180}" > "$PACT_WAIT_BUDGET_FILE"
 # Per-service block classification (#2549): PENDING_BUILD / UNVERIFIED /
 # REGRESSION / UNKNOWN, plus the human reason. Read below by the left-behind
 # summary and by the scheduled-tick silencing rule.
-declare -A block_class=()
-declare -A block_reason=()
 # Verbatim CLI output of every service that ends up blocked, in the record format
 # derive-codeploy-set.py reads. Written only in the block branch, so a clean run
 # leaves it empty and the derivation prints nothing (#1985).
@@ -159,7 +345,11 @@ if [ "${EVENT_NAME}" = "workflow_dispatch" ] \
       # `unknown` (broker probe inconclusive) path it can answer GREEN for a pair that is
       # not being deployed. resolve-codeploy-selector.sh narrows it to exact | SKIP |
       # REFUSE; its --self-test asserts no branch can ever emit a moving tag again.
-      vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+      if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
+        vpresent="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$reconcile_present")"
+      else
+        vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+      fi
       sel_line="$(PACT_VERSION_PRESENT="$vpresent" \
         bash .github/scripts/resolve-codeploy-selector.sh "$svc" "$GITHUB_SHA")"
       read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
@@ -181,6 +371,31 @@ if [ "${EVENT_NAME}" = "workflow_dispatch" ] \
     fi
     CODEPLOY_ARGS+=(--pacticipant "$svc" "${CID_SELECTOR[@]}")
   done
+  if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
+    # Source preflight is a snapshot. The Broker participant can disappear before
+    # this atomic co-deploy verdict, so revalidate the whole requested set immediately
+    # before asking Pact. A late absence or an uncertain response invalidates the
+    # atomic set; never carry a cached source proof into a verdict for changed state.
+    for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+      code="$(curl -s -o /dev/null -w '%{http_code}' \
+        -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+        "${PACT_BROKER_URL}/pacticipants/${svc}" || echo 000)"
+      if [ "$code" != "200" ]; then
+        if [ "$code" = "404" ]; then
+          echo "::error::reconcile co-deploy refused: Pacticipant ${svc} disappeared after source preflight"
+        else
+          echo "::error::reconcile co-deploy refused: Pacticipant ${svc} is unavailable after source preflight (HTTP ${code})"
+        fi
+        echo "deployable=[]" >> "$GITHUB_OUTPUT"
+        echo "blocked=${SERVICES}" >> "$GITHUB_OUTPUT"
+        {
+          echo "### can-i-deploy: reconcile co-deploy participant state changed"
+          echo "The Broker did not confirm every Pacticipant immediately before the atomic verdict; no member of the requested set may proceed."
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit 1
+      fi
+    done
+  fi
   if [ "${#CODEPLOY_ARGS[@]}" -eq 0 ]; then
     # Every requested service turned out to have no contracts in the broker. There is no
     # matrix to ask, and asking `can-i-deploy` with zero pacticipants is a CLI error that
@@ -216,6 +431,11 @@ if [ "${EVENT_NAME}" = "workflow_dispatch" ] \
 fi
 
 for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+  if jq -e --arg svc "$svc" 'index($svc) != null' >/dev/null <<< "$reconcile_blocked"; then
+    rc=1
+    printf '===SERVICE %s\tNOT_ASKED\n' "$svc" >> "$BLOCKS_FILE"
+    continue
+  fi
   # A service that has never published a contract is not a Pacticipant in the
   # broker; `can-i-deploy` then errors with "Pacticipant <svc> not found" (matrix
   # 400) and the verdict reads as "NOT deployable". But a service with NO contracts
@@ -226,6 +446,25 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
   code="$(curl -s -o /dev/null -w '%{http_code}' \
     -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
     "${PACT_BROKER_URL}/pacticipants/${svc}" || echo 000)"
+  if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ] && [ "$code" != "200" ]; then
+    # A source that disappears or becomes unobservable after preflight cannot
+    # inherit the successful source proof. Do not let 404, 5xx or network errors
+    # turn into the ordinary no-contract deploy path for a reconcile.
+    if [ "$code" = 404 ]; then
+      refuse_reconcile_source "$svc"
+      rc=1
+      printf '===SERVICE %s\tNOT_ASKED\n' "$svc" >> "$BLOCKS_FILE"
+      continue
+    fi
+    echo "::error::reconcile source refused for ${svc}: Pacticipant is missing or unavailable after source preflight (HTTP ${code})"
+    echo "deployable=[]" >> "$GITHUB_OUTPUT"
+    echo "blocked=${SERVICES}" >> "$GITHUB_OUTPUT"
+    {
+      echo "### can-i-deploy: reconcile Pacticipant state changed"
+      echo "The Broker no longer proves that every no-contract service is absent; no GitOps image-pin mutation was allowed."
+    } >> "$GITHUB_STEP_SUMMARY"
+    exit 1
+  fi
   if [ "$code" = "404" ]; then
     echo "  ✓ ${svc} has no contracts in the broker (not a Pacticipant) — deployable"
     deployable_list+=("$svc")
@@ -236,7 +475,11 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
   # `--latest main` on a push routinely answers about the PREVIOUS build — see #3082
   # and both scripts' headers. (The "keep this comment SHORT" instruction that used to
   # stand here is obsolete as of #4086: this is a script now, and it has no ceiling.)
-  vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+  if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
+    vpresent="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$reconcile_present")"
+  else
+    vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+  fi
   sel_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$GITHUB_EVENT_NAME" \
     bash .github/scripts/resolve-can-i-deploy-selector.sh "$svc" "$GITHUB_SHA")"
   read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
@@ -249,7 +492,10 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
     r_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$GITHUB_EVENT_NAME" \
       bash .github/scripts/classify-can-i-deploy-block.sh "$svc" </dev/null)"
     cls="$(cut -f1 <<< "$r_line")"
-    block_class["$svc"]="$cls"; block_reason["$svc"]="$(cut -f2- <<< "$r_line")"
+    block_class="$(jq -cn --argjson old "$block_class" --arg svc "$svc" --arg cls "$cls" \
+      '$old + {($svc): $cls}')"
+    block_reason="$(jq -cn --argjson old "$block_reason" --arg svc "$svc" \
+      --arg reason "$(cut -f2- <<< "$r_line")" '$old + {($svc): $reason}')"
     echo "::error::can-i-deploy: [${cls}] ${refuse_why}"
     printf '===SERVICE %s\t%s\n%s\n' "$svc" "$cls" "$refuse_why" >> "$BLOCKS_FILE"
     rc=1  # keep the job red (ADR-0092); only the batch survives
@@ -301,8 +547,10 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
         bash .github/scripts/classify-can-i-deploy-block.sh "$svc" <<< "$cid_out")"
       cls="$(cut -f1 <<< "$cls_line")"
       cls_why="$(cut -f2- <<< "$cls_line")"
-      block_class["$svc"]="$cls"
-      block_reason["$svc"]="$cls_why"
+      block_class="$(jq -cn --argjson old "$block_class" --arg svc "$svc" --arg cls "$cls" \
+        '$old + {($svc): $cls}')"
+      block_reason="$(jq -cn --argjson old "$block_reason" --arg svc "$svc" \
+        --arg reason "$cls_why" '$old + {($svc): $reason}')"
       echo "::error::can-i-deploy: ${svc} NOT deployable [${cls}] — ${cls_why} (ADR-0092, #2549)"
       # Class too: derive-codeploy-set.py rejects transient blocks (#1985).
       printf '===SERVICE %s\t%s\n%s\n' "$svc" "$cls" "$cid_out" >> "$BLOCKS_FILE"
@@ -343,8 +591,8 @@ if [ "$BLOCKED_N" -gt 0 ]; then
     # a service can land in BLOCKED_JSON without going through the classifier
     # (e.g. it never reached the per-service loop), and an unclassified block
     # must not silently inherit a transient label.
-    svc_cls="${block_class[$svc]:-UNKNOWN}"
-    svc_why="${block_reason[$svc]:-no classification recorded for this service}"
+    svc_cls="$(jq -r --arg svc "$svc" '.[$svc] // "UNKNOWN"' <<< "$block_class")"
+    svc_why="$(jq -r --arg svc "$svc" '.[$svc] // "no classification recorded for this service"' <<< "$block_reason")"
     [ "$svc_cls" = "REGRESSION" ] && regression_blocked=1
     if echo "$MP" | grep -qx "$svc"; then
       echo "::error::[${svc}] MONEY-PATH service blocked by can-i-deploy [${svc_cls}] — ${svc_why}; it stays behind main (issue #1420)"
@@ -363,7 +611,10 @@ if [ "$BLOCKED_N" -gt 0 ]; then
   # this deploy at all, one at a time?". Derive it instead of working it out by
   # hand from the broker matrix (unit-tested, no network:
   # .github/scripts/test-derive-codeploy-set.sh).
-  mapfile -t CHANGED_LIST < <(echo "$SERVICES" | jq -r '.[]')
+  CHANGED_LIST=()
+  while IFS= read -r changed_service; do
+    CHANGED_LIST+=("$changed_service")
+  done < <(echo "$SERVICES" | jq -r '.[]')
   CODEPLOY_OUT="$(python3 .github/scripts/derive-codeploy-set.py "${CHANGED_LIST[@]}" < "$BLOCKS_FILE" || true)"
   if [ -n "$CODEPLOY_OUT" ]; then
     echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -424,7 +675,8 @@ fi
 # contract break — retried forever, reported never. A REGRESSION therefore fails the
 # scheduled run exactly as a money-path block does.
 if [ "${EVENT_NAME}" = "schedule" ] && [ "$rc" -ne 0 ] \
-   && [ "${mp_blocked:-0}" != "1" ] && [ "${regression_blocked:-0}" != "1" ]; then
+   && [ "${mp_blocked:-0}" != "1" ] && [ "${regression_blocked:-0}" != "1" ] \
+   && [ "$reconcile_source_blocked" != "1" ]; then
   echo "::notice::reconcile tick: ${BLOCKED_N:-0} service(s) still gate-blocked (non money-path, self-clearing classes only) — left for a later tick; the deployable subset deployed. Not failing the scheduled run."
   exit 0
 fi
