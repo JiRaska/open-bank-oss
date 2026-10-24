@@ -35,4 +35,6 @@ interface CycleFeePostingsPort {
 }
 
 /** Everything the day-close reporter reads: the cycle run evidence and the cycle's fee postings. */
-interface BillingCloseEvidencePort : CloseJobRunPort, CycleFeePostingsPort
+interface BillingCloseEvidencePort :
+    CloseJobRunPort,
+    CycleFeePostingsPort
