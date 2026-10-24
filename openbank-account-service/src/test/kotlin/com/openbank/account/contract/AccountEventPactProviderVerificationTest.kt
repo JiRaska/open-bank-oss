@@ -360,6 +360,12 @@ class AccountEventPactProviderVerificationTest {
         // Intentionally empty.
     }
 
+    /** Mirror of the git-pact twin's handler — see there for why this one seeds nothing. */
+    @State("no account exists for the id")
+    fun noAccountForUnknownId() {
+        // Intentionally empty.
+    }
+
     /** Mirror of the git-pact twin's handler — see there for why the findById guard is needed. */
     @State("an ACTIVE CZK account exists for tax-profile resolution")
     fun activeCzkAccountForTaxProfileResolution() = runOnVertxContext {

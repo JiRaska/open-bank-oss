@@ -203,6 +203,17 @@ openbank-sdd-service.
   caller, privilege or event. Rollback: revert the commit.
 
 
+**2026-10-20 — Order read-back now uses the response DTO.**
+`GET /api/v1/standing-orders/{id}` previously serialized the domain entity,
+exposing `idempotencyKey` and `failureCount` while omitting computed `amount` and
+`description`. It now returns `StandingOrderResponse`, as the create and list
+endpoints do; `StandingOrderLifecycleE2E` checks the authenticated HTTP read-back.
+**STRIDE-I:** this narrows the disclosed data and makes the response contract
+explicit. The route, `ROLE_API`/`ROLE_OPERATOR`/`ROLE_ADMIN` gate and persisted
+order remain unchanged. The OpenAPI response schema is updated;
+downstream clients still need contract verification before rollout. Rollback:
+restore the entity serialization, including its disclosure and shape mismatch.
+
 ## Pension integration boundary (ADR-0334/0335, #12435)
 
 **Pension contribution scheduling.** This integration adds the `pension` namespace to `standing-order-service-ingress-allow-list`.

@@ -235,6 +235,15 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   this migration as "non-money-path" and is corrected here — no endpoint, authorization or
   consent-lifecycle logic changes. **Risk class:** none — response-plumbing de-duplication only.
   Rollback: restore the deleted mapper classes and revert the exception base classes.
+- **2026-10-20** — **Mixed GDPR-only and SCA-required consent scopes now return a client error.**
+  `ConsentService` already rejects this combination before persisting a grant, but its
+  `ConsentMixedScopeException` had no REST mapper and the generic mapper returned 500.
+  `ConsentMixedScopeMapper` now returns 422 `VALIDATION_ERROR`; the consent lifecycle E2E
+  exercises the mixed-scope request over HTTP. **STRIDE-T:** the rejection remains before
+  any consent row or activation; only its externally visible error status changes. The
+  response contains the fixed mixed-scope message, not the caller's scope values. No
+  new route, caller, credential, grant or SCA bypass is introduced. Rollback: remove
+  the mapper, restoring the incorrect 500 while the domain rejection remains.
 - **2026-10-11** — **The 8443 listener no longer accepts a client certificate as a login (#12511).**
   `client-auth: required` (2026-09-20 entries above) also registers Quarkus's mTLS authentication
   mechanism, which turned any certificate the private CA had signed into an authenticated

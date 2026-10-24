@@ -13,9 +13,11 @@ import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
 import java.time.Instant
 
-private fun errorResponse(code: ErrorCode, message: String) = ApiError(
+private const val HTTP_UNPROCESSABLE_ENTITY = 422
+
+private fun errorResponse(code: ErrorCode, message: String, status: Int = code.httpStatus) = ApiError(
     traceId = Ids.randomId().toString(),
-    status = code.httpStatus,
+    status = status,
     code = code.code,
     message = message,
     timestamp = Instant.now(),
@@ -43,6 +45,19 @@ class ConsentScaChallengeNotFoundMapper : ExceptionMapper<ConsentScaChallengeNot
     override fun toResponse(e: ConsentScaChallengeNotFoundException): Response = Response.status(
         422,
     ).entity(errorResponse(ErrorCode.VALIDATION_ERROR, e.message ?: "SCA challenge not found")).build()
+}
+
+@Provider
+class ConsentMixedScopeMapper : ExceptionMapper<ConsentMixedScopeException> {
+    override fun toResponse(e: ConsentMixedScopeException): Response = Response.status(HTTP_UNPROCESSABLE_ENTITY)
+        .entity(
+            errorResponse(
+                ErrorCode.VALIDATION_ERROR,
+                e.message ?: "Cannot mix GDPR-only and SCA-required scopes",
+                HTTP_UNPROCESSABLE_ENTITY,
+            ),
+        )
+        .build()
 }
 
 @Provider

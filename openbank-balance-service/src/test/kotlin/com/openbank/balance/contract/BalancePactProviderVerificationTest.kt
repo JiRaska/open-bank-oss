@@ -71,6 +71,10 @@ class BalancePactProviderVerificationTest {
         // Batch A: account-service getBalances / getBalance / initialize
         private val LIST_ACCOUNT_ID = UUID.fromString("d4d4d4d4-d4d4-d4d4-d4d4-d4d4d4d4d4d4")
         private val SINGLE_ACCOUNT_ID = UUID.fromString("d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5")
+
+        // Agent-service get_balance_holds: one active hold (the listing must not come back empty).
+        private val AGENT_HOLDS_ACCOUNT_ID = UUID.fromString("d2d2d2d2-d2d2-42d2-82d2-d2d2d2d2d2d2")
+        private val AGENT_HOLD_ID = UUID.fromString("e2e2e2e2-e2e2-42e2-82e2-e2e2e2e2e2e2")
     }
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -258,6 +262,38 @@ class BalancePactProviderVerificationTest {
                 currency = "CZK",
                 reason = "payment-cover",
                 referenceId = "pact-tx-00000001",
+                expiresAt = null,
+                createdAt = OffsetDateTime.now(),
+                releasedAt = null,
+            ),
+        )
+        Unit
+    }
+
+    /** Mirror of the git-pact twin's handler — see there for why the fixture must be ACTIVE. */
+    @State("an active CZK hold exists for the agent holds account")
+    fun stateAgentHoldExists() = runOnVertxContext {
+        seedBalance(
+            Balance(
+                id = UUID.randomUUID(),
+                accountId = AGENT_HOLDS_ACCOUNT_ID,
+                currency = "CZK",
+                bookedAmount = BigDecimal("10000.00"),
+                availableAmount = BigDecimal("9900.00"),
+                reservedAmount = BigDecimal("100.00"),
+                pendingAmount = BigDecimal.ZERO,
+                updatedAt = OffsetDateTime.now(),
+                version = 0L,
+            ),
+        )
+        seedHold(
+            BalanceHold(
+                id = AGENT_HOLD_ID,
+                accountId = AGENT_HOLDS_ACCOUNT_ID,
+                amount = BigDecimal("100.00"),
+                currency = "CZK",
+                reason = "payment-cover",
+                referenceId = "pact-agent-hold-0001",
                 expiresAt = null,
                 createdAt = OffsetDateTime.now(),
                 releasedAt = null,
