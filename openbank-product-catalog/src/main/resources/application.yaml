@@ -103,6 +103,21 @@ openbank:
       # Machine clients that may read approval evidence: azp -> service-account username.
       evidence-readers:
         openbank-pension: service-account-openbank-pension
+    # ADR-0352 §4: the publish-path signature over an IR-bearing revision's canonical hash.
+    # `disabled` (the default): publish-ir answers 409 and nothing is signed. `openbao`: Transit
+    # `sign` on a dedicated key; grant this service's OpenBao role `update` on
+    # transit/sign/<key-id> and nothing else (consumers get transit/verify/<key-id> only).
+    # `hmac`: a shared secret, which proves nothing about WHO signed. It is accepted only in the
+    # dev and test launch modes; IrSigningModeGuard refuses to boot a production launch with it.
+    # The secret has NO default anywhere in this file outside those two profiles.
+    ir-signing:
+      mode: ${CATALOG_IR_SIGNING_MODE:disabled}
+      key-id: ${CATALOG_IR_SIGNING_KEY_ID:product-ir-publish}
+      openbao:
+        address: ${CATALOG_IR_SIGNING_OPENBAO_ADDRESS:https://openbao.vault.svc:8200}
+        transit-mount: ${CATALOG_IR_SIGNING_OPENBAO_TRANSIT_MOUNT:transit}
+        role: ${CATALOG_IR_SIGNING_OPENBAO_ROLE:product-catalog-ir-signing}
+        sa-token-path: ${CATALOG_IR_SIGNING_OPENBAO_SA_TOKEN_PATH:/var/run/secrets/kubernetes.io/serviceaccount/token}
   api:
     # API-contract major, independent of version.txt (ADR-0048); newest served contract is /api/v2.
     version: "2"
@@ -127,6 +142,11 @@ openbank:
   # OPA sidecar is absent in CI — keep @Authorize advisory so the reads proceed under test.
   authz:
     enforce: "false"
+  openbank:
+    catalog:
+      ir-signing:
+        mode: hmac
+        hmac-secret: test-only-ir-signing-secret-not-for-production
 
 # Portable distribution: fail closed unless its operator supplies PostgreSQL and a standards-based
 # OIDC issuer. No industry pack is installed implicitly; a bank, insurer, or other regulated firm
@@ -195,3 +215,8 @@ openbank:
     oidc:
       tls:
         verification: none
+  openbank:
+    catalog:
+      ir-signing:
+        mode: hmac
+        hmac-secret: dev-only-ir-signing-secret-not-for-production
