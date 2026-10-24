@@ -7,8 +7,10 @@ package com.openbank.ledger.infrastructure.persistence.repository
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import org.hibernate.reactive.mutiny.Mutiny
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -56,15 +58,24 @@ class JournalHistorySnapshots(private val mapper: ObjectMapper) {
             Panache.getSession().flatMap { session ->
                 session.createNativeQuery<Any>("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ").executeUpdate()
                     .flatMap {
-                        session.createNativeQuery(JournalHistorySnapshotSql.CREATE, String::class.java)
-                            .setParameter("snapshotId", id).setParameter("accountId", accountId)
-                            .setParameter("currency", currency).setParameter("fromDate", fromDate)
-                            .setParameter("throughDate", throughDate).singleResult
+                        captureInSession(session, id, accountId, currency, fromDate, throughDate)
                     }
             }
         }.awaitSuspending()
         return mapper.readValue(json, JournalHistoryManifest::class.java)
     }
+
+    internal fun captureInSession(
+        session: Mutiny.Session,
+        id: UUID,
+        accountId: UUID,
+        currency: String,
+        fromDate: LocalDate,
+        throughDate: LocalDate,
+    ): Uni<String> = session.createNativeQuery(JournalHistorySnapshotSql.CREATE, String::class.java)
+        .setParameter("snapshotId", id).setParameter("accountId", accountId)
+        .setParameter("currency", currency).setParameter("fromDate", fromDate)
+        .setParameter("throughDate", throughDate).singleResult
 
     suspend fun manifest(id: UUID): JournalHistoryManifest? {
         val rows = Panache.withSession {

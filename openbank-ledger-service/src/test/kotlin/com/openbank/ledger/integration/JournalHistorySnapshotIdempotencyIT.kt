@@ -28,6 +28,10 @@ class JournalHistorySnapshotIdempotencyIT {
             "throughDate" to "2026-10-31",
         )
         given().contentType("application/json").body(body).post(PATH).then().statusCode(400)
+        for (invalid in listOf("", "x".repeat(129), "invalid key")) {
+            given().contentType("application/json").body(body).header("Idempotency-Key", invalid)
+                .post(PATH).then().statusCode(400)
+        }
         val key = UUID.randomUUID().toString()
         val first = given().contentType("application/json").body(body).header("Idempotency-Key", key)
             .post(PATH).then().extract()

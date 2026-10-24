@@ -5,17 +5,14 @@
 package com.openbank.ledger.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.ledger.infrastructure.persistence.repository.HistoryCaptureParameters
+import com.openbank.ledger.infrastructure.persistence.repository.JournalHistoryCaptureReceipts
 import com.openbank.ledger.infrastructure.persistence.repository.JournalHistorySnapshots
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.money.CurrencyCode
-import com.openbank.libs.idempotency.IdempotencyKeyReusedException
-import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyScope
-import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.RequestFingerprints
-import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.security.Roles
-import io.quarkus.logging.Log
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -31,9 +28,8 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.withContext
 import java.net.URI
+import java.security.MessageDigest
 import java.time.LocalDate
 import java.util.UUID
 
@@ -43,7 +39,7 @@ import java.util.UUID
 @Consumes(MediaType.APPLICATION_JSON)
 class JournalHistoryResource(
     private val snapshots: JournalHistorySnapshots,
-    private val idempotencyStore: IdempotencyStore,
+    private val receipts: JournalHistoryCaptureReceipts,
     private val objectMapper: ObjectMapper,
 ) {
     // Request-scoped identity, carried across the coroutine dispatch (see AccountResource).
@@ -64,50 +60,25 @@ class JournalHistoryResource(
         val through = LocalDate.parse(request.throughDate)
         require(!from.isAfter(through)) { "fromDate must not be after throughDate" }
         val currency = CurrencyCode.of(request.currency).code
-        // #10916: a retry with the same key and body replays the first snapshot instead of capturing
-        // a second one; a different body under the key is 409, a concurrent duplicate is in-progress.
         val scope = IdempotencyScope(IDEMPOTENCY_SERVICE, identity.principal.name)
         val requestHash = RequestFingerprints.of(objectMapper, "POST", SNAPSHOTS_PATH, request)
-        when (
-            val reservation = idempotencyStore.reserve(
-                scope,
-                idempotencyKey,
-                requestHash,
-                IdempotencyStore.DEFAULT_IN_FLIGHT_TTL_SECONDS,
-            )
-        ) {
-            is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
-                .entity(reservation.record.responseBody)
-                .type(MediaType.APPLICATION_JSON)
-                .header("X-Idempotency-Replayed", "true")
-                .build()
-            ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
-            ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
-            ReserveResult.Reserved -> Unit
-        }
-        var captured = false
-        val manifest = try {
-            snapshots.capture(request.accountId, currency, from, through).also { captured = true }
-        } finally {
-            if (!captured) {
-                withContext(NonCancellable) {
-                    runCatching { idempotencyStore.release(scope, idempotencyKey, requestHash) }
-                        .onFailure { Log.warn("Failed to release idempotency key after snapshot failure", it) }
-                }
-            }
-        }
-        val status = if (manifest.persisted) Response.Status.CREATED else Response.Status.OK
-        idempotencyStore.save(
-            scope,
-            idempotencyKey,
+        val framed = listOf("POST", SNAPSHOTS_PATH, "ledger.list", scope.storeKey(idempotencyKey))
+            .joinToString("") { value -> "${value.toByteArray(Charsets.UTF_8).size}:$value" }
+        val keyHash = MessageDigest.getInstance("SHA-256").digest(framed.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        val result = receipts.capture(
+            keyHash,
             requestHash,
-            status.statusCode,
-            objectMapper.writeValueAsString(manifest),
-            IdempotencyStore.DEFAULT_RECORD_TTL_SECONDS,
+            HistoryCaptureParameters(request.accountId, currency, from, through),
         )
-        if (!manifest.persisted) return Response.ok(manifest).build()
-        return Response.created(URI.create("$SNAPSHOTS_PATH/${manifest.snapshotId}"))
-            .entity(manifest).build()
+        val manifest = result.manifest
+        val response = if (manifest.persisted) {
+            Response.created(URI.create("$SNAPSHOTS_PATH/${manifest.snapshotId}"))
+        } else {
+            Response.ok()
+        }
+        if (result.replayed) response.header("X-Idempotency-Replayed", "true")
+        return response.entity(manifest).build()
     }
 
     @GET

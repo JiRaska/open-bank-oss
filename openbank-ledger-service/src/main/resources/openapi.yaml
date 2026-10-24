@@ -40,9 +40,14 @@ paths:
         Uses the existing ledger.list read authorization. Copies committed attached journal facts
         from one database view; never posts money or classifies an IR event. Coverage is explicitly
         ATTACHED_LEDGER_VIEW_ONLY, not account lifetime or complete classified history. A source-free
-        result is returned inline with persisted=false and is not retained server-side.
-        A retry with the same Idempotency-Key and body replays the first response
-        (X-Idempotency-Replayed: true); a different body under the same key is 409.
+        result is returned inline with persisted=false; no financial snapshot is stored for it.
+        A caller- and operation-scoped Idempotency-Key binds the first result for 86400 seconds.
+        Snapshot creation and its replay binding commit in one database transaction. A retry
+        with the same key and body replays the original result (X-Idempotency-Replayed: true),
+        without extending expiry; a different body under the same key is 409. Replay rereads
+        the retained source-linked snapshot instead of a separately cached financial response.
+        If its source is erased or unavailable during that lifetime, replay is 410 and does not
+        create another observation. After expiry a new capture may use the key again.
       security: [{bearerAuth: []}]
       parameters:
         - name: Idempotency-Key
@@ -74,6 +79,8 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {$ref: '#/components/responses/Conflict'}
+        '410':
+          description: The original captured source is no longer available; no replay or recapture under this unexpired key
   /api/v1/journals/history-snapshots/{snapshotId}:
     get:
       tags: [Ledger]
