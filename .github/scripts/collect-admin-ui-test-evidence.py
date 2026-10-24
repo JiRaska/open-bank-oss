@@ -478,7 +478,7 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
             "path": value.get("path"), "event": value.get("event"),
             "head_repository": head_repo.get("full_name") if isinstance(head_repo, dict) else None,
             "head_sha": value.get("head_sha"), "head_branch": value.get("head_branch"),
-            "run_attempt": value.get("run_attempt"), "id": value.get("id"),
+            "run_attempt": value.get("run_attempt"), "id": value.get("id"), "status": value.get("status"),
             "run_started_at": value.get("run_started_at"), "updated_at": value.get("updated_at"),
         }
 

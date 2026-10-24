@@ -326,7 +326,9 @@
   as declaration-only with `EXPOSE` the single live field (#3016), so the tidy fix for a stale
   `FROM` looks like deleting it. It is not:
   `openbank-admin-ui/scripts/generate-cluster-topology.mjs` parses
-  `openbank-ledger-service/Dockerfile` in `imageFacts()` and renders the base image into the
+  `.github/workflows/Dockerfile.deploy` in `imageFacts()` (it read `openbank-ledger-service/Dockerfile`
+  until the port-only stubs were removed — the container port now comes from `quarkus.http.port` via
+  `.github/scripts/service-port.py`) and renders the base image into the
   /docs/cluster dossier (ADR-0081) — and when it cannot parse one it falls back to a HARDCODED
   `eclipse-temurin:25-jre-alpine` literal, so removing the declaration would have resurrected the
   fiction in the UI instead of retiring it (#3354, #3630). A second reader that is a *generator

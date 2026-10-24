@@ -9,6 +9,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -37,6 +38,107 @@ class CreditQuoteCalculatorTest {
     )
 
     private fun quote(r: CreditQuoteRequest = request()) = CreditQuoteCalculator.quote(r, now, validity, firstDue)
+
+    @Test
+    fun `a single repayment of 101 one year after drawing 100 has one percent APRC`() {
+        val q = CreditQuoteCalculator.quote(
+            request(principal = "100", term = 1, rate = "0.12"),
+            now,
+            validity,
+            LocalDate.parse("2027-08-21"),
+        )
+
+        assertThat(q.totalPayable).isEqualTo(czk("101"))
+        assertThat(q.aprc).isEqualByComparingTo("0.010000")
+    }
+
+    @Test
+    fun `the original four argument JVM signature still prices an existing caller`() {
+        val originalMethod = CreditQuoteCalculator::class.java.getMethod(
+            "quote",
+            CreditQuoteRequest::class.java,
+            Instant::class.java,
+            Duration::class.java,
+            LocalDate::class.java,
+        )
+        val q = originalMethod.invoke(
+            CreditQuoteCalculator,
+            request(principal = "100", term = 1, rate = "0.12"),
+            now,
+            validity,
+            LocalDate.parse("2027-08-21"),
+        ) as CreditQuote
+
+        assertThat(q.aprc).isEqualByComparingTo("0.010000")
+    }
+
+    @Test
+    fun `deferring the same repayment lowers APRC and preserves the regular monthly root`() {
+        val r = request(principal = "100", term = 1, rate = "0.12")
+        val monthly = CreditQuoteCalculator.quote(r, now, validity, LocalDate.parse("2026-09-21"))
+        val yearly = CreditQuoteCalculator.quote(r, now, validity, LocalDate.parse("2027-08-21"))
+
+        // 100 * (1 + X)^(1/12) = 101, so X = 1.01^12 - 1.
+        assertThat(monthly.aprc).isEqualByComparingTo("0.126825")
+        assertThat(yearly.totalPayable).isEqualTo(monthly.totalPayable)
+        assertThat(yearly.aprc).isLessThan(monthly.aprc)
+    }
+
+    @Test
+    fun `an explicit future drawdown date is independent of the quote creation date`() {
+        val q = CreditQuoteCalculator.quote(
+            request(principal = "100", term = 1, rate = "0.12"),
+            now,
+            validity,
+            firstDueDate = LocalDate.parse("2027-09-21"),
+            drawdownDate = LocalDate.parse("2026-09-21"),
+        )
+
+        assertThat(q.aprc).isEqualByComparingTo("0.010000")
+        assertThat(q.validUntil).isEqualTo(now.plus(validity))
+    }
+
+    @Test
+    fun `the default drawdown date uses UTC even near midnight`() {
+        val q = CreditQuoteCalculator.quote(
+            request(principal = "100", term = 1, rate = "0.12"),
+            Instant.parse("2026-08-21T23:59:59Z"),
+            validity,
+            LocalDate.parse("2027-08-21"),
+        )
+
+        assertThat(q.aprc).isEqualByComparingTo("0.010000")
+    }
+
+    @Test
+    fun `residual days use the complete year ending at the backwards month anchor`() {
+        // Whole months are removed first: Apr 1 -> Mar 1, leaving Feb 15 -> Mar 1.
+        assertSinglePaymentAprc("2024-02-15", "2024-04-01", 1.0 / 12 + 15.0 / 366)
+        assertSinglePaymentAprc("2025-02-15", "2025-04-01", 1.0 / 12 + 14.0 / 365)
+        // The residual endpoint is in 2025, but its preceding full year includes Feb 29, 2024.
+        assertSinglePaymentAprc("2024-12-15", "2025-02-01", 1.0 / 12 + 17.0 / 366)
+    }
+
+    @Test
+    fun `end of month intervals follow backwards calendar months without an implicit roll`() {
+        assertSinglePaymentAprc("2024-01-31", "2024-02-29", 29.0 / 366)
+        assertSinglePaymentAprc("2025-01-31", "2025-02-28", 28.0 / 366)
+        assertSinglePaymentAprc("2024-02-29", "2024-03-31", 1.0 / 12)
+        assertSinglePaymentAprc("2024-01-31", "2024-03-31", 2.0 / 12)
+    }
+
+    private fun assertSinglePaymentAprc(drawdown: String, due: String, years: Double) {
+        val q = CreditQuoteCalculator.quote(
+            request(principal = "100", term = 1, rate = "0.12"),
+            now,
+            validity,
+            firstDueDate = LocalDate.parse(due),
+            drawdownDate = LocalDate.parse(drawdown),
+        )
+        // Independent closed-form root of 100 * (1 + X)^years = 101.
+        val expected = BigDecimal.valueOf(Math.pow(1.01, 1 / years) - 1).setScale(6, RoundingMode.HALF_UP)
+        assertThat(q.aprc).describedAs("drawdown %s, payment %s", drawdown, due).isEqualByComparingTo(expected)
+    }
 
     // ── Consistency with the loan that would actually be booked ───────────────
 
@@ -81,8 +183,7 @@ class CreditQuoteCalculatorTest {
         val plain = quote(request())
         val withFee = quote(request(monthly = "100"))
         val difference = withFee.totalPayable - plain.totalPayable
-        // Compared on amount, not on Money identity: Money keeps the currency's minor-unit scale,
-        // so the equal value 4800 and 4800.00 are different objects and the same money.
+        // 100 in monthly charges across all 48 installments.
         assertThat(difference.amount).isEqualByComparingTo("4800") // 100 × 48
     }
 
@@ -150,5 +251,16 @@ class CreditQuoteCalculatorTest {
     @Test
     fun `a zero or negative term is refused`() {
         assertThatThrownBy { request(term = 0) }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `the first repayment must be strictly after drawdown`() {
+        val drawdown = LocalDate.parse("2026-08-21")
+        for (due in listOf(drawdown, drawdown.minusDays(1))) {
+            assertThatThrownBy {
+                CreditQuoteCalculator.quote(request(), now, validity, due, drawdown)
+            }.isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessage("firstDueDate must be after drawdownDate")
+        }
     }
 }

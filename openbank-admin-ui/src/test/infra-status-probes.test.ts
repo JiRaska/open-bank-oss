@@ -5,7 +5,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { CLUSTER_INFRA, LOCAL_INFRA, probeInfra } from '@/lib/infra/probes'
+import { Socket } from 'node:net'
+import { CLUSTER_INFRA, LOCAL_INFRA, parseConfiguredTcpTarget, probeInfra } from '@/lib/infra/probes'
 import { IMAGE_PATTERNS } from '@/lib/live-platform-versions'
 
 // The infra ids are a stable contract consumed by /docs/bcp and /infrastructure.
@@ -29,6 +30,64 @@ describe('infra-status probe definitions', () => {
     expect(CLUSTER_INFRA.find(d => d.id === 'kafka')?.probe).toEqual({
       kind: 'tcp', host: 'openbank-cluster-kafka-bootstrap.messaging.svc', port: 9093,
     })
+  })
+
+  it('probes ClickHouse only at its configured listener and reports missing or failed targets unknown', async () => {
+    const clickhouse = CLUSTER_INFRA.find(d => d.id === 'clickhouse')
+    expect(clickhouse?.probe).toEqual({ kind: 'configured-tcp', urlEnv: 'CLICKHOUSE_URL' })
+    const original = process.env.CLICKHOUSE_URL
+    try {
+      delete process.env.CLICKHOUSE_URL
+      await expect(probeInfra(clickhouse!)).resolves.toMatchObject({ status: 'UNKNOWN', latencyMs: null })
+      process.env.CLICKHOUSE_URL = 'not a URL'
+      expect(parseConfiguredTcpTarget('CLICKHOUSE_URL')).toBeNull()
+      await expect(probeInfra(clickhouse!)).resolves.toMatchObject({ status: 'UNKNOWN', latencyMs: null })
+
+      process.env.CLICKHOUSE_URL = 'http://127.0.0.1:1'
+      expect(parseConfiguredTcpTarget('CLICKHOUSE_URL')).toEqual({ host: '127.0.0.1', port: 1 })
+      await expect(probeInfra(clickhouse!)).resolves.toMatchObject({ status: 'UNKNOWN', checkedAt: expect.any(String) })
+
+      process.env.CLICKHOUSE_URL = 'http://clickhouse'
+      expect(parseConfiguredTcpTarget('CLICKHOUSE_URL')).toEqual({ host: 'clickhouse', port: 80 })
+      process.env.CLICKHOUSE_URL = 'https://clickhouse'
+      expect(parseConfiguredTcpTarget('CLICKHOUSE_URL')).toEqual({ host: 'clickhouse', port: 443 })
+
+      process.env.CLICKHOUSE_URL = 'http://user:secret@127.0.0.1:8123'
+      expect(parseConfiguredTcpTarget('CLICKHOUSE_URL')).toBeNull()
+      await expect(probeInfra(clickhouse!)).resolves.toMatchObject({ status: 'UNKNOWN', latencyMs: null })
+    } finally {
+      if (original === undefined) delete process.env.CLICKHOUSE_URL
+      else process.env.CLICKHOUSE_URL = original
+    }
+  })
+
+  it.each([
+    ['http://[::1]:8123', '::1', 8123],
+    ['https://clickhouse', 'clickhouse', 443],
+    ['http://127.0.0.1:8123', '127.0.0.1', 8123],
+  ] as const)('passes configured %s to the TCP connector as a host literal', async (url, host, port) => {
+    const original = process.env.CLICKHOUSE_URL
+    const connect = vi.spyOn(Socket.prototype, 'connect').mockImplementation(function (this: Socket, ...args: unknown[]) {
+      const connected = args[2] as () => void
+      connected()
+      return this
+    })
+    const timeout = vi.spyOn(Socket.prototype, 'setTimeout')
+    const destroy = vi.spyOn(Socket.prototype, 'destroy')
+    try {
+      process.env.CLICKHOUSE_URL = url
+      const clickhouse = CLUSTER_INFRA.find(d => d.id === 'clickhouse')!
+      await expect(probeInfra(clickhouse)).resolves.toMatchObject({ status: 'UP', latencyMs: expect.any(Number) })
+      expect(connect).toHaveBeenCalledExactlyOnceWith(port, host, expect.any(Function))
+      expect(timeout).toHaveBeenCalledExactlyOnceWith(3000)
+      expect(destroy).toHaveBeenCalledOnce()
+    } finally {
+      connect.mockRestore()
+      timeout.mockRestore()
+      destroy.mockRestore()
+      if (original === undefined) delete process.env.CLICKHOUSE_URL
+      else process.env.CLICKHOUSE_URL = original
+    }
   })
 
   it('uses Prometheus readiness for Valkey because its NetworkPolicy blocks cross-namespace probes', () => {
@@ -73,7 +132,7 @@ describe('infra-status probe definitions', () => {
     for (const map of [CLUSTER_INFRA, LOCAL_INFRA]) {
       const ids = map.map(d => d.id)
       expect(new Set(ids).size, 'duplicate infra id').toBe(ids.length)
-      for (const d of map) expect(['http', 'tcp', 'prometheus-deployment', 'absent']).toContain(d.probe.kind)
+      for (const d of map) expect(['http', 'tcp', 'configured-tcp', 'prometheus-deployment', 'absent']).toContain(d.probe.kind)
     }
   })
 

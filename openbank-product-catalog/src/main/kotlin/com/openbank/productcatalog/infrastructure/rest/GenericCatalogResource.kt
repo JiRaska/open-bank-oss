@@ -7,7 +7,9 @@ package com.openbank.productcatalog.infrastructure.rest
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.security.Roles
+import com.openbank.productcatalog.application.CatalogForbiddenException
 import com.openbank.productcatalog.application.CatalogNotFoundException
 import com.openbank.productcatalog.application.CatalogPreconditionRequiredException
 import com.openbank.productcatalog.application.GenericCatalogService
@@ -20,6 +22,7 @@ import com.openbank.productcatalog.domain.catalog.OfferingRelationship
 import com.openbank.productcatalog.domain.catalog.PriceCadence
 import com.openbank.productcatalog.domain.catalog.PriceComponent
 import com.openbank.productcatalog.domain.catalog.PriceKind
+import com.openbank.productcatalog.domain.catalog.PriceRole
 import com.openbank.productcatalog.domain.catalog.ProductOffering
 import com.openbank.productcatalog.domain.catalog.ProductRevision
 import com.openbank.productcatalog.domain.catalog.ProductSpecification
@@ -46,9 +49,12 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
 import com.openbank.productcatalog.generated.model.CatalogSchema as GeneratedCatalogSchema
+import com.openbank.productcatalog.generated.model.IrSignature as GeneratedIrSignature
 import com.openbank.productcatalog.generated.model.MarketContext as GeneratedMarketContext
 import com.openbank.productcatalog.generated.model.Offering as GeneratedOffering
 import com.openbank.productcatalog.generated.model.ProductRevision as GeneratedProductRevision
+import com.openbank.productcatalog.generated.model.RevisionApprovalPolicy as GeneratedRevisionApprovalPolicy
+import com.openbank.productcatalog.generated.model.RevisionApprovalRole as GeneratedRevisionApprovalRole
 import com.openbank.productcatalog.generated.model.RevisionContent as GeneratedRevisionContent
 import com.openbank.productcatalog.generated.model.SchemaRef as GeneratedSchemaRef
 import com.openbank.productcatalog.generated.model.SchemaViolation as GeneratedSchemaViolation
@@ -223,6 +229,31 @@ class GenericCatalogResource(
         return Response.ok(revisionResponse(published)).tag(EntityTag(published.revision.toString())).build()
     }
 
+    /**
+     * ADR-0352 §7: publishing an IR-bearing revision is its own four-eyes action (`catalog.publish-ir`,
+     * `rules.yaml: four_eyes.actions`), distinct from `catalog.publish`, because it also produces the
+     * publish-path signature over the IR's canonical hash. Same roles, same maker != checker rule.
+     */
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "catalog.publish-ir", resource = "#offeringId")
+    override suspend fun publishOfferingRevisionIrV2(
+        offeringId: UUID,
+        revisionId: UUID,
+        ifMatch: String,
+        request: PublishRequest,
+    ): Response {
+        // Enforced HERE, not only in rest.rego: @Authorize is advisory while AUTHZ_ENFORCE=false, and a
+        // Keycloak service account can carry ROLE_OPERATOR. Fails closed on POSITIVE evidence: only a
+        // verified JWT from an interactive client (azp), with a subject and a non-service-account
+        // username matching the principal, may sign. "Does not look like a machine" is not enough.
+        if (!ServiceAccountIdentity.isHumanStaff(identity)) {
+            throw CatalogForbiddenException("publish-ir requires a verified human checker")
+        }
+        requireRevisionOwner(service.findRevision(revisionId), offeringId)
+        val published = service.publishIr(revisionId, requiredRevision(ifMatch), actor(), request.reason)
+        return Response.ok(revisionResponse(published)).tag(EntityTag(published.revision.toString())).build()
+    }
+
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
     @Authorize(action = "catalog.read", resource = "#offeringId")
     override suspend fun getPublishedProductV2(offeringId: UUID, effectiveAt: java.time.OffsetDateTime?): Response =
@@ -275,6 +306,10 @@ class GenericCatalogResource(
         }
         val attributesNode = mapper.valueToTree<JsonNode>(attributes)
         schemaProfile.requireValidInstance(attributesNode)
+        // Product IR (ADR-0352): the trusted-profile check bounds the document; ProductIrParser validates
+        // it fully in the service before the draft is written.
+        val behaviourNode = behaviour?.let { mapper.valueToTree<JsonNode>(it) }
+        behaviourNode?.let { schemaProfile.requireValidInstance(it) }
         eligibility.forEach { schemaProfile.requireValidInstance(mapper.valueToTree(it.expected)) }
         eligibility.flatMap { it.explanation.values }.forEach {
             require(it.length <= MAX_LOCALIZED_TEXT_LENGTH) {
@@ -304,6 +339,7 @@ class GenericCatalogResource(
                     it.taxTreatment?.value?.let(TaxTreatment::valueOf) ?: TaxTreatment.UNSPECIFIED,
                     it.effectiveFrom?.toInstant(),
                     it.effectiveTo?.toInstant(),
+                    it.role?.value?.let(PriceRole::valueOf),
                 )
             },
             eligibility = eligibility.map {
@@ -318,6 +354,7 @@ class GenericCatalogResource(
                 OfferingRelationship(RelationshipKind.valueOf(it.kind.value), it.targetOfferingId)
             },
             documentCodes = documentCodes.toList(),
+            behaviour = behaviourNode?.let { catalogJson.toObject(it) },
         )
     }
 
@@ -336,6 +373,13 @@ class GenericCatalogResource(
             .entries.associate { it.key.toString() to it.value as Any },
         sha256 = schema.sha256,
         registeredAt = schema.registeredAt.atOffset(ZoneOffset.UTC),
+        approvalPolicy = schema.approvalPolicy?.let { policy ->
+            GeneratedRevisionApprovalPolicy(
+                roles = policy.roles.map { GeneratedRevisionApprovalRole(code = it.code) },
+                requireEffectiveFrom = policy.requireEffectiveFrom,
+                requiredAttributes = policy.requiredAttributes,
+            )
+        },
     )
 
     private fun specificationResponse(specification: ProductSpecification) = GeneratedSpecification(
@@ -384,6 +428,15 @@ class GenericCatalogResource(
         // Deprecated wire aliases of the two fields above (#13429); removed with the compatibility window.
         pensionApprovalDigest = revision.approvalDigest,
         pensionApprovedEffectiveTo = revision.approvedEffectiveTo?.atOffset(ZoneOffset.UTC),
+        irSignature = revision.irSignature?.let {
+            GeneratedIrSignature(
+                revisionHash = it.revisionHash,
+                keyId = it.keyId,
+                algorithm = it.algorithm,
+                signature = it.signature,
+                signedAt = it.signedAt.atOffset(ZoneOffset.UTC),
+            )
+        },
     )
 
     private fun requiredRevision(ifMatch: String?): Long {

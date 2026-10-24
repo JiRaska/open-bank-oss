@@ -26,3 +26,7 @@ Tuto dokumentaci publikuje sama služba na management endpointu `/q/openbank/doc
 - **Push:** vypnutý adaptér zapisuje `SUPPRESSED`, nikoli přijetí poskytovatelem. Text na zamčené obrazovce zůstává obecný.
 - **Idempotence:** dodaný deduplikační klíč vynucuje tabulka notifikací; opakování stejné události nevytvoří druhý záznam v inboxu.
 - **Auth:** Keycloak OIDC. Čtecí API vyžadují `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API`; řízení výpravy (break-glass) vyžaduje `ROLE_OPERATOR`/`ROLE_ADMIN` s four-eyes při resume.
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

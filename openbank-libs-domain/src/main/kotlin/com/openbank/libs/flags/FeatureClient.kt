@@ -25,8 +25,9 @@ package com.openbank.libs.flags
  * [EvaluationReason.DEFAULT] (flag absent). Callers therefore never need a
  * try/catch around an eval — the default is the safe behaviour by construction.
  *
- * Evaluation is synchronous: flagd evaluates locally (sub-ms), so a `suspend`
- * signature would only add ceremony. Outbound exposure emission (A/B) is
+ * These accessors are synchronous and may block on sidecar network I/O. Reactive callers
+ * must use the runtime `enabledSuspending` extension or `@FeatureFlag` interceptor.
+ * Outbound exposure emission (A/B) is
  * fire-and-forget through [com.openbank.libs.flags.ExposurePublisher].
  */
 interface FeatureClient {

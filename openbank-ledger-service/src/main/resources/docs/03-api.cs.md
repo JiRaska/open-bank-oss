@@ -86,6 +86,18 @@ Zaúčtování je idempotentní přes **pole `idempotencyKey` v těle požadavku
 
 `ApiError`: `{ "code": "...", "message": "..." }`. Mapování je centralizováno v `ExceptionMappers` a generický fallback je delegován na `openbank-libs` (ADR-0049 D4 — služba neregistruje catch-all `Exception` mapper). Typické stavy: `400` (nevyvážené / neplatné zaúčtování), `401`/`403` (auth), `404` (neznámý zápis), `409` (konflikt idempotency klíče).
 
+## Účastníci závěrky dne (ADR-0342)
+
+`GET /api/v1/ledger/accounting-days/{date}/participants` vrací úplnost dne. Deklarovaný účastník (například `interest`) hlásí `RAN`, `SKIPPED` nebo `REFUSED` přes `PUT .../participants/{participant}`; hlásit smí jen service-account deklarovaný pro něj. Účastník, který nehlásil, je v `missing`; ten, jehož poslední hlášení je `REFUSED`, je v `refused` - jeho práce (například kapitalizace úroků) nebyla zaúčtována. Obojí drží den v `CUTOFF` (`complete=false`), dokud účastník nenahlásí `RAN` nebo ho operátor nepromině.
+
+`PUT .../participants/{participant}/waiver` (operátor, povinný důvod) je povolen jen pro existující den v `CUTOFF` a jen pro účastníka bez hlášení `RAN`: `404` pro den, který nebyl otevřen (tedy i pro budoucí den), `409` pro den mimo `CUTOFF` nebo účastníka, který již proběhl. Prominutí se přidává jako nový záznam, nikdy nepřepisuje předchozí; může nahradit hlášení `REFUSED`.
+
+`openbank.ledger.close.participants-mode` je `off`, `shadow` (výchozí, počítá by-hold rozhodnutí a den přesto uzavře) nebo `enforce`; jakákoli jiná hodnota zastaví start služby.
+
+V režimu `enforce` aplikační služba účetního dne kontroluje účastníky při automatickém i ručním přechodu operátora `CUTOFF → TIED_OUT`, pod stávajícím transakčním zámkem dne. Chybějící účastník nebo REFUSED vrací 409 do přijetí platného hlášení či výslovné výjimky operátora s důvodem. Volající tuto kontrolu nemůže vynechat. Výchozí režim zůstává `shadow`; změna nepovoluje aktivaci vynucování.
+
+Prominutí vyžaduje ověřený lidský JWT i v advisory režimu OPA; strojový token je odmítnut 403 i s rolí operátora. Audit používá pouze neprázdný JWT `sub`; chybějící, prázdný nebo nečitelný subject vrací 401 bez náhrady zobrazovaným jménem.
+
 ## Mapa účetních tříd (ADR-0341 D3)
 
 Zdroje posílají na řádku žurnálu `accountingClass` a roli a ledger určí GL účet z vlastní tabulky `accounting_class_gl_map` (migrace V31). Čtecí strana je `GET /api/v1/accounting-classes` a `GET /api/v1/accounting-classes/resolve` pro regulatorní čtenáře a odsouhlasení. Zápisový endpoint záměrně neexistuje: mapa se mění revidovanou migrací stejně jako účtový rozvrh.

@@ -99,7 +99,7 @@ class LedgerOutboxEventPublisherTest {
             LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), meters).publish(entry(payload()))
 
             assertThat(commandSlot.captured.accountingClass).isEqualTo("CUSTOMER_DEPOSIT_SAVINGS")
-            assertThat(meters.find("billing.fee.post.legacy_payload").counter()).isNull()
+            assertThat(meters.find("openbank.billing.fee.post.legacy_payload").counter()).isNull()
         }
 
     @Test
@@ -117,7 +117,7 @@ class LedgerOutboxEventPublisherTest {
             LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), meters).publish(entry(legacy))
 
             assertThat(commandSlot.captured.accountingClass).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
-            assertThat(meters.get("billing.fee.post.legacy_payload").counter().count()).isEqualTo(1.0)
+            assertThat(meters.get("openbank.billing.fee.post.legacy_payload").counter().count()).isEqualTo(1.0)
         }
 
     @Test

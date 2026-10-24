@@ -18,6 +18,7 @@ import com.openbank.productcatalog.domain.catalog.ProductRevision
 import com.openbank.productcatalog.domain.catalog.ProductSpecification
 import com.openbank.productcatalog.domain.catalog.RevisionApproval
 import com.openbank.productcatalog.domain.catalog.RevisionApprovalPolicy
+import com.openbank.productcatalog.domain.catalog.RevisionIrSignature
 import com.openbank.productcatalog.domain.catalog.RevisionState
 import com.openbank.productcatalog.domain.catalog.SchemaRef
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
@@ -179,15 +180,18 @@ class PostgresGenericCatalogRepository(
         }
 
     override suspend fun findRevision(id: UUID): ProductRevision? = sessions.withSession { session ->
-        session.find(CatalogRevisionEntity::class.java, id)
-    }.map { it?.toDomain() }.awaitSuspending()
+        session.find(CatalogRevisionEntity::class.java, id).flatMap {
+            session.withIrSignature(it) { r -> r.toDomain() }
+        }
+    }.awaitSuspending()
 
     override suspend fun listRevisions(offeringId: UUID): List<ProductRevision> = sessions.withSession { session ->
         session.createQuery(
             "FROM CatalogRevisionEntity WHERE offeringId = :offeringId ORDER BY number DESC, id",
             CatalogRevisionEntity::class.java,
         ).setParameter("offeringId", offeringId).resultList
-    }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
+            .flatMap { rows -> session.withIrSignatures(rows) { r -> r.toDomain() } }
+    }.awaitSuspending()
 
     override suspend fun updateDraft(revision: ProductRevision, actorId: String): ProductRevision =
         translateOptimisticFailure {
@@ -221,6 +225,7 @@ class PostgresGenericCatalogRepository(
         reason: String,
         contentHash: String,
         at: Instant,
+        irSignature: RevisionIrSignature?,
     ): ProductRevision = translateOptimisticFailure {
         sessions.withTransaction { session ->
             session.find(CatalogRevisionEntity::class.java, revisionId, LockMode.PESSIMISTIC_WRITE)
@@ -255,10 +260,12 @@ class PostgresGenericCatalogRepository(
                                 draft.updatedAt = at
                                 session.persist(approval(draft, checkerId, reason, at))
                             }.flatMap {
+                                session.persistIrSignature(draft.id, irSignature)
+                            }.flatMap {
                                 recordChange(session, "REVISION", draft.id, "REVISION_PUBLISHED", checkerId)
                             }.flatMap {
                                 bankCompatibility.refreshLegacyProjection(session, draft, at)
-                            }.map { draft.toDomain().copy(revision = draft.revision + 1) }
+                            }.map { draft.toDomain().copy(revision = draft.revision + 1, irSignature = irSignature) }
                         }
                 }
         }.awaitSuspending()
@@ -398,7 +405,8 @@ class PostgresGenericCatalogRepository(
                     """AND (r.effectiveTo IS NULL OR r.effectiveTo > :at) ORDER BY r.number DESC, r.id""",
                 CatalogRevisionEntity::class.java,
             ).setParameter("offeringId", offeringId).setParameter("at", effectiveAt).resultList
-        }.map { it.firstOrNull()?.toDomain() }.awaitSuspending()
+                .flatMap { session.withIrSignature(it.firstOrNull()) { r -> r.toDomain() } }
+        }.awaitSuspending()
 
     override suspend fun findPublishedForLegacyProduct(productId: UUID, effectiveAt: Instant): ProductRevision? {
         val offeringId = sessions.withSession { session ->
@@ -461,6 +469,7 @@ class PostgresGenericCatalogRepository(
                 taxTreatment = price.taxTreatment.name
                 effectiveFrom = price.effectiveFrom
                 effectiveTo = price.effectiveTo
+                role = price.role?.name
             }
         }
         val relationships = revision.content.relationships.map { relationship ->

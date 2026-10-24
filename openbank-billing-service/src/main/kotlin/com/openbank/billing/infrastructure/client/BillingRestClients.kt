@@ -111,6 +111,8 @@ data class PriceComponentDto(
     val currency: String? = null,
     val unit: String? = null,
     val cadence: String? = null,
+    /** FEE, RATE, LIMIT or THRESHOLD (catalog #13230); absent on components authored before roles existed. */
+    val role: String? = null,
 )
 
 /** Account read — carries account PII, so the call propagates an OIDC service token. */

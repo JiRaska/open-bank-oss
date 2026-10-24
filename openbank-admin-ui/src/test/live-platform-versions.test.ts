@@ -21,7 +21,7 @@ import { compareVersions, formatVersion, nodesText, versionText } from '@/lib/pl
 type Row = { metric: Record<string, string>; value: [number, string] }
 const prom = (rows: Row[]) => new Response(JSON.stringify({ status: 'success', data: { result: rows } }), { status: 200 })
 const row = (metric: Record<string, string>, v: number): Row => ({ metric, value: [0, String(v)] })
-const imageRow = (image: string, observedAt: number, container?: string): Row => row({ image, ...(container ? { container } : {}) }, observedAt)
+const imageRow = (image: string, observedAt: number, container?: string, namespace?: string): Row => row({ image, ...(container ? { container } : {}), ...(namespace ? { namespace } : {}) }, observedAt)
 
 /** Mock Prometheus keyed on which query string was sent. */
 function mockProm(answers: Partial<Record<keyof typeof QUERIES, Row[]>>): typeof fetch {
@@ -45,6 +45,26 @@ describe('parsers', () => {
     expect(parseImageVersion('kafka', 'quay.io/strimzi/kafka:0.77.0-kafka-9.8.7')).toBe('9.8.7')
     expect(parseImageVersion('kafka', 'quay.io/strimzi/operator:0.77.0')).toBeNull()
     expect(parseImageVersion('strimziOperator', 'quay.io/strimzi/operator:0.77.0')).toBe('0.77.0')
+  })
+
+  it('parses ClickHouse server image versions without treating related images as the server', () => {
+    expect(parseImageVersion('clickhouse', 'docker.io/clickhouse/clickhouse-server:26.8-alpine')).toBe('26.8')
+    expect(parseImageVersion('clickhouse', 'docker.io/clickhouse/clickhouse-server:26.8.30.8-alpine')).toBe('26.8.30.8')
+    expect(parseImageVersion('clickhouse', 'docker.io/clickhouse/clickhouse-server:26.8@sha256:0123456789abcdef')).toBe('26.8')
+    expect(parseImageVersion('clickhouse', 'docker.io/clickhouse/clickhouse-server:26.8junk')).toBeNull()
+    expect(parseImageVersion('clickhouse', 'docker.io/clickhouse/clickhouse-keeper:26.8-alpine')).toBeNull()
+  })
+
+  it('counts only the analytics ClickHouse server container as its runtime image', () => {
+    const observedAt = '2026-10-21T00:00:00.000Z'
+    expect(aggregateImages([
+      { image: 'docker.io/clickhouse/clickhouse-server:26.8-alpine', container: 'clickhouse', namespace: 'analytics', count: 1, observedAt },
+      { image: 'docker.io/clickhouse/clickhouse-server:26.9-alpine', container: 'clickhouse-init', namespace: 'analytics', count: 1, observedAt },
+      { image: 'docker.io/clickhouse/clickhouse-server:27.1-alpine', container: 'clickhouse', namespace: 'ai-platform', count: 1, observedAt },
+      { image: 'docker.io/clickhouse/clickhouse-keeper:26.8-alpine', container: 'keeper', namespace: 'analytics', count: 1, observedAt },
+    ])).toEqual({
+      clickhouse: [{ version: '26.8', count: 1, observedAt }],
+    })
   })
 
   it('parses postgres, valkey, apicurio, loki, keycloak, grafana', () => {
@@ -121,6 +141,57 @@ describe('live snapshot from mocked Prometheus', () => {
     ],
   })
 
+  it('reads the controller runtime version when the container image is only a digest', async () => {
+    const s = await fetchLiveSnapshot(mockProm({
+      images: [imageRow(`sha256:${'a'.repeat(64)}`, fixedNow.getTime() / 1000, 'controller', 'kube-system')],
+      karpenterBuild: [row({ namespace: 'kube-system', container: 'controller', version: '1.14.1' }, fixedNow.getTime() / 1000)],
+    }), () => fixedNow)
+    expect(s.components.karpenter).toEqual([{ version: '1.14.1', count: 1, observedAt: fixedNow.toISOString(), source: 'prometheus-runtime-build-info' }])
+    expect(s.available).toBe(true)
+  })
+
+  it('groups controller replicas without hiding a mixed running version', async () => {
+    const metric = { namespace: 'kube-system', container: 'controller' }
+    const s = await fetchLiveSnapshot(mockProm({ karpenterBuild: [
+      row({ ...metric, version: '1.14.1' }, fixedNow.getTime() / 1000 - 10),
+      row({ ...metric, version: 'v1.14.1' }, fixedNow.getTime() / 1000),
+      row({ ...metric, version: '1.14.2' }, fixedNow.getTime() / 1000),
+    ] }), () => fixedNow)
+    expect(s.components.karpenter).toEqual([
+      { version: '1.14.1', count: 2, observedAt: fixedNow.toISOString(), source: 'prometheus-runtime-build-info' },
+      { version: '1.14.2', count: 1, observedAt: fixedNow.toISOString(), source: 'prometheus-runtime-build-info' },
+    ])
+    expect(s.available).toBe(true)
+  })
+
+  it.each([
+    [{ namespace: 'kube-system', container: 'controller', version: '1.14.1' }, IMAGE_SAMPLE_MAX_AGE_MS / 1000 + 1],
+    [{ namespace: 'kube-system', container: 'controller', version: '1.14.1' }, -31],
+    [{ namespace: 'other', container: 'controller', version: '1.14.1' }, 0],
+    [{ namespace: 'kube-system', container: 'sidecar', version: '1.14.1' }, 0],
+    [{ namespace: 'kube-system', container: 'controller', version: 'unknown' }, 0],
+  ])('does not promote stale or unrelated build information: %j', async (metric, age) => {
+    const s = await fetchLiveSnapshot(mockProm({ karpenterBuild: [row(metric, fixedNow.getTime() / 1000 - age)] }), () => fixedNow)
+    expect(s.components.karpenter).toBeUndefined()
+  })
+
+  it('preserves existing observed-image evidence when runtime build telemetry is absent', async () => {
+    const s = await fetchLiveSnapshot(mockProm({
+      images: [imageRow('public.ecr.aws/karpenter/controller:1.14.1', fixedNow.getTime() / 1000, 'controller', 'kube-system')],
+    }), () => fixedNow)
+    expect(s.components.karpenter).toEqual([{ version: '1.14.1', count: 1, observedAt: fixedNow.toISOString() }])
+  })
+
+  it('does not infer Keycloak or Karpenter versions from desired image tags', async () => {
+    const s = await fetchLiveSnapshot(mockProm({ images: [row({
+      image: `sha256:${'a'.repeat(64)}`,
+      image_spec: `registry.example/openbank-keycloak:26.8.0-optimized@sha256:${'b'.repeat(64)}`,
+      namespace: 'iam', container: 'keycloak',
+    }, fixedNow.getTime() / 1000)] }), () => fixedNow)
+    expect(s.components.keycloak).toBeUndefined()
+    expect(s.components.karpenter).toBeUndefined()
+  })
+
   it('reads versions, nodes (Ready of total) and node types', async () => {
     const s = await fetchLiveSnapshot(full, () => fixedNow)
     expect(s.available).toBe(true)
@@ -159,6 +230,20 @@ describe('live snapshot from mocked Prometheus', () => {
       ],
     }), () => fixedNow)
     expect(s.components.kafka).toEqual([{ version: '4.2.0', count: 1, observedAt: fixedNow.toISOString() }])
+  })
+
+  it('reports only the analytics ClickHouse server container from the fresh Prometheus sample', async () => {
+    const fixedNow = new Date('2026-10-19T18:00:00.000Z')
+    const observedAt = fixedNow.getTime() / 1000
+    const s = await fetchLiveSnapshot(mockProm({
+      images: [
+        imageRow('docker.io/clickhouse/clickhouse-server:26.8-alpine', observedAt, 'clickhouse', 'analytics'),
+        imageRow('docker.io/clickhouse/clickhouse-server:26.9-alpine', observedAt, 'clickhouse-init', 'analytics'),
+        imageRow('docker.io/clickhouse/clickhouse-server:27.1-alpine', observedAt, 'clickhouse', 'ai-platform'),
+        imageRow('docker.io/clickhouse/clickhouse-keeper:26.8-alpine', observedAt, 'keeper', 'analytics'),
+      ],
+    }), () => fixedNow)
+    expect(s.components.clickhouse).toEqual([{ version: '26.8', count: 1, observedAt: fixedNow.toISOString() }])
   })
 
   it('keeps Kafka version unknown when Prometheus sees only exporter or unclassified containers', async () => {
