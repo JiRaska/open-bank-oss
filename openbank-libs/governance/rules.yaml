@@ -867,8 +867,6 @@ change_requirements:
     consumer_allowlist:
       - topic: "openbank.oversight-triggers"
         reason: "agent-service's OversightEventConsumer (ADR-0031 D9 phase 2, channel disabled by default via AGENT_OVERSIGHT_KAFKA_ENABLED) is built; its producers (aml-service, sanctions-service, per the KafkaTopic comment) are not. The 30-minute scheduler sweep covers the gap meanwhile. TRACKING (2026-10-17, #13168): #13179."
-      - topic: "openbank.treasury.payments"
-        reason: "ADR-0344 split of #13413: swift-service's TreasuryPaymentReleasedConsumer and audit-service's subscription land first (bank-own transfer rail slice); the treasury-service producer arrives with the market-and-payments slice, which MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-10-23, #13698): #13698."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
@@ -4901,8 +4899,12 @@ security_sensitive_paths:
   openbank-treasury-service:
     auth_crypto_payment:
       - "src/main/kotlin/**/ApprovalResource.kt"
-      # ADR-0344: the leg schedule hash.
+      # ADR-0344: the market-data provenance hash (SHA-256), the payment netting key and the leg
+      # schedule hash.
+      - "src/main/kotlin/**/marketdata/MarketData.kt"
+      - "src/main/kotlin/**/marketdata/MarketDataFiles.kt"
       - "src/main/kotlin/**/domain/model/Legs.kt"
+      - "src/main/kotlin/**/domain/payment/Payments.kt"
       - "src/main/kotlin/**/approval/**"
       - "src/main/kotlin/**/security/**"
       - "src/main/kotlin/**/filter/**"

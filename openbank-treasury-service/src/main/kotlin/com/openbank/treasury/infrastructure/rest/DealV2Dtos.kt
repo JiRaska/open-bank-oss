@@ -237,6 +237,8 @@ data class CashFlowDto(
     val manual: Boolean,
     val original: Map<String, Any?>?,
     val override: Map<String, Any?>?,
+    /** ADR-0344 D6: the payment this flow settles through, once one is proposed. */
+    val paymentId: String?,
     val journalRefs: List<String>,
 ) {
     companion object {
@@ -275,6 +277,7 @@ data class CashFlowDto(
                     )
                 }
             },
+            paymentId = f.paymentId,
             journalRefs = emptyList(),
         )
     }

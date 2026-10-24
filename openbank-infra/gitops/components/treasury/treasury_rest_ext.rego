@@ -22,6 +22,16 @@
 #   treasury.reference.reject, .verify        — ROLE_TREASURY_APPROVER
 #   treasury.cashflow.override.propose, treasury.position.close — ROLE_TREASURY_BACK_OFFICE
 #   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
+#   treasury.fixing.read, treasury.marketdata.read, treasury.payment.read — treasury staff, never the
+#                                               reference editor (ADR-0344 D5/D6)
+#   treasury.payment.read                     — also ROLE_TREASURY_PAYMENT_RELEASER (its ONLY read)
+#   treasury.marketdata.import, treasury.fixing.manual, treasury.fixing.run — ROLE_TREASURY_BACK_OFFICE
+#   treasury.marketdata.approve               — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
+#   treasury.payment.propose                  — ROLE_TREASURY_BACK_OFFICE
+#   treasury.payment.cancel                   — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
+#   treasury.payment.resolve                  — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
+#   treasury.payment.release                  — ROLE_TREASURY_PAYMENT_RELEASER only (ADR-0344 D6; the
+#                                               domain refuses the deal's creator and every term author)
 #   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
 #   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
@@ -91,6 +101,11 @@ allowed_reasons contains "treasury-staff-read" if {
 		"treasury.reference.read",
 		"treasury.cashflow.read",
 		"treasury.calendar.read",
+		# ADR-0344 D5: fixings and market data (factor history, quality, batches).
+		"treasury.fixing.read",
+		"treasury.marketdata.read",
+		# ADR-0344 D6: own-account payments.
+		"treasury.payment.read",
 	}
 }
 
@@ -234,4 +249,58 @@ allowed_reasons contains "service-tax-reporting-portfolio-read" if {
 	not input.principal.service_account == null
 	"ROLE_API" in input.principal.roles
 	input.action == "treasury.portfolio.inspect"
+}
+
+# ADR-0344 D5: back office imports observations, proposes manual fixings and runs the fixing pass;
+# an approver (a different human, checked in the domain and the database) activates them. No role
+# both writes and activates market data; machines and AI agents get nothing from this file.
+allowed_reasons contains "treasury-back-office-market-data" if {
+	treasury_staff
+	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
+	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run"}
+}
+
+allowed_reasons contains "treasury-approver-market-data" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
+	role in input.principal.roles
+	input.action == "treasury.marketdata.approve"
+}
+
+# ADR-0344 D6: back office proposes and cancels own-account payments; ONLY the payment releaser
+# releases one — no dealer, approver, admin, machine or agent. The domain adds that the releaser is
+# neither a deal's creator nor a term author.
+allowed_reasons contains "treasury-back-office-payment" if {
+	treasury_staff
+	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
+	input.action in {"treasury.payment.propose", "treasury.payment.cancel"}
+}
+
+allowed_reasons contains "treasury-approver-payment-cancel" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action == "treasury.payment.cancel"
+}
+
+# A released payment is resolved (MANUALLY_SETTLED / RETURNED) by an approver; the domain refuses
+# its releaser and every term author.
+allowed_reasons contains "treasury-approver-payment-resolve" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
+	role in input.principal.roles
+	input.action == "treasury.payment.resolve"
+}
+
+# Least privilege: the releaser reads the payments it may release and nothing else (no deals,
+# counterparties, positions, nostro or market data); the release itself is the rule below.
+allowed_reasons contains "treasury-payment-releaser-read" if {
+	treasury_staff
+	"ROLE_TREASURY_PAYMENT_RELEASER" in input.principal.roles
+	input.action == "treasury.payment.read"
+}
+
+allowed_reasons contains "treasury-payment-release" if {
+	treasury_staff
+	"ROLE_TREASURY_PAYMENT_RELEASER" in input.principal.roles
+	input.action == "treasury.payment.release"
 }

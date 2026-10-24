@@ -167,9 +167,13 @@ class CashFlowRepositoryImpl(
                 checkNotNull(deal) { "deal ${row.dealId} disappeared" }
                 postedUnderLock(row.dealId, flow.flowId).map { posted ->
                     OverrideEligibility(DealState.valueOf(deal.state), posted).require(row.toDomain())
-                    // The override was computed from the flow as read; if anything moved the row's
-                    // state since, refuse rather than write a stale state over it.
-                    if (row.state != flow.state.name) {
+                    // The override was computed from the flow as read; if a fixing or a payment touched
+                    // the row since, refuse rather than write a stale state over it (fill never writes
+                    // the payment link or the fixing provenance, but state/rate/amount must not regress).
+                    val moved = row.state != flow.state.name ||
+                        row.fixedAt != flow.fixedAt ||
+                        row.paymentId != flow.paymentId
+                    if (moved) {
                         throw CashFlowConflictException(
                             "flow ${flow.flowId} changed since it was read (now ${row.state}); reload and retry",
                         )

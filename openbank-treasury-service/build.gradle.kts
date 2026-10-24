@@ -108,5 +108,8 @@ tasks.withType<Test> {
     // `build --rerun-tasks`: the heap sat at 522 of 524 MB, Kover's class transformer could no longer
     // allocate ("can't create byte array") and the run wedged without failing. Same per-module
     // override, and the same reasoning, as account-service.
-    maxHeapSize = "2g"
+    // 2026-10-19: 18 @TestProfile classes now (each a fresh Quarkus app, metaspace and Kover
+    // transforms included); at 2g the `build --rerun-tasks` run wedged the same way (OutOfMemoryError
+    // in Kover's agent, no test failure, no exit). 4g fits the fork with headroom.
+    maxHeapSize = "4g"
 }

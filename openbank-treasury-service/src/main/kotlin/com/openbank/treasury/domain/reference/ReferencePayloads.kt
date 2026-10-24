@@ -47,6 +47,9 @@ enum class ReferenceKind(val wire: String) {
     ACCOUNTING_SETTINGS("accounting-settings"),
     BALANCE_SHEET_SIDE("balance-sheet-side"),
     DEALING_FILTER("dealing-filter"),
+
+    // ADR-0344 contract 8.5: a bank-published rate sheet (tenor -> rates), effective-dated, four-eyes.
+    INTERNAL_RATE_SHEET("internal-rate-sheet"),
     ;
 
     /** The kinds stored as [GenericPayload]. */

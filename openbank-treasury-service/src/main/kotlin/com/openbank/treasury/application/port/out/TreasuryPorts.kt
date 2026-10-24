@@ -70,6 +70,13 @@ interface DealRepository {
         /** Further outbox events of the same change (e.g. treasury.cashflow.generated). */
         extraEvents: List<DealEvent> = emptyList(),
         /**
+         * ADR-0344 D6: the change ends the deal's payable life (cancel, reverse). In the SAME
+         * transaction, under a lock on the deal row (the row a payment release locks too): refuse
+         * (DealHasReleasedPaymentException, 409) if any of its payments is released, else withdraw its
+         * PROPOSED payments and free their flows. Commits or rolls back with the deal change.
+         */
+        withdrawPayments: Boolean = false,
+        /**
          * A limit-consuming write (submit, approve): in the SAME transaction, after locking the deal
          * row, take the (counterparty, limit currency) line lock and re-measure the others' exposure;
          * past [ExposureGuard.maxOthers] it refuses (CorrectionLimitBreachedException, 422) instead of
