@@ -151,7 +151,7 @@ quarkus:
   # switches it back on from its own profile.
   lending:
     close:
-      report-cron: "off"
+      report-cron: "0 0 0 1 1 ? 2099"
 
 openbank:
   # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
