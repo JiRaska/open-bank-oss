@@ -16,7 +16,7 @@ function record(overrides: Record<string, unknown>) {
     prNumber: 123,
     prUrl: 'https://github.com/openbank/open-bank-oss/pull/123',
     headBranch: 'agent/finops-agent-budget',
-    mergedBy: 'jiri.raska',
+    mergedBy: 'fixture-reviewer',
     mergedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     title: 'Tighten idle namespace budget',
     proposalId: null,
@@ -53,7 +53,7 @@ describe('MergeRecordsSection', () => {
 
     render(<MergeRecordsSection knownAgentIds={['finops-agent']} />)
 
-    expect(await screen.findByText('Recorded human merges')).toBeVisible()
+    expect(await screen.findByText('Recorded agent PR merges')).toBeVisible()
     // Summary chip renders only after the fetch resolves (records !== null), and
     // the title above renders immediately — so the chip must be AWAITED, not
     // grabbed synchronously, or the assertion races the fetch (CI flake).
@@ -68,7 +68,7 @@ describe('MergeRecordsSection', () => {
     expect(screen.getByText('not-yet-chartered')).toBeVisible()
 
     // mergedBy is rendered as the HUMAN audit actor, distinctly marked.
-    expect(screen.getByText('jiri.raska')).toBeVisible()
+    expect(screen.getByText('fixture-reviewer')).toBeVisible()
     expect(screen.getByText('alice')).toBeVisible()
     expect(screen.getAllByTitle('Human — the audited actor of this merge').length).toBe(2)
 
@@ -98,14 +98,49 @@ describe('MergeRecordsSection', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
   })
 
-  it('drops malformed upstream rows and falls through to the empty state', async () => {
+  it('reports unverified rows without claiming that no merge records exist', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse([record({ mergedAt: 'not-a-date' })])))
 
     render(<MergeRecordsSection knownAgentIds={[]} />)
 
-    expect(await screen.findByText(
-      'No recorded merges yet — merge recording activates when the first agent PR is merged (ADR-0031 phase 3).',
-    )).toBeVisible()
+    expect(await screen.findByText(/Some merge records have an invalid format or incomplete evidence/)).toBeVisible()
+    expect(screen.queryByText(/No recorded merges yet/)).not.toBeInTheDocument()
+  })
+
+  it('reports a malformed successful response without claiming an empty audit', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ error: 'upstream_error' }) }))
+    render(<MergeRecordsSection knownAgentIds={[]} />)
+    expect(await screen.findByText(/Some merge records have an invalid format or incomplete evidence/)).toBeVisible()
+    expect(screen.queryByText(/No recorded merges yet/)).not.toBeInTheDocument()
+  })
+
+  it.each(['HEAD', 'PR'])('separates the App executor from the human and displays %s scope', async scope => {
+    const mergedAt = '2026-10-01T10:00:00Z'
+    const authorization = {
+      approvedBy: 'reviewer', approvedById: 100, approvedAt: '2026-10-01T09:59:00Z',
+      ...(scope === 'HEAD' ? {
+        kind: 'OWNER_WORKFLOW_EXACT_HEAD', scope: 'HEAD', statusId: 42, workflowRunId: 45,
+        evidenceUrl: 'https://github.com/openbank/open-bank-oss/actions/runs/45',
+      } : {
+        kind: 'LEGACY_PR_AUTO_MERGE', scope: 'PR',
+        evidenceUrl: 'https://github.com/openbank/open-bank-oss/pull/123',
+        pullRequestNodeId: 'PR_synthetic', mergeEventNodeId: 'ME_synthetic',
+        mergeEventAt: '2026-10-01T10:00:01Z', observedAt: '2026-10-01T10:00:02Z',
+      }),
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse([record({
+      mergedBy: 'openbank-gitops-bot[bot]', mergedByType: 'GITHUB_APP', mergedById: 200,
+      headSha: 'a'.repeat(40), mergeCommitSha: 'b'.repeat(40), mergedAt,
+      recordedAt: '2026-10-01T10:00:05Z', authorization,
+    })])))
+    render(<MergeRecordsSection knownAgentIds={[]} />)
+    expect(await screen.findByText('openbank-gitops-bot[bot]')).toBeVisible()
+    expect(screen.getByTitle('App — the actual merge executor')).toBeVisible()
+    expect(screen.queryByTitle('Human — the audited actor of this merge')).not.toBeInTheDocument()
+    expect(screen.getByText('reviewer')).toBeVisible()
+    expect(screen.getByRole('link', { name: scope === 'HEAD' ? 'Exact-head approval' : 'Historical PR request' }))
+      .toHaveAttribute('href', authorization.evidenceUrl)
+    expect(screen.queryByText('Direct human merge')).not.toBeInTheDocument()
   })
 
   it('survives a network throw with the quiet warning', async () => {

@@ -59,6 +59,7 @@ import argparse
 import contextlib
 import io
 import json
+import math
 import pathlib
 import re
 import sys
@@ -159,7 +160,10 @@ def load_results(path: pathlib.Path) -> dict[str, float]:
         secondary = entry.get("secondaryMetrics") or {}
         if METRIC not in secondary:
             raise ValueError(f"{path}: {name} has no {METRIC} — was JMH run with -prof gc?")
-        out[name] = float(secondary[METRIC]["score"])
+        value = float(secondary[METRIC]["score"])
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(f"{path}: {name} has invalid allocation measurement {value}")
+        out[name] = value
     return out
 
 
@@ -238,6 +242,19 @@ def compare(declared: set[str], baseline: dict[str, float], results: dict[str, f
                 f"({(got - want) / want * 100:+.1f} %) — ratchet the baseline down (--write-baseline)"
             )
     return findings, notices
+
+
+def ratchet_baseline(path: pathlib.Path, results: dict[str, float]) -> None:
+    """Update only measured entries, preserving other budgets and metadata; never raise a budget."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    baseline = doc["benchmarks"]
+    if not results:
+        raise ValueError("no measurements to ratchet")
+    for name, value in results.items():
+        if name not in baseline or not math.isfinite(value) or value < 0 or value > baseline[name]:
+            raise ValueError(f"{name}: ratchet requires a finite measurement at or below the existing budget")
+    baseline.update({name: min(float(baseline[name]), round(value, 1)) for name, value in results.items()})
+    path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 
 
 def write_baseline(path: pathlib.Path, results: dict[str, float]) -> None:
@@ -486,6 +503,7 @@ def main() -> int:
     ap.add_argument("--results", help="JMH JSON produced with -prof gc -rf json")
     ap.add_argument("--enforce", action="store_true")
     ap.add_argument("--write-baseline", action="store_true")
+    ap.add_argument("--ratchet-baseline", action="store_true", help="lower only measured existing budgets")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
@@ -494,6 +512,11 @@ def main() -> int:
     if results is not None and not results.is_file():
         print(f"::error::{results} not found — the JMH run produced no results; refusing to report a pass")
         return 1
+    if args.ratchet_baseline:
+        if results is None or args.write_baseline:
+            ap.error("--ratchet-baseline requires --results and cannot combine with --write-baseline")
+        ratchet_baseline(pathlib.Path(args.root) / BASELINE, load_results(results))
+        return 0
     return run(pathlib.Path(args.root), results, args.enforce, args.write_baseline)
 
 

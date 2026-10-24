@@ -277,7 +277,8 @@ commercial control but not OSI-"open"; revisit if AGPL+dual-license friction pro
    only** — no agent acts yet.
 2. **Read-only oversight** (control plane): one or two agents (e.g. compliance, SRE-watch) that only read
    and write proposals to the queue. Fully HITL, near-zero blast radius.
-3. **One development agent on one NON-money-path service**: opens PRs via skills; a human merges.
+3. **One development agent on one NON-money-path service**: opens PRs via skills; a human merges
+   or authorizes the exact head for the trusted merge App (see the 2026-10-24 amendment).
 4. **Expand** to more domains and, with 2 approvals + threat model, to money-path services.
 5. **Provenance + tamper-evidence** (D5) and EU AI Act technical documentation.
 
@@ -287,6 +288,49 @@ commercial control but not OSI-"open"; revisit if AGPL+dual-license friction pro
 tool. A charter may list a typed-decision use case under `tools.allow`; the call is OPA-gated like an
 MCP `tools/call`, and its `DecisionRecord` carries the agent's `actChain`. An agent can never lower a
 threshold, because that is a four-eyes configuration change (ADR-0348 D3), not a tool.
+
+## Amendment 2026-10-24: actual merge execution and separate human authorization
+
+Merge execution and human authorization are separate facts. The recorder preserves GitHub's
+actual `merged_by` login and account id. A trusted App merge is audited as `SERVICE`, with the
+App as `actorId`; it must never become a `HUMAN` event or substitute the approving owner into
+`mergedBy`. Direct human merges and their existing records retain their previous meaning.
+
+For new App merges, authorization is `OWNER_WORKFLOW_EXACT_HEAD`, scope `HEAD`: the CI producer
+verifies the raw trusted-App status on the actual PR head, the latest decision before merge,
+canonical repository/PR description, and the successful first-attempt main owner workflow and
+writer job. Both workflow actors must be the live User repository owner. The stored evidence
+includes the human login/id, decision timestamp, status id and workflow-run URL/id, separately
+from the actual merged head and merge commit. Failed, skipped, revoked, foreign, incomplete,
+after-merge or unavailable evidence fails closed. Required PR checks remain unchanged.
+
+Historical reconstruction is explicitly different. For merges no later than governance PR
+[#13717](https://github.com/JiRaska/open-bank-oss/pull/13717)'s merge at
+`2026-10-23T19:42:17Z`, an observed owner auto-merge request may be stored as
+`LEGACY_PR_AUTO_MERGE`, scope `PR`. This records the real human request, **not approval of a
+specific head and not certification that historical policy was satisfied**. The producer verifies
+the current canonical merged PR, owner User identity, request timestamp before merge, complete
+timeline without a subsequent disable, and a single immutable merged event matching the actual
+executor and merge commit. It preserves the PR node id, merged-event node id/time and observation
+time. The server bounds observation clock skew to 60 seconds and read-back rejects observations
+later than the producer's current reconstruction. GitHub REST/timeline merge timestamps may differ by one second; discrepancies over 60 seconds
+fail closed. This bounded reconstruction is unavailable for later merges. It does not create a
+retroactive exact-head approval or replace an existing premerge revocation.
+
+The API/schema transition is additive: the original POST keeps its human-only request contract;
+App evidence uses `POST /api/v1/agent-merge-records/app`. Existing rows default to `HUMAN`,
+with no invented ids or authorization. The producer checks evidence-schema capability before writing, then reads the
+committed record back. Duplicate deliveries retain the original record and produce no second audit
+event; conflicting App identities, heads or authorization return 409. A refreshed historical
+observation timestamp does not change the original evidence. The merge row and audit outbox remain
+atomic, so enqueue failure rolls back both and a retry can recover.
+
+A main-only, first-attempt owner workflow can reconstruct merged PRs from canonical GitHub data,
+using the existing least-privilege recorder credential and verifying each stored result. A later
+green run does not itself repair old gaps: issue
+[#13062](https://github.com/JiRaska/open-bank-oss/issues/13062) remains open until all referenced
+merges have been backfilled and read back successfully. Unprovable evidence must remain an explicit
+gap. No merge is repeated, no failed historical status is overwritten, and no advisory is published.
 
 ## Alternatives considered
 
