@@ -3091,7 +3091,9 @@ gates:
       python3 .github/scripts/merge-train.py --self-test
       python3 .github/scripts/test-merge-train-owner-approval.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/merge-train.py", ".github/scripts/test-merge-train-owner-approval.py", ".github/workflows/merge-train-owner-approval.yml", "openbank-libs/governance/rules.yaml"]
+    # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
+    # every workflow, so a PR adding a carrier- or ruleset-judging check script must re-run it (#13750).
+    selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml"]
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
 
