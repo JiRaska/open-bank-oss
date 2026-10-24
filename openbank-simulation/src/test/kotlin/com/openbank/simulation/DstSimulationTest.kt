@@ -5,10 +5,15 @@
 package com.openbank.simulation
 
 import com.openbank.simulation.engine.FaultProfile
+import com.openbank.simulation.invariants.Invariant
+import com.openbank.simulation.invariants.MoneyPathInvariants
+import com.openbank.simulation.invariants.Violation
 import com.openbank.simulation.runner.SimulationConfig
 import com.openbank.simulation.runner.SimulationRunner
+import com.openbank.simulation.runner.World
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Instant
 
 /**
  * The end-to-end DST proof (ADR-0100). The harness is only credible if it BOTH holds the
@@ -27,22 +32,32 @@ class DstSimulationTest {
 
     @Test
     fun `happy path holds every invariant across many seeds`() {
-        val runner = SimulationRunner(FaultProfile.NONE, SimulationConfig(), stepsPerSeed = steps)
+        val coverage = CombinedScenarioCoverage()
+        val runner = SimulationRunner(
+            FaultProfile.NONE,
+            SimulationConfig(),
+            stepsPerSeed = steps,
+            invariants = MoneyPathInvariants.ALL + coverage,
+        )
         val report = runner.run(seeds)
         assertThat(report.allPassed).withFailMessage(report.summary()).isTrue()
+        coverage.assertComplete(seeds, steps)
     }
 
     @Test
     fun `adversarial faults hold every invariant when the projection is correctly dedup-guarded`() {
         // Hostile profile: dropped (re-delivered), duplicated and reordered events, write
         // failures and lock conflicts. Correct, idempotent code must still keep every invariant.
+        val coverage = CombinedScenarioCoverage()
         val runner = SimulationRunner(
             FaultProfile.ADVERSARIAL,
             SimulationConfig(dedupEnabled = true),
             stepsPerSeed = steps,
+            invariants = MoneyPathInvariants.ALL + coverage,
         )
         val report = runner.run(seeds)
         assertThat(report.allPassed).withFailMessage(report.summary()).isTrue()
+        coverage.assertComplete(seeds, steps)
     }
 
     @Test
@@ -79,5 +94,49 @@ class DstSimulationTest {
         assertThat(replayA).isEqualTo(replayB)
         assertThat(replayA.violation).isEqualTo(first.violation)
         assertThat(replayA.stepsRun).isEqualTo(first.stepsRun)
+    }
+
+    private class CombinedScenarioCoverage : Invariant {
+        override val name = "combined-scenario-coverage"
+
+        private class Observation {
+            var checks = 0
+            var screened = 0
+            var authorizations = 0
+            var standingOrders = 0
+            var lastInstant: Instant? = null
+            var clockMonotonic = true
+        }
+
+        private val observations = mutableMapOf<Long, Observation>()
+
+        override fun check(world: World): Violation? {
+            val observation = observations.getOrPut(world.context.seed) { Observation() }
+            val now = world.context.clock.instant()
+            observation.clockMonotonic = observation.clockMonotonic &&
+                (observation.lastInstant?.let { !now.isBefore(it) } ?: true)
+            observation.checks++
+            observation.screened = world.screening.conversions().size
+            observation.authorizations = world.cardAuths.all().size
+            observation.standingOrders = world.standingOrders.all().size
+            observation.lastInstant = now
+            return null
+        }
+
+        fun assertComplete(seedCount: Int, stepsPerSeed: Int) {
+            assertThat(observations).hasSize(seedCount)
+            observations.forEach { (seed, observation) ->
+                assertThat(observation.checks).describedAs("settled invariant sweeps for seed %s", seed)
+                    .isEqualTo(stepsPerSeed)
+                assertThat(observation.screened).describedAs("FX screening records for seed %s", seed)
+                    .isEqualTo(stepsPerSeed)
+                assertThat(observation.authorizations).describedAs("card authorizations for seed %s", seed)
+                    .isEqualTo(stepsPerSeed)
+                assertThat(observation.standingOrders).describedAs("standing orders for seed %s", seed)
+                    .isPositive()
+                assertThat(observation.clockMonotonic).describedAs("shared clock for seed %s", seed)
+                    .isTrue()
+            }
+        }
     }
 }
