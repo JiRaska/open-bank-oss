@@ -85,3 +85,24 @@ spec:
               because the funding nostro account would be negative on the value date. Fund the
               account (or move the payment) and release it again; GET /api/v1/treasury/payments
               lists the PROPOSED payments.
+
+    # ADR-0344 D6: the institution-transfer rail reported a status (SENT / SETTLED / REJECTED) for a
+    # payment a human had already resolved MANUALLY_SETTLED or RETURNED. The rail and the manual
+    # resolution disagree about whether money moved; the status was NOT applied and sits in the
+    # channel's DLQ. Fires on any such conflict in the last 15 minutes.
+    - name: openbank.treasury.payment-rail-conflict
+      rules:
+        - alert: TreasuryPaymentRailConflict
+          expr: sum by (status) (increase(openbank_treasury_payment_rail_conflict_total[15m])) > 0
+          labels:
+            severity: critical
+          annotations:
+            # Each conflict is a rail delivery, not a periodic job: the window follows real traffic.
+            subject_period: continuous
+            summary: "A rail status contradicts a manually resolved treasury payment"
+            description: >-
+              treasury-service received a rail status {{ $labels.status }} for a payment a human
+              had already resolved MANUALLY_SETTLED or RETURNED. It was not applied and is parked
+              in openbank.dlq.treasury.institution-transfer-status-in. Establish with the
+              correspondent whether the money moved, correct the resolution through a reviewed
+              change, then replay or discard the record.

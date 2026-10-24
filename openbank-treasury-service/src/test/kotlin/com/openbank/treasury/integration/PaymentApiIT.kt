@@ -243,7 +243,7 @@ class PaymentApiIT {
 
     @Test
     @Order(22)
-    fun `22 - two releases that each fit but together overdraw serialise, and exactly one passes`() {
+    fun `22 - two releases on one funding line, different value dates, together overdraw - exactly one passes`() {
         val amount = jdbc { c ->
             c.prepareStatement("select amount from treasury_payments where payment_id = '$payA'").executeQuery()
                 .use { rs ->
@@ -251,8 +251,13 @@ class PaymentApiIT {
                     rs.getBigDecimal(1)
                 }
         }
+        // payB pays a day later: a lock keyed on the value date would put the two releases under
+        // different locks, and neither would see the other's uncommitted reservation.
+        val later = valueDate.plusDays(1)
+        shiftValueDate(payB, later)
         ledger.reset()
         ledger.balances[Triple("1001", "CZK", valueDate)] = amount.multiply(BigDecimal("1.5"))
+        ledger.balances[Triple("1001", "CZK", later)] = amount.multiply(BigDecimal("1.5"))
         val rita = Actor("rita.releaser", ActorType.HUMAN)
         val pool = Executors.newFixedThreadPool(2)
         val gate = CountDownLatch(1)
@@ -272,6 +277,7 @@ class PaymentApiIT {
             }.exceptionOrNull(),
         ).isInstanceOf(FundingExceededException::class.java)
         released = if (outcomes[0].isSuccess) payA else payB
+        shiftValueDate(payB, valueDate)
         assertThat(count("select count(*) from treasury_payments where status = 'RAIL_NOT_SUPPORTED'")).isEqualTo(1)
     }
 
@@ -491,6 +497,20 @@ class PaymentApiIT {
                 rs.next()
                 rs.getString(1)
             }
+    }
+
+    private fun shiftValueDate(pay: String, to: LocalDate) = jdbc { c ->
+        c.prepareStatement("update treasury_payments set value_date = ? where payment_id = '$pay'").use {
+            it.setObject(1, to)
+            it.executeUpdate()
+        }
+        c.prepareStatement(
+            "update deal_cash_flows set payment_date = ? where flow_id in " +
+                "(select flow_id from treasury_payment_flows where payment_id = '$pay')",
+        ).use {
+            it.setObject(1, to)
+            it.executeUpdate()
+        }
     }
 
     private fun count(sql: String): Int = jdbc { c ->

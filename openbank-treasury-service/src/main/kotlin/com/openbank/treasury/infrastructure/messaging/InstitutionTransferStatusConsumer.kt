@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.treasury.application.usecase.InstitutionTransferStatus
 import com.openbank.treasury.application.usecase.PaymentService
+import com.openbank.treasury.domain.payment.ManualResolutionRailConflictException
 import com.openbank.treasury.domain.payment.RailStatus
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.enterprise.context.ApplicationScoped
@@ -46,7 +47,19 @@ class InstitutionTransferStatusConsumer(
             log.warnf("Dropping unprocessable institution-transfer status (poison pill): %.300s", payload)
             return
         }
-        val applied = payments.onRailStatus(status)
+        val applied = try {
+            payments.onRailStatus(status)
+        } catch (e: ManualResolutionRailConflictException) {
+            // The rail reports an outcome for a payment a human already resolved: counted, logged
+            // and RETHROWN so the DLQ parks it — never applied, never dropped.
+            meterRegistry.counter(RAIL_CONFLICT_METRIC, "status", status.status.name.lowercase()).increment()
+            log.errorf(
+                "Rail status %s for manually resolved payment %s: dead-lettered",
+                status.status,
+                status.paymentId,
+            )
+            throw e
+        }
         meterRegistry.counter(
             "openbank.treasury.rail.status",
             "outcome",
@@ -80,6 +93,7 @@ class InstitutionTransferStatusConsumer(
 
     companion object {
         const val EVENT_TYPE = "swift.institution-transfer.status.v1"
+        const val RAIL_CONFLICT_METRIC = "openbank.treasury.payment.rail_conflict"
         const val MAX_PAYLOAD = 16_384
         const val MAX_KEY = 128
         const val MAX_SHORT = 140

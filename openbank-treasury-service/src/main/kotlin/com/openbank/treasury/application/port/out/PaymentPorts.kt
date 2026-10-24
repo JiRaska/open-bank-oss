@@ -29,9 +29,9 @@ interface PaymentRepository {
     suspend fun list(status: PaymentStatus?, from: LocalDate, to: LocalDate, limit: Int): List<Payment>
 
     /**
-     * PROPOSED -> RELEASED under the funding check, serialised per funding bucket: inside ONE
-     * transaction it takes a transaction-scoped advisory lock on [fundingKey] (account, currency,
-     * value date), recomputes the released-but-unsettled outgoing total of that bucket, calls
+     * PROPOSED -> RELEASED under the funding check, serialised per funding LINE: inside ONE
+     * transaction it takes a transaction-scoped advisory lock on [fundingKey] (account, currency —
+     * no value date), recomputes the unbooked outgoing total of that line on EVERY value date, calls
      * [fundingCheck] with it (which throws to refuse), then stores the release and its [events] —
      * the status change and, for a payment handed to a rail, `treasury.payment.released.v1`
      * (contract 9) — all in that one transaction.

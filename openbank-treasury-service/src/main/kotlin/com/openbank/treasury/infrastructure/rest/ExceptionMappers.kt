@@ -163,6 +163,11 @@ class ExceptionMappers {
     fun paymentStale(e: com.openbank.treasury.domain.payment.PaymentStaleException): Response =
         error(Response.Status.CONFLICT.statusCode, "PAYMENT_STALE", e.message)
 
+    /** A RELEASED / SENT payment is still with the rail: resolution waits for its terminal status. */
+    @ServerExceptionMapper
+    fun paymentInFlight(e: com.openbank.treasury.domain.payment.PaymentInFlightException): Response =
+        error(Response.Status.CONFLICT.statusCode, "PAYMENT_IN_FLIGHT", e.message)
+
     @ServerExceptionMapper
     fun ssiChanged(e: com.openbank.treasury.domain.payment.SsiChangedException): Response =
         error(Response.Status.CONFLICT.statusCode, "SSI_CHANGED", e.message)
