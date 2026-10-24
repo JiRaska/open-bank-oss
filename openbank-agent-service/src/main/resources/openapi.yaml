@@ -8,7 +8,7 @@ openapi: "3.1.0"
 info:
   title: OpenBank Agent Service API (MCP)
 
-  version: "1.16.0"
+  version: "1.17.0"
   description: |
     Model Context Protocol (MCP) 2.0 server exposing OpenBank domain operations as AI-callable tools.
     All requests use JSON-RPC 2.0 over HTTP POST `/mcp`.
@@ -392,18 +392,66 @@ paths:
         "409":
           description: Proposal already decided, or authenticated principal equals the author (segregation of duties)
 
+  /api/v1/agent-merge-records/capabilities:
+    get:
+      tags: [merge-records]
+      operationId: agentMergeEvidenceCapabilities
+      summary: Preflight recorder evidence schema before sending App provenance
+      responses:
+        "200":
+          description: Supported recorder evidence schema
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [evidenceSchemaVersion]
+                properties:
+                  evidenceSchemaVersion: {type: integer, enum: [2]}
+        "401":
+          description: Authentication required
+        "403":
+          description: Authenticated principal lacks ROLE_MERGE_RECORDER
+  /api/v1/agent-merge-records/{prNumber}:
+    get:
+      tags: [merge-records]
+      operationId: getRecordedAgentMerge
+      summary: Read durable merge evidence after ingest
+      parameters:
+        - in: path
+          name: prNumber
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200":
+          description: Stored evidence
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MergeRecordDto'
+        "400":
+          description: Invalid PR number
+        "401":
+          description: Authentication required
+        "403":
+          description: Authenticated principal lacks ROLE_MERGE_RECORDER
+        "404":
+          description: No recorded merge
+
   /api/v1/agent-merge-records:
     post:
       tags: [merge-records]
       operationId: recordAgentMerge
-      summary: Ingest a recorded human merge of an agent-authored PR
+      summary: Record the merge executor and separate human authorization
       description: |
         Records WHO merged an agent's PR (ADR-0031 phase 3) — the merge half of the
         AI-attribution evidence chain next to `agent.proposal.decided`. Called by the
-        GitHub Actions pipeline with a service credential (ROLE_ADMIN only). Idempotent
+        GitHub Actions pipeline with a service credential (ROLE_MERGE_RECORDER only). Idempotent
         by `prNumber`: a webhook redelivery returns the already-stored record with
         `inserted: false` and emits no second audit event. A genuine insert emits an
-        `agent.pr.merged` audit event under the merging human.
+        `agent.pr.merged` audit event under the actual merge executor (HUMAN or SERVICE).
+        GitHub App merges require exact source and merge SHAs plus separate human authorization.
+        Conflicting App redeliveries return 409; the original record and outbox remain unchanged.
+        App timestamps are normalized to PostgreSQL microsecond precision before storage and replay comparison.
       requestBody:
         required: true
         content:
@@ -422,11 +470,13 @@ paths:
         "401":
           description: Authentication required
         "403":
-          description: Authenticated principal lacks ROLE_ADMIN
+          description: Authenticated principal lacks ROLE_MERGE_RECORDER
+        "409":
+          description: App merge identity, source head, or authorization conflicts with stored evidence
     get:
       tags: [merge-records]
       operationId: listAgentMergeRecords
-      summary: List recorded human merges of agent-authored PRs
+      summary: List merge executors and authorizations of agent-authored PRs
       description: |
         The recorded-merge evidence, newest first. `agentId` narrows to one agent's merges
         (the admin-ui per-agent drill-down). Requires ROLE_OPERATOR, ROLE_ADMIN or
@@ -846,9 +896,105 @@ components:
           type: string
           nullable: true
 
+    MergeAuthorization:
+      type: object
+      required: [approvedBy, approvedById, approvedAt, evidenceUrl]
+      description: |
+        OWNER_WORKFLOW_EXACT_HEAD (HEAD scope) requires statusId/workflowRunId and no legacy fields.
+        LEGACY_PR_AUTO_MERGE (PR scope) requires node ids and merge/observation timestamps,
+        no workflow/status ids, and a merge at or before 2026-10-23T19:42:17Z.
+        Legacy reconstruction proves the observed PR auto-merge request, not exact-head approval
+        or historical policy compliance. The trusted recorder verifies source evidence against GitHub.
+      allOf:
+        - if:
+            required: [kind]
+            properties:
+              kind: {const: LEGACY_PR_AUTO_MERGE}
+          then:
+            required: [pullRequestNodeId, mergeEventNodeId, mergeEventAt, observedAt]
+            properties:
+              scope: {const: PR}
+              statusId: {type: "null"}
+              workflowRunId: {type: "null"}
+              pullRequestNodeId: {type: string, minLength: 1}
+              mergeEventNodeId: {type: string, minLength: 1}
+              mergeEventAt: {type: string, format: date-time}
+              observedAt: {type: string, format: date-time}
+          else:
+            required: [statusId, workflowRunId]
+            properties:
+              scope: {const: HEAD}
+              statusId: {type: integer, minimum: 1}
+              workflowRunId: {type: integer, minimum: 1}
+              pullRequestNodeId: {type: "null"}
+              mergeEventNodeId: {type: "null"}
+              mergeEventAt: {type: "null"}
+              observedAt: {type: "null"}
+      properties:
+        approvedBy:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'
+        approvedById:
+          type: integer
+          format: int64
+          minimum: 1
+        approvedAt:
+          type: string
+          format: date-time
+          description: Human approval time, no later than mergedAt.
+        evidenceUrl:
+          type: string
+          description: Canonical trusted workflow run URL for exact-head evidence, or this PR URL for legacy evidence.
+        statusId:
+          type: [integer, "null"]
+          format: int64
+          minimum: 1
+        workflowRunId:
+          type: [integer, "null"]
+          format: int64
+          minimum: 1
+        kind:
+          type: string
+          enum: [OWNER_WORKFLOW_EXACT_HEAD, LEGACY_PR_AUTO_MERGE]
+          default: OWNER_WORKFLOW_EXACT_HEAD
+        scope:
+          type: string
+          enum: [HEAD, PR]
+          description: Must match kind; HEAD for exact-head approval, PR for legacy reconstruction.
+        pullRequestNodeId:
+          type: [string, "null"]
+        mergeEventNodeId:
+          type: [string, "null"]
+        mergeEventAt:
+          type: [string, "null"]
+          format: date-time
+        observedAt:
+          type: [string, "null"]
+          format: date-time
+          description: |
+            Time the historical evidence was observed, no earlier than mergedAt or mergeEventAt.
+            The server rejects observations more than 60 seconds ahead of its clock.
+            Retries preserve the original stored observation time.
+
     MergeRecordIngestRequest:
       type: object
       required: [agentId, prNumber, prUrl, headBranch, mergedBy, mergedAt, title]
+      allOf:
+        - if:
+            required: [mergedByType]
+            properties:
+              mergedByType: {const: GITHUB_APP}
+          then:
+            required: [mergedById, headSha, mergeCommitSha, authorization]
+            properties:
+              mergedById: {type: integer}
+              headSha: {type: string}
+              mergeCommitSha: {type: string}
+              authorization:
+                $ref: '#/components/schemas/MergeAuthorization'
+          else:
+            properties:
+              authorization: {type: "null"}
       properties:
         agentId:
           type: string
@@ -863,7 +1009,27 @@ components:
           type: string
         mergedBy:
           type: string
-          description: The HUMAN login who pressed merge — becomes the audit actor.
+          description: The actual merge executor login, preserved independently of the human approver.
+        mergedByType:
+          type: string
+          enum: [HUMAN, GITHUB_APP]
+          default: HUMAN
+          description: Legacy requests default to HUMAN. GITHUB_APP requires all provenance fields and authorization.
+        mergedById:
+          type: [integer, "null"]
+          format: int64
+          minimum: 1
+        headSha:
+          type: [string, "null"]
+          pattern: '^[0-9a-f]{40}$'
+        mergeCommitSha:
+          type: [string, "null"]
+          pattern: '^[0-9a-f]{40}$'
+        authorization:
+          anyOf:
+            - $ref: '#/components/schemas/MergeAuthorization'
+            - type: "null"
+          description: Required for GITHUB_APP, prohibited for HUMAN. Ingested by the trusted recorder, not user identity substitution.
         mergedAt:
           type: string
           format: date-time
@@ -897,6 +1063,26 @@ components:
           type: string
         mergedBy:
           type: string
+        mergedByType:
+          type: string
+          enum: [HUMAN, GITHUB_APP]
+          default: HUMAN
+          description: Legacy requests default to HUMAN. GITHUB_APP requires all provenance fields and authorization.
+        mergedById:
+          type: [integer, "null"]
+          format: int64
+          minimum: 1
+        headSha:
+          type: [string, "null"]
+          pattern: '^[0-9a-f]{40}$'
+        mergeCommitSha:
+          type: [string, "null"]
+          pattern: '^[0-9a-f]{40}$'
+        authorization:
+          anyOf:
+            - $ref: '#/components/schemas/MergeAuthorization'
+            - type: "null"
+          description: Required for GITHUB_APP, prohibited for HUMAN. Ingested by the trusted recorder, not user identity substitution.
         mergedAt:
           type: string
           format: date-time

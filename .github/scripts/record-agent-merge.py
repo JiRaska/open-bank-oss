@@ -2,81 +2,23 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# RECORD AGENT MERGE — ADR-0031 phase 3 "recorded human merge" evidence (CI-side producer).
+# RECORD AGENT MERGE — ADR-0031 phase 3 execution and human authorization evidence.
 #
-# WHY THIS EXISTS
-#   Phase 3 of ADR-0031 requires evidence that a HUMAN merged an agent-authored PR — the
-#   merge event itself, recorded out-of-band of the agent's own telemetry (an agent that
-#   reports "a human merged me" about itself proves nothing). This script is the producer:
-#   it runs from .github/workflows/record-agent-merge.yml on every closed PR targeting
-#   main, decides whether the PR was agent-authored, and POSTs the record to
-#   POST /api/v1/agent-merge-records in openbank-agent-service (ROLE_ADMIN-protected).
+# Actual GitHub merge executors are preserved. Direct human merges retain the legacy
+# payload. Trusted App merges carry separate, verified exact-head owner workflow proof.
+# A bounded historical PR-scoped reconstruction is explicitly labelled and never claims
+# approval of a SHA or historical policy compliance (see merge_authorization_proof.py).
 #
-# SCOPE — what counts as agent-authored
-#   * head branch carrying a declared charter id from openbank-libs/governance/agents.yaml
-#     (`<id>/<rest>`, `<id>-<rest>`, or `agent/<id>-<rest>`) — the registry is authoritative
-#   * head branch under `agent/` or `codex/` that matches NO charter id — an unchartered
-#     coding session; the agentId is the constant `external-coding-agent` (never a made-up
-#     segment id: an ADR number is not an agent)
-#   * author login declared in rules.yaml `autonomous_agent_prs.agent_accounts`
-#     (normalised the same way check-agent-pr-guard.py normalises: `app/` prefix and
-#     `[bot]` suffix are spelling variants of one machine account)
-#   rules.yaml `agent_branch_prefixes` is deliberately NOT the scope source here: the live
-#   value was emptied by owner decision (2026-10-14) when the queue stopped gating on
-#   branch names, while merge recording still has to cover the historical `agent/` and
-#   `codex/` shapes — those two prefixes are this recorder's own constant scope.
+# Agent scope comes from the charter registry, declared agent accounts and historical
+# agent/ or codex/ branch shapes; live queue prefix scope is not the evidence scope.
+# A missing/invalid proof or failed write/read-back fails closed and keeps the tracking
+# issue open. A new green run does not repair an older missing record.
 #
-# agentId MAPPING (registry-first; #12822 audit finding — the old first-dash-segment rule
-# recorded `agent/adr-0031-...` as agent "adr" and missed flaky-test-hunter's
-# `flaky-test-hunter/unit-return-<n>` branches entirely, so a hunter merge would have
-# passed green UNRECORDED)
-#   <id>/<rest>              -> <id>   (e.g. flaky-test-hunter/unit-return-42 -> "flaky-test-hunter")
-#   <id>-<rest>, agent/<id>-<rest> -> <id>   (longest registry prefix wins)
-#   codex/<anything>         -> "external-coding-agent" (constant; no charter id exists)
-#   agent/<seg>-<rest>, no registry match -> "external-coding-agent" (unchartered session)
-#   prefix-less branch with a declared-agent author -> the author login, verbatim
-#
-# FAIL CLOSED ON PURPOSE
-#   This producer runs on pull_request CLOSED — the merge has ALREADY happened, so a
-#   red exit here cannot block or un-do anything. The earlier fail-soft design (::warning::
-#   + exit 0 on every failure) therefore protected nothing and cost everything: a green
-#   check with a missing record reads exactly like "no agent PRs merged", the
-#   un-falsifiable state phase 3 exists to eliminate. Every path where a record SHOULD
-#   exist but does not (unreadable rules/agents registry, absent merged_by, missing
-#   config, unreachable endpoint, non-2xx) now exits 1 with a `::error::`, and the
-#   workflow opens one tracking issue on top. The only exit-0 outcomes are "recorded"
-#   and "legitimately nothing to record" (the PR is not agent-authored).
-#
-# USAGE
-#   python3 .github/scripts/record-agent-merge.py [--event PATH] [--rules PATH]
-#                                                 [--agents PATH] [--token-file PATH | --dry-run]
-#
-#   --event       pull_request closed event JSON (default: $GITHUB_EVENT_PATH)
-#   --rules       governance rules.yaml (default: openbank-libs/governance/rules.yaml)
-#   --agents      governance agents.yaml charter registry (default:
-#                 openbank-libs/governance/agents.yaml) — the only valid agentId source
-#   --token-file  0600 file holding `Authorization: Bearer <token>` (the workflow mints a
-#                 client_credentials token per run — realm accessTokenLifespan is 300 s,
-#                 so a static JWT would be dead on arrival). Wins over the env fallback.
-#   --dry-run     build and print the payload, never POST (for humans inspecting a run)
-#
-# ENV
-#   AGENT_SERVICE_URL            base URL of openbank-agent-service; the record is POSTed to
-#                                $AGENT_SERVICE_URL/api/v1/agent-merge-records. Sourced from
-#                                the repo variable of the same name in the workflow.
-#   AGENT_MERGE_RECORDER_TOKEN   bearer token fallback used only when --token-file is
-#                                absent — for tests and local dry inspection. The workflow
-#                                deliberately does NOT source it from a repo secret: a
-#                                statically provisioned JWT dies with the realm's 300-second
-#                                accessTokenLifespan (see workflow header).
-#   AGENT_MERGE_PROPOSAL_ID      optional override for the optional proposalId field; when
-#                                unset the script looks for a `Proposal-Id: <id>` line in the
-#                                PR body and otherwise omits the field.
-#
-# EXIT CODES
-#   0  recorded, or legitimately nothing to record (PR not agent-authored), or --dry-run
-#   1  anything else: malformed event, unreadable rules, absent merged_by, missing
-#      config/token, or the POST did not succeed — a record that should exist but does not
+# --pr N fetches a canonical merged PR for an owner/main workflow backfill.
+# --dry-run never writes. --verify-record checks backend capability before writing and
+# independently reads the committed record back. App writes always require verification.
+# --token-file contains the freshly minted Authorization header; env token is test/local
+# fallback only. Never log or put a bearer token in a process argument.
 import argparse
 import json
 import os
@@ -85,6 +27,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from merge_authorization_proof import BOT, GitHub, app_authorization, authorize_backfill, instant
 
 RULES = "openbank-libs/governance/rules.yaml"
 AGENTS_REGISTRY = "openbank-libs/governance/agents.yaml"
@@ -246,6 +189,16 @@ def resolve_token(token_file):
                   "(the workflow mints a client_credentials token per run — see header)")
 
 
+class BackendNoRedirect(urllib.request.HTTPRedirectHandler):
+    """Recorder credentials may reach only the configured endpoint, never a redirect."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, "backend redirect refused", headers, fp)
+
+
+def backend_open(request, timeout=10):
+    return urllib.request.build_opener(BackendNoRedirect()).open(request, timeout=timeout)
+
+
 def post_record(base_url, token, payload, timeout=10):
     """POST the record; returns None on success or a human-readable failure reason."""
     url = base_url.rstrip("/") + ENDPOINT_PATH
@@ -259,14 +212,66 @@ def post_record(base_url, token, payload, timeout=10):
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with backend_open(request, timeout=timeout) as response:
             if 200 <= response.status < 300:
                 return None
             return f"HTTP {response.status} from {url}"
     except urllib.error.HTTPError as error:
-        return f"HTTP {error.code} from {url}: {error.reason}"
+        failure = f"HTTP {error.code} from {url}: {error.reason}"
+        error.close()
+        return failure
     except (urllib.error.URLError, OSError) as error:
         return f"could not reach {url}: {error}"
+
+
+def read_backend(base_url, token, suffix):
+    request = urllib.request.Request(base_url.rstrip("/") + ENDPOINT_PATH + suffix,
+                                     headers={"Authorization": f"Bearer {token}"})
+    try:
+        with backend_open(request, timeout=10) as response:
+            if response.status != 200:
+                raise ValueError(f"backend read returned HTTP {response.status}")
+            raw = response.read(1_000_001)
+            if len(raw) > 1_000_000:
+                raise ValueError("backend evidence response exceeds bounded size")
+            value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise ValueError("backend evidence read is not an object")
+        return value
+    except urllib.error.HTTPError as error:
+        code = error.code
+        error.close()
+        raise ValueError(f"backend evidence read failed: HTTP {code}") from None
+    except (OSError, ValueError) as error:
+        raise ValueError("backend evidence read failed: " + str(error)) from error
+
+
+def verify_stored(payload, stored):
+    """A successful write is insufficient: independently read the committed evidence back."""
+    for key in ("agentId", "prNumber", "prUrl", "headBranch", "mergedBy", "mergedAt"):
+        same = (instant(stored.get(key)) == instant(payload[key])) if key == "mergedAt" else stored.get(key) == payload[key]
+        if not same:
+            raise ValueError("stored merge identity differs: " + key)
+    if payload.get("mergedByType") != "GITHUB_APP":
+        if stored.get("mergedByType") != "HUMAN":
+            raise ValueError("stored human merger has incorrect actor type")
+        return
+    for key in ("mergedByType", "mergedById", "headSha", "mergeCommitSha"):
+        if stored.get(key) != payload[key]:
+            raise ValueError("stored App merge identity differs: " + key)
+    expected, actual = payload["authorization"], stored.get("authorization")
+    if not isinstance(actual, dict):
+        raise ValueError("stored human authorization is missing")
+    for key, value in expected.items():
+        if key == "observedAt":
+            # A retry returns the original observation timestamp, not a fabricated new record.
+            if not (instant(payload["mergedAt"]) <= instant(actual.get(key)) <= instant(value)):
+                raise ValueError("stored observation is outside the verified reconstruction interval")
+        elif key in ("approvedAt", "mergeEventAt"):
+            if instant(actual.get(key)) != instant(value):
+                raise ValueError("stored authorization timestamp differs: " + key)
+        elif actual.get(key) != value:
+            raise ValueError("stored authorization differs: " + key)
 
 
 def main(argv=None):
@@ -277,11 +282,30 @@ def main(argv=None):
     parser.add_argument("--token-file", help="0600 file holding 'Authorization: Bearer <token>' "
                                              "(workflow-minted client_credentials token)")
     parser.add_argument("--dry-run", action="store_true", help="print the payload, never POST")
+    parser.add_argument("--pr", type=int, help="backfill one canonical merged PR from GitHub (main workflow only)")
+    parser.add_argument("--verify-record", action="store_true", help="require schema capability and committed read-back")
     args = parser.parse_args(argv)
 
     event_path = args.event or os.environ.get("GITHUB_EVENT_PATH", "")
     try:
-        event = json.loads(Path(event_path).read_text())
+        if args.pr is not None:
+            if args.pr < 1:
+                raise ValueError("PR number must be positive")
+            repo = os.environ.get("GITHUB_REPOSITORY", "")
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+                raise ValueError("canonical repository is required")
+            if not args.dry_run:
+                authorize_backfill(repo, GitHub(), os.environ)
+            canonical = GitHub().get(f"/repos/{repo}/pulls/{args.pr}")
+            if (not isinstance(canonical, dict) or canonical.get("merged") is not True
+                    or canonical.get("state") != "closed" or canonical.get("number") != args.pr
+                    or canonical.get("html_url") != f"https://github.com/{repo}/pull/{args.pr}"
+                    or (canonical.get("base") or {}).get("ref") != "main"
+                    or ((canonical.get("base") or {}).get("repo") or {}).get("full_name") != repo):
+                raise ValueError("backfill requires an actually merged PR")
+            event = {"pull_request": canonical}
+        else:
+            event = json.loads(Path(event_path).read_text())
     except (OSError, ValueError) as error:
         print(f"::error::record-agent-merge: cannot read pull_request event at "
               f"'{event_path}': {error} — this is a CI wiring bug, not a merge outcome", file=sys.stderr)
@@ -309,6 +333,14 @@ def main(argv=None):
         return 0
 
     merged_by = human_merger(pull, agent_accounts)
+    app_proof = None
+    if not merged_by and isinstance(pull.get("merged_by"), dict) and pull["merged_by"].get("login") == BOT:
+        try:
+            app_proof = app_authorization(pull, os.environ.get("GITHUB_REPOSITORY", ""), GitHub())
+            merged_by = pull["merged_by"]["login"]
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            print(f"::error::record-agent-merge: merged_by App evidence rejected: {error}", file=sys.stderr)
+            return 1
     if not merged_by:
         print(f"::error::record-agent-merge: PR #{pull.get('number')} merged but merged_by "
               "does not identify an eligible GitHub User account — a merge record without "
@@ -318,6 +350,8 @@ def main(argv=None):
         return 1
 
     payload = build_payload(pull, agent_id)
+    if app_proof:
+        payload.update(app_proof)
     proposal_id = extract_proposal_id(pull)
     if proposal_id:
         payload["proposalId"] = proposal_id
@@ -338,6 +372,16 @@ def main(argv=None):
               f"of PR #{payload['prNumber']} NOT recorded", file=sys.stderr)
         return 1
 
+    must_verify = args.verify_record or app_proof is not None
+    if must_verify:
+        try:
+            capability = read_backend(base_url, token, "/capabilities")
+            version = capability.get("evidenceSchemaVersion")
+            if type(version) is not int or version != 2:
+                raise ValueError("deployed backend does not support merge evidence schema 2; no write attempted")
+        except ValueError as error:
+            print(f"::error::record-agent-merge: {error}", file=sys.stderr)
+            return 1
     failure = post_record(base_url, token, payload)
     if failure:
         # Fail closed on purpose: the merge already happened (pull_request closed), so red
@@ -347,6 +391,12 @@ def main(argv=None):
               f"#{payload['prNumber']} happened but was NOT recorded — investigate, do not "
               "re-run the merge", file=sys.stderr)
         return 1
+    if must_verify:
+        try:
+            verify_stored(payload, read_backend(base_url, token, f"/{payload['prNumber']}"))
+        except ValueError as error:
+            print(f"::error::record-agent-merge: committed evidence verification failed: {error}", file=sys.stderr)
+            return 1
     print(f"record-agent-merge: agent PR #{payload['prNumber']} ({agent_id}) merged by "
           f"{merged_by} — recorded at {base_url.rstrip('/')}{ENDPOINT_PATH}")
     return 0

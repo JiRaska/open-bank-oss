@@ -95,4 +95,15 @@ class AgentChatContractTest {
             .contains("HOSTED")
             .contains("SELF_HOSTED")
     }
+
+    @Test
+    fun `merge provenance contract preserves human default and separates App authorization`() {
+        val request = openapi.substringAfter("    MergeRecordIngestRequest:")
+            .substringBefore("    MergeRecordDto:")
+        assertThat(request).contains("default: HUMAN", "enum: [HUMAN, GITHUB_APP]")
+            .contains("headSha:", "mergeCommitSha:", "mergedById:", "authorization:")
+        assertThat(openapi).contains("/api/v1/agent-merge-records/capabilities:")
+            .contains("/api/v1/agent-merge-records/{prNumber}:")
+            .contains("required: [approvedBy, approvedById, approvedAt, evidenceUrl]")
+    }
 }

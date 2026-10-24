@@ -9,6 +9,9 @@ import com.openbank.agent.application.port.`in`.MergeRecordCommand
 import com.openbank.agent.application.port.`in`.MergeRecordQueries
 import com.openbank.agent.application.port.`in`.RecordMergeUseCase
 import com.openbank.agent.domain.mergerecord.AgentMergeRecord
+import com.openbank.agent.domain.mergerecord.MergeActorType
+import com.openbank.agent.domain.mergerecord.MergeAuthorization
+import com.openbank.agent.domain.mergerecord.MergeEvidenceConflict
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -16,6 +19,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
@@ -24,8 +28,8 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * The recorded-human-merge API (ADR-0031 phase 3). A GitHub Actions workflow POSTs every merged
- * agent PR here with a service credential (ROLE_ADMIN); the admin-ui BFF and oversight read the
+ * The merge-executor evidence API (ADR-0031 phase 3). A GitHub Actions workflow POSTs every merged
+ * agent PR here with a service credential (ROLE_MERGE_RECORDER); the admin-ui BFF and oversight read the
  * evidence back. Ingest is idempotent by pr_number — the webhook can redeliver — and returns the
  * already-stored record on a duplicate, with no second audit event.
  *
@@ -54,6 +58,11 @@ class AgentMergeRecordResource {
         val title: String?,
         val proposalId: String? = null,
         val source: String? = null,
+        val mergedByType: MergeActorType = MergeActorType.HUMAN,
+        val mergedById: Long? = null,
+        val headSha: String? = null,
+        val mergeCommitSha: String? = null,
+        val authorization: MergeAuthorization? = null,
     )
 
     data class MergeRecordDto(
@@ -70,6 +79,11 @@ class AgentMergeRecordResource {
         val source: String,
         /** False on a duplicate redelivery — the stored (original) record, unchanged. */
         val inserted: Boolean,
+        val mergedByType: MergeActorType,
+        val mergedById: Long?,
+        val headSha: String?,
+        val mergeCommitSha: String?,
+        val authorization: MergeAuthorization?,
     )
 
     private fun AgentMergeRecord.toDto(inserted: Boolean) = MergeRecordDto(
@@ -77,6 +91,8 @@ class AgentMergeRecordResource {
         headBranch = headBranch, mergedBy = mergedBy, mergedAt = mergedAt, title = title,
         proposalId = proposalId?.toString(), recordedAt = recordedAt, source = source,
         inserted = inserted,
+        mergedByType = mergedByType, mergedById = mergedById, headSha = headSha,
+        mergeCommitSha = mergeCommitSha, authorization = authorization,
     )
 
     /**
@@ -101,20 +117,45 @@ class AgentMergeRecordResource {
             runCatching { UUID.fromString(it) }.getOrNull()
                 ?: throw IllegalArgumentException("proposalId must be a UUID")
         }
-        val outcome = recordMerge.record(
-            MergeRecordCommand(
-                agentId = agentId,
-                prNumber = prNumber,
-                prUrl = prUrl,
-                headBranch = headBranch,
-                mergedBy = mergedBy,
-                mergedAt = mergedAt,
-                title = title,
-                proposalId = proposalId,
-                source = body.source?.trim()?.takeIf { it.isNotEmpty() } ?: "unknown",
-            ),
+        val command = MergeRecordCommand(
+            agentId = agentId,
+            prNumber = prNumber,
+            prUrl = prUrl,
+            headBranch = headBranch,
+            mergedBy = mergedBy,
+            mergedAt = mergedAt,
+            title = title,
+            proposalId = proposalId,
+            source = body.source?.trim()?.takeIf { it.isNotEmpty() } ?: "unknown",
+            mergedByType = body.mergedByType,
+            mergedById = body.mergedById,
+            headSha = body.headSha,
+            mergeCommitSha = body.mergeCommitSha,
+            authorization = body.authorization,
         )
-        return Response.ok(outcome.record.toDto(outcome.inserted)).build()
+        return try {
+            val outcome = recordMerge.record(command)
+            Response.ok(outcome.record.toDto(outcome.inserted)).build()
+        } catch (e: MergeEvidenceConflict) {
+            Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+        }
+    }
+
+    /** Producer preflight prevents a v1 deployment from silently ignoring App provenance. */
+    @GET
+    @Path("/capabilities")
+    @RolesAllowed("ROLE_MERGE_RECORDER")
+    fun capabilities(): Map<String, Int> = mapOf("evidenceSchemaVersion" to 2)
+
+    /** Read back the durable record, rather than trusting only a successful POST response. */
+    @GET
+    @Path("/{prNumber}")
+    @Blocking
+    @RolesAllowed("ROLE_MERGE_RECORDER")
+    fun find(@PathParam("prNumber") prNumber: Long): Response {
+        require(prNumber > 0) { "prNumber must be positive" }
+        val record = queries.findByPrNumber(prNumber) ?: return Response.status(Response.Status.NOT_FOUND).build()
+        return Response.ok(record.toDto(inserted = false)).build()
     }
 
     /** The recorded-merge evidence, newest first; `agentId` narrows to one agent's merges. */
