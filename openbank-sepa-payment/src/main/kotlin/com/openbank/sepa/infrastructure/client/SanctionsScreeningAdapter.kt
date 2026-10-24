@@ -4,11 +4,11 @@
 
 package com.openbank.sepa.infrastructure.client
 
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.sepa.application.port.out.SanctionsScreeningPort
 import com.openbank.sepa.application.port.out.ScreeningUnavailableException
-import com.openbank.sepa.domain.screening.ScreeningMatchStatus
-import com.openbank.sepa.domain.screening.ScreeningResult
-import com.openbank.sepa.domain.screening.ScreeningRole
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -52,14 +52,8 @@ class SanctionsScreeningAdapter(@RestClient private val client: SanctionsService
         )
     }
 
-    /** Unknown / null statuses are treated as suspicious (ESCALATED), never silently CLEAR. */
-    private fun mapStatus(remote: String?): ScreeningMatchStatus = when (remote?.uppercase()) {
-        "CLEAR" -> ScreeningMatchStatus.CLEAR
-        "POTENTIAL_HIT" -> ScreeningMatchStatus.POTENTIAL_HIT
-        "HIT" -> ScreeningMatchStatus.HIT
-        "WHITELISTED" -> ScreeningMatchStatus.WHITELISTED
-        else -> ScreeningMatchStatus.ESCALATED
-    }
+    /** Unknown / null statuses are ESCALATED, never silently CLEAR (shared parser, ADR-0353 D5). */
+    private fun mapStatus(remote: String?): ScreeningMatchStatus = ScreeningMatchStatus.fromWire(remote)
 
     private companion object {
         // Sanctions matching is name-based; entityType is informational. See ADR-0032 scope note.

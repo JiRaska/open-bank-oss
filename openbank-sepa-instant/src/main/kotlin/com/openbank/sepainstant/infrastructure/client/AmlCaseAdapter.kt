@@ -20,33 +20,29 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
  * Failures propagate so the use-case's best-effort wrapper can log them without flipping the verdict.
  */
 @ApplicationScoped
-class AmlCaseAdapter(
-    @RestClient private val client: AmlServiceClient
-) : AmlCasePort {
+class AmlCaseAdapter(@RestClient private val client: AmlServiceClient) : AmlCasePort {
 
     @Inject
     lateinit var self: AmlCaseAdapter
 
-    override fun openCase(command: OpenAmlCaseCommand): Uni<Void> =
-        self.openCaseWithResilience(command)
+    override fun openCase(command: OpenAmlCaseCommand): Uni<Void> = self.openCaseWithResilience(command)
 
     @Retry(maxRetries = 2, delay = 300, jitter = 150, retryOn = [Exception::class])
     @Timeout(5_000)
-    open fun openCaseWithResilience(command: OpenAmlCaseCommand): Uni<Void> =
-        client.createCase(
-            command.idempotencyKey,
-            CreateAmlCaseRequest(
-                partyId = command.debtorAccountId,
-                accountId = command.debtorAccountId,
-                transactionId = command.paymentId,
-                customerReference = command.customerReference,
-                screeningType = SCREENING_TYPE,
-                riskLevel = command.riskLevel.name,
-                alertCode = command.alertCode,
-                alertDetail = command.alertDetail,
-                matchedEntity = command.matchedEntity
-            )
-        ).replaceWithVoid()
+    open fun openCaseWithResilience(command: OpenAmlCaseCommand): Uni<Void> = client.createCase(
+        command.idempotencyKey,
+        CreateAmlCaseRequest(
+            partyId = command.debtorAccountId,
+            accountId = command.debtorAccountId,
+            transactionId = command.paymentId,
+            customerReference = command.customerReference,
+            screeningType = SCREENING_TYPE,
+            riskLevel = command.riskLevel.name,
+            alertCode = command.alertCode,
+            alertDetail = command.alertDetail,
+            matchedEntity = command.matchedEntity,
+        ),
+    ).replaceWithVoid()
 
     private companion object {
         const val SCREENING_TYPE = "TRANSACTION_MONITORING"
