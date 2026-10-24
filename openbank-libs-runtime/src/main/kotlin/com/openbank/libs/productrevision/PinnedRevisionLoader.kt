@@ -12,16 +12,20 @@ import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import java.util.concurrent.ConcurrentHashMap
 
-/** A signed, published revision as a consumer keeps it locally: the IR JSON and the detached signature. */
-data class SignedRevisionCopy(val irJson: String, val signature: IrSignature)
+/**
+ * A signed, published revision as a consumer keeps it locally: the IR JSON, the identity the
+ * publish path signed (as the catalog reported it) and the detached signature over that identity.
+ */
+data class SignedRevisionCopy(val irJson: String, val identity: RevisionIdentity, val signature: IrSignature)
 
 /**
  * Where a consumer keeps its local copies (ADR-0352 §6: product-catalog is a publication authority,
  * not a runtime dependency — this is a table, a file set or a config map the consumer owns, never
- * a live catalog call on the posting path). `null` means "no copy under this hash".
+ * a live catalog call on the posting path). `null` means "no copy for this pin". The loader never
+ * trusts the source to have matched the pin: it re-checks every field itself.
  */
 fun interface SignedRevisionSource {
-    fun fetch(revisionHash: String): SignedRevisionCopy?
+    fun fetch(pin: RevisionIdentity): SignedRevisionCopy?
 }
 
 /**
@@ -44,7 +48,13 @@ enum class RevisionLoadOutcome {
     /** The copy parses, but its canonical hash is not the hash it was filed under. */
     HASH_MISMATCH,
 
-    /** The signature is not a valid signature over the hash under a trusted key. */
+    /**
+     * The copy names another revision than the pin — a different product, revision id, revision
+     * number or IR version — even though its hash and signature may be valid for THAT revision.
+     */
+    IDENTITY_MISMATCH,
+
+    /** The signature is not a valid signature over the pinned identity's envelope under a trusted key. */
     SIGNATURE_INVALID,
 
     /** The verifier could not answer (OpenBao unreachable); not a verdict, and not a pass. */
@@ -57,18 +67,31 @@ enum class RevisionLoadOutcome {
 /** Thrown for every outcome that is not [RevisionLoadOutcome.LOADED] / [RevisionLoadOutcome.CACHE_HIT]. */
 class PinnedRevisionUnavailableException(
     val outcome: RevisionLoadOutcome,
-    val revisionHash: String,
+    val pin: RevisionIdentity,
     cause: Throwable? = null,
-) : RuntimeException("pinned product revision $revisionHash unavailable: ${outcome.tag}", cause)
+) : RuntimeException(
+    "pinned product revision ${pin.productCode}#${pin.revisionNumber} (${pin.revisionId}, " +
+        "${pin.revisionHash}) unavailable: ${outcome.tag}",
+    cause,
+) {
+    val revisionHash: String get() = pin.revisionHash
+}
 
 /**
- * Loads the pinned revision a contract names, by `revisionHash`, from a local signed copy and
- * **verifies the signature before returning it** (ADR-0352 §4, §5, §6). Refuses an unsigned,
- * mis-signed, mis-hashed or invalid copy with [PinnedRevisionUnavailableException]; a consumer
- * that catches it does not post.
+ * Loads the pinned revision a contract names — a full [RevisionIdentity], never a bare hash — from
+ * a local signed copy and **verifies the signature over that identity before returning it**
+ * (ADR-0352 §4, §5, §6). Refuses an unsigned, mis-signed, mis-hashed, invalid or mis-identified
+ * copy with [PinnedRevisionUnavailableException]; a consumer that catches it does not post.
  *
- * - The cache is keyed by hash and immutable: a hash names exactly one canonical document, so an
- *   entry can never go stale and is never evicted or replaced. Only a verified revision enters it.
+ * Binding by construction: the signature is verified against the PIN's envelope, not the copy's, so
+ * a valid signature for another product or another revision of the same product cannot verify here;
+ * the copy's claimed identity and the parsed IR's `productCode`/`irVersion` are additionally compared
+ * with the pin first, so a substitution is reported as [RevisionLoadOutcome.IDENTITY_MISMATCH]
+ * instead of as an anonymous signature failure.
+ *
+ * - The cache is keyed by the full identity and immutable: an identity names exactly one canonical
+ *   document, so an entry can never go stale and is never evicted or replaced. Only a verified
+ *   revision enters it.
  *   Its size is bounded by the number of distinct revisions the consumer's contracts pin (a handful
  *   per product, each a few KB), not by traffic: a request cannot add an entry the source does
  *   not already hold under a valid signature.
@@ -82,41 +105,49 @@ class PinnedRevisionLoader(
     private val verifier: IrSignatureVerifierPort,
     private val registry: MeterRegistry? = null,
 ) {
-    private val cache = ConcurrentHashMap<String, ProductRevisionIr>()
+    private val cache = ConcurrentHashMap<RevisionIdentity, ProductRevisionIr>()
 
-    /** The verified revision under [revisionHash], or throws [PinnedRevisionUnavailableException]. */
-    fun load(revisionHash: String): ProductRevisionIr {
-        cache[revisionHash]?.let {
+    /** The verified revision for [pin], or throws [PinnedRevisionUnavailableException]. */
+    fun load(pin: RevisionIdentity): ProductRevisionIr {
+        cache[pin]?.let {
             count(RevisionLoadOutcome.CACHE_HIT)
             return it
         }
-        val copy = source.fetch(revisionHash) ?: refuse(RevisionLoadOutcome.MISSING, revisionHash)
+        val copy = source.fetch(pin) ?: refuse(RevisionLoadOutcome.MISSING, pin)
+        if (copy.identity != pin) refuse(RevisionLoadOutcome.IDENTITY_MISMATCH, pin)
         val revision = try {
             ProductIrParser.parse(copy.irJson)
         } catch (e: ProductIrValidationException) {
-            refuse(RevisionLoadOutcome.INVALID_IR, revisionHash, e)
+            refuse(RevisionLoadOutcome.INVALID_IR, pin, e)
         }
-        if (revision.revisionHash != revisionHash || ProductIrCanonical.revisionHash(revision) != revisionHash) {
-            refuse(RevisionLoadOutcome.HASH_MISMATCH, revisionHash)
+        if (revision.revisionHash != pin.revisionHash ||
+            ProductIrCanonical.revisionHash(revision) != pin.revisionHash
+        ) {
+            refuse(RevisionLoadOutcome.HASH_MISMATCH, pin)
         }
+        // The hash covers both fields, but a pin can still name a hash whose IR is another product.
+        if (revision.productCode != pin.productCode || revision.irVersion != pin.irVersion) {
+            refuse(RevisionLoadOutcome.IDENTITY_MISMATCH, pin)
+        }
+        // Verified against the PIN, never against what the copy claims: the binding holds by construction.
         val valid = try {
-            verifier.verify(revisionHash, copy.signature)
+            verifier.verify(pin, copy.signature)
         } catch (e: IrSigningException) {
-            refuse(RevisionLoadOutcome.VERIFIER_UNAVAILABLE, revisionHash, e)
+            refuse(RevisionLoadOutcome.VERIFIER_UNAVAILABLE, pin, e)
         }
-        if (!valid) refuse(RevisionLoadOutcome.SIGNATURE_INVALID, revisionHash)
-        // putIfAbsent: two racing loaders of one hash verified the same bytes; either copy is the one.
-        val cached = cache.putIfAbsent(revisionHash, revision) ?: revision
+        if (!valid) refuse(RevisionLoadOutcome.SIGNATURE_INVALID, pin)
+        // putIfAbsent: two racing loaders of one pin verified the same bytes; either copy is the one.
+        val cached = cache.putIfAbsent(pin, revision) ?: revision
         count(RevisionLoadOutcome.LOADED)
         return cached
     }
 
-    /** Hashes currently held; a consumer's health or debug surface, never a decision input. */
-    fun cachedHashes(): Set<String> = cache.keys.toSet()
+    /** Pins currently held; a consumer's health or debug surface, never a decision input. */
+    fun cachedPins(): Set<RevisionIdentity> = cache.keys.toSet()
 
-    private fun refuse(outcome: RevisionLoadOutcome, hash: String, cause: Throwable? = null): Nothing {
+    private fun refuse(outcome: RevisionLoadOutcome, pin: RevisionIdentity, cause: Throwable? = null): Nothing {
         count(outcome)
-        throw PinnedRevisionUnavailableException(outcome, hash, cause)
+        throw PinnedRevisionUnavailableException(outcome, pin, cause)
     }
 
     private fun count(outcome: RevisionLoadOutcome) {
