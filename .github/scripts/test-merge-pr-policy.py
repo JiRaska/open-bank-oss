@@ -231,6 +231,20 @@ class PolicyEvidenceTests(unittest.TestCase):
                 self.assertEqual(harness.run_main([{'evidenceSchemaVersion': 2, **capability}], post), 1)
                 post.assert_not_called()
 
+    def test_policy_cli_write_and_independent_readback_succeed(self):
+        harness = old.CommittedEvidenceTests()
+        harness.github = PolicyGitHub()
+        harness.pull = copy.deepcopy(harness.github.pull)
+        payload = old.recorder.build_payload(harness.pull, old.recorder.CODEX_AGENT_ID)
+        payload.update(self.authorize())
+        post = Mock(return_value=None)
+        with patch.object(policy, 'REVIEWED_POLICY_BLOBS', {harness.github.blob_sha}):
+            self.assertEqual(harness.run_main([
+                {'evidenceSchemaVersion': 2, 'policyPrAuthorization': True}, payload], post), 0)
+        post.assert_called_once()
+        self.assertNotIn('authorization', post.call_args.args[2])
+        self.assertEqual(post.call_args.args[2]['policyAuthorization']['policyCommitSha'], PARENT)
+
     def test_policy_posts_to_separate_endpoint(self):
         with old.local_backend() as (source, received):
             self.assertIsNone(old.recorder.post_record(source, 'synthetic-token', {
