@@ -150,6 +150,14 @@ export const PERMISSIONS = {
   "treasury:correction:propose": [ROLES.TREASURY_DEALER, ROLES.TREASURY_BACK_OFFICE],
   "treasury:payment:release":   [ROLES.TREASURY_PAYMENT_RELEASER],
   "treasury:payment:cancel":    [ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_APPROVER],
+  // risk-engine as the desk uses it (slice 7). Console mirrors of the method-level @RolesAllowed, minus
+  // the M2M ROLE_API that never holds a console session: POST /api/v1/risk/pricing admits the desk's
+  // three dealing roles (NOT back office) beside the risk departments; the five desk report reads
+  // (snapshot list, valuation, sensitivity, VaR, FX position) add back office; the remaining snapshot
+  // reports (cash flows, liquidity, IRRBB, limits) stay on RiskResource's class-level set.
+  "treasury:pricing:run":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.RISK, ROLES.FINANCE, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  "treasury:risk-reports:read": [ROLES.ADMIN, ROLES.OPERATOR, ROLES.RISK, ROLES.FINANCE, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE],
+  "treasury:risk-reports:full": [ROLES.ADMIN, ROLES.OPERATOR, ROLES.RISK, ROLES.FINANCE],
   // Pension back office (ADR-0334, #12350): exactly the two pension services' @RolesAllowed.
   // Reads admit OPERATOR, ADMIN and AUDITOR; every write (activate, NAV calculate/publish, strategy
   // change submit/decide/apply) admits OPERATOR and ADMIN. Four-eyes between maker and checker is

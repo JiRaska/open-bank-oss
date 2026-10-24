@@ -207,6 +207,46 @@ describe('workbench grants — strictly equal to the service annotations', () =>
   })
 })
 
+// ── risk-engine as the desk uses it: UI grants == the annotations, read from the risk-engine sources ──
+const RISK_REST = '../../openbank-risk-engine/src/main/kotlin/com/openbank/risk/infrastructure/rest/'
+// A console session never carries the M2M ROLE_API, so the UI set is the annotation minus it.
+const consoleRoles = (args: string) => [...new Set(args.split(',').map(a => a.trim()).filter(Boolean).map(a => (a.startsWith('Roles.') ? `ROLE_${a.slice(6)}` : a.replace(/^"|"$/g, ''))))].filter(r => r !== 'ROLE_API').sort()
+const riskMethodRoles = (file: string, fn: string): string[] => {
+  const m = read(`${RISK_REST}${file}`).match(new RegExp(`@RolesAllowed\\(([^)]*)\\)(?:(?!\\bfun\\b|\\bclass\\b|@RolesAllowed)[\\s\\S])*?suspend fun ${fn}\\(`))
+  expect(m, `${file} ${fn} method-level @RolesAllowed`).toBeTruthy()
+  return consoleRoles(m![1])
+}
+const riskClassRoles = (file: string, cls: string): string[] => {
+  const m = read(`${RISK_REST}${file}`).match(new RegExp(`@RolesAllowed\\(([^)]*)\\)\\s*(?:(?://[^\\n]*|@[A-Za-z]+(?:\\([^\\n]*\\))?)\\s*)*class ${cls}`))
+  expect(m, `${cls} class-level @RolesAllowed`).toBeTruthy()
+  return consoleRoles(m![1])
+}
+
+describe('risk-engine grants — strictly equal to the risk-engine annotations', () => {
+  it('treasury:pricing:run equals POST /api/v1/risk/pricing, and back office is not in it', () => {
+    expect(granted('treasury:pricing:run')).toEqual(riskMethodRoles('PricingResource.kt', 'price'))
+    expect(hasPermission([R.TREASURY_BACK_OFFICE], 'treasury:pricing:run')).toBe(false)
+    for (const role of [R.TREASURY_DEALER, R.TREASURY_APPROVER, R.TREASURY_SENIOR_APPROVER]) expect(hasPermission([role], 'treasury:pricing:run'), role).toBe(true)
+  })
+
+  it('treasury:risk-reports:read equals every desk report endpoint (list, valuation, sensitivity, VaR, FX position)', () => {
+    for (const fn of ['list', 'valuation', 'sensitivity', 'valueAtRisk', 'fxPosition']) {
+      expect(granted('treasury:risk-reports:read'), fn).toEqual(riskMethodRoles('RiskResource.kt', fn))
+    }
+    expect(hasPermission([R.TREASURY_BACK_OFFICE], 'treasury:risk-reports:read')).toBe(true)
+  })
+
+  it('treasury:risk-reports:full equals RiskResource’s class-level set (the desk is not in it)', () => {
+    expect(granted('treasury:risk-reports:full')).toEqual(riskClassRoles('RiskResource.kt', 'RiskResource'))
+    for (const role of DESK) expect(hasPermission([role], 'treasury:risk-reports:full'), role).toBe(false)
+  })
+
+  it('the parser can fail: a drifted annotation is detected (negative control)', () => {
+    expect(consoleRoles('Roles.API, "ROLE_X", Roles.ADMIN')).toEqual(['ROLE_ADMIN', 'ROLE_X'])
+    expect(granted('treasury:pricing:run')).not.toEqual(consoleRoles('Roles.ADMIN, "ROLE_TREASURY_DEALER"'))
+  })
+})
+
 // ── the BFF relay for the new writes ───────────────────────────────────────────────────────────
 const ctx = (path: string[]) => ({ params: Promise.resolve({ service: 'treasury-service', path }) })
 const TREASURY = ['api', 'v1', 'treasury']

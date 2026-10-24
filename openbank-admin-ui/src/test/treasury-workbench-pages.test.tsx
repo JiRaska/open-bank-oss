@@ -634,6 +634,17 @@ describe('reports', () => {
     expect(screen.getByTestId('report-view').textContent).toMatch(/Intraday|Vnitrodenní/)
   })
 
+  it('back office reads the snapshot list and desk reports, but gets a plain refusal and no call for a class-level report', async () => {
+    session.roles = ['ROLE_TREASURY_BACK_OFFICE']
+    router = url => base(url) ?? notServed()
+    await renderPage(<TreasuryReportsPage />)
+    await screen.findByRole('option', { name: /2026-10-19/ })
+    expect(calls.some(c => c.url.endsWith('/risk/snapshots'))).toBe(true)
+    await click(/Liquidity analysis|Analýza likvidity/)
+    expect(await screen.findByTestId('report-forbidden')).toBeTruthy()
+    expect(calls.some(c => c.url.includes('/liquidity'))).toBe(false)
+  })
+
   it('says "not yet available" for a report the deployment does not serve', async () => {
     router = url => base(url) ?? notServed()
     await renderPage(<TreasuryReportsPage />)

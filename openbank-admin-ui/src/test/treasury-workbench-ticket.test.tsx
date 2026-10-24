@@ -20,6 +20,7 @@ vi.mock('next-auth/react', () => ({
   signIn: vi.fn(),
 }))
 
+import { DealTicket } from '@/components/treasury/wb/DealTicket'
 import NewTreasuryDealPage from '@/app/treasury/deals/new/page'
 import TreasuryDealDetailPage from '@/app/treasury/deals/[id]/page'
 import { bodyOf, type Call, COUNTERPARTIES, deal, flow, json, keyOf, ledger, notServed, renderPage } from './treasury-wb-harness'
@@ -245,6 +246,22 @@ describe('deal ticket — generate schedule and server refusals', () => {
     await click(/Create draft|Vytvořit koncept/)
     await screen.findByText(/never submitted|nepředkládá/)
     expect(screen.queryByRole('button', { name: /Submit for approval|Předložit ke schválení/ })).toBeNull()
+  })
+
+  it('back office sees no pre-trade pricing control; the dealer does (canCreate held equal, so only the role differs)', async () => {
+    router = baseRouter()
+    const open = async (roles: string[]) => {
+      session.roles = roles
+      await renderPage(<DealTicket mode="create" canCreate canBackOffice={false} actor="x" />)
+      await screen.findAllByRole('option', { name: /Sim Bank A/ })
+      select(/^(Produkt|Product)$/, 'IRS')
+    }
+    await open(['ROLE_TREASURY_BACK_OFFICE'])
+    expect(screen.queryByRole('button', { name: /Price pre-trade|Předběžně ocenit/ })).toBeNull()
+    cleanup()
+    await open(['ROLE_TREASURY_DEALER'])
+    expect(screen.getByRole('button', { name: /Price pre-trade|Předběžně ocenit/ })).toBeTruthy()
+    expect(calls.some(c => c.url.endsWith('/risk/pricing'))).toBe(false)
   })
 })
 

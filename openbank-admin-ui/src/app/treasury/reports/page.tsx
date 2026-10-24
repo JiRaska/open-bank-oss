@@ -9,9 +9,11 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSession } from 'next-auth/react'
 import { FileText } from 'lucide-react'
 import { z } from 'zod'
+import { hasPermission } from '@/lib/auth/roles'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui'
 import { riskUrl, wbGet, wbUrl, type WbRead } from '@/components/treasury/wb/client'
@@ -44,9 +46,15 @@ function Reports() {
   const [result, setResult] = useState<WbRead<unknown> | null>(null)
   const books = useRefOptions('book')
   const spec = REPORTS.find(r => r.id === reportId)!
+  const { data: session } = useSession()
+  const roles = useMemo(() => session?.user?.roles ?? [], [session?.user?.roles])
+  // Mirrors the risk-engine method-level / class-level @RolesAllowed: a role the backend refuses never gets the call.
+  const canListRuns = hasPermission(roles, 'treasury:risk-reports:read')
+  const allowed = spec.source === 'treasury' || hasPermission(roles, spec.riskScope === 'class' ? 'treasury:risk-reports:full' : 'treasury:risk-reports:read')
 
   useEffect(() => {
     let cancelled = false
+    if (!canListRuns) { setSnapshots([]); return }
     void (async () => {
       const res = await wbGet(riskUrl('/snapshots'), snapshotsSchema)
       if (cancelled) return
@@ -55,9 +63,10 @@ function Reports() {
       if (runs.length > 0) setSnapshotId(runs[0].id)
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [canListRuns])
 
   useEffect(() => {
+    if (!allowed) { setResult(null); return }
     if (spec.snapshot && !snapshotId) {
       setResult(snapshots === null ? null : { ok: false, kind: 'not_available', status: 404 })
       return
@@ -76,7 +85,7 @@ function Reports() {
       if (!cancelled) setResult(res)
     })()
     return () => { cancelled = true }
-  }, [spec, snapshotId, snapshots, bookId, confidence, horizon, bucketSet])
+  }, [spec, allowed, snapshotId, snapshots, bookId, confidence, horizon, bucketSet])
 
   return (
     <div>
@@ -127,9 +136,10 @@ function Reports() {
         </div>
       </Section>
       <Section title={reportName(spec, t)} id="reports-view">
-        {result === null && <p style={{ fontSize: 13 }}>{t('Načítám…', 'Loading…')}</p>}
-        {result && !result.ok && <ReadFailure result={result} what={reportName(spec, t)} service={spec.source === 'risk' ? 'risk-engine' : 'treasury-service'} />}
-        {result?.ok && <ReportView data={result.data} fallbackProvenance={spec.provenance} />}
+        {!allowed && <p data-testid="report-forbidden" style={{ fontSize: 13 }}>{t('Tento report vaší roli nepřísluší.', 'This report is not available to your role.')}</p>}
+        {allowed && result === null && <p style={{ fontSize: 13 }}>{t('Načítám…', 'Loading…')}</p>}
+        {allowed && result && !result.ok && <ReadFailure result={result} what={reportName(spec, t)} service={spec.source === 'risk' ? 'risk-engine' : 'treasury-service'} />}
+        {allowed && result?.ok && <ReportView data={result.data} fallbackProvenance={spec.provenance} />}
       </Section>
     </div>
   )

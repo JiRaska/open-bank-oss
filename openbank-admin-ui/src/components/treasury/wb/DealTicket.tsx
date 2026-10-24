@@ -11,6 +11,8 @@
 // it concerns. Creates a DRAFT (nothing posts); submit sends it to a DIFFERENT person.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useSession } from 'next-auth/react'
+import { hasPermission } from '@/lib/auth/roles'
 import { StatusBadge, Tabs, type TabItem } from '@/components/ui'
 import { dealActionUrl, treasuryUrl } from '@/components/treasury/api'
 import { counterpartyListSchema, type Counterparty } from '@/components/treasury/contracts'
@@ -51,6 +53,9 @@ const pricingSchema = z.object({
 
 export function DealTicket({ mode, deal, canCreate, canBackOffice, actor, onSaved }: Props) {
   const { t, money, num } = useFmt()
+  const { data: session } = useSession()
+  // Mirrors POST /api/v1/risk/pricing: back office and every other role the service refuses never sees the control.
+  const canPrice = hasPermission(session?.user?.roles ?? [], 'treasury:pricing:run')
   const today = useMemo(() => bankToday(), [])
   const [form, setForm] = useState<TicketForm>(() => (deal ? ticketFromDeal(deal) : emptyTicket('MM_PLACEMENT', today)))
   const [errors, setErrors] = useState<Errors>({})
@@ -209,7 +214,7 @@ export function DealTicket({ mode, deal, canCreate, canBackOffice, actor, onSave
 
   const canSubmit = profile.legacy || !form.kind || form.kind !== 'HYPOTHETICAL'
   const showLegs = profile.legs > 0
-  const hasPricing = (profile.legs > 0 || profile.panels.includes('fx')) && !profile.legacy
+  const hasPricing = canPrice && (profile.legs > 0 || profile.panels.includes('fx')) && !profile.legacy
 
   const tabs: TabItem<TabId>[] = [
     { id: 'timeline', label: t('Stav a průběh', 'State & timeline') },

@@ -18,6 +18,8 @@ export type ReportSpec = {
   source: 'risk' | 'treasury'
   /** Needs a risk snapshot (run) to be chosen. */
   snapshot: boolean
+  /** Risk reports: 'desk' = the method-level read the treasury desk holds; 'class' = RiskResource's class-level set only. */
+  riskScope?: 'desk' | 'class'
   /** Honours the portfolio-node selector. */
   book: boolean
   path: (snapshotId: string) => string
@@ -28,14 +30,14 @@ export type ReportSpec = {
 
 export const REPORTS: ReportSpec[] = [
   { id: 'payment-orders', cs: 'Platební příkazy', en: 'Payment orders', source: 'treasury', snapshot: false, book: false, path: () => '/payments', provenance: 'intraday' },
-  { id: 'cash-flow', cs: 'Peněžní toky', en: 'Cash flow', source: 'risk', snapshot: true, book: false, path: id => `/snapshots/${id}/cash-flows` },
-  { id: 'liquidity', cs: 'Analýza likvidity', en: 'Liquidity analysis', source: 'risk', snapshot: true, book: false, path: id => `/snapshots/${id}/liquidity` },
-  { id: 'irrbb', cs: 'Úrokové riziko', en: 'Interest-rate risk', source: 'risk', snapshot: true, book: false, path: id => `/snapshots/${id}/irrbb` },
-  { id: 'limits', cs: 'Limity a čerpání', en: 'Limits and utilisation', source: 'risk', snapshot: true, book: false, path: id => `/snapshots/${id}/limits` },
-  { id: 'fx-position', cs: 'FX pozice', en: 'FX position', source: 'risk', snapshot: true, book: true, path: id => `/snapshots/${id}/fx-position` },
-  { id: 'sensitivity', cs: 'Citlivost (PV01, DV01 po pásmech)', en: 'Sensitivity (PV01, DV01 buckets)', source: 'risk', snapshot: true, book: true, path: id => `/snapshots/${id}/sensitivity`, extra: ['bucketSet'] },
-  { id: 'var', cs: 'Value at Risk', en: 'Value at risk', source: 'risk', snapshot: true, book: true, path: id => `/snapshots/${id}/var`, extra: ['confidence', 'horizon'] },
-  { id: 'valuation', cs: 'Ocenění', en: 'Valuation', source: 'risk', snapshot: true, book: true, path: id => `/snapshots/${id}/valuation` },
+  { id: 'cash-flow', riskScope: 'class', cs: 'Peněžní toky', en: 'Cash flow', source: 'risk', snapshot: true, book: false, path: id => `/snapshots/${id}/cash-flows` },
+  { id: 'liquidity', riskScope: 'class', cs: 'Analýza likvidity', en: 'Liquidity analysis', source: 'risk', snapshot: true, book: false, path: id => `/snapshots/${id}/liquidity` },
+  { id: 'irrbb', riskScope: 'class', cs: 'Úrokové riziko', en: 'Interest-rate risk', source: 'risk', snapshot: true, book: false, path: id => `/snapshots/${id}/irrbb` },
+  { id: 'limits', riskScope: 'class', cs: 'Limity a čerpání', en: 'Limits and utilisation', source: 'risk', snapshot: true, book: false, path: id => `/snapshots/${id}/limits` },
+  { id: 'fx-position', riskScope: 'desk', cs: 'FX pozice', en: 'FX position', source: 'risk', snapshot: true, book: true, path: id => `/snapshots/${id}/fx-position` },
+  { id: 'sensitivity', riskScope: 'desk', cs: 'Citlivost (PV01, DV01 po pásmech)', en: 'Sensitivity (PV01, DV01 buckets)', source: 'risk', snapshot: true, book: true, path: id => `/snapshots/${id}/sensitivity`, extra: ['bucketSet'] },
+  { id: 'var', riskScope: 'desk', cs: 'Value at Risk', en: 'Value at risk', source: 'risk', snapshot: true, book: true, path: id => `/snapshots/${id}/var`, extra: ['confidence', 'horizon'] },
+  { id: 'valuation', riskScope: 'desk', cs: 'Ocenění', en: 'Valuation', source: 'risk', snapshot: true, book: true, path: id => `/snapshots/${id}/valuation` },
   { id: 'accounting', cs: 'Účetnictví (pravidla zaúčtování)', en: 'Accounting (posting rules)', source: 'treasury', snapshot: false, book: false, path: () => '/posting-rules', provenance: 'regulatory' },
 ]
 
