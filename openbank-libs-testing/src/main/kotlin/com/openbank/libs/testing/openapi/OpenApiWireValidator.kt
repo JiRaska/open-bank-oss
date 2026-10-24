@@ -23,7 +23,7 @@ import org.snakeyaml.engine.v2.api.LoadSettings
  * The validator and YAML parser are `implementation` dependencies of this module on purpose: they
  * are not part of its public API, so no consumer compiles against them.
  */
-class OpenApiWireValidator(specYaml: String) {
+class OpenApiWireValidator private constructor(specYaml: String) {
     private val mapper = ObjectMapper()
     private val spec: JsonNode = nullableToType(
         mapper.valueToTree(Load(LoadSettings.builder().build()).loadFromString(specYaml)),
@@ -31,13 +31,16 @@ class OpenApiWireValidator(specYaml: String) {
 
     /** Loads `openapi.yaml` from the test classpath (a service's main resources). */
     constructor() : this(
+        specYaml =
         checkNotNull(OpenApiWireValidator::class.java.classLoader.getResourceAsStream("openapi.yaml")) {
             "openapi.yaml not on the test classpath"
         }.bufferedReader().use { it.readText() },
     )
 
-    /** Violations of [body] against the [status] response schema of [method] [specPath]; empty = conforms. */
-    fun violations(body: String, specPath: String, method: String = "get", status: String = "200"): List<String> {
+    /** Violations of [body] against the 200 JSON response schema of `GET` [specPath]; empty = conforms. */
+    fun violations(body: String, specPath: String): List<String> {
+        val method = "get"
+        val status = "200"
         val schema = spec.path("paths").path(specPath).path(method).path("responses").path(status)
             .path("content").path("application/json").path("schema")
         require(!schema.isMissingNode) { "no $status JSON schema for ${method.uppercase()} $specPath" }
