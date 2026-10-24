@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.12.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.11.0...admin-ui-v3.12.0) (2026-10-24)
+
+
+### Features
+
+* **treasury:** reference data and the cash-flow ledger for the five existing products (ADR-0344 phase 0) ([#13614](https://github.com/JiRaska/open-bank-oss/issues/13614)) ([42eec93](https://github.com/JiRaska/open-bank-oss/commit/42eec93ad9ee5c85728242d9b559515037391274))
+
 ## [3.11.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.3...admin-ui-v3.11.0) (2026-10-23)
 
 
