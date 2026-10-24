@@ -4,10 +4,11 @@
 
 package com.openbank.treasury.domain.model
 
+import com.openbank.libs.domain.calendar.DayCount
+import com.openbank.libs.domain.calendar.YearFraction
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
 
 /** How a product consumes its counterparty's credit line (ADR-0315 D4 extended to ADR-0344 D2). */
 enum class CreditMeasure {
@@ -78,10 +79,8 @@ class CreditMeasureMissingException(val code: String, message: String) : Runtime
  */
 object CreditExposure {
     private const val PERCENT = 100L
-    private const val DAYS_IN_YEAR = 365L
     private const val YEARS_SCALE = 6
     private val HUNDRED = BigDecimal.valueOf(PERCENT)
-    private val DAYS_PER_YEAR = BigDecimal.valueOf(DAYS_IN_YEAR)
 
     fun limitCurrency(product: ProductType, currency: String): String =
         if (product in CreditMeasure.CZK_LINE_PRODUCTS) Deal.CZK else currency
@@ -104,12 +103,17 @@ object CreditExposure {
     }
 
     private fun factor(deal: Deal, asOf: LocalDate, terms: CreditTerms): BigDecimal {
-        val residualYears = BigDecimal(ChronoUnit.DAYS.between(asOf, deal.maturityDate).coerceAtLeast(0))
-            .divide(DAYS_PER_YEAR, YEARS_SCALE, RoundingMode.HALF_UP)
+        // Residual maturity as an exact ACT/365F fraction from the kernel; the bucket bound is compared
+        // as a rational (no rounded decimal), so a deal exactly on a boundary stays in the lower bucket.
+        val residual = if (deal.maturityDate.isAfter(asOf)) {
+            DayCount.ACT_365_FIXED.yearFraction(asOf, deal.maturityDate)
+        } else {
+            YearFraction.ZERO
+        }
+        val residualYears = residual.toBigDecimal().setScale(YEARS_SCALE, RoundingMode.HALF_UP)
         return terms.factors
             .filter {
-                it.product == deal.product &&
-                    (it.maxResidualYears == null || residualYears <= it.maxResidualYears)
+                it.product == deal.product && (it.maxResidualYears == null || within(residual, it.maxResidualYears))
             }
             .minByOrNull { it.maxResidualYears ?: BigDecimal(Long.MAX_VALUE) }
             ?.factorPercent
@@ -118,6 +122,9 @@ object CreditExposure {
                 "no derivative-conversion-factor for ${deal.product} at $residualYears years residual is effective on $asOf",
             )
     }
+
+    private fun within(residual: YearFraction, maxYears: BigDecimal): Boolean =
+        BigDecimal(residual.numerator) <= maxYears.multiply(BigDecimal(residual.denominator))
 
     /** Collateral at its dirty price; an unpriced collateral counts as nothing (never as cover). */
     private fun collateralValue(deal: Deal): BigDecimal {
