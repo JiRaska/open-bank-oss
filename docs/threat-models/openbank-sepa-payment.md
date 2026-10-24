@@ -607,3 +607,37 @@ destructive schema downgrade using the migration's documented reverse SQL.
 
 
 Booking observability (#13623): an entity-only first-due marker commits with accepted PROCESSING before provider IO. Only the validated completion port records proof in the locked lifecycle/outbox transaction. Generic writes preserve pending evidence; nullable historical coverage is reported separately and never suppresses tracked pending age. This does not authorize retries, reconciliation actions, SLA policy or a transaction lookup API.
+
+## Unsettled-booking alerts and settlement re-drive (#13623)
+
+**Change.** `SepaPaymentBookingUnsettled` (open outbound booking clock > 30m) and `SepaPaymentRefundUnsettled`
+(unproven return > 1h) page on the two durable clocks; runbook `docs/runbooks/0032-payment-rail-unsettled-booking.md`.
+`submitToScheme` now re-enters for a PROCESSING payment whose booking clock is open and calls settlement again.
+
+**STRIDE.**
+- *Tampering / double booking:* the re-drive reuses `sepa-settlement-<paymentId>`; transaction-service dedups on
+  the key alone and replays the stored answer, so a re-drive can complete a booking but never create a second one.
+  Completion still requires the strict request/response match and the locked completion write.
+- *Elevation (booking an unaccepted payment):* re-entry is gated on the durable first-due marker, which only the
+  accepted VALIDATED -> PROCESSING write sets. A PROCESSING row reached by a generic status write or a legacy row
+  has no marker and is never settled. The scheme is never resubmitted on re-entry.
+- *Repudiation:* re-drive is a Temporal reset by an operator with `--reason`, recorded in workflow history; the
+  reversal re-drive goes through the existing `sepaPayment.handleReturn` authorization and keeps the original
+  server-derived actor/correlation on the intent.
+- *Denial of service / silent loss:* the previously unwatched holds now page. A cold pod reads NaN and a stopped
+  sweep is caught by `WorkflowLivenessStale`, so neither silences the alert by reading zero.
+- *Information disclosure:* alert labels are `rail`/`service`/`severity` only; no payment, account or key.
+
+- *Tampering (value date drift):* the request's value date is pinned to the durable acceptance instant, so a
+  re-drive days later sends the identical request. transaction-service answers a known key from the stored row
+  and ignores the body, so nothing fingerprints it today; the pin keeps that true if it ever does.
+- *Automatic re-settlement:* because `submitToScheme` re-enters for a held payment, ANY Temporal retry of that
+  activity (3 attempts within 10 minutes) re-settles on its own. Accepted on the same grounds as the operator
+  re-drive: same key, same request, and only the locked completion write may close the clock. A real-DB IT
+  (`SepaSettlementRedriveIT`) runs two re-drives concurrently and asserts one proof and one COMPLETED event.
+
+**Residual.** No retry beyond the workflow's own 3 attempts for a held booking, and none for a return (deterministic answers would replay anyway); no
+in-band "mark reconciled" after an out-of-band correction, so such a payment is silenced with a ticket, never by
+writing `booking_proven_at`. The pacs.008 carries no payment-type information (service level SEPA, local instrument INST) for SCT_INST; the clearing
+simulator ignores it, a real SCT Inst connection would not. Tracked in #13663.
+

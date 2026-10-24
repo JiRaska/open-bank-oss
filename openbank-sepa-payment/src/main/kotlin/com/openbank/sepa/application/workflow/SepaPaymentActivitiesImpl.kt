@@ -15,6 +15,7 @@ import com.openbank.sepa.application.port.out.SanctionsScreeningPort
 import com.openbank.sepa.application.port.out.SchemeGatewayPort
 import com.openbank.sepa.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.sepa.application.port.out.ScreeningUnavailableException
+import com.openbank.sepa.application.port.out.SepaBookingQuery
 import com.openbank.sepa.application.port.out.SepaBookingWrites
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
 import com.openbank.sepa.application.port.out.SepaPaymentRepository
@@ -48,6 +49,7 @@ private const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
 open class SepaPaymentActivitiesImpl(
     private val paymentRepository: SepaPaymentRepository,
     private val bookingWrites: SepaBookingWrites,
+    private val bookingQuery: SepaBookingQuery,
     private val screeningPort: SanctionsScreeningPort,
     private val amlCasePort: AmlCasePort,
     private val fraudScoringPort: FraudScoringPort,
@@ -210,6 +212,20 @@ open class SepaPaymentActivitiesImpl(
     override fun submitToScheme(paymentId: UUID): SepaPaymentStatus = runOnVertxContext {
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during scheme-submission activity")
+        // #13623 re-drive: an ACCEPTED payment whose booking never proved stays PROCESSING with an open
+        // booking clock, and nothing else ever calls settlement for it again. Re-entering here (an
+        // operator Temporal reset to just before this activity) settles it under the SAME
+        // `sepa-settlement-<id>` key, so transaction-service replays an existing booking and never books
+        // twice. Keyed on the durable booking clock, not on PROCESSING alone: a PROCESSING row with no
+        // tracked obligation (legacy, or a generic status write) was never proven scheme-accepted here.
+        // Consequence, deliberately accepted: ANY Temporal retry of this activity on a held payment (the
+        // workflow's 3 attempts within 10 minutes, e.g. after a worker restart or timeout that followed the
+        // PROCESSING write) now re-settles on its own. That is safe for the same reason: same key, a value date
+        // pinned to the due instant, and completion only through the locked, replay-tolerant write.
+        if (payment.status == SepaPaymentStatus.PROCESSING) {
+            val dueAt = bookingQuery.pendingBookingDueAt(paymentId)
+            if (dueAt != null) return@runOnVertxContext settleHeld(payment, paymentId, dueAt)
+        }
         if (!schemeSubmissionEnabled || payment.status != SepaPaymentStatus.VALIDATED) {
             return@runOnVertxContext payment.status
         }
@@ -260,8 +276,14 @@ open class SepaPaymentActivitiesImpl(
                 createdAt = Instant.now(clock),
             ),
         )
+        // processing.updatedAt is exactly the instant acceptForBooking records as booking_first_due_at.
+        return settleHeld(processing, paymentId, processing.updatedAt)
+    }
+
+    /** Book an accepted PROCESSING payment; any unproven answer holds it in PROCESSING with its clock open. */
+    private suspend fun settleHeld(processing: SepaPayment, paymentId: UUID, acceptedAt: Instant): SepaPaymentStatus {
         val settled = try {
-            settlementPort.settle(processing)
+            settlementPort.settle(processing, acceptedAt)
         } catch (ex: SettlementUnavailableException) {
             log.warnf(ex, "Settlement unavailable for payment %s; holding in PROCESSING", paymentId)
             return SepaPaymentStatus.PROCESSING

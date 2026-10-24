@@ -71,7 +71,7 @@ spec:
         instrumentation.opentelemetry.io/inject-java: "openbank"
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-product-catalog-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "998e6ce246756876"
+        openbank.tech/policy-checksum: "a38f96da250e1ae1"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -82,7 +82,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: product-catalog
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-product-catalog:sandbox-fa8bcc76
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-product-catalog:sandbox-1a0a6513
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -141,6 +141,15 @@ spec:
               value: http://localhost:8181
             - name: AUTHZ_ENFORCE
               value: "false"
+            # ADR-0352 §4: the publish-path signature over an IR-bearing revision's canonical hash.
+            # The OpenBao address is declared here so gen-network-policies.py derives the
+            # accounts -> vault:8200 egress. The MODE stays at the application default `disabled`
+            # (publish-ir answers 409, nothing is signed) until the Transit key `product-ir-publish`
+            # and this service's kubernetes-auth role are provisioned; then set
+            # CATALOG_IR_SIGNING_MODE=openbao here. `hmac` refuses to boot in this launch mode.
+            # Consumers (phase 3) get verify-only roles.
+            - name: CATALOG_IR_SIGNING_OPENBAO_ADDRESS
+              value: https://openbao.vault.svc:8200
           startupProbe:
             httpGet:
               path: /q/health/ready
