@@ -49,3 +49,8 @@ data class AllowancePostings(val pending: Int, val posted: Int, val dead: Int)
 fun interface AllowancePostingsPort {
     fun postingsFor(accountingDate: LocalDate): Uni<AllowancePostings>
 }
+
+/** Everything the day-close reporter reads: the run evidence and the allowance outbox state. */
+interface LendingCloseEvidencePort :
+    CloseJobRunPort,
+    AllowancePostingsPort

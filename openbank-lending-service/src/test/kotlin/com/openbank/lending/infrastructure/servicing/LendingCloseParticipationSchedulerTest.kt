@@ -6,6 +6,8 @@ package com.openbank.lending.infrastructure.servicing
 
 import com.openbank.lending.application.port.`in`.AccrueInterestUseCase
 import com.openbank.lending.application.port.out.AllowancePostings
+import com.openbank.lending.application.port.out.CloseJobRunPort
+import com.openbank.lending.application.port.out.LendingCloseEvidencePort
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.libs.close.CloseJobRun
 import com.openbank.libs.close.CloseOutcome
@@ -50,10 +52,11 @@ class LendingCloseParticipationSchedulerTest {
 
     private fun scheduler(accrualEvery: String = "24h", provisioningEvery: String = "24h") =
         LendingCloseParticipationScheduler(
-            closeJobRuns = runs,
-            allowancePostings = { day ->
-                postingsAsked += day
-                Uni.createFrom().item(allowance)
+            evidence = object : LendingCloseEvidencePort, CloseJobRunPort by runs {
+                override fun postingsFor(accountingDate: LocalDate): Uni<AllowancePostings> {
+                    postingsAsked += accountingDate
+                    return Uni.createFrom().item(allowance)
+                }
             },
             sink = { participant, report ->
                 assertThat(participant).isEqualTo(LendingCloseJobs.PARTICIPANT)
@@ -65,7 +68,8 @@ class LendingCloseParticipationSchedulerTest {
             domainMetrics = noOpDomainMetrics(),
             accrualEvery = accrualEvery,
             provisioningEvery = provisioningEvery,
-        )
+            lookbackDays = 3,
+        ).apply { staleAfter = java.time.Duration.ofHours(2) }
 
     @BeforeEach
     fun stubPanacheSession() {
