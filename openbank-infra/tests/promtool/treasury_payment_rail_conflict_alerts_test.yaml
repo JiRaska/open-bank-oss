@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for the payment rail-conflict alert: a must-FIRE case, a flat counter that must
+# NOT fire, and an old conflict that no longer fires after the window.
+rule_files:
+  - prometheus-rules-reconciliation.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "a rail status for a manually resolved payment fires TreasuryPaymentRailConflict"
+    input_series:
+      - series: 'openbank_treasury_payment_rail_conflict_total{pod="treasury-a",status="settled"}'
+        values: "0 0 0 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TreasuryPaymentRailConflict
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              status: settled
+            exp_annotations:
+              subject_period: continuous
+              summary: "A rail status contradicts a manually resolved treasury payment"
+              description: "treasury-service received a rail status settled for a payment a human had already resolved MANUALLY_SETTLED or RETURNED. It was not applied and is parked in openbank.dlq.treasury.institution-transfer-status-in. Establish with the correspondent whether the money moved, correct the resolution through a reviewed change, then replay or discard the record."
+
+  - interval: 1m
+    name: "a flat counter does NOT fire"
+    input_series:
+      - series: 'openbank_treasury_payment_rail_conflict_total{pod="treasury-a",status="settled"}'
+        values: "2+0x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: TreasuryPaymentRailConflict
+        exp_alerts: []
+
+  - interval: 1m
+    name: "an old conflict no longer fires after 15m"
+    input_series:
+      - series: 'openbank_treasury_payment_rail_conflict_total{pod="treasury-a",status="sent"}'
+        values: "0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: TreasuryPaymentRailConflict
+        exp_alerts: []

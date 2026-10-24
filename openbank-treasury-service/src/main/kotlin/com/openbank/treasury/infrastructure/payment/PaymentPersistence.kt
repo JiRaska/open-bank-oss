@@ -264,7 +264,10 @@ class PaymentRepositoryImpl(
                 // (deal row, then its payments), so a reverse and a release never deadlock.
                 deals.find("dealId in ?1", payment.dealIds).withLock(LockModeType.PESSIMISTIC_WRITE).list()
             }.flatMap {
-                Panache.getSession().flatMap { session -> unbookedOut(session, payment.currency, payment.valueDate) }
+                // Every value date, not only those up to this one: a later-dated release already committed
+                // under this line's lock has reserved the money too, and leaving it out would make
+                // the outcome depend on which of two racing releases commits first.
+                Panache.getSession().flatMap { session -> unbookedOut(session, payment.currency, ANY_VALUE_DATE) }
             }.flatMap { pending ->
                 fundingCheck(pending)
                 payments.find("paymentId", payment.paymentId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
@@ -474,6 +477,9 @@ class PaymentRepositoryImpl(
 
     private companion object {
         const val MAX_FLOWS = 10_000
+
+        /** The release check counts the line's unbooked outflows on every value date. */
+        val ANY_VALUE_DATE: LocalDate = LocalDate.of(9999, 12, 31)
 
         /**
          * Σ of the signed amounts (OUT +, IN -) of every flow on an outgoing payment in an outflow

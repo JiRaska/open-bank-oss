@@ -58,12 +58,25 @@ enum class PaymentStatus {
      */
     val blocksDealChange: Boolean get() = this in BLOCKING_DEAL_CHANGE
 
-    /** A status an independent human may resolve to MANUALLY_SETTLED or RETURNED: exactly the blocking ones. */
-    val resolvable: Boolean get() = blocksDealChange
+    /**
+     * A status an independent human may resolve to MANUALLY_SETTLED or RETURNED: only one the rail no
+     * longer acts on — RAIL_NOT_SUPPORTED (never handed to a rail) and FAILED (the rail rejected it).
+     * RELEASED / SENT are in flight: the rail still reports their outcome, so a manual resolution
+     * would race it ([PaymentInFlightException], 409 PAYMENT_IN_FLIGHT); they wait for its terminal
+     * status. Its own set, deliberately not derived from [blocksDealChange].
+     */
+    val resolvable: Boolean get() = this in RESOLVABLE
+
+    /** Handed to the rail and not yet terminal there: the rail's outcome is still to come. */
+    val inFlight: Boolean get() = this == RELEASED || this == SENT
 
     companion object {
         val BLOCKING_DEAL_CHANGE: Set<PaymentStatus> = setOf(RELEASED, SENT, RAIL_NOT_SUPPORTED, FAILED)
         val BLOCKING_DEAL_CHANGE_NAMES: List<String> = BLOCKING_DEAL_CHANGE.map { it.name }.sorted()
+        val RESOLVABLE: Set<PaymentStatus> = setOf(RAIL_NOT_SUPPORTED, FAILED)
+
+        /** Resolved by a human: the rail has no say any more, so any rail status for it is a conflict. */
+        val MANUALLY_RESOLVED: Set<PaymentStatus> = setOf(MANUALLY_SETTLED, RETURNED)
     }
 }
 
@@ -86,7 +99,17 @@ typealias TransferRail = InstitutionTransferRail
 typealias RailStatus = com.openbank.libs.iso20022.InstitutionTransferStatus
 
 /** A rail status that cannot apply to the payment as it stands (never released, or contradicts a terminal state). */
-class RailStatusConflictException(message: String) : IllegalStateException(message)
+open class RailStatusConflictException(message: String) : IllegalStateException(message)
+
+/**
+ * A rail status for a payment a human already resolved (MANUALLY_SETTLED / RETURNED): the rail and
+ * the resolution disagree about money. Never dropped and never applied: the consumer counts it on
+ * `openbank.treasury.payment.rail_conflict` and rethrows so the channel's DLQ parks it for a human.
+ */
+class ManualResolutionRailConflictException(message: String) : RailStatusConflictException(message)
+
+/** A RELEASED / SENT payment is still in the rail's hands: its resolution waits for the rail's terminal status. */
+class PaymentInFlightException(message: String) : IllegalStateException(message)
 
 object TransferRails {
     /**
@@ -182,9 +205,15 @@ data class Payment(
      * SETTLED; REJECTED moves RELEASED/SENT -> FAILED. A replay, or a status the payment is already
      * past (a late SENT after SETTLED), answers null — nothing to store. A status for a payment that
      * was never handed to the rail, or one contradicting a terminal outcome (SETTLED after FAILED),
-     * is a [RailStatusConflictException]: never guessed at.
+     * is a [RailStatusConflictException]: never guessed at. ANY status for a payment a human resolved
+     * (MANUALLY_SETTLED / RETURNED) is a [ManualResolutionRailConflictException].
      */
     fun onRail(rail: RailStatus, reference: String?, reason: String?): Payment? {
+        if (status in PaymentStatus.MANUALLY_RESOLVED) {
+            throw ManualResolutionRailConflictException(
+                "payment $paymentId was resolved $status by a human; rail status $rail contradicts it",
+            )
+        }
         val ref = reference?.take(MAX_REFERENCE)
         return when (rail) {
             RailStatus.ACCEPTED -> accepted(ref)
@@ -254,7 +283,7 @@ data class Payment(
     }
 
     /**
-     * A RELEASED / SENT / RAIL_NOT_SUPPORTED payment ends MANUALLY_SETTLED or RETURNED, recorded by a
+     * A RAIL_NOT_SUPPORTED or FAILED payment ends MANUALLY_SETTLED or RETURNED, recorded by a
      * second, independent human: never the releaser, never a term author ([authors], computed fresh).
      * Its flows are never freed.
      */
@@ -268,13 +297,20 @@ data class Payment(
             "a released payment resolves to MANUALLY_SETTLED or RETURNED"
         }
         require(reason.isNotBlank() && reason.length <= MAX_REASON) { "a resolution needs a reason (1..$MAX_REASON)" }
-        check(status.resolvable) {
-            "cannot resolve a $status payment (expected RELEASED, SENT, RAIL_NOT_SUPPORTED or FAILED)"
-        }
+        requireOutOfRail()
+        check(status.resolvable) { "cannot resolve a $status payment (expected RAIL_NOT_SUPPORTED or FAILED)" }
         if (actor.id == releasedBy || actor.id in authors) {
             throw FourEyesViolationException("four-eyes: the releaser or a term author must not resolve a payment")
         }
         return copy(status = outcome, statusReason = reason)
+    }
+
+    private fun requireOutOfRail() {
+        if (status.inFlight) {
+            throw PaymentInFlightException(
+                "payment $paymentId is $status: the rail still reports its outcome; resolve it only once it is FAILED",
+            )
+        }
     }
 
     /** A nostro statement entry matched this expected (or sent) payment. */
@@ -288,23 +324,18 @@ data class Payment(
         const val MAX_REASON = 500
         const val MAX_REFERENCE = 140
 
-        private val SETTLED_ALREADY = setOf(PaymentStatus.SETTLED, PaymentStatus.MANUALLY_SETTLED)
-        private val FAILED_ALREADY = setOf(PaymentStatus.FAILED, PaymentStatus.RETURNED)
-        private val AFTER_RELEASE = setOf(
-            PaymentStatus.SENT,
-            PaymentStatus.SETTLED,
-            PaymentStatus.FAILED,
-            PaymentStatus.MANUALLY_SETTLED,
-            PaymentStatus.RETURNED,
-        )
+        private val SETTLED_ALREADY = setOf(PaymentStatus.SETTLED)
+        private val FAILED_ALREADY = setOf(PaymentStatus.FAILED)
+        private val AFTER_RELEASE = setOf(PaymentStatus.SENT, PaymentStatus.SETTLED, PaymentStatus.FAILED)
 
         /**
          * Outgoing payments that have (or may have) left the funding account. Shared by the funding
          * check and pendingOut; one is still counted until the ledger holds the outflow journal of
-         * every flow it pays.
+         * every flow it pays. RETURNED stays in: a human recorded the return, but until the ledger
+         * books (or the nostro confirms) it, the reservation is not released on a human's word.
          */
         val OUTFLOW_STATUSES: List<String> =
-            listOf("RELEASED", "SENT", "RAIL_NOT_SUPPORTED", "MANUALLY_SETTLED", "SETTLED")
+            listOf("RELEASED", "SENT", "RAIL_NOT_SUPPORTED", "MANUALLY_SETTLED", "SETTLED", "RETURNED")
 
         private val SETTLEABLE = setOf(PaymentStatus.PROPOSED, PaymentStatus.SENT, PaymentStatus.RELEASED)
 

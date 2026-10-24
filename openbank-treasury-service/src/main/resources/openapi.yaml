@@ -1943,7 +1943,7 @@ paths:
     post:
       tags: [Treasury]
       operationId: resolvePayment
-      summary: Resolve a released payment MANUALLY_SETTLED or RETURNED (an approver who is neither its releaser nor a term author); its flows stay linked
+      summary: Resolve a RAIL_NOT_SUPPORTED or FAILED payment MANUALLY_SETTLED or RETURNED (an approver who is neither its releaser nor a term author); its flows stay linked
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -1958,7 +1958,7 @@ paths:
                 reason: { type: string, maxLength: 500 }
       responses:
         '200': { description: Resolved, content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
-        '409': { description: Not released }
+        '409': { description: 'PAYMENT_IN_FLIGHT (RELEASED or SENT: the rail still reports its outcome, resolve once it is FAILED) or INVALID_STATE (not RAIL_NOT_SUPPORTED or FAILED)' }
         '422': { description: FOUR_EYES_VIOLATION }
   /api/v1/treasury/deals/{id}/corrections:
     get:

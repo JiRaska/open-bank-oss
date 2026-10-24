@@ -11,8 +11,10 @@ import com.openbank.treasury.application.usecase.PaymentService
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.payment.FundingExceededException
+import com.openbank.treasury.domain.payment.ManualResolutionRailConflictException
 import com.openbank.treasury.domain.payment.RailStatus
 import com.openbank.treasury.domain.payment.RailStatusConflictException
+import com.openbank.treasury.infrastructure.messaging.InstitutionTransferStatusConsumer
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -85,6 +87,12 @@ class PaymentRailIT {
     @Inject
     @Any
     lateinit var connector: InMemoryConnector
+
+    @Inject
+    lateinit var consumer: InstitutionTransferStatusConsumer
+
+    @Inject
+    lateinit var meterRegistry: io.micrometer.core.instrument.MeterRegistry
 
     private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
 
@@ -397,6 +405,46 @@ class PaymentRailIT {
         )
         assertThat(payload["ssiVersion"].asInt()).isEqualTo(2)
         assertThat(payload["creditor"]["accountNumber"].asText()).isEqualTo("CZ5508000000001234567899")
+    }
+
+    @Test
+    @Order(19)
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `19 - a RELEASED payment is in flight - resolving it is 409 PAYMENT_IN_FLIGHT, nothing written`() {
+        assertThat(status(payC2)).isEqualTo("RELEASED")
+        post("/payments/$payC2/resolve", """{"outcome":"RETURNED","reason":"assumed returned"}""")
+            .then().statusCode(409).body("error", equalTo("PAYMENT_IN_FLIGHT"))
+        onContext { payments.onRailStatus(event(payC2, RailStatus.SENT)) }
+        assertThat(status(payC2)).isEqualTo("SENT")
+        post("/payments/$payC2/resolve", """{"outcome":"MANUALLY_SETTLED","reason":"assumed paid"}""")
+            .then().statusCode(409).body("error", equalTo("PAYMENT_IN_FLIGHT"))
+        assertThat(status(payC2)).isEqualTo("SENT")
+    }
+
+    @Test
+    @Order(20)
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `20 - a FAILED payment is resolved RETURNED, and keeps counting against funding until booked`() {
+        val amountB = onContext { payments.find(UUID.fromString(payB)) }.amount
+        val pendingBefore = onContext { paymentRepository.pendingOut("CZK", valueDate) }
+        post("/payments/$payB/resolve", """{"outcome":"RETURNED","reason":"rejected, confirmed returned"}""")
+            .then().statusCode(200).body("status", equalTo("RETURNED"))
+        assertThat(onContext { paymentRepository.pendingOut("CZK", valueDate) })
+            .isEqualByComparingTo(pendingBefore + amountB)
+    }
+
+    @Test
+    @Order(21)
+    fun `21 - a rail SETTLED after RETURNED is dead-lettered and counted, never applied`() {
+        val counter = {
+            meterRegistry.find(InstitutionTransferStatusConsumer.RAIL_CONFLICT_METRIC).counters().sumOf { it.count() }
+        }
+        val before = counter()
+        assertThatThrownBy { onContext { consumer.consume(statusJson(payB, "SETTLED", "LATE-REF")) } }
+            .isInstanceOf(ManualResolutionRailConflictException::class.java)
+        assertThat(counter()).isEqualTo(before + 1.0)
+        assertThat(status(payB)).isEqualTo("RETURNED")
+        assertThat(statusEvents(payB, "SETTLED")).isEqualTo(0)
     }
 
     private fun pendingOut(): BigDecimal = jdbc { c ->

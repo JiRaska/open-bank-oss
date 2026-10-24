@@ -14,7 +14,9 @@ import com.openbank.treasury.domain.model.ActorNotPermittedException
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.FourEyesViolationException
 import com.openbank.treasury.domain.payment.FundingCheck
+import com.openbank.treasury.domain.payment.ManualResolutionRailConflictException
 import com.openbank.treasury.domain.payment.Payment
+import com.openbank.treasury.domain.payment.PaymentInFlightException
 import com.openbank.treasury.domain.payment.PaymentProposals
 import com.openbank.treasury.domain.payment.PaymentStatus
 import com.openbank.treasury.domain.payment.ProposalOutcome
@@ -268,7 +270,49 @@ class PaymentsTest {
         )
         assertThat(PaymentStatus.BLOCKING_DEAL_CHANGE_NAMES)
             .isEqualTo(PaymentStatus.entries.filter { it.blocksDealChange }.map { it.name }.sorted())
+        // Resolution is its own set: only statuses the rail no longer acts on.
         assertThat(PaymentStatus.entries.filter { it.resolvable })
-            .isEqualTo(PaymentStatus.entries.filter { it.blocksDealChange })
+            .containsExactlyInAnyOrder(PaymentStatus.RAIL_NOT_SUPPORTED, PaymentStatus.FAILED)
+    }
+
+    @Test
+    fun `a RELEASED or SENT payment is in flight - resolving it is refused until the rail is terminal`() {
+        val released = proposed(false, flow(FlowDirection.OUT, "100.00"))
+            .release(Actor("rita.releaser", ActorType.HUMAN), at)
+        val sent = checkNotNull(released.onRail(RailStatus.SENT, "REF-1", null))
+        listOf(released, sent).forEach { p ->
+            PaymentStatus.MANUALLY_RESOLVED.forEach { outcome ->
+                assertThatThrownBy { p.resolve(Actor("anna", ActorType.HUMAN), outcome, "by hand", emptySet()) }
+                    .isInstanceOf(PaymentInFlightException::class.java)
+            }
+        }
+        val failed = checkNotNull(sent.onRail(RailStatus.REJECTED, null, "AC04"))
+        assertThat(
+            failed.resolve(Actor("anna", ActorType.HUMAN), PaymentStatus.MANUALLY_SETTLED, "paid", emptySet()).status,
+        )
+            .isEqualTo(PaymentStatus.MANUALLY_SETTLED)
+    }
+
+    @Test
+    fun `any rail status for a manually resolved payment is a conflict, never applied nor dropped`() {
+        val failed = checkNotNull(
+            proposed(false, flow(FlowDirection.OUT, "100.00"))
+                .release(Actor("rita.releaser", ActorType.HUMAN), at)
+                .onRail(RailStatus.REJECTED, null, null),
+        )
+        val returned = failed.resolve(Actor("anna", ActorType.HUMAN), PaymentStatus.RETURNED, "returned", emptySet())
+        val settled = failed.resolve(Actor("anna", ActorType.HUMAN), PaymentStatus.MANUALLY_SETTLED, "paid", emptySet())
+        listOf(returned, settled).forEach { p ->
+            listOf(RailStatus.ACCEPTED, RailStatus.SENT, RailStatus.SETTLED, RailStatus.REJECTED).forEach { s ->
+                assertThatThrownBy { p.onRail(s, null, null) }
+                    .isInstanceOf(ManualResolutionRailConflictException::class.java)
+            }
+        }
+    }
+
+    @Test
+    fun `a RETURNED payment keeps counting against funding until the ledger books it`() {
+        assertThat(Payment.OUTFLOW_STATUSES).contains("RETURNED", "MANUALLY_SETTLED", "RAIL_NOT_SUPPORTED")
+        assertThat(Payment.OUTFLOW_STATUSES).doesNotContain("FAILED", "PROPOSED", "CANCELLED")
     }
 }

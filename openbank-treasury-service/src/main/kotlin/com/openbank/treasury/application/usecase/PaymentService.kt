@@ -421,7 +421,10 @@ class PaymentService(
                 "no funding (nostro) account in ${p.currency}",
             )
         val balance = port.accountBalance(nostro.glCode, p.currency, p.valueDate) ?: BigDecimal.ZERO
-        return "treasury-funding:${nostro.glCode}:${p.currency}:${p.valueDate}" to { pending ->
+        // The lock is the funding LINE (account, currency), never the value date: the pending sum a
+        // release checks spans other value dates, so every release that can appear in another's
+        // sum must take the same lock or two of them overdraw the line jointly.
+        return fundingLineKey(nostro.glCode, p.currency) to { pending ->
             val result = FundingCheck.check(balance, pending, p.amount)
             if (result.exceeded) {
                 onFundingExceeded(p.currency)
@@ -432,6 +435,8 @@ class PaymentService(
             }
         }
     }
+
+    internal fun fundingLineKey(glCode: String, currency: String): String = "treasury-funding:$glCode:$currency"
 
     private suspend fun termAuthors(dealId: UUID): List<String> = cashFlows.versions(dealId).map { it.createdBy }
 
