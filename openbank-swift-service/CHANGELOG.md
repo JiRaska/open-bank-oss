@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.2...swift-service-v0.13.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* **swift:** alert on an unbooked MT103 the scheme accepted ([#13689](https://github.com/JiRaska/open-bank-oss/issues/13689)) ([7228d8f](https://github.com/JiRaska/open-bank-oss/commit/7228d8f107ce0f790196afcb69faf374ddf03781)), closes [#13623](https://github.com/JiRaska/open-bank-oss/issues/13623)
+
 ## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.1...swift-service-v0.13.2) (2026-10-23)
 
 

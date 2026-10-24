@@ -1751,6 +1751,20 @@ four_eyes:
     - settlement.create                # Human operator origination; no verified M2M caller (#10041).
     - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                          # core also enforces maker != checker for standalone installs.
+    - catalog.publish-ir               # ADR-0352 §7: publishing an IR-bearing revision — the publish
+                                         # path signs the IR's canonical revisionHash on the way out,
+                                         # so a valid signature is authority over every account under
+                                         # the product. Its own action, never the shared catalog.publish,
+                                         # so this entry can never cover a non-IR publish by accident.
+                                         # No M2M caller, and not only by policy: rest.rego
+                                         # catalog-publish-ir requires HUMAN + (ROLE_OPERATOR or
+                                         # ROLE_ADMIN) and excludes machines, but product-catalog runs
+                                         # AUTHZ_ENFORCE=false, so that rule is advisory there. The
+                                         # binding control is in the service: publishOfferingRevisionIrV2
+                                         # refuses any identity ServiceAccountIdentity.isHumanStaff does
+                                         # not positively classify as interactive staff (fails closed), and
+                                         # GenericCatalogService enforces maker != checker. No service
+                                         # rego grants catalog.* to a machine beyond catalog.read.
     - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
                                          # playbook version. Confirmed no M2M caller — the only allow
                                          # rule for this action (rest.rego commstyle-publish) requires
@@ -4084,14 +4098,13 @@ product_ir_determinism:
   # ADR-0352 §8: every golden scenario runs twice in one JVM with byte-identical canonical output
   # (GoldenDeterminismTest, openbank-libs-testing); the gate keeps that test's scope equal to the
   # committed scenario files. Cross-irVersion equivalence is a declared no-op with one version.
-  detect: ["openbank-libs-testing/src/main/resources/product-golden/*.json", "openbank-libs-testing/src/main/resources/product-golden/index.txt"]
+  detect: ["**/product-golden/*.json", "**/product-golden/index.txt"]
   require:
-    - "every scenario file is listed in index.txt and every index entry exists"
+    - "every scenario file is listed in its directory's index.txt and every index entry exists"
     - "every scenario's revision uses a supported irVersion and its name equals its file name"
     - "GoldenDeterminismTest exists, is not disabled and iterates the committed index"
   gate: product-ir-determinism
-  enforced: advisory
-  target_enforce_date: "2026-12-31"   # ADR-0144; ADR-0352 flips it at the end of phase 2
+  enforced: enforced                  # flipped at the end of ADR-0352 phase 2 (2026-10-23), before any consumer switches
   ci_producer: ".github/scripts/check-product-ir-determinism.py"
 
 product_ir_run_limits:
@@ -4102,9 +4115,23 @@ product_ir_run_limits:
     - "every ruleId is present, matches the pattern and is unique within its revision"
     - "no golden scenario step expects more than maxInstructionsPerEvaluation instructions"
   gate: product-ir-run-limits
-  enforced: advisory
-  target_enforce_date: "2026-12-31"   # ADR-0144; ADR-0352 flips it at the end of phase 2
+  enforced: enforced                  # flipped at the end of ADR-0352 phase 2 (2026-10-23), before any consumer switches
   ci_producer: ".github/scripts/check-product-ir-run-limits.py"
+
+product_ir_authoring_parity:
+  # ADR-0352 §5/§11: the Kotlin DSL is build-time sugar and the committed ir/<name>.json is the
+  # artifact the catalog publishes (§7: the hash on origin/main is the hash that may be published).
+  # Every authoring path must yield the same canonical bytes; today those are the DSL and raw JSON,
+  # MCP/Studio join in phases 5-6 and widen this rule's detect list, not its requirement.
+  detect: ["openbank-products/ir/*.json", "openbank-products/src/main/kotlin/com/openbank/products/catalog/ReferenceProducts.kt"]
+  require:
+    - "every committed ir/<name>.json has a DSL product declared under that name, and every DSL product has a committed IR"
+    - "ReferenceProductsTest compiles each DSL product and asserts its canonical JSON equals the committed file byte for byte (JVM half)"
+    - "the parity test exists, is not disabled and iterates ReferenceProducts.all"
+  gate: product-ir-authoring-parity
+  enforced: advisory
+  target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the MCP/Studio authoring paths (phases 5-6) are in scope
+  ci_producer: ".github/scripts/check-product-ir-authoring-parity.py"
 
 realm_devci_artifact_parity:
   detect: [
@@ -4997,6 +5024,15 @@ catalog_kernel_neutrality:
 # Missing or unparseable = the train serves nothing (fail closed) and --check-declaration fails.
 # ---------------------------------------------------------------------------------------
 merge_train:
+  # A decision record is separate from CI. It lifts only the codex prefix exclusion;
+  # normal/strict lane routing, required/extra gates and the pinned merge producer remain.
+  owner_approval:
+    workflow: .github/workflows/merge-train-owner-approval.yml
+    context: merge-train/owner-approval
+    actor: user_repository_owner
+    bind: [repository, pull_request, head_sha]
+    stale_on_push: true
+    revocable: true
   extra_gates:
     - {workflow: .github/workflows/security.yml, check: Trivy}
 

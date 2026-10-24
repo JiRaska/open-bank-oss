@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-module governance manifest (ADR-0071). openbank-products is the Product as Code content
+# module (ADR-0352): a build-time DSL, reference product IR, golden scenarios and the obp CLI.
+# It is a library and a CLI, not a service: no datastore, no endpoint, no deployment, no customer
+# data. Schema: openbank-libs/governance/governance.schema.json
+dataDomain: core
+primaryDatastore: none
+ownsNoDatabase: true
+dataLineageRole: internal
+dataClassification: public
+retentionPolicy: not applicable (no data; reference product definitions are source code)
+evidenceExported: false

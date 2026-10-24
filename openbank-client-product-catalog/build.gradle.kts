@@ -81,6 +81,7 @@ openApiGenerate {
             "apis" to "CatalogV2,CatalogEvents",
             "models" to listOf(
                 "EligibilityRule",
+                "IrSignature",
                 "EligibilityOperator",
                 "ApiError",
                 "CatalogEvent",
