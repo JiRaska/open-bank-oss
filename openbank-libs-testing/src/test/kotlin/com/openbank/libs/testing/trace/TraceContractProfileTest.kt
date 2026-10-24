@@ -30,6 +30,7 @@ class TraceContractProfileTest {
         assertThat(TraceContractProfile().configOverrides).containsExactlyInAnyOrderEntriesOf(
             mapOf(
                 "quarkus.otel.sdk.disabled" to "false",
+                "quarkus.otel.traces.exporter" to "none",
                 "openbank.outbox.dispatch-enabled" to "false",
                 "quarkus.index-dependency.openbank-libs-testing.group-id" to "com.openbank",
                 "quarkus.index-dependency.openbank-libs-testing.artifact-id" to "openbank-libs-testing",
@@ -42,6 +43,7 @@ class TraceContractProfileTest {
         val overrides = WithExtras().configOverrides
         assertThat(overrides).containsEntry("authz.enforce", "false")
         assertThat(overrides).containsEntry("quarkus.otel.sdk.disabled", "false")
+        assertThat(overrides).containsEntry("quarkus.otel.traces.exporter", "none")
         assertThat(overrides).containsEntry("openbank.outbox.dispatch-enabled", "false")
     }
 
@@ -50,6 +52,7 @@ class TraceContractProfileTest {
         val overrides = NoOutbox().configOverrides
         assertThat(overrides).doesNotContainKey("openbank.outbox.dispatch-enabled")
         assertThat(overrides).containsEntry("quarkus.otel.sdk.disabled", "false")
+        assertThat(overrides).containsEntry("quarkus.otel.traces.exporter", "none")
     }
 
     @Test

@@ -35,6 +35,8 @@ open class TraceContractProfile : QuarkusTestProfile {
         val overrides = linkedMapOf(
             // Some modules switch the SDK off for tests; without it there are no spans to contract at all.
             "quarkus.otel.sdk.disabled" to "false",
+            // The explicit SimpleSpanProcessor is the sole recorder path; CDI export would also batch it.
+            "quarkus.otel.traces.exporter" to "none",
             // TraceContractRecorder is a bean in this jar; ArC only indexes the jar when asked to.
             "quarkus.index-dependency.openbank-libs-testing.group-id" to "com.openbank",
             "quarkus.index-dependency.openbank-libs-testing.artifact-id" to "openbank-libs-testing",
