@@ -25,3 +25,29 @@ This documentation is published directly by the service at the management endpoi
 - **Idempotency:** merge-record ingest is idempotent by `prNumber` (`ON CONFLICT DO NOTHING` — a redelivered webhook returns the stored record with `inserted=false`, no second audit row); assistant/tool calls are read-only and non-mutating
 - **Auth:** Keycloak OIDC (resource server, realm `openbank`); outbound MCP tool calls carry a `openbank-services` client-credentials Bearer (ADR-0031 / ADR-0034)
 - **Governance:** every tool call passes the OPA-backed **AgentPolicyGate** (deny-by-default), bounded by the `ui-assistant` charter in `agents.yaml`; enforcement is `advisory` by default, flip to `block` (ADR-0031 D9)
+
+## Account read-tool consumer contracts
+
+`AgentAccountReadPactConsumerTest` exercises production `RestDownstreamReadAdapter` dispatch for `get_account` and `get_account_by_iban` through an anonymous account client bound to a Pact mock server. Three interactions cover account-by-ID 200, account-by-IBAN 200 and missing-IBAN 404; the last must propagate a client exception instead of invented account data. Assertions retain identifying response fields, not every field of the provider response.
+
+These tests do not invoke the production REST-client annotations or OIDC filters, MCP HTTP routing, model execution, charter/HITL enforcement, audit persistence or live JWT/OPA authorization. Existing synthetic account/unknown-IBAN provider states are reused. Separate provider replay and normal CI remain necessary; local mock success is not runtime delivery proof. The test-only Pact dependency uses the existing version catalog.
+
+`AgentTransactionReadPactConsumerTest` additionally covers `get_transaction`: a seeded by-ID transaction 200 passes through the real read adapter, while an unknown transaction 404 propagates a client exception. It uses the same handwritten-client Pact boundary and shares the existing posted-transaction and no-seed provider states with the Party portability pact. These two interactions do not establish caller authorization or ownership isolation.
+
+
+## FX and AML read-tool consumer contracts
+
+`AgentFxReadPactConsumerTest` additionally covers `fx_get_rate` (EUR/CZK 200 and unknown USD/JPY 404) and `fx_list_rates` (200 bare-array rate board). `AgentAmlReadPactConsumerTest` covers `aml_get_case` (seeded case 200 and unknown case 404) and `aml_list_cases` (200 with partyId/limit/offset query forwarding). All six interactions call the real `RestDownstreamReadAdapter` with anonymous client implementations bound to Pact mock servers. Their URLs/query construction is handwritten; these contracts do not execute the production MicroProfile REST-client annotations or OIDC filters. Optional FX source queries are not covered.
+
+FX matchers check currency/decimal wire shape, not pricing accuracy or provider-side positive-rate invariants; the board contract does not pin row order or a particular count. AML provider twins seed an idempotent synthetic case and explicitly register the unknown-case state so the folder filter retains its 404 interaction. Staff TestSecurity/OidcSecurity fixtures do not establish the agent service account's JWT, enforced OPA grants, tenant/ownership isolation or cross-party filtering. Provider-state parity, actual replay counts without skips, and normal CI remain required; no live broker, model/MCP request or deployed authorization result is claimed.
+
+### Catalog and Ledger read contracts
+
+The Agent Catalog Pact covers product listing, product detail, fees and an unknown-product 404.
+Its three provider states reuse canonical seeded products in both Product Catalog verifier twins.
+The Ledger Pact retains its three journal/trial-balance reads and adds an unauthenticated journal
+401 using the existing negative-auth provider state and separate anonymous folder verifier.
+The consumer fixtures call the real read adapter through handwritten HTTP clients; they do not
+execute the production MicroProfile annotations or establish JWT, OPA, ownership or live broker
+interoperability. Catalog/Ledger mapping needs its own real-client proof; FX/AML mapping results
+cannot be transferred to these interfaces. These supplemental interactions are not yet executed.
