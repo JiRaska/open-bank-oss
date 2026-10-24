@@ -121,7 +121,9 @@ test('EoM close run history renders the latest summary and expandable per-pocket
   await expect(page.getByRole('cell', { name: /Ruční|Manual/ })).toBeVisible()
   await page.getByRole('button', { name: /Zobrazit chyby|Show failures/ }).click()
   await expect(page.getByText(/Rekonciliace nesedí|Reconciliation mismatch/)).toBeVisible()
-  await expect(page.getByText(/55555555-5555-4555-8555-555555555555/)).toBeVisible()
+  // The account id is a machine identifier: shown shortened (ShortId) with a copy affordance.
+  await expect(page.getByText('55555555…')).toBeVisible()
+  await expect(page.getByText(/55555555-5555-4555-8555-555555555555/)).toHaveCount(0)
 
   // The page's own state check is recorded in the operator check trail (survives
   // reloads; the raw status is part of the entry text).

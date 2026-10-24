@@ -105,7 +105,7 @@ describe('Transaction search pagination', () => {
     const nextPage = new Promise<Response>(resolve => { resolveNextPage = resolve })
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input), 'https://admin.openbank.example')
-      if (url.searchParams.get('accountId') === 'new-account') return resultResponse([transaction(99)], 0)
+      if (url.searchParams.get('iban') === 'CZ6508000000192000145399') return resultResponse([transaction(99)], 0)
       if (url.searchParams.get('offset') === '50') return nextPage
       return resultResponse(firstPage, 0)
     })
@@ -116,8 +116,8 @@ describe('Transaction search pagination', () => {
     await screen.findByText('TXN-049')
     fireEvent.click(screen.getByRole('button', { name: 'Next transaction page' }))
 
-    const account = screen.getByLabelText('Search by account ID')
-    fireEvent.change(account, { target: { value: 'new-account' } })
+    const account = screen.getByLabelText('Filter by IBAN')
+    fireEvent.change(account, { target: { value: 'CZ6508000000192000145399' } })
     fireEvent.keyDown(account, { key: 'Enter' })
     await screen.findByText('TXN-099')
 

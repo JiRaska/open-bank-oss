@@ -370,6 +370,40 @@ class CustomerEdgeResource(
         return upstream.get("$balanceServiceUrl/api/v1/balances/$accountId", customer.partyId.toString())
     }
 
+    /** Low-balance alerts belong only to the account owner, never a delegated reader. */
+    @GET
+    @Path("/balances/{accountId}/{currency}/low-balance-alert")
+    @Authorize(action = "customer.balances.read", resource = "#accountId")
+    @Blocking
+    fun getLowBalanceAlert(@PathParam("accountId") accountId: UUID, @PathParam("currency") currency: String): Response {
+        val customer = customer()
+        if (!ownsAccount(accountId, customer.partyId)) return forbidden("Account does not belong to caller")
+        val ccy = CurrencyCode.parse(currency)?.value ?: return badRequest("Invalid currency")
+        return upstream.get(
+            "$balanceServiceUrl/api/v1/balances/$accountId/$ccy/low-balance-alert",
+            customer.partyId.toString(),
+        )
+    }
+
+    @PUT
+    @Path("/balances/{accountId}/{currency}/low-balance-alert")
+    @Authorize(action = "customer.balances.alert.update", resource = "#accountId")
+    @Blocking
+    fun setLowBalanceAlert(
+        @PathParam("accountId") accountId: UUID,
+        @PathParam("currency") currency: String,
+        body: String,
+    ): Response {
+        val customer = customer()
+        if (!ownsAccount(accountId, customer.partyId)) return forbidden("Account does not belong to caller")
+        val ccy = CurrencyCode.parse(currency)?.value ?: return badRequest("Invalid currency")
+        return upstream.put(
+            "$balanceServiceUrl/api/v1/balances/$accountId/$ccy/low-balance-alert",
+            customer.partyId.toString(),
+            body,
+        )
+    }
+
     // --- Interest (ADR-0033) ---
 
     /**

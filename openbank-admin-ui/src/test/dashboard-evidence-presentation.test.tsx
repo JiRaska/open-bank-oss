@@ -54,4 +54,102 @@ describe('dashboard evidence presentation', () => {
     expect(screen.getAllByText('1/1')).toHaveLength(2)
     expect(screen.queryByText('Current platform state cannot be verified')).not.toBeInTheDocument()
   })
+
+  it('does not treat an incomplete Kubernetes inventory as undeployed services', async () => {
+    const twoServices = {
+      ...governance,
+      items: [
+        ...governance.items,
+        { serviceName: 'ledger-service', dataDomain: 'core' },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(
+      url.endsWith('/governance') ? twoServices : {
+        source: 'kubernetes', discoveryStatus: 'partial', services: [health.services[0]],
+      },
+    ))))
+
+    render(wrap(<DashboardPage />))
+
+    expect(await screen.findByText('Service inventory is incomplete')).toBeInTheDocument()
+    expect(screen.getByTitle('UP')).toBeInTheDocument()
+    expect(screen.getByTitle('Deployment cannot be confirmed: inventory is incomplete')).toBeInTheDocument()
+    expect(screen.getByText('Healthy services')).toBeInTheDocument()
+    expect(screen.getByText('Unknown status')).toBeInTheDocument()
+    expect(screen.queryByTitle('Not deployed in this environment')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['Kubernetes without a discovery status', { source: 'kubernetes' }],
+    ['static source with a Kubernetes status', { source: 'static', discoveryStatus: 'complete' }],
+    ['unknown source with a complete-looking status', { source: 'future-source', discoveryStatus: 'complete' }],
+  ])('keeps missing roster members unknown for %s', async (_description, metadata) => {
+    const twoServices = {
+      ...governance,
+      items: [
+        ...governance.items,
+        { serviceName: 'ledger-service', dataDomain: 'core' },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(
+      url.endsWith('/governance') ? twoServices : {
+        ...metadata, services: [health.services[0]],
+      },
+    ))))
+
+    render(wrap(<DashboardPage />))
+
+    expect(await screen.findByText('Service inventory is incomplete')).toBeInTheDocument()
+    expect(screen.getByTitle('Deployment cannot be confirmed: inventory is incomplete')).toBeInTheDocument()
+    expect(screen.queryByTitle('Not deployed in this environment')).not.toBeInTheDocument()
+  })
+
+  it('accepts only the explicit static discovery status as a complete static inventory', async () => {
+    const twoServices = {
+      ...governance,
+      items: [
+        ...governance.items,
+        { serviceName: 'ledger-service', dataDomain: 'core' },
+      ],
+    }
+    const staticHealth = {
+      source: 'static',
+      discoveryStatus: 'static',
+      services: [
+        health.services[0],
+        { name: 'ledger-service', label: 'Ledger', group: 'core', status: 'UP', latencyMs: 8 },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(
+      url.endsWith('/governance') ? twoServices : staticHealth,
+    ))))
+
+    render(wrap(<DashboardPage />))
+
+    expect(await screen.findByText('Healthy services')).toBeInTheDocument()
+    expect(screen.queryByText('Service inventory is incomplete')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Not deployed in this environment')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['UNKNOWN', 'Health status unknown', 'serviceChipUnknown'],
+    ['DOWN', 'DOWN', 'serviceChipUnhealthy'],
+  ] as const)('renders mixed UP/%s workloads as %s with the matching chip state', async (secondStatus, title, stateClass) => {
+    const mixedHealth = { services: [
+      { ...health.services[0], namespace: 'tenant-a', port: 8080, status: 'UP' },
+      { ...health.services[0], namespace: 'tenant-b', port: 8081, status: secondStatus },
+    ] }
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(
+      url.endsWith('/governance') ? governance : mixedHealth,
+    ))))
+
+    render(wrap(<DashboardPage />))
+
+    const chip = await screen.findByTitle(title)
+    expect(chip.className).toContain(stateClass)
+    if (secondStatus === 'UNKNOWN') {
+      expect(chip.className).not.toContain('serviceChipUnhealthy')
+      expect(screen.getByText('Unknown status')).toBeInTheDocument()
+    }
+  })
 })

@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { inCluster, discoverServices, resolveInClusterBaseUrl } from '@/lib/discovery'
+import { inCluster, resolveInClusterService } from '@/lib/discovery'
 import { auth } from '@/auth'
 import { buildCnbTrend, defaultTrendWindow, type FxTrend } from '@/lib/fx/trend'
 
@@ -12,19 +12,22 @@ const FX_SERVICE_URL = process.env.FX_SERVICE_URL ?? 'http://localhost:8119'
 
 export const dynamic = 'force-dynamic'
 
-async function resolveFxServiceBaseUrl(): Promise<string | null> {
+type FxBaseResolution = { state: 'found'; baseUrl: string } | { state: 'not_found' } | { state: 'unknown' } | { state: 'unavailable' }
+
+async function resolveFxServiceBaseUrl(): Promise<FxBaseResolution> {
   if (!inCluster()) {
     try {
       const res = await fetch(`${FX_SERVICE_URL}/q/health/ready`, { signal: AbortSignal.timeout(3000) })
-      return res.ok ? FX_SERVICE_URL : null
+      return res.ok ? { state: 'found', baseUrl: FX_SERVICE_URL } : { state: 'unavailable' }
     } catch {
-      return null
+      return { state: 'unavailable' }
     }
   }
-  const discovered = await discoverServices()
-  const fx = discovered?.find((d) => d.name === 'fx-service')
-  if (!fx || fx.scaledToZero || !fx.ready) return null
-  return resolveInClusterBaseUrl('fx-service')
+  const resolution = await resolveInClusterService('fx-service')
+  if (resolution.state === 'not_found') return { state: 'not_found' }
+  if (resolution.state !== 'found') return { state: 'unknown' }
+  if (resolution.service.scaledToZero || !resolution.service.ready) return { state: 'unavailable' }
+  return { state: 'found', baseUrl: resolution.baseUrl }
 }
 
 /**
@@ -73,12 +76,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'invalid_currency' }, { status: 400 })
   }
 
-  const baseUrl = await resolveFxServiceBaseUrl()
-  if (!baseUrl) {
+  const resolution = await resolveFxServiceBaseUrl()
+  if (resolution.state === 'unknown') {
+    return NextResponse.json({ error: 'discovery_unavailable' }, { status: 503 })
+  }
+  if (resolution.state !== 'found') {
     return NextResponse.json({ indicative: true, base, quote, points: [], unavailable: true } satisfies FxTrend & {
       unavailable: boolean
     })
   }
+  const baseUrl = resolution.baseUrl
 
   // Relay the operator's own bearer — fx-service's history route is role-guarded. Answered as 401
   // rather than folded into the 502 below: "you are not authenticated" and "the upstream failed" are

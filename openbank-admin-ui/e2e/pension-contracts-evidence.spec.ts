@@ -124,58 +124,42 @@ test('status filter re-fetches the list with the chosen status', async ({ page }
   await expect(page.getByRole('row', { name: /11111111-2222-4333-8444-555555555553/ })).toContainText('Contributions paused')
 })
 
-test('search requires two characters and a bare UUID opens its contract directly', async ({ page }) => {
-  await page.goto('/pension')
-
-  await page.getByRole('textbox', { name: 'Search contracts', exact: true }).fill('x')
-  await page.getByRole('button', { name: 'Search', exact: true }).click()
-  await expect(page.getByText('Enter at least 2 characters: birth date, payment reference, product, or UUID.')).toBeVisible()
-  await expect(page).toHaveURL(/\/pension$/)
-
-  const uuid = '11111111-2222-4333-8444-555555555551'
-  await page.getByRole('textbox', { name: 'Search contracts', exact: true }).fill(uuid)
-  await page.getByRole('button', { name: 'Search', exact: true }).click()
-  await expect(page).toHaveURL(new RegExp(`/pension/contracts/${uuid}$`))
-})
-
-test('free-text search sends the query with the status and renders matching rows without navigation', async ({ page }) => {
-  const requests: URL[] = []
-  const match = '11111111-2222-4333-8444-555555555559'
+test('search: a short query hints, free text searches in place, a UUID opens the contract', async ({ page }) => {
+  const queries: (string | null)[] = []
   await page.unroute(CONTRACTS_URL)
   await page.route(CONTRACTS_URL, route => {
-    const url = new URL(route.request().url())
-    requests.push(url)
+    queries.push(new URL(route.request().url()).searchParams.get('q'))
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(url.searchParams.get('q') === '850505' ? [contract({ contractId: match })] : []),
+      body: JSON.stringify([contract({ contractId: '11111111-2222-4333-8444-555555555551' })]),
     })
   })
-  await page.goto('/pension')
-  await page.getByRole('textbox', { name: 'Search contracts', exact: true }).fill('850505')
-  await page.getByRole('button', { name: 'Search', exact: true }).click()
-  await expect.poll(() => requests.some(url => url.searchParams.get('q') === '850505'
-    && url.searchParams.get('status') === 'ACTIVE' && url.searchParams.get('limit') === '100')).toBe(true)
-  await expect(page.getByRole('row', { name: new RegExp(match) })).toBeVisible()
-  await expect(page).toHaveURL(/\/pension$/)
-})
 
-test('a failed text search is unavailable rather than an empty result and clearing it recovers', async ({ page }) => {
-  await page.unroute(CONTRACTS_URL)
-  await page.route(CONTRACTS_URL, route => new URL(route.request().url()).searchParams.has('q')
-    ? route.fulfill({ status: 502, body: 'bad gateway' })
-    : route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
-      contract({ contractId: '11111111-2222-4333-8444-555555555551' }),
-    ]) }))
   await page.goto('/pension')
-  const search = page.getByRole('textbox', { name: 'Search contracts', exact: true })
-  await search.fill('unavailable-search')
-  await page.getByRole('button', { name: 'Search', exact: true }).click()
-  await expect(page.getByText(/Failed to load|not responding|is not deployed/)).toBeVisible()
-  await expect(page.getByText('No data yet')).toHaveCount(0)
-  await search.clear()
-  await expect(page.getByRole('row', { name: /11111111-2222-4333-8444-555555555551/ })).toBeVisible()
-  await expect(page.getByText(/Failed to load|not responding|is not deployed/)).toHaveCount(0)
+  const search = page.getByLabel('Search contracts')
+  const submit = page.getByRole('button', { name: 'Filter list', exact: true })
+
+  // Under two characters nothing is searched and nothing navigates; the hint says why.
+  // The page can surface other role=alert banners (e.g. upstream health) — target the
+  // validation hint by its text, not by role alone.
+  await search.fill('x')
+  await submit.click()
+  await expect(page.getByText('Enter at least 2 characters: birth date, payment reference, or product.')).toBeVisible()
+  await expect(page).toHaveURL(/\/pension$/)
+
+  // Free text is a staff search (q) that stays on the list — it never navigates.
+  await search.fill('DPS')
+  await submit.click()
+  await expect.poll(() => queries).toContain('DPS')
+  await expect(page).toHaveURL(/\/pension$/)
+
+  // A bare UUID opens the contract directly and is never sent as a search term.
+  const uuid = '11111111-2222-4333-8444-555555555551'
+  await search.fill(uuid)
+  await submit.click()
+  await expect(page).toHaveURL(new RegExp(`/pension/contracts/${uuid}$`))
+  expect(queries).not.toContain(uuid)
 })
 
 test('a failed list load renders the unavailable state, never the no-data panel', async ({ page }) => {

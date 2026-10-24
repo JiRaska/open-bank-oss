@@ -117,3 +117,38 @@ test_review_veto_preserves_other_machine_reads if {
 		with data.rules as rules_mock
 	decision.allow == true
 }
+
+# --- ADR-0347 threshold-set administration ---
+
+test_risk_and_compliance_may_administer_thresholds if {
+	every role in ["ROLE_RISK", "ROLE_COMPLIANCE"] {
+		principal := {"type": "HUMAN", "id": "risk-staff", "roles": [role], "service_account": false}
+		every action in ["fraud.thresholds.propose", "fraud.thresholds.decide", "fraud.thresholds.read"] {
+			decision := rest.allow with input as {"principal": principal, "action": action}
+				with data.rules as rules_mock
+			decision.allow == true
+		}
+	}
+}
+
+# The blanket operator-fraud-write reason must not reach the threshold set: changing a fraud
+# control's figures is not an ops action.
+test_operator_may_not_change_thresholds if {
+	every action in ["fraud.thresholds.propose", "fraud.thresholds.decide"] {
+		rest.allow == false with input as {"principal": operator, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_machine_may_not_touch_thresholds if {
+	every principal in [
+		edge,
+		services_m2m,
+		{"type": "HUMAN", "id": "renamed-risk", "roles": ["ROLE_RISK"], "service_account": true},
+	] {
+		every action in ["fraud.thresholds.propose", "fraud.thresholds.decide", "fraud.thresholds.read"] {
+			rest.allow == false with input as {"principal": principal, "action": action}
+				with data.rules as rules_mock
+		}
+	}
+}

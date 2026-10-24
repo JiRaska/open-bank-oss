@@ -39,7 +39,14 @@ describe('Test Intelligence performance coverage scope', () => {
     expect(smoke).not.toContain('"txn list 200|401"')
     expect(smoke).toContain('Authorization: `Bearer ${__ENV.PERF_READ_TOKEN || ""}`')
     expect(workflow).toContain('PERF_READ_TOKEN: ${{ secrets.PERF_READ_TOKEN }}')
-    expect(workflow).toContain('--env PERF_READ_TOKEN')
+    // The k6 step hands the token to the runner via env:, and the runner (not the workflow)
+    // forwards it into the container with `--env` and refuses to run without it.
+    const runner = readFileSync(path.join(root(), '.github/scripts/run-k6-advisory-baseline.py'), 'utf8')
+    const k6Step = workflow.slice(workflow.indexOf('- name: Run k6 baseline'))
+    expect(k6Step.split('\n- name:')[0].split('\n      - name:')[0]).toContain('PERF_READ_TOKEN: ${{ env.PERF_READ_TOKEN }}')
+    expect(k6Step).toContain('run-k6-advisory-baseline.py')
+    expect(runner).toContain("'PERF_READ_TOKEN'")
+    expect(runner).toContain("command += ['--env', name]")
     expect(workflow).toContain('No safe authenticated money-path target')
   })
 

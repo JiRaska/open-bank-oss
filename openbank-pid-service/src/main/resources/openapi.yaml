@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: PID Service API (Party Identity)
-  version: 1.16.0
+  version: 1.17.0
   description: Party identity data management — create, update, KYC linking, BankID/ROB sync, identity resolution and four-eyes verification cases (ADR-0072).
   license:
     name: Apache-2.0
@@ -671,7 +671,7 @@ paths:
   /api/v1/parties/by-external-id:
     get:
       tags: [Parties]
-      summary: Get party by external ID
+      summary: Get party by exact external identifier
       operationId: getByExternalId
       parameters:
         - name: externalId
@@ -691,6 +691,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PartyResponse'
+        '400':
+          description: Required query parameter is missing or invalid
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Caller lacks operator/admin role
+        '404':
+          description: No party matches the exact external identifier
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties/by-external-id/lookup:
+    post:
+      tags: [Parties]
+      summary: Look up one party by an exact external identifier
+      description: |
+        Browser-safe operator/admin lookup. The identifier is accepted in the request body rather
+        than the URL, and the response contains only the stable party ID, status, creation time,
+        and the exact requested identifier. The legacy GET endpoint remains available to existing
+        callers; browser clients should use this POST operation to avoid placing identifiers in URLs.
+      operationId: lookupPartyByExternalId
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalIdLookupRequest'
+      responses:
+        '200':
+          description: PII-minimised exact match
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalIdLookupResponse'
+        '400':
+          description: Missing, unsupported, blank, or oversized lookup input
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Caller lacks operator/admin role
+        '404':
+          description: No party matches the exact external identifier
+      security:
+        - bearerAuth: []
 
   /api/v1/parties/{id}/external-ids:
     post:
@@ -888,6 +932,49 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ExternalIdLookupRequest:
+      type: object
+      required: [type, value]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum: [BANKID_SUB, ROB_AIFO, ICO, PASSPORT_NUMBER, ID_CARD_NUMBER]
+        value:
+          type: string
+          minLength: 1
+          maxLength: 256
+    ExternalIdLookupResponse:
+      type: object
+      required: [partyId, status, createdAt, externalId]
+      additionalProperties: false
+      properties:
+        partyId:
+          type: string
+          format: uuid
+          description: Stable reference to the matched party; no profile attributes are returned.
+        status:
+          type: string
+          enum: [ACTIVE, SUSPENDED, DECEASED, TERMINATED]
+        createdAt:
+          type: string
+          format: date-time
+        externalId:
+          $ref: '#/components/schemas/ExternalIdLookupMatchedIdentifier'
+    ExternalIdLookupMatchedIdentifier:
+      type: object
+      required: [type, value]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum: [BANKID_SUB, ROB_AIFO, ICO, PASSPORT_NUMBER, ID_CARD_NUMBER]
+        value:
+          type: string
+        verifiedAt:
+          type: string
+          format: date-time
+          nullable: true
     CreatePartyRequest:
       type: object
       required: [partyType]

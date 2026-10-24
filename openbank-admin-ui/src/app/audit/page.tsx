@@ -12,6 +12,8 @@ import { ScrollText, Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PartySearch } from '@/components/party/PartySearch'
+import { isValidIban, normalizeIban } from '@/lib/validation/iban'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AUDIT_EVIDENCE_WINDOW, formatAuditPayload, parseAuditEvidenceList, type AuditEvidence } from '@/lib/audit/auditEvidence'
 
@@ -37,10 +39,14 @@ export default function AuditPage() {
   const [aggregateId, setAggregateId] = useState('')
   const [loadedAggregateId, setLoadedAggregateId] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [mode, setMode] = useState<'client' | 'iban' | 'advanced'>('client')
+  const [ibanInput, setIbanInput] = useState('')
+  const [ibanHint, setIbanHint] = useState<string | null>(null)
+  const [resolving, setResolving] = useState(false)
   const activeSearch = useRef<AbortController | null>(null)
 
-  const search = useCallback(async () => {
-    const query = aggregateId.trim()
+  const search = useCallback(async (override?: string) => {
+    const query = (override ?? aggregateId).trim()
     if (!query) return
     activeSearch.current?.abort()
     const controller = new AbortController()
@@ -90,6 +96,27 @@ export default function AuditPage() {
     }
   }, [aggregateId, loadedAggregateId])
 
+  async function resolveIban() {
+    const iban = normalizeIban(ibanInput)
+    if (!isValidIban(iban)) {
+      setIbanHint(t('Kontrolní číslice IBANu nesedí — zkontrolujte zadání.', 'IBAN check digits don’t match — please verify the value.'))
+      return
+    }
+    setResolving(true); setIbanHint(null)
+    try {
+      const res = await fetch(`/api/svc/account-service/api/v1/accounts/iban/${iban}`, { signal: AbortSignal.timeout(5000) })
+      if (!res.ok) { setIbanHint(t('Účet s tímto IBANem nebyl nalezen.', 'No account was found for this IBAN.')); return }
+      const acc = await res.json() as { id?: string }
+      if (!acc.id) { setIbanHint(t('Účet s tímto IBANem nebyl nalezen.', 'No account was found for this IBAN.')); return }
+      setAggregateId(acc.id); setEntries([]); setLoadedAggregateId(null); setExpanded(null); setUnavailable(null)
+      await search(acc.id)
+    } catch {
+      setIbanHint(t('Služba účtů právě neodpovídá.', 'The account service is not responding right now.'))
+    } finally {
+      setResolving(false)
+    }
+  }
+
   // A response holding exactly the window is evidence of TRUNCATION, not of a complete trail:
   // audit-service clamps at AUDIT_EVIDENCE_WINDOW, so a full window cannot distinguish "this is
   // everything" from "there is more". Below the window the service returned all it holds.
@@ -110,14 +137,49 @@ export default function AuditPage() {
       {/* Search */}
       <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
         <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '12px' }}>{t('Prohledat auditní záznamy', 'Search Audit Trail')}</div>
+        <div role="group" aria-label={t('Režim hledání', 'Search mode')} style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+          {(['client', 'iban', 'advanced'] as const).map(m => (
+            <button key={m} type="button" className={mode === m ? 'btn btn-primary' : 'btn btn-secondary'} aria-pressed={mode === m} onClick={() => setMode(m)}>
+              {m === 'client' ? t('Klient', 'Client') : m === 'iban' ? 'IBAN' : t('Technické ID (pokročilé)', 'Technical ID (advanced)')}
+            </button>
+          ))}
+        </div>
+        {mode === 'client' && (
+          <PartySearch
+            selectedId={aggregateId || undefined}
+            busy={loading}
+            onSelect={p => { setAggregateId(p.id); setEntries([]); setLoadedAggregateId(null); setExpanded(null); setUnavailable(null); void search(p.id) }}
+            placeholder={t('Jméno, příjmení, rodné číslo nebo e-mail klienta', 'Client name, surname, birth number or e-mail')}
+          />
+        )}
+        {mode === 'iban' && (
+          <div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <input
+                className="input"
+                style={{ flex: 1 }}
+                placeholder="IBAN (CZ65 0800 …)"
+                aria-label="IBAN"
+                value={ibanInput}
+                onChange={e => { setIbanInput(e.target.value); setIbanHint(null) }}
+                onKeyDown={e => e.key === 'Enter' && void resolveIban()}
+              />
+              <button type="button" className="btn btn-primary" onClick={() => void resolveIban()} disabled={loading || resolving || !ibanInput.trim()} aria-busy={resolving}>
+                {resolving ? t('Hledám…', 'Searching…') : t('Hledat', 'Search')}
+              </button>
+            </div>
+            {ibanHint && <div role="status" style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '6px' }}>{ibanHint}</div>}
+          </div>
+        )}
+        {mode === 'advanced' && (
         <div style={{ display: 'flex', gap: '10px' }}>
           <div style={{ position: 'relative', flex: 1 }}>
             <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input
               className="input"
               style={{ paddingLeft: '32px', width: '100%', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
-              placeholder="Aggregate ID (account UUID, party UUID, transaction UUID…)"
-              aria-label={t('ID agregátu', 'Aggregate ID')}
+              placeholder={t('Technické ID entity (pokročilé)', 'Technical entity ID (advanced)')}
+              aria-label={t('Technické ID (pokročilé)', 'Technical ID (advanced)')}
               value={aggregateId}
               onChange={e => {
                 activeSearch.current?.abort()
@@ -134,12 +196,13 @@ export default function AuditPage() {
               onKeyDown={e => e.key === 'Enter' && search()}
             />
           </div>
-          <button type="button" className="btn btn-primary" onClick={search} disabled={loading || !aggregateId.trim()} aria-busy={loading} aria-label={t('Vyhledat auditní záznam', 'Search audit trail')}>
+          <button type="button" className="btn btn-primary" onClick={() => void search()} disabled={loading || !aggregateId.trim()} aria-busy={loading} aria-label={t('Vyhledat auditní záznam', 'Search audit trail')}>
             {loading ? t('Hledám…', 'Searching…') : t('Hledat', 'Search')}
           </button>
         </div>
+        )}
         <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-          {t(`Zadejte UUID libovolné entity — účty, klienti, transakce, KYC případy atd. Jeden dotaz vrátí nejvýše ${AUDIT_EVIDENCE_WINDOW} nejnovějších událostí.`, `Enter any entity UUID — accounts, parties, transactions, KYC cases, etc. One query returns at most the ${AUDIT_EVIDENCE_WINDOW} newest events.`)}
+          {t(`Vyhledejte klienta nebo IBAN účtu (technické ID je jen pokročilá možnost). Jeden dotaz vrátí nejvýše ${AUDIT_EVIDENCE_WINDOW} nejnovějších událostí.`, `Find a client or an account IBAN (the technical ID is an advanced fallback). One query returns at most the ${AUDIT_EVIDENCE_WINDOW} newest events.`)}
         </div>
       </div>
 

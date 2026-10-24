@@ -64,7 +64,7 @@ if [ "${1:-}" = "--self-test" ]; then
     printf '%b' "$body" > "$td/rules.yaml"
     out=$(bash "$0" "$td/rules.yaml" 2>&1); rc=$?
     if [ "$rc" -ne "$want" ]; then echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
-    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+    elif [ -n "$sub" ] && [[ "$out" != *"$sub"* ]]; then
       echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1)); fi; }
 
   # The only clean shape: advisory WITH a live date.
@@ -98,7 +98,7 @@ if [ "${1:-}" = "--self-test" ]; then
     printf '%b' "$body" > "$td/rules.yaml"
     out=$(bash "$0" --warn-days "$days" "$td/rules.yaml" 2>&1); rc=$?
     if [ "$rc" -ne 0 ]; then echo "::error::self-test: $label — warn mode must always exit 0, got $rc: $out" >&2; fails=$((fails+1))
-    elif ! printf '%s' "$out" | grep -qF -- "$want_sub"; then
+    elif [[ "$out" != *"$want_sub"* ]]; then
       echo "::error::self-test: $label — no '$want_sub' in: $out" >&2; fails=$((fails+1)); fi; }
 
   soon=$(date -u -v+10d +%Y-%m-%d 2>/dev/null || date -u -d '+10 days' +%Y-%m-%d)
@@ -131,7 +131,7 @@ if [ "${1:-}" = "--self-test" ]; then
   expect_no() { local label="$1" body="$2" out
     printf '%b' "$body" > "$td/rules.yaml"
     out=$(bash "$0" "$td/rules.yaml" 2>&1)
-    if printf '%s' "$out" | grep -qF "::warning"; then
+    if [[ "$out" == *"::warning"* ]]; then
       echo "::error::self-test: $label — unexpected ::warning: $out" >&2; fails=$((fails+1)); fi; }
   expect_no "a date 60 days out is NOT warned about" \
     "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$in60\"\n"
@@ -140,7 +140,7 @@ if [ "${1:-}" = "--self-test" ]; then
     "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$in3\"\n" 0 "::warning file=$td/rules.yaml,line=2::target_enforce_date $in3"
   # The window is the env knob, not a constant: the same 3-day date with a 1-day window is silent.
   out=$(printf '%b' "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$in3\"\n" > "$td/rules.yaml"; GATE_GRADUATION_WARN_DAYS=1 bash "$0" "$td/rules.yaml" 2>&1)
-  if printf '%s' "$out" | grep -qF "::warning"; then
+  if [[ "$out" == *"::warning"* ]]; then
     echo "::error::self-test: GATE_GRADUATION_WARN_DAYS=1 must silence a 3-day date: $out" >&2; fails=$((fails+1)); fi
   # An enforced rule with a near date is out of scope — nothing to graduate.
   expect_no "an enforced rule with a near date is not warned about" \

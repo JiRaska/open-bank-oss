@@ -53,12 +53,8 @@ OUTBOX_INFRA_RE = re.compile(
 # Explicit exemptions, one reason each — an exemption without a reason is exactly
 # the unowned-control class this gate exists to prevent.
 ALLOWLIST = {
-    # Emits its own audit-chain gauges, covered by prometheus-rules-audit-chain.yaml
-    # (NeverVerified + Stale) — a second watcher on the same cadence adds nothing.
-    "openbank-audit-service/src/main/kotlin/com/openbank/audit/infrastructure/observability/AuditChainIntegrityGauge.kt",
-    # The sentinel's own scheduler — its liveness is the absence of its findings,
-    # watched by the deploy-drift watchdog and its own run evidence.
-    "openbank-control-liveness-sentinel/src/main/kotlin/com/openbank/liveness/infrastructure/schedule/LivenessCheckScheduler.kt",
+    # Empty: audit-service's chain gauge and the sentinel's scheduler both register a
+    # heartbeat now. The sentinel is watched from OUTSIDE by LivenessSentinelHeartbeatAbsent.
 }
 
 # Today's non-compliant set (first scan 2026-08-03, 37 files; 27 at the 2026-08-07

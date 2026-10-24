@@ -18,7 +18,7 @@ cd "$SRC/open-bank-oss"
 # (which provides the Gradle distribution) — a bare `gradle` is not on the OSS-Fuzz
 # base-builder-jvm image. `-p` points the root wrapper at the standalone project dir, which
 # uses fuzz/ossfuzz/settings.gradle.kts.
-./gradlew -p fuzz/ossfuzz shadowJar --no-daemon -q
+./gradlew -p fuzz/ossfuzz test shadowJar --no-daemon -q
 
 # 3) Package per OSS-Fuzz JVM conventions.
 cp fuzz/ossfuzz/build/libs/ossfuzz-all.jar "$OUT/openbank.jar"

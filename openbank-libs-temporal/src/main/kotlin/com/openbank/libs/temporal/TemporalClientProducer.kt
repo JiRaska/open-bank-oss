@@ -47,12 +47,23 @@ class TemporalClientProducer(private val config: TemporalConfig, private val met
         }
         WorkflowClient.newInstance(
             WorkflowServiceStubs.newServiceStubs(stubsOptions.build()),
-            WorkflowClientOptions.newBuilder()
-                .setNamespace(config.namespace())
-                .setDataConverter(kotlinAwareDataConverter())
-                .build(),
+            workflowClientOptions(),
         )
     }
+
+    /**
+     * The options every fleet client is built with. Public so a test can build a Temporal test
+     * environment with EXACTLY the options production uses, instead of a lookalike that would stay
+     * green after someone dropped the propagator here.
+     *
+     * The context propagator is applied by the SDK to every `WorkerFactory` created from a client
+     * with these options, so activities in all service-local registrars see the caller's trace.
+     */
+    fun workflowClientOptions(): WorkflowClientOptions = WorkflowClientOptions.newBuilder()
+        .setNamespace(config.namespace())
+        .setDataConverter(kotlinAwareDataConverter())
+        .setContextPropagators(OpenTelemetryContextPropagator.install())
+        .build()
 
     /**
      * Temporal's default JSON payload converter builds a plain Jackson ObjectMapper, which cannot

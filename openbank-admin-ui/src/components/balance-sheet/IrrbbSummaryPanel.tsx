@@ -18,7 +18,7 @@ import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
 import { getJson, riskUrl } from '@/components/balance-sheet/api'
 import { irrbbSchema, type Irrbb } from '@/components/balance-sheet/contracts'
 import { SCENARIO_NAMES, dataGapText, irrbbRows, outlierStatus, treasuryRows, type OutlierStatus } from '@/components/balance-sheet/irrbbSummary'
-import { formatMoney } from '@/lib/lending/money'
+import { formatMoney } from '@/lib/lending/contracts'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 const STATUS_TONE: Record<OutlierStatus, Tone> = { OK: 'success', EARLY_WARNING: 'warning', BREACH: 'danger', NOT_EVALUABLE: 'neutral' }

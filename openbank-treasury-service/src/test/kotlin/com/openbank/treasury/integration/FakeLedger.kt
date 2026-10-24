@@ -5,7 +5,9 @@
 package com.openbank.treasury.integration
 
 import com.openbank.treasury.application.port.out.LedgerPostingPort
+import com.openbank.treasury.application.port.out.PostedJournal
 import com.openbank.treasury.domain.model.JournalSpec
+import com.openbank.treasury.domain.model.ResolvedAccount
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
@@ -32,7 +34,7 @@ class FakeLedger : LedgerPostingPort {
     @Volatile
     var loseNextResponse = false
 
-    override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID {
+    override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): PostedJournal {
         calls += spec.idempotencyKey
         val (id, _) = journals.computeIfAbsent(spec.idempotencyKey) { UUID.randomUUID() to spec }
         if (loseNextResponse) {
@@ -41,7 +43,18 @@ class FakeLedger : LedgerPostingPort {
                 "simulated: ledger committed ${spec.idempotencyKey} but the response was lost",
             )
         }
-        return id
+        return PostedJournal(
+            id,
+            spec.lines.map {
+                ResolvedAccount(
+                    it.accountingClass,
+                    it.role,
+                    it.currency,
+                    it.glAccountId
+                        ?: UUID.nameUUIDFromBytes("${it.accountingClass}|${it.role}|${it.currency}".toByteArray()),
+                )
+            },
+        )
     }
 
     fun reset() {

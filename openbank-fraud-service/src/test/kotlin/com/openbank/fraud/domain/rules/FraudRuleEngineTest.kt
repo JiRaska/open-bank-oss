@@ -11,6 +11,14 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.util.UUID
 
+// The rules under test read their money thresholds from a FraudThresholdSet (ADR-0347). These
+// one-argument forms pin every case below to the seeded version 1 — the figures the rules shipped
+// with as constants — so this suite still states today's behaviour exactly. The no-set and
+// other-set behaviours have their own tests at the bottom.
+private fun FraudRuleEngine.score(request: ScoreRequest) = score(request, FraudThresholdFixtures.SEED_V1)
+
+private fun FraudRule.evaluate(request: ScoreRequest) = evaluate(request, FraudThresholdFixtures.SEED_V1)
+
 class FraudRuleEngineTest {
 
     private fun request(
@@ -534,5 +542,49 @@ class FraudRuleEngineTest {
 
         assertThat(result.verdict).isEqualTo(FraudVerdict.ALLOW)
         assertThat(result.score).isZero()
+    }
+
+    // --- ADR-0347: thresholds are data ---
+
+    @Test
+    fun `no active threshold set fails closed as REVIEW naming the cause, never DECLINE`() {
+        val result = FraudRuleEngine.score(request(amount = BigDecimal("1.00")), null)
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains(FraudRuleEngine.THRESHOLDS_UNAVAILABLE)
+        assertThat(result.reasons).contains("large-single-transaction-unmapped-currency")
+        assertThat(result.thresholdSetVersion).isNull()
+    }
+
+    @Test
+    fun `the verdict follows the threshold set it is given, not a constant`() {
+        val lowered = FraudThresholdSet(
+            version = 2,
+            thresholds = FraudThresholdFixtures.SEED_V1.thresholds +
+                (
+                    FraudThresholdSet.LARGE_SINGLE_TRANSACTION to
+                        mapOf("CZK" to BigDecimal("1000"), "EUR" to BigDecimal("20000"))
+                    ),
+        )
+        val req = request(amount = BigDecimal("1250.00"))
+
+        assertThat(FraudRuleEngine.score(req, FraudThresholdFixtures.SEED_V1).verdict).isEqualTo(FraudVerdict.ALLOW)
+        val underV2 = FraudRuleEngine.score(req, lowered)
+        assertThat(underV2.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(underV2.reasons).contains("large-single-transaction")
+        assertThat(underV2.thresholdSetVersion).isEqualTo(2)
+    }
+
+    @Test
+    fun `a set that drops a currency fails closed for that currency only`() {
+        val noEur = FraudThresholdSet(
+            version = 2,
+            thresholds = FraudThresholdFixtures.SEED_V1.thresholds.mapValues { (_, byCcy) -> byCcy - "EUR" },
+        )
+
+        assertThat(FraudRuleEngine.score(request(amount = BigDecimal("1.00"), currency = "EUR"), noEur).reasons)
+            .contains("large-single-transaction-unmapped-currency")
+        assertThat(FraudRuleEngine.score(request(amount = BigDecimal("1.00"), currency = "CZK"), noEur).verdict)
+            .isEqualTo(FraudVerdict.ALLOW)
     }
 }

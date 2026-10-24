@@ -7,28 +7,19 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     // First-increment PEP screening (ADR-0116): outbound call to openbank-sanctions-service's
     // POST /api/v1/sanctions/screen, mirroring the same client stack already used by
     // openbank-domestic-payment / openbank-sepa-payment / openbank-fx-service / openbank-account-service.
     implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.cache)
@@ -38,10 +29,7 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
-    testImplementation(libs.quarkus.junit5)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     // @TestSecurity for KycOutboxWriteIT (#4007): the outbox write can only be proved through a
     // real HTTP request (a reactive Panache repo called from a bare @QuarkusTest thread has no
     // Vert.x context), and every KYC endpoint is @RolesAllowed.

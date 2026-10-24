@@ -113,6 +113,7 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-17** — **Value date fixed: `TransactionServiceClient` is now GENERATED from transaction-service's `openapi.yaml` (ADR-0319).** The hand-written interface and DTOs were replaced by a sub-interface of the client built in `openbank-client-transaction`; the MT103 value date, which the service holds as `YYYYMMDD`, is now converted to an ISO date before sending - the previous raw value could not be parsed by transaction-service (`LocalDate.parse`), so the settlement booking could never have been accepted. **This turns the MT103 settlement booking ON for the first time: it is a money-movement change and waits for the owner's decision before it is merged.** Only HTTP 200/201/202 with a readable `COMPLETED` transaction proves settlement. Missing/unreadable or FAILED/in-progress responses remain uncertain; 409, 400/422 and 204 do not complete the message. The caller retains SENT after an unavailable/uncertain result; no automatic SENT redriver is implemented here. Any later reconciliation must reuse the original idempotency key; an unparseable stored value date sends nothing. **STRIDE-T/S (trust boundary):** the outbound call is the same route, the same NAMED oidc-client `m2m` (Keycloak client `openbank-swift`) and the same `SyntheticTaintClientFilter` registration, pinned by the existing `M2mOidcClientIdentityWiringTest`-style wiring assertions and by the consumer pact (literal `/api/v1/transactions`, replayed by transaction-service's `@PactFolder` class). What changes is where the request/response types come from: the provider's own spec, so a spec change now fails this service's compile instead of production, and the request carries the spec's full optional field set serialised as `null` (transaction-service ignores them). No new credential, no new scope, no new network path. Rollback: revert the commit (the hand-written client returns).
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `swift_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; as a kernel (ADR-0327) repository it is covered with no change of its own. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-27** — `ApprovalResource`'s body (limit clamping, null-body 400, unknown-id 404,
@@ -126,7 +127,7 @@ not change any existing request's outcome until explicitly flipped.
   libs-runtime, fixed in #11033/#11047).
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -141,7 +142,7 @@ not change any existing request's outcome until explicitly flipped.
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal clearing and transaction REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-05-30** — Added `swift_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/
-  boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
+  boundary. Risk class = **availability**, mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`).
   Rollback: `DROP SEQUENCE`.
 - **2026-06-23** — ADR-0104 D4: real ISO 20022 `pacs.008` submission to SWIFT SWIFTNet via
   `clearing-simulator`. New outbound trust boundary: `swift-service → clearing-simulator`
@@ -178,7 +179,7 @@ not change any existing request's outcome until explicitly flipped.
   annotations. Also updated `SwiftResourceAuthzTest`'s anonymous-access assertion (404 -> 401)
   to match the new `@RolesAllowed` outer gate.
 - **2026-07-08** — ADR-0155 four-eyes enforcement rollout (issue #413), mirroring the
-  sepa-payment pilot. New endpoint `PATCH /api/v1/swift/approvals/{id}` + `ApprovalConfig`
+  sepa-payment pilot. New endpoint `PATCH /api/v1/swift/approvals/{id}` + ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`)
   (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate (openbank-libs-runtime,
   shared, opt-in) on `swift.send`. New STRIDE supplement §4a; new residual risk noting
   `swift.send`'s `PendingApproval` has no `resourceId` binding (action-scoped only, no path
@@ -273,3 +274,23 @@ not change any existing request's outcome until explicitly flipped.
   the change: 6 rows, all `EUR` (5000–12345 minor units), so no stored row reads differently. The
   `GET`/`POST` response shape is held by a `SwiftMessageView` mirroring the former domain members.
   No new endpoint, caller, privilege or event. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-22** — **Settlement answer bound to the request (#13217).** `SettlementAdapter` settles an MT103 only on HTTP 201 with a COMPLETED transaction (enforced by the shared facade) that has an id and matches the request's type, source account, amount, currency, rail and instruction type. HTTP 200/202 and a COMPLETED booking for something else no longer mark the message settled; it stays SENT. **Tampering / repudiation:** a wrong or foreign booking can no longer be recorded as this message's settlement. Same edge, identity, credential and endpoint; no new event. The consumer pact pins the bound response fields so the provider replay keeps them honest. Rollback: revert the commit.
+
+- **Outbound local booking proof (#13623).** Internal nullable due/proof/transaction columns
+  retain unresolved obligations across independent ACK/reject status changes. Narrow row-locked,
+  version-checked writes commit accepted-due/SENT/event and proven-booking/COMPLETED/event
+  atomically. Network calls hold no database lock. Existing strict provider binding and booking
+  key remain unchanged; callbacks win over stale completion. Pending local proof is not evidence
+  that the provider did not book. Coverage of historical rows is explicitly unknown rather than
+  backfilled from creation. Fixed-rail gauges expose tracked age and unknown coverage separately;
+  no payment identities or private errors enter labels. No new endpoint, caller privilege,
+  financial retry, SLA or alert. Rollback readers/writers while retaining additive metadata;
+  reconcile/export obligations before any destructive schema removal.
+
+- **2026-10-23** — **Unsettled-booking alert (#13623).** `SwiftBookingUnsettled` pages when the oldest open MT103 booking clock passes 30 minutes; runbook `docs/runbooks/0032-payment-rail-unsettled-booking.md` (SWIFT section). **Threats addressed:** *denial of service / silent loss.* A message the scheme accepted whose debit never booked used to sit in SENT with one WARN line. swift-service makes a single transaction-service call with no retry, so every non-booking was permanent and invisible. It now pages, including the two holds the outcome counter never sees: no ordering account id, and an unparseable value date. A cold pod reads NaN and never fires; a stopped sweep is caught by `WorkflowLivenessStale` (`swift-booking-age`). *Information disclosure:* the alert carries `rail`/`service`/`severity` labels only. *Repudiation:* the runbook forbids using `ack`/`reject` to silence it. They do not touch the booking clock, and a REJECTED status on a scheme-accepted message would misstate the record. **Residual:** there is no re-drive (#13686), so a transport failure on the only call can be resolved only by a finance correction plus an Alertmanager silence with a ticket. No code, authorization, endpoint or retry change in this service. Rollback: revert the rule.
+

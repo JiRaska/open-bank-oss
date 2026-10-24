@@ -61,3 +61,7 @@ toho konzumenta, ne obnovením této aparatury spekulativně.
 - **Reaktivně všude** — Hibernate Reactive + Mutiny, přemostěno na Kotlin coroutines přes `awaitSuspending`.
 - **Observability** — Micrometer/Prometheus metriky a OpenTelemetry tracing (OTLP exporter), SmallRye Health probes.
 - **Security headers** — striktní sada konfigurovaná globálně (CSP `default-src 'self'`, HSTS, `X-Frame-Options: DENY`, nosniff, referrer/permissions policy).
+
+## Heartbeat naplánované úlohy
+
+Úloha (ověření hashovacího řetězce auditu) registruje celoflotilový heartbeat `audit-chain-verify` (`DomainMetrics.registerWorkflowLiveness`, nasazený při startu) a úspěch zapisuje jen na cestě úspěchu: dokončené ověření se počítá i tehdy, když najde přerušený řetězec (heartbeat říká, zda kontrola proběhla; `openbank.audit.chain.intact`, zda prošla); ověření, které vyhodí výjimku, se nepočítá. `WorkflowLivenessStale` upozorní, když stáří překročí dvojnásobek očekávaného intervalu.

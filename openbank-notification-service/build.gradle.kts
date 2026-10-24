@@ -7,10 +7,6 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.oidc.client.reactive.filter)
@@ -20,15 +16,10 @@ dependencies {
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.scheduler)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.mailer)
     implementation(libs.quarkus.redis.client) // four-eyes ApprovalStore (ADR-0155, ADR-0176 D5)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
@@ -37,11 +28,8 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
     testImplementation(project(":openbank-libs-testing"))
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
 
     // CI infra sweep (#578): isolated PostgreSQL per test JVM via Testcontainers.

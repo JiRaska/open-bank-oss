@@ -12,8 +12,33 @@
 # Derived paths (read out of the .rego sources, never listed by hand):
 #   data.agents.agents  (each element projected to: id, skills, tools.allow, tools.deny)
 #   data.agents.tool_tiers.deny
+#   data.agents.tool_tiers.read
+#   data.agents.tool_tiers.write_proposal
 
 tool_tiers:
+  read:
+  - query.ledger.readonly
+  - query.gl.readonly
+  - query.catalog.readonly
+  - read.logs
+  - read.governance
+  - query.compliance.readonly
+  - query.payments.readonly
+  - query.interest.readonly
+  - query.disputes.readonly
+  - query.observability.readonly
+  - query.balance.readonly
+  - query.transaction.readonly
+  - query.account.readonly
+  - query.consent.readonly
+  - verify.mandate
+  write_proposal:
+  - draft.ticket
+  - gh.pr.open
+  - draft.adr
+  - git.branch
+  - git.commit.signed
+  - run.skill
   deny:
   - money.transfer
   - money.post.ledger

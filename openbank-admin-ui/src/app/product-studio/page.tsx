@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { Bot, Boxes, CheckCircle2, CircleAlert, Eye, FileJson, Link2, ListChecks, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
-import { canReviewPrivateCatalogDraft, type AgentModelDescriptor } from '@/lib/catalog-review-capability'
+import { resolveCatalogReviewCapability, type CatalogReviewCapability } from '@/lib/catalog-review-capability'
 import { catalogFieldValue, catalogSchemaFields, type CatalogSchemaField, withCatalogFieldValue } from '@/lib/catalog-schema-form'
 import { catalogRevisionEditorDocument, diffCatalogDocuments } from '@/lib/catalog-structural-diff'
 import {
@@ -19,14 +19,14 @@ import {
   type MarketContextInput,
 } from '@/lib/catalog-offer-composition'
 import { proposeBundleComponents } from '@/lib/catalog-bundle-proposals'
-import { pensionApprovalComplete } from '@/lib/pension-approval'
+import { revisionApprovalComplete, revisionApprovalPermission } from '@/lib/revision-approval'
 import { explainOfferSelection, simulateBundleImpact } from '@/lib/catalog-offer-intelligence'
 import { selectOffersForMarket } from '@/lib/catalog-offer-selection'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   catalogV2Operation, type CatalogSchema, type Offering, type OfferingRequest, type ProductRevision,
   type RevisionRequest, type Specification, type SpecificationRequest, type ValidateCatalogResponse,
-  type PensionApprovalResponse,
+  type RevisionApprovalResponse,
 } from '@/lib/product-catalog-v2'
 import styles from './page.module.css'
 
@@ -94,6 +94,8 @@ function isDraftRelationship(value: unknown): value is DraftRelationship {
 export default function ProductStudioPage() {
   const { language } = useLanguage()
   const t = (cs: string, en: string) => language === 'cs' ? cs : en
+  const approvalRoleLabel = (code: string) => code === 'LEGAL_COUNSEL' ? t('Právník', 'Legal counsel')
+    : code === 'PRODUCT_OWNER' ? t('Produktový vlastník', 'Product owner') : code
   const [schemas, setSchemas] = useState<CatalogSchema[]>([])
   const [specifications, setSpecifications] = useState<Specification[]>([])
   const [offerings, setOfferings] = useState<Offering[]>([])
@@ -112,33 +114,29 @@ export default function ProductStudioPage() {
   const [relationshipTargetId, setRelationshipTargetId] = useState('')
   const [relationshipKind, setRelationshipKind] = useState<RelationshipKind>('BUNDLE')
   const [publishReason, setPublishReason] = useState('')
-  const [pensionApprovalReason, setPensionApprovalReason] = useState('')
-  const [pensionApprovals, setPensionApprovals] = useState<PensionApprovalResponse[] | null>(null)
-  const [pensionApprovalKeyLoaded, setPensionApprovalKeyLoaded] = useState('')
-  const [pensionApprovalError, setPensionApprovalError] = useState('')
+  const [approvalReason, setApprovalReason] = useState('')
+  const [approvals, setApprovals] = useState<RevisionApprovalResponse[] | null>(null)
+  const [approvalKeyLoaded, setApprovalKeyLoaded] = useState('')
+  const [approvalError, setApprovalError] = useState('')
   const [newSpecSchema, setNewSpecSchema] = useState('')
   const [newDraftClassSelection, setNewDraftClassSelection] = useState<{ key: string; classes: string[] }>({ key: '', classes: [] })
   const [review, setReview] = useState<CatalogReview | null>(null)
   const [reviewing, setReviewing] = useState(false)
   const [validationState, setValidationState] = useState<'idle' | 'valid' | 'invalid'>('idle')
-  const [reviewCapability, setReviewCapability] = useState<'checking' | 'available' | 'unavailable'>('checking')
+  const [reviewCapability, setReviewCapability] = useState<CatalogReviewCapability>({ status: 'checking', models: [] })
 
   const selectedSpec = specifications.find(item => item.id === specificationId)
   const selectedOffering = offerings.find(item => item.id === offeringId)
   const selectedRevision = revisions.find(item => item.id === revisionId)
-  const pensionRevision = selectedRevision?.schemaRef.id === 'org.openbank.retirement.pension-savings' &&
-    selectedRevision.schemaRef.version === 2
-  const pensionApprovalKey = selectedRevision ? `${selectedRevision.id}:${selectedRevision.revision}` : ''
-  const currentPensionApprovals = pensionApprovalKeyLoaded === pensionApprovalKey ? pensionApprovals : null
-  const currentPensionApprovalError = pensionApprovalKeyLoaded === pensionApprovalKey ? pensionApprovalError : ''
+  const approvalKey = selectedRevision ? `${selectedRevision.id}:${selectedRevision.revision}` : ''
+  const currentApprovals = approvalKeyLoaded === approvalKey ? approvals : null
+  const currentApprovalError = approvalKeyLoaded === approvalKey ? approvalError : ''
   const publishedRevision = revisions.find(item => item.state === 'PUBLISHED')
   const parsedDraft = useMemo(() => {
     try { return draftText ? JSON.parse(draftText) as Record<string, unknown> : null } catch { return null }
   }, [draftText])
   const savedDraftMatchesEditor = Boolean(selectedRevision && parsedDraft &&
     diffCatalogDocuments(catalogRevisionEditorDocument(selectedRevision), parsedDraft).length === 0)
-  const pensionApprovalsComplete = !currentPensionApprovalError &&
-    pensionApprovalComplete(currentPensionApprovals, savedDraftMatchesEditor)
   const draftRelationships = useMemo(
     () => Array.isArray(parsedDraft?.relationships) ? parsedDraft.relationships.filter(isDraftRelationship) : [],
     [parsedDraft],
@@ -164,6 +162,11 @@ export default function ProductStudioPage() {
   const activeSchema = selectedRevision
     ? schemas.find(item => item.id === selectedRevision.schemaRef.id && item.version === selectedRevision.schemaRef.version)
     : compatibleSchemas.at(-1)
+  // The pack's approval policy for the selected revision's exact schema version (#13429).
+  const approvalPolicy = selectedRevision ? schemas.find(item => item.id === selectedRevision.schemaRef.id &&
+    item.version === selectedRevision.schemaRef.version)?.approvalPolicy : undefined
+  const approvalsComplete = !currentApprovalError &&
+    revisionApprovalComplete(approvalPolicy, currentApprovals, savedDraftMatchesEditor)
   const guidedFields = useMemo(
     () => catalogSchemaFields(activeSchema?.document),
     [activeSchema],
@@ -228,6 +231,23 @@ export default function ProductStudioPage() {
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
   }, [])
 
+  const fetchReviewCapability = useCallback(async (signal?: AbortSignal): Promise<CatalogReviewCapability> => {
+    try {
+      const response = await fetch('/api/agent/catalog-reviews', { signal, cache: 'no-store' })
+      if (!response.ok || response.status === 401 || response.status === 403) {
+        return resolveCatalogReviewCapability(response.status, response.ok, null)
+      }
+      const body: unknown = await response.json()
+      return resolveCatalogReviewCapability(response.status, true, body)
+    } catch {
+      return { status: 'error', models: [] }
+    }
+  }, [])
+  const refreshReviewCapability = useCallback(async () => {
+    setReviewCapability({ status: 'checking', models: [] })
+    setReviewCapability(await fetchReviewCapability())
+  }, [fetchReviewCapability])
+
   useEffect(() => {
     const task = window.setTimeout(() => { void load() }, 0)
     return () => window.clearTimeout(task)
@@ -238,12 +258,11 @@ export default function ProductStudioPage() {
   }, [offeringId, loadRevisions])
   useEffect(() => {
     const controller = new AbortController()
-    void fetch('/api/agent/chat', { signal: controller.signal, cache: 'no-store' })
-      .then(async response => response.ok ? response.json() as Promise<{ models?: AgentModelDescriptor[] }> : null)
-      .then(result => setReviewCapability(canReviewPrivateCatalogDraft(result?.models ?? []) ? 'available' : 'unavailable'))
-      .catch(() => setReviewCapability('unavailable'))
+    void fetchReviewCapability(controller.signal).then(capability => {
+      if (!controller.signal.aborted) setReviewCapability(capability)
+    })
     return () => controller.abort()
-  }, [])
+  }, [fetchReviewCapability])
   useEffect(() => {
     const nextDraft = selectedRevision
       ? JSON.stringify(catalogRevisionEditorDocument(selectedRevision), null, 2)
@@ -252,18 +271,18 @@ export default function ProductStudioPage() {
     return () => window.clearTimeout(task)
   }, [selectedRevision])
   useEffect(() => {
-    if (!selectedRevision || !pensionRevision) return
+    if (!selectedRevision || !approvalPolicy) return
     let active = true
     const task = window.setTimeout(() => {
-      setPensionApprovals(null)
-      setPensionApprovalError('')
-      void catalogV2Operation('listPensionRevisionApprovalsV2', {
+      setApprovals(null)
+      setApprovalError('')
+      void catalogV2Operation('listRevisionApprovalsV2', {
         pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id },
-      }).then(rows => { if (active) { setPensionApprovals(rows); setPensionApprovalKeyLoaded(pensionApprovalKey) } })
-        .catch(error => { if (active) { setPensionApprovalError(error instanceof Error ? error.message : String(error)); setPensionApprovalKeyLoaded(pensionApprovalKey) } })
+      }).then(rows => { if (active) { setApprovals(rows); setApprovalKeyLoaded(approvalKey) } })
+        .catch(error => { if (active) { setApprovalError(error instanceof Error ? error.message : String(error)); setApprovalKeyLoaded(approvalKey) } })
     }, 0)
     return () => { active = false; window.clearTimeout(task) }
-  }, [selectedRevision, pensionRevision, pensionApprovalKey])
+  }, [selectedRevision, approvalPolicy, approvalKey])
 
   const updateGuidedField = (field: CatalogSchemaField, raw: string | boolean | string[]) => {
     if (!parsedDraft) return
@@ -406,7 +425,7 @@ export default function ProductStudioPage() {
   }
 
   const publish = () => {
-    if (!selectedRevision || !publishReason.trim() || (pensionRevision && !pensionApprovalsComplete)) return
+    if (!selectedRevision || !publishReason.trim() || !approvalsComplete) return
     void run('revision:publish', () => catalogV2Operation('publishOfferingRevisionV2', {
       pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id },
       headers: { 'If-Match': `"${selectedRevision.revision}"` },
@@ -414,31 +433,31 @@ export default function ProductStudioPage() {
     }), t('Revize publikována nezávislým schvalovatelem', 'Revision published by an independent checker'))
   }
 
-  const approvePensionRevision = (role: 'LEGAL_COUNSEL' | 'PRODUCT_OWNER') => {
-    if (!selectedRevision || !pensionRevision || !savedDraftMatchesEditor || !pensionApprovalReason.trim()) return
-    void run(`pension:approve:${role}`, () => catalogV2Operation('approvePensionRevisionV2', {
+  const approveRevision = (role: string) => {
+    if (!selectedRevision || !approvalPolicy || !savedDraftMatchesEditor || !approvalReason.trim()) return
+    void run(`revision:approve:${role}`, () => catalogV2Operation('approveRevisionV2', {
       pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id, role },
       headers: { 'If-Match': `"${selectedRevision.revision}"` },
-      body: { reason: pensionApprovalReason.trim() },
+      body: { reason: approvalReason.trim() },
     }), t('Schválení aktuální revize zaznamenáno', 'Approval of the current revision recorded'))
   }
 
   const reviewDraft = async () => {
-    if (!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewCapability !== 'available') return
+    if (!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewCapability.status !== 'available') return
     setReviewing(true); setReview(null); setMessage('')
     try {
       const response = await fetch('/api/agent/catalog-reviews', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id }),
+        body: JSON.stringify({ offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id, model: reviewCapability.defaultModel }),
       })
       const body = await response.json() as CatalogReview & { error?: string }
       if (!response.ok) throw new Error(body.error ?? response.statusText)
       setReview(body)
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      setReviewCapability(detail === 'model unavailable' ? 'unavailable' : reviewCapability)
+      if (detail === 'model unavailable') setReviewCapability({ status: 'unavailable', models: [] })
       setMessage(detail === 'model unavailable'
-        ? t('Privátní AI kontrola není v tomto prostředí dostupná. Návrh zůstává uvnitř platformy; použijte kontrolu schématu a dopadu změny.', 'Private AI review is unavailable in this environment. The draft stays inside the platform; use schema validation and change impact instead.')
+        ? t('Schválený model pro kontrolu není dostupný. Draft nebyl zpracován; použijte kontrolu schématu a dopadu změny.', 'No approved review model is available. The draft was not processed; use schema validation and change impact instead.')
         : detail)
     } finally {
       setReviewing(false)
@@ -598,32 +617,32 @@ export default function ProductStudioPage() {
             </details>
             <div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision} onClick={() => void validateDraft()}><CheckCircle2 size={13} aria-hidden="true" />{t('Ověřit schéma', 'Validate schema')}</button><button className="btn btn-primary" type="button" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || busy} aria-busy={flight.isRunning('revision:save')} onClick={saveDraft}><Send size={13} aria-hidden="true" />{flight.isRunning('revision:save') ? t('Ukládám…', 'Saving…') : t('Uložit draft', 'Save draft')}</button></div>
           </Can>
-          {pensionRevision && selectedRevision && <div className={styles.approvalPanel} aria-label={t('Penzijní schválení revize', 'Pension revision approvals')}>
-            <div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Právní a produktové schválení', 'Legal and product approval')}</span></div>
-            <p>{t('Schválení se vztahují k uložené revizi a jejímu intervalu účinnosti. Po změně draftu je nutné nové schválení obou rolí.', 'Approvals bind to the saved revision and its effective interval. Editing the draft requires fresh approval by both roles.')}</p>
+          {approvalPolicy && selectedRevision && <div className={styles.approvalPanel} aria-label={t('Schválení revize rolemi', 'Revision role approvals')}>
+            <div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Schválení rolemi', 'Role approval')}</span></div>
+            <p>{t('Schválení se vztahují k uložené revizi a jejímu intervalu účinnosti. Po změně draftu je nutné nové schválení všech rolí.', 'Approvals bind to the saved revision and its effective interval. Editing the draft requires fresh approval by every role.')}</p>
             <div className={styles.approvalMeta}>
               <span>{t('Revize', 'Revision')}: <b>#{selectedRevision.number} · {selectedRevision.revision}</b></span>
               <span>{t('Účinnost od', 'Effective from')}: <b>{selectedRevision.effectiveFrom ?? '—'}</b></span>
               <span>{t('Účinnost do', 'Effective to')}: <b>{selectedRevision.effectiveTo ?? '—'}</b></span>
               <span>{t('Uložený obsah', 'Saved content')}: <b>{savedDraftMatchesEditor ? t('shodný', 'matches editor') : t('neuložené změny', 'unsaved changes')}</b></span>
             </div>
-            {currentPensionApprovalError && <p role="alert">{t('Schválení se nepodařilo načíst:', 'Could not load approvals:')} {currentPensionApprovalError}</p>}
-            {!currentPensionApprovalError && currentPensionApprovals === null && <p>{t('Načítám schválení…', 'Loading approvals…')}</p>}
-            {(['LEGAL_COUNSEL', 'PRODUCT_OWNER'] as const).map(role => {
-              const approval = currentPensionApprovals?.find(item => item.role === role)
-              return <div key={role} className={styles.pensionApprovalRow}>
-                <span>{role === 'LEGAL_COUNSEL' ? t('Právník', 'Legal counsel') : t('Produktový vlastník', 'Product owner')}: <b>{approval && savedDraftMatchesEditor ? t('schváleno', 'approved') : t('čeká', 'pending')}</b></span>
+            {currentApprovalError && <p role="alert">{t('Schválení se nepodařilo načíst:', 'Could not load approvals:')} {currentApprovalError}</p>}
+            {!currentApprovalError && currentApprovals === null && <p>{t('Načítám schválení…', 'Loading approvals…')}</p>}
+            {approvalPolicy.roles.map(({ code }) => {
+              const approval = currentApprovals?.find(item => item.role === code)
+              const permission = revisionApprovalPermission(code)
+              const approveButton = <button className="btn btn-secondary" type="button" disabled={busy || !savedDraftMatchesEditor || currentApprovals === null || Boolean(currentApprovalError) || !approvalReason.trim() || (approvalPolicy.requireEffectiveFrom && !selectedRevision.effectiveFrom)} onClick={() => approveRevision(code)}>{t('Schválit uloženou revizi', 'Approve saved revision')}</button>
+              return <div key={code} className={styles.approvalRow}>
+                <span>{approvalRoleLabel(code)}: <b>{approval && savedDraftMatchesEditor ? t('schváleno', 'approved') : t('čeká', 'pending')}</b></span>
                 {approval && savedDraftMatchesEditor && <small>{approval.approvedAt} · {t('Otisk', 'Digest')} {approval.digest.slice(0, 12)}…</small>}
-                {selectedRevision.state === 'DRAFT' && !approval && <Can permission={role === 'LEGAL_COUNSEL' ? 'catalog:pension:legal-approve' : 'catalog:pension:product-approve'}>
-                  <button className="btn btn-secondary" type="button" disabled={busy || !savedDraftMatchesEditor || currentPensionApprovals === null || Boolean(currentPensionApprovalError) || !pensionApprovalReason.trim() || !selectedRevision.effectiveFrom} onClick={() => approvePensionRevision(role)}>{t('Schválit uloženou revizi', 'Approve saved revision')}</button>
-                </Can>}
+                {selectedRevision.state === 'DRAFT' && !approval && (permission ? <Can permission={permission}>{approveButton}</Can> : approveButton)}
               </div>
             })}
-            <label className={styles.smallLabel} htmlFor="studio-pension-approval-reason">{t('Odůvodnění schválení', 'Approval reason')}</label>
-            <input id="studio-pension-approval-reason" className="input" maxLength={4096} value={pensionApprovalReason} onChange={event => setPensionApprovalReason(event.target.value)} />
-            {!pensionApprovalsComplete && <p role="status">{t('Publikace čeká na samostatné aktuální schválení právníkem i produktovým vlastníkem.', 'Publication awaits separate current approval by legal counsel and product owner.')}</p>}
+            <label className={styles.smallLabel} htmlFor="studio-revision-approval-reason">{t('Odůvodnění schválení', 'Approval reason')}</label>
+            <input id="studio-revision-approval-reason" className="input" maxLength={4096} value={approvalReason} onChange={event => setApprovalReason(event.target.value)} />
+            {!approvalsComplete && <p role="status">{t('Publikace čeká na samostatné aktuální schválení všemi rolemi, které typ produktu vyžaduje.', 'Publication awaits separate current approval by every role the product type requires.')}</p>}
           </div>}
-          <Can permission="catalog:publish"><div className={styles.approvalPanel}><div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Nezávislé schválení', 'Independent approval')}</span></div><p>{t('Publikace je nevratné rozhodnutí. Služba ověří, že autor a schvalovatel jsou rozdílné identity — tento formulář to nemůže obejít.', 'Publication is an irreversible decision. The service verifies that maker and checker are different identities — this form cannot bypass it.')}</p><div className={styles.approvalMeta}><span>{t('Autor draftu', 'Draft maker')}: <b>{selectedRevision?.makerId ?? '—'}</b></span><span>{t('Stav ověření', 'Validation')}: <b>{validationState === 'valid' ? t('ověřeno', 'verified') : t('čeká na ověření', 'awaiting validation')}</b></span></div><div style={{ display: 'flex', gap: 7 }}><label className="sr-only" htmlFor="studio-publish-reason">{t('Důvod schválení', 'Approval reason')}</label><input id="studio-publish-reason" className="input" value={publishReason} onChange={e => setPublishReason(e.target.value)} placeholder={t('Důvod schválení', 'Approval reason')} /><button className="btn btn-primary" type="button" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || !publishReason.trim() || busy || (pensionRevision && !pensionApprovalsComplete)} aria-busy={flight.isRunning('revision:publish')} onClick={publish}><ShieldCheck size={13} aria-hidden="true" />{flight.isRunning('revision:publish') ? t('Publikuji…', 'Publishing…') : t('Publikovat', 'Publish')}</button></div></div></Can>
+          <Can permission="catalog:publish"><div className={styles.approvalPanel}><div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Nezávislé schválení', 'Independent approval')}</span></div><p>{t('Publikace je nevratné rozhodnutí. Služba ověří, že autor a schvalovatel jsou rozdílné identity — tento formulář to nemůže obejít.', 'Publication is an irreversible decision. The service verifies that maker and checker are different identities — this form cannot bypass it.')}</p><div className={styles.approvalMeta}><span>{t('Autor draftu', 'Draft maker')}: <b>{selectedRevision?.makerId ?? '—'}</b></span><span>{t('Stav ověření', 'Validation')}: <b>{validationState === 'valid' ? t('ověřeno', 'verified') : t('čeká na ověření', 'awaiting validation')}</b></span></div><div style={{ display: 'flex', gap: 7 }}><label className="sr-only" htmlFor="studio-publish-reason">{t('Důvod schválení', 'Approval reason')}</label><input id="studio-publish-reason" className="input" value={publishReason} onChange={e => setPublishReason(e.target.value)} placeholder={t('Důvod schválení', 'Approval reason')} /><button className="btn btn-primary" type="button" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || !publishReason.trim() || busy || !approvalsComplete} aria-busy={flight.isRunning('revision:publish')} onClick={publish}><ShieldCheck size={13} aria-hidden="true" />{flight.isRunning('revision:publish') ? t('Publikuji…', 'Publishing…') : t('Publikovat', 'Publish')}</button></div></div></Can>
         </div>
       </section>
     </div>
@@ -638,8 +657,17 @@ export default function ProductStudioPage() {
 
           <div className={styles.aiPanel}>
             <div className={styles.aiHead}><div><div className={styles.aiTitle}><Bot size={15} aria-hidden="true" />{t('Catalog intelligence review', 'Catalog intelligence review')}</div><div className={styles.aiCopy}>{t('Připne přesný draft, vytvoří pouze návrh pro lidské posouzení a nikdy nemění ani nepublikuje nabídku.', 'Pins the exact draft, creates only a human-review proposal and never changes or publishes an offer.')}</div></div><span className={styles.aiGuard}><ShieldCheck size={11} aria-hidden="true" />HITL</span></div>
-            <Can permission="catalog:author"><div className={styles.actions}><button className="btn btn-secondary" type="button" aria-busy={reviewing} aria-label={reviewing ? t('Kontroluji draft', 'Reviewing draft') : t('Spustit AI kontrolu draftu', 'Run AI review for draft')} disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewing || reviewCapability !== 'available'} onClick={() => void reviewDraft()}><Sparkles size={13} aria-hidden="true" />{reviewing ? t('Kontroluji…', 'Reviewing…') : reviewCapability === 'checking' ? t('Ověřuji AI kapacitu…', 'Checking AI availability…') : reviewCapability === 'available' ? t('Spustit AI kontrolu', 'Run AI review') : t('Privátní AI kontrola nedostupná', 'Private AI review unavailable')}</button></div></Can>
-            {reviewCapability === 'unavailable' && <div className={styles.aiUnavailable}><ShieldCheck size={13} aria-hidden="true" /><span>{t('Toto prostředí nemá schválený interní model pro neveřejné drafty. Nic se neposílá do hostovaného modelu — k dispozici zůstává deterministická kontrola schématu a dopadu.', 'This environment has no approved internal model for unpublished drafts. Nothing is sent to a hosted model — deterministic schema and change-impact checks remain available.')}</span></div>}
+            <Can permission="catalog:author"><div className={styles.actions}><button className="btn btn-secondary" type="button" aria-busy={reviewing} aria-label={reviewing ? t('Kontroluji draft', 'Reviewing draft') : t('Spustit AI kontrolu draftu', 'Run AI review for draft')} disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewing || reviewCapability.status !== 'available'} onClick={() => void reviewDraft()}><Sparkles size={13} aria-hidden="true" />{reviewing ? t('Kontroluji…', 'Reviewing…') : reviewCapability.status === 'checking' ? t('Ověřuji AI kapacitu…', 'Checking AI availability…') : reviewCapability.status === 'available' ? t('Spustit AI kontrolu', 'Run AI review') : t('AI kontrola nedostupná', 'AI review unavailable')}</button></div></Can>
+            {reviewCapability.status !== 'checking' && reviewCapability.status !== 'available' && <div className={styles.aiUnavailable} role="status"><ShieldCheck size={13} aria-hidden="true" /><span>{reviewCapability.status === 'unavailable'
+              ? t('V tomto prostředí není dostupný schválený model pro kontrolu. Draft nebyl odeslán.', 'No approved review model is available in this environment. The draft was not sent.')
+              : reviewCapability.status === 'unauthenticated'
+                ? t('Nelze ověřit přihlášení k AI službě. Obnovte relaci a zkuste kontrolu dostupnosti znovu; obsah draftu nebyl odeslán.', 'Could not authenticate with the AI service. Refresh your session and retry the availability check; no draft content was sent.')
+                : reviewCapability.status === 'forbidden'
+                ? t('Váš účet nemá oprávnění ověřit kapacitu kontroly. Požádejte správce o kontrolu oprávnění; obsah draftu nebyl odeslán.', 'Your account cannot inspect review capability. Ask an administrator to check access; no draft content was sent.')
+                  : t('Dostupnost kontroly se nepodařilo ověřit. Obsah draftu nebyl odeslán; zkuste to znovu.', 'Review availability could not be verified. No draft content was sent; please retry.')}</span><button className="btn btn-secondary" type="button" onClick={() => void refreshReviewCapability()}><RefreshCw size={12} aria-hidden="true" />{t('Zkusit znovu', 'Retry')}</button></div>}
+            {reviewCapability.status === 'available' && <div className={styles.schemaHint} role="note">{reviewCapability.mode === 'sandbox-hosted'
+              ? t(`Sandboxová kontrola odešle přes LiteLLM přesnou revizi draftu ke kontrole modelem ${reviewCapability.defaultModel}. Nezahrnujte osobní ani zákaznické údaje. Výsledek je pouze návrh pro lidské posouzení.`, `Sandbox review sends the exact revision through LiteLLM to ${reviewCapability.defaultModel}. Do not include personal or customer data. The result is only a proposal for human review.`)
+              : t(`Použije se schválený interní model ${reviewCapability.defaultModel}. Výsledek je pouze návrh pro lidské posouzení.`, `Approved internal model ${reviewCapability.defaultModel} will be used. The result is only a proposal for human review.`)}</div>}
             {!selectedRevision && <div className={styles.schemaHint}>{t('Vyberte draft revizi; review nikdy nepracuje s neurčitým nebo živým obsahem.', 'Select a draft revision; review never works from an ambiguous or live document.')}</div>}
             {review && <div aria-live="polite"><div className={styles.findingText} style={{ marginTop: 11, fontWeight: 700 }}>{review.summary}</div>{review.findings.length === 0 && <div className={styles.schemaHint}>{t('Model nenašel strukturované nálezy. To nenahrazuje lidskou obchodní kontrolu.', 'The model found no structured findings. That never replaces human business review.')}</div>}{review.findings.map(finding => <div key={`${finding.category}:${finding.instancePath}`} className={`${styles.finding} ${finding.severity === 'HIGH' ? styles.findingHigh : finding.severity === 'WARNING' ? styles.findingWarning : ''}`}><div className={styles.findingTitle}><span>{finding.category}</span><span>{finding.severity}</span></div><div className={styles.findingText}>{finding.recommendation}</div><div className={styles.evidence}>{finding.instancePath} · {finding.evidence}</div></div>)}<div className={styles.provenance}><span>proposal {review.proposalId.slice(0, 8)}</span><span>model {review.model}</span><span>context {review.contextHash.slice(0, 12)}…</span></div></div>}
           </div>

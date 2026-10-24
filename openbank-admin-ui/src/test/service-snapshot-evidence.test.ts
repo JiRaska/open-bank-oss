@@ -14,7 +14,7 @@ afterEach(() => {
 
 describe('service snapshot evidence', () => {
   it('keeps a verified all-down fleet distinct from collector failure', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ services: [{
+    vi.stubGlobal('fetch', vi.fn(async () => json({ source: 'static', discoveryStatus: 'static', services: [{
       name: 'ledger-service', port: 8101, status: 'DOWN', reachable: false, latencyMs: null,
     }] })))
 
@@ -25,19 +25,65 @@ describe('service snapshot evidence', () => {
   })
 
   it('rejects malformed collector evidence instead of manufacturing offline services', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ services: [{ name: 'ledger-service' }] })))
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      source: 'static', discoveryStatus: 'static', services: [{ name: 'ledger-service' }],
+    })))
     await expect(fetchAllServiceSnapshotsEvidence()).resolves.toEqual({ ok: false, failure: 'error' })
+  })
+
+  it.each(['partial', 'unavailable'] as const)(
+    'rejects %s Kubernetes discovery instead of treating its service array as complete',
+    async (discoveryStatus) => {
+      vi.stubGlobal('fetch', vi.fn(async () => json({
+        source: 'kubernetes', discoveryStatus,
+        services: [{ name: 'ledger-service', namespace: 'ledger', port: 8101, status: 'UP', reachable: true, latencyMs: 5 }],
+      })))
+      await expect(fetchAllServiceSnapshotsEvidence()).resolves.toEqual({ ok: false, failure: 'discovery_unavailable' })
+    },
+  )
+
+  it.each([
+    ['missing source', { discoveryStatus: 'complete' }],
+    ['missing status', { source: 'kubernetes' }],
+    ['Kubernetes with static status', { source: 'kubernetes', discoveryStatus: 'static' }],
+    ['static with complete status', { source: 'static', discoveryStatus: 'complete' }],
+    ['unknown source', { source: 'future-source', discoveryStatus: 'complete' }],
+  ])('rejects %s metadata rather than treating it as a complete inventory', async (_label, metadata) => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      ...metadata,
+      services: [{ name: 'ledger-service', port: 8101, status: 'DOWN', reachable: false, latencyMs: null }],
+    })))
+    await expect(fetchAllServiceSnapshotsEvidence()).resolves.toEqual({ ok: false, failure: 'discovery_unavailable' })
   })
 
   it('rejects duplicate services and malformed stack blocks', async () => {
     const malformed = { name: 'ledger-service', port: 8101, status: 'UP', reachable: true, latencyMs: 4, stack: { quarkus: {} } }
     const duplicate = { name: 'ledger-service', port: 8101, status: 'DOWN', reachable: false, latencyMs: null }
     const fetch = vi.fn()
-      .mockResolvedValueOnce(json({ services: [malformed] }))
-      .mockResolvedValueOnce(json({ services: [duplicate, duplicate] }))
+      .mockResolvedValueOnce(json({ source: 'static', discoveryStatus: 'static', services: [malformed] }))
+      .mockResolvedValueOnce(json({ source: 'static', discoveryStatus: 'static', services: [duplicate, duplicate] }))
     vi.stubGlobal('fetch', fetch)
 
     await expect(fetchAllServiceSnapshotsEvidence()).resolves.toEqual({ ok: false, failure: 'error' })
+    await expect(fetchAllServiceSnapshotsEvidence()).resolves.toEqual({ ok: false, failure: 'error' })
+  })
+
+  it('preserves same-named workloads from separate namespaces, but rejects duplicate workload identity', async () => {
+    const account = { name: 'ledger-service', namespace: 'tenant-a', port: 8101, status: 'UP', reachable: true, latencyMs: null }
+    const pension = { ...account, namespace: 'tenant-b' }
+    const duplicateWorkload = { ...account, port: 8102 }
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ source: 'static', discoveryStatus: 'static', services: [account, pension] }))
+      .mockResolvedValueOnce(json({ source: 'static', discoveryStatus: 'static', services: [account, duplicateWorkload] }))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(fetchAllServiceSnapshotsEvidence()).resolves.toMatchObject({
+      ok: true,
+      snapshots: [
+        { name: 'ledger-service', namespace: 'tenant-a', port: 8101 },
+        { name: 'ledger-service', namespace: 'tenant-b', port: 8101 },
+      ],
+    })
     await expect(fetchAllServiceSnapshotsEvidence()).resolves.toEqual({ ok: false, failure: 'error' })
   })
 
