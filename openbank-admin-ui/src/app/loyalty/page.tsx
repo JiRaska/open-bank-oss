@@ -14,13 +14,13 @@ import {
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { PartySearch } from '@/components/party/PartySearch'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import styles from './loyalty.module.css'
 import {
   AI_RED_LINES, AI_ROLES, CONNECTIONS, LEGAL, PRINCIPLES, type Bilingual,
 } from '@/lib/loyalty/lipaContent'
-import type { LoyaltyCatalogueResponse, LoyaltyState } from '@/app/api/loyalty/route'
-import type { LoyaltyPartyResponse } from '@/app/api/loyalty/party/[partyId]/route'
+import type { LoyaltyCatalogueResponse, LoyaltyPartyResponse, LoyaltyState } from '@/lib/loyalty/contracts'
 import { parseLoyaltyCatalogue, parseLoyaltyParty } from '@/lib/loyalty/evidenceContract'
 
 const TABS = ['overview', 'catalogues', 'party', 'principles', 'finance', 'ai'] as const
@@ -68,11 +68,11 @@ export default function LoyaltyPage() {
     return () => { cancelled = true }
   }, [refresh])
 
-  const lookUpParty = useCallback(async () => {
+  const lookUpParty = useCallback(async (chosenId?: string) => {
     const requestId = ++partyRequestId.current
-    const id = partyId.trim()
+    const id = (chosenId ?? partyId).trim()
     if (!UUID_RE.test(id)) {
-      setPartyError(t('Zadejte platné UUID klienta.', 'Enter a valid customer UUID.'))
+      setPartyError(t('Vyberte klienta pomocí vyhledávání.', 'Select a customer using the search.'))
       setParty(null)
       setPartyLoading(false)
       return
@@ -374,25 +374,12 @@ export default function LoyaltyPage() {
                 )}
               </p>
               <div className={styles.lookup}>
-                <label htmlFor="lipa-party" className="sr-only">{t('UUID klienta', 'Customer UUID')}</label>
-                <input
-                  id="lipa-party"
-                  value={partyId}
-                  onChange={e => setPartyId(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && !partyLoading) void lookUpParty() }}
-                  placeholder={t('UUID klienta', 'Customer UUID')}
-                  className="w-96 max-w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm"
+                <PartySearch
+                  selectedId={partyId || undefined}
+                  busy={partyLoading}
+                  onSelect={p => { setPartyId(p.id); void lookUpParty(p.id) }}
+                  placeholder={t('Jméno, příjmení, rodné číslo nebo e-mail klienta', 'Client name, surname, birth number or e-mail')}
                 />
-                <button
-                  type="button"
-                  onClick={() => void lookUpParty()}
-                  disabled={partyLoading}
-                  aria-busy={partyLoading}
-                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700"
-                >
-                  <Search className="h-4 w-4" />
-                  {t('Vyhledat', 'Look up')}
-                </button>
                 {party && (
                   <Link href={`/customer-360?partyId=${party.partyId}`} className="inline-flex items-center gap-1 text-sm font-semibold text-violet-700 hover:underline">
                     {t('Otevřít Customer 360', 'Open Customer 360')}<ArrowRight className="h-3 w-3" />
@@ -402,7 +389,7 @@ export default function LoyaltyPage() {
               {partyError && <p role="alert" className="mt-2 text-sm text-rose-700">{partyError}</p>}
             </div>
 
-            {!party && !partyLoading && !partyError && <div className={styles.notice}><Search aria-hidden="true" /><div><h3>{t('Začněte identifikátorem klienta', 'Start with a customer ID')}</h3><p>{t('UUID najdete v detailu klienta. Vyhledávání zobrazí skutečný zůstatek a historii; neprovádí žádné změny.', 'Find the UUID in the customer record. Lookup shows the actual balance and history without changing them.')}</p><Link href="/customer-360">{t('Přejít do Customer 360', 'Go to Customer 360')} →</Link></div></div>}
+            {!party && !partyLoading && !partyError && <div className={styles.notice}><Search aria-hidden="true" /><div><h3>{t('Začněte vyhledáním klienta', 'Start by finding a customer')}</h3><p>{t('Klienta najdete podle jména, příjmení, rodného čísla nebo data narození. Vyhledávání zobrazí skutečný zůstatek a historii; neprovádí žádné změny.', 'Find the customer by name, surname, birth number or date of birth. Lookup shows the actual balance and history without changing them.')}</p><Link href="/customer-360">{t('Přejít do Customer 360', 'Go to Customer 360')} →</Link></div></div>}
             {partyLoading && <p className="text-sm text-slate-500">{t('Načítám…', 'Loading…')}</p>}
 
             {party && unavailableKind(party.state) && (

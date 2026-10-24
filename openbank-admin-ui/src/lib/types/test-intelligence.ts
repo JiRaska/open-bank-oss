@@ -97,8 +97,45 @@ export interface TestInfrastructureObservation {
   reprovisions?: number
 }
 
+/**
+ * How a component's posture relates to the code that is RUNNING (#13201).
+ * - `running-commit`: the posture came from the evidence store for exactly the running commit.
+ * - `snapshot`: the posture is the bundled snapshot; `snapshotCommit` says which build it is about.
+ * `match` is null when either commit is unknown — never guessed.
+ */
+export interface RunningCommitObservation {
+  runningCommit: string | null
+  snapshotCommit: string | null
+  source: 'running-commit' | 'snapshot'
+  match: boolean | null
+  /** Why the evidence store was not used for this component. */
+  storeStatus: 'hit' | 'miss' | 'error' | 'disabled' | 'not-running'
+  /**
+   * On a store hit: the commit the tests actually RAN on, and how it relates to the running
+   * one. `tree-equivalent` = a different commit, proven byte-identical in every build input
+   * of this service (pact-version-tree-equivalent.sh), so its tests describe the running image.
+   */
+  evidenceCommit?: string
+  equivalence?: EvidenceEquivalence
+  /** Newest test/coverage observation and its request-time age, when available. */
+  latestEvidenceAt?: string | null
+  latestEvidenceAgeSeconds?: number | null
+}
+
+export type EvidenceEquivalence = 'identical' | 'tree-equivalent'
+
+/** Set by the evidence-store publisher: which commit the stored posture's runs are about. */
+export interface EvidenceSource {
+  commit: string
+  equivalence: EvidenceEquivalence
+}
+
 export interface ComponentTestPosture {
   component: string
+  /** Added by the route at request time; absent in the on-disk/CI file. */
+  running?: RunningCommitObservation
+  /** Present only on a posture served by the commit-addressed evidence store (#13201). */
+  evidenceSource?: EvidenceSource
   released: boolean
   moneyPath: boolean
   evidence: EvidenceObservation[]
@@ -315,6 +352,8 @@ export interface ClientExperienceEvidence {
 
 export interface TestIntelligenceReport {
   schemaVersion: 1
+  /** Added by the route at request time; absent in the on-disk/CI file. */
+  evidence?: TestEvidenceMeta
   collectedAt: string
   components: ComponentTestPosture[]
   contracts: ContractEvidence[]
@@ -403,8 +442,10 @@ export interface TestCaseHistory {
   name: string
   /** Verified path to the test definition; never a claimed production dependency. */
   testDefinitionPath?: string | null
+  /** Requirement ids the test declares it verifies (`verifies:<scope>/<ref>` convention). */
+  verifies?: string[]
   owner: string
-  state: 'stable' | 'flaky' | 'failing' | 'skipped'
+  state: 'stable' | 'flaky' | 'failing' | 'skipped' | 'stale'
   lastState: 'passed' | 'failed' | 'skipped'
   observations: number
   failureRate: number | null
@@ -450,4 +491,39 @@ export interface TestAgentFinding {
   rootCause: string | null
   proposalUrl: string | null
   status: string
+}
+
+/** Provenance of an evidence payload served by admin-ui: where it came from and how old it is. */
+export interface TestEvidenceMeta {
+  /** Whole-response composition; mixed means published/bundled aggregate plus per-running-commit rows. */
+  source: 'bundled' | 'published-snapshot' | 'running-commit' | 'mixed' | 'unavailable'
+  /** When the bundled snapshot was collected (null if unknown — never invented). */
+  asOf: string | null
+  ageSeconds: number | null
+  stale: boolean
+  /** When admin-ui last assembled this payload (its server-side cache refresh). */
+  servedFrom: string
+  dataset: {
+    status: 'ready' | 'stale' | 'unavailable' | 'disabled'
+    sourceSha: string | null
+    runId: number | null
+    runAttempt: number | null
+    snapshot: string | null
+    sha256: string | null
+    collectedAt: string | null
+    expiresAt: string | null
+    pointerExpired: boolean | null
+    snapshotAgeSeconds: number | null
+    error?: string
+  }
+  runningCommits: {
+    /** Null off-cluster: running commits cannot be read without the Kubernetes API. */
+    known: number | null
+    matchingSnapshot: number
+    fromStore: number
+    /** Of `fromStore`: tested on a different but build-identical commit. */
+    fromEquivalentBuild: number
+    fromBundledFallback: number
+    mismatchedEvidence: number
+  }
 }

@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.4.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.1...customer-edge-v1.4.2) (2026-10-21)
+
+
+### Bug Fixes
+
+* **customer-edge:** prefix unprefixed metrics with openbank. and gate new ones ([#13193](https://github.com/JiRaska/open-bank-oss/issues/13193)) ([ca69f24](https://github.com/JiRaska/open-bank-oss/commit/ca69f2451fee91827db7fb179bde3b4244b0455c))
+
+## [1.4.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.0...customer-edge-v1.4.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **customer-edge:** scope the Pact provider stub to its own test class ([#13477](https://github.com/JiRaska/open-bank-oss/issues/13477)) ([140993e](https://github.com/JiRaska/open-bank-oss/commit/140993e36fcd92073fa0ea7034338a69caa81b35))
+
+## [1.4.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.2...customer-edge-v1.4.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
+## [1.3.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.1...customer-edge-v1.3.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **customer-edge:** supply the configured pension provider on applications ([#12834](https://github.com/JiRaska/open-bank-oss/issues/12834)) ([bf4393c](https://github.com/JiRaska/open-bank-oss/commit/bf4393ca55acd29e1a074d4635978b9f213a4a09))
+
 ## [1.3.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.0...customer-edge-v1.3.1) (2026-10-16)
 
 

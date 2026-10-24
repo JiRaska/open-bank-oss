@@ -186,6 +186,110 @@ class PidApiContractTest {
 
     @Test
     @TestSecurity(user = "contract-test", roles = ["ROLE_OPERATOR"])
+    fun `legacy external-id lookup preserves its published spec while serving its actual parameters`() {
+        val documented = spec.at("/paths/~1api~1v1~1parties~1by-external-id/get/parameters")
+            .map { it.path("name").asText() }
+        // Keep the existing GET contract unchanged in this additive POST release. The source
+        // currently binds type/value; exact reconciliation of this legacy spec drift is separate.
+        assertThat(documented).containsExactly("externalId", "source")
+
+        // A unique missing value takes the request through enum parsing and repository lookup;
+        // the expected record-level 404 distinguishes a valid lookup from a 400 caused by names
+        // that the served JAX-RS method does not actually bind.
+        val status = given()
+            .queryParam("type", "BANKID_SUB")
+            .queryParam("value", "contract-missing-${java.util.UUID.randomUUID()}")
+            .get("/api/v1/parties/by-external-id")
+            .then().extract().statusCode()
+        assertThat(status).isEqualTo(404)
+    }
+
+    @Test
+    @TestSecurity(user = "contract-test", roles = ["ROLE_OPERATOR"])
+    fun `browser lookup accepts the identifier in the body and returns only minimized matched data`() {
+        val identifier = "contract-bankid-${java.util.UUID.randomUUID()}"
+        val created = given()
+            .contentType(ContentType.JSON)
+            .body(
+                """{"givenName":"Private","familyName":"Fixture","birthdate":"1990-01-01","bankIdSub":"$identifier"}""",
+            )
+            .post("/api/v1/parties")
+            .then().statusCode(201)
+            .extract().body().jsonPath().getMap<String, kotlin.Any>("")
+
+        val body = given()
+            .contentType(ContentType.JSON)
+            .body("""{"type":"BANKID_SUB","value":"$identifier"}""")
+            .post("/api/v1/parties/by-external-id/lookup")
+            .then().statusCode(200)
+            .extract().body().jsonPath().getMap<String, kotlin.Any>("")
+
+        assertThat(body.keys).containsExactlyInAnyOrder("partyId", "status", "createdAt", "externalId")
+        assertThat(body["partyId"]).isEqualTo(created["id"])
+        val matchedIdentifier = body["externalId"] as Map<*, *>
+        assertThat(matchedIdentifier.keys).containsExactlyInAnyOrder("type", "value", "verifiedAt")
+        assertThat(matchedIdentifier["type"]).isEqualTo("BANKID_SUB")
+        assertThat(matchedIdentifier["value"]).isEqualTo(identifier)
+        assertThat(body.keys).doesNotContain("externalIds", "coreAttributes", "contactAttributes", "addressAttributes")
+        assertThat(body.values.joinToString(" ")).doesNotContain("Private", "Fixture", "1990-01-01")
+    }
+
+    @Test
+    @TestSecurity(user = "contract-test", roles = ["ROLE_OPERATOR"])
+    fun `browser lookup returns not found for a valid unmatched identifier`() {
+        val missingIdentifier = "missing-${java.util.UUID.randomUUID()}"
+        val body = given()
+            .contentType(ContentType.JSON)
+            .body("""{"type":"BANKID_SUB","value":"$missingIdentifier"}""")
+            .post("/api/v1/parties/by-external-id/lookup")
+            .then().statusCode(404)
+            .extract().asString()
+        assertThat(body).doesNotContain(missingIdentifier)
+    }
+
+    @Test
+    @TestSecurity(user = "contract-test", roles = ["ROLE_VIEWER"])
+    fun `browser lookup denies a role outside operator and admin`() {
+        given()
+            .contentType(ContentType.JSON)
+            .body("""{"type":"BANKID_SUB","value":"not-queried"}""")
+            .post("/api/v1/parties/by-external-id/lookup")
+            .then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "contract-test", roles = ["ROLE_OPERATOR"])
+    fun `browser lookup rejects unsupported, blank, oversized, and missing input without reflecting it`() {
+        val oversized = "x".repeat(257)
+        listOf(
+            """{"type":"BIRTH_NUMBER","value":"private-index"}""",
+            """{"type":"BANKID_SUB","value":"   "}""",
+            """{"type":"BANKID_SUB","value":"$oversized"}""",
+            "{}",
+            "null",
+            "",
+        ).forEach { request ->
+            val response = given()
+                .contentType(ContentType.JSON)
+                .body(request)
+                .post("/api/v1/parties/by-external-id/lookup")
+                .then().statusCode(400)
+                .extract().asString()
+            assertThat(response).doesNotContain("private-index", oversized)
+        }
+    }
+
+    @Test
+    fun `browser lookup requires authentication`() {
+        given()
+            .contentType(ContentType.JSON)
+            .body("""{"type":"BANKID_SUB","value":"not-queried"}""")
+            .post("/api/v1/parties/by-external-id/lookup")
+            .then().statusCode(401)
+    }
+
+    @Test
+    @TestSecurity(user = "contract-test", roles = ["ROLE_OPERATOR"])
     fun `a resolve request missing every spec-required field is rejected, not silently resolved`() {
         val required = requestSchema(RESOLVE_PATH, "post").get("required").map { it.asText() }
         assertThat(required).describedAs("declared required fields on %s", RESOLVE_PATH).isNotEmpty()

@@ -7,12 +7,15 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Network, RefreshCw, Play, Pause, ArrowRight, ArrowLeft, BookOpen } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { edgeGeometry, pathId } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBands } from '@/components/topology/layout'
+import { classifyBffFailure } from '@/lib/services/bff'
 import {
   parseGovernanceLineage,
   type GovernanceLineageService as GovService,
@@ -73,6 +76,7 @@ export default function LineageFlowPage() {
   const [flow, setFlow] = useFlowAnimation()
   const [isChecking, setIsChecking] = useState(true)
   const [hasVerifiedSnapshot, setHasVerifiedSnapshot] = useState(false)
+  const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const requestRef = useRef(0)
 
   const load = useCallback(async () => {
@@ -88,10 +92,13 @@ export default function LineageFlowPage() {
           setSelected(null)
           setHasVerifiedSnapshot(false)
         }
-        setUnavailable({ kind: res.status === 401 || res.status === 403 ? 'unauthorized' : res.status === 404 ? 'not_deployed' : 'unreachable' })
+        setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
-      const evidence = parseGovernanceLineage(await res.json())
+      const payload = await res.json()
+      if (request !== requestRef.current) return
+      setContentSource(payload.contentSource ?? null)
+      const evidence = parseGovernanceLineage(payload)
       if (request !== requestRef.current) return
       if (!evidence) { setUnavailable({ kind: 'error' }); return }
       if (!evidence.available) { setUnavailable({ kind: 'not_deployed' }); return }
@@ -162,6 +169,8 @@ export default function LineageFlowPage() {
                'Who produces data for whom — the declared data-governance lineage (ADR-0071), derived from each service’s governance.yaml, animated as producer → consumer flow.')}
         icon={<Network aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
       />
+
+      <ContentSourceNote source={contentSource} />
 
       {isChecking && !hasVerifiedSnapshot && !unavailable ? (
         <div className="card" role="status" aria-live="polite" data-testid="lineage-loading" style={{ padding: 40, textAlign: 'center', color: 'var(--text-tertiary)' }}>

@@ -9,6 +9,7 @@ import com.openbank.libs.persistence.outbox.AbstractPanacheOutboxRepository
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.libs.persistence.outbox.OutboxTableShape
+import com.openbank.libs.persistence.outbox.TraceparentCapture
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -42,5 +43,8 @@ class DocumentOutboxRepositoryImpl(clock: Clock) :
         it.attemptCount = 0
         it.createdAt = createdAt
         it.updatedAt = createdAt
+        // Same transaction as the event: the dispatcher runs later with no request, so this is the
+        // only chance to remember which request produced it.
+        it.traceContext = traceparent ?: TraceparentCapture.current()
     }
 }

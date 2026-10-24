@@ -165,3 +165,7 @@ audit-service + aml-service konzumují event
 3. **Human-in-the-loop pro fuzzy shody** — `POTENTIAL_HIT` nikdy automaticky neblokuje; vyžaduje compliance přezkum.
 4. **Data listin se neukládají** — pouze metadata shody; záznamy listiny zůstávají na autoritativních zdrojových URL.
 5. **Minimalizace PII** — `name` a `dateOfBirth` jsou PII; maskují se v logu.
+
+## Heartbeat naplánované úlohy
+
+Úloha (60sekundový tick obnovy sankčních seznamů) registruje celoflotilový heartbeat `sanctions-list-refresh` (`DomainMetrics.registerWorkflowLiveness`, nasazený při startu) a úspěch zapisuje jen na cestě úspěchu: tick se počítá jako úspěšný, jen pokud v něm žádný seznam neselhal; feed, který selhává každou minutu, tak zestárne místo aby vypadal zdravě. `WorkflowLivenessStale` upozorní, když stáří překročí dvojnásobek očekávaného intervalu.

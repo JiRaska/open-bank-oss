@@ -1,6 +1,6 @@
 # Architecture
 
-The service follows the hexagonal architecture mandated by [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture.md). The domain layer has **zero framework imports**. Persistence is plain JDBC (no ORM) over a small set of evidence tables — the service owns no banking data; its "outputs" are model completions, downstream read calls, merge/proposal evidence rows, and audit events.
+The service follows the hexagonal architecture mandated by [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture.md). The domain layer has **zero framework imports**. Persistence is plain JDBC (no ORM) for proposal, kill-switch, merge-record, and audit-outbox state — the service owns no banking data; its "outputs" are model completions, downstream read calls, merge/proposal evidence rows, and audit events.
 
 ## C4 — container view
 
@@ -63,10 +63,16 @@ The use-case orchestration and ports:
 
 ## Durable audit outbox
 
-The service has no domain-event outbox, but its `agent_audit_outbox` durably records AI-attributed `AuditEvent`s before Kafka delivery. The **model gateway**, **policy gate**, and **merge-record ingest** publish through `AuditEventPublisher` (the ingest attributed to the merging human, `HUMAN` / `agent.pr.merged`); a dispatcher retries broker delivery and `audit-service` deduplicates the producer event id before extending its hash chain. Kafka activation remains explicitly controlled until the runtime rollout is attested.
+The service has no domain-event outbox, but its `agent_audit_outbox` durably records AI-attributed `AuditEvent`s before Kafka delivery. The **model gateway**, **policy gate**, and **merge-record ingest** publish through `AuditEventPublisher` (the ingest attributed to the merging human, `HUMAN` / `agent.pr.merged`); a dispatcher retries broker delivery and `audit-service` deduplicates the producer event id before extending its hash chain.
+
+Each proposal creation or decision stores its state and the corresponding audit event in one database transaction. If the operation fails, both writes roll back. The merge recorder likewise commits its record and durable audit enqueue together. Kafka delivery happens after those database transactions and is at least once, so consumers must deduplicate. This change does not repair historical missing audit events. Kafka activation remains explicitly controlled until the runtime rollout is attested.
 
 ## Resilience
 
 - `quarkus-smallrye-fault-tolerance` on the outbound calls.
 - The chat loop degrades gracefully: a model 429 / "request too large" / backend outage returns a friendly message rather than a 5xx; a whole tool round of errors stops offering tools so the model must answer in text.
 - Fail-closed PDP: any OPA transport error is a DENY (with `pdpError=true` for the BLOCK-mode safety fallback).
+
+## Scheduled-job heartbeat
+
+The agent audit outbox poller registers the fleet workflow-liveness heartbeat `agent-audit-outbox-dispatch` (`DomainMetrics.registerWorkflowLiveness`, seeded at startup) and records a success only on its success path: it is registered only while `agent.audit.kafka.enabled` is true, so a disabled dispatcher cannot report success, and a poll with a failed send does not count. `WorkflowLivenessStale` alerts when the age exceeds twice the expected interval.

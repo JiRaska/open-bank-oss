@@ -30,7 +30,16 @@ on:
     paths:
       - "openbank-infra/aws/envs/sandbox-platform/**"
       - ".github/workflows/platform-tofu.yml"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Apply scope
+        type: choice
+        options:
+          - platform
+          - admin-ui-evidence
+        default: platform
+        required: true
 
 permissions:
   contents: read
@@ -198,8 +207,19 @@ jobs:
     environment: platform-apply
     env:
       TF_VAR_governance_gh_pat: ${{ secrets.GOVERNANCE_GH_PAT }}
+      PLAN_SCOPE: ${{ inputs.scope || 'platform' }}
     steps:
+      - name: Verify apply dispatch is from main
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Platform apply must be dispatched from main."
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Test evidence plan guard
+        run: python3 .github/scripts/test-admin-ui-evidence-plan.py
 
       - name: Configure AWS credentials (OIDC, admin apply role)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -249,7 +269,24 @@ jobs:
         working-directory: ${{ env.ENV_DIR }}
         run: |
           set -o pipefail
-          tofu plan -input=false -lock-timeout=300s -no-color -out=tfplan 2>&1 | tee /tmp/apply-plan.txt
+          targets=()
+          if [ "$PLAN_SCOPE" = "admin-ui-evidence" ]; then
+            targets=(
+              "-target=aws_iam_role.admin_ui_evidence"
+              "-target=aws_iam_role_policy.admin_ui_evidence"
+              "-target=aws_s3_bucket_policy.test_evidence"
+            )
+          elif [ "$PLAN_SCOPE" != "platform" ]; then
+            echo "::error::Unsupported apply scope."
+            exit 1
+          fi
+          tofu plan -input=false -lock-timeout=300s -no-color -out=tfplan "${targets[@]}" 2>&1 | tee /tmp/apply-plan.txt
+          if [ "$PLAN_SCOPE" = "admin-ui-evidence" ]; then
+            plan_json="$(mktemp "$RUNNER_TEMP/admin-ui-evidence-plan.XXXXXX.json")"
+            trap 'rm -f "$plan_json"' EXIT
+            tofu show -json tfplan > "$plan_json"
+            python3 "$GITHUB_WORKSPACE/.github/scripts/check-admin-ui-evidence-plan.py" "$plan_json"
+          fi
           {
             echo "### \`tofu apply\` plan — ${ENV_DIR}"
             echo '```'

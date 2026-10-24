@@ -27,3 +27,7 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Auth:** Keycloak OIDC (klient `openbank-services`); OPA autorizace (ADR-0034) ve výchozím stavu advisory; `@Authorize` na recallu
 - **Money-path:** ANO — uvedeno v `rules.yaml: money_path_services`; ADR-0057 tier **T0 (always-on)**; threat model v `docs/threat-models/openbank-sepa-instant.md`
 - **Sankční brána:** synchronní sankční prověrka jmen plátce + příjemce při submitu (ADR-0032), fail-closed
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

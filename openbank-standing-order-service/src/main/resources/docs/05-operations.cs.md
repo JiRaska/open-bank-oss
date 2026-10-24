@@ -118,3 +118,11 @@ Verze se řeší ze sdíleného `libs.versions.toml` / konvenčního pluginu `op
 - **Release osa:** release-please vlastní `version.txt` (aktuálně `0.2.0`). Feature/fix PR **nesmí** ručně editovat `version.txt`; merge do `main` otevře per-service Release PR, který ji bumpne, zapíše changelog a otaguje `standing-order-service-v<version>`.
 - **API kontraktová osa:** `openapi.yaml info.version` (`1.0.0`) se bumpuje nezávisle z OpenAPI diffu (ADR-0048), ne z typu commitu.
 - **CI:** path-scoped per-service pipeline; integrační testy používají per-job Testcontainers (žádný sdílený compose stack).
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

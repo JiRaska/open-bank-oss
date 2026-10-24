@@ -4,44 +4,115 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { Shield, RefreshCw, Clock, Zap, ChevronDown, ChevronRight, Info, Circle, Loader2 } from 'lucide-react'
 import { fetchAllServiceConfigSnapshots } from '@/lib/api'
-import type { ServiceConfigSnapshot } from '@/types'
+import { workloadHealthIdentity } from '@/lib/health/workloadHealth'
+import type { ServiceConfigResponse, ServiceConfigSnapshot, ServiceHealth } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 const POLL_INTERVAL = 15_000
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function hasNumericFields(value: unknown, fields: string[]): boolean {
+  return value === undefined || value === null || (isRecord(value) && fields.every(field => Number.isFinite(value[field])))
+}
+
+function parseServiceConfigSnapshot(value: unknown): ServiceConfigSnapshot | null {
+  if (!isRecord(value)
+    || typeof value.name !== 'string' || value.name.trim() === ''
+    || typeof value.port !== 'number' || !Number.isFinite(value.port) || value.port <= 0
+    || typeof value.reachable !== 'boolean'
+    || (value.namespace !== undefined && (typeof value.namespace !== 'string' || value.namespace.trim() === ''))
+    || (value.latencyMs !== null && (typeof value.latencyMs !== 'number' || !Number.isFinite(value.latencyMs)))) return null
+
+  const config = value.config
+  if (config !== null && (!isRecord(config)
+    || typeof config.service !== 'string'
+    || !hasNumericFields(config.rateLimit, ['maxConcurrent'])
+    || !hasNumericFields(config.circuitBreaker, ['requestVolumeThreshold', 'failureRatio', 'successThreshold', 'delayMs'])
+    || !hasNumericFields(config.retry, ['maxRetries', 'delayMs', 'jitterMs'])
+    || !hasNumericFields(config.timeout, ['valueMs']))) return null
+
+  const health = value.health
+  if (health !== null && (!isRecord(health)
+    || typeof health.status !== 'string' || !['UP', 'DOWN', 'DEGRADED'].includes(health.status)
+    || (health.checks !== undefined && (!Array.isArray(health.checks)
+      || !health.checks.every(check => isRecord(check)
+        && typeof check.name === 'string'
+        && (check.status === 'UP' || check.status === 'DOWN')))))) return null
+
+  const normalizedConfig: ServiceConfigResponse | null = config === null ? null : {
+    service: config.service as string,
+    rateLimit: (config.rateLimit ?? null) as ServiceConfigResponse['rateLimit'],
+    circuitBreaker: (config.circuitBreaker ?? null) as ServiceConfigResponse['circuitBreaker'],
+    retry: (config.retry ?? null) as ServiceConfigResponse['retry'],
+    timeout: (config.timeout ?? null) as ServiceConfigResponse['timeout'],
+  }
+  const normalizedHealth: ServiceHealth | null = health === null ? null : {
+    status: health.status as ServiceHealth['status'],
+    checks: Array.isArray(health.checks) ? health.checks.map(check => ({
+      name: (check as { name: string }).name,
+      status: (check as { status: 'UP' | 'DOWN' }).status,
+    })) : [],
+  }
+  return {
+    name: value.name,
+    ...(typeof value.namespace === 'string' ? { namespace: value.namespace } : {}),
+    port: value.port,
+    config: normalizedConfig,
+    health: normalizedHealth,
+    latencyMs: value.latencyMs as number | null,
+    reachable: value.reachable,
+  }
+}
 
 export default function ServiceConfigPage() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [snapshots, setSnapshots] = useState<ServiceConfigSnapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [refreshFailed, setRefreshFailed] = useState(false)
+  const refreshGeneration = useRef(0)
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
   const refresh = useCallback(async () => {
+    const generation = ++refreshGeneration.current
+    const isCurrent = () => generation === refreshGeneration.current
     try {
       const data = await fetchAllServiceConfigSnapshots()
-      setSnapshots(data)
+      if (!Array.isArray(data)) {
+        throw new Error('invalid service config response')
+      }
+      const parsed = data.map(parseServiceConfigSnapshot)
+      if (!parsed.every((snapshot): snapshot is ServiceConfigSnapshot => snapshot !== null)) {
+        throw new Error('invalid service config response')
+      }
+      if (!isCurrent()) return
+      setSnapshots(parsed)
       setLastRefresh(new Date())
+      setRefreshFailed(false)
     } catch (e) {
-      // The BFF is unreachable (in the sandbox most of the fleet isn't deployed),
-      // which is expected, not exceptional. Keep the last-known-good snapshots and
-      // let `finally` drop the spinner so the page degrades to its empty/stale
-      // state. Without this catch the rejection escaped the effect entirely as an
-      // unhandled promise rejection on every failed poll.
+      // Keep the last known sample for context, but make its stale state visible.
       console.error('Failed to load service config snapshots', e)
+      if (isCurrent()) setRefreshFailed(true)
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     refresh()
     const id = setInterval(refresh, POLL_INTERVAL)
-    return () => clearInterval(id)
+    return () => {
+      clearInterval(id)
+      refreshGeneration.current += 1
+    }
   }, [refresh])
 
   const toggle = (name: string) => setExpanded(p => p === name ? null : name)
@@ -66,7 +137,7 @@ export default function ServiceConfigPage() {
         actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {lastRefresh && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              {lastRefresh.toLocaleTimeString(dateLocale)}
+              {t('Poslední úspěšné načtení', 'Last successful load')}: <time dateTime={lastRefresh.toISOString()}>{lastRefresh.toLocaleString(dateLocale)}</time>
             </span>
           )}
           <button
@@ -85,12 +156,24 @@ export default function ServiceConfigPage() {
           </button>
         </div>}
       />
+      {refreshFailed && (
+        <div role={lastRefresh ? 'status' : 'alert'} aria-live="polite" style={{ marginBottom: '16px', padding: '12px 16px', border: '1px solid var(--warning-border)', borderRadius: '10px', background: 'var(--warning-bg)', color: 'var(--text-primary)' }}>
+          {lastRefresh
+            ? t('Obnovení selhalo. Zobrazené hodnoty pocházejí z posledního úspěšného načtení a mohou být zastaralé.', 'Refresh failed. The values shown are from the last successful load and may be stale.')
+            : t('Konfiguraci služeb se nepodařilo načíst; stav je neznámý.', 'Service configuration could not be loaded; status is unknown.')}
+        </div>
+      )}
+      {lastRefresh && snapshots.length === 0 && (
+        <p role="status" style={{ marginBottom: '16px', color: 'var(--text-secondary)' }}>
+          {t('Poslední úspěšné načtení neobsahovalo žádné pozorování konfigurace služeb.', 'The last successful load returned no service configuration observations.')}
+        </p>
+      )}
       {/* Status summary */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
+      {snapshots.length > 0 && <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
         <StatusPill color="var(--success-text)" bg="var(--success-bg)" count={upCount} label={t('V pořádku', 'Healthy')} />
         {degradedCount > 0 && <StatusPill color="var(--warning-text)" bg="var(--warning-bg)" count={degradedCount} label={t('Zhoršené', 'Degraded')} />}
         {downCount > 0 && <StatusPill color="var(--danger-text)" bg="var(--danger-bg)" count={downCount} label={t('Nedostupné', 'Unreachable')} />}
-      </div>
+      </div>}
 
       {/* Legend row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
@@ -112,14 +195,15 @@ export default function ServiceConfigPage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
         {snapshots.map(snap => {
           const cfg = snap.config
-          const isOpen = expanded === snap.name
-          const panelId = `service-config-${snap.name.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+          const identity = workloadHealthIdentity(snap)
+          const isOpen = expanded === identity
+          const panelId = `service-config-${encodeURIComponent(identity)}`
           const healthStatus = !snap.reachable ? 'down' : snap.health?.status === 'UP' ? 'up' : snap.health?.status === 'DOWN' ? 'down' : 'degraded'
           const hasCustomConfig = cfg && (cfg.rateLimit || cfg.circuitBreaker || cfg.retry || cfg.timeout)
 
           return (
             <div
-              key={snap.name}
+              key={identity}
               className="card"
               style={{ overflow: 'hidden', borderRadius: 'var(--r-lg)' }}
             >
@@ -128,7 +212,7 @@ export default function ServiceConfigPage() {
                 type="button"
                 aria-expanded={isOpen}
                 aria-controls={isOpen ? panelId : undefined}
-                onClick={() => toggle(snap.name)}
+                onClick={() => toggle(identity)}
                 style={{
                   width: '100%',
                   display: 'flex',
@@ -151,6 +235,7 @@ export default function ServiceConfigPage() {
                   </span>
                   <HealthDot status={healthStatus} />
                   <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{snap.name}</span>
+                  {snap.namespace && <span className="tag" aria-label={t(`Jmenný prostor ${snap.namespace}`, `Namespace ${snap.namespace}`)} style={{ fontSize: '10px' }}>{snap.namespace}</span>}
                   <span className="tag">:{snap.port}</span>
                   {snap.latencyMs != null && (
                     <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'JetBrains Mono, monospace' }}>

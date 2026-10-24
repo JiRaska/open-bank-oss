@@ -127,15 +127,21 @@ export function useServiceResource<T = unknown>(
           setLoading(false)
           return
         }
-        const raw = (await res.json()) as unknown
+        // Reading a failed body is transport failure; valid HTTP carrying invalid JSON
+        // is a terminal contract failure and must not trigger cold-pod wake retries.
+        let raw: unknown
+        try {
+          raw = await res.json()
+        } catch (error) {
+          if (cancelled) return
+          if (!error || typeof error !== 'object' || !('name' in error) || error.name !== 'SyntaxError') throw error
+          setUnavailable({ kind: 'error', status: res.status })
+          setWaking(false)
+          setLoading(false)
+          return
+        }
         if (cancelled) return
-        // `select` runs OUTSIDE the transport catch below, deliberately. These pages parse through
-        // a strict client contract (cards is the PCI allow-list boundary), so `select` throws on a
-        // payload the upstream should not have sent. Letting that land in the transport catch
-        // classified a CONTRACT violation as a cold pod: the screen said "the service is waking
-        // up", retried three times, and then reported `unreachable` — sending the operator after
-        // a scaling problem that does not exist while the real fault, a malformed response, was
-        // never named anywhere. A parse failure is `error`: terminal, not retried.
+        // A decoder/schema rejection is terminal regardless of its exception class.
         let parsed: T
         try {
           parsed = (select ? select(raw) : (raw as T))

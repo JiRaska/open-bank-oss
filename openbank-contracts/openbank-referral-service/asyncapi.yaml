@@ -14,9 +14,11 @@ channels:
     publish: {operationId: referralQualified, message: {$ref: '#/components/messages/Qualified'}}
   referral.reward.requested.v1:
     address: openbank.referral.reward-requested.v1
+    x-planned-consumer: https://github.com/JiRaska/open-bank-oss/issues/13176
     publish: {operationId: referralRewardRequested, message: {$ref: '#/components/messages/RewardRequested'}}
   referral.reward.outcome.v1:
     address: openbank.referral.reward-outcome.v1
+    x-planned-consumer: https://github.com/JiRaska/open-bank-oss/issues/7194
     publish: {operationId: referralRewardOutcome, message: {$ref: '#/components/messages/RewardOutcome'}}
 components:
   messages:

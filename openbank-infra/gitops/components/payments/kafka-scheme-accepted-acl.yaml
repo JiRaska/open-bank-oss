@@ -1,14 +1,9 @@
-# Strimzi mTLS identities + ACLs for the `payment.scheme-accepted` money path
-# (ADR-0108 threat model §2a; re-introduced under ADR-0137 TOGETHER WITH the
-# tls:9093 listener + per-service client mTLS — the first removal in #2554 was
-# premature because no TLS listener existed, so the anonymous consumer was the
-# only thing the ACLs could deny).
+# Strimzi mTLS identities + ACLs for the payments services (ADR-0137).
 #
-# Threat (transaction-service threat model §2a): a rogue/misconfigured producer
-# publishes a forged SchemeAcceptedEvent to `payment.scheme-accepted` and drives
-# an unauthorised settlement in the money-path engine. SchemeAcceptedConsumer
-# books it with no party-level SCA (system-initiated). Mitigation = only the
-# four payment rails may Write, only transaction-service may Read.
+# The file name is historical: it was created for the `payment.scheme-accepted` topic, which was
+# removed (ADR-0108: rail settlement runs over REST, SettlementAdapter -> transaction-service,
+# and nothing ever produced to the topic). The name is kept because many manifests and tests cite
+# this path for the eso-kafka-cert-reader Role below.
 #
 # Identity model (ADR-0137): mTLS gives each *service* exactly one client cert =
 # one KafkaUser = one principal for ALL of its Kafka traffic, so KafkaUsers are
@@ -29,11 +24,7 @@
 # user.password + ca.crt). Those secrets are projected into the `payments`
 # namespace by External Secrets — see kafka-mtls-externalsecrets.yaml.
 ---
-# ── Rail producers: Write to payment.scheme-accepted ────────────────────────
-# NOTE: today the four rails settle over HTTP (SettlementAdapter →
-# transaction-service REST), so they do not yet publish to this topic; these
-# Write grants provision the ADR-0108 event path for when it is wired, and make
-# the topic deny-by-default for everyone else in the meantime.
+# ── Rail producers: sepa-payment, sepa-instant, domestic-payment, swift-service ──
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
 metadata:
@@ -57,12 +48,6 @@ spec:
       - resource: { type: topic, name: openbank.sepa.payment.events, patternType: literal }
         operations: [Write, Describe]
         host: "*"
-      - resource:
-          type: topic
-          name: payment.scheme-accepted
-          patternType: literal
-        operations: [Write, Describe]
-        host: "*"
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
@@ -82,12 +67,6 @@ spec:
   authorization:
     type: simple
     acls:
-      - resource:
-          type: topic
-          name: payment.scheme-accepted
-          patternType: literal
-        operations: [Write, Describe]
-        host: "*"
       # sepa-instant's own domain-event stream (kafka-producer-sct-inst-events-out ->
       # openbank.sepa.instant.events). Missing here, the producer got "Topic authorization
       # failed" once the cluster stopped allowing ANONYMOUS/no-ACL writes, and a submit blocked
@@ -151,12 +130,6 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
-      - resource:
-          type: topic
-          name: payment.scheme-accepted
-          patternType: literal
-        operations: [Write, Describe]
-        host: "*"
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
@@ -176,12 +149,6 @@ spec:
   authorization:
     type: simple
     acls:
-      - resource:
-          type: topic
-          name: payment.scheme-accepted
-          patternType: literal
-        operations: [Write, Describe]
-        host: "*"
       # swift-service's own domain-event stream (swift-events-out ->
       # openbank.payments.swift.event). Missing here, the producer gets "Topic
       # authorization failed" and a synchronous send HANGS on the failing publish —
@@ -193,12 +160,7 @@ spec:
         operations: [Write, Describe, Create]
         host: "*"
 ---
-# ── Consumer: transaction-service ───────────────────────────────────────────
-# Reads scheme-accepted, writes its DLQ, and joins its dedicated consumer group.
-# The group name MUST match the live SmallRye channel group.id — aligned to
-# `transaction-scheme-accepted-cg` in transaction-service application.yaml under
-# this same change (it was `openbank-transaction-service`; renaming is safe
-# because the topic is empty — nothing produces to it yet).
+# ── transaction-service ─────────────────────────────────────────────────────
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
 metadata:
@@ -220,24 +182,6 @@ spec:
       # Its own domain-event topic — consumed by audit-service and analytics-sink.
       - resource: { type: topic, name: openbank.transactions.transaction.initiated, patternType: literal }
         operations: [Write, Describe]
-        host: "*"
-      - resource:
-          type: topic
-          name: payment.scheme-accepted
-          patternType: literal
-        operations: [Read, Describe]
-        host: "*"
-      - resource:
-          type: topic
-          name: payment.scheme-accepted.dlq
-          patternType: literal
-        operations: [Write, Describe]
-        host: "*"
-      - resource:
-          type: group
-          name: transaction-scheme-accepted-cg
-          patternType: literal
-        operations: [Read]
         host: "*"
 ---
 # ── clearing-service (#2665 Tier 1) ─────────────────────────────────────────

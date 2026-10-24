@@ -15,6 +15,9 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { requireApiPermission } from '@/lib/auth/api-permission'
 import { serverSvcUrl } from '@/lib/services/bff'
+import type { LoyaltyBenefit, LoyaltyCatalogueResponse, LoyaltyEarnSource, LoyaltyProvisioning, LoyaltyState } from '@/lib/loyalty/contracts'
+
+export type { LoyaltyBenefit, LoyaltyCatalogueResponse, LoyaltyEarnSource, LoyaltyProvisioning, LoyaltyState } from '@/lib/loyalty/contracts'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,36 +25,6 @@ const SERVICE = 'loyalty-service'
 const NAMESPACE = 'loyalty'
 const PORT = 8157
 const TIMEOUT_MS = 4000
-
-export type LoyaltyState = 'ok' | 'not_deployed' | 'unreachable' | 'unauthorized'
-
-export interface LoyaltyBenefit {
-  id: string
-  engine: string
-  priceLeaves: number
-  validityDays: number
-  description: string
-}
-
-export interface LoyaltyEarnSource {
-  id: string
-  leaves: number
-  validityDays: number
-}
-
-export interface LoyaltyProvisioning {
-  at: string
-  outstandingLeaves: number
-  annualCapPerParty: number
-  ruleVersion: string
-}
-
-export interface LoyaltyCatalogueResponse {
-  state: LoyaltyState
-  benefits: LoyaltyBenefit[]
-  earnSources: LoyaltyEarnSource[]
-  provisioning: LoyaltyProvisioning | null
-}
 
 function stateFor(status: number): LoyaltyState {
   if (status === 401 || status === 403) return 'unauthorized'

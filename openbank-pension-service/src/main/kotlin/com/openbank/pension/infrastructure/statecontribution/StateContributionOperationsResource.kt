@@ -66,6 +66,8 @@ data class ReturnReportResponse(
     val channelReference: String?,
     val resultApplied: Boolean,
     val createdAt: Instant,
+    val currency: String,
+    val total: BigDecimal,
 ) {
     companion object {
         fun from(r: ReturnReport) = ReturnReportResponse(
@@ -76,12 +78,21 @@ data class ReturnReportResponse(
             r.channelReference,
             r.resultApplied,
             r.createdAt,
+            r.total.currency.code,
+            r.total.amount,
         )
     }
 }
 
-/** `filed` is false when no return was DUE, so no report was filed. */
-data class ReturnReportRunResponse(val filed: Boolean, val report: ReturnReportResponse?)
+/**
+ * `filed` is false when no return was DUE, so no report was filed. [reports] holds one report per
+ * currency. [report] is the first of them, kept for clients written before multi-currency reports.
+ */
+data class ReturnReportRunResponse(
+    val filed: Boolean,
+    val report: ReturnReportResponse?,
+    val reports: List<ReturnReportResponse>,
+)
 
 /**
  * Operator routes for the CZ state-contribution returns (ZDPS §18, #12382). Like the other funding
@@ -149,8 +160,8 @@ class StateContributionOperationsResource {
     ): ReturnReportRunResponse {
         requireIdempotencyKey(idempotencyKey)
         val m = month(requireNotNull(request?.month) { "month (YYYY-MM) is required" }, "month")
-        val report = returns.fileReturnReport(m)
-        return ReturnReportRunResponse(report != null, report?.let(ReturnReportResponse::from))
+        val filed = returns.fileReturnReport(m).map(ReturnReportResponse::from)
+        return ReturnReportRunResponse(filed.isNotEmpty(), filed.firstOrNull(), filed)
     }
 
     @GET

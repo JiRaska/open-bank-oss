@@ -6,7 +6,7 @@ package com.openbank.interest.infrastructure.client
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
@@ -29,7 +29,10 @@ import java.util.UUID
  */
 @RegisterRestClient(configKey = "product-catalog")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #8481: catalog reads are minted by the NAMED oidc-client `ledger` - Keycloak client
+// `openbank-interest` holding the narrow catalog:read scope - never the shared `openbank-services`
+// principal. account_rest_ext.rego grants service-account-openbank-interest catalog.read and nothing else there.
+@OidcClientFilter("ledger")
 @Produces(MediaType.APPLICATION_JSON)
 @Path("/api/v2")
 interface ProductCatalogClient {

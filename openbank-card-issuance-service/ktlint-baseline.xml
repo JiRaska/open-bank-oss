@@ -362,8 +362,4 @@
         <error line="87" column="62" source="standard:function-signature" />
         <error line="114" column="1" source="standard:spacing-between-declarations-with-annotations" />
     </file>
-    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
-        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
-        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
-    </file>
 </baseline>

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.15.0...treasury-service-v0.15.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **treasury:** reverse per GL account what was posted there, fail closed ([#13412](https://github.com/JiRaska/open-bank-oss/issues/13412)) ([84e3f7c](https://github.com/JiRaska/open-bank-oss/commit/84e3f7c773eb1a4021dafd08015bf56f3dd37902)), closes [#13411](https://github.com/JiRaska/open-bank-oss/issues/13411)
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.14.0...treasury-service-v0.15.0) (2026-10-19)
+
+
+### Features
+
+* **billing:** price fees from the pinned catalog revision, post by accounting class (ADR-0341) ([#13209](https://github.com/JiRaska/open-bank-oss/issues/13209)) ([dcd911c](https://github.com/JiRaska/open-bank-oss/commit/dcd911cea88eaa7b38cb7192ab89de830400b5a9))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.13.1...treasury-service-v0.14.0) (2026-10-19)
+
+
+### Features
+
+* **ledger:** own the accountingClass to GL map; treasury posts by class (ADR-0341) ([#13205](https://github.com/JiRaska/open-bank-oss/issues/13205)) ([b936611](https://github.com/JiRaska/open-bank-oss/commit/b936611a8c9f622a076b30377e0757485c29a6f6))
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.13.0...treasury-service-v0.13.1) (2026-10-14)
 
 

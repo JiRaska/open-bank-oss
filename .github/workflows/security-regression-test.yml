@@ -25,7 +25,12 @@ name: Security regression test
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+    # No `labeled`/`unlabeled`: the rule reads the CLOSED ISSUE's labels, never the PR's, so a PR
+    # label change cannot alter the verdict. Those two types only fired a second run that the
+    # concurrency group below then cancelled — a merge-train carrier is opened and then labelled
+    # `merge-train`, and the cancelled `opened` run is how #13137 was blamed for a job that ran no
+    # step (ADR-0343, inconclusive rule).
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read

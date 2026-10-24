@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v1.0.1...document-service-v1.1.0) (2026-10-18)
+
+
+### Features
+
+* **document:** propagate the producing request's trace through the outbox ([#13160](https://github.com/JiRaska/open-bank-oss/issues/13160)) ([92cda7d](https://github.com/JiRaska/open-bank-oss/commit/92cda7dc3d0bf2fd414ec94976ca1ba1b9132d56))
+
 ## [1.0.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v1.0.0...document-service-v1.0.1) (2026-10-14)
 
 
