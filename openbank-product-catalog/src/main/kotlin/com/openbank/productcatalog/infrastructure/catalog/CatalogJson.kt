@@ -100,6 +100,8 @@ class CatalogJson(private val mapper: ObjectMapper) {
         set<JsonNode>("eligibility", mapper.valueToTree(content.eligibility.map(::eligibilityToMap)))
         set<JsonNode>("relationships", mapper.valueToTree(content.relationships))
         set<JsonNode>("documentCodes", mapper.valueToTree(content.documentCodes))
+        // Part of the content node, so contentHash and approvalDigest cover the behaviour too (ADR-0352 §7).
+        content.behaviour?.let { set<JsonNode>("behaviour", toNode(it)) }
     }
 
     fun toContent(node: JsonNode): RevisionContent = RevisionContent(
@@ -139,6 +141,7 @@ class CatalogJson(private val mapper: ObjectMapper) {
             )
         }.orEmpty(),
         documentCodes = node.get("documentCodes")?.map(JsonNode::asText).orEmpty(),
+        behaviour = node.get("behaviour")?.takeUnless(JsonNode::isNull)?.let(::toObject),
     )
 
     private fun eligibilityToMap(rule: EligibilityRule): Map<String, Any> = mapOf(

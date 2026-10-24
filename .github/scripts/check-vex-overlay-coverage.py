@@ -100,6 +100,12 @@ NO_OVERLAY_YET: dict[str, str] = {
                               "services that already have overlays, but writing dispositions from "
                               "that assumption rather than the resolved runtimeClasspath artifacts "
                               "is exactly the fabrication this gate's own header refuses.",
+    "products": "#668 - openbank-products (ADR-0352 phase 2) is a released content module: a "
+                "build-time Kotlin DSL, reference product IR JSON, golden scenarios and the obp CLI. "
+                "It is deployed nowhere and serves nothing; its only consumers are developers and CI. "
+                "No VEX overlay is written yet: dispositions must come from this module's own resolved "
+                "runtime classpath (it depends on openbank-libs-testing for the golden runner), not be "
+                "copied from a service. Delete this entry in the PR that writes the overlay.",
 }
 
 
