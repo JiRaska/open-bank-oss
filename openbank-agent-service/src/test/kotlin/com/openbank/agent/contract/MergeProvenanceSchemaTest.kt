@@ -134,4 +134,25 @@ class MergeProvenanceSchemaTest {
             .`when`().post("/api/v1/agent-merge-records/app")
             .then().statusCode(403)
     }
+
+    @Test
+    fun `policy proof has its own additive schema without widening the old closed enum`() {
+        val proof = mapOf(
+            "kind" to "POLICY_PR_AUTO_MERGE", "scope" to "PR", "approvedBy" to "fixture-owner",
+            "approvedById" to 1234, "approvedAt" to "2026-10-24T11:59:00Z",
+            "evidenceUrl" to "https://github.com/JiRaska/open-bank-oss/pull/1",
+            "pullRequestNodeId" to "PR_fixture", "mergeEventNodeId" to "ME_fixture",
+            "mergeEventAt" to "2026-10-24T12:00:00Z", "observedAt" to "2026-10-24T12:00:01Z",
+            "policyCommitSha" to "c".repeat(40), "policyBlobSha" to "d".repeat(40),
+        )
+        val policyApp = (app - "authorization") + ("policyAuthorization" to proof)
+        val policySchema = schema("PolicyAppMergeRecordIngestRequest")
+        assertThat(policySchema.validate(mapper.valueToTree(policyApp))).isEmpty()
+        assertThat(validate(app + ("authorization" to proof))).isNotEmpty()
+        assertThat(policySchema.validate(mapper.valueToTree(policyApp + ("authorization" to exactProof)))).isNotEmpty()
+        assertThat(policySchema.validate(mapper.valueToTree(policyApp - "policyAuthorization"))).isNotEmpty()
+        assertThat(
+            schema("PolicyMergeAuthorization").validate(mapper.valueToTree(proof - "policyBlobSha")),
+        ).isNotEmpty()
+    }
 }

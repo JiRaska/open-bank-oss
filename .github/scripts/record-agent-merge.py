@@ -202,6 +202,8 @@ def backend_open(request, timeout=10):
 def post_record(base_url, token, payload, timeout=10):
     """POST the record; returns None on success or a human-readable failure reason."""
     suffix = "/app" if payload.get("mergedByType") == "GITHUB_APP" else ""
+    if payload.get("policyAuthorization") is not None:
+        suffix = "/app-policy"
     url = base_url.rstrip("/") + ENDPOINT_PATH + suffix
     request = urllib.request.Request(
         url,
@@ -256,11 +258,17 @@ def verify_stored(payload, stored):
     if payload.get("mergedByType") != "GITHUB_APP":
         if stored.get("mergedByType") != "HUMAN":
             raise ValueError("stored human merger has incorrect actor type")
+        if stored.get("authorization") is not None or stored.get("policyAuthorization") is not None:
+            raise ValueError("stored human merge carries App authorization")
         return
     for key in ("mergedByType", "mergedById", "headSha", "mergeCommitSha"):
         if stored.get(key) != payload[key]:
             raise ValueError("stored App merge identity differs: " + key)
-    expected, actual = payload["authorization"], stored.get("authorization")
+    family = "policyAuthorization" if payload.get("policyAuthorization") is not None else "authorization"
+    other = "authorization" if family == "policyAuthorization" else "policyAuthorization"
+    if stored.get(other) is not None or payload.get(other) is not None:
+        raise ValueError("ambiguous authorization families")
+    expected, actual = payload[family], stored.get(family)
     if not isinstance(actual, dict):
         raise ValueError("stored human authorization is missing")
     for key, value in expected.items():
@@ -380,6 +388,8 @@ def main(argv=None):
             version = capability.get("evidenceSchemaVersion")
             if type(version) is not int or version != 2:
                 raise ValueError("deployed backend does not support merge evidence schema 2; no write attempted")
+            if payload.get("policyAuthorization") is not None and capability.get("policyPrAuthorization") is not True:
+                raise ValueError("deployed backend does not support policy PR evidence; no write attempted")
         except ValueError as error:
             print(f"::error::record-agent-merge: {error}", file=sys.stderr)
             return 1

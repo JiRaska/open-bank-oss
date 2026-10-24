@@ -3593,6 +3593,23 @@ gates:
     run: |
       python3 .github/scripts/test-merge-authorization-proof.py
 
+  - id: agent-merge-pr-policy-selftest
+    name: "immutable PR policy authorization evidence regressions (ADR-0031)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — offline adversarial tests exercise the real policy reader, CLI
+      capability preflight, committed read-back, canonical parent/tree/blob identity and
+      PR timeline. Unknown policy source, codex downgrade and revoked intent fail closed.
+    budget_seconds: 60
+    min_subjects: 24
+    rationale: >-
+      PR intent under a reviewed pre-merge prefix rule is distinct from exact-head approval
+      and from bounded legacy reconstruction. The original evidence gate retains its floor.
+    review_after: "2027-10-25"
+    run: |
+      python3 .github/scripts/test-merge-pr-policy.py
+
   # ==== kotlin =========================================================
   # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
   # Fleet-wide scan (not diff-scoped): every Kafka topic a service publishes must have a

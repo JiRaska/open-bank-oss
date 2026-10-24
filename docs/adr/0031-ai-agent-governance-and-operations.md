@@ -296,7 +296,8 @@ actual `merged_by` login and account id. A trusted App merge is audited as `SERV
 App as `actorId`; it must never become a `HUMAN` event or substitute the approving owner into
 `mergedBy`. Direct human merges and their existing records retain their previous meaning.
 
-For new App merges, authorization is `OWNER_WORKFLOW_EXACT_HEAD`, scope `HEAD`: the CI producer
+For App merges requiring exact-head owner approval (the `codex/` exclusion), authorization is
+`OWNER_WORKFLOW_EXACT_HEAD`, scope `HEAD`: the CI producer
 verifies the raw trusted-App status on the actual PR head, the latest decision before merge,
 canonical repository/PR description, and the successful first-attempt main owner workflow and
 writer job. Both workflow actors must be the live User repository owner. The stored evidence
@@ -423,3 +424,29 @@ gap. No merge is repeated, no failed historical status is overwritten, and no ad
 - Temporal (durable workflow orchestration), LangGraph, vLLM + LiteLLM, Langfuse, Llama Guard /
   NeMo Guardrails, SPIFFE/SPIRE, pgvector — open runtime components (D6).
 - AGPL-3.0 + commercial dual-licensing, CLA vs DCO — licensing/IP strategy (D8).
+
+
+## Amendment 2026-10-25: bounded reconstruction under the pre-merge prefix rule
+
+The exact-head exclusion applies to `codex/`, not every agent branch. For a later App merge
+with no trusted exact-head decision, the recorder may preserve independently observed owner PR
+intent as `POLICY_PR_AUTO_MERGE`, scope `PR`, only when the canonical merge's first-parent tree
+contains an explicitly reviewed whole-source policy blob and its recognized owner-prefix rule
+permits this branch without exact-head approval. The initial reviewed source identities are the
+first-parent policy blobs of #13750 and #13725. Unknown blobs require a reviewed code change;
+AST matching alone is not a sandbox or a proof of arbitrary Python semantics. The producer
+verifies main ancestry, regular-file tree identity and the Git blob digest without executing it.
+It stores `policyCommitSha` and `policyBlobSha` alongside complete owner-request/merge-event
+observations. Neither field attests which workflow source executed the merge or certifies every
+historical governance requirement. `codex/`, revoked or wrong-PR decisions never downgrade.
+The legacy cutoff and its distinct evidence type remain unchanged.
+
+The old closed authorization enum stays intact on its existing request and response surfaces.
+The additive `/app-policy` endpoint and `policyAuthorization` response slot carry the new proof;
+`authorization` is null for these records. Mixing proof families is invalid. Schema capability
+remains integer 2 for existing producers, with a separate literal-true `policyPrAuthorization`
+flag required by the new producer before any new-proof write. V8 adds policy context columns
+without rewriting historical actors or evidence. Duplicates preserve original observation time;
+changed policy identities conflict. Deploy the new reader/UI and verify capabilities and actual
+image readiness before policy backfill; an old UI can drop the new proof and must not be used
+as an audit-completeness check. No deployment hold, Pact gate or review requirement is waived.
