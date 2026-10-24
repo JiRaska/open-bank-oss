@@ -1,0 +1,61 @@
+{
+  "identity": "Approved L\u00edpa vector identity, 2026-10-13; client release build 180",
+  "source_repository": "https://github.com/JiRaska/openbank-app",
+  "vector_source": "design-system/brand/lipa",
+  "app_preview": {
+    "source": "composeApp/src/androidUnitTest/screenshots/cards-wallet-visible-light.png",
+    "renderer": "CardsWalletScreenshotTest.loadedCardIsVisibleInWallet / CardsScreen",
+    "data": "FakeCardsApi, FakeScaApi and FakeTransactionApi; synthetic fixtures",
+    "treatment": "Unmodified rendered pixels, not a device capture"
+  },
+  "illustration_edit": {
+    "method": "Built-in imagegen; original scene and text preserved, brand patches replaced using the approved mark",
+    "prompt": "Replace every old OpenBank emblem with the approved L\u00edpa mark. Preserve characters, poses, composition, lighting and all diagram text. Change branding only."
+  },
+  "assets": [
+    {
+      "file": "lipa-mark.svg",
+      "sha256": "26f6c6521edf9414fe6092e7bb55a34c7b5c1d045f7fd8e3175fe0b7210d818f"
+    },
+    {
+      "file": "lipa-lockup-light.svg",
+      "sha256": "faeb304ec3a97df36602b032736694387c1e8941179a7f632a4f7e71e6a7cc0e"
+    },
+    {
+      "file": "lipa-lockup-dark.svg",
+      "sha256": "a1b071e4c4f1b2941cb0f71f555e01821f903eecf24e59de565c6e1121eca479"
+    },
+    {
+      "file": "lipa-icon.svg",
+      "sha256": "86c71c4c5c381e468f1d15b33e4b2d5758955d6b1bd7072919ea59c4e6a4a063"
+    },
+    {
+      "file": "lipa-icon-32.png",
+      "sha256": "7e917ade240eff3fcea7050032a51b7cca9a37711596300db78d3bd2321476a7"
+    },
+    {
+      "file": "lipa-icon-180.png",
+      "sha256": "ed495d1c876f2abec65916902b2af67d18ec6794c05d5aaf28c7b45934acc12e"
+    },
+    {
+      "file": "lipa-icon-192.png",
+      "sha256": "40bb2b281af7a3e7628e97daeb94ad13f9050b4e0ee4d4f40a422682c9f1fb72"
+    },
+    {
+      "file": "lipa-icon-512.png",
+      "sha256": "095f17c8bbe186c1cf9b25b066cfbbe8aff8ba00f2a3e43f89373682e08e5809"
+    },
+    {
+      "file": "app-cards-lipa.png",
+      "sha256": "35a5e9742e17a04e00f16f31ef36fdb75dc941057d3fcdbc37b1b2dc158742fe"
+    },
+    {
+      "file": "explorers-lipa.webp",
+      "sha256": "13e4089abf59afa5638786bd3de0a74c399511e57d1d958e411df8ab81c7e9b5"
+    },
+    {
+      "file": "labs-kernel-lipa.webp",
+      "sha256": "17bb2aaf63fb2dcc0a257585bb00a94c44327e27c7b09e270d9a4e83291fa914"
+    }
+  ]
+}
