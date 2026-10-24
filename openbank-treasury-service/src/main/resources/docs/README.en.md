@@ -4,6 +4,8 @@
 
 This documentation is published by the service at the management endpoint `/q/openbank/docs` (Docs-as-Service, ADR 0019).
 
+The [architecture chapter](./02-architecture.en.md) follows a deal through approval, ledger posting and reconciliation. The generated **API surface** chapter is rebuilt from this service's `openapi.yaml` in CI for every image; `/q/openapi` holds the complete schemas.
+
 ## TL;DR
 
 - **Tech stack:** Kotlin / Quarkus 3.x / PostgreSQL (Flyway migrations)

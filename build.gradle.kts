@@ -2,9 +2,13 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-// Root build file — empty by design. Per-service build.gradle.kts files own
-// their own plugin set and configure cyclonedxBom in-place because the
-// CycloneDxTask type is on the per-project plugin classpath, not the root.
+// Include every CycloneDX owner, including projects outside the Quarkus convention.
+subprojects {
+    val bomProject = this
+    bomProject.pluginManager.withPlugin("org.cyclonedx.bom") {
+        bomProject.pluginManager.apply("openbank.cyclonedx-verification")
+    }
+}
 
 // Aggregate convenience: `./gradlew sbomAll` runs cyclonedxBom on every
 // subproject that has the org.cyclonedx.bom plugin. CI uses this instead of

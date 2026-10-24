@@ -109,7 +109,7 @@ class TransactionPactProviderVerificationTest {
     /**
      * Serves the negative-auth interactions of the interest, sdd, sepa-payment and swift pacts.
      *
-     * On the git-pact side these live in their own class, [TransactionNegativeAuthPactVerificationTest],
+     * On the git-pact side these live in their own class, [TransactionNegativeAuthProviderVerificationTest],
      * which can simply omit `@TestSecurity`; a second `@PactBroker` class is not the equivalent move
      * here, because two broker-sourced classes for one provider each fetch every pact the broker holds
      * (this repo's "one broker-sourced @Provider test per provider" rule, and the

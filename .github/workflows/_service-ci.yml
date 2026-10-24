@@ -531,6 +531,11 @@ jobs:
         run: |
           set -euo pipefail
           cp .github/scripts/pact-broker-post.sh "$RUNNER_TEMP/pact-broker-post.sh"
+          cp .github/scripts/service-ci-provider-task-list.sh "$RUNNER_TEMP/service-ci-provider-task-list.sh"
+          cp .github/scripts/service-ci-discover-provider-pact-task.sh "$RUNNER_TEMP/service-ci-discover-provider-pact-task.sh"
+          chmod 700 "$RUNNER_TEMP/pact-broker-post.sh" \
+            "$RUNNER_TEMP/service-ci-provider-task-list.sh" \
+            "$RUNNER_TEMP/service-ci-discover-provider-pact-task.sh"
           bash "$RUNNER_TEMP/pact-broker-post.sh" --self-test
           cp .github/scripts/resolve-historical-service-ref.sh \
             "$RUNNER_TEMP/resolve-historical-service-ref.sh"

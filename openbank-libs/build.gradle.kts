@@ -53,9 +53,6 @@ dependencies {
 // binary is available; in a Docker build context that strips .git we fall
 // back to "unknown" — passing the real commit through a build-arg is a
 // follow-up if reproducible attribution becomes a hard requirement.
-val buildTimeStamp: String =
-    DateTimeFormatter.ISO_INSTANT.format(Instant.now().truncatedTo(ChronoUnit.SECONDS))
-
 val gitCommitStamp: String = runCatching {
     val proc = providers.exec {
         commandLine("git", "rev-parse", "--short", "HEAD")
@@ -87,7 +84,8 @@ val quarkusFromCatalog = libsVersionsToml["quarkus"] ?: error("quarkus version m
 tasks.processResources {
     inputs.property("kotlinVersion", kotlinFromCatalog)
     inputs.property("quarkusVersion", quarkusFromCatalog)
-    inputs.property("buildTime", buildTimeStamp)
+    // Stamp actual resource generation; an unchanged artifact keeps its original build time.
+    // The clock is output metadata, not a reason to rebuild every dependent test classpath.
     inputs.property("gitCommit", gitCommitStamp)
     filesMatching("openbank-build-info.properties") {
         filter(
@@ -98,7 +96,9 @@ tasks.processResources {
                 "quarkusLts" to "true",
                 "quarkusSupportUntil" to "2027-03-25",
                 "gradleVersion" to gradle.gradleVersion,
-                "buildTime" to buildTimeStamp,
+                "buildTime" to DateTimeFormatter.ISO_INSTANT.format(
+                    Instant.now().truncatedTo(ChronoUnit.SECONDS),
+                ),
                 "gitCommit" to gitCommitStamp,
                 "libsVersion" to project.version.toString(),
             ),

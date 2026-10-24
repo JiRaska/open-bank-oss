@@ -20,9 +20,15 @@ cleanup_test_evidence() {
   wait "${docker_events_pid}" 2>/dev/null || true
 }
 trap cleanup_test_evidence EXIT
+# Local task durations for the two observed slow builds; no second build
+# or Build Scan upload. Parallel task times are not a critical-path sum.
+GRADLE_PROFILE_ARGS=()
+case "$SERVICE" in
+  openbank-lending-service|openbank-pension-service) GRADLE_PROFILE_ARGS=(--profile) ;;
+esac
 # Cache healing replays this command only if verification fails before
 # the first Gradle task; tests and build outputs are never replayed.
 bash .github/scripts/retry-testcontainers-ebusy.sh -- \
   bash .github/scripts/retry-gradle-verification-cache.sh -- \
-  ./gradlew --configure-on-demand :"${SERVICE}":build --build-cache --console=plain --stacktrace \
+  ./gradlew "${GRADLE_PROFILE_ARGS[@]}" --configure-on-demand :"${SERVICE}":build --build-cache --console=plain --stacktrace \
   -Dquarkus.smallrye-openapi.store-schema-directory="build/openapi-generated"

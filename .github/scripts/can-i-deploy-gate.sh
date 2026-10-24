@@ -273,7 +273,7 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
     # Pacticipant (via record-deployment) but has never published a pact or been
     # verified against one. Has the same semantics as a 404 Pacticipant — it cannot
     # break any consumer/provider expectation. Treat as deployable.
-    if echo "$cid_out" | grep -q "No version with tag"; then
+    if [[ "$cid_out" == *"No version with tag"* ]]; then
       echo "::warning::can-i-deploy: ${svc} has no 'main'-tagged version yet (new service, no pacts) — treating as deployable (ADR-0092)"
       deployable_list+=("$svc")
     # If every failure line is "no version is currently recorded as deployed/released

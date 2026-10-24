@@ -87,7 +87,7 @@ import java.util.UUID
 @PactFolder("../pacts")
 // Everything EXCEPT the unauthenticated interactions, which class-level @TestSecurity above makes
 // unservable here — they expect 401 and every request this class makes carries an operator
-// identity. TransactionNegativeAuthPactVerificationTest serves them without @TestSecurity; the two
+// identity. TransactionNegativeAuthProviderVerificationTest serves them without @TestSecurity; the two
 // filters are complements built from one literal, so no interaction lands in both or in neither.
 // pact-jvm 4.7.3 matches a filter value against the state name with String.matches (a full-match
 // Java regex, read from InteractionFilter$ByProviderState), so the negative lookahead holds.

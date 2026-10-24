@@ -15,7 +15,7 @@ SCRIPT = Path(__file__).with_name("deploy-window-inputs.sh")
 def pull_request(number, head, labels=(), draft=False):
     return {
         "number": number, "state": "open", "head": {
-            "ref": head, "repo": {"full_name": "example/open-bank"}},
+            "ref": head, "sha": "a" * 40, "repo": {"full_name": "example/open-bank"}},
         "base": {"repo": {"full_name": "example/open-bank"}},
         "created_at": "2026-01-01T00:00:00Z", "draft": draft,
         "labels": [{"name": label} for label in labels], "auto_merge": None,
@@ -65,8 +65,16 @@ class DeployWindowInputsTest(unittest.TestCase):
         code, inventory = self.run_inventory([[deploy], [repair, feature, held_deploy]])
         self.assertEqual(code, 0)
         self.assertEqual([pr["number"] for pr in inventory], [1, 2])
+        self.assertEqual(inventory[0]["head_sha"], "a" * 40)
         self.assertTrue(inventory[1]["repair_priority"])
         self.assertFalse(inventory[0]["repair_priority"])
+
+    def test_missing_head_sha_fails_closed(self):
+        deploy = pull_request(1, "chore/gitops-auto-deploy-a")
+        del deploy["head"]["sha"]
+        code, inventory = self.run_inventory([[deploy]])
+        self.assertNotEqual(code, 0)
+        self.assertIsNone(inventory)
 
     def test_api_error_fails_closed(self):
         code, inventory = self.run_inventory([[]], fail_api=True)

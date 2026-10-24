@@ -6,6 +6,11 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+// Consumer contracts share this test helper without compiling the full test suite.
+kotlin.sourceSets.named("consumerPactTest") {
+    kotlin.include("com/openbank/customeredge/infrastructure/rest/InMemoryPaymentSessionBackend.kt")
+}
+
 dependencies {
     // Micrometer + Prometheus registry: customer-edge had no MeterRegistry, so it
     // exposed no /q/metrics surface and the openbank-services PodMonitor scraped a
