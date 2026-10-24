@@ -78,7 +78,7 @@ export default function SpaydUriPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10, marginTop: 12 }}>
           <Fact title="open-bank.tech" body={t('Doména se seznamem povolených bankovních aplikací (.well-known). Jen ty smí odkaz otevřít; telefon si seznam uloží při instalaci, takže banka ho otevře i offline. V pilotu naše doména, ve standardu doména asociace.', 'The host with the allowlist of banking apps (.well-known). Only those may open the link; the phone caches the list at install, so a bank opens it offline too. Our host in the pilot, the association\'s in the standard.')} />
           <Fact title="/pay/v1" body={t('Společná cesta: fotoaparát otevře jednu banku ze seznamu. Bez nainstalované banky se zobrazí statická stránka s platbou a odkazem na instalaci.', 'The common path: the camera opens one listed bank. With no bank installed, a static page shows the payment and an install link.')} />
-          <Fact title={t('/pay/v1/<kód banky>', '/pay/v1/<bank code>')} body={t('Adresovaná cesta jedné banky (např. /pay/v1/0800). Slouží k předání platby vybrané bance; otevře ji jen ona.', 'One bank\'s addressed path (e.g. /pay/v1/0800). Used to hand the payment to the chosen bank; only that bank opens it.')} />
+          <Fact title={t('/pay/v1/<kód banky>', '/pay/v1/<bank code>')} body={t('Adresovaná cesta označuje vybranou banku (např. /pay/v1/0800). Výhradní otevření její aplikací vyžaduje odpovídající asociaci cesty na obou platformách; současný pilot tuto výhradnost nezaručuje.', 'The addressed path identifies the chosen bank (e.g. /pay/v1/0800). Exclusive opening by its app requires a matching path association on both platforms; the current pilot does not guarantee that exclusivity.')} />
           <Fact title={t('spayd-<kód banky>://', 'spayd-<bank code>://')} body={t('Kontrolní schéma jen pro otázku „jsi nainstalovaná?“ (canOpenURL). Platba jím nikdy nejde; podvrh dá nanejvýš falešný řádek ve výběru.', 'A probe scheme only for “are you installed?” (canOpenURL). No payment ever travels on it; squatting it yields at most a false row in the chooser.')} />
           <Fact title={t('payload', 'payload')} body={t('Původní SPAYD. Žádný backend, žádný lookup — stejný princip jako tištěný QR.', 'The original SPAYD. No backend, no lookup — the same principle as a printed QR.')} />
         </div>
@@ -87,11 +87,11 @@ export default function SpaydUriPage() {
       {/* Flow */}
       <Section
         title={t('Tok: sken fotoaparátem → výběr banky → potvrzení', 'Flow: camera scan → bank choice → confirmation')}
-        subtitle={t('Android ukáže výběr nainstalovaných bankovních aplikací systémově. iOS otevře vždy jen jednu aplikaci, takže výběr nabídne ta aplikace sama a platbu předá dál.', 'Android shows a chooser of installed banking apps itself. iOS always opens a single app, so that app offers the choice and hands the payment on.')}
+        subtitle={t('Systém otevře způsobilou ověřenou aplikaci podle platformy a nastavení uživatele. Výběr banky může nabídnout otevřená aplikace a platbu předat dál.', 'The system opens an eligible verified app according to the platform and user settings. The opened app can offer bank choice and hand the payment on.')}
       >
         <FlowDiagram t={t} />
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-          <Tag>{t('systémový chooser (Android)', 'system chooser (Android)')}</Tag>
+          <Tag>{t('směrování ověřeného odkazu (Android)', 'verified-link routing (Android)')}</Tag>
           <Tag>{t('relay chooser v aplikaci (iOS)', 'in-app relay chooser (iOS)')}</Tag>
           <Tag>{t('příjemce vždy znovu ověří', 'receiver always re-verifies')}</Tag>
           <Tag>{t('jen předvyplnění + SCA', 'prefill only + SCA')}</Tag>
@@ -116,8 +116,8 @@ export default function SpaydUriPage() {
         </div>
         <Callout>
           {t(
-            'Jeden QR nese jeden payload, „oba formáty v jednom kódu“ nejde. Proto je volba na obrazovce Můj kód: „Pro bankovní appku“ (výchozí, holý SPAYD, přečte každá banka) a „Pro fotoaparát“ (spayd://). Výchozí formát se přepne až ve fázi 3.',
-            'One QR carries one payload; “both formats in one code” is impossible. So the choice sits on the My code screen: “For a banking app” (default, bare SPAYD, every bank reads it) and “For the camera” (spayd://). The default flips only in phase 3.',
+            'Jeden QR nese jeden payload, „oba formáty v jednom kódu“ nejde. Proto je volba na obrazovce Můj kód: „Pro bankovní appku“ (výchozí, holý SPAYD, přečte každá banka) a „Pro fotoaparát“ (https://open-bank.tech/pay/v1?…). Výchozí formát se přepne až ve fázi 3.',
+            'One QR carries one payload; “both formats in one code” is impossible. So the choice sits on the My code screen: “For a banking app” (default, bare SPAYD, every bank reads it) and “For the camera” (https://open-bank.tech/pay/v1?…). The default flips only in phase 3.',
           )}
         </Callout>
       </Section>
@@ -146,8 +146,8 @@ export default function SpaydUriPage() {
         </div>
         <Callout>
           {t(
-            'Cena řešení: relay musí implementovat každá banka. Banka bez něj si na iOS sken „nechá“ pokaždé, když ji systém vybere. Seznam kódů bank a obě schémata proto patří do standardu (rozšíření SPAYD pod ČBA), ne do kódu jedné banky.',
-            'The cost: every bank has to implement the relay. A bank without it keeps the scan on iOS whenever the system picks it. The bank-code list and both schemes therefore belong in the standard (a SPAYD extension under ČBA), not in one bank\'s code.',
+            'Cena řešení: relay musí implementovat každá banka. Banka bez něj si na iOS sken „nechá“ pokaždé, když ji systém vybere. Seznam kódů bank, HTTPS formát a asociace domény proto patří do standardu (rozšíření SPAYD pod ČBA), ne do kódu jedné banky.',
+            'The cost: every bank has to implement the relay. A bank without it keeps the scan on iOS whenever the system picks it. The bank-code list, HTTPS format and domain associations therefore belong in the standard (a SPAYD extension under ČBA), not in one bank\'s code.',
           )}
         </Callout>
       </Section>
@@ -175,7 +175,7 @@ export default function SpaydUriPage() {
           <li>{t('Telefon A: OpenBank z TestFlightu (build 178+), obrazovka Můj kód, přepnout na „Pro fotoaparát“ (vystaví odkaz).', 'Phone A: OpenBank from TestFlight (build 178+), My code screen, switch to “For the camera” (issues the link).')}</li>
           <li>{t('Telefon B: běžný fotoaparát namířit na QR, ťuknout „Otevřít v OpenBank“. Formulář Poslat se předvyplní.', 'Phone B: point the stock camera at the QR, tap “Open in OpenBank”. The Send form is prefilled.')}</li>
           <li>{t('Výběr banky na iOS (od buildu 177): vedle OpenBank nainstalovat ukázkovou aplikaci SDK. OpenBank registruje spayd-9998, ukázková aplikace spayd-9999. Po skenu iOS otevře jednu z nich a ta nabídne druhou v „Zaplatit v“.', 'Bank choice on iOS (from build 177): install the SDK example app next to OpenBank. OpenBank registers spayd-9998, the example spayd-9999. After the scan iOS opens one of them, and it offers the other under “Pay with”.')}</li>
-          <li>{t('Zatím neměřeno: které aplikace fotoaparátu na Androidu předávají vlastní schéma systému. Zapisovat po aplikaci fotoaparátu, ne po modelu telefonu.', 'Not measured yet: which Android camera apps hand a custom scheme to the system. Record per camera app, not per phone model.')}</li>
+          <li>{t('V pilotu zaznamenat, jak jednotlivé fotoaparáty předávají HTTPS odkaz a jak jej směruje platforma při různých výchozích aplikacích. Zapisovat po aplikaci fotoaparátu, ne po modelu telefonu.', 'In the pilot, record how each camera hands off the HTTPS link and how the platform routes it with different default apps. Record per camera app, not per phone model.')}</li>
         </ol>
       </Section>
 
@@ -220,8 +220,8 @@ function FlowDiagram({ t }: { t: (cs: string, en: string) => string }) {
       </defs>
       <text x={40} y={34} fontSize={13} fontWeight={700} fill="var(--success-text)">Android</text>
       {boxes(46, ANDROID, 'var(--success-bg)', 'var(--success-border)', [
-        t('Fotoaparát|čte spayd:// QR', 'Camera|reads spayd:// QR'),
-        t('Systémový výběr|nainstalované banky', 'System chooser|installed banks'),
+        t('Fotoaparát|čte HTTPS QR', 'Camera|reads HTTPS QR'),
+        t('Směrování odkazu|dle nastavení telefonu', 'Link routing|phone settings'),
         t('Vybraná banka|parsuje SPAYD', 'Chosen bank|parses SPAYD'),
         t('Potvrzení + SCA|jako dnes', 'Confirm + SCA|as today'),
       ])}
@@ -261,11 +261,11 @@ const PHASES: { titleCs: string; titleEn: string; bodyCs: string; bodyEn: string
 ]
 
 const PLATFORM: { stepCs: string; stepEn: string; androidCs: string; androidEn: string; iosCs: string; iosEn: string }[] = [
-  { stepCs: 'Registrace', stepEn: 'Registration', androidCs: 'intent-filter na spayd + spayd-<kód>', androidEn: 'intent-filter for spayd + spayd-<code>', iosCs: 'CFBundleURLTypes spayd + spayd-<kód>', iosEn: 'CFBundleURLTypes spayd + spayd-<code>' },
+  { stepCs: 'Registrace', stepEn: 'Registration', androidCs: 'ověřený HTTPS App Link; spayd-<kód> jen pro zjištění instalace', androidEn: 'verified HTTPS App Link; spayd-<code> only for installation probes', iosCs: 'HTTPS Universal Link; spayd-<kód> jen pro zjištění instalace', iosEn: 'HTTPS Universal Link; spayd-<code> only for installation probes' },
   { stepCs: 'Sken fotoaparátem', stepEn: 'Camera scan', androidCs: 'předá URI systému (záleží na aplikaci fotoaparátu)', androidEn: 'hands the URI to the system (depends on the camera app)', iosCs: 'banner „Otevřít v <aplikace>“', iosEn: 'banner “Open in <app>”' },
-  { stepCs: 'Výběr banky', stepEn: 'Bank choice', androidCs: 'systémový chooser nainstalovaných aplikací', androidEn: 'system chooser of installed apps', iosCs: 'žádný systémový; nabídne ho otevřená banka (relay)', iosEn: 'none from the system; the opened bank offers it (relay)' },
+  { stepCs: 'Výběr banky', stepEn: 'Bank choice', androidCs: 'dle platformy a nastavení; výběr může nabídnout aplikace', androidEn: 'depends on platform and settings; the app can offer a choice', iosCs: 'žádný systémový; nabídne ho otevřená banka (relay)', iosEn: 'none from the system; the opened bank offers it (relay)' },
   { stepCs: 'Zjištění nainstalovaných bank', stepEn: 'Finding installed banks', androidCs: '<queries> v manifestu + resolveActivity', androidEn: '<queries> in the manifest + resolveActivity', iosCs: 'LSApplicationQueriesSchemes + canOpenURL', iosEn: 'LSApplicationQueriesSchemes + canOpenURL' },
-  { stepCs: 'Předání platby', stepEn: 'Hand-off', androidCs: 'stejné bajty na spayd-<kód>', androidEn: 'same bytes on spayd-<code>', iosCs: 'stejné bajty na spayd-<kód>', iosEn: 'same bytes on spayd-<code>' },
+  { stepCs: 'Předání platby', stepEn: 'Hand-off', androidCs: 'stejný SPAYD v adresovaném HTTPS odkazu', androidEn: 'the same SPAYD in an addressed HTTPS link', iosCs: 'stejný SPAYD v adresovaném HTTPS odkazu', iosEn: 'the same SPAYD in an addressed HTTPS link' },
 ]
 
 const SECURITY: { Icon: React.ElementType; titleCs: string; titleEn: string; bodyCs: string; bodyEn: string }[] = [
