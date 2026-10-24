@@ -169,7 +169,11 @@ resource "kubectl_manifest" "ec2nodeclass_default" {
     spec = {
       amiFamily = "AL2023"
       amiSelectorTerms = [
-        { alias = "al2023@latest" }
+        # 2026-10-17: held at v20260923 (kernel 6.18.48) because v20261012 (kernel 6.18.54) breaks
+        # Falco's modern_ebpf probe on 19 of 21 nodes ("failed to load BPF skeleton ... -13").
+        # Return to al2023@latest once a Falco release loads on 6.18.54; see the PR that introduced
+        # this pin for the evidence and the alternative of disabling the Falco DaemonSet.
+        { alias = "al2023@v20260923" }
       ]
       # Eviction headroom against the no-swap memory-reclaim livelock (issue
       # #809): with the AMI default (evictionHard memory.available<100Mi, 10s
