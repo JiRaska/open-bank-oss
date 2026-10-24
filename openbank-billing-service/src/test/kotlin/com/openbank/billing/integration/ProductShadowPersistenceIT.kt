@@ -25,6 +25,7 @@ import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Duration
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -297,5 +298,74 @@ class ProductShadowPersistenceIT {
         // Released: now exactly one claim gets it.
         assertThat(queue.claim(1000).count { it.input?.accountId == accountId }).isEqualTo(1)
         assertThat(queue.claim(1000).map { it.input?.accountId }).doesNotContain(accountId)
+    }
+
+    private fun backdate(accountId: String, days: Long) = dataSource.connection.use { c ->
+        c.prepareStatement(
+            "UPDATE billing_product_shadow_input SET created_at = now() - make_interval(days => ?) WHERE account_id = ?",
+        ).use { st ->
+            st.setInt(1, days.toInt())
+            st.setString(2, accountId)
+            assertThat(st.executeUpdate()).isEqualTo(1)
+        }
+    }
+
+    private fun row(accountId: String): Triple<String, String?, BigDecimal?> = dataSource.connection.use { c ->
+        c.prepareStatement(
+            "SELECT status, outcome, balance, monthly_turnover, aggregate_pocket_balance, segment, evaluated_at, " +
+                "evaluation_zone, opened_at, scheduled_cadence, scheduled_trigger " +
+                "FROM billing_product_shadow_input WHERE account_id = ?",
+        ).use { st ->
+            st.setString(1, accountId)
+            st.executeQuery().use { rs ->
+                assertThat(rs.next()).isTrue()
+                val anyFact = (3..11).any { rs.getObject(it) != null }
+                Triple(rs.getString(1), rs.getString(2), if (anyFact) rs.getBigDecimal(3) ?: BigDecimal.ZERO else null)
+            }
+        }
+    }
+
+    @Test
+    fun `facts older than the retention are erased whatever the outcome, younger ones are kept`(): Unit =
+        onVertxContext {
+            val suffix = UUID.randomUUID()
+            val notComparable = "acc-shadow-expired-done-$suffix"
+            val pending = "acc-shadow-expired-pending-$suffix"
+            val young = "acc-shadow-young-$suffix"
+            assessments.persistWithPostingIntent(
+                assessment(notComparable, UUID.randomUUID().toString(), withShadow = true),
+            )
+            val claimed = queue.claim(1000).single { it.input?.accountId == notComparable }
+            queue.complete(claimed.id, "VERIFICATION_DISABLED", compared = false)
+            // Queued after the claim, so these two stay PENDING.
+            for (a in listOf(pending, young)) {
+                assessments.persistWithPostingIntent(assessment(a, UUID.randomUUID().toString(), withShadow = true))
+            }
+            backdate(notComparable, 31)
+            backdate(pending, 31)
+            backdate(young, 29)
+
+            while (queue.eraseExpiredFacts(Duration.ofDays(30), 1000) > 0) Unit
+
+            assertThat(row(notComparable)).isEqualTo(Triple("DONE", "VERIFICATION_DISABLED", null))
+            // A row never compared within the retention is closed, so it is not claimed again without facts.
+            assertThat(
+                row(pending),
+            ).isEqualTo(Triple("DONE", ProductShadowQueueRepositoryImpl.OUTCOME_FACTS_EXPIRED, null))
+            val kept = row(young)
+            assertThat(kept.first).isEqualTo("PENDING")
+            assertThat(kept.third).isEqualByComparingTo("500.00")
+            assertThat(queue.claim(1000).map { it.input?.accountId }).doesNotContain(pending)
+        }
+
+    @Test
+    fun `the retention purge leaves a row under a live claim to its comparator`(): Unit = onVertxContext {
+        val accountId = "acc-shadow-expired-claimed-${UUID.randomUUID()}"
+        assessments.persistWithPostingIntent(assessment(accountId, UUID.randomUUID().toString(), withShadow = true))
+        queue.claim(1000).single { it.input?.accountId == accountId }
+        backdate(accountId, 31)
+        while (queue.eraseExpiredFacts(Duration.ofDays(30), 1000) > 0) Unit
+        assertThat(row(accountId).first).isEqualTo("CLAIMED")
+        assertThat(row(accountId).third).isEqualByComparingTo("500.00")
     }
 }

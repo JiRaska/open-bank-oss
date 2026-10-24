@@ -219,6 +219,9 @@ openbank:
       every: "${BILLING_PRODUCT_SHADOW_EVERY:5m}"
       batch-size: "${BILLING_PRODUCT_SHADOW_BATCH_SIZE:200}"
       max-batches-per-run: "${BILLING_PRODUCT_SHADOW_MAX_BATCHES:10}"
+      # Upper bound on how long the frozen account facts (balance, turnover, pocket balance, segment,
+      # temporal facts) of a shadow row are kept, whatever its outcome; older rows have them erased.
+      fact-retention: "${BILLING_PRODUCT_SHADOW_FACT_RETENTION:P30D}"
       verification:
         mode: "${BILLING_PRODUCT_SHADOW_VERIFICATION_MODE:disabled}"
         key-id: "${BILLING_PRODUCT_SHADOW_VERIFICATION_KEY_ID:product-ir-publish}"
