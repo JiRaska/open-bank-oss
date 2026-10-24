@@ -90,6 +90,11 @@
   so the gate prints `SUBJECTS=UNRESOLVED` (`gatelib.subjects_unresolved`) and run-gates.py skips
   the floor for that run only, saying so in the output — a silent pass there is indistinguishable
   from a gate that really looked.
+  For security checks such as `ruleset-bypass-actors`, use the runner's explicit
+  `GATE_VERDICT=NOT_EVALUATED` marker **and a non-zero exit** (#13448). `SUBJECTS=UNRESOLVED`
+  alone only skips the floor; exit zero still renders PASS. Count readable protection rulesets
+  as subjects: an empty actor list is valid, an unreadable list is not evidence, and no active
+  protection ruleset must fail. Preserve the distinction in the roster and JSON regressions.
 
 - **An advisory gate's "these findings are all benign" note is an unverified claim, and advisory
   mode is what removes the pressure to check it.** The repo already knows a gate that has only ever

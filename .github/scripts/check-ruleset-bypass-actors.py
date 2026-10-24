@@ -11,16 +11,8 @@ required check. It is a good detector and it is only a detector: it reads
 `main`. Nothing in this repository looks at the other half of the same mechanism — WHO is
 allowed to do that at all.
 
-That set is one API field, `bypass_actors`, and today it is exactly one entry:
-
-    {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"}
-
-RepositoryRole 5 is `admin`. So the bypass surface is "any repository admin, on a pull
-request" — which in practice means the CLI's `--admin` override applied to a merge, under
-the owner's credentials. Every agent working in this repo runs as that identity:
-`current_user_can_bypass` reads `pull_requests_only` for it, not `never`. The repo's own
-guardrails record an agent taking that override unprompted on a money-path security PR,
-because its prompt did not forbid it.
+That set is the API field `bypass_actors`. The declaration below pins the permitted
+surface; an empty declaration means no actor may bypass protection.
 
 WHAT THIS GATE DOES, AND WHAT IT HONESTLY CANNOT DO
 ----------------------------------------------------
@@ -103,11 +95,8 @@ TARGET_REF = "refs/heads/main"
 class Unreadable(RuntimeError):
     """The subject could not be READ — distinct from the subject being clean, and from a broken call.
 
-    A non-admin token omits `bypass_actors` entirely, and CI runs as `GITHUB_TOKEN`. Raising the
-    same `RuntimeError` a failed `gh api` raises made the gate exit 1 on every CI run, so an
-    enforced gate that has never once been evaluable was red on every pull request — including the
-    pull request adding it. Reporting UNRESOLVED is the honest answer: it is not a pass (nothing was
-    checked) and not a finding (nothing was seen).
+    A non-admin token omits `bypass_actors` entirely. This is NOT_EVALUATED, with a
+    non-zero exit: no evidence of a violation, but no evidence of a clean actor set either.
     """
 
 
@@ -138,8 +127,8 @@ def gh_api(path: str) -> list | dict:
     for a token without admin scope. Collapsing the two made an org-wide API budget problem
     render as a policy violation on an unrelated PR: measured 2026-09-11, `lint-supplychain-security`
     was red on 6 open PRs for this reason, gating the required `Validate manifests` context.
-    A gate that cannot reach its subject must still never report a clean pass — UNRESOLVED is
-    neither pass nor fail, and run-gates skips the min_subjects floor for it.
+    A gate that cannot reach its subject must still never report a clean pass — UNRESOLVED
+    produces a non-zero NOT_EVALUATED verdict, distinct from a policy finding.
     """
     # A single stalled API read must not consume the whole 60-second gate budget. Retry a
     # timeout once; two ruleset reads can still finish within 50 seconds in the worst case.
@@ -168,8 +157,8 @@ def gh_api(path: str) -> list | dict:
         raise RuntimeError(f"gh api {path} returned non-JSON: {exc}") from exc
 
 
-def live_bypass_actors(repo: str) -> list[tuple[int, str, str]]:
-    """Every bypass actor of every ACTIVE branch ruleset that includes `refs/heads/main`.
+def live_bypass_actors(repo: str) -> tuple[list[tuple[int, str, str]], int]:
+    """Return actors and the number of readable ACTIVE branch rulesets covering main.
 
     `enforcement` must be `active`: an `evaluate`-mode ruleset is a dry run whose bypass
     list grants nothing. Rulesets targeting other refs are out of scope — this gate is
@@ -177,6 +166,7 @@ def live_bypass_actors(repo: str) -> list[tuple[int, str, str]]:
     declaration churn for changes that cannot affect it.
     """
     out: list[tuple[int, str, str]] = []
+    checked_rulesets = 0
     for summary in gh_api(f"repos/{repo}/rulesets"):
         if summary.get("enforcement") != "active" or summary.get("target") != "branch":
             continue
@@ -198,9 +188,13 @@ def live_bypass_actors(repo: str) -> list[tuple[int, str, str]]:
                 f"ruleset {summary['id']} ({summary.get('name')}) returned no `bypass_actors` "
                 f"field — the token cannot see bypass actors (admin scope required), so this "
                 f"gate CANNOT be evaluated. Not a finding: an unreadable subject is UNRESOLVED, "
-                f"never 'zero actors'. Run it with an admin token, or skip it where none exists."
+                f"never 'zero actors'. Use a credential authorized to read bypass configuration."
             )
-        for actor in detail["bypass_actors"]:
+        actors = detail["bypass_actors"]
+        if not isinstance(actors, list) or any(not isinstance(actor, dict) for actor in actors):
+            raise Unreadable(f"ruleset {summary['id']} returned malformed `bypass_actors`; expected an array of actors")
+        checked_rulesets += 1
+        for actor in actors:
             out.append(
                 (
                     int(actor.get("actor_id") or 0),
@@ -208,7 +202,7 @@ def live_bypass_actors(repo: str) -> list[tuple[int, str, str]]:
                     str(actor.get("bypass_mode") or ""),
                 )
             )
-    return out
+    return out, checked_rulesets
 
 
 def findings(
@@ -278,7 +272,7 @@ def self_test() -> int:
     admin_always = (5, "RepositoryRole", "always")
     a_bot = (1234, "Integration", "pull_request")
 
-    case("today's real shape is clean", [admin], [admin], [], [])
+    case("a declared actor is clean", [admin], [admin], [], [])
     case("a NEW bypass actor is reported", [admin, a_bot], [admin], [a_bot], [])
     # The one that matters most: same actor, widened mode. A comparison keyed only on
     # actor_id would call this clean, and it is the difference between "can merge a PR past
@@ -318,12 +312,8 @@ def self_test() -> int:
         except RuntimeError:
             fails.append("an unreadable ruleset must raise Unreadable, not a bare RuntimeError")
 
-        # The exit code for "could not look" is the whole point of the Unreadable/RuntimeError
-        # split: an enforced gate that answers 1 here is red on every CI run and never once says
-        # anything about bypass actors. Assert the code, not just the exception type.
-        # The three end-to-end cases the gate must tell apart. Each prints its own output so the
-        # PR body can show it; the fixtures are captured, so none of them reaches the CI log as a
-        # finding unless the case is the one that is supposed to fail.
+        # Exercise the checker CLI as well as the comparison: an unreadable subject must
+        # never exit zero, and must remain distinguishable from a concrete bypass finding.
         def _broken(path):
             raise RuntimeError("gh api exploded")
 
@@ -361,24 +351,25 @@ def self_test() -> int:
             must_not=["::error", "NOT declared", "could not check"],
         )
 
-        # An unreadable ruleset (non-admin token, no bypass_actors key) is UNRESOLVED: exit 0.
+        # Missing permission is NOT_EVALUATED, never a successful check.
         run_case(
             "unreadable-no-bypass-field",
             _fake_detail({"conditions": {"ref_name": {"include": [TARGET_REF]}}}),
-            0,
-            must_contain=["could not check ruleset bypass actors"],
+            1,
+            must_contain=["could not check ruleset bypass actors", "GATE_VERDICT=NOT_EVALUATED", "SUBJECTS=UNRESOLVED"],
             must_not=["Team#", "NOT declared"],
         )
 
-        # A RATE LIMIT is the third state, and both halves of the split have to be held or the
-        # change is untested: the limit must NOT go red, and everything else must still go red.
+        # A rate limit also lacks a verdict; preserve that reason instead of a clean pass.
         def _rate_limited(path):
             raise Unreadable("gh api ... was RATE LIMITED (rc=1): API rate limit exceeded for installation")
 
+        run_case("rate-limited", _rate_limited, 1,
+                 must_contain=["GATE_VERDICT=NOT_EVALUATED", "SUBJECTS=UNRESOLVED"])
         globals()["gh_api"] = _rate_limited
-        rc = _run_main(["--enforce"])
-        if rc != 0:
-            fails.append(f"a rate-limited subject must exit 0 (UNRESOLVED), got {rc}")
+        rc, _ = _capture(lambda: _run_main([]))
+        if rc != 1:
+            fails.append("an unreadable subject must not pass even without --enforce")
 
         # The classifier itself, not just the exception plumbing: the real gh_api decides by
         # matching stderr, so a message that is NOT a rate limit must stay a RuntimeError. Without
@@ -457,7 +448,7 @@ def self_test() -> int:
         globals()["gh_api"] = _fake_detail(
             {"conditions": {"ref_name": {"include": [TARGET_REF]}}, "bypass_actors": []}
         )
-        if live_bypass_actors("o/r") != []:
+        if live_bypass_actors("o/r") != ([], 1):
             fails.append("a genuinely EMPTY bypass_actors list must resolve to [], not raise")
     finally:
         globals()["gh_api"] = _real
@@ -491,42 +482,26 @@ def main() -> int:
         return self_test()
 
     try:
-        live = live_bypass_actors(args.repo)
-    except Unreadable as exc:
-        # NOT a pass: say out loud that nothing was checked, and let the runner's floor logic know
-        # the corpus was never read, so this run cannot be mistaken for a clean one.
-        #
-        # Name the ACTUAL reason. There are two, they need different actions, and a message that
-        # names the wrong one sends the reader after the wrong fix — the rate-limit case reads as
-        # a permissions problem nobody can reproduce locally, because locally there is no limit.
-        rate_limited = "RATE LIMITED" in str(exc)
-        if rate_limited:
-            gatelib.subjects_unresolved("the rulesets API was rate limited — the subject was never read")
-        else:
-            gatelib.subjects_unresolved("bypass_actors is not visible to this token (admin scope required)")
-        print(f"::warning::ruleset-bypass-actors: could not check ruleset bypass actors: {exc}")
-        remedy = (
-            "wait for the limit to reset, or reduce what spends the installation's API budget"
-            if rate_limited
-            else "run it with an admin token to get a verdict"
-        )
-        print(
-            f"ruleset-bypass-actors: NOT EVALUATED on this run. The check has teeth only where it "
-            f"can actually READ `bypass_actors` — {remedy}. Treating an unreadable subject as red "
-            f"would make the gate permanently and uninformatively red; treating it as green would "
-            f"be a lie. UNRESOLVED is neither."
-        )
-        return 0
+        live, checked_rulesets = live_bypass_actors(args.repo)
     except RuntimeError as exc:
-        # A failed API call is reported as "could not check", never as an invented actor, but it
-        # stays a HARD failure (exit 1): gh missing, a network error, repeated timeouts or a non-JSON
-        # body mean the enforced gate read nothing, and an expired token must not leave it green.
-        sys.stderr.write(f"::error::ruleset-bypass-actors: could not check ruleset bypass actors: {exc}\n")
+        # Missing permission, unavailable API and malformed responses all mean that no
+        # comparison was completed. Use the runner's existing machine-readable contract
+        # (#13400), not prose plus exit 0 (#13448). Do not invent a bypass finding.
+        gatelib.subjects_unresolved("bypass configuration could not be verified")
+        print(f"::warning::ruleset-bypass-actors: could not check ruleset bypass actors: {exc}")
+        print("GATE_VERDICT=NOT_EVALUATED")
+        print("ruleset-bypass-actors: NOT EVALUATED. Restore API access or use a credential "
+              "authorized to read bypass configuration, then re-run the check.")
         return 1
 
     undeclared, stale = findings(live, DECLARED_BYPASS_ACTORS)
     level = "error" if args.enforce else "warning"
-    gatelib.subjects(len(live), "bypass actors on an active ruleset covering main")
+    # The corpus is protection rulesets, not the actors they permit. Zero actors is
+    # desirable; zero checked rulesets is absence of protection evidence.
+    gatelib.subjects(checked_rulesets, "active rulesets covering main with readable bypass configuration")
+    if checked_rulesets == 0:
+        print("::error::ruleset-bypass-actors: no active branch ruleset covering main was checked")
+        return 1
 
     for a in undeclared:
         print(
