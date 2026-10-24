@@ -592,7 +592,7 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
   are its journals and DEAD rows (the outbox gave up, a closed-day 409 included) make the day
   REFUSED. (2) Each pass marks itself in flight before working; the day is not reported while the
   marker stands (a pass running across midnight cannot be overtaken by an earlier RAN row), and a
-  marker older than `lending.close.stale-after` (2h) is reported REFUSED `pass started and never
+  marker older than the derived stale threshold (`LendingCloseJobs.staleAfter`, see (5)) is reported REFUSED `pass started and never
   completed`, so a crash cannot hold the day unresolvably. (3) The accrual drains truncated batches
   within `drain-budget` / `max-drain-rounds`, and each pass first re-drains every earlier day in the
   lookback still REFUSED as truncated, as of that day, re-recording it RAN once nothing is left. (4) A
