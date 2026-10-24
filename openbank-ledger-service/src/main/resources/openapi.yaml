@@ -16,8 +16,7 @@ info:
   # which relaxes the request and breaks no caller.
   # 1.27.0 -> 1.28.0 (ADR-0342): additive. Day-close participants: GET/PUT
   # /ledger/accounting-days/{businessDate}/participants[/{participant}] and PUT .../{participant}/waiver.
-  # 1.29.0: additive raw journal snapshot reads and optional unverified caller-origin evidence.
-  version: 1.29.0
+  version: 1.28.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -32,70 +31,6 @@ tags:
   - name: ClosedPeriod
 
 paths:
-  /api/v1/journals/history-snapshots:
-    post:
-      tags: [Ledger]
-      summary: Capture an immutable raw account journal view
-      description: >
-        Uses the existing ledger.list read authorization. Copies committed attached journal facts
-        from one database view; never posts money or classifies an IR event. Coverage is explicitly
-        ATTACHED_LEDGER_VIEW_ONLY, not account lifetime or complete classified history. A source-free
-        result is returned inline with persisted=false and is not retained server-side.
-      security: [{bearerAuth: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/JournalHistoryRequest'}
-      responses:
-        '200':
-          description: Source-free inline manifest, not persisted
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/JournalHistoryManifest'}
-        '201':
-          description: Immutable manifest with stable ordinal pages
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/JournalHistoryManifest'}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {$ref: '#/components/responses/Forbidden'}
-  /api/v1/journals/history-snapshots/{snapshotId}:
-    get:
-      tags: [Ledger]
-      summary: Read the immutable manifest while all source facts remain attached
-      security: [{bearerAuth: []}]
-      parameters:
-        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
-      responses:
-        '200':
-          description: Captured manifest, unaffected by newer postings
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/JournalHistoryManifest'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {$ref: '#/components/responses/NotFound'}
-  /api/v1/journals/history-snapshots/{snapshotId}/entries:
-    get:
-      tags: [Ledger]
-      summary: Read a stable page of raw immutable journal records
-      security: [{bearerAuth: []}]
-      parameters:
-        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
-        - {name: afterOrdinal, in: query, schema: {type: integer, format: int64, minimum: 0, default: 0}}
-        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 100}}
-      responses:
-        '200':
-          description: Ordered records; nextAfterOrdinal is null only at manifest entryCount
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/JournalHistoryPage'}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {$ref: '#/components/responses/NotFound'}
   /api/v1/journals:
     get:
       tags: [Ledger]
@@ -1398,78 +1333,6 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
-    JournalOriginInput:
-      type: object
-      description: >
-        Unverified raw assertion by the already-authorized journal writer. Ledger assigns the
-        authenticated submitter from its security context. This does not prove economic classification,
-        confer a new origin authority or establish complete IR history. Legacy omission means unknown.
-      required: [kind, sourceRecordId]
-      properties:
-        kind: {type: string, enum: [PAYMENT_TRANSACTION, BILLING_FEE, INTEREST_CAPITALIZATION, OTHER]}
-        sourceRecordId: {type: string, format: uuid}
-        rail:
-          type: string
-          enum: [CARD, SEPA_CT, SEPA_INST, SWIFT, DOMESTIC, INTERNAL, CASH, FEE, INTEREST, UNKNOWN]
-        instructionType:
-          type: string
-          enum: [ONE_OFF, STANDING_ORDER, DIRECT_DEBIT, FUTURE_DATED, SYSTEM, UNKNOWN]
-        reversalOfTransactionId: {type: string, format: uuid}
-    JournalHistoryRequest:
-      type: object
-      required: [accountId, currency, fromDate, throughDate]
-      properties:
-        accountId: {type: string, format: uuid}
-        currency: {type: string, pattern: '^[A-Z]{3}$'}
-        fromDate: {type: string, format: date}
-        throughDate: {type: string, format: date}
-    JournalHistoryManifest:
-      type: object
-      required: [snapshotId, persisted, accountId, currency, fromDate, throughDate, observedAt, databaseView,
-        coverageScope, openingAnchorScope, accountLifetimeComplete, classifiedHistoryComplete, originTrust,
-        openingBooked, closingBooked, entryCount, missingOriginCount, recordsSha256, canonicalization]
-      properties:
-        snapshotId: {type: string, format: uuid}
-        persisted: {type: boolean}
-        accountId: {type: string, format: uuid}
-        currency: {type: string}
-        fromDate: {type: string, format: date}
-        throughDate: {type: string, format: date}
-        observedAt: {type: string, format: date-time}
-        databaseView: {type: string, description: PostgreSQL committed MVCC view identifier; not a sequence watermark}
-        coverageScope: {type: string, enum: [ATTACHED_LEDGER_VIEW_ONLY]}
-        openingAnchorScope: {type: string, enum: [SUM_OF_ATTACHED_BOOKED_LINES_BEFORE_FROM_DATE]}
-        accountLifetimeComplete: {type: boolean, enum: [false]}
-        classifiedHistoryComplete: {type: boolean, enum: [false]}
-        originTrust: {type: string, enum: [AUTHENTICATED_CALLER_ASSERTION_UNVERIFIED]}
-        openingBooked: {type: number}
-        closingBooked: {type: number}
-        entryCount: {type: integer, format: int64, minimum: 0}
-        missingOriginCount: {type: integer, format: int64, minimum: 0}
-        recordsSha256: {type: string, pattern: '^[0-9a-f]{64}$'}
-        canonicalization:
-          type: string
-          enum: [POSTGRES_JSONB_TEXT_LINES_V1]
-          description: SHA256 of ordered canonicalJson strings joined by one LF, with no trailing LF
-    JournalHistoryRecord:
-      type: object
-      required: [ordinal, canonicalJson]
-      properties:
-        ordinal: {type: integer, format: int64, minimum: 1}
-        canonicalJson:
-          type: string
-          description: >
-            Exact PostgreSQL JSONB text for one journal and account/currency. Contains journalId,
-            entryDate/valueDate, journalCreatedAt, transactionId, statusAtSnapshot, reversalOfJournalId,
-            synthetic, bookedDelta, customerLines and nullable unverified origin. Preserve the exact
-            string when checking the manifest digest; JSON reserialization is not equivalent bytes.
-    JournalHistoryPage:
-      type: object
-      required: [snapshotId, records, nextAfterOrdinal]
-      properties:
-        snapshotId: {type: string, format: uuid}
-        records: {type: array, items: {$ref: '#/components/schemas/JournalHistoryRecord'}}
-        nextAfterOrdinal: {type: integer, format: int64, nullable: true}
     PeriodTrialBalanceResponse:
       type: object
       description: Trial balance for one statutory period, with its attestation anchor (ADR-0096 D1).
@@ -1972,8 +1835,6 @@ components:
       type: object
       required: [idempotencyKey, transactionId, entryDate, valueDate, createdBy, lines]
       properties:
-        origin:
-          $ref: '#/components/schemas/JournalOriginInput'
         idempotencyKey:
           type: string
           description: Caller-supplied idempotency key; replaying the same key returns the original entry.

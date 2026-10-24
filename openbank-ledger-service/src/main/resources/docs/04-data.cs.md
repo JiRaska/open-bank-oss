@@ -69,7 +69,3 @@ Re-identifikace (spojení `sub_account_id`/`transaction_id` zpět na zákazníka
 - Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
 - Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
 - Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
-
-## Životní cyklus mezipaměti historie
-
-V35 přidává volitelné údaje o původu a neměnné manifesty, řádky a provenienci snímků. Jedna transakce repeatable-read kopíruje potvrzená data z jednoho SQL/MVCC pohledu; maximum sekvence není důkazem potvrzení transakcí. Provenience zahrnuje i zdroje počátečního součtu. Smazání zdrojového zápisu či řádku a změna údajů o původu transakčně zneplatní odvozené kopie. Čtení odmítá nedostupné připojené zdroje; stávající údržba partition takové kopie fyzicky odstraní. Prázdný výsledek bez zdrojů se neukládá. Nevzniká nová samostatná retenční lhůta, mazání zdrojů ani změna právního pozastavení výmazu; dostupnost kopie následuje všechny původní zdroje. Nejde o nový zákonný doklad uzávěrky.

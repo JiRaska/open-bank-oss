@@ -69,9 +69,6 @@ class LedgerResource(
     private val accountingClasses: AccountingClassService,
 ) {
 
-    @jakarta.inject.Inject
-    private lateinit var callerIdentity: io.quarkus.security.identity.SecurityIdentity
-
     @GET
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.list", resource = "")
@@ -205,10 +202,6 @@ class LedgerResource(
             // The filter sets this property only after authenticating a configured canary
             // principal. Never accept a caller-supplied header or coroutine MDC as synthetic.
             synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
-            origin = request.origin?.let { origin ->
-                check(!callerIdentity.isAnonymous) { "authenticated journal submitter is required" }
-                origin.toDomain(callerIdentity.principal.name)
-            },
         )
         val outcome = ledgerUseCase.postJournalWithOutcome(command)
         val entry = outcome.entry
@@ -315,7 +308,6 @@ data class PostJournalRequest(
      * Writing the type honestly is what makes [requireLines] reachable instead of dead code.
      */
     val lines: List<PostJournalLineRequest?>,
-    val origin: JournalOriginInput? = null,
 ) {
     /**
      * The lines, with every element proven present.

@@ -101,9 +101,3 @@ Prominutí vyžaduje ověřený lidský JWT i v advisory režimu OPA; strojový 
 ## Mapa účetních tříd (ADR-0341 D3)
 
 Zdroje posílají na řádku žurnálu `accountingClass` a roli a ledger určí GL účet z vlastní tabulky `accounting_class_gl_map` (migrace V31). Čtecí strana je `GET /api/v1/accounting-classes` a `GET /api/v1/accounting-classes/resolve` pro regulatorní čtenáře a odsouhlasení. Zápisový endpoint záměrně neexistuje: mapa se mění revidovanou migrací stejně jako účtový rozvrh.
-
-## Snímky nezpracované historie účetních zápisů
-
-`POST /api/v1/journals/history-snapshots` přijímá účet, měnu a včetně krajních dnů vymezené období pod stávajícím oprávněním `ledger.list`. Vrací pevný pohled potvrzených databázových zápisů, počáteční součet připojených účetních řádků, pořadí, počet a SHA-256. Stránky `GET /.../{snapshotId}/entries?afterOrdinal=...` jsou stabilní; kontrolní součet používá přesné řetězce `canonicalJson` spojené LF. Výsledek bez zdrojových zápisů se nepersistuje (`persisted=false`).
-
-Pokrytí zahrnuje jen připojené účetní zápisy, nikoli úplnou historii účtu či ověřenou ekonomickou klasifikaci. Přímé změny zůstatku, odpojené partition a chybějící původ zůstávají omezením. Volitelné `origin` je neověřené tvrzení již oprávněného odesílatele; jeho identitu doplňuje ledger ze svého bezpečnostního kontextu. Nejde o EventKind ani nové oprávnění účtovat.

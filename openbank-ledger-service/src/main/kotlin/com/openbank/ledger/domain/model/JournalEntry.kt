@@ -30,8 +30,6 @@ data class JournalEntry(
      * and from nothing else; the posting itself is a real double-entry posting in every other way.
      */
     val synthetic: Boolean = false,
-    /** Optional, immutable caller-attributed raw source facts; legacy journals remain unknown. */
-    val origin: JournalOrigin? = null,
 ) {
     init {
         requireValid(lines.size >= 2) { "Journal entry must have at least 2 lines" }

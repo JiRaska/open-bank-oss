@@ -36,7 +36,7 @@ class JournalPartitionMaintainerTest {
         dryRun = true,
         clusterLock = NoOpClusterLock(),
         domainMetrics = metrics,
-    ).apply { historySnapshots = mockk(relaxed = true) }
+    )
 
     @AfterEach
     fun cleanup() {

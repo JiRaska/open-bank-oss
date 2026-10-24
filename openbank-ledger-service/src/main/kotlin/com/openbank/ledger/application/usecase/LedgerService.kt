@@ -163,7 +163,6 @@ class LedgerService(
             // The posting itself is unchanged in every other way — same validation, same accounts,
             // same controls upstream — which is the only reason a canary posting proves anything.
             synthetic = command.synthetic,
-            origin = command.origin,
         ).post()
 
         // Cross-check that we actually validated every account that the entry references.

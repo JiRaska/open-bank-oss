@@ -69,7 +69,3 @@ Re-identification (joining `sub_account_id`/`transaction_id` back to a customer)
 - Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
 - Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
 - Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.
-
-## Raw history read-cache lifecycle
-
-V35 adds optional raw origin columns and immutable snapshot manifests, records and provenance. One repeatable-read transaction copies facts from one SQL/MVCC view; source sequence maxima are not commit watermarks. Provenance includes every opening-balance contributor. Source-row or source-line erasure and origin-evidence changes invalidate derived caches transactionally. Every snapshot read rejects missing attached sources; the existing partition-maintenance tick physically purges those unavailable caches after lifecycle actions and on later ticks. A source-free manifest is returned inline and never stored. No new independent TTL, source deletion, legal-hold release or financial retention duration is introduced. Cache retention follows availability of all its original sources; snapshots are read-caches, not new statutory close evidence.

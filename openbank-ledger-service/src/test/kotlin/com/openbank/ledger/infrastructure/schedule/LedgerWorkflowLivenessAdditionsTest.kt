@@ -79,7 +79,7 @@ class LedgerWorkflowLivenessAdditionsTest {
             dryRun = true,
             clusterLock = NoOpClusterLock(),
             domainMetrics = metricsOver(registry),
-        ).apply { historySnapshots = mockk(relaxed = true) }
+        )
 
         scheduler.onStart(StartupEvent())
 
@@ -117,7 +117,7 @@ class LedgerWorkflowLivenessAdditionsTest {
             dryRun = true,
             clusterLock = NoOpClusterLock(),
             domainMetrics = metricsOver(registry),
-        ).apply { historySnapshots = mockk(relaxed = true) }
+        )
         scheduler.onStart(StartupEvent())
 
         scheduler.maintain()
