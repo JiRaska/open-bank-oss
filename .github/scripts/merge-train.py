@@ -18,9 +18,10 @@ THE INVARIANT
     (`git merge-tree --write-tree`, `git commit-tree`, `git ls-tree`) — never on files a build wrote.
   * The one thing a privileged job cannot re-derive execution-free — the regeneration commit's
     CONTENT — is bounded by path (DERIVED_OUTPUTS, read from origin/main) and then proven by main's
-    own derived-freshness gates, which CI runs on the exact train tree. Gate scripts, workflows and
-    generators in that tree are main's, because a PR touching any of them never qualifies (only
-    prose and gate-input data under `.github/` ride a train — `Untrainable`).
+    own derived-freshness gates, which CI runs on the exact train tree. Workflows and generators in
+    that tree are main's, because a PR touching any of them never qualifies (under `.github/` only
+    prose, gate-input data and allow-listed gate code ride a train — `Untrainable`, GATE_CODE_GLOBS),
+    and a train carrying gate code never carries a regeneration commit, so its gates are main's too.
 
 THREE JOBS, EACH ON ITS OWN RUNNER
 ----------------------------------
@@ -165,7 +166,7 @@ LEGACY_CULPRIT_PREFIX = "isolated as the cause of a red train"
 # Fast-lane exclusions.
 PROTECTED_PREFIXES = ("openbank-libs/", "build-logic/", "openbank-infra/gitops/", "docs/adr/", ".github/")
 PROTECTED_GLOBS = ("*/src/main/resources/openapi.yaml",)
-# A member touching any of these never rides a train: generators, gate scripts, gates.yaml, the
+# A member touching any of these never rides a train: generators, privileged gate scripts, the
 # regen inventory and the WORKFLOWS that run the freshness gates all live under `.github/`, and
 # the regeneration-content argument rests on CI running main's copies of them. Everything ELSE the
 # generator runner executes is derived from origin/main's regen-derived.sh by `Untrainable` —
@@ -173,11 +174,44 @@ PROTECTED_GLOBS = ("*/src/main/resources/openapi.yaml",)
 # Under `.github/` the default is UNTRAINABLE; only prose and gate-input data (*.md, *.txt) ride a
 # train, and not where such a file still decides what executes: workflows and actions (any file),
 # pip requirement pins (they choose what gets installed) and agent prompts (they instruct an agent
-# that holds tools). gates.yaml (run commands), every script and every extension-less file stay out.
+# that holds tools). Every script and every extension-less file stay out, except the allow-listed
+# gate code below (#13400), which never shares a train with a regeneration commit.
 UNTRAINABLE_PREFIXES = (".github/workflows/", ".github/actions/", ".github/agent-prompts/")
 GITHUB_DIR = ".github/"
 GITHUB_TRAINABLE_SUFFIXES = (".md", ".txt")
 GITHUB_UNTRAINABLE_NAME_GLOBS = ("*requirements*",)
+# GATE CODE that rides a train (#13400) — an ALLOW-LIST, so an unknown `.github/` path stays strict.
+# A check script or gates.yaml is reviewed at arm time like any code, and the carrier's CI runs the
+# COMBINED head: the gate is judged together with the code it judges exactly as in the strict lane,
+# and bisect isolates a culprit. The one thing the strict lane gave that a train does not is that
+# "regeneration content is proven by MAIN's gates" — so a train carrying gate code never carries a
+# regeneration commit (TrainBuilder separates them; publish rejects the mix). Then the carrier tree
+# is only reviewed member diffs, the strict lane's trust exactly.
+GATE_CODE_GLOBS = (".github/scripts/check-*.py", ".github/scripts/check-*.sh", ".github/gates/gates.yaml")
+# Check scripts that prove a DERIVED_OUTPUTS entry (ADR-0343 §Security): defence in depth on top of
+# the separation above.
+FRESHNESS_GATE_CODE = (".github/scripts/check-adr-registry.sh", ".github/scripts/check-eu-ai-act.sh")
+# ...and gate code that stays strict because the train's own verdict depends on it: run by the pinned
+# extra-gate workflow (security.yml), judging a CARRIER through merge_train_carrier, or judging the
+# merge machinery itself (ruleset / merge-train context). The self-test re-derives this set from the
+# real tree and fails when a new script of that kind is missing here.
+PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
+    ".github/scripts/check-codeql-compile-coverage.py",     # security.yml (extra gate's workflow)
+    ".github/scripts/check-security-checklist.py",          # judges a carrier by its members
+    ".github/scripts/check-api-contract.py",                # judges a carrier by its members
+    ".github/scripts/check-coverage-floor-ratchet.py",      # judges a carrier by its members
+    ".github/scripts/check-deploy-holds.py",                # reads the merge-train / ruleset contract
+    ".github/scripts/check-ruleset-context-parity.py",      # reads the merge-train / ruleset contract
+    ".github/scripts/check-ruleset-bypass-actors.py",       # judges the ruleset (who may bypass merge rules)
+    ".github/scripts/check-branch-protection.py",           # judges branch protection on main
+    ".github/scripts/check-agent-pr-guard.py",              # agent-pr-guard: the train reads it as a refusal
+    ".github/scripts/check-agent-bounded-write-surface.py", # reads branch protection on main
+    ".github/scripts/check-merged-past-red-check.py",       # reads the rulesets
+)
+# Files that SUPPRESS security findings (scanner allowlists and rule sets). They were trainable as
+# plain data; a loosened one must take the owner's strict lane, wherever it lives.
+SECURITY_SUPPRESSION_PATHS = (".gitleaksignore", ".gitleaks.toml", ".trivyignore", ".semgrep.yml", ".semgrep.yaml")
+SECURITY_SUPPRESSION_PREFIXES = (".semgrep/",)
 SOURCED_BY_GEN_INDEX = "docs/adr/*.sh"         # gen-index.sh sources its sibling libraries
 GENERATOR_OVERLAY_ROOTS = (".github/scripts", "docs/adr", "openbank-infra/gitops")
 REGEN_COMMANDS = ("bash .github/scripts/regen-derived.sh --all", "bash docs/adr/gen-index.sh")
@@ -278,15 +312,24 @@ class Untrainable:
     def __call__(self, path: str) -> bool:
         if any(path.startswith(p) for p in UNTRAINABLE_PREFIXES) or path in self.programs:
             return True
+        if path in SECURITY_SUPPRESSION_PATHS or path.startswith(SECURITY_SUPPRESSION_PREFIXES):
+            return True
         if glob_match(SOURCED_BY_GEN_INDEX, path):
             return True
         name = path.rsplit("/", 1)[-1]
         if path.startswith(GITHUB_DIR):
+            if gate_code(path):
+                return False
             return (not name.endswith(GITHUB_TRAINABLE_SUFFIXES)
                     or any(fnmatch.fnmatch(name, g) for g in GITHUB_UNTRAINABLE_NAME_GLOBS))
         if self.find_root is None:
             return name.startswith("gen-")
         return path.startswith(self.find_root + "/") and fnmatch.fnmatch(name, self.find_name)
+
+
+def gate_code(path: str) -> bool:
+    """Reviewed gate code that may ride a train (GATE_CODE_GLOBS), never a PRIVILEGED_GATE_CODE path."""
+    return path not in PRIVILEGED_GATE_CODE and any(glob_match(g, path) for g in GATE_CODE_GLOBS)
 
 
 def generator_commands(script_text: str) -> list[str]:
@@ -424,6 +467,10 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
             return False, "a path contains a control character — manual lane, never a train"
         if untrainable(f):
             return False, f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
+    if pr.get("special_paths") and any(gate_code(f) for f in pr.get("files") or []):
+        # The strict lane refuses a symlink/gitlink outright; on the train publish would halve the
+        # whole carrier for it. Gate code next to one never rides (review of #13750).
+        return False, "gate code next to a symlink or gitlink — never a train"
     app_state, app_desc = (app or {}).get(STATUS_CONTEXT, ("", ""))
     if app_state == "failure" and not app_desc.startswith((LEGACY_CULPRIT_PREFIX, *NOTICE_PREFIXES)):
         return False, "merge-train failure on this head (culprit or manual lane) — waits for a push"
@@ -746,19 +793,46 @@ class TrainBuilder:
         self.untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
         self.env = generator_env()
         self.quarantined: list[str] = []
+        self.overlaid_gate: list[str] = []
         # Path fragments main's inventory declares as generator INPUTS (set from origin/main by
         # mode_build). Only added files under these stay visible while the generators run.
         self.declared_inputs: list[str] = []
         self.keep_declared_inputs = True
+        # #13400: gate code and a regeneration commit never share a train; members held back for that
+        # are DEFERRED (no drop notice; the next tick takes them), never dropped.
+        self.separate_gate_code = True
+        self.deferred: list[int] = []
 
     def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         return sh(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=self.workdir, check=check, env=self.env)
 
     def build(self, base: str, members: list[Member]) -> tuple[str, list[int], list[int]]:
+        """(tip, applied, dropped); self.deferred lists members held back for the next train."""
+        self.deferred = []
+        tip, applied, dropped, regen, gate = self._build(base, members)
+        if not (self.separate_gate_code and regen and gate):
+            return tip, applied, dropped
+        # Keep the class of the OLDEST applied member, so neither class starves behind the other.
+        keep_gate = applied[0] in gate
+        keep = [m for m in members if (m.number in gate) == keep_gate]
+        log(f"build: gate code {sorted(gate)} and a regeneration commit never share a train — "
+            f"keeping the {'gate-code' if keep_gate else 'other'} member(s)")
+        tip, applied2, dropped2, regen2, gate2 = self._build(base, keep)
+        if regen2 and gate2:
+            # Main itself needs regeneration: gate code cannot ride until it does not.
+            keep = [m for m in members if m.number not in gate]
+            tip, applied2, dropped2, regen2, gate2 = self._build(base, keep) if keep else (base, [], [], False, [])
+        kept = {m.number for m in keep}
+        self.deferred = [m.number for m in members if m.number not in kept]
+        log(f"build: deferred {self.deferred} to the next train")
+        return tip, applied2, dropped2
+
+    def _build(self, base: str, members: list[Member]) -> tuple[str, list[int], list[int], bool, list[int]]:
         self.git("checkout", "-q", "--detach", "-f", base)
         self.git("clean", "-qfdx")
         applied: list[int] = []
         dropped: list[int] = []
+        gate: list[int] = []
         for m in members:
             r = self.git("merge", "--squash", "--no-commit", m.ref, check=False)
             staged = changed_paths(self.git, cached=True) if r.returncode == 0 else []
@@ -769,6 +843,9 @@ class TrainBuilder:
                 continue
             self.git("commit", "-q", "-m", squash_message(m))
             applied.append(m.number)
+            if any(gate_code(f) for f in staged):
+                gate.append(m.number)
+        regen = False
         if applied:
             try:
                 self.overlay_trusted_generators(base)
@@ -776,13 +853,14 @@ class TrainBuilder:
                 # A member changed what the runner would execute: nobody rides this train.
                 log(f"::warning::train refused before any generator ran: {exc}")
                 self.git("checkout", "-q", "--detach", "-f", base)
-                return base, [], dropped + applied
+                return base, [], dropped + applied, False, []
             self.quarantine_new_executables(base)
             try:
-                self.regenerate()
+                regen = self.regenerate()
             finally:
                 self.restore_quarantined()
-        return self.git("rev-parse", "HEAD").stdout.strip(), applied, dropped
+                self.restore_overlaid_gate()
+        return self.git("rev-parse", "HEAD").stdout.strip(), applied, dropped, regen, gate
 
     def quarantine_new_executables(self, base: str) -> None:
         """Before any generator runs: remove from the working tree every file that is not on
@@ -802,6 +880,16 @@ class TrainBuilder:
         if self.quarantined:
             log(f"quarantined {len(self.quarantined)} file(s) not on main while the generators run")
 
+    def restore_overlaid_gate(self) -> None:
+        """Put the member's gate code back after the generators ran over main's copy."""
+        gate, self.overlaid_gate = self.overlaid_gate, []
+        for e in gate:
+            if e.startswith("??"):
+                os.unlink(os.path.join(self.workdir, e[3:]))
+        tracked = [e[3:] for e in gate if not e.startswith("??")]
+        if tracked:
+            self.git("checkout", "HEAD", "--", *tracked)
+
     def restore_quarantined(self) -> None:
         tracked = [f for f in self.quarantined if self.git("cat-file", "-e", f"HEAD:{f}", check=False).returncode == 0]
         if tracked:
@@ -818,7 +906,10 @@ class TrainBuilder:
         # The overlay exists to put main's GENERATORS back. A trainable data file under an overlay
         # root (a baseline, an ADR) is the member's content and must stay so — otherwise the regen
         # commit carries main's copy as a revert and publish rejects it as a non-derived path.
-        data = [e for e in entries if not self.untrainable(e[3:])]
+        # Gate code is NOT restored: the generators see main's copy, as they see main's generators;
+        # regenerate() puts the member's copy back before anything is committed (review of #13750).
+        self.overlaid_gate = [e for e in entries if gate_code(e[3:])]
+        data = [e for e in entries if not self.untrainable(e[3:]) and not gate_code(e[3:])]
         modified = [e[3:] for e in data if not e.startswith("??")]
         if modified:
             self.git("checkout", "HEAD", "--", *modified)
@@ -835,6 +926,7 @@ class TrainBuilder:
             if r.returncode != 0:
                 log(f"::warning::regen command failed ({cmd}): {r.stderr.strip()[-300:]}")
         self.restore_quarantined()
+        self.restore_overlaid_gate()
         changed = zpaths(self.git("ls-files", "-z", "-m", "-o", "--exclude-standard").stdout)
         if any(unsafe_path(f) for f in changed):
             raise RuntimeError("a generator wrote a path with a control character — refusing the train")
@@ -880,6 +972,7 @@ def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: 
     own, own_tree = base, git.tree(base)
     applied: list[int] = []
     dropped: list[int] = []
+    gate: list[int] = []
     idx = 0
     for m in members:
         r = git("merge-tree", "--write-tree", own, m.head_sha, check=False)
@@ -893,6 +986,8 @@ def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: 
             raise Reject(f"bundle has no commit for #{m.number}", member_fault=False)
         if git.tree(chain[idx]) != tree:
             raise Reject(f"bundle commit for #{m.number} differs from the merge-tree rebuild", member_fault=False)
+        if any(gate_code(f) for f in changed_paths(git, own_tree, tree)):
+            gate.append(m.number)
         own = git("commit-tree", tree, "-p", own, "-m", own_member_message(m.number, m.head_sha)).stdout.strip()
         own_tree = tree
         applied.append(m.number)
@@ -900,6 +995,9 @@ def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: 
     rest = chain[idx:]
     if len(rest) > 1:
         raise Reject(f"bundle carries {len(rest)} commits beyond its members", member_fault=False)
+    if rest and gate:
+        # #13400: the regeneration content is proven by MAIN's gates only while no member changed one.
+        raise Reject(f"regeneration commit next to gate-code member(s) {gate}", member_fault=False)
     if rest:
         regen = rest[0]
         for change in changed_entries(git, f"{regen}^", regen):
@@ -1334,8 +1432,10 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
             if failing:
                 red.append((view, failing))
             continue
+        entries = changed_entries(git, f"{base}...{fetched}")
         files = changed_paths(git, f"{base}...{fetched}")
         view = pr_view(repo, p, files)
+        view["special_paths"] = [x for c in entries if c.new_mode in SPECIAL_MODES for x in c.paths]
         app = gh.app_statuses(fetched)
         checks = pinned_checks(gh, fetched, extra)
         ok, why = qualifies(view, member_required, checks, app, untrainable, extra=extra)
@@ -1470,7 +1570,7 @@ def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_si
         heads = {m.number: m.head_sha for m in batch}
         pathlib.Path(out_dir, DROPS_FILE).write_text("".join(f"{n} {heads[n]}\n" for n in dropped))
     if applied:
-        write_manifest(os.path.join(out_dir, MANIFEST_FILE), batch)
+        write_manifest(os.path.join(out_dir, MANIFEST_FILE), [m for m in batch if m.number not in builder.deferred])
         git("update-ref", BUNDLE_REF, tip)
         git("bundle", "create", os.path.join(out_dir, BUNDLE_FILE), BUNDLE_REF, f"^{base}")
     return applied
@@ -2353,6 +2453,8 @@ SYN_HEREDOC_SCRIPT = "openbank-infra/gitops/p/gen-p-opa-bundle.sh"
 SYN_NEWLINE_GENERATOR = "openbank-infra/gitops/x/gen-a\nb-opa-bundle.sh"
 SYN_SHADOW_MODULE = "openbank-infra/gitops/p/yaml.py"
 SYN_BASELINE = ".github/scripts/x-baseline.txt"     # gate-input data inside a generator overlay root
+SYN_GATE_CODE = ".github/scripts/check-k.py"        # reviewed gate code: rides a train, never with a regen commit
+SYN_MAIN_GATE_CODE = ".github/scripts/check-m.py"   # gate code main already carries
 
 
 class FakeGitHub:
@@ -2528,6 +2630,7 @@ def _synthetic_origin(root: str) -> None:
     w(SYN_GENERATOR, SYN_GENERATOR_SRC)
     w(REGEN_INVENTORY, SYN_INVENTORY)
     w(SYN_BASELINE, "base\n")
+    w(SYN_MAIN_GATE_CODE, "main\n")
     w("ci.py", "import os,sys\nfail=[]\n"
                "if int(open('count.txt').read()) != len(os.listdir('services')): fail.append('gates (data)')\n"
                "if os.path.exists('bad.txt'): fail.append('Validate manifests')\n"
@@ -2559,9 +2662,13 @@ def _synthetic_origin(root: str) -> None:
     pr("pR", {"services/r.txt": "r\n", "count.txt": "2\n"})
     pr("pL", {"docs/l.md": "l\n"}, link=("docs-link", "/etc/passwd"))
     pr("pG", {SYN_GENERATOR: "import os,pathlib\npathlib.Path('leaked.txt').write_text(os.environ.get('GH_TOKEN','none'))\n"})
-    pr("pW", {".github/gates/gates.yaml": "gates: []\n"})
-    pr("pW2", {".github/scripts/check-two.py": "print(2)\n"})
+    pr("pW", {".github/workflows/w.yml": "on: push\n"})
+    pr("pW2", {".github/scripts/two.py": "print(2)\n"})
     pr("pS", {".github/scripts/check-s.py": "print(1)\n"}, link=("docs-s-link", "/etc/passwd"))
+    # #13400: gate code (a check script, gates.yaml) rides a train; next to a member that needs
+    # regeneration it must not share one (the regeneration is proven by main's gates only).
+    pr("pK", {SYN_GATE_CODE: "print('k')\n"})
+    pr("pM", {SYN_MAIN_GATE_CODE: "member\n"})   # modifies a check script main already has
     pr("pX", {"docs/adr/0001-x.md": "x\n"})
     pr("pF", {"svc/fast.txt": "f\n"})
     pr("pT", {SYN_BASELINE: "loosened\n"})
@@ -2610,8 +2717,7 @@ def self_test() -> int:
     U = Untrainable(real_regen)
     check("untrainable: main's find enumeration is parsed", (U.find_root, U.find_name) ==
           ("openbank-infra/gitops/components", "gen-*opa-bundle*.sh"), f"{U.find_root} {U.find_name}")
-    for f in (".github/scripts/regen-derived.sh", ".github/gates/gates.yaml", ".github/scripts/check-x.py",
-              ".github/workflows/ci.yml", "docs/adr/gen-index.sh", "docs/adr/lib-frontmatter.sh",
+    for f in (".github/scripts/regen-derived.sh", ".github/workflows/ci.yml", "docs/adr/gen-index.sh", "docs/adr/lib-frontmatter.sh",
               "openbank-infra/gitops/components/x/gen-x-opa-bundle.sh",
               "openbank-infra/gitops/components/a/b/c/d/gen-x-opa-bundle.sh"):
         ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
@@ -2622,9 +2728,18 @@ def self_test() -> int:
     for f in (".github/scripts/x.py", ".github/scripts/x.js", ".github/scripts/x.cjs", ".github/scripts/x.init.gradle",
               ".github/scripts/lib/probe.sh", ".github/workflows/y.yml", ".github/workflows/notes.md",
               ".github/workflows/requirements/schemathesis.txt", ".github/actions/a/action.yml",
-              ".github/actions/a/README.md", ".github/gates/gates.yaml", ".github/scripts/pyyaml-requirements.txt",
+              ".github/actions/a/README.md", ".github/scripts/pyyaml-requirements.txt",
               ".github/agent-prompts/pr-steward.md", ".github/CODEOWNERS", ".github/labels.yml",
-              ".github/scripts/noext", "docs/adr/new.sh"):
+              ".github/scripts/noext", "docs/adr/new.sh",
+              # #13400: the train's own code and everything that judges a carrier or the merge
+              # machinery stays strict, as does any .github path the allow-list does not name.
+              ".github/scripts/merge-train.py", ".github/scripts/merge_train_carrier.py",
+              ".github/workflows/merge-train.yml", ".github/workflows/security.yml",
+              ".github/scripts/check-security-checklist.py", ".github/scripts/check-api-contract.py",
+              ".github/scripts/check-codeql-compile-coverage.py", ".github/scripts/check-adr-registry.sh",
+              ".github/scripts/check-eu-ai-act.sh", ".github/scripts/check-x.js", ".github/scripts/check-x",
+              ".github/scripts/lib/check-x.sh", ".github/scripts/sub/check-x.py", ".github/gates/other.yaml",
+              ".github/gates/gates.yml", ".github/dependabot.yml", ".github/unknown.json", ".github/x/y.cfg"):
         ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
         check(f"qualifies: member touching {f} is refused (manual lane)", not ok and "manual lane" in why, why)
     # Prose and gate-INPUT data under .github/ ride trains (ADR-0343 §Security: a baseline is read
@@ -2636,6 +2751,57 @@ def self_test() -> int:
         check(f"qualifies: member touching only {f} is trainable", ok and not U(f), why)
     for f in ("openbank-libs/governance/rules.yaml", "docs/adr/0343-x.md", "openbank-infra/gitops/components/x/x.yaml"):
         check(f"untrainable: data file {f} is NOT untrainable", not U(f))
+    # #13400: reviewed gate code rides a train. The carrier's CI runs the COMBINED head, so a gate
+    # change is judged together with the code it judges exactly as in the strict lane, and bisect
+    # isolates a culprit; what it may never do is share a train with a regeneration commit.
+    for f in (".github/scripts/check-x.py", ".github/scripts/check-x.sh", ".github/gates/gates.yaml"):
+        ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
+        check(f"qualifies: a gate-code-only member ({f}) is a train CANDIDATE", ok and not U(f) and gate_code(f), why)
+        sl = strict_lane_state({**base_pr, "files": [f]}, req, green, None, U, [], None, None)
+        check(f"strict lane: a gate-code-only member ({f}) is NOT in the strict lane", sl[0] is None, str(sl))
+    for mix in ([".github/scripts/check-x.py", ".github/workflows/ci.yml"],
+                [".github/gates/gates.yaml", ".github/scripts/merge-train.py"],
+                [".github/scripts/check-x.py", ".github/unknown.json"]):
+        ok, why = qualifies({**base_pr, "files": mix}, req, green, None, U)
+        check(f"qualifies: a member mixing gate code with {mix[1]} is refused (strict lane)",
+              not ok and "manual lane" in why, why)
+        check(f"strict lane: a member mixing gate code with {mix[1]} IS in the strict lane",
+              strict_lane_state({**base_pr, "files": mix}, req, green, None, U, [], None, None)[0] == "green")
+    # Review: gate code never rides a train next to a symlink/gitlink (the strict lane refuses
+    # those outright); one such member must not drag a whole carrier into bisect. A DATA-only
+    # member with a symlink still reaches publish, which halves it (pL), as before.
+    ok, why = qualifies({**base_pr, "files": [".github/scripts/check-x.py", "docs/l"], "special_paths": ["docs/l"]},
+                        req, green, None, U)
+    check("qualifies: gate code next to a symlink/gitlink is refused on the train path", not ok and "symlink" in why, why)
+    check("qualifies: a data-only member with a symlink still qualifies (publish halves it)",
+          qualifies({**base_pr, "files": ["docs/l"], "special_paths": ["docs/l"]}, req, green, None, U)[0])
+    # Review: files that SUPPRESS security findings stay strict, wherever they live.
+    for f in (".gitleaksignore", ".gitleaks.toml", ".trivyignore", ".semgrep/rules.yml", ".semgrep.yml",
+              ".github/scripts/check-ruleset-bypass-actors.py", ".github/scripts/check-branch-protection.py"):
+        ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
+        check(f"qualifies: member touching {f} is refused (strict lane)", not ok and "manual lane" in why and U(f), why)
+    # Drift guard on the REAL tree: every check script the train's own workflows or the pinned
+    # extra gate run, every one that judges a carrier (imports merge_train_carrier) or the merge
+    # machinery, and every one that proves a DERIVED_OUTPUTS entry must be in PRIVILEGED_GATE_CODE.
+    scripts = pathlib.Path(".github/scripts")
+    check("privileged gate code: the drift guard runs from the repository root (it never skips silently)",
+          scripts.is_dir() and pathlib.Path(".github/workflows").is_dir(), str(pathlib.Path.cwd()))
+    must: set[str] = set(FRESHNESS_GATE_CODE)
+    # Every workflow that mentions the train or its carrier library, plus each pinned extra gate's
+    # workflow: the check scripts they run decide a train's own verdict.
+    extra_wfs = {pathlib.Path(w) for w in (parse_extra_gates(pathlib.Path(RULES_FILE).read_text()) or {}).values()} \
+        if pathlib.Path(RULES_FILE).exists() else set()
+    for wf in sorted(pathlib.Path(".github/workflows").glob("*.y*ml")) if scripts.is_dir() else []:
+        text = wf.read_text(errors="replace")
+        if wf in extra_wfs or re.search(r"merge_train_carrier|merge-train", text):
+            must |= set(re.findall(r"\.github/scripts/check-[A-Za-z0-9_.-]+", text))
+    for c in sorted(scripts.glob("check-*")) if scripts.is_dir() else []:
+        if re.search(r"merge_train_carrier|merge-train|bypass_actors|branches/[^/\s]*/protection|/rulesets",
+                     c.read_text(errors="replace")):
+            must.add(c.as_posix())
+    missing = sorted(m for m in must if gate_code(m))
+    check("privileged gate code: every check script the train, its extra gate or a carrier/ruleset verdict depends on stays strict",
+          scripts.is_dir() and not missing, str(missing))
     for f in ("docs/a\nb.md", "svc/tab\there.txt", "svc/esc\x1b.txt", "svc/del\x7f.txt"):
         ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
         check(f"qualifies: a DATA path with a control character {f!r} is refused", not ok and "control character" in why, why)
@@ -2911,7 +3077,7 @@ def self_test() -> int:
             gh = FakeGitHub(origin, root)
             base0 = gh.main_sha()
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
-                       "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62}
+                       "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62, "pK": 38, "pM": 39}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -3212,6 +3378,97 @@ def self_test() -> int:
                   and not os.path.exists(os.path.join(origin, "leaked.txt")) and not gh.comments, f"{gh.merged} {gh.comments}")
             reset()
 
+            # #13400: a gate-code-only member rides a train, and never one carrying a regeneration
+            # commit. pR (older) needs regeneration, pK (check script) does not: build trains pR
+            # first and defers pK WITHOUT a drop notice; pK then rides its own train.
+            open_only("pR", "pK")
+            # The fake merges member HEADS, not the carrier tree, so after pR main lacks the regenerated
+            # file that real main would carry from the carrier: hold it green, then commit the
+            # regeneration on main as the real merge would have, and let pK ride.
+            gh.main_override = {"derived": "success"}
+            drain()
+            check("gate code: deferred while main itself would need regeneration (never mixed, never dropped)",
+                  gh.merged == [21] and gh.prs[38]["state"] == "open" and not gh.comments, f"{gh.merged} {gh.comments}")
+            gh.g("checkout", "-q", "-f", "main")
+            subprocess.run([sys.executable, SYN_GENERATOR], cwd=origin, check=True, env=base_env())
+            gh.g("add", "derived")
+            gh.g("commit", "-q", "-m", "regenerated (as the carrier carried it)")
+            gh.main_override = {}
+            drain()
+            pk_head = gh.prs[38]["head"]["sha"]
+            check("gate code: a check-script PR merges through a TRAIN (not the strict lane), with no notice",
+                  sorted(gh.merged) == [21, 38] and not gh.updates
+                  and not gh.app_statuses(pk_head).get(STATUS_CONTEXT, ("", ""))[1].startswith("strict lane:")
+                  and not gh.comments, f"{gh.merged} updates={gh.updates} {gh.comments}")
+            regen_with_gate = []
+            for t in gh.carriers.values():
+                chain = parse_own_chain(gh.g, t["head"]["sha"])
+                if chain and 38 in [n for n, _h in chain[1]]:
+                    msgs = gh.g("log", "--format=%B", f"{chain[0]}..{t['head']['sha']}").stdout
+                    regen_with_gate.append(OWN_REGEN_MSG.strip() in msgs)
+            check("gate code: no carrier holding the gate-code member carries a regeneration commit",
+                  regen_with_gate and not any(regen_with_gate), str(regen_with_gate))
+            reset()
+            # The publish half (the security boundary): a build that IGNORES the separation and
+            # emits pK + pR + a regeneration commit is rejected; nothing merges.
+            open_only("pR", "pK")
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",),
+                             untrainable=Untrainable(SYN_INVENTORY))
+            b.separate_gate_code = False
+            b.declared_inputs = regen_inventory_fragments(SYN_INVENTORY)
+            out = os.path.join(root, "bundle-gate-regen")
+            mode_build(gh, Git(bdir), b, "o/r", out, 8)
+            man = pathlib.Path(out, MANIFEST_FILE).read_text() if os.path.exists(os.path.join(out, MANIFEST_FILE)) else ""
+            status = mode_publish(gh, Git(clone("publish")), "o/r", out, "998", "1", 8)
+            check("gate code: CONTROL — with separation off, build emits both members and a regeneration commit",
+                  "21 " in man and "38 " in man, man)
+            check("gate code: publish rejects a train mixing gate code with a regeneration commit; nothing merges",
+                  status == "rejected" and gh.merged == [], f"publish={status}")
+            reset()
+
+            # Review: a gate-code member adding a symlink never rides (qualifies refuses it), and a
+            # build that forces it past qualifies is rejected by publish as the member's fault, so
+            # the batch halves (bisect) instead of merging.
+            open_only("pS", "p1")
+            cands, _apps = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0, Untrainable(SYN_INVENTORY))
+            check("gate code + symlink: never a train candidate", [m.number for m in cands] == [1], str([m.number for m in cands]))
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(), overlay_roots=(".github/scripts",), untrainable=Untrainable(SYN_INVENTORY))
+            ms = []
+            for br in ("p1", "pS"):
+                b.git("fetch", "-q", "origin", br)
+                h = b.git("rev-parse", "FETCH_HEAD").stdout.strip()
+                ms.append(Member(numbers[br], br, "", h, br, "t", ref=h))
+            tip, _a, _d = b.build(base0, ms)
+            pg = Git(clone("publish"))
+            pg("fetch", "-q", bdir, tip)
+            try:
+                verify_bundle_train(pg, base0, ms, tip, ["derived/*"])
+                rej = None
+            except Reject as exc:
+                rej = exc
+            check("gate code + symlink: forced past qualifies, publish rejects it as the member's fault (bisect)",
+                  rej is not None and rej.member_fault and "symlink" in str(rej), str(rej))
+            reset()
+
+            # Review: during regeneration the generators see MAIN's copy of gate code (as of
+            # generators), and the member's copy is back in the tree before anything is committed.
+            gate_probe = os.path.join(root, "gate-probe.txt")
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -c \"import shutil; shutil.copy('{SYN_MAIN_GATE_CODE}', {gate_probe!r})\"",),
+                             overlay_roots=(".github/scripts",), untrainable=Untrainable(SYN_INVENTORY))
+            b.git("fetch", "-q", "origin", "pM")
+            hm = b.git("rev-parse", "FETCH_HEAD").stdout.strip()
+            tip, applied, _d = b.build(base0, [Member(39, "pM", "", hm, "pM", "t", ref=hm)])
+            seen = pathlib.Path(gate_probe).read_text() if os.path.exists(gate_probe) else ""
+            check("gate code: generators read main's copy during regeneration; the train keeps the member's, no regen commit",
+                  applied == [39] and seen == "main\n"
+                  and b.git("show", f"{tip}:{SYN_MAIN_GATE_CODE}").stdout == "member\n"
+                  and b.git("log", "-1", "--format=%s", tip).stdout.strip() != REGEN_COMMIT_SUBJECT,
+                  f"applied={applied} seen={seen!r}")
+            reset()
+
             # NEGATIVE (review 5): a bundle generator deeper than any fixed glob.
             marker = os.path.join(root, "deep-generator-ran")
             open_only("pD")
@@ -3394,7 +3651,7 @@ def self_test() -> int:
             api_calls = []
             gh.pr_files = lambda n: api_calls.append(n) or [f"svc/f{i}.txt" for i in range(3000)]
             cands, _apps = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0, Untrainable(SYN_INVENTORY))
-            check("files: a 3000-entry API list hiding .github/gates/gates.yaml does not admit the PR",
+            check("files: a 3000-entry API list hiding .github/workflows/w.yml does not admit the PR",
                   all(m.number != 35 for m in cands) and api_calls == [], f"{[m.number for m in cands]} api={api_calls}")
             del gh.pr_files
             reset()

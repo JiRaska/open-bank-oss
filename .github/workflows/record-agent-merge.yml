@@ -1,14 +1,11 @@
 # -----------------------------------------------------------------------------
-# Record "a human merged an agent's PR" — ADR-0031 phase 3 evidence.
+# Record actual merge execution and separate human authorization — ADR-0031 phase 3.
 #
-# WHY. Phase 3 of ADR-0031 needs recorded evidence that a HUMAN merged an agent-authored
-# PR, kept out-of-band of the agent's own telemetry (an agent self-reporting "a human
-# merged me" proves nothing). This workflow is the CI-side producer: on every PR closed
-# (merged) against main, .github/scripts/record-agent-merge.py decides whether the PR was
-# agent-authored (head branch under agent/ or codex/, or author declared in rules.yaml
-# autonomous_agent_prs.agent_accounts) and POSTs the record — mergedBy, merge commit,
-# head branch, title — to POST /api/v1/agent-merge-records in openbank-agent-service
-# (ROLE_MERGE_RECORDER-protected, ADR-0031 phase 3 backend).
+# WHY. GitHub App execution must not be attributed to a human. The trusted producer
+# verifies the actual merge executor and, separately, owner authorization for the exact
+# head. Bounded historical PR-scoped requests are labelled explicitly, not treated as
+# head approval. The source of truth and negative cases live in the Python proof validator.
+# Writes use the least-privilege recorder role and are read back after commit.
 #
 # REQUIRED REPO CONFIGURATION (one-time, manual — the run FAILS CLOSED until done):
 #   * Repository variable AGENT_SERVICE_URL — base URL of openbank-agent-service, e.g.
@@ -36,7 +33,7 @@
 # issue, so a silent gap in the merge-record evidence is visible the day it happens.
 #
 # Like record-deployment-on-merge.yml: `pull_request` (not `_target`) keeps same-repo
-# secrets; a fork PR gets no secrets and simply records nothing (soft warning).
+# secrets; missing credentials fail closed. Historical backfills use an owner-only main dispatch.
 # -----------------------------------------------------------------------------
 name: Record agent PR merge
 
@@ -44,13 +41,22 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      prs:
+        description: "Merged PR numbers to backfill and verify, comma separated (maximum 100)"
+        required: true
+        type: string
 
 permissions:
   contents: read
+  pull-requests: read
+  actions: read
+  statuses: read
 
 concurrency:
   # One record per PR; a reopened/closed churn supersedes the earlier run.
-  group: record-agent-merge-${{ github.event.pull_request.number }}
+  group: record-agent-merge-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 env:
@@ -65,7 +71,6 @@ env:
   AGENT_MERGE_PROPOSAL_ID: ""
   # Untrusted event data is passed as a FILE ($GITHUB_EVENT_PATH, set by the
   # runner), never interpolated into the script.
-  GITHUB_EVENT_PATH: ${{ github.event_path }}
 
 jobs:
   record:
@@ -77,19 +82,24 @@ jobs:
     # The workflow fires on every closed PR; only a MERGED one can produce a merge
     # record, and the agent-authorship decision itself lives in the script (testable
     # Python, thin YAML — repo convention).
-    if: github.event.pull_request.merged == true
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+       github.actor == github.repository_owner && github.triggering_actor == github.repository_owner &&
+       github.run_attempt == 1)
     # In-cluster ARC runner — the same lane as schema-registry-apply.yml (Apicurio),
     # _service-ci.yml's Pact Broker publish and audit-anchor-attestation.yml: only it
     # resolves the agent-service cluster-DNS name. ubuntu-latest would fail every POST
     # at DNS resolution (fail-soft used to mask exactly that).
     runs-on: openbank-build
-    timeout-minutes: 5
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 20 || 5 }}
     steps:
       # The script and the rules.yaml it reads agent_accounts from. SHALLOW on purpose:
       # nothing here needs history.
       - name: Check out the recorder script and governance rules
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
         with:
+          ref: main
           fetch-depth: 1
           persist-credentials: false
 
@@ -104,7 +114,7 @@ jobs:
           [ -n "${AGENT_MERGE_RECORDER_CLIENT_ID:-}" ] || missing+=("secrets.AGENT_MERGE_RECORDER_CLIENT_ID")
           [ -n "${AGENT_MERGE_RECORDER_CLIENT_SECRET:-}" ] || missing+=("secrets.AGENT_MERGE_RECORDER_CLIENT_SECRET")
           if ((${#missing[@]})); then
-            echo "::error::record-agent-merge is UNCONFIGURED — missing: ${missing[*]}. A human merge of an agent PR will NOT be recorded until the sandbox CI client (client_credentials, ROLE_MERGE_RECORDER) and the vars above are provisioned. Absence of a record must NOT read as 'no agent PRs merged'."
+            echo "::error::record-agent-merge is UNCONFIGURED — missing: ${missing[*]}. An agent PR merge will NOT be recorded until the sandbox CI client (client_credentials, ROLE_MERGE_RECORDER) and the vars above are provisioned. Absence of a record must NOT read as 'no agent PRs merged'."
             exit 1
           fi
           echo "::notice::recorder configuration present (URL + issuer + client credentials)"
@@ -131,10 +141,29 @@ jobs:
           umask 077
           printf 'Authorization: Bearer %s' "$tok" > "$TOKEN_FILE"
 
-      - name: Record the human merge of an agent PR
+      - name: Record and verify actual merge execution and human authorization
         env:
           TOKEN_FILE: ${{ runner.temp }}/agent-merge-recorder-token
-        run: python3 .github/scripts/record-agent-merge.py --token-file "$TOKEN_FILE"
+          GH_TOKEN: ${{ github.token }}
+          BACKFILL_PRS: ${{ inputs.prs }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            [[ "$BACKFILL_PRS" =~ ^[1-9][0-9]*(,[1-9][0-9]*)*$ ]] || { echo '::error::invalid PR list'; exit 1; }
+            IFS=, read -r -a prs <<< "$BACKFILL_PRS"
+            (( ${#prs[@]} <= 100 )) || { echo '::error::at most 100 backfill PRs per run'; exit 1; }
+            for pr in "${prs[@]}"; do
+              python3 .github/scripts/record-agent-merge.py --pr "$pr" --verify-record --token-file "$TOKEN_FILE"
+            done
+          else
+            python3 .github/scripts/record-agent-merge.py --verify-record --token-file "$TOKEN_FILE"
+          fi
+
+      - name: Remove ephemeral recorder credential
+        if: always()
+        env:
+          TOKEN_FILE: ${{ runner.temp }}/agent-merge-recorder-token
+        run: rm -f -- "$TOKEN_FILE"
 
   raise-issue:
     name: Open the tracking issue on recorder failure
@@ -151,7 +180,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      PR_URL: ${{ github.event.pull_request.html_url }}
+      PR_URL: ${{ github.event.pull_request.html_url || 'Historical backfill; see the run for exact PRs' }}
     steps:
       - name: Open or refresh the tracking issue
         # Body written to a file, never passed via --body: backticks inside a
@@ -167,8 +196,8 @@ jobs:
           - PR: ${PR_URL}
           - Run: ${RUN_URL}
 
-          A green recorder run is the only positive signal that a human merge of an
-          agent PR was recorded out-of-band. This failure means the record is MISSING:
+          A green verified recorder run is the positive signal that merge execution and
+          separate authorization evidence were recorded out-of-band. This failure means the record is MISSING:
           do not read the absence as "no agent PRs merged".
 
           Triage, in order:
