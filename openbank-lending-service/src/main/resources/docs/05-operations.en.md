@@ -153,3 +153,21 @@ The accrual drains truncated batches within `lending.servicing.accrual.drain-bud
 truncated, re-recording them RAN once nothing is left. A REFUSED day stays held until a later RAN
 report or an operator waiver on the ledger. A report that reaches the ledger after the day closed is
 stored `late` and never moves the day. Metric: `openbank_close_participation_reports_total{participant="lending"}`.
+
+### Durable accrual receipts (#13708)
+
+Before contacting ledger, `lending_accrual_progress` (V28) commits the installment's complete dated
+journal request, deterministic reference and transaction identity. A retry reuses that request,
+including its original date and GL accounts. It does not rebuild it from the current clock or chart.
+Only a POSTED response with matching transaction identity and entry date confirms the intent.
+A closed-day refusal remains visible; the same idempotency key is never retargeted to another date.
+
+One local database transaction completes the intent, marks the installment, writes its existing
+`loan.interest_accrued` outbox event, and increments work-day items and actual receipt-day journals.
+A later installment failure cannot discard a committed prefix. An acknowledgement followed by a
+local rollback leaves the intent pending; retrying its exact request can reconcile it once.
+Pending intents prevent RAN. Erasing an unresolved intent follows the installment lifecycle and
+sets scoped aggregate `unreconciled` evidence for its work/requested dates; later successful passes
+cannot clear it. Use the existing controlled ledger reconciliation/waiver process for disposition.
+No per-customer tombstone or new retention period is introduced. Rollback retains V28 tables and
+pending evidence; reverting code does not prove an unresolved remote posting absent.

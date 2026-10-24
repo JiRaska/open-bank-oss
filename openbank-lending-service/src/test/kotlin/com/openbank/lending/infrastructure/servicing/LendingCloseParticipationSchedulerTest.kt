@@ -183,14 +183,14 @@ class LendingCloseParticipationSchedulerTest {
     }
 
     @Test
-    fun `a completed accrual records RAN evidence with installments and journals`() {
+    fun `completed accrual records disposition without trusting transient outcome counters`() {
         accrualScheduler(Uni.createFrom().item(AccrualOutcome(today, installmentsAccrued = 5, journalsPosted = 4)))
             .runAccrualPass().await().indefinitely()
 
         val run = runs.runs.getValue(today to LendingCloseJobs.ACCRUAL)
         assertThat(run.refused).isZero()
-        assertThat(run.itemsProcessed).isEqualTo(5)
-        assertThat(run.journalsPosted).isEqualTo(4)
+        assertThat(run.itemsProcessed).isZero()
+        assertThat(run.journalsPosted).isZero()
     }
 
     @Test
@@ -321,8 +321,8 @@ class LendingCloseParticipationSchedulerTest {
 
         val run = runs.runs.getValue(today to LendingCloseJobs.ACCRUAL)
         assertThat(run.refused).isZero()
-        assertThat(run.itemsProcessed).isEqualTo(3)
-        assertThat(run.journalsPosted).isEqualTo(3)
+        assertThat(run.itemsProcessed).isZero()
+        assertThat(run.journalsPosted).isZero()
     }
 
     @Test
@@ -349,7 +349,7 @@ class LendingCloseParticipationSchedulerTest {
         val caughtUp = runs.runs.getValue(dayD to LendingCloseJobs.ACCRUAL)
         assertThat(caughtUp.refused).isZero()
         assertThat(caughtUp.refusalReason).isNull()
-        assertThat(caughtUp.itemsProcessed).isEqualTo(507)
+        assertThat(caughtUp.itemsProcessed).isEqualTo(500)
     }
 
     // #13708 review: a pass that crashed mid-way leaves running=TRUE; the next pass must heal the day.
@@ -370,10 +370,10 @@ class LendingCloseParticipationSchedulerTest {
         assertThat(runs.inFlight).isEmpty()
         val healed = runs.runs.getValue(dayD to LendingCloseJobs.ACCRUAL)
         assertThat(healed.refused).isZero()
-        assertThat(healed.itemsProcessed).isEqualTo(2)
-        // Booked in the OPEN day: D's row carries no journals, today's carries both passes' journals.
+        assertThat(healed.itemsProcessed).isZero()
+        // Mock outcomes are not durable receipts and must not invent or relocate counts.
         assertThat(healed.journalsPosted).isZero()
-        assertThat(runs.runs.getValue(today to LendingCloseJobs.ACCRUAL).journalsPosted).isEqualTo(4)
+        assertThat(runs.runs.getValue(today to LendingCloseJobs.ACCRUAL).journalsPosted).isZero()
     }
 
     // #13708 security review: catch-up journals booked today must not clear today's refusal.
@@ -398,7 +398,10 @@ class LendingCloseParticipationSchedulerTest {
         )
         val accrual = mockk<AccrueInterestUseCase>()
         every { accrual.accrueDueInterest(dayD, any(), any()) } returns
-            Uni.createFrom().item(AccrualOutcome(dayD, 3, 3))
+            Uni.createFrom().item(AccrualOutcome(dayD, 3, 3)).invoke { _ ->
+                // Model authoritative completion, not the scheduler's transient outcome count.
+                runs.addJournals(today, LendingCloseJobs.ACCRUAL, 3)
+            }
         every { accrual.accrueDueInterest(today, any(), any()) } returns
             Uni.createFrom().item(AccrualOutcome(today, 1, 1))
         // Today's own pass dies before writing its result: only the catch-up touches today's row.

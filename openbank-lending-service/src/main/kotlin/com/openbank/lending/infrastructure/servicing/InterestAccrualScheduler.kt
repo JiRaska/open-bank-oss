@@ -110,7 +110,7 @@ class InterestAccrualScheduler @Inject constructor(
         // day it reports for, and the evidence is recorded under that same date.
         val today = AccountingClock.bank(clock).today()
         catchUpUnfinishedDays(today)
-            .flatMap { passFor(today, today) }
+            .flatMap { passFor(today) }
             .invoke { outcome ->
                 if (outcome.installmentsAccrued > 0) {
                     log.infof(
@@ -132,50 +132,28 @@ class InterestAccrualScheduler @Inject constructor(
     /**
      * Mark in flight, drain as of [asOf], record the evidence under [asOf]; a failure is REFUSED.
      *
-     * The journals are always booked in the OPEN Prague day ([today], see `LendingService.accrueOne`):
-     * a day past its cutoff answers `409 ACCOUNTING_DAY_CLOSED` to a posting under the day lock, so a
-     * catch-up for an earlier day D cannot post into D. It recognises D's remaining interest in the
-     * open day instead, and the evidence says so: D's row gets the installments it covered (the day's
-     * work is done) with no journals, and today's row gets the journals, so each day reports exactly
-     * the journals the ledger holds for it.
+     * Each persisted ledger receipt carries its actual dated request. Atomic completion increments
+     * work-day items and receipt-day journals; neither midnight nor a failed later batch loses them.
      */
-    private fun passFor(asOf: LocalDate, today: LocalDate): Uni<AccrualOutcome> =
+    private fun passFor(asOf: LocalDate): Uni<AccrualOutcome> =
         LendingCloseJobs.markStarted(closeJobRuns, clock, asOf, LendingCloseJobs.ACCRUAL)
             .flatMap {
                 val deadline = clock.instant().plus(drainBudget)
                 drain(asOf, deadline, AccrualOutcome(asOf, 0), 1)
             }
             .call { outcome ->
-                val lateDay = asOf != today
-                // A pass the budget left truncated has not finished the day: RAN here would let the
-                // ledger tie the day out over interest that was not booked.
+                // Counts come from the atomic persisted receipt, including committed prefixes of
+                // failed batches. This run records disposition only, never transient batch totals.
                 LendingCloseJobs.record(
                     closeJobRuns,
                     clock,
                     outcome.asOf,
                     LendingCloseJobs.ACCRUAL,
-                    items = outcome.installmentsAccrued,
-                    journals = if (lateDay) 0 else outcome.journalsPosted,
+                    items = 0,
+                    journals = 0,
                     refused = if (outcome.truncated) 1 else 0,
                     reason = if (outcome.truncated) LendingCloseJobs.REASON_ACCRUAL_TRUNCATED else null,
-                ).flatMap {
-                    if (lateDay && outcome.journalsPosted > 0) {
-                        // Booked today: today's row carries them - as a journal count ONLY. A full
-                        // record() here would overwrite today's refused/reason/in-flight state and
-                        // could flip a REFUSED or running today to a clean RAN (fail-open).
-                        closeJobRuns.addJournals(today, LendingCloseJobs.ACCRUAL, outcome.journalsPosted)
-                            .onFailure().recoverWithItem { e ->
-                                log.warnf(
-                                    "late-day journals for %s NOT added to today's evidence (%s)",
-                                    today,
-                                    e.javaClass.simpleName,
-                                )
-                                Unit
-                            }
-                    } else {
-                        Uni.createFrom().item(Unit)
-                    }
-                }
+                )
             }
             .onFailure().call { e -> recordRefusal(asOf, e) }
 
@@ -226,7 +204,7 @@ class InterestAccrualScheduler @Inject constructor(
                     log.infof("interest accrual: catching up %d unfinished day(s): %s", days.size, days)
                     Multi.createFrom().iterable(days)
                         .onItem().transformToUniAndConcatenate { day ->
-                            passFor(day, today).onFailure().recoverWithNull()
+                            passFor(day).onFailure().recoverWithNull()
                         }
                         .collect().asList()
                         .replaceWith(Unit)

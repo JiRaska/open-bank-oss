@@ -19,6 +19,7 @@ CREATE TABLE lending_close_job_run (
     journals_posted INTEGER       NOT NULL DEFAULT 0 CHECK (journals_posted >= 0),
     refused         INTEGER       NOT NULL DEFAULT 0 CHECK (refused >= 0),
     refusal_reason  VARCHAR(1000),
+    unreconciled    BOOLEAN       NOT NULL DEFAULT FALSE,
     running         BOOLEAN       NOT NULL DEFAULT FALSE,
     started_at      TIMESTAMPTZ,
     completed_at    TIMESTAMPTZ,
@@ -50,3 +51,56 @@ CREATE TABLE lending_close_job_run (
 CREATE INDEX IF NOT EXISTS idx_lending_outbox_allowance_accounting_date
     ON lending_outbox ((CAST(payload AS jsonb) ->> 'accountingDate'))
     WHERE event_type = 'lending.allowance.posting';
+
+
+-- Persist the complete dated request before contacting ledger. Retries replay these exact bytes;
+-- completion, installment status, outbox and day counters commit in one local transaction.
+-- This migration is not released yet. Rollback retains pending intents: deleting them cannot
+-- establish whether an acknowledged remote journal committed. No new personal-data retention applies.
+CREATE TABLE lending_accrual_progress (
+    installment_id UUID PRIMARY KEY REFERENCES installment(id) ON DELETE CASCADE,
+    loan_id UUID NOT NULL,
+    installment_number INTEGER NOT NULL,
+    due_date DATE NOT NULL,
+    interest_amount NUMERIC(20,2) NOT NULL CHECK (interest_amount >= 0),
+    currency CHAR(3) NOT NULL,
+    business_date DATE NOT NULL,
+    reference TEXT NOT NULL UNIQUE,
+    transaction_id UUID NOT NULL,
+    requested_date DATE,
+    request_json TEXT,
+    started_at TIMESTAMPTZ NOT NULL,
+    journal_id UUID UNIQUE,
+    booked_date DATE,
+    completed_at TIMESTAMPTZ,
+    CHECK ((interest_amount = 0 AND requested_date IS NULL AND request_json IS NULL)
+        OR (interest_amount > 0 AND requested_date IS NOT NULL AND request_json IS NOT NULL)),
+    CHECK ((journal_id IS NULL AND booked_date IS NULL)
+        OR (journal_id IS NOT NULL AND booked_date IS NOT NULL AND booked_date = requested_date AND completed_at IS NOT NULL)),
+    CHECK (completed_at IS NULL OR interest_amount = 0 OR journal_id IS NOT NULL)
+);
+
+-- Erasure follows the installment lifecycle. An unresolved remote outcome leaves only scoped,
+-- non-identifying aggregate uncertainty; later successful passes must not clear that uncertainty.
+CREATE FUNCTION refuse_erased_accrual_progress() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE affected_date DATE;
+BEGIN
+    IF OLD.completed_at IS NULL THEN
+        FOR affected_date IN SELECT DISTINCT d FROM unnest(
+            ARRAY[OLD.business_date, OLD.requested_date]) AS dates(d) WHERE d IS NOT NULL ORDER BY d
+        LOOP
+            INSERT INTO lending_close_job_run
+                (business_date, job, refused, refusal_reason, unreconciled)
+            VALUES (affected_date, 'accrual', 1,
+                'accrual evidence requires reconciliation', TRUE)
+            ON CONFLICT (business_date, job) DO UPDATE SET
+                unreconciled = TRUE,
+                refused = GREATEST(lending_close_job_run.refused, 1),
+                refusal_reason = 'accrual evidence requires reconciliation';
+        END LOOP;
+    END IF;
+    RETURN OLD;
+END;
+$$;
+CREATE TRIGGER refuse_erased_accrual_progress BEFORE DELETE ON lending_accrual_progress
+    FOR EACH ROW EXECUTE FUNCTION refuse_erased_accrual_progress();

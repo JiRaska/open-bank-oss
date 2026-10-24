@@ -996,3 +996,26 @@ historical-replay / reconciliation policy is tracked in #10275.
 The customer self-service intake, quote, credit-journey and financial-health endpoints admit only customer-edge. That caller is recognised by `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT whose `azp` is the configured client and whose `preferred_username` is that client's own `service-account-<azp>`. It is never recognised by the principal name, which Quarkus takes from a username claim. A token carrying the edge's username but issued to another client, or a human token issued through the edge client, is refused with 403.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+
+### Durable accrual evidence and retry boundary (#13708)
+
+The accrual loop commits a complete immutable dated journal request before the remote money call.
+It accepts only a POSTED, nonzero journal identity with the persisted deterministic transaction ID
+and matching provider entry date. Current time, a successful transport, a batch's returned count,
+or a missing response date cannot substitute for that receipt. Retries replay the same request;
+a closed-day refusal never silently changes its date or idempotency identity.
+
+The progress row, installment mark, existing accrual outbox event and per-day item/journal counters
+complete in one local transaction. A conditional completion and unique journal identity prevent
+recounting or assigning one journal to different intents. A committed prefix survives a later batch
+failure. A remote acknowledgement followed by local failure leaves a pending intent, which blocks
+RAN until an exact idempotent retry reconciles it. Completion re-locks the persisted installment and
+intent, validates their economic facts, and builds the event from persisted facts rather than a
+caller-supplied snapshot. Day rows are acquired in date order.
+
+Intent metadata follows installment erasure through its foreign key; no new personal-data retention
+period or permanent identity tombstone is introduced. Deleting unresolved evidence leaves only a
+scoped, non-identifying aggregate reconciliation refusal for the affected work/requested dates.
+Ordinary successful runs cannot clear this uncertainty. Existing controlled ledger reconciliation
+or waiver is required for disposition. Rollback retains additive V28 evidence and pending intents.
