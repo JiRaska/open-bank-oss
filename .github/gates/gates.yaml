@@ -1723,6 +1723,31 @@ gates:
     run: |
       python3 .github/scripts/check-stateful-not-on-spot.py
 
+  - id: default-nodepool-budget-shape
+    name: "default NodePool disruption budgets stay pinned: <=1 node, windowed drift, freeze (#13726, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 20
+    rationale: >-
+      #13704 bounded the spot `default` NodePool (most CNPG pods) to one disrupted node at a time and
+      confined Drifted replacements to a daily window via a scheduled Drifted budget of 0 nodes,
+      beside the overnight freeze. Nothing enforced it, and stateful-not-on-spot covers only the
+      stateful pool. Every budget must allow at most one node (a "50%" entry is live the day the tight
+      one goes), a catch-all budget must exist, the Drifted-0 schedule must leave a window of at most
+      4h, and the freeze (scheduled, no reasons, 0 nodes) must remain. The HCL is brace-matched, as
+      in check-stateful-not-on-spot.py.
+    review_after: "2027-04-30"
+    verified: >-
+      2026-10-24 -- run on the branch: OK, 4 budgets. Self-test falsifies 7 mutations on the real
+      file (catch-all removed, catch-all raised to 50%, Drifted raised to 5, scheduled Drifted
+      budget removed, window widened to 12h, freeze removed, pool renamed) and a missing file.
+    min_subjects: 3   # 4 budget entries today (2026-10-24)
+    selftest_inputs: [".github/scripts/check-default-nodepool-budget.py"]
+    selftest: python3 .github/scripts/check-default-nodepool-budget.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-default-nodepool-budget.py
+
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
   # Rolling campaign-service into the sandbox hit five defects that each kill the pod or its
