@@ -50,6 +50,12 @@ export const ROLES = {
   // #10896: nostro reconciliation. NostroResource's class-level @RolesAllowed (reads) also admits
   // this role, unlike TreasuryResource's — see the treasury:nostro:read comment below.
   TREASURY_SENIOR_APPROVER: "ROLE_TREASURY_SENIOR_APPROVER",
+  // ADR-0344 workbench roles (treasury API 1.19.0 contract): back office proposes cash-flow
+  // overrides, manual fixings and closes; the reference editor proposes reference-data versions;
+  // the payment releaser alone releases a payment to the rail. None of them approves its own item.
+  TREASURY_BACK_OFFICE: "ROLE_TREASURY_BACK_OFFICE",
+  TREASURY_REFERENCE_EDITOR: "ROLE_TREASURY_REFERENCE_EDITOR",
+  TREASURY_PAYMENT_RELEASER: "ROLE_TREASURY_PAYMENT_RELEASER",
 } as const
 
 export type Role = typeof ROLES[keyof typeof ROLES]
@@ -61,7 +67,7 @@ export const PERMISSIONS = {
   // the KYC and supervisor entries their role-specific workspace can be
   // derived, but the role matrix says they may not view the dashboard — a
   // contradiction ADR-0229 D4 explicitly rules out.
-  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.RISK, ROLES.FINANCE, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.RISK, ROLES.FINANCE, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_REFERENCE_EDITOR, ROLES.TREASURY_PAYMENT_RELEASER],
   // Accounts
   "accounts:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS],
   "accounts:create":          [ROLES.ADMIN, ROLES.OPERATOR],
@@ -111,7 +117,11 @@ export const PERMISSIONS = {
   // (approve/reject/settle/mature/reverse) APPROVER only — ADMIN is deliberately NOT in either
   // write set, because the method-level @RolesAllowed does not admit it. Cancel admits both desk
   // roles. Four-eyes between two PEOPLE is the domain's 422, not a role split.
-  "treasury:view":          [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  // ADR-0344 widens the class-level read set with the back-office role only, so the console set
+  // still equals TreasuryResource's class-level @RolesAllowed exactly. The reference editor reads
+  // reference data and nothing else; the payment releaser reads payments and nothing else (their
+  // own permissions below, and the service's own rule for each).
+  "treasury:view":          [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE],
   "treasury:deal:create":   [ROLES.TREASURY_DEALER],
   "treasury:deal:approve":  [ROLES.TREASURY_APPROVER],
   "treasury:deal:cancel":   [ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER],
@@ -123,6 +133,23 @@ export const PERMISSIONS = {
   // admitted (mirrored in ADMIN_EXCLUDED_BY_SERVICE, roles.test.ts).
   "treasury:nostro:read":   [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
   "treasury:nostro:upload": [ROLES.TREASURY_APPROVER],
+  // ADR-0344 workbench. Reads of the areas that sit behind the resources' class-level @RolesAllowed
+  // (calendar, analysis, fixings, market data, reports, day completion) admit exactly the
+  // treasury:view set; reference data and payments each admit one more role, and ONLY for their own
+  // area. Each write mirrors the contract's own role set and is never granted to ADMIN. Four-eyes
+  // between two PEOPLE (creator != approver, never an AI principal) is the domain's 422/403, not a role split.
+  "treasury:workbench:view":    [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE],
+  "treasury:reference:read":    [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_REFERENCE_EDITOR],
+  "treasury:payment:read":      [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_PAYMENT_RELEASER],
+  "treasury:backoffice:write":  [ROLES.TREASURY_BACK_OFFICE],
+  "treasury:confirmation:send": [ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_APPROVER],
+  "treasury:decision:approve":  [ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  "treasury:reference:propose": [ROLES.TREASURY_REFERENCE_EDITOR, ROLES.TREASURY_BACK_OFFICE],
+  "treasury:reference:approve": [ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  "treasury:reference:decide":  [ROLES.TREASURY_APPROVER],
+  "treasury:correction:propose": [ROLES.TREASURY_DEALER, ROLES.TREASURY_BACK_OFFICE],
+  "treasury:payment:release":   [ROLES.TREASURY_PAYMENT_RELEASER],
+  "treasury:payment:cancel":    [ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_APPROVER],
   // Pension back office (ADR-0334, #12350): exactly the two pension services' @RolesAllowed.
   // Reads admit OPERATOR, ADMIN and AUDITOR; every write (activate, NAV calculate/publish, strategy
   // change submit/decide/apply) admits OPERATOR and ADMIN. Four-eyes between maker and checker is
@@ -404,6 +431,12 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   ['treasury:deal:create', ['/treasury/deals/new']],
   ['treasury:deal:approve', ['/treasury/approvals']],
   ['treasury:nostro:read', ['/treasury/nostro']],
+  ['treasury:workbench:view', [
+    '/treasury/calendar', '/treasury/analysis', '/treasury/fixings', '/treasury/market-data',
+    '/treasury/reports', '/treasury/day-completion',
+  ]],
+  ['treasury:reference:read', ['/treasury/reference']],
+  ['treasury:payment:read', ['/treasury/payments']],
   // ADR-0285 D6: the four-eyes workbench for communication style publishes. The checker
   // (ROLE_COMMS_APPROVER) holds communication:style:decide but not approvals:view, so the
   // bare '/approvals' guard below would wall them out of the very queue their publish
