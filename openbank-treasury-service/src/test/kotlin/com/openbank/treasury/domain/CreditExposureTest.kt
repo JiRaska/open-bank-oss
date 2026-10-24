@@ -132,6 +132,27 @@ class CreditExposureTest {
     }
 
     @Test
+    fun `the residual-maturity bucket boundaries at 1y and 5y hold on both sides`() {
+        fun irsDays(days: Long): Deal {
+            val end = trade.plusDays(days)
+            return deal(
+                ProductType.IRS,
+                listOf(
+                    leg(PayReceive.PAY, "CZK", "10000000.00", end, LegRate.fixed(BigDecimal("4.00"))),
+                    leg(PayReceive.RECEIVE, "CZK", "10000000.00", end, LegRate.fixed(BigDecimal("4.00"))),
+                ),
+            )
+        }
+        fun measure(days: Long) = CreditExposure.of(irsDays(days), trade, seededCreditTerms)
+        // ACT/365F: 365 d is exactly 1y (<=1y bucket, 0.5 %), 366 d falls into the <=5y bucket (1.0 %).
+        assertThat(measure(365)).isEqualByComparingTo("50000.00")
+        assertThat(measure(366)).isEqualByComparingTo("100000.00")
+        // 1825 d is exactly 5y (1.0 %), 1826 d falls into the open bucket (1.5 %).
+        assertThat(measure(1825)).isEqualByComparingTo("100000.00")
+        assertThat(measure(1826)).isEqualByComparingTo("150000.00")
+    }
+
+    @Test
     fun `an FX forward consumes its CZK notional x factor on the CZK line`() {
         val d = fxForward()
         assertThat(d.limitCurrency).isEqualTo("CZK")
