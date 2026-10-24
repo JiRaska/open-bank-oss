@@ -392,6 +392,39 @@ paths:
         "409":
           description: Proposal already decided, or authenticated principal equals the author (segregation of duties)
 
+  /api/v1/agent-merge-records/app:
+    post:
+      tags: [merge-records]
+      operationId: recordAuthorizedAppMerge
+      summary: Record an actual GitHub App merge with separate human authorization
+      description: |
+        ROLE_MERGE_RECORDER only. Requires the actual trusted App login/id, full source and merge
+        SHAs, and typed human authorization. Exact-head workflow approval and historical PR-scoped
+        reconstruction remain distinct; legacy observations do not certify exact-head approval.
+        A conflicting duplicate returns 409 without replacing evidence or emitting another event.
+        App timestamps are normalized to PostgreSQL microsecond precision before storage and replay comparison.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppMergeRecordIngestRequest'
+      responses:
+        "200":
+          description: The durable merge record; inserted is false for an identical redelivery
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MergeRecordDto'
+        "400":
+          description: Missing, invalid, or inconsistent App provenance
+        "401":
+          description: Authentication required
+        "403":
+          description: Authenticated principal lacks ROLE_MERGE_RECORDER
+        "409":
+          description: The stored executor, source, or authorization conflicts with the request
+
   /api/v1/agent-merge-records/capabilities:
     get:
       tags: [merge-records]
@@ -441,17 +474,13 @@ paths:
     post:
       tags: [merge-records]
       operationId: recordAgentMerge
-      summary: Record the merge executor and separate human authorization
+      summary: Record a human merge using the original ingest contract
       description: |
-        Records WHO merged an agent's PR (ADR-0031 phase 3) — the merge half of the
-        AI-attribution evidence chain next to `agent.proposal.decided`. Called by the
-        GitHub Actions pipeline with a service credential (ROLE_MERGE_RECORDER only). Idempotent
-        by `prNumber`: a webhook redelivery returns the already-stored record with
-        `inserted: false` and emits no second audit event. A genuine insert emits an
-        `agent.pr.merged` audit event under the actual merge executor (HUMAN or SERVICE).
-        GitHub App merges require exact source and merge SHAs plus separate human authorization.
-        Conflicting App redeliveries return 409; the original record and outbox remain unchanged.
-        App timestamps are normalized to PostgreSQL microsecond precision before storage and replay comparison.
+        ROLE_MERGE_RECORDER only. Preserves the original human request contract and ignores unknown
+        legacy properties; such properties never become authorization evidence. The actual human
+        login remains the audit actor. GitHub App executions must use the separate /app operation.
+        Redelivery returns the original record and emits no second audit event; a conflicting attempt
+        against an existing App record returns 409.
       requestBody:
         required: true
         content:
@@ -979,22 +1008,39 @@ components:
     MergeRecordIngestRequest:
       type: object
       required: [agentId, prNumber, prUrl, headBranch, mergedBy, mergedAt, title]
-      allOf:
-        - if:
-            required: [mergedByType]
-            properties:
-              mergedByType: {const: GITHUB_APP}
-          then:
-            required: [mergedById, headSha, mergeCommitSha, authorization]
-            properties:
-              mergedById: {type: integer}
-              headSha: {type: string}
-              mergeCommitSha: {type: string}
-              authorization:
-                $ref: '#/components/schemas/MergeAuthorization'
-          else:
-            properties:
-              authorization: {type: "null"}
+      properties:
+        agentId:
+          type: string
+          description: The declared agent id (e.g. "flaky-test-hunter"), derived from the PR head branch prefix/author by the caller.
+        prNumber:
+          type: integer
+          format: int64
+          description: The GitHub PR number — the idempotency key; a redelivery returns the stored record.
+        prUrl:
+          type: string
+        headBranch:
+          type: string
+        mergedBy:
+          type: string
+          description: The HUMAN login who pressed merge — becomes the audit actor.
+        mergedAt:
+          type: string
+          format: date-time
+        title:
+          type: string
+        proposalId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Links the agent_proposal row when the caller can establish it.
+        source:
+          type: string
+          nullable: true
+          description: Ingest origin, e.g. "github-actions". Defaults to "unknown".
+
+    AppMergeRecordIngestRequest:
+      type: object
+      required: [agentId, prNumber, prUrl, headBranch, mergedBy, mergedAt, title, mergedByType, mergedById, headSha, mergeCommitSha, authorization]
       properties:
         agentId:
           type: string
@@ -1012,24 +1058,21 @@ components:
           description: The actual merge executor login, preserved independently of the human approver.
         mergedByType:
           type: string
-          enum: [HUMAN, GITHUB_APP]
-          default: HUMAN
-          description: Legacy requests default to HUMAN. GITHUB_APP requires all provenance fields and authorization.
+          enum: [GITHUB_APP]
+          description: This endpoint records only the actual trusted GitHub App executor.
         mergedById:
-          type: [integer, "null"]
+          type: integer
           format: int64
           minimum: 1
         headSha:
-          type: [string, "null"]
+          type: string
           pattern: '^[0-9a-f]{40}$'
         mergeCommitSha:
-          type: [string, "null"]
+          type: string
           pattern: '^[0-9a-f]{40}$'
         authorization:
-          anyOf:
-            - $ref: '#/components/schemas/MergeAuthorization'
-            - type: "null"
-          description: Required for GITHUB_APP, prohibited for HUMAN. Ingested by the trusted recorder, not user identity substitution.
+          $ref: '#/components/schemas/MergeAuthorization'
+          description: Required separate human authorization evidence; never substitutes the actual merge executor.
         mergedAt:
           type: string
           format: date-time

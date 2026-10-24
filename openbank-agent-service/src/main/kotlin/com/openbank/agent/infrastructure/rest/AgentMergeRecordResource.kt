@@ -5,6 +5,7 @@
 
 package com.openbank.agent.infrastructure.rest
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.agent.application.port.`in`.MergeRecordCommand
 import com.openbank.agent.application.port.`in`.MergeRecordQueries
 import com.openbank.agent.application.port.`in`.RecordMergeUseCase
@@ -48,6 +49,8 @@ class AgentMergeRecordResource {
 
     @Inject lateinit var queries: MergeRecordQueries
 
+    /** The original human-only request; unknown legacy properties remain ignored. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class MergeRecordIngestRequest(
         val agentId: String?,
         val prNumber: Long?,
@@ -58,7 +61,22 @@ class AgentMergeRecordResource {
         val title: String?,
         val proposalId: String? = null,
         val source: String? = null,
-        val mergedByType: MergeActorType = MergeActorType.HUMAN,
+    )
+
+    enum class GitHubAppActorType { GITHUB_APP }
+
+    /** A separate additive contract: App provenance is never parsed as a human merge. */
+    data class AppMergeRecordIngestRequest(
+        val agentId: String?,
+        val prNumber: Long?,
+        val prUrl: String?,
+        val headBranch: String?,
+        val mergedBy: String?,
+        val mergedAt: Instant?,
+        val title: String?,
+        val proposalId: String? = null,
+        val source: String? = null,
+        val mergedByType: GitHubAppActorType? = null,
         val mergedById: Long? = null,
         val headSha: String? = null,
         val mergeCommitSha: String? = null,
@@ -100,24 +118,54 @@ class AgentMergeRecordResource {
      * role (ADR-0031 phase 3 hardening): the caller is the CI pipeline's service credential
      * and nothing else, so a full ROLE_ADMIN (an interactive bank administrator role) must
      * NOT be able to write merge evidence. Provisioning the CI client with this role keeps
-     * the blast radius of a leaked recorder secret to one endpoint.
+     * the blast radius of a leaked recorder secret to the merge-evidence API.
      */
     @POST
     @Blocking
     @RolesAllowed("ROLE_MERGE_RECORDER")
-    fun ingest(body: MergeRecordIngestRequest): Response {
-        val agentId = requireNotBlank(body.agentId, "agentId")
-        val prUrl = requireNotBlank(body.prUrl, "prUrl")
-        val headBranch = requireNotBlank(body.headBranch, "headBranch")
-        val mergedBy = requireNotBlank(body.mergedBy, "mergedBy")
-        val title = requireNotBlank(body.title, "title")
-        val mergedAt = requireNotNull(body.mergedAt) { "mergedAt is required" }
-        val prNumber = requireNotNull(body.prNumber) { "prNumber is required" }
-        val proposalId = body.proposalId?.let {
+    fun ingest(body: MergeRecordIngestRequest): Response = store(body.toCommand())
+
+    @POST
+    @Path("/app")
+    @Blocking
+    @RolesAllowed("ROLE_MERGE_RECORDER")
+    fun ingestApp(body: AppMergeRecordIngestRequest): Response {
+        requireNotNull(body.mergedByType) { "mergedByType is required" }
+        val common = MergeRecordIngestRequest(
+            agentId = body.agentId, prNumber = body.prNumber, prUrl = body.prUrl,
+            headBranch = body.headBranch, mergedBy = body.mergedBy, mergedAt = body.mergedAt,
+            title = body.title, proposalId = body.proposalId, source = body.source,
+        )
+        return store(
+            common.toCommand(
+                mergedByType = MergeActorType.GITHUB_APP,
+                mergedById = body.mergedById,
+                headSha = body.headSha,
+                mergeCommitSha = body.mergeCommitSha,
+                authorization = body.authorization,
+            ),
+        )
+    }
+
+    private fun MergeRecordIngestRequest.toCommand(
+        mergedByType: MergeActorType = MergeActorType.HUMAN,
+        mergedById: Long? = null,
+        headSha: String? = null,
+        mergeCommitSha: String? = null,
+        authorization: MergeAuthorization? = null,
+    ): MergeRecordCommand {
+        val agentId = requireNotBlank(this.agentId, "agentId")
+        val prUrl = requireNotBlank(this.prUrl, "prUrl")
+        val headBranch = requireNotBlank(this.headBranch, "headBranch")
+        val mergedBy = requireNotBlank(this.mergedBy, "mergedBy")
+        val title = requireNotBlank(this.title, "title")
+        val mergedAt = requireNotNull(this.mergedAt) { "mergedAt is required" }
+        val prNumber = requireNotNull(this.prNumber) { "prNumber is required" }
+        val proposalId = this.proposalId?.let {
             runCatching { UUID.fromString(it) }.getOrNull()
                 ?: throw IllegalArgumentException("proposalId must be a UUID")
         }
-        val command = MergeRecordCommand(
+        return MergeRecordCommand(
             agentId = agentId,
             prNumber = prNumber,
             prUrl = prUrl,
@@ -126,19 +174,20 @@ class AgentMergeRecordResource {
             mergedAt = mergedAt,
             title = title,
             proposalId = proposalId,
-            source = body.source?.trim()?.takeIf { it.isNotEmpty() } ?: "unknown",
-            mergedByType = body.mergedByType,
-            mergedById = body.mergedById,
-            headSha = body.headSha,
-            mergeCommitSha = body.mergeCommitSha,
-            authorization = body.authorization,
+            source = this.source?.trim()?.takeIf { it.isNotEmpty() } ?: "unknown",
+            mergedByType = mergedByType,
+            mergedById = mergedById,
+            headSha = headSha,
+            mergeCommitSha = mergeCommitSha,
+            authorization = authorization,
         )
-        return try {
-            val outcome = recordMerge.record(command)
-            Response.ok(outcome.record.toDto(outcome.inserted)).build()
-        } catch (e: MergeEvidenceConflict) {
-            Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
-        }
+    }
+
+    private fun store(command: MergeRecordCommand): Response = try {
+        val outcome = recordMerge.record(command)
+        Response.ok(outcome.record.toDto(outcome.inserted)).build()
+    } catch (e: MergeEvidenceConflict) {
+        Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
     }
 
     /** Producer preflight prevents a v1 deployment from silently ignoring App provenance. */

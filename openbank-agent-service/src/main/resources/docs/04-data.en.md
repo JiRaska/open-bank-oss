@@ -24,7 +24,7 @@ The per-service governance manifest ([`governance.yaml`](../../../../openbank-ag
 
 ## `agent_merge_record` — merge execution and human authorization (ADR-0031 phase 3)
 
-One row per merged agent-authored PR, ingested out-of-band by the `record-agent-merge` CI workflow over `POST /api/v1/agent-merge-records` ([03 — API](./03-api.md)). No banking data, no PR body/diff content (the audit payload too carries merge facts only).
+One row per merged agent-authored PR, ingested out-of-band by the `record-agent-merge` CI workflow over `POST /api/v1/agent-merge-records` for human executors or its separate `/app` operation for GitHub App executions ([03 — API](./03-api.md)). No banking data, no PR body/diff content (the audit payload too carries merge facts only).
 
 | Column | Type | Notes |
 |---|---|---|

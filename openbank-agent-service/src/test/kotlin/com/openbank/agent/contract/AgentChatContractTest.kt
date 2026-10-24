@@ -97,12 +97,15 @@ class AgentChatContractTest {
     }
 
     @Test
-    fun `merge provenance contract preserves human default and separates App authorization`() {
-        val request = openapi.substringAfter("    MergeRecordIngestRequest:")
-            .substringBefore("    MergeRecordDto:")
-        assertThat(request).contains("default: HUMAN", "enum: [HUMAN, GITHUB_APP]")
+    fun `merge provenance preserves the original human input and adds a separate App contract`() {
+        val human = openapi.substringAfter("    MergeRecordIngestRequest:")
+            .substringBefore("    AppMergeRecordIngestRequest:")
+        assertThat(human).doesNotContain("mergedByType:", "authorization:", "headSha:")
+        val app = openapi.substringAfter("    AppMergeRecordIngestRequest:").substringBefore("    MergeRecordDto:")
+        assertThat(app).contains("enum: [GITHUB_APP]")
             .contains("headSha:", "mergeCommitSha:", "mergedById:", "authorization:")
-        assertThat(openapi).contains("/api/v1/agent-merge-records/capabilities:")
+        assertThat(openapi).contains("/api/v1/agent-merge-records/app:")
+            .contains("/api/v1/agent-merge-records/capabilities:")
             .contains("/api/v1/agent-merge-records/{prNumber}:")
             .contains("required: [approvedBy, approvedById, approvedAt, evidenceUrl]")
     }

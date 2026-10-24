@@ -393,6 +393,8 @@ class AgentMergeRecordApiIT {
     fun `ingest with ROLE_ADMIN but without ROLE_MERGE_RECORDER is rejected`() {
         given().get("/api/v1/agent-merge-records/capabilities").then().statusCode(403)
         given().get("/api/v1/agent-merge-records/9030").then().statusCode(403)
+        given().contentType("application/json").body(appBody(9007))
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(403)
         // Least-privilege guard (ADR-0031 phase 3 hardening): an interactive bank
         // administrator must NOT be able to write merge evidence — only the dedicated
         // ROLE_MERGE_RECORDER carried by the CI recorder client may.
@@ -420,26 +422,27 @@ class AgentMergeRecordApiIT {
         given().get("/api/v1/agent-merge-records/9030").then().statusCode(404)
         val body = appBody(9030)
         given().contentType("application/json").body(body)
-            .`when`().post("/api/v1/agent-merge-records").then().statusCode(200)
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(200)
             .body("mergedBy", `is`("openbank-gitops-bot[bot]"))
             .body("mergedByType", `is`("GITHUB_APP"))
             .body("authorization.approvedBy", `is`("fixture-owner"))
             .body("headSha", `is`("a".repeat(40)))
             .body("inserted", `is`(true))
         given().contentType("application/json").body(body + ("title" to "redelivered title"))
-            .`when`().post("/api/v1/agent-merge-records").then().statusCode(200)
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(200)
             .body("inserted", `is`(false))
         val conflicts = listOf(
             body + ("headSha" to "c".repeat(40)),
             body + ("mergeCommitSha" to "d".repeat(40)),
             body + ("mergedById" to 9999),
             body + ("authorization" to appAuthorization().copy(statusId = 9999)),
-            ingestBody(prNumber = 9030),
         )
         conflicts.forEach {
             given().contentType("application/json").body(it)
-                .`when`().post("/api/v1/agent-merge-records").then().statusCode(409)
+                .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(409)
         }
+        given().contentType("application/json").body(ingestBody(prNumber = 9030))
+            .`when`().post("/api/v1/agent-merge-records").then().statusCode(409)
         given().get("/api/v1/agent-merge-records/9030").then().statusCode(200)
             .body("mergedBy", `is`("openbank-gitops-bot[bot]"))
             .body("authorization.approvedBy", `is`("fixture-owner"))
@@ -470,6 +473,7 @@ class AgentMergeRecordApiIT {
         val forgedUrl = "https://example.invalid/actions/runs/4321"
         val invalid = listOf(
             body - "authorization", body - "headSha", body - "mergeCommitSha", body - "mergedById",
+            body - "mergedByType", body + ("mergedByType" to "HUMAN"),
             body + ("mergedById" to 0), body + ("headSha" to "a".repeat(39)),
             body + ("mergeCommitSha" to "B".repeat(40)),
             body + ("mergedBy" to "untrusted[bot]"),
@@ -485,7 +489,7 @@ class AgentMergeRecordApiIT {
         )
         invalid.forEach {
             given().contentType("application/json").body(it)
-                .`when`().post("/api/v1/agent-merge-records").then().statusCode(400)
+                .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(400)
             assertMergeCount(9031, 0)
             assertThat(auditCountFor(9031)).isZero()
         }
@@ -497,13 +501,13 @@ class AgentMergeRecordApiIT {
         val authorization = legacyAuthorization(9032)
         val body = appBody(9032) + ("authorization" to authorization)
         given().contentType("application/json").body(body)
-            .`when`().post("/api/v1/agent-merge-records").then().statusCode(200)
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(200)
             .body("mergedByType", `is`("GITHUB_APP"))
             .body("authorization.kind", `is`("LEGACY_PR_AUTO_MERGE"))
             .body("authorization.scope", `is`("PR"))
         given().contentType("application/json")
             .body(body + ("authorization" to authorization.copy(observedAt = Instant.parse("2026-10-24T12:01:00Z"))))
-            .`when`().post("/api/v1/agent-merge-records").then().statusCode(200)
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(200)
             .body("inserted", `is`(false))
         val stored = given().get("/api/v1/agent-merge-records/9032").then().statusCode(200).extract().asString()
         val storedProof = objectMapper.readTree(stored).path("authorization")
@@ -511,7 +515,7 @@ class AgentMergeRecordApiIT {
         assertThat(storedProof.path("scope").asText()).isEqualTo("PR")
         given().contentType("application/json")
             .body(body + ("authorization" to authorization.copy(mergeEventNodeId = "ME_other")))
-            .`when`().post("/api/v1/agent-merge-records").then().statusCode(409)
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(409)
         assertThat(auditCountFor(9032)).isEqualTo(1)
     }
 
@@ -535,7 +539,7 @@ class AgentMergeRecordApiIT {
         )
         invalid.forEach {
             given().contentType("application/json").body(it)
-                .`when`().post("/api/v1/agent-merge-records").then().statusCode(400)
+                .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(400)
             assertMergeCount(9033, 0)
             assertThat(auditCountFor(9033)).isZero()
         }
@@ -551,10 +555,10 @@ class AgentMergeRecordApiIT {
             ),
         )
         given().contentType("application/json").body(body)
-            .`when`().post("/api/v1/agent-merge-records").then().statusCode(200)
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(200)
             .body("inserted", `is`(true))
         given().contentType("application/json").body(body)
-            .`when`().post("/api/v1/agent-merge-records").then().statusCode(200)
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(200)
             .body("inserted", `is`(false))
         val stored = given().get("/api/v1/agent-merge-records/9034").then().statusCode(200).extract().asString()
         val evidence = objectMapper.readTree(stored)
@@ -563,6 +567,29 @@ class AgentMergeRecordApiIT {
         assertThat(Instant.parse(evidence.path("authorization").path("approvedAt").asText()))
             .isEqualTo(Instant.parse("2026-10-01T11:59:00.123456Z"))
         assertThat(auditCountFor(9034)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "pipeline", roles = ["ROLE_MERGE_RECORDER"])
+    fun `legacy human input ignores unknown fields without interpreting them as App authorization`() {
+        val legacy = ingestBody(prNumber = 9036) + mapOf(
+            "mergedByType" to "GITHUB_APP",
+            "mergedById" to -1,
+            "authorization" to "ignored legacy extension",
+            "headSha" to "not-a-sha",
+        )
+        val response = given().contentType("application/json").body(legacy)
+            .`when`().post("/api/v1/agent-merge-records").then().statusCode(200).extract().asString()
+        val record = objectMapper.readTree(response)
+        assertThat(record.path("mergedBy").asText()).isEqualTo("octo-reviewer")
+        assertThat(record.path("mergedByType").asText()).isEqualTo("HUMAN")
+        assertThat(record.path("authorization").isNull).isTrue()
+        assertThat(record.path("headSha").isNull).isTrue()
+        assertThat(auditCountFor(9036)).isEqualTo(1)
+        given().contentType("application/json").body(appBody(9037))
+            .`when`().post("/api/v1/agent-merge-records").then().statusCode(400)
+        assertMergeCount(9037, 0)
+        assertThat(auditCountFor(9037)).isZero()
     }
 
     @Test

@@ -24,7 +24,7 @@ Per-service governance manifest ([`governance.yaml`](../../../../openbank-agent-
 
 ## `agent_merge_record` — skutečný merge a lidské schválení (ADR-0031 fáze 3)
 
-Jeden řádek na každý mergovaný PR autora agentem, ingestovaný mimo pásmo CI workflow `record-agent-merge` přes `POST /api/v1/agent-merge-records` ([03 — API](./03-api.md)). Žádná bankovní data, žádný obsah PR (tělo/diff) — i auditní payload nese pouze fakta o merge.
+Jeden řádek na každý mergovaný PR autora agentem, ingestovaný mimo pásmo CI workflow `record-agent-merge` přes `POST /api/v1/agent-merge-records` pro lidského vykonavatele nebo samostatnou operaci `/app` pro GitHub App ([03 — API](./03-api.md)). Žádná bankovní data, žádný obsah PR (tělo/diff) — i auditní payload nese pouze fakta o merge.
 
 | Sloupec | Typ | Poznámky |
 |---|---|---|

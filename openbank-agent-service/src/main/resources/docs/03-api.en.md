@@ -12,7 +12,8 @@ Two version axes apply (ADR-0048): the release version (`version.txt` = `1.27.4`
 | Admin assistant | `POST /agent/chat` | JSON | Keycloak OIDC; runs as `ui-assistant` |
 | Model registry | `GET /agent/models` | JSON | Keycloak OIDC |
 | Catalog review capability/review | `GET` / `POST` `/agent/catalog-reviews` | JSON | Keycloak OIDC; operator/admin/compliance |
-| Merge-record evidence | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (roles below) |
+| Human merge ingest / evidence reads | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (roles below) |
+| App merge ingest | `POST /api/v1/agent-merge-records/app` | JSON | `ROLE_MERGE_RECORDER` |
 | Health | `GET /q/health/live`, `/q/health/ready` | JSON | none (management port 8085) |
 
 ## MCP — `POST /mcp`
@@ -96,9 +97,11 @@ The trusted CI recorder submits the evidence; agent tools cannot self-report a m
 
 - `POST /api/v1/agent-merge-records`: `ROLE_MERGE_RECORDER` only. Existing required fields remain
   `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title`; `proposalId` and
-  `source` remain optional. Old requests default to `mergedByType=HUMAN` without authorization.
-- `GITHUB_APP` requests additionally require `mergedById`, `headSha`, `mergeCommitSha` and
-  `authorization`. `mergedBy` remains the actual trusted App login. Authorization contains the
+  `source` remain optional. This original endpoint always records a human executor. Unknown
+  legacy fields remain ignored and never become App identity or authorization evidence.
+- `POST /api/v1/agent-merge-records/app`: the separate additive App-only ingest operation, also
+  recorder-only. Requires `mergedByType=GITHUB_APP`, `mergedById`, `headSha`, `mergeCommitSha` and
+  non-null `authorization`; human actor input is rejected. `mergedBy` remains the actual trusted App login. Authorization contains the
   human login/id/time and evidence reference. `OWNER_WORKFLOW_EXACT_HEAD` / `HEAD` binds the
   premerge owner workflow decision to this exact PR head, with `statusId` and `workflowRunId`.
 - `LEGACY_PR_AUTO_MERGE` / `PR` is bounded to merges through `2026-10-23T19:42:17Z`. It stores the

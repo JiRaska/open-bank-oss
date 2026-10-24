@@ -8,19 +8,29 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.networknt.schema.JsonSchemaFactory
 import com.networknt.schema.SpecVersion
+import com.openbank.agent.it.PostgresTestResource
+import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
+import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
 import java.io.File
 
 /** Validate native OpenAPI 3.1 null unions; 3.0's nullable flag is ignored by JSON Schema. */
+@QuarkusTest
+@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
 class MergeProvenanceSchemaTest {
     private val mapper = ObjectMapper()
     private val document = Yaml().load<Map<String, Any>>(File("src/main/resources/openapi.yaml").readText())
-    private val root = mapper.valueToTree<ObjectNode>(document)
-        .put("\$schema", "https://json-schema.org/draft/2020-12/schema")
-        .put("\$ref", "#/components/schemas/MergeRecordIngestRequest")
-    private val schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012).getSchema(root)
+    private fun schema(name: String) = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012).getSchema(
+        mapper.valueToTree<ObjectNode>(document)
+            .put("\$schema", "https://json-schema.org/draft/2020-12/schema")
+            .put("\$ref", "#/components/schemas/$name"),
+    )
+    private val humanSchema = schema("MergeRecordIngestRequest")
+    private val appSchema = schema("AppMergeRecordIngestRequest")
     private val human = mapOf(
         "agentId" to "fixture-agent",
         "prNumber" to 1,
@@ -47,18 +57,30 @@ class MergeProvenanceSchemaTest {
         "authorization" to exactProof,
     )
 
-    private fun validate(value: Any) = schema.validate(mapper.valueToTree(value))
+    private fun validate(value: Any) = appSchema.validate(mapper.valueToTree(value))
 
     @Test
     fun `legacy human requests accept omitted and explicitly null new provenance fields`() {
-        assertThat(validate(human)).isEmpty()
+        assertThat(humanSchema.validate(mapper.valueToTree(human))).isEmpty()
         assertThat(
-            validate(
-                human + mapOf(
-                    "authorization" to null,
-                    "mergedById" to null,
-                    "headSha" to null,
-                    "mergeCommitSha" to null,
+            humanSchema.validate(
+                mapper.valueToTree(
+                    human + mapOf(
+                        "authorization" to null,
+                        "mergedById" to null,
+                        "headSha" to null,
+                        "mergeCommitSha" to null,
+                    ),
+                ),
+            ),
+        ).isEmpty()
+        assertThat(
+            humanSchema.validate(
+                mapper.valueToTree(
+                    human + mapOf(
+                        "mergedByType" to "GITHUB_APP",
+                        "authorization" to "ignored legacy extension",
+                    ),
                 ),
             ),
         ).isEmpty()
@@ -91,15 +113,25 @@ class MergeProvenanceSchemaTest {
     }
 
     @Test
-    fun `App actors require complete non-null provenance and human actors prohibit authorization`() {
+    fun `App endpoint requires complete non-null provenance and rejects human actor input`() {
         val bareApp = human + mapOf("mergedBy" to "openbank-gitops-bot[bot]", "mergedByType" to "GITHUB_APP")
         val invalid = listOf(
             bareApp, app - "authorization", app - "headSha", app - "mergeCommitSha", app - "mergedById",
+            app - "mergedByType", app + ("mergedByType" to null), app + ("mergedByType" to "HUMAN"),
             app + ("authorization" to null), app + ("headSha" to null),
             app + ("mergeCommitSha" to null), app + ("mergedById" to null),
             human + ("authorization" to exactProof),
             human + mapOf("mergedByType" to "HUMAN", "authorization" to exactProof),
         )
         invalid.forEach { assertThat(validate(it)).isNotEmpty() }
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = ["ROLE_ADMIN"])
+    fun `schema-valid App evidence cannot be ingested without the dedicated recorder role`() {
+        assertThat(validate(app)).isEmpty()
+        given().contentType("application/json").body(app)
+            .`when`().post("/api/v1/agent-merge-records/app")
+            .then().statusCode(403)
     }
 }

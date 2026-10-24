@@ -12,7 +12,8 @@ Platí dvě verzovací osy (ADR-0048): release verze (`version.txt` = `1.27.4`) 
 | Admin asistent | `POST /agent/chat` | JSON | Keycloak OIDC; běží jako `ui-assistant` |
 | Registr modelů | `GET /agent/models` | JSON | Keycloak OIDC |
 | Capability / kontrola katalogu | `GET` / `POST` `/agent/catalog-reviews` | JSON | Keycloak OIDC; operator/admin/compliance |
-| Důkazní záznamy merge | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (role viz níže) |
+| Lidský merge / čtení důkazů | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (role viz níže) |
+| Ingest App merge | `POST /api/v1/agent-merge-records/app` | JSON | `ROLE_MERGE_RECORDER` |
 | Health | `GET /q/health/live`, `/q/health/ready` | JSON | žádné (management port 8085) |
 
 ## MCP — `POST /mcp`
@@ -94,8 +95,11 @@ Důkazy posílá důvěryhodný CI recorder; nástroje agenta nemohou vlastní m
 
 - `POST /api/v1/agent-merge-records`: pouze `ROLE_MERGE_RECORDER`. Povinná pole zůstávají
   `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title`; `proposalId` a
-  `source` jsou volitelné. Staré požadavky mají výchozí `mergedByType=HUMAN` bez autorizace.
-- `GITHUB_APP` navíc vyžaduje `mergedById`, `headSha`, `mergeCommitSha` a `authorization`.
+  `source` jsou volitelné. Původní endpoint vždy zaznamenává lidského vykonavatele. Neznámá
+  pole starých požadavků ignoruje a nikdy je nepoužije jako identitu App ani autorizační důkaz.
+- `POST /api/v1/agent-merge-records/app`: samostatná aditivní operace pouze pro App a roli recorder.
+  Vyžaduje `mergedByType=GITHUB_APP`, `mergedById`, `headSha`, `mergeCommitSha` a nenulovou
+  `authorization`; vstup s lidským typem vykonavatele odmítá.
   `mergedBy` stále obsahuje skutečnou App. Autorizace nese lidský login/id/čas a odkaz na důkaz.
   `OWNER_WORKFLOW_EXACT_HEAD` / `HEAD` váže rozhodnutí vlastníka před merge na přesné SHA tohoto
   PR, včetně `statusId` a `workflowRunId`.
