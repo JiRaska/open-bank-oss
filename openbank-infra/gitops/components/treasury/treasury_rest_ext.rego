@@ -32,6 +32,11 @@
 #   treasury.payment.resolve                  — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
 #   treasury.payment.release                  — ROLE_TREASURY_PAYMENT_RELEASER only (ADR-0344 D6; the
 #                                               domain refuses the deal's creator and every term author)
+#   treasury.revaluation.read                 — treasury staff, never the reference editor or releaser (ADR-0344 D7/D8)
+#   treasury.revaluation.run                  — ROLE_TREASURY_BACK_OFFICE
+#   treasury.deal.correction.propose          — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE (ADR-0344 D7)
+#   treasury.deal.correction.approve/.reject  — ROLE_TREASURY_APPROVER (the domain refuses every term author)
+#   treasury.deal.correction.override-limit   — ROLE_TREASURY_SENIOR_APPROVER only (a limit decision, ADR-0315 D4)
 #   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
 #   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
@@ -106,6 +111,8 @@ allowed_reasons contains "treasury-staff-read" if {
 		"treasury.marketdata.read",
 		# ADR-0344 D6: own-account payments.
 		"treasury.payment.read",
+		# ADR-0344 D7/D8: the revaluation record of a date.
+		"treasury.revaluation.read",
 	}
 }
 
@@ -178,6 +185,30 @@ allowed_reasons contains "treasury-approver-cashflow" if {
 		"treasury.cashflow.override.reject",
 		"treasury.deal.send-confirmation",
 	}
+}
+
+# ADR-0344 D7: a correction of a booked deal is proposed by the desk or back office and decided by an
+# approver. The domain additionally refuses as decider the proposer, every term author of the deal,
+# the authors of its earlier corrections and any non-human principal.
+allowed_reasons contains "treasury-correction-propose" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_BACK_OFFICE"}
+	role in input.principal.roles
+	input.action == "treasury.deal.correction.propose"
+}
+
+allowed_reasons contains "treasury-correction-decide" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action in {"treasury.deal.correction.approve", "treasury.deal.correction.reject"}
+}
+
+# A correction whose terms breach a counterparty limit is a limit decision: the senior only, as for
+# a booking (the domain refuses a term author and the later approval by the same senior).
+allowed_reasons contains "treasury-correction-override-limit" if {
+	treasury_staff
+	"ROLE_TREASURY_SENIOR_APPROVER" in input.principal.roles
+	input.action == "treasury.deal.correction.override-limit"
 }
 
 # Schedule preview runs the schedule engine: real work per call, so only the roles that build or
@@ -257,7 +288,10 @@ allowed_reasons contains "service-tax-reporting-portfolio-read" if {
 allowed_reasons contains "treasury-back-office-market-data" if {
 	treasury_staff
 	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
-	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run"}
+	input.action in {
+		"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run",
+		"treasury.revaluation.run",
+	}
 }
 
 allowed_reasons contains "treasury-approver-market-data" if {

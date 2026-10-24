@@ -77,6 +77,15 @@ class TreasuryResource {
     private fun actor(): Actor = Actor.fromPrincipalName(identity.principal.name)
 
     @Inject
+    lateinit var dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository
+
+    @org.eclipse.microprofile.config.inject.ConfigProperty(
+        name = "openbank.treasury.close.due-steps",
+        defaultValue = "ACCRUALS,FIXINGS,PAYMENTS",
+    )
+    lateinit var closeDueSteps: String
+
+    @Inject
     lateinit var cashFlows: CashFlowUseCase
 
     @Inject
@@ -155,6 +164,45 @@ class TreasuryResource {
             "dealId" to id,
             "transitions" to DealResponse.from(deal).history,
             "versions" to cashFlows.versions(id).map(DealVersionDto::from),
+        )
+    }
+
+    @GET
+    @Path("/day-completion/{date}")
+    @Operation(
+        summary = "The treasury accounting day's completion record: every step with its last outcome (ADR-0344 D7)",
+    )
+    @Authorize(action = "treasury.deal.read")
+    suspend fun dayCompletion(@PathParam("date") date: LocalDate): Map<String, Any?> {
+        val recorded = dayCompletion.day(date)
+        // ADR-0342: what treasury reports (or, while a due step is unfinished, withholds) for this day.
+        val report = com.openbank.treasury.infrastructure.close.TreasuryCloseParticipation.report(
+            date,
+            com.openbank.treasury.infrastructure.close.TreasuryCloseParticipation.dueSteps(closeDueSteps),
+            recorded,
+        )
+        return mapOf(
+            "date" to date,
+            "steps" to com.openbank.treasury.domain.model.DayStepRecord.day(date, recorded).map {
+                mapOf(
+                    "step" to it.step.name,
+                    "status" to it.status.name,
+                    "count" to it.count,
+                    "journals" to it.journals,
+                    "refused" to it.refused,
+                    "detail" to it.detail,
+                    "at" to it.at,
+                )
+            },
+            "closeParticipation" to report?.let {
+                mapOf(
+                    "participant" to com.openbank.treasury.infrastructure.close.TreasuryCloseParticipation.PARTICIPANT,
+                    "outcome" to it.outcome.name,
+                    "journalsPosted" to it.journalsPosted,
+                    "itemsProcessed" to it.itemsProcessed,
+                    "reason" to it.reason,
+                )
+            },
         )
     }
 

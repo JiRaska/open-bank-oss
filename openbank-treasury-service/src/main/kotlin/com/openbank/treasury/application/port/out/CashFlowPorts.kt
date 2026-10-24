@@ -40,6 +40,17 @@ data class DealVersionView(
 /** A flow with the deal facts the event calendar needs. */
 data class CalendarFlow(val flow: CashFlow, val bookId: String?, val maturityDate: LocalDate, val product: String)
 
+/** A live flow for the cash-flow analysis (contract 8.4): its deal's kind, book and cash account. */
+data class AnalysisFlow(
+    val flow: CashFlow,
+    val kind: com.openbank.treasury.domain.model.DealKind,
+    val bookId: String?,
+    val cashAccountId: String?,
+)
+
+/** More flows fall in the requested horizon than one analysis may read: narrow it (422). */
+class AnalysisTooLargeException(message: String) : RuntimeException(message)
+
 /** A guarded flow write found the row changed underneath it (a concurrent fixing, payment or override): 409. */
 class CashFlowConflictException(message: String) : IllegalStateException(message)
 
@@ -73,4 +84,15 @@ interface CashFlowRepository {
 
     /** Latest-schedule flows of ACTUAL and PLANNED deals with a payment or fixing date in [from, to]. */
     suspend fun calendarFlows(from: LocalDate, to: LocalDate, bookId: String?): List<CalendarFlow>
+
+    /**
+     * The current-schedule flows of live deals of [kinds] paying in [from]..[to]; throws
+     * [AnalysisTooLargeException] past [maxRows] rather than answering with part of the book.
+     */
+    suspend fun analysisFlows(
+        from: LocalDate,
+        to: LocalDate,
+        kinds: Set<com.openbank.treasury.domain.model.DealKind>,
+        maxRows: Int,
+    ): List<AnalysisFlow> = throw UnsupportedOperationException("cash-flow analysis is not wired")
 }

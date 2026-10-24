@@ -407,7 +407,7 @@ class CashFlowLedgerApiIT {
     @Test
     @Order(14)
     @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
-    fun `14 - the override queue and a deal's overrides by status are served`() {
+    fun `14 - the override queue, a deal's overrides by status and the day-completion record are served`() {
         given().`when`().get("/api/v1/treasury/deals/$dealId/cash-flows/overrides?status=APPROVED")
             .then().statusCode(200).body("overrideId", hasItem(overrideId))
         given().`when`().get("/api/v1/treasury/deals/$dealId/cash-flows/overrides?status=PENDING")
@@ -415,6 +415,8 @@ class CashFlowLedgerApiIT {
         given().`when`().get("/api/v1/treasury/cash-flow-overrides?status=APPROVED&limit=50")
             .then().statusCode(200).body("overrideId", hasItem(overrideId))
         given().`when`().get("/api/v1/treasury/cash-flow-overrides?limit=0").then().statusCode(400)
+        given().`when`().get("/api/v1/treasury/day-completion/$today").then().statusCode(200)
+            .body("steps", hasSize<Any>(6)).body("steps[0].step", equalTo("FIXINGS"))
     }
 
     @Test

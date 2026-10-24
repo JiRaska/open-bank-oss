@@ -110,8 +110,8 @@ class TreasuryDealService(
      */
     private val creditTerms: suspend (asOf: LocalDate) -> CreditTerms = { CreditTerms.NONE },
     /**
-     * ADR-0344 D6: runs before a deal is cancelled or reversed: blocks the change while a payment
-     * of the deal is released, withdraws its PROPOSED payments.
+     * ADR-0344 D6: runs before a deal is cancelled or reversed (and, later, corrected): blocks the
+     * change while a payment of the deal is released, withdraws its PROPOSED payments.
      */
     private val paymentGuard: (suspend (dealId: UUID) -> Unit)? = null,
 ) : TreasuryDealUseCase {
@@ -195,6 +195,22 @@ class TreasuryDealService(
         } else {
             deal
         }
+    }
+
+    override suspend fun vetCorrection(
+        target: Deal,
+        override: com.openbank.treasury.domain.model.LimitOverride?,
+    ): Pair<Deal, LimitCheck?> {
+        val vetted = vetTerms(target)
+        val productCheck = policy().evaluate(vetted)
+        if (productCheck.breached) throw com.openbank.treasury.domain.model.ProductLimitBreachedException(productCheck)
+        if (!vetted.consumesLimitWhenLive) return vetted to null
+        // limitCheck measures through CreditExposure (the one credit measure, ADR-0315 D4).
+        val check = limitCheck(vetted)
+        if (check.breached && (override == null || check.exposureAfter > override.coversExposureUpTo)) {
+            throw com.openbank.treasury.domain.model.LimitBreachedException(check)
+        }
+        return vetted to check
     }
 
     override suspend fun submit(dealId: UUID, actor: Actor, key: String?): Deal {
@@ -400,7 +416,7 @@ class TreasuryDealService(
         // check and the withdrawal run again under the deal lock in the save's transaction.
         paymentGuard?.invoke(dealId)
         check(deal.product.legacy || deal.state != DealState.SETTLED) {
-            "a settled ${deal.product} deal cannot be reversed"
+            "a settled ${deal.product} deal is changed by a correction (ADR-0344 D7), not reversed"
         }
         val accrued = if (deal.state == DealState.SETTLED) accruedSoFar(deal) else BigDecimal.ZERO
         val ref = PostingRules.reversal(reversed, deal.state, accrued)

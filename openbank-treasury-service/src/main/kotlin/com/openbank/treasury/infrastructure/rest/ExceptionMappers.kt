@@ -152,12 +152,29 @@ class ExceptionMappers {
         error(Response.Status.CONFLICT.statusCode, "PAYMENT_RELEASED", e.message)
 
     @ServerExceptionMapper
+    fun scenarioNotAvailable(e: com.openbank.treasury.application.usecase.ScenarioNotAvailableException): Response =
+        error(UNPROCESSABLE, "SCENARIO_NOT_AVAILABLE", e.message)
+
+    @ServerExceptionMapper
+    fun analysisTooLarge(e: com.openbank.treasury.application.port.out.AnalysisTooLargeException): Response =
+        error(UNPROCESSABLE, "ANALYSIS_TOO_LARGE", e.message)
+
+    @ServerExceptionMapper
     fun rateSheetNotFound(e: com.openbank.treasury.infrastructure.marketdata.RateSheetNotFoundException): Response =
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
 
     @ServerExceptionMapper
     fun rateSheetStale(e: com.openbank.treasury.infrastructure.marketdata.RateSheetStaleException): Response =
         error(Response.Status.CONFLICT.statusCode, "RATE_SHEET_STALE", e.message)
+
+    @ServerExceptionMapper
+    fun priorRevaluationUnposted(
+        e: com.openbank.treasury.application.port.out.PriorRevaluationUnpostedException,
+    ): Response = error(Response.Status.CONFLICT.statusCode, "PRIOR_REVALUATION_UNPOSTED", e.message)
+
+    @ServerExceptionMapper
+    fun revaluationOutOfOrder(e: com.openbank.treasury.application.port.out.RevaluationOutOfOrderException): Response =
+        error(Response.Status.CONFLICT.statusCode, "REVALUATION_OUT_OF_ORDER", e.message)
 
     @ServerExceptionMapper
     fun paymentStale(e: com.openbank.treasury.domain.payment.PaymentStaleException): Response =
@@ -189,8 +206,27 @@ class ExceptionMappers {
         error(UNPROCESSABLE, e.code, e.message)
 
     @ServerExceptionMapper
+    fun correctionNotFound(e: com.openbank.treasury.application.usecase.CorrectionNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
     fun correctionLimit(e: com.openbank.treasury.application.port.out.CorrectionLimitBreachedException): Response =
         error(UNPROCESSABLE, "LIMIT_BREACHED", e.message)
+
+    @ServerExceptionMapper
+    fun correctionStale(e: com.openbank.treasury.domain.model.CorrectionStaleException): Response =
+        error(Response.Status.CONFLICT.statusCode, "CORRECTION_STALE", e.message)
+
+    @ServerExceptionMapper
+    fun correctionBlocked(e: com.openbank.treasury.domain.model.CorrectionBlockedByPaymentException): Response =
+        Response.status(Response.Status.CONFLICT.statusCode).entity(
+            mapOf(
+                "error" to "PAYMENT_RELEASED",
+                "message" to e.message,
+                "paymentId" to e.paymentId,
+                "flowId" to e.flowId,
+            ),
+        ).build()
 
     private fun error(status: Int, code: String, message: String?): Response =
         Response.status(status).entity(mapOf("error" to code, "message" to message)).build()

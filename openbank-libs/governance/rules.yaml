@@ -1312,6 +1312,9 @@ close_participants:
     interest:
       service: openbank-interest-service
       principal: service-account-openbank-interest
+    treasury:
+      service: openbank-treasury-service
+      principal: service-account-openbank-treasury
 
 money_path_services:
   - openbank-ledger-service
@@ -4932,6 +4935,9 @@ security_sensitive_paths:
       - "src/main/kotlin/**/marketdata/MarketDataFiles.kt"
       - "src/main/kotlin/**/domain/model/Legs.kt"
       - "src/main/kotlin/**/domain/payment/Payments.kt"
+      # ADR-0344 D7/D8: the two outbound m2m OIDC clients (ledger close, risk valuation).
+      - "src/main/kotlin/**/close/LedgerCloseParticipationClient.kt"
+      - "src/main/kotlin/**/revaluation/RiskValuationClient.kt"
       - "src/main/kotlin/**/approval/**"
       - "src/main/kotlin/**/security/**"
       - "src/main/kotlin/**/filter/**"

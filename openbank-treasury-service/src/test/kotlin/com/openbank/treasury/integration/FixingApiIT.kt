@@ -134,17 +134,8 @@ class FixingApiIT {
         given().`when`().get("/api/v1/treasury/market-data/quality?date=$fixingDate").then().statusCode(200)
             .body("missing.index", hasItem("PRIBOR_3M"))
         assertThat(projected()).isGreaterThan(0)
-        // The day-completion record holds the day's FIXINGS step FAILED (read straight from the table:
-        // the day-completion read endpoint arrives with the close participation).
-        val step = jdbc { c ->
-            c.prepareStatement(
-                "select status from treasury_day_completion where business_date = ? and step = 'FIXINGS'",
-            ).use { ps ->
-                ps.setObject(1, fixingDate)
-                ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
-            }
-        }
-        assertThat(step).isEqualTo("FAILED")
+        given().`when`().get("/api/v1/treasury/day-completion/$fixingDate").then().statusCode(200)
+            .body("steps.find { it.step == 'FIXINGS' }.status", equalTo("FAILED"))
     }
 
     @Test

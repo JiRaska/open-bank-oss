@@ -484,3 +484,53 @@ test_reference_editor_reads_no_fixings_market_data_or_payments if {
 		not allowed(releaser, a)
 	}
 }
+
+# --- ADR-0344 D7 corrections: must-DENY first ---
+
+test_correction_split_between_proposers_and_approver if {
+	allowed(dealer, "treasury.deal.correction.propose")
+	allowed(back_office, "treasury.deal.correction.propose")
+	not allowed(approver, "treasury.deal.correction.propose")
+	allowed(approver, "treasury.deal.correction.approve")
+	allowed(approver, "treasury.deal.correction.reject")
+	not allowed(dealer, "treasury.deal.correction.approve")
+	not allowed(back_office, "treasury.deal.correction.approve")
+	allowed(senior, "treasury.deal.correction.override-limit")
+	not allowed(approver, "treasury.deal.correction.override-limit")
+	not allowed(dealer, "treasury.deal.correction.override-limit")
+	every p in [agent, shared_sa, renamed_sa, nobody] {
+		not allowed(p, "treasury.deal.correction.override-limit")
+		not allowed(p, "treasury.deal.correction.propose")
+		not allowed(p, "treasury.deal.correction.approve")
+		not allowed(p, "treasury.deal.correction.reject")
+	}
+}
+
+# --- ADR-0344 D7/D8 revaluation: must-DENY first ---
+
+test_revaluation_run_is_back_office_only if {
+	not allowed(dealer, "treasury.revaluation.run")
+	not allowed(approver, "treasury.revaluation.run")
+	every p in [shared_sa, renamed_sa, agent, nobody] {
+		not allowed(p, "treasury.revaluation.run")
+	}
+	# Reads: as every treasury `.read`, a ROLE_OPERATOR holder reaches it through operator-read-any.
+	every p in [renamed_sa, agent, nobody] {
+		not allowed(p, "treasury.revaluation.read")
+	}
+	allowed(back_office, "treasury.revaluation.run")
+	allowed(dealer, "treasury.revaluation.read")
+}
+
+# Least privilege (slices 4a/5): the reference editor and the payment releaser reach neither the
+# revaluation record nor any correction action.
+test_editor_and_releaser_get_no_revaluation_or_correction if {
+	every p in [editor, releaser] {
+		not allowed(p, "treasury.revaluation.read")
+		not allowed(p, "treasury.revaluation.run")
+		not allowed(p, "treasury.deal.correction.propose")
+		not allowed(p, "treasury.deal.correction.approve")
+		not allowed(p, "treasury.deal.correction.reject")
+		not allowed(p, "treasury.deal.correction.override-limit")
+	}
+}

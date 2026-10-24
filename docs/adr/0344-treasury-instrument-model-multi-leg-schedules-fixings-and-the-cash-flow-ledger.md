@@ -1,13 +1,14 @@
 ---
 date: 2026-10-19
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [architecture, ledger, payments, accounting-close]
 summary: "Treasury deals become multi-leg instruments over effective-dated reference data; a stored, versioned, overridable cash-flow ledger drives fixings, payment orders and posting rules, proven field by field against golden fixtures."
+followup: "none — behavioural and stress cash-flow scenarios are an accepted limitation until a risk-engine scenario model is published"
 ---
 
 # ADR-0344 — Treasury instrument model: multi-leg schedules, fixings, an overridable cash-flow ledger and the deal-to-payment-to-posting chain
