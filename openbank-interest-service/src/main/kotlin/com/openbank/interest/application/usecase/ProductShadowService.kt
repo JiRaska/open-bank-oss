@@ -141,7 +141,11 @@ class ProductShadowService(
         return hash
     }
 
-    private fun notComparable(reason: ShadowNotComparable, retry: Boolean = false, label: String = reason.name): Outcome {
+    private fun notComparable(
+        reason: ShadowNotComparable,
+        retry: Boolean = false,
+        label: String = reason.name,
+    ): Outcome {
         recorder.notComparable(reason)
         return if (retry) Outcome.Retry(label) else Outcome.Done(ShadowCompletion(label))
     }

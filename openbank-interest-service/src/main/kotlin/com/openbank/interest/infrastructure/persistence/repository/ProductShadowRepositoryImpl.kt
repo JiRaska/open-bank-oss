@@ -56,7 +56,8 @@ class ProductShadowQueueRepositoryImpl(private val sf: Mutiny.SessionFactory, pr
                     "INSERT INTO interest_product_shadow_input " +
                         "(id, source_kind, source_id, status, attempts, next_attempt_at, created_at) " +
                         "SELECT gen_random_uuid(), :kind, src.id, 'PENDING', 0, :now, :now FROM $table src " +
-                        "WHERE src.created_at >= :since AND NOT EXISTS (SELECT 1 FROM interest_product_shadow_input q " +
+                        "WHERE src.created_at >= :since AND NOT EXISTS " +
+                        "(SELECT 1 FROM interest_product_shadow_input q " +
                         "WHERE q.source_kind = :kind AND q.source_id = src.id) " +
                         "ORDER BY src.created_at LIMIT :lim ON CONFLICT (source_kind, source_id) DO NOTHING",
                 ).setParameter("kind", kind.name)
