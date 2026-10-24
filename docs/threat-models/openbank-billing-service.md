@@ -109,8 +109,11 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
   re-persisted beyond the audit record, with ONE bounded exception since ADR-0352 phase 3: the
   product-IR shadow freezes the account's balance, monthly turnover, pocket balance and segment in
   `billing_product_shadow_input`, committed with the assessment, so the comparator can re-decide the
-  same facts later. They are erased (set to NULL) when the comparison completes, leaving only the
-  outcome; a row stuck PENDING keeps them until it completes or exhausts its retries. The comparator's
+  same facts later. They are erased (set to NULL) when the IR actually re-decides the input, leaving
+  only the outcome; a row stuck PENDING keeps them until it completes or exhausts its retries, and a
+  row completed as not comparable (`NO_IR`, `VERIFICATION_DISABLED`, `VERIFICATION_FAILED`, ...) keeps
+  them so it can be compared once the cause is fixed. No re-drive or purge of such rows exists yet, so
+  that retention is unbounded until one does; tracked as a follow-up. The comparator's
   metrics carry consumer, product code, rule id and a reason only, never an account, amount or
   balance. Transport is TLS; reads are OPA-authorized.
 - **Tampering (product IR, ADR-0352 phase 3)** — the shadow evaluates a revision's IR only after the
