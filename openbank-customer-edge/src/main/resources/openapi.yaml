@@ -52,7 +52,10 @@ info:
   # 1.81.0 -> 1.82.0 (#12259): additive company-scoped business payment batch draft routes.
   # 1.82.0 -> 1.83.0: additive configured pension provider and explicit unconfigured-provider 503 responses.
   # 1.83.0 -> 1.84.0: additive low-balance-alert endpoint and schemas (ADR-0333).
-  version: 1.84.0
+  # 1.84.0 -> 1.85.0 (#13210): CORRECTION — GET /balances/{accountId} is documented as the wire
+  # actually carries it, `{"balances": [Balance]}` (balance-service wraps its list), not a bare array;
+  # Balance gains the `id` and `version` it always sent. No served behaviour changed.
+  version: 1.85.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2416,9 +2419,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Balance'
+                $ref: '#/components/schemas/BalanceList'
 
   /balances/{accountId}/{currency}/low-balance-alert:
     parameters:
@@ -8274,8 +8275,6 @@ components:
         pagination:
           $ref: '#/components/schemas/Pagination'
 
-    # Mirrors openbank-balance-service BalanceResponse. GET /api/v1/balances/{accountId} returns
-    # one entry per currency held on the account (an array), not a single balance.
     LowBalanceAlertRequest:
       type: object
       required: [enabled, threshold, rearmMargin]
@@ -8292,9 +8291,27 @@ components:
         enabled: {type: boolean}
         threshold: {type: number}
         rearmMargin: {type: number}
+    # Passthrough of balance-service GET /api/v1/balances/{accountId}, which answers
+    # `mapOf("balances" to list)` — one Balance per currency held on the account.
+    BalanceList:
+      type: object
+      required: [balances]
+      properties:
+        balances:
+          type: array
+          items:
+            $ref: '#/components/schemas/Balance'
+
     Balance:
       type: object
+      required: [id, accountId, currency, bookedAmount, availableAmount, reservedAmount, pendingAmount, updatedAt, version]
       properties:
+        id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          format: int64
         accountId:
           type: string
           format: uuid
