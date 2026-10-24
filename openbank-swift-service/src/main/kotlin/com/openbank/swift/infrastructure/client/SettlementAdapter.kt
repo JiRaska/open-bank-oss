@@ -31,7 +31,7 @@ import java.util.UUID
  * Books settled MT103 funds via transaction-service (ADR-0108).
  * Called after the clearing-simulator returns ACSC and swift-service transitions to SENT.
  * Uses the stable `swift-settlement-<messageId>` key for any explicit reconciliation.
- * The caller retains SENT on uncertainty; no automatic SENT redriver is introduced here.
+ * The caller retains SENT on uncertainty; `SwiftSettlementRedriveService` re-drives it under the same key (#13686).
  */
 @ApplicationScoped
 class SettlementAdapter(
@@ -56,14 +56,16 @@ class SettlementAdapter(
             requestFor(message, sourceAccountId)
         } catch (e: DateTimeParseException) {
             // SwiftMessage.validate() guarantees YYYYMMDD at creation; a stored value that no longer parses is
-            // bad data, not an outage: nothing is sent and the message stays SENT.
+            // bad data, not an outage: nothing is sent and the message stays SENT. It cannot heal, so it is
+            // counted as bad-data and marked permanent: the re-drive stops on it, the open clock keeps alerting.
+            metrics.unsettled(Outcome.BAD_DATA)
             log.errorf(
                 e,
                 "SWIFT message %s has an unparseable value date '%s'; not booking",
                 message.id,
                 message.valueDate,
             )
-            return SettlementOutcome(settled = false, transactionId = null)
+            return SettlementOutcome(settled = false, transactionId = null, permanent = true)
         }
 
         return try {
@@ -114,7 +116,7 @@ class SettlementAdapter(
 
     /**
      * HTTP 201 (the provider's answer to a create, including its idempotent replay) with a COMPLETED
-     * transaction that matches the request is the ONLY settlement (#13217): type, source account, numeric
+     * transaction that matches the request is the ONLY settlement (#13217): type, source and target account, numeric
      * amount, currency, rail and instruction type, as sepa-instant's `SettlementAdapter` binds them.
      * valueDate is not compared - the provider resolves it to a business day. 200/202, a missing id or a
      * booking for something else leaves the message SENT; the shared facade has already thrown on a
@@ -132,6 +134,7 @@ class SettlementAdapter(
         val matchesRequest = tx.status == COMPLETED &&
             tx.type == request.type &&
             tx.sourceAccountId == request.sourceAccountId &&
+            tx.targetAccountId == request.targetAccountId &&
             amount.compareTo(request.amount) == 0 &&
             tx.currencyCode == request.currencyCode &&
             tx.rail == request.rail &&
