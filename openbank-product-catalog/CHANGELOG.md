@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.3.1...product-catalog-v1.4.0) (2026-10-23)
+
+
+### Features
+
+* **products:** Product as Code phase 2 — openbank-products, signed publish-ir, pinned-revision loader (ADR-0352) ([#13644](https://github.com/JiRaska/open-bank-oss/issues/13644)) ([44b68d0](https://github.com/JiRaska/open-bank-oss/commit/44b68d002817537e5fbb1699522b8b1568b3d0ff))
+
 ## [1.3.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.3.0...product-catalog-v1.3.1) (2026-10-23)
 
 

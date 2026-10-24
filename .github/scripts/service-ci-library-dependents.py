@@ -114,7 +114,9 @@ def self_test() -> int:
     iso = affected(ROOT, ["openbank-libs-iso20022/src/main/kotlin/X.kt"], modules)
     assert {"openbank-libs-iso20022", "openbank-transaction-service", "openbank-simulation"} <= iso
     assert iso != modules
-    workflow = (ROOT / ".github/workflows/services-ci.yml").read_text()
+    # The scope selection moved out of services-ci.yml's `detect` step (workflow-run-step-size
+    # headroom); the invocations and the lib-path regex now live in the extracted script.
+    workflow = (ROOT / ".github/scripts/service-ci-select-modules.sh").read_text()
     assert workflow.count('python3 .github/scripts/service-ci-library-dependents.py "$ALL"') == 2
     for line in workflow.splitlines():
         if "Decision: code-global change" in line:
