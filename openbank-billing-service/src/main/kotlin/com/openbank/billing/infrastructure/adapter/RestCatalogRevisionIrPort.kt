@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.billing.application.port.out.CatalogRevisionIrPort
+import com.openbank.billing.application.port.out.CatalogRevisionMismatchException
 import com.openbank.billing.application.port.out.CatalogRevisionUnavailableException
 import com.openbank.billing.application.port.out.StoredRevisionIr
 import com.openbank.billing.infrastructure.client.ProductCatalogRestClient
@@ -46,6 +47,11 @@ class RestCatalogRevisionIrPort(@RestClient private val catalog: ProductCatalogR
 
     internal fun parse(revisionId: String, body: String): StoredRevisionIr {
         val root = mapper.readTree(body)
+        // The copy is stored under revisionId and trusted by that id afterwards, so the body must be that revision.
+        val answered = root.get("id")?.takeIf(JsonNode::isTextual)?.asText()
+        if (answered != revisionId) {
+            throw CatalogRevisionMismatchException("catalog answered revision $answered for $revisionId")
+        }
         val behaviour = root.path("content").get("behaviour")?.takeUnless(JsonNode::isNull)
             ?: return StoredRevisionIr(revisionId, hasIr = false, revisionHash = null, irJson = null, signature = null)
         val sig = root.get("irSignature")?.takeUnless(JsonNode::isNull)

@@ -113,7 +113,10 @@ class ProductShadowQueueRepositoryImpl(private val sf: Mutiny.SessionFactory, pr
                     rows.map { row ->
                         row.status = ProductShadowRows.STATUS_CLAIMED
                         row.claimedAt = now
-                        QueuedShadowInput(row.id, ProductShadowRows.domain(row), row.attempts)
+                        // An unmappable row is still claimed and handed over, so it completes instead of
+                        // aborting this transaction and blocking every row behind it on each run.
+                        val input = runCatching { ProductShadowRows.domain(row) }.getOrNull()
+                        QueuedShadowInput(row.id, input, row.attempts)
                     }
                 }
         }.awaitSuspending()
@@ -121,13 +124,19 @@ class ProductShadowQueueRepositoryImpl(private val sf: Mutiny.SessionFactory, pr
 
     /**
      * Data minimisation: the frozen account facts (balance, turnover, pocket balance, segment) exist only
-     * so the comparator can re-decide; once it has, they are erased and only the outcome remains. The
-     * legacy decision itself is already held in `assessed_fee`.
+     * so the comparator can re-decide; once it has ([compared]), they are erased and only the outcome
+     * remains. A not-comparable outcome (NO_IR, VERIFICATION_DISABLED, ...) keeps them: nothing was
+     * re-decided yet, and erasing them would make the input uncomparable for good. The legacy decision
+     * itself is already held in `assessed_fee`.
      */
-    override suspend fun complete(id: UUID, outcome: String) = update(id) { row ->
+    override suspend fun complete(id: UUID, outcome: String, compared: Boolean) = update(id) { row ->
         row.status = ProductShadowRows.STATUS_DONE
         row.outcome = outcome
         row.completedAt = clock.instant()
+        if (compared) eraseFacts(row)
+    }
+
+    private fun eraseFacts(row: ProductShadowInputEntity) {
         row.balance = null
         row.monthlyTurnover = null
         row.aggregatePocketBalance = null

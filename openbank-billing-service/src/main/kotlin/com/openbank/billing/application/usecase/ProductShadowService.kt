@@ -5,6 +5,7 @@
 package com.openbank.billing.application.usecase
 
 import com.openbank.billing.application.port.out.CatalogRevisionIrPort
+import com.openbank.billing.application.port.out.CatalogRevisionMismatchException
 import com.openbank.billing.application.port.out.CatalogRevisionUnavailableException
 import com.openbank.billing.application.port.out.ProductShadowQueuePort
 import com.openbank.billing.application.port.out.QueuedShadowInput
@@ -18,7 +19,9 @@ import com.openbank.libs.productrevision.RevisionLoadOutcome
 import com.openbank.libs.productrevision.SignedRevisionCopy
 import com.openbank.libs.productrevision.shadow.ProductShadowRecorder
 import com.openbank.libs.productrevision.shadow.ShadowNotComparable
+import io.micrometer.core.instrument.Counter
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * The billing shadow comparator (ADR-0352 §6, phase 3): drains the queue of legacy fee decisions,
@@ -37,7 +40,7 @@ class ProductShadowService(
     verifier: IrSignatureVerifierPort?,
     private val comparator: FeeShadowComparator,
     private val recorder: ProductShadowRecorder,
-    meters: io.micrometer.core.instrument.MeterRegistry? = null,
+    private val meters: io.micrometer.core.instrument.MeterRegistry? = null,
     private val maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
 ) {
     /** The loader's source: copies this service has read from its own table, by hash. */
@@ -49,10 +52,10 @@ class ProductShadowService(
     suspend fun runOnce(limit: Int): Int {
         val batch = queue.claim(limit)
         for (item in batch) {
-            when (val outcome = process(item)) {
-                is Outcome.Done -> queue.complete(item.id, outcome.label)
+            when (val outcome = processGuarded(item)) {
+                is Outcome.Done -> queue.complete(item.id, outcome.label, outcome.compared)
                 is Outcome.Retry -> if (item.attempts + 1 >= maxAttempts) {
-                    queue.complete(item.id, "${outcome.label}_EXHAUSTED")
+                    queue.complete(item.id, "${outcome.label}_EXHAUSTED", compared = false)
                 } else {
                     queue.retryLater(item.id, outcome.label)
                 }
@@ -64,14 +67,32 @@ class ProductShadowService(
     private sealed interface Outcome {
         val label: String
 
-        data class Done(override val label: String) : Outcome
+        /** [compared] is true when the IR re-decided the input, so its frozen facts are no longer needed. */
+        data class Done(override val label: String, val compared: Boolean = false) : Outcome
         data class Retry(override val label: String) : Outcome
     }
 
+    /**
+     * One item's failure is that item's outcome, never the batch's: an unexpected exception (an NPE or a
+     * DateTimeException from the interpreter, an unmappable row) completes the item as
+     * IR_EVALUATION_FAILED instead of escaping, which would leave it to be re-claimed ahead of every other
+     * row on each run. Cancellation and JVM errors still propagate.
+     */
+    private suspend fun processGuarded(item: QueuedShadowInput): Outcome = runCatching { process(item) }
+        .getOrElse { e ->
+            if (e is CancellationException || e is Error) throw e
+            log.warnf("product shadow: input %s not evaluable (%s)", item.id, e.javaClass.simpleName)
+            notComparable(ShadowNotComparable.IR_EVALUATION_FAILED)
+        }
+
     private suspend fun process(item: QueuedShadowInput): Outcome {
-        val input = item.input
-        val stored = localCopy(input.productRevisionId)
-            ?: return notComparable(ShadowNotComparable.REVISION_UNAVAILABLE, retry = true)
+        val input = item.input ?: return notComparable(ShadowNotComparable.IR_EVALUATION_FAILED)
+        val stored = try {
+            localCopy(input.productRevisionId)
+        } catch (e: CatalogRevisionMismatchException) {
+            log.warnf("product shadow: %s; copy not stored", e.message)
+            return notComparable(ShadowNotComparable.VERIFICATION_FAILED)
+        } ?: return notComparable(ShadowNotComparable.REVISION_UNAVAILABLE, retry = true)
         if (!stored.hasIr) return notComparable(ShadowNotComparable.NO_IR)
         val loader = loader ?: return notComparable(ShadowNotComparable.VERIFICATION_DISABLED)
         val hash = trustedHash(stored) ?: return notComparable(ShadowNotComparable.VERIFICATION_FAILED)
@@ -90,7 +111,7 @@ class ProductShadowService(
             log.warnf("product shadow: IR of %s not evaluable: %s", revision.productCode, e.message)
             return notComparable(ShadowNotComparable.IR_EVALUATION_FAILED)
         }
-        return Outcome.Done(record(revision.productCode, results))
+        return Outcome.Done(record(revision.productCode, results), compared = true)
     }
 
     /** Billing's local copy, fetched from the catalog and stored on first sight; null when the catalog cannot answer. */
@@ -127,6 +148,15 @@ class ProductShadowService(
             diverged -> "DIVERGED"
             unmapped -> "RULE_UNMAPPED"
             unknownInput -> "INPUT_UNKNOWN"
+            results.isEmpty() -> {
+                // Neither side has a fee: nothing was compared, which must not read as agreement.
+                meters?.let {
+                    Counter.builder(NOTHING_TO_COMPARE)
+                        .description("Shadow inputs with no fee on either side, so nothing compared (ADR-0352)")
+                        .register(it).increment()
+                }
+                NO_FEES
+            }
             else -> "AGREED"
         }
     }
@@ -147,5 +177,7 @@ class ProductShadowService(
 
     companion object {
         const val DEFAULT_MAX_ATTEMPTS = 12
+        const val NO_FEES = "NO_FEES"
+        const val NOTHING_TO_COMPARE = "openbank_billing_product_shadow_nothing_to_compare_total"
     }
 }
