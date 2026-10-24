@@ -86,6 +86,9 @@ added to a user later still reaches the token.
 and user alike — and every `@RolesAllowed` endpoint answers 403. So:
 
 - A new realm role must be appended to every `scopeMappings` entry in the same change.
+  `check-realm-template-importable.py` rule R11 enforces it: roles added after the first
+  version of this note (`ROLE_MARKETING`, `ROLE_MERGE_RECORDER`) were missing from all 41
+  entries until it did, and a cold-start import would have dropped them from every token.
 - A new client gets `fullScopeAllowed: false` and its own `scopeMappings` entry.
   `openbank-synthetic-catalog-read` is the one client with no entry: it is meant to carry
   no realm roles at all.
