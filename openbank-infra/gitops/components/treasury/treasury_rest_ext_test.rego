@@ -270,3 +270,14 @@ test_schedule_preview_is_dealer_and_back_office_only if {
 	allowed(dealer, "treasury.deal.preview")
 	allowed(back_office, "treasury.deal.preview")
 }
+
+# Least privilege: the reference editor reads reference data and NOTHING else — no deal,
+# counterparty, position, nostro or quote read, and neither the cash-flow ledger nor the calendar.
+# Back office keeps all of them (must-allow control).
+test_reference_editor_reads_reference_only if {
+	allowed(editor, "treasury.reference.read")
+	every a in (reads | {"treasury.cashflow.read", "treasury.calendar.read"}) {
+		not allowed(editor, a)
+		allowed(back_office, a)
+	}
+}

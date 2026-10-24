@@ -51,7 +51,7 @@ info:
   #         Slice 4 (same unreleased version): four-eyes corrections of a booked deal
   #         (/deals/{id}/corrections, ADR-0344 D7) with a preview of the new flows and the delta
   #         journals they post.
-  version: 1.19.0
+  version: 1.20.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -218,7 +218,7 @@ paths:
         '400': { description: Invalid terms }
         '403': { description: Not permitted (another agent's draft) }
         '404': { description: No such deal }
-        '409': { description: The deal is not a DRAFT }
+        '409': { description: 'The deal is not a DRAFT (INVALID_STATE), or it changed since it was read (DEAL_CHANGED)' }
 
   /api/v1/treasury/deals/{id}/submit:
     post:
@@ -1253,7 +1253,7 @@ components:
       name: kind
       in: path
       required: true
-      schema: { $ref: '#/components/schemas/ReferenceKind' }
+      schema: { $ref: '#/components/schemas/ReferenceKindRequest' }
     ReferenceKey:
       name: key
       in: path
@@ -1280,7 +1280,10 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     InvalidState:
-      description: INVALID_STATE — the transition is not allowed from the deal's current state or date
+      description: >-
+        INVALID_STATE — the transition is not allowed from the deal's current state or date; DEAL_CHANGED —
+        the deal row changed since this command read it (reload and retry); FLOW_NOT_OVERRIDABLE — on a
+        cash-flow override, the flow is past FIXED, on a payment, posted, or its deal has ended (a correction)
       content:
         application/json:
           schema:
@@ -1309,7 +1312,8 @@ components:
           type: string
           description: >-
             FOUR_EYES_VIOLATION, LIMIT_BREACHED, PRODUCT_LIMIT_BREACHED, ACTOR_NOT_PERMITTED,
-            INVALID_STATE, NOT_FOUND, REFERENCE_NOT_EFFECTIVE, REFERENCE_BACKDATED, SENIOR_APPROVAL_REQUIRED, SCHEDULE_ENGINE_UNAVAILABLE
+            INVALID_STATE, NOT_FOUND, REFERENCE_NOT_EFFECTIVE, REFERENCE_BACKDATED, SENIOR_APPROVAL_REQUIRED, SCHEDULE_ENGINE_UNAVAILABLE,
+            DEAL_CHANGED, FLOW_NOT_OVERRIDABLE, FLOW_ALREADY_IN_PAYMENT, FLOW_CHANGED
         message:
           type: [string, 'null']
         breaches:
@@ -1986,6 +1990,19 @@ components:
           description: Field-level summary of what differs from the previous version
           items: { type: string }
     ReferenceKind:
+      type: string
+      # x-extensible-enum, not enum (1.20.0): reference kinds GROW as ADR-0344 phases land them. A
+      # client must tolerate an unknown kind in a RESPONSE; a closed set would make every new kind a
+      # breaking response-enum addition. What a client may SEND is the closed ReferenceKindRequest.
+      x-extensible-enum: [calendar, index, counterparty, ssi, netting, security, book, bucket-set, regulatory-code,
+             party-group, party-type, country, document-type, account, settlement-place, product-type,
+             loan-type, communication-channel, market-factor, own-capital-item, period-length, scenario,
+             behavioural-scenario, calculation-settings, limit-settings, derivative-conversion-factor,
+             collateral-haircut, portfolio-group, accounting-settings, balance-sheet-side, dealing-filter,
+             internal-rate-sheet]
+    ReferenceKindRequest:
+      # What a client may SEND (the path parameter): closed, so the server's validation is what the
+      # document says. A new kind widens it (additive for a request).
       type: string
       enum: [calendar, index, counterparty, ssi, netting, security, book, bucket-set, regulatory-code,
              party-group, party-type, country, document-type, account, settlement-place, product-type,
