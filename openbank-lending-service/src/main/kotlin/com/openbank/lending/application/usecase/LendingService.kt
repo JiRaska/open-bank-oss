@@ -52,6 +52,7 @@ import com.openbank.lending.domain.model.SubmitDocumentsRequest
 import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.lending.infrastructure.compliance.OriginationConfig
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
@@ -1173,13 +1174,33 @@ class LendingService @Inject constructor(
      * (IAS 1 accrual basis), booking each to the ledger as an accrual against a receivable. Idempotent:
      * the `interestAccrued` flag is set per row, so a re-run never double-recognizes. Repayment later
      * settles the receivable rather than re-recognizing income (see [recordRepayment]).
+     *
+     * Reads `limit + 1` rows and accrues at most [limit]: the extra row is only a probe, so a pass the
+     * batch cap cut short reports [AccrualOutcome.truncated] instead of looking complete (ADR-0342).
      */
-    override fun accrueDueInterest(asOf: LocalDate, limit: Int): Uni<AccrualOutcome> =
-        installments.findAccruable(asOf, limit).flatMap { due ->
+    override fun accrueDueInterest(asOf: LocalDate, limit: Int, deadline: java.time.Instant?): Uni<AccrualOutcome> =
+        installments.findAccruable(asOf, limit + 1).flatMap { found ->
+            val due = found.take(limit)
             Multi.createFrom().iterable(due)
-                .onItem().transformToUniAndConcatenate { installment -> accrueOne(installment) }
+                // Checked per installment: past the deadline the rest of the batch is left for the
+                // next pass (null = skipped), and the outcome says the pass was cut short.
+                .onItem().transformToUniAndConcatenate { installment ->
+                    if (deadline != null && !clock.instant().isBefore(deadline)) {
+                        Uni.createFrom().nullItem<LoanInstallment>()
+                    } else {
+                        accrueOne(installment).map<LoanInstallment?> { it }
+                    }
+                }
                 .collect().asList()
-                .map { AccrualOutcome(asOf = asOf, installmentsAccrued = it.size) }
+                .map { results ->
+                    val accrued = results.filterNotNull()
+                    AccrualOutcome(
+                        asOf = asOf,
+                        installmentsAccrued = accrued.size,
+                        journalsPosted = accrued.count { it.interest.isPositive() },
+                        truncated = found.size > limit || accrued.size < due.size,
+                    )
+                }
         }
 
     private fun accrueOne(installment: LoanInstallment): Uni<LoanInstallment> {
@@ -1196,6 +1217,11 @@ class LendingService @Inject constructor(
                 installment.loanId.value,
                 installment.interest,
                 PostingKind.INTEREST_ACCRUAL,
+                // ADR-0342: dated in the CURRENT Prague accounting day, the one the ledger still has
+                // OPEN, never the UTC date (which lags by one around midnight) nor the as-of day a
+                // catch-up works for: a day past cutoff answers 409 ACCOUNTING_DAY_CLOSED under the
+                // day lock, so interest a late pass recognises for D is booked in the open day.
+                accountingDate = AccountingClock.bank(clock).today(),
             ),
         )
             .flatMap { installments.markAccrued(installment.id, accruedAt) }
