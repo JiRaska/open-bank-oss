@@ -2692,12 +2692,13 @@ def _synthetic_origin(root: str) -> None:
 
 def self_test() -> int:
     fails: list[str] = []
+    last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
     ran: list[str] = []
 
     def check(label: str, cond: bool, detail: str = "") -> None:
         ran.append(label)
         if not cond:
-            fails.append(f"{label}: {detail}")
+            fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
 
     # ---- qualifies -----------------------------------------------------------------------
     req = ["all-green", "Gitleaks", STATUS_CONTEXT]
@@ -4064,6 +4065,7 @@ def self_test() -> int:
                 ct = int(gh.g("show", "-s", "--format=%ct", head).stdout.strip())
                 if last_activity_ago_s is not None:
                     gh.activity[head] = ct + offset_s - last_activity_ago_s
+                last_reservation.update(ct=ct, now=ct + offset_s, activity=gh.activity.get(head))
                 time.time = lambda: ct + offset_s
                 try:
                     return settle_now()
@@ -4097,6 +4099,16 @@ def self_test() -> int:
             check("reservation: a head committed in the future times out even with live CI activity",
                   34 in s["fast"] and s.get("timed_out") == [35], str(s))
             reset()
+            # The pin is live: a fresh fixture head carries exactly the pinned instant, so the default
+            # clock sees it as age 0 whatever the suite's real duration. If git ignored the pinned date
+            # (or a read bypassed it) the head would be stale or future-dated and every holder would
+            # time out. `open_only` cuts the heads, so measure one.
+            open_only("pW", "pF")
+            ct_pin = int(gh.g("show", "-s", "--format=%ct", gh.prs[35]["head"]["sha"]).stdout.strip())
+            check("clock pin: a fixture head is stamped with the pinned instant (age 0 on the default clock)",
+                  ct_pin == int(time.time()), f"head ct={ct_pin} time.time={time.time():.0f}")
+            reset()
+
             # GREEN IS DONE, NOT STALLED: #13608 went green ~05:50Z, nothing ran after it, and the next tick
             # read the silence as a stall and released a mergeable holder to the back of the queue.
             # (e) green, last check activity 20 min ago: merged this tick, not released.
