@@ -22,7 +22,9 @@ def fixture(selected=None, event='pull_request', ref='refs/pull/1/merge', module
     modules = MODULES if modules is None else modules
     selected = modules if selected is None else selected
     lane = 'pr' if event == 'pull_request' else 'other'
-    needs = {'changes': {'result': 'success', 'outputs': {'any': 'true' if selected else 'false'}}}
+    needs = {'changes': {'result': 'success', 'outputs': {
+        'any': 'true' if selected else 'false', 'renderer-changed': 'false'}},
+        'renderer-tests': {'result': 'skipped'}}
     for branch in graph.LANES:
         for module in modules:
             active = branch == lane and module in selected
@@ -47,6 +49,34 @@ def change_result(needs, module, lane, job, value):
 class ResultsTest(unittest.TestCase):
     def check(self, needs, selected=None, event='pull_request', ref='refs/pull/1/merge'):
         return results.verify(MODULES if selected is None else selected, needs, event, ref, MODULES)
+
+    def test_renderer_changed_scope_requires_successful_direct_result(self):
+        for value in ['success', 'failure', 'cancelled', 'skipped', '', None]:
+            with self.subTest(value=value):
+                needs = fixture()
+                needs['changes']['outputs']['renderer-changed'] = 'true'
+                needs['renderer-tests']['result'] = value
+                self.assertEqual(bool(self.check(needs)), value != 'success')
+        needs = fixture()
+        needs['changes']['outputs']['renderer-changed'] = 'true'
+        del needs['renderer-tests']
+        self.assertTrue(self.check(needs))
+
+    def test_renderer_scope_and_unselected_result_fail_closed(self):
+        for value in ['success', 'failure', 'cancelled', '', None]:
+            needs = fixture()
+            needs['renderer-tests']['result'] = value
+            self.assertTrue(self.check(needs))
+        needs = fixture()
+        del needs['renderer-tests']
+        self.assertTrue(self.check(needs))
+        for value in ['True', '', None, True, 1, [], {}]:
+            needs = fixture()
+            needs['changes']['outputs']['renderer-changed'] = value
+            self.assertTrue(self.check(needs))
+        needs = fixture()
+        del needs['changes']['outputs']['renderer-changed']
+        self.assertTrue(self.check(needs))
 
     def test_cancelled_before_runner_rejects_even_when_wrapper_says_success(self):
         needs = fixture()
@@ -186,7 +216,65 @@ class ResultsTest(unittest.TestCase):
             self.assertTrue(self.check(needs))
 
 
+class RendererSelectionTest(unittest.TestCase):
+    def test_renderer_source_dependency_test_and_proof_paths_select(self):
+        for event in ['pull_request', 'push']:
+            for path in ['openbank-document-renderer/app.py',
+                         'openbank-document-renderer/requirements.in',
+                         'openbank-document-renderer/requirements.txt',
+                         'openbank-document-renderer/Dockerfile',
+                         'openbank-document-renderer/tests/test_app.py',
+                         'openbank-document-renderer/tests/test_woff2.py',
+                         *results.RENDERER_PROOF_PATHS]:
+                self.assertTrue(results.renderer_selected([path], event), (event, path))
+
+    def test_unrelated_paths_do_not_select(self):
+        for paths in [[], ['docs/guide.md'], ['openbank-document-service/src/main/App.kt'],
+                      ['openbank-document-renderer-notes.md'],
+                      ['.github/scripts/check-service-build-results.py.backup']]:
+            self.assertFalse(results.renderer_selected(paths, 'pull_request'), paths)
+
+    def test_scheduled_and_manual_runs_always_select(self):
+        for event in ['schedule', 'workflow_dispatch']:
+            self.assertTrue(results.renderer_selected([], event))
+            self.assertTrue(results.renderer_selected(['docs/guide.md'], event))
+
+    def test_unknown_event_and_malformed_inventory_reject(self):
+        with self.assertRaises(ValueError):
+            results.renderer_selected([], 'unknown')
+        for paths in ['openbank-document-renderer/app.py', [None], [''],
+                      ['/openbank-document-renderer/app.py'], ['a/../app.py'],
+                      ['a//app.py'], ['a/\x00app.py']]:
+            with self.subTest(paths=paths), self.assertRaises(ValueError):
+                results.renderer_selected(paths, 'pull_request')
+
+    def test_cli_selection_and_missing_environment(self):
+        import os
+        import subprocess
+        import sys
+        env = dict(os.environ, FILES='openbank-document-renderer/tests/test_woff2.py',
+                   GITHUB_EVENT_NAME='pull_request')
+        command = [sys.executable, results.__file__, '--select-renderer']
+        selected = subprocess.run(command, env=env, capture_output=True, text=True, check=False)
+        self.assertEqual(selected.returncode, 0, selected.stderr)
+        self.assertEqual(selected.stdout, 'renderer-changed=true\n')
+        env['FILES'] = 'docs/guide.md'
+        unselected = subprocess.run(command, env=env, capture_output=True, text=True, check=False)
+        self.assertEqual(unselected.returncode, 0, unselected.stderr)
+        self.assertEqual(unselected.stdout, 'renderer-changed=false\n')
+        del env['FILES']
+        missing = subprocess.run(command, env=env, capture_output=True, text=True, check=False)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertNotIn('renderer-changed=', missing.stdout)
+
+
 class GraphTest(unittest.TestCase):
+    def test_required_graph_includes_direct_renderer_result(self):
+        import yaml
+        needs = yaml.safe_load(graph.needs_block(MODULES))['needs']
+        self.assertIn('renderer-tests', needs)
+        self.assertEqual(needs.count('renderer-tests'), 1)
+
     def test_inactive_names_do_not_classify_small_scope_as_full_fleet(self):
         spec = importlib.util.spec_from_file_location('updater', graph.ROOT / '.github/scripts/auto-update-armed-prs.py')
         updater = importlib.util.module_from_spec(spec)

@@ -75,3 +75,16 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8200/health', timeout=2).status == 200 else 1)"
 
 ENTRYPOINT ["python", "app.py"]
+
+# Exercise the shipped native libraries and non-root user. Test dependencies stay
+# in this target; the default production target retains the runtime image alone.
+FROM runtime AS test
+USER root
+COPY tests/requirements.txt /tmp/test-requirements.txt
+RUN python -m pip install --no-cache-dir --require-hashes -r /tmp/test-requirements.txt
+COPY tests /app/tests
+USER openbank
+ENTRYPOINT ["python", "-m", "pytest"]
+CMD ["-q", "-o", "cache_dir=/tmp/pytest-cache", "tests"]
+
+FROM runtime AS production
