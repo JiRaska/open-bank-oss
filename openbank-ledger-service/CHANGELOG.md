@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.37.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.37.1...ledger-service-v1.37.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **ledger:** add an env-backed enabled switch so ledger-pension-co builds no Kafka producer ([#13646](https://github.com/JiRaska/open-bank-oss/issues/13646)) ([b822b6d](https://github.com/JiRaska/open-bank-oss/commit/b822b6ddecb07ddcf03cca99a8004775359a408e))
+
 ## [1.37.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.37.0...ledger-service-v1.37.1) (2026-10-23)
 
 
