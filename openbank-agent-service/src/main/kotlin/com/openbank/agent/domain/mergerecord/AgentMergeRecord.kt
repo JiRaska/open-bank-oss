@@ -9,9 +9,10 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * ADR-0031 phase 3, "recorded human merge": the durable evidence that a HUMAN merged an
- * agent-authored PR. `agent.proposal.decided` records proposal decisions; nothing recorded WHO
- * merged the agent's PR — this is that record. Immutable, framework-free aggregate; storage lives
+ * ADR-0031 phase 3: durable evidence of the actual merge executor and, for App merges,
+ * the separate human authorization of an agent-authored PR. `agent.proposal.decided` records
+ * proposal decisions; this record preserves the executor and authorization of the git merge.
+ * Immutable, framework-free aggregate; storage lives
  * behind [com.openbank.agent.application.port.out.AgentMergeRecordRepository].
  *
  * [agentId] is the declared agent id (e.g. "flaky-test-hunter"), derived from the PR head branch
@@ -25,7 +26,7 @@ data class AgentMergeRecord(
     val prNumber: Long,
     val prUrl: String,
     val headBranch: String,
-    /** The HUMAN login who pressed merge — the audit actor for this event. */
+    /** Actual GitHub merge executor; authorization is recorded separately. */
     val mergedBy: String,
     val mergedAt: Instant,
     val title: String,
@@ -33,4 +34,84 @@ data class AgentMergeRecord(
     val recordedAt: Instant,
     /** Ingest origin, e.g. "github-actions" — distinguishes pipeline-fed rows from manual backfills. */
     val source: String,
+    val mergedByType: MergeActorType = MergeActorType.HUMAN,
+    val mergedById: Long? = null,
+    val headSha: String? = null,
+    val mergeCommitSha: String? = null,
+    val authorization: MergeAuthorization? = null,
 )
+
+enum class MergeActorType { HUMAN, GITHUB_APP }
+
+enum class MergeAuthorizationKind { OWNER_WORKFLOW_EXACT_HEAD, LEGACY_PR_AUTO_MERGE }
+
+enum class MergeAuthorizationScope { HEAD, PR }
+
+/**
+ * Distinguishes exact-head approval from reconstruction of a historical PR-scoped auto-merge
+ * request. Legacy evidence does not certify source-head approval or historical policy compliance.
+ */
+data class MergeAuthorization(
+    val approvedBy: String,
+    val approvedById: Long,
+    val approvedAt: Instant,
+    val evidenceUrl: String,
+    val statusId: Long? = null,
+    val workflowRunId: Long? = null,
+    val kind: MergeAuthorizationKind = MergeAuthorizationKind.OWNER_WORKFLOW_EXACT_HEAD,
+    val scope: MergeAuthorizationScope = if (kind == MergeAuthorizationKind.OWNER_WORKFLOW_EXACT_HEAD) {
+        MergeAuthorizationScope.HEAD
+    } else {
+        MergeAuthorizationScope.PR
+    },
+    val pullRequestNodeId: String? = null,
+    val mergeEventNodeId: String? = null,
+    val mergeEventAt: Instant? = null,
+    val observedAt: Instant? = null,
+) {
+    init {
+        require(approvedBy.matches(Regex("[A-Za-z0-9][A-Za-z0-9-]{0,38}"))) {
+            "approvedBy must be a human GitHub login"
+        }
+        require(approvedById > 0) { "approvedById must be positive" }
+        when (kind) {
+            MergeAuthorizationKind.OWNER_WORKFLOW_EXACT_HEAD -> {
+                require(scope == MergeAuthorizationScope.HEAD) { "exact-head authorization requires HEAD scope" }
+                require(statusId != null && statusId > 0 && workflowRunId != null && workflowRunId > 0) {
+                    "exact-head authorization ids must be positive"
+                }
+                require(evidenceUrl == "https://github.com/JiRaska/open-bank-oss/actions/runs/$workflowRunId") {
+                    "authorization evidenceUrl must identify the trusted workflow run"
+                }
+                require(
+                    pullRequestNodeId == null && mergeEventNodeId == null && mergeEventAt == null && observedAt == null,
+                ) {
+                    "exact-head authorization cannot carry legacy observation fields"
+                }
+            }
+            MergeAuthorizationKind.LEGACY_PR_AUTO_MERGE -> {
+                require(scope == MergeAuthorizationScope.PR) { "legacy authorization requires PR scope" }
+                require(statusId == null && workflowRunId == null) { "legacy evidence is not workflow approval" }
+                require(!pullRequestNodeId.isNullOrBlank() && !mergeEventNodeId.isNullOrBlank()) {
+                    "legacy evidence requires GitHub PR and merge-event node ids"
+                }
+                require(mergeEventAt != null && observedAt != null) { "legacy evidence observation times are required" }
+                require(!approvedAt.isAfter(mergeEventAt)) { "auto-merge request must precede the merge event" }
+                require(!mergeEventAt.isAfter(observedAt)) { "legacy observation must follow the merge event" }
+            }
+        }
+    }
+
+    /** Observation refreshes do not change the identity of the historical authorization evidence. */
+    fun sameEvidenceAs(other: MergeAuthorization?): Boolean {
+        if (other == null || kind != other.kind) return false
+        return if (kind == MergeAuthorizationKind.LEGACY_PR_AUTO_MERGE) {
+            copy(observedAt = other.observedAt) == other
+        } else {
+            this == other
+        }
+    }
+}
+
+/** A duplicate cannot replace the original actor, head, or authorization evidence. */
+class MergeEvidenceConflict : RuntimeException("merge evidence conflicts with the stored record")

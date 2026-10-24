@@ -3143,7 +3143,9 @@ gates:
       python3 .github/scripts/merge-train.py --self-test
       python3 .github/scripts/test-merge-train-owner-approval.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/merge-train.py", ".github/scripts/test-merge-train-owner-approval.py", ".github/workflows/merge-train-owner-approval.yml", "openbank-libs/governance/rules.yaml"]
+    # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
+    # every workflow, so a PR adding a carrier- or ruleset-judging check script must re-run it (#13750).
+    selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml"]
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
 
@@ -3571,6 +3573,25 @@ gates:
     min_subjects: 30
     run: |
       python3 .github/scripts/test-record-agent-merge.py
+
+  - id: agent-merge-authorization-selftest
+    name: "merge execution and separate authorization evidence regressions (ADR-0031)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — offline adversarial unittest cases exercise the real proof validator,
+      canonical GitHub API identities, exact-head workflow decisions and bounded historical
+      PR-scope reconstruction. They prove rejection of revoked, foreign, after-merge,
+      incomplete and unavailable evidence, old backend capability, and incorrect read-back.
+    budget_seconds: 60
+    min_subjects: 48
+    rationale: >-
+      A successful App merge must preserve the actual executor separately from the human
+      authorizer. A green record with a fabricated HUMAN actor or unverified authorization
+      is false audit evidence. Existing human-recorder regressions retain their own floor.
+    review_after: "2027-10-24"
+    run: |
+      python3 .github/scripts/test-merge-authorization-proof.py
 
   # ==== kotlin =========================================================
   # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
@@ -6992,11 +7013,11 @@ gates:
   # so a new benchmark cannot go uncompared and a removed one cannot leave a stale number. The
   # B/op comparison itself is the last step of .github/workflows/libs-bench.yml (needs a JMH run).
   - id: libs-bench-alloc-baseline
-    name: "libs JMH allocation baseline covers every benchmark (advisory)"
+    name: "libs JMH allocation baseline covers every benchmark (enforced)"
     group: kotlin
-    mode: advisory
+    mode: enforced
+    review_after: "2027-01-23"
     rationale: "An allocation regression in Money, the idempotency fingerprint or the audit hash chain is paid on every request by every service and is invisible to every test; a baseline only protects the benchmarks it actually lists, so its scope is derived from the sources."
-    review_after: "2026-12-15"
     verified: "2026-09-30 — static: 19 @Benchmark, 17 baseline entries + 2 UNSTABLE (MoneyBench.allocate/split, bimodal across forks, reported only), exit 0; --results from three local -f 1 runs all OK (worst compared spread 1.9 %, CanonicalJsonBench.write); the pre-change run against the same baseline is red on all five hex-site benchmarks (+99 % to +971 %)"
     budget_seconds: 10
     min_subjects: 15   # 19 @Benchmark methods 2026-09-30
@@ -7004,7 +7025,7 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-bench-alloc-baseline.py"]
     run: |
-      python3 .github/scripts/check-bench-alloc-baseline.py --root .
+      python3 .github/scripts/check-bench-alloc-baseline.py --root . --enforce
 
   # ADR-0352 §8 — product IR (Product as Code, phase 1). Three gates:
   #   product-ir-determinism  the golden set is indexed, well-formed and fed to GoldenDeterminismTest,

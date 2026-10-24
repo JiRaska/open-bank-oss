@@ -72,8 +72,8 @@ accepted. A stored value that no longer parses sends nothing and the message sta
 200/201/202 with a readable transaction whose status is `COMPLETED` prove settlement. A missing,
 unreadable, `FAILED` or in-progress response remains uncertain, including a `204`. A `409` or
 `400`/`422` does not complete the message. The caller retains `SENT` after an unavailable or uncertain
-result; no automatic redriver for `SENT` is implemented here. Any later reconciliation must reuse
-the original `swift-settlement-<messageId>` idempotency key. The API contract
+result; the settlement re-drive (#13686, see operations) retries it with the original
+`swift-settlement-<messageId>` idempotency key, and any manual reconciliation must reuse that key too. The API contract
 of this service (`valueDate` `^\d{8}$`) is unchanged.
 
 | Input | Answer |
