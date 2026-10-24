@@ -45,24 +45,11 @@ object ValuationModel {
     fun money(value: BigDecimal): BigDecimal = value.setScale(MONEY_SCALE, RoundingMode.HALF_EVEN)
 }
 
-/** ADR-0344 D2: only ACTUAL deals post, pay and enter regulatory measures. */
-enum class DealKind {
-    ACTUAL,
-
-    /** Enters the liquidity forecast only. */
-    PLANNED,
-
-    /** Priced only (pre-trade), never part of any snapshot measure. */
-    HYPOTHETICAL,
-    ;
-
-    companion object {
-        /** Absent means ACTUAL: every deal published before the field existed was a booked one. */
-        fun parse(raw: String?): DealKind = raw?.trim()?.uppercase()?.let { v ->
-            entries.firstOrNull { it.name == v } ?: throw IllegalArgumentException("unknown deal kind '$raw'")
-        } ?: ACTUAL
-    }
-}
+/**
+ * ADR-0344 D2: only ACTUAL deals post, pay and enter regulatory measures. One vocabulary owned by
+ * openbank-libs-finance, which treasury books with and this engine values with.
+ */
+typealias DealKind = com.openbank.libs.finance.deal.DealKind
 
 /** Where a deal's flows came from (ADR-0344 D4): treasury's stored ledger, or derived here. */
 enum class FlowSource { STORED, DERIVED }
