@@ -36,7 +36,7 @@ on:
   workflow_run:
     # Producers of the required contexts (main-protection) and of the extra gate (Security scan),
     # on PRs, carriers and main. Names are workflow `name:` values.
-    workflows: ["Services CI", "CI", "Secret scan", "OPA policy", "Security scan", "Issue hygiene"]
+    workflows: ["Services CI", "CI", "Secret scan", "OPA policy", "Security scan", "Issue hygiene", "Merge train owner approval"]
     types: [completed]
   pull_request_target:
     # Runs in the BASE context; nothing here checks out or executes the PR (all jobs use ref: main).

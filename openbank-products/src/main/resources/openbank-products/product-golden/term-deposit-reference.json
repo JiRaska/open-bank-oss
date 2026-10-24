@@ -1,0 +1,215 @@
+{
+  "name": "term-deposit-reference",
+  "description": "TERM-DEPOSIT-12M on 10 000 EUR opened 2026-01-01: maturity is scheduled for 2027-01-01, one day of the 2 % band at ACT/360 accrues 0.555556, a 1000 withdrawal before maturity pays a 1 % penalty of 10.00, maturity capitalises the accrued 0.56, and a withdrawal after maturity carries no penalty.",
+  "revision": {
+    "irVersion": 1,
+    "productCode": "TERM-DEPOSIT-12M",
+    "currency": "EUR",
+    "interest": {
+      "ruleId": "interest.base",
+      "rateType": "TIERED",
+      "tiers": [
+        {
+          "from": "0.00",
+          "to": "10000.00",
+          "rate": "0.0200"
+        },
+        {
+          "from": "10000.00",
+          "rate": "0.0300"
+        }
+      ],
+      "dayCount": "ACT_360",
+      "accrualCadence": "DAILY",
+      "capitalisationCadence": "AT_MATURITY",
+      "accrualRounding": "INTEREST_ACCRUAL",
+      "postingRounding": "LEDGER_POSTING"
+    },
+    "termDeposit": {
+      "ruleId": "term.main",
+      "termMonths": 12,
+      "maturityAction": "CAPITALISE",
+      "earlyWithdrawal": {
+        "ruleId": "term.early-withdrawal",
+        "kind": "RATE",
+        "rate": "0.0100"
+      }
+    },
+    "hooks": {
+      "onOpen": [
+        {
+          "ruleId": "open.schedule-accrual",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "ACCRUAL",
+            "cadence": "DAILY"
+          }
+        },
+        {
+          "ruleId": "open.schedule-maturity",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "MATURITY",
+            "cadence": "AT_MATURITY"
+          }
+        }
+      ],
+      "prePosting": [
+        {
+          "ruleId": "posting.early-withdrawal",
+          "action": {
+            "type": "EARLY_WITHDRAWAL_PENALTY"
+          }
+        }
+      ],
+      "scheduled": [
+        {
+          "ruleId": "scheduled.accrue",
+          "trigger": "ACCRUAL",
+          "action": {
+            "type": "ACCRUE_INTEREST"
+          }
+        },
+        {
+          "ruleId": "scheduled.mature",
+          "trigger": "MATURITY",
+          "action": {
+            "type": "MATURE"
+          }
+        }
+      ]
+    }
+  },
+  "clock": {
+    "zone": "UTC"
+  },
+  "state": {
+    "currency": "EUR",
+    "balance": "10000.00",
+    "accruedInterest": "0.000000",
+    "openedOn": "2026-01-01"
+  },
+  "steps": [
+    {
+      "at": "2026-01-01T09:00:00Z",
+      "hook": "onOpen",
+      "expected": [
+        {
+          "type": "SCHEDULE",
+          "ruleId": "open.schedule-accrual",
+          "irVersion": 1,
+          "hook": "scheduled",
+          "tag": "ACCRUAL",
+          "cadence": "DAILY",
+          "at": null
+        },
+        {
+          "type": "SCHEDULE",
+          "ruleId": "open.schedule-maturity",
+          "irVersion": 1,
+          "hook": "scheduled",
+          "tag": "MATURITY",
+          "cadence": "AT_MATURITY",
+          "at": "2027-01-01"
+        }
+      ]
+    },
+    {
+      "at": "2026-01-02T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "ACCRUAL",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "interest.base",
+          "irVersion": 1,
+          "narrative": "interest accrual",
+          "lines": [
+            {
+              "accountingClass": "INTEREST_EXPENSE",
+              "direction": "DEBIT",
+              "amount": "0.555556",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "CREDIT",
+              "amount": "0.555556",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-06-01T10:00:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "WITHDRAWAL",
+        "direction": "DEBIT",
+        "amount": "1000.00"
+      },
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "posting.early-withdrawal",
+          "irVersion": 1,
+          "narrative": "early-withdrawal penalty",
+          "lines": [
+            {
+              "accountingClass": "CUSTOMER_DEPOSIT",
+              "direction": "DEBIT",
+              "amount": "10.00",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "PENALTY_INCOME",
+              "direction": "CREDIT",
+              "amount": "10.00",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2027-01-01T00:30:00Z",
+      "hook": "scheduled",
+      "tag": "MATURITY",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "scheduled.mature",
+          "irVersion": 1,
+          "narrative": "interest capitalisation",
+          "lines": [
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "DEBIT",
+              "amount": "0.56",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "CUSTOMER_DEPOSIT",
+              "direction": "CREDIT",
+              "amount": "0.56",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2027-01-02T10:00:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "WITHDRAWAL",
+        "direction": "DEBIT",
+        "amount": "1000.00"
+      },
+      "expected": []
+    }
+  ]
+}
