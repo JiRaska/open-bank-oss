@@ -54,6 +54,12 @@ dependencies {
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
 
+// The instrumented Quarkus/HTTP/DB suite exceeds Gradle's default 512 MiB test heap
+// in hosted CI. Preserve the full suite and coverage checks with a bounded 1 GiB worker.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "1g"
+}
+
 kover {
     reports {
         verify {
