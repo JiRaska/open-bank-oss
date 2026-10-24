@@ -11,6 +11,7 @@ import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.WebApplicationException
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 
 /** Job names recorded in `lending_close_job_run` (ADR-0342 D1). Stable: they are persisted. */
@@ -36,6 +37,19 @@ object LendingCloseJobs {
     const val REASON_PASS_ABANDONED = "pass started and never completed"
 
     private const val HTTP_CONFLICT = 409
+
+    /** Slack on top of the longest legitimate pass, for scheduling jitter and the final writes. */
+    val STALE_MARGIN: Duration = Duration.ofMinutes(30)
+
+    /**
+     * How long an in-flight marker may stand before it means "the pass died". Derived, never
+     * configured on its own: a live accrual pass may catch up every lookback day and then do today,
+     * each draining for up to [drainBudget], so it can legitimately run `drainBudget × (lookback + 1)`.
+     * A separately configured threshold could be set below that and report a still-running pass as
+     * abandoned (#13708 review).
+     */
+    fun staleAfter(drainBudget: Duration, lookbackDays: Long): Duration =
+        drainBudget.multipliedBy(lookbackDays + 1).plus(STALE_MARGIN)
     private val log = Logger.getLogger(LendingCloseJobs::class.java)
 
     /**

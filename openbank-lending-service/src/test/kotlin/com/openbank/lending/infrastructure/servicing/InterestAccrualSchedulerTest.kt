@@ -60,29 +60,29 @@ class InterestAccrualSchedulerTest {
     @Test
     fun `runs the pass for the clock's today with the configured batch size`() {
         val today = LocalDate.parse("2026-07-01")
-        every { accrual.accrueDueInterest(today, 250) } returns
+        every { accrual.accrueDueInterest(today, 250, any()) } returns
             Uni.createFrom().item(AccrualOutcome(asOf = today, installmentsAccrued = 3))
 
         val result = scheduler.runAccrualPass().await().indefinitely()
 
         assertThat(result).isNull()
-        verify(exactly = 1) { accrual.accrueDueInterest(today, 250) }
+        verify(exactly = 1) { accrual.accrueDueInterest(today, 250, any()) }
     }
 
     @Test
     fun `completes quietly when nothing is due`() {
         val today = LocalDate.parse("2026-07-01")
-        every { accrual.accrueDueInterest(today, 250) } returns
+        every { accrual.accrueDueInterest(today, 250, any()) } returns
             Uni.createFrom().item(AccrualOutcome(asOf = today, installmentsAccrued = 0))
 
         scheduler.runAccrualPass().await().indefinitely()
 
-        verify(exactly = 1) { accrual.accrueDueInterest(today, 250) }
+        verify(exactly = 1) { accrual.accrueDueInterest(today, 250, any()) }
     }
 
     @Test
     fun `a failing pass propagates so the scheduler tick is marked failed`() {
-        every { accrual.accrueDueInterest(any(), any()) } returns
+        every { accrual.accrueDueInterest(any(), any(), any()) } returns
             Uni.createFrom().failure(IllegalStateException("ledger down"))
 
         assertThatThrownBy { scheduler.runAccrualPass().await().indefinitely() }

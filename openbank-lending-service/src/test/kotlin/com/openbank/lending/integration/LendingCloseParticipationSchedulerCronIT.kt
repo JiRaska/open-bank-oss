@@ -123,6 +123,38 @@ class LendingCloseParticipationSchedulerCronIT {
         }
     }
 
+    // #13708 security review, against real Postgres: addJournals moves journals_posted and nothing else.
+    @Test
+    fun `adding journals never clears a refusal or an in-flight marker`() {
+        val refusedDay = java.time.LocalDate.of(2097, 5, 1)
+        val runningDay = java.time.LocalDate.of(2097, 5, 2)
+        VertxContextSupport.subscribeAndAwait<Unit> {
+            closeJobRuns.record(
+                CloseJobRun(
+                    refusedDay,
+                    LendingCloseJobs.ACCRUAL,
+                    1,
+                    1,
+                    1,
+                    LendingCloseJobs.REASON_DAY_CLOSED,
+                    clock.instant(),
+                ),
+            )
+                .flatMap { closeJobRuns.addJournals(refusedDay, LendingCloseJobs.ACCRUAL, 4) }
+                .flatMap { closeJobRuns.markStarted(runningDay, LendingCloseJobs.ACCRUAL, clock.instant()) }
+                .flatMap { closeJobRuns.addJournals(runningDay, LendingCloseJobs.ACCRUAL, 2) }
+        }
+        val completed = VertxContextSupport.subscribeAndAwait { closeJobRuns.findBetween(refusedDay, runningDay) }
+        val inFlight = VertxContextSupport.subscribeAndAwait { closeJobRuns.inFlightBetween(refusedDay, runningDay) }
+
+        val refused = completed.single { it.businessDate == refusedDay }
+        assertThat(refused.refused).isEqualTo(1)
+        assertThat(refused.refusalReason).isEqualTo(LendingCloseJobs.REASON_DAY_CLOSED)
+        assertThat(refused.journalsPosted).isEqualTo(5)
+        assertThat(completed.map { it.businessDate }).doesNotContain(runningDay)
+        assertThat(inFlight.map { it.businessDate }).contains(runningDay)
+    }
+
     private companion object {
         const val WAIT_NANOS = 30_000_000_000L
         const val POLL_MILLIS = 250L

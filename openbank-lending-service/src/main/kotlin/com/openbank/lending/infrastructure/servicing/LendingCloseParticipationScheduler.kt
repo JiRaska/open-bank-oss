@@ -41,7 +41,7 @@ import java.time.LocalDate
  * Two more holds, both "not reported yet", never a guess:
  *  - **in flight** — a pass for the day has marked itself started and not finished, so an earlier
  *    RAN row may be about to change (a pass running across midnight). A marker older than
- *    [staleAfter] is a pass that died: that job is reported REFUSED `pass started and never completed`,
+ *    [LendingCloseJobs.staleAfter] is a pass that died: that job is reported REFUSED `pass started and never completed`,
  *    so a crash cannot hold the day unresolvably;
  *  - **allowance journals pending** — provisioning queues its allowance journals in the outbox, so the
  *    day waits until every `lending.allowance.posting` row for it has been delivered. SENT rows count as
@@ -68,12 +68,15 @@ class LendingCloseParticipationScheduler(
     @ConfigProperty(name = "lending.close.lookback-days", defaultValue = "3") private val lookbackDays: Long,
 ) {
     /**
-     * An in-flight marker older than this is a pass that died (twice the default drain budget, plus
-     * margin). Field-injected `lateinit` rather than a 9th constructor parameter (detekt
-     * LongParameterList fires AT 9) and without a Kotlin default (gate `configproperty-kotlin-defaults`).
+     * The accrual's drain budget, from which the stale threshold is DERIVED
+     * ([LendingCloseJobs.staleAfter]) rather than configured separately. Field-injected `lateinit`
+     * rather than a 9th constructor parameter (detekt LongParameterList fires AT 9) and without a
+     * Kotlin default (gate `configproperty-kotlin-defaults`).
      */
-    @ConfigProperty(name = "lending.close.stale-after", defaultValue = "PT2H")
-    lateinit var staleAfter: Duration
+    @ConfigProperty(name = "lending.servicing.accrual.drain-budget", defaultValue = "PT10M")
+    lateinit var drainBudget: Duration
+
+    private val staleAfter: Duration get() = LendingCloseJobs.staleAfter(drainBudget, lookbackDays)
 
     private val log = Logger.getLogger(LendingCloseParticipationScheduler::class.java)
     private val reporter = CloseParticipationReporter(LendingCloseJobs.PARTICIPANT, sink, meterRegistry)

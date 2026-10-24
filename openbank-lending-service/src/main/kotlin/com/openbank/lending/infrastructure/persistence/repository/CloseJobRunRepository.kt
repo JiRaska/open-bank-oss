@@ -47,6 +47,14 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : LendingClos
             .executeUpdate()
     }.replaceWith(Unit)
 
+    override fun addJournals(businessDate: LocalDate, job: String, journals: Int): Uni<Unit> = sf.withTransaction { s ->
+        s.createNativeQuery<Int>(ADD_JOURNALS_SQL)
+            .setParameter(P_DATE, businessDate)
+            .setParameter(P_JOB, job)
+            .setParameter(P_ITEMS, journals)
+            .executeUpdate()
+    }.replaceWith(Unit)
+
     override fun findBetween(from: LocalDate, to: LocalDate): Uni<List<CloseJobRun>> = sf.withSession { s ->
         s.createNativeQuery<Array<Any?>>(SELECT_SQL)
             .setParameter(P_DATE, from)
@@ -128,6 +136,12 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : LendingClos
                 "journals_posted = lending_close_job_run.journals_posted + EXCLUDED.journals_posted, " +
                 "refused = EXCLUDED.refused, refusal_reason = EXCLUDED.refusal_reason, " +
                 "completed_at = EXCLUDED.completed_at, running = FALSE"
+
+        // Only journals_posted moves; refused, refusal_reason, running and completed_at are left alone.
+        const val ADD_JOURNALS_SQL =
+            "INSERT INTO lending_close_job_run (business_date, job, journals_posted) VALUES (?1, ?2, ?3) " +
+                "ON CONFLICT (business_date, job) DO UPDATE SET " +
+                "journals_posted = lending_close_job_run.journals_posted + EXCLUDED.journals_posted"
 
         const val SELECT_SQL =
             "SELECT business_date, job, items_processed, journals_posted, refused, refusal_reason, completed_at " +
