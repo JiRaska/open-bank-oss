@@ -441,7 +441,7 @@ function IAOpsContent() {
             </div>
           </Card>
 
-          {/* ── A2. Recorded human merges (ADR-0031 phase 3 evidence) ── */}
+          {/* ── A2. Recorded agent PR merges (ADR-0031 phase 3 evidence) ── */}
           <MergeRecordsSection knownAgentIds={data.agents.map(a => a.id)} />
 
           {/* Tool tiers — what MCP/the bot can & cannot do */}
