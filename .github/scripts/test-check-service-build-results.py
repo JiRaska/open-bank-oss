@@ -438,8 +438,9 @@ def preserve_fixture_outputs(*names):
 
 
 class ThinCalleeTest(unittest.TestCase):
-    # Golden bodies captured before extraction; intentional preservation boundary.
-    BODIES: ClassVar[dict] = {'build-test.sh': ('build', 'Build + test (:${{ inputs.service }})', '7d8c1749e22e575911efb4b7d3147470d64af8ef8d58aa3ed5fe9c949981c894', {'SERVICE': '${{ inputs.service }}'}), 'checkout-provider-ref.sh': ('contract', 'Check out a requested provider version only after proving it is on main', '9359271c9fbb762b315b2cc0b0da49b326d93fab2901a15e4b1ca21b294495fd', {}), 'prepare-provider-overlay.sh': ('contract', 'Check out P and overlay the provider test tree from F (equivalence-proven)', '0f445699cbeda8ff0dbad68672a9a71bc53219d33bbf96b23a43f4c9371708f0', {}), 'prewarm-images.sh': ('contract', 'Pre-warm Testcontainers image cache via ECR', '36f9392b6a9fd8ab7df2d878ba0b936420502a88fccfa77085755f22103b0bfc', {'ECR_LOGIN_OUTCOME': '${{ steps.ecr_login.outcome }}'}), 'configure-maven-mirror.sh': ('contract', 'Configure CodeArtifact Maven mirror', '8a6a6c1a11a5623f49afbd15dff4af80c338c295e695c27f7959a71aeedb15bf', {}), 'warm-gradle-cache.sh': ('contract', 'Warm Gradle dependency cache (self-heal corrupted entries)', '5c234b880455ce780fae589d39d1f91d0cd08b43644e567b7b6f88c8a691bd44', {'SERVICE': '${{ inputs.service }}'}), 'publish-consumer-pacts.sh': ('contract', 'Publish consumer pacts to broker', '6bdbc08d0209bd0dd7c545679063a38479c14b3e835ceab2f744ab1ea9d3844f', {'SERVICE': '${{ inputs.service }}'}), 'discover-provider-task.sh': ('contract', 'Discover provider Pact task', 'e78a0cf60a5611406644949246814eda227c7d6c91534cfd74341ed2c32560a1', {'REQUIRE_PROVIDER_PACT_TEST': '${{ inputs.require_provider_pact_test }}'}), 'preflight-pact-broker.sh': ('contract', 'Preflight Pact Broker selector/HAL response', '771d0c340377a6d4d43e0d19a7a0648ac79b39783e3a51469df9979d92565049', {})}
+    # Golden bodies from extraction; four hashes updated for the explicitly reviewed
+    # PR12587 ports (profiling, provider proof reuse, strict HAL). Other bodies stay fixed.
+    BODIES: ClassVar[dict] = {'build-test.sh': ('build', 'Build + test (:${{ inputs.service }})', '5b7a07cab6615893c8cf8b60214379ca845af08ad81224fc5c03a055da68ed69', {'SERVICE': '${{ inputs.service }}'}), 'checkout-provider-ref.sh': ('contract', 'Check out a requested provider version only after proving it is on main', '9359271c9fbb762b315b2cc0b0da49b326d93fab2901a15e4b1ca21b294495fd', {}), 'prepare-provider-overlay.sh': ('contract', 'Check out P and overlay the provider test tree from F (equivalence-proven)', '0f445699cbeda8ff0dbad68672a9a71bc53219d33bbf96b23a43f4c9371708f0', {}), 'prewarm-images.sh': ('contract', 'Pre-warm Testcontainers image cache via ECR', '36f9392b6a9fd8ab7df2d878ba0b936420502a88fccfa77085755f22103b0bfc', {'ECR_LOGIN_OUTCOME': '${{ steps.ecr_login.outcome }}'}), 'configure-maven-mirror.sh': ('contract', 'Configure CodeArtifact Maven mirror', '8a6a6c1a11a5623f49afbd15dff4af80c338c295e695c27f7959a71aeedb15bf', {}), 'warm-gradle-cache.sh': ('contract', 'Warm Gradle dependency cache (self-heal corrupted entries)', 'd34b7783f113651bdbf88431aceec68318d0a8d5a5df0b478f1eb709f4a805a9', {'SERVICE': '${{ inputs.service }}'}), 'publish-consumer-pacts.sh': ('contract', 'Publish consumer pacts to broker', '6bdbc08d0209bd0dd7c545679063a38479c14b3e835ceab2f744ab1ea9d3844f', {'SERVICE': '${{ inputs.service }}'}), 'discover-provider-task.sh': ('contract', 'Discover provider Pact task', '0e74a3f67a9bc2cb9cd3823873aba2afcc051093cfc66355ae75ede4d0b7c9ec', {'REQUIRE_PROVIDER_PACT_TEST': '${{ inputs.require_provider_pact_test }}'}), 'preflight-pact-broker.sh': ('contract', 'Preflight Pact Broker selector/HAL response', '3c0cc41a6127180ce4a2e4d305c8108adbbbea707ea59032117f7a76517dac25', {})}
 
     def test_exact_bodies_and_explicit_environment(self):
         import hashlib
@@ -627,7 +628,12 @@ class ThinCalleeTest(unittest.TestCase):
                 gradle.write_text('#!/bin/sh\n' + ('echo providerPactTest\n' if has_task else 'echo tasks\n'))
                 gradle.chmod(0o700)
                 output = root / 'output'
-                env = dict(os.environ, SERVICE='openbank-fixture', PACT_PROVIDER_VERSION='fixture',
+                runner = root / 'runner'
+                runner.mkdir()
+                for helper in ['service-ci-discover-provider-pact-task.sh', 'service-ci-provider-task-list.sh']:
+                    shutil.copyfile(graph.ROOT / '.github/scripts' / helper, runner / helper)
+                    (runner / helper).chmod(0o700)
+                env = dict(os.environ, RUNNER_TEMP=str(runner), SERVICE='openbank-fixture', PACT_PROVIDER_VERSION='fixture',
                            REQUIRE_PROVIDER_PACT_TEST=str(required).lower(), GITHUB_OUTPUT=str(output))
                 result = subprocess.run(['bash', '-e', str(script)], cwd=root, env=env,
                                         capture_output=True, text=True, check=False)

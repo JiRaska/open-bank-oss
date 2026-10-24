@@ -2498,9 +2498,9 @@ jobs:
     needs:
       - changes
       - publication-ready
-      - deploy-source-freshness
       - verification-metadata
       - renderer-tests
+      - deploy-source-freshness
       - build_pr_openbank_account_service
       - build_pr_openbank_agent_service
       - build_pr_openbank_aml_service

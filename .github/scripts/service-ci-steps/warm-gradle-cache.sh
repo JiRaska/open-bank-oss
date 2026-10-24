@@ -23,7 +23,7 @@
       cat /tmp/gradle-warmup.log
     elif [ $warmup_status -ne 0 ]; then
       cat /tmp/gradle-warmup.log
-      if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
+      if bash "$SERVICE_CI_HELPERS/heal-gradle-verification-failure.sh" /tmp/gradle-warmup.log; then
         echo "retrying dependency warm-up after healing corrupted cache entries"
         run_warmup > /tmp/gradle-warmup.log 2>&1
         retry_status=$?

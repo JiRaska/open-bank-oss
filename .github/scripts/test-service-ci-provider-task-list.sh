@@ -77,4 +77,56 @@ if service_ci_provider_task_reuse_is_proven "$tmp/proof" openbank-card-service; 
   echo 'provider task listing self-test: reused missing proof' >&2
   exit 1
 fi
-echo 'service-ci provider task listing self-test passed'
+# The contract job may already be in a historical checkout. Its healer must be
+# the trusted staged script, invoked through Bash even when copied mode is 0600.
+for relative_helper in missing poisoned; do
+  sandbox="$tmp/warm-$relative_helper"
+  mkdir -p "$sandbox/work" "$sandbox/bin" "$sandbox/trusted" "$sandbox/runtime"
+  cp "$repo_root/.github/scripts/service-ci-provider-task-list.sh" "$sandbox/runtime/"
+  cp "$tmp/complete.log" "$sandbox/listing.log"
+  cat > "$sandbox/bin/timeout" <<'EOF'
+#!/usr/bin/env bash
+shift 2
+exec "$@"
+EOF
+  cat > "$sandbox/work/gradlew" <<'EOF'
+#!/usr/bin/env bash
+count=0
+[ ! -e "$WARM_CASE/count" ] || count=$(cat "$WARM_CASE/count")
+count=$((count + 1))
+printf '%s' "$count" > "$WARM_CASE/count"
+if [ "$count" -eq 1 ]; then
+  echo 'synthetic verification cache failure'
+  exit 1
+fi
+cat "$WARM_CASE/listing.log"
+EOF
+  cat > "$sandbox/trusted/heal-gradle-verification-failure.sh" <<'EOF'
+#!/usr/bin/env bash
+grep -q 'synthetic verification cache failure' "$1" || exit 3
+printf 'trusted' > "$WARM_CASE/healer"
+EOF
+  chmod 700 "$sandbox/bin/timeout" "$sandbox/work/gradlew"
+  chmod 600 "$sandbox/trusted/heal-gradle-verification-failure.sh"
+  if [ "$relative_helper" = poisoned ]; then
+    mkdir -p "$sandbox/work/.github/scripts"
+    cat > "$sandbox/work/.github/scripts/heal-gradle-verification-failure.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'poisoned' > "$WARM_CASE/poison"
+exit 0
+EOF
+    chmod 700 "$sandbox/work/.github/scripts/heal-gradle-verification-failure.sh"
+  fi
+  (
+    cd "$sandbox/work"
+    WARM_CASE="$sandbox" RUNNER_TEMP="$sandbox/runtime" SERVICE_CI_HELPERS="$sandbox/trusted" \
+      SERVICE=openbank-card-service GITHUB_RUN_ID=42 GITHUB_RUN_ATTEMPT=1 \
+      PATH="$sandbox/bin:$PATH" bash "$repo_root/.github/scripts/service-ci-steps/warm-gradle-cache.sh"
+  ) > "$sandbox/output.log" 2>&1
+  [ "$(cat "$sandbox/count")" = 2 ]
+  [ "$(cat "$sandbox/healer")" = trusted ]
+  [ ! -e "$sandbox/poison" ]
+  service_ci_provider_task_reuse_is_proven \
+    "$sandbox/runtime/provider-pact-task-openbank-card-service-42-1.proof" openbank-card-service
+done
+echo 'service-ci provider task listing and trusted warm-cache self-test passed'
