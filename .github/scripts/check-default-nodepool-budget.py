@@ -35,6 +35,9 @@ TF = Path("openbank-infra/aws/envs/sandbox-platform/main.tf")
 HEADER = 'resource "kubectl_manifest" "nodepool_default"'
 MAX_NODES = 1
 MAX_DRIFT_WINDOW_H = 4  # 24h - duration of the Drifted-0 budget
+APPROVED_DRIFT_SCHEDULE = "0 9 * * *"  # existing daily 09:00 UTC start, set by #13704
+APPROVED_FREEZE_SCHEDULE = "0 20 * * *"  # existing daily 20:00-07:00 UTC freeze
+APPROVED_FREEZE_H = 11
 
 
 def matching(text: str, i: int, open_c: str, close_c: str) -> int:
@@ -113,12 +116,23 @@ def check_text(tf: str) -> tuple[list[str], int]:
         f.append(f"{TF}: default NodePool has no scheduled `Drifted` budget with nodes = 0 -- drift would "
                  "roll at any hour")
     else:
+        # The 24h complement below is valid only for the approved daily recurrence.
+        # An annual or weekly cron with the same 22h duration otherwise passes it.
+        if drift[0]["schedule"].split() != APPROVED_DRIFT_SCHEDULE.split():
+            f.append(f"{TF}: Drifted-0 budget must keep the approved daily schedule "
+                     f"{APPROVED_DRIFT_SCHEDULE!r}")
         h = hours(drift[0].get("duration", ""))
         if h is None or 24 - h > MAX_DRIFT_WINDOW_H or h > 24:
             f.append(f"{TF}: Drifted-0 budget duration {drift[0].get('duration')!r} leaves a drift window "
                      f"longer than {MAX_DRIFT_WINDOW_H}h (or is unparseable)")
-    if not any(b.get("schedule") and not b["reasons"] and nodes_value(b.get("nodes", "")) == 0 for b in bs):
+    freezes = [b for b in bs if b.get("schedule") and not b["reasons"]
+               and nodes_value(b.get("nodes", "")) == 0]
+    if not freezes:
         f.append(f"{TF}: default NodePool lost its freeze (scheduled budget, no reasons, nodes 0)")
+    elif not any(b["schedule"].split() == APPROVED_FREEZE_SCHEDULE.split()
+                 and hours(b.get("duration", "")) == APPROVED_FREEZE_H for b in freezes):
+        f.append(f"{TF}: default NodePool must keep its approved daily freeze "
+                 f"({APPROVED_FREEZE_SCHEDULE!r}, {APPROVED_FREEZE_H}h)")
     return f, len(bs)
 
 
@@ -165,7 +179,17 @@ def self_test() -> int:
                                        "more than"),
         "schedule (Drifted 0) budget removed": (sub(r'\n\s*\{ schedule = "0 9 \* \* \*"[^\n]*\},', ""),
                                                  "no scheduled `Drifted`"),
+        "Drifted schedule changed to annual": (sub(r'schedule = "0 9 \* \* \*"',
+                                                   'schedule = "0 9 1 1 *"'), "daily schedule"),
+        "Drifted schedule field removed": (sub(r'schedule = "0 9 \* \* \*", ', ""),
+                                            "no scheduled `Drifted`"),
         "Drifted window widened to 12h": (sub(r'duration = "22h"', 'duration = "12h"'), "drift window"),
+        "freeze schedule changed to annual": (sub(r'schedule = "0 20 \* \* \*"',
+                                                  'schedule = "0 20 1 1 *"'), "approved daily freeze"),
+        "freeze schedule moved to noon": (sub(r'schedule = "0 20 \* \* \*"',
+                                              'schedule = "0 12 * * *"'), "approved daily freeze"),
+        "freeze duration removed": (sub(r'duration = "11h", ', ""), "approved daily freeze"),
+        "freeze duration shortened": (sub(r'duration = "11h"', 'duration = "1h"'), "approved daily freeze"),
         "freeze removed": (sub(r'\n\s*\{ schedule = "0 20 \* \* \*"[^\n]*\},', ""), "lost its freeze"),
         "pool removed": (sub(r'"nodepool_default"', '"nodepool_other"'), "no `nodepool_default`"),
     }
