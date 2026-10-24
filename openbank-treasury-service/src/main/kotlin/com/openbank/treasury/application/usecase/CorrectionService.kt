@@ -161,7 +161,10 @@ class CorrectionService(
         // Re-vetted NOW (exposure and the mandate may have moved since the proposal); a full unwind
         // only reduces exposure. The counterparty headroom is re-measured once more under the lock.
         val (vetted, check) = if (c.fullUnwind) raw to null else vet(raw, c.limitOverride)
-        val corrected = plan.schedule?.let { vetted.withSchedule(it.write.scheduleVersion, it.hash) } ?: vetted
+        // The stored credit figure (limit_deal_amount, summed by every later line query) follows the
+        // corrected terms: the check re-measured them through CreditExposure (ADR-0315 D4).
+        val measured = check?.let { vetted.copy(limitCheck = it) } ?: vetted
+        val corrected = plan.schedule?.let { measured.withSchedule(it.write.scheduleVersion, it.hash) } ?: measured
         // The line is the deal's LIMIT currency (CZK for FX), measured by its limit amount: the same
         // figures LimitCheck used, the same key and query every booking takes.
         val guard = check?.let { ExposureGuard.of(it, c.limitOverride?.coversExposureUpTo) }

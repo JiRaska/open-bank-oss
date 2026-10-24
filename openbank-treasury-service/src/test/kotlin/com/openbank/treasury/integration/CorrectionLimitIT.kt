@@ -230,6 +230,11 @@ class CorrectionLimitIT {
         assertThat(
             count("select cast(principal as bigint) / 1000000 from deals where deal_id = '$deal'"),
         ).isEqualTo(1000)
+        // The stored credit figure follows the corrected terms (CreditExposure re-measured): the
+        // next line query sums 1000 M for this deal, not the 100 M it was booked at.
+        assertThat(
+            count("select cast(limit_deal_amount as bigint) / 1000000 from deals where deal_id = '$deal'"),
+        ).isEqualTo(1000)
     }
 
     private fun sql(s: String) = jdbc { it.prepareStatement(s).executeUpdate() }
