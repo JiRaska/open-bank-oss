@@ -201,7 +201,8 @@ def backend_open(request, timeout=10):
 
 def post_record(base_url, token, payload, timeout=10):
     """POST the record; returns None on success or a human-readable failure reason."""
-    url = base_url.rstrip("/") + ENDPOINT_PATH
+    suffix = "/app" if payload.get("mergedByType") == "GITHUB_APP" else ""
+    url = base_url.rstrip("/") + ENDPOINT_PATH + suffix
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),

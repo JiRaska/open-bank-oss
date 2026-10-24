@@ -143,6 +143,7 @@ private DNS zone.
     corrected. Measured by `AgentAuditEventPersistenceIT`, which asserts the sentinel rather than
     agreeing with it silently.
 - **T-R3 (ADR-0031 phase 3) — merge-evidence repudiation.** `POST /api/v1/agent-merge-records` exists
+  alongside the additive `POST /api/v1/agent-merge-records/app` for App execution,
   precisely to close the "an agent merged its own PR and nobody can prove a human decided" gap: the
   record of WHO merged an agent-authored PR enters out-of-band (the `record-agent-merge` CI workflow),
   and the agent has no write tool to self-report. Ingest is audited once as `agent.pr.merged` under

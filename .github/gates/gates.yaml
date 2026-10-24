@@ -3582,7 +3582,7 @@ gates:
       PR-scope reconstruction. They prove rejection of revoked, foreign, after-merge,
       incomplete and unavailable evidence, old backend capability, and incorrect read-back.
     budget_seconds: 60
-    min_subjects: 47
+    min_subjects: 48
     rationale: >-
       A successful App merge must preserve the actual executor separately from the human
       authorizer. A green record with a fabricated HUMAN actor or unverified authorization

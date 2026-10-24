@@ -317,8 +317,9 @@ later than the producer's current reconstruction. GitHub REST/timeline merge tim
 fail closed. This bounded reconstruction is unavailable for later merges. It does not create a
 retroactive exact-head approval or replace an existing premerge revocation.
 
-The API/schema transition is additive: existing rows default to `HUMAN`, with no invented ids or
-authorization. The producer checks evidence-schema capability before writing, then reads the
+The API/schema transition is additive: the original POST keeps its human-only request contract;
+App evidence uses `POST /api/v1/agent-merge-records/app`. Existing rows default to `HUMAN`,
+with no invented ids or authorization. The producer checks evidence-schema capability before writing, then reads the
 committed record back. Duplicate deliveries retain the original record and produce no second audit
 event; conflicting App identities, heads or authorization return 409. A refreshed historical
 observation timestamp does not change the original evidence. The merge row and audit outbox remain

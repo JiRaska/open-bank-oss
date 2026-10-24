@@ -434,6 +434,12 @@ def local_backend(redirect_to=None, redirect_code=302):
 
 
 class BackendCredentialIsolationTests(unittest.TestCase):
+    def test_app_and_legacy_human_use_distinct_ingest_operations(self):
+        for actor, suffix in (("HUMAN", ""), ("GITHUB_APP", "/app")):
+            with self.subTest(actor=actor), local_backend() as (source, received):
+                self.assertIsNone(recorder.post_record(source, "synthetic-token", {"mergedByType": actor}))
+                self.assertEqual(received, [("POST", recorder.ENDPOINT_PATH + suffix, "Bearer synthetic-token")])
+
     def test_real_capability_get_refuses_cross_origin_redirect_without_leaking_credentials(self):
         for code in (301, 302, 303, 307, 308):
             with self.subTest(code=code), local_backend() as (sink, leaked):
