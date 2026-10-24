@@ -1186,9 +1186,9 @@ class LendingService @Inject constructor(
                 // next pass (null = skipped), and the outcome says the pass was cut short.
                 .onItem().transformToUniAndConcatenate { installment ->
                     if (deadline != null && !clock.instant().isBefore(deadline)) {
-                        Uni.createFrom().item(null as LoanInstallment?)
+                        Uni.createFrom().nullItem<LoanInstallment>()
                     } else {
-                        accrueOne(installment).map { it as LoanInstallment? }
+                        accrueOne(installment).map<LoanInstallment?> { it }
                     }
                 }
                 .collect().asList()
