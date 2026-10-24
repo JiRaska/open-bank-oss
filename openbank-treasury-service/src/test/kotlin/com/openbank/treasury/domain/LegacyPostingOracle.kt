@@ -86,6 +86,7 @@ object LegacyPostingRules {
                 LegacyLine(liabilityCode(deal), Side.CREDIT, p, ccy),
             )
             ProductType.FX_SPOT -> fxSpotSettlement(deal)
+            else -> error("${deal.product} is not a legacy product")
         }
         return LegacyJournal(PostingEvent.SETTLED, lines)
     }
@@ -170,6 +171,7 @@ object LegacyPostingRules {
                 line(LegacyTreasuryChart.code(ccy, "expense"), Side.DEBIT, rest, ccy),
                 LegacyLine(nostro, Side.CREDIT, p + i, ccy),
             )
+            else -> error("${deal.product} is not a legacy product")
         }
         return LegacyJournal(PostingEvent.MATURED, lines)
     }
