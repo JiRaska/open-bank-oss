@@ -119,6 +119,7 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-24** — **No `PmtTpInf` on the domestic pacs.008, by decision (#13663).** `openbank-libs-iso20022` gained an optional payment-type block; `SchemeGatewayAdapter` passes `paymentTypeInformation = null` explicitly instead of inheriting it. The EPC service level `SEPA` applies to EUR SEPA schemes, not to a domestic clearing transfer, so sending it would misdescribe the payment. The emitted XML is byte-identical to before. **Residual:** the domestic scheme's own priority or instant code (`DomesticPaymentPriority.INSTANT`) is still not stated on the wire; adding it needs the domestic scheme's code list, not an EPC code.
 - **2026-10-15** — **Outbound account-service edge: request-derived values no longer reach logs** (CodeQL
   505/506, PR #12717). `AccountServiceClient` — the outbound client edge to account-service — logged the
   IBAN or account id, plus the full throwable, whenever a party/account lookup failed. The warn lines now

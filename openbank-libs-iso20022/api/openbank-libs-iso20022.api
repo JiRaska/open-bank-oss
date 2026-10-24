@@ -74,6 +74,8 @@ public final class com/openbank/libs/iso20022/CreditDebitIndicator : java/lang/E
 
 public final class com/openbank/libs/iso20022/CreditTransferInstruction {
 	public fun <init> (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/ChargeBearer;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public fun <init> (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/ChargeBearer;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/iso20022/PaymentTypeInformation;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/ChargeBearer;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/iso20022/PaymentTypeInformation;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component10 ()Ljava/lang/String;
 	public final fun component11 ()Ljava/lang/String;
@@ -82,6 +84,7 @@ public final class com/openbank/libs/iso20022/CreditTransferInstruction {
 	public final fun component14 ()Ljava/lang/String;
 	public final fun component15 ()Ljava/lang/String;
 	public final fun component16 ()Ljava/lang/String;
+	public final fun component17 ()Lcom/openbank/libs/iso20022/PaymentTypeInformation;
 	public final fun component2 ()Ljava/time/OffsetDateTime;
 	public final fun component3 ()Ljava/time/OffsetDateTime;
 	public final fun component4 ()Ljava/lang/String;
@@ -91,7 +94,8 @@ public final class com/openbank/libs/iso20022/CreditTransferInstruction {
 	public final fun component8 ()Lcom/openbank/libs/iso20022/ChargeBearer;
 	public final fun component9 ()Lcom/openbank/libs/iso20022/SettlementMethod;
 	public final fun copy (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/ChargeBearer;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/iso20022/CreditTransferInstruction;
-	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/CreditTransferInstruction;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/ChargeBearer;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/CreditTransferInstruction;
+	public final fun copy (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/ChargeBearer;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/iso20022/PaymentTypeInformation;)Lcom/openbank/libs/iso20022/CreditTransferInstruction;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/CreditTransferInstruction;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/ChargeBearer;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/iso20022/PaymentTypeInformation;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/CreditTransferInstruction;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAmount ()Ljava/math/BigDecimal;
 	public final fun getChargeBearer ()Lcom/openbank/libs/iso20022/ChargeBearer;
@@ -106,6 +110,7 @@ public final class com/openbank/libs/iso20022/CreditTransferInstruction {
 	public final fun getEndToEndId ()Ljava/lang/String;
 	public final fun getInterbankSettlementDate ()Ljava/time/OffsetDateTime;
 	public final fun getMessageId ()Ljava/lang/String;
+	public final fun getPaymentTypeInformation ()Lcom/openbank/libs/iso20022/PaymentTypeInformation;
 	public final fun getRemittanceInfo ()Ljava/lang/String;
 	public final fun getSettlementMethod ()Lcom/openbank/libs/iso20022/SettlementMethod;
 	public final fun getTransactionId ()Ljava/lang/String;
@@ -322,9 +327,33 @@ public final class com/openbank/libs/iso20022/PaymentStatusReport {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/openbank/libs/iso20022/PaymentTypeInformation {
+	public static final field Companion Lcom/openbank/libs/iso20022/PaymentTypeInformation$Companion;
+	public static final field SEPA_CREDIT_TRANSFER Lcom/openbank/libs/iso20022/PaymentTypeInformation;
+	public static final field SEPA_INSTANT Lcom/openbank/libs/iso20022/PaymentTypeInformation;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/iso20022/PaymentTypeInformation;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/PaymentTypeInformation;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/PaymentTypeInformation;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLocalInstrumentCode ()Ljava/lang/String;
+	public final fun getServiceLevelCode ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/PaymentTypeInformation$Companion {
+}
+
 public final class com/openbank/libs/iso20022/ReceivedCreditTransfer {
 	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/lang/String;
+	public final fun component11 ()Ljava/lang/String;
 	public final fun component2 ()Ljava/lang/String;
 	public final fun component3 ()Ljava/lang/String;
 	public final fun component4 ()Ljava/math/BigDecimal;
@@ -334,7 +363,8 @@ public final class com/openbank/libs/iso20022/ReceivedCreditTransfer {
 	public final fun component8 ()Ljava/lang/String;
 	public final fun component9 ()Ljava/lang/String;
 	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/iso20022/ReceivedCreditTransfer;
-	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/ReceivedCreditTransfer;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/ReceivedCreditTransfer;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/iso20022/ReceivedCreditTransfer;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/ReceivedCreditTransfer;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/ReceivedCreditTransfer;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAmount ()Ljava/math/BigDecimal;
 	public final fun getCreditorAgentBic ()Ljava/lang/String;
@@ -343,9 +373,12 @@ public final class com/openbank/libs/iso20022/ReceivedCreditTransfer {
 	public final fun getCurrency ()Ljava/lang/String;
 	public final fun getDebtorIban ()Ljava/lang/String;
 	public final fun getEndToEndId ()Ljava/lang/String;
+	public final fun getLocalInstrumentCode ()Ljava/lang/String;
 	public final fun getMessageId ()Ljava/lang/String;
+	public final fun getServiceLevelCode ()Ljava/lang/String;
 	public final fun getTransactionId ()Ljava/lang/String;
 	public fun hashCode ()I
+	public final fun isInstant ()Z
 	public fun toString ()Ljava/lang/String;
 }
 

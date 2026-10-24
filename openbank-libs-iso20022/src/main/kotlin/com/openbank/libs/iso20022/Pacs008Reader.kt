@@ -21,7 +21,48 @@ data class ReceivedCreditTransfer(
     val creditorIban: String,
     val creditorAgentBic: String,
     val debtorIban: String,
-)
+    /** `PmtTpInf/SvcLvl/Cd` (first occurrence), or `null` when the message carries none. */
+    val serviceLevelCode: String? = null,
+    /** `PmtTpInf/LclInstrm/Cd`, or `null` when the message carries none. */
+    val localInstrumentCode: String? = null,
+) {
+    /** The pre-#13663 constructor, retained for binary compatibility (libs ABI rule). */
+    @Suppress("LongParameterList")
+    constructor(
+        messageId: String,
+        endToEndId: String,
+        transactionId: String?,
+        amount: BigDecimal,
+        currency: String,
+        creditorName: String,
+        creditorIban: String,
+        creditorAgentBic: String,
+        debtorIban: String,
+    ) : this(
+        messageId, endToEndId, transactionId, amount, currency, creditorName, creditorIban,
+        creditorAgentBic, debtorIban, null, null,
+    )
+
+    /** The pre-#13663 all-arguments `copy`, retained for binary compatibility; keeps the payment type. */
+    @Suppress("LongParameterList")
+    fun copy(
+        messageId: String,
+        endToEndId: String,
+        transactionId: String?,
+        amount: BigDecimal,
+        currency: String,
+        creditorName: String,
+        creditorIban: String,
+        creditorAgentBic: String,
+        debtorIban: String,
+    ): ReceivedCreditTransfer = ReceivedCreditTransfer(
+        messageId, endToEndId, transactionId, amount, currency, creditorName, creditorIban,
+        creditorAgentBic, debtorIban, serviceLevelCode, localInstrumentCode,
+    )
+
+    /** True when the message is flagged as SCT Inst (`LclInstrm/Cd=INST`). */
+    val isInstant: Boolean get() = localInstrumentCode == "INST"
+}
 
 /** Thrown when a `pacs.008` cannot be parsed into a [ReceivedCreditTransfer] (missing/malformed field). */
 class Pacs008ParseException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
@@ -44,6 +85,7 @@ class Pacs008Reader {
         val root = doc.documentElement
         val tx = root.firstByLocal("CdtTrfTxInf") ?: missing("CdtTrfTxInf")
         val amountEl = tx.firstByLocal("IntrBkSttlmAmt") ?: missing("IntrBkSttlmAmt")
+        val pmtTpInf = tx.firstByLocal("PmtTpInf")
 
         return ReceivedCreditTransfer(
             messageId = root.requireText("MsgId"),
@@ -57,6 +99,8 @@ class Pacs008Reader {
             creditorIban = tx.requireChild("CdtrAcct").requireText("IBAN"),
             creditorAgentBic = tx.requireChild("CdtrAgt").requireText("BICFI"),
             debtorIban = tx.requireChild("DbtrAcct").requireText("IBAN"),
+            serviceLevelCode = pmtTpInf?.firstByLocal("SvcLvl")?.firstByLocal("Cd")?.trimmedText(),
+            localInstrumentCode = pmtTpInf?.firstByLocal("LclInstrm")?.firstByLocal("Cd")?.trimmedText(),
         )
     }
 

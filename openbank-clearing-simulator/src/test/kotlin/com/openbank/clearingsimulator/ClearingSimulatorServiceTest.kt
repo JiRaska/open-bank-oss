@@ -9,6 +9,8 @@ import com.openbank.clearingsimulator.application.dto.ReturnRequest
 import com.openbank.libs.iso20022.ChargeBearer
 import com.openbank.libs.iso20022.CreditTransferInstruction
 import com.openbank.libs.iso20022.Pacs008Builder
+import com.openbank.libs.iso20022.Pacs008Reader
+import com.openbank.libs.iso20022.PaymentTypeInformation
 import com.openbank.libs.iso20022.SettlementMethod
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -24,7 +26,7 @@ class ClearingSimulatorServiceTest {
     private val pacs008 = Pacs008Builder()
     private val now = Instant.parse("2026-06-22T10:18:00Z")
 
-    private fun pacs008Xml(amount: String) = pacs008.build(
+    private fun pacs008Xml(amount: String, paymentType: PaymentTypeInformation? = null) = pacs008.build(
         CreditTransferInstruction(
             messageId = "OB-MSG-0001",
             creationDateTime = OffsetDateTime.of(2026, 6, 22, 10, 15, 30, 0, ZoneOffset.UTC),
@@ -42,6 +44,7 @@ class ClearingSimulatorServiceTest {
             creditorName = "Bob Creditor",
             creditorIban = "FR1420041010050500013M02606",
             remittanceInfo = "Invoice 2026-0042",
+            paymentTypeInformation = paymentType,
         ),
     )
 
@@ -56,6 +59,35 @@ class ClearingSimulatorServiceTest {
         assertThat(result.creditNotificationXml!!).contains("<CdtDbtInd>CRDT</CdtDbtInd>")
         assertThat(result.creditNotificationXml!!).contains("<IBAN>FR1420041010050500013M02606</IBAN>")
         assertThat(result.creditNotificationXml!!).contains("<EndToEndId>E2E-0001</EndToEndId>")
+    }
+
+    // #13663: sepa-payment and sepa-instant now send PmtTpInf. The simulator validates against the
+    // shared XSD before it reads anything, so a schema that did not admit the block would turn every
+    // SEPA payment into an FF01 reject. Both shapes must clear, and the reader must see the type.
+    @Test
+    fun `an SCT with PmtTpInf SvcLvl SEPA validates, settles and is read as non-instant`() {
+        val xml = pacs008Xml("12.34", PaymentTypeInformation.SEPA_CREDIT_TRANSFER)
+        val result = service.clear(xml, now)
+
+        assertThat(result.settled).isTrue()
+        assertThat(result.statusReportXml).contains("<TxSts>ACSC</TxSts>")
+        val read = Pacs008Reader().read(xml)
+        assertThat(read.serviceLevelCode).isEqualTo("SEPA")
+        assertThat(read.isInstant).isFalse()
+    }
+
+    @Test
+    fun `an SCT Inst with PmtTpInf LclInstrm INST validates, settles and is read as instant`() {
+        val xml = pacs008Xml("12.34", PaymentTypeInformation.SEPA_INSTANT)
+        val result = service.clear(xml, now)
+
+        assertThat(result.settled).isTrue()
+        assertThat(result.statusReportXml).contains("<TxSts>ACSC</TxSts>")
+        assertThat(result.creditNotificationXml!!).contains("<EndToEndId>E2E-0001</EndToEndId>")
+        val read = Pacs008Reader().read(xml)
+        assertThat(read.serviceLevelCode).isEqualTo("SEPA")
+        assertThat(read.localInstrumentCode).isEqualTo("INST")
+        assertThat(read.isInstant).isTrue()
     }
 
     @Test
