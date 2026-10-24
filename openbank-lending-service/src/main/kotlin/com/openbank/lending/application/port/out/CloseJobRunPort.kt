@@ -25,6 +25,15 @@ interface CloseJobRunPort {
      */
     fun record(run: CloseJobRun): Uni<Unit>
 
+    /**
+     * Adds [journals] to `(businessDate, job)`'s journal count and touches NOTHING else: not refused,
+     * not its reason, not the in-flight marker, not completed_at. A catch-up books an earlier day's
+     * remainder in today's open day and must not turn today's REFUSED or in-flight row into a clean
+     * one (#13708 security review: the full-row upsert of [record] did exactly that). A row created
+     * here has no completed_at, so the day is not reported until its own pass records.
+     */
+    fun addJournals(businessDate: LocalDate, job: String, journals: Int): Uni<Unit>
+
     /** Every COMPLETED run with `businessDate` in `[from, to]` (in-flight rows are excluded). */
     fun findBetween(from: LocalDate, to: LocalDate): Uni<List<CloseJobRun>>
 

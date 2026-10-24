@@ -160,16 +160,18 @@ class InterestAccrualScheduler @Inject constructor(
                     reason = if (outcome.truncated) LendingCloseJobs.REASON_ACCRUAL_TRUNCATED else null,
                 ).flatMap {
                     if (lateDay && outcome.journalsPosted > 0) {
-                        // Booked today: today's row carries them. Today's own pass runs right after
-                        // and adds its counts (the row accumulates).
-                        LendingCloseJobs.record(
-                            closeJobRuns,
-                            clock,
-                            today,
-                            LendingCloseJobs.ACCRUAL,
-                            items = 0,
-                            journals = outcome.journalsPosted,
-                        )
+                        // Booked today: today's row carries them - as a journal count ONLY. A full
+                        // record() here would overwrite today's refused/reason/in-flight state and
+                        // could flip a REFUSED or running today to a clean RAN (fail-open).
+                        closeJobRuns.addJournals(today, LendingCloseJobs.ACCRUAL, outcome.journalsPosted)
+                            .onFailure().recoverWithItem { e ->
+                                log.warnf(
+                                    "late-day journals for %s NOT added to today's evidence (%s)",
+                                    today,
+                                    e.javaClass.simpleName,
+                                )
+                                Unit
+                            }
                     } else {
                         Uni.createFrom().item(Unit)
                     }

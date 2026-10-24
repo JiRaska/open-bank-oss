@@ -376,6 +376,72 @@ class LendingCloseParticipationSchedulerTest {
         assertThat(runs.runs.getValue(today to LendingCloseJobs.ACCRUAL).journalsPosted).isEqualTo(4)
     }
 
+    // #13708 security review: catch-up journals booked today must not clear today's refusal.
+    @Test
+    fun `late-day catch-up journals never turn a REFUSED today into a clean one`() {
+        val dayD = today.minusDays(1)
+        ran(
+            today,
+            LendingCloseJobs.ACCRUAL,
+            items = 0,
+            journals = 0,
+            refused = 1,
+            reason = LendingCloseJobs.REASON_DAY_CLOSED,
+        )
+        ran(
+            dayD,
+            LendingCloseJobs.ACCRUAL,
+            items = 5,
+            journals = 5,
+            refused = 1,
+            reason = LendingCloseJobs.REASON_ACCRUAL_TRUNCATED,
+        )
+        val accrual = mockk<AccrueInterestUseCase>()
+        every { accrual.accrueDueInterest(dayD, any(), any()) } returns
+            Uni.createFrom().item(AccrualOutcome(dayD, 3, 3))
+        every { accrual.accrueDueInterest(today, any(), any()) } returns
+            Uni.createFrom().item(AccrualOutcome(today, 1, 1))
+        // Today's own pass dies before writing its result: only the catch-up touches today's row.
+        runs.crashOnRecord = today to LendingCloseJobs.ACCRUAL
+
+        runCatching {
+            InterestAccrualScheduler(
+                accrual,
+                500,
+                clock,
+                noOpDomainMetrics(),
+                runs,
+            ).runAccrualPass().await().indefinitely()
+        }
+
+        val todayRow = runs.runs.getValue(today to LendingCloseJobs.ACCRUAL)
+        assertThat(todayRow.refused).describedAs("still REFUSED, never flipped by the catch-up").isEqualTo(1)
+        assertThat(todayRow.refusalReason).isEqualTo(LendingCloseJobs.REASON_DAY_CLOSED)
+        assertThat(todayRow.journalsPosted).isEqualTo(3)
+        assertThat(runs.inFlight.keys).describedAs("today's dead pass still marked in flight")
+            .contains(today to LendingCloseJobs.ACCRUAL)
+        assertThat(runs.runs.getValue(dayD to LendingCloseJobs.ACCRUAL).refused).isZero()
+    }
+
+    @Test
+    fun `adding late-day journals leaves the refusal and the in-flight marker untouched`() {
+        ran(
+            today,
+            LendingCloseJobs.ACCRUAL,
+            items = 0,
+            journals = 0,
+            refused = 1,
+            reason = LendingCloseJobs.REASON_DAY_CLOSED,
+        )
+        runs.addJournals(today, LendingCloseJobs.ACCRUAL, 4).await().indefinitely()
+        assertThat(runs.runs.getValue(today to LendingCloseJobs.ACCRUAL).refused).isEqualTo(1)
+
+        val dayX = today.minusDays(2)
+        runs.markStarted(dayX, LendingCloseJobs.ACCRUAL, clock.instant()).await().indefinitely()
+        runs.addJournals(dayX, LendingCloseJobs.ACCRUAL, 2).await().indefinitely()
+        assertThat(runs.inFlight.keys).contains(dayX to LendingCloseJobs.ACCRUAL)
+    }
+
     @Test
     fun `a marker younger than the derived stale threshold is a live pass and is not re-run`() {
         val dayD = today.minusDays(1)

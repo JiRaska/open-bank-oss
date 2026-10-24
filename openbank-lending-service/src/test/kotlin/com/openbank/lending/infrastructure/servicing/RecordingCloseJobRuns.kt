@@ -20,6 +20,9 @@ class RecordingCloseJobRuns : CloseJobRunPort {
     val runs = linkedMapOf<Pair<LocalDate, String>, CloseJobRun>()
     val inFlight = linkedMapOf<Pair<LocalDate, String>, Instant>()
 
+    /** Journals added to a row that had not completed yet (mirrors the SQL insert with no completed_at). */
+    val pendingJournals = linkedMapOf<Pair<LocalDate, String>, Int>()
+
     /** Every (day, job) ever marked started, in order — what a pass worked as of. */
     val started = mutableListOf<Pair<LocalDate, String>>()
 
@@ -29,11 +32,27 @@ class RecordingCloseJobRuns : CloseJobRunPort {
         return Uni.createFrom().item(Unit)
     }
 
+    override fun addJournals(businessDate: LocalDate, job: String, journals: Int): Uni<Unit> {
+        val key = businessDate to job
+        val prior = runs[key]
+        if (prior != null) {
+            runs[key] = prior.copy(journalsPosted = prior.journalsPosted + journals)
+        } else {
+            pendingJournals[key] = (pendingJournals[key] ?: 0) + journals
+        }
+        return Uni.createFrom().item(Unit)
+    }
+
+    /** When set, record() for this key fails: a pass that died before writing its result. */
+    var crashOnRecord: Pair<LocalDate, String>? = null
+
     override fun record(run: CloseJobRun): Uni<Unit> {
         val key = run.businessDate to run.job
+        if (key == crashOnRecord) return Uni.createFrom().failure(IllegalStateException("pod died"))
+        val carried = pendingJournals.remove(key) ?: 0
         val prior = runs[key]
         runs[key] = if (prior == null) {
-            run
+            run.copy(journalsPosted = run.journalsPosted + carried)
         } else {
             run.copy(
                 itemsProcessed = prior.itemsProcessed + run.itemsProcessed,
