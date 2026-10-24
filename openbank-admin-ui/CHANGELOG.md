@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.11.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.3...admin-ui-v3.11.0) (2026-10-23)
+
+
+### Features
+
+* **products:** Product as Code phase 2 — openbank-products, signed publish-ir, pinned-revision loader (ADR-0352) ([#13644](https://github.com/JiRaska/open-bank-oss/issues/13644)) ([44b68d0](https://github.com/JiRaska/open-bank-oss/commit/44b68d002817537e5fbb1699522b8b1568b3d0ff))
+
 ## [3.10.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.2...admin-ui-v3.10.3) (2026-10-22)
 
 
