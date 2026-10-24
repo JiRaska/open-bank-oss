@@ -46,10 +46,10 @@ class TreasuryParityReplayTest {
     fun `the fixture set is the one the gate counts - every delivered product has one and none is skipped`() {
         val all = fixtures()
         assertThat(all).hasSizeGreaterThanOrEqualTo(MIN_FIXTURES)
-        // ADR-0344 delivers products in phases; phase 0 delivers the five legacy products, and each
-        // later phase widens this set together with the gate's REQUIRED_PRODUCTS and its fixtures.
+        // ADR-0344 delivers products in phases; each phase widens ProductType.DELIVERED together with
+        // the gate's REQUIRED_PRODUCTS and its fixtures.
         assertThat(all.map { ProductType.valueOf(it.second["product"].asText()) }.toSet())
-            .containsExactlyInAnyOrderElementsOf(ProductType.entries.filter { it.legacy })
+            .containsExactlyInAnyOrderElementsOf(ProductType.DELIVERED)
     }
 
     @Test
@@ -141,7 +141,7 @@ class TreasuryParityReplayTest {
     private fun label(k: Key) = "leg ${k.leg ?: "deal"} period ${k.period ?: "-"} ${k.kind}"
 
     companion object {
-        private const val MIN_FIXTURES = 11
+        private const val MIN_FIXTURES = 17
 
         private fun JsonNode.textOrNull(field: String): String? = get(field)?.takeUnless { it.isNull }?.asText()
 
