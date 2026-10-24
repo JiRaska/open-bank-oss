@@ -78,6 +78,12 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 ## Runbooks
 
+### Unsettled internal booking outcomes
+
+`openbank_payment_unsettled_total{rail="SWIFT",outcome="..."}` counts unsuccessful transaction-service attempts. The bounded outcomes are `mismatch`, `failed-replay`, `conflict`, `unexpected-status` and `transport-error`; five zero series are registered before any attempt. Retries count as separate attempts, so this is not a count of unique messages. Cancellation and matched successful responses do not increment it. `failed-replay` denotes a decoded FAILED response and does not prove that this call was a replay.
+
+Settlement requires HTTP 201, a COMPLETED transaction with an id, and a match to the submitted booking fields. Other outcomes do not prove booking completion; independent ACK/reject callbacks may change the business status. Preserve the existing `swift-settlement-<messageId>` key during investigation: a 409 or an uncertain response is not proof of a completed booking. Establish the transaction outcome through approved reconciliation tooling before selecting a corrective action; do not rotate the key or use a new booking POST as a lookup. transaction-service still has no public lookup by idempotency key; the runbook reads its database. The unsettled-booking alert is described below.
+
 ### Outbox lag / events not flowing
 
 1. Count pending: `SELECT count(*) FROM swift_outbox WHERE status='PENDING'`.
@@ -116,3 +122,26 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Outbound booking clock (#13623)
+
+Accepted MT103 submission commits the first booking-due timestamp with SENT and its existing
+status event before calling transaction-service. A missing ordering account also leaves this
+obligation pending. Only the existing strictly matched 201 COMPLETED response with a transaction
+identity can commit local booking proof together with COMPLETED and its status event. A concurrent
+ACK/rejection or revision change refuses stale completion; it does not overwrite the callback.
+An unresolved local proof can therefore coexist with a provider that actually booked. Reconcile
+the original `swift-settlement-<messageId>` key; no new financial retry or replacement key is added.
+
+`openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SWIFT"}` is the oldest
+tracked pending local-proof age, a lower bound. It remains numeric even when
+`openbank_payment_booking_unknown_coverage{rail="SWIFT"}` reports uncovered legacy/bypassed MT103 rows.
+The query does not filter by business status: ACKNOWLEDGED/REJECTED does not prove ledger booking.
+Startup before a successful query is NaN; a known empty tracked set is zero, independently of
+unknown coverage. Query failure retains the cached timestamp so age continues advancing and
+records no workflow success. Nullable migration columns do not invent historical due times.
+`SwiftBookingUnsettled` alerts on it (30m, below); no booking retry, public API or automatic historical repair is introduced.
+
+### Unsettled booking alert (#13623)
+
+`SwiftBookingUnsettled` fires when the oldest open MT103 booking clock is older than 30 minutes (`openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`, tested by `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`). swift-service makes one transaction-service call per accepted message and never retries, and it has no re-drive path (#13686), so the age is the only signal that reaches an operator. That includes a message with no ordering account id or an unparseable value date, which the outcome counter never sees. The remedy (query transaction-service by key, then reconcile or reverse) is the SWIFT section of `docs/runbooks/0032-payment-rail-unsettled-booking.md`. `ack`/`reject` do not close the clock and must not be used to silence the alert.

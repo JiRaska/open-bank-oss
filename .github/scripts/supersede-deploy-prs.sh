@@ -218,22 +218,36 @@ unmigrated_branch_holds() {
     "$SUPERSEDE_BRANCH_HOLDS_HOOK" "$1"
     return
   fi
-  local head branch_rules main_rules
+  local head tmpd rc
   head="$(gh pr view "$1" --repo "$REPO" --json headRefOid --jq .headRefOid)" || return 1
   [[ "$head" =~ ^[0-9a-f]{40}$ ]] || return 1
-  branch_rules="$(gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$RULES_PATH?ref=$head")" || return 1
-  main_rules="$(gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$RULES_PATH?ref=main")" || return 1
-  BRANCH_RULES="$branch_rules" MAIN_RULES="$main_rules" "${DEPLOY_HOLD_PYTHON:-python3}" -c '
-import os, yaml
-def held(text):
-    doc = yaml.safe_load(text) or {}
+  # By FILE, never env/argv: rules.yaml exceeds Linux MAX_ARG_STRLEN (128 KiB per string), and an
+  # env var carrying it makes exec fail with "Argument list too long" (E2BIG).
+  tmpd="$(mktemp -d)" || return 1
+  if gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$RULES_PATH?ref=$head" >"$tmpd/branch.yaml" &&
+     gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$RULES_PATH?ref=main" >"$tmpd/main.yaml"; then
+    diff_deploy_holds "$tmpd/branch.yaml" "$tmpd/main.yaml"; rc=$?
+  else
+    rc=1
+  fi
+  rm -rf "$tmpd"
+  return "$rc"
+}
+
+# Services held in rules.yaml file $1 but not in file $2 (paths, not contents — see above).
+diff_deploy_holds() {
+  "${DEPLOY_HOLD_PYTHON:-python3}" -c '
+import sys, yaml
+def held(path):
+    with open(path) as f:
+        doc = yaml.safe_load(f) or {}
     services = ((doc.get("deploy_holds") or {}).get("services")) or {}
     if not isinstance(services, dict):
         raise SystemExit("deploy_holds.services is not a map")
     return set(services)
-for name in sorted(held(os.environ["BRANCH_RULES"]) - held(os.environ["MAIN_RULES"])):
+for name in sorted(held(sys.argv[1]) - held(sys.argv[2])):
     print(name)
-'
+' "$1" "$2"
 }
 
 # rc 0 iff PR $1 already carries the notice marked $2 (default: the owner-hold notice).
@@ -1002,6 +1016,23 @@ HOOK
   else
     echo "self-test case 47 OK (legacy holds, disjoint pins -> rc=0)"
   fi
+
+  # case 48 — E2BIG regression: a rules.yaml over MAX_ARG_STRLEN (128 KiB) must be diffed by file.
+  local bigd bigout bigrc
+  bigd="$(mktemp -d)"
+  {
+    printf 'filler:\n'
+    for _ in $(seq 1 6000); do printf '  - "padding padding padding padding padding"\n'; done
+  } >"$bigd/pad.yaml"
+  { printf 'deploy_holds:\n  services:\n    openbank-kyc-service: {}\n    openbank-fraud-service: {}\n'; cat "$bigd/pad.yaml"; } >"$bigd/branch.yaml"
+  { printf 'deploy_holds:\n  services:\n    openbank-kyc-service: {}\n'; cat "$bigd/pad.yaml"; } >"$bigd/main.yaml"
+  bigout="$(diff_deploy_holds "$bigd/branch.yaml" "$bigd/main.yaml" 2>&1)" && bigrc=0 || bigrc=$?
+  if [ "$(wc -c <"$bigd/branch.yaml")" -le 204800 ] || [ "$bigrc" -ne 0 ] || [ "$bigout" != "openbank-fraud-service" ]; then
+    echo "SELF-TEST FAIL case 48: >200 KiB rules diff rc=$bigrc out='$bigout'"; ok=1
+  else
+    echo "self-test case 48 OK (>200 KiB rules.yaml diffed by file -> rc=0, openbank-fraud-service)"
+  fi
+  rm -rf "$bigd"
 
   # case 29 — producer-run isolation (#13460) suffixes every branch with `-run<id>`. The sha must
   # still parse, or KEEP_SHA is empty and every run classifies every predecessor SKIP — measured on

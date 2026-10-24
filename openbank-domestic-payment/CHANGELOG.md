@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.2...domestic-payment-v1.2.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* **sepa-payment:** alert on unsettled bookings and re-drive held settlement ([#13662](https://github.com/JiRaska/open-bank-oss/issues/13662)) ([bbc2b48](https://github.com/JiRaska/open-bank-oss/commit/bbc2b489726cd02d885cd0ed4452c814a17d1b1a))
+
+## [1.2.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.1...domestic-payment-v1.2.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **domestic-payment:** book via the generated transaction client and bind the answer to the request ([#13621](https://github.com/JiRaska/open-bank-oss/issues/13621)) ([c3de0a5](https://github.com/JiRaska/open-bank-oss/commit/c3de0a59fceea1653c4520d6a47a028ee21212a8))
+
 ## [1.2.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.0...domestic-payment-v1.2.1) (2026-10-16)
 
 
