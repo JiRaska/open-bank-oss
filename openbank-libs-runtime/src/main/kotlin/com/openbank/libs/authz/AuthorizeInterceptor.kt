@@ -574,14 +574,11 @@ internal fun m2mDecisionLine(action: String, principalId: String, outcome: Strin
  * not above it.
  */
 private fun makerActorKind(query: AuthzQuery, authenticatedIdentity: SecurityIdentity): MakerActorKind {
-    val jwt = authenticatedIdentity.principal as? JsonWebToken
-    val preferredUsername = jwt?.getClaim<String>("preferred_username")
     val verifiedServiceAccount = ServiceAccountIdentity.verifiedClientId(authenticatedIdentity) != null
     return when {
         query.principal.type == "AI_AGENT" -> MakerActorKind.AI_AGENT
         verifiedServiceAccount -> MakerActorKind.SERVICE_ACCOUNT
-        preferredUsername?.startsWith(SERVICE_ACCOUNT_PREFIX) == true -> MakerActorKind.UNKNOWN
-        query.principal.id.startsWith(SERVICE_ACCOUNT_PREFIX) && jwt == null -> MakerActorKind.UNKNOWN
+        !ServiceAccountIdentity.isVerifiedPerson(authenticatedIdentity) -> MakerActorKind.UNKNOWN
         query.principal.type == "HUMAN" && "ROLE_CUSTOMER" in query.principal.roles -> MakerActorKind.CUSTOMER_PARTY
         query.principal.type == "HUMAN" -> MakerActorKind.HUMAN
         else -> MakerActorKind.UNKNOWN
