@@ -116,7 +116,7 @@ class InterestServiceTest {
     private fun stubCapitalization(profile: TaxProfile = TaxProfile.FAIL_SAFE_DEFAULT) {
         stubNoClaimOutstanding()
         every { taxProfilePort.resolve(any()) } returns Uni.createFrom().item(profile)
-        every { ledgerPostingPort.postWithReceipt(capture(postingSlot)) } returns Uni.createFrom().nullItem()
+        every { ledgerPostingPort.post(capture(postingSlot)) } returns Uni.createFrom().item(Unit)
         every {
             capitalizationRepo.saveWithOutbox(
                 capture(capSlot),
@@ -505,21 +505,6 @@ class InterestServiceTest {
     }
 
     @Test
-    fun `actual ledger receipt is persisted with capitalization`() {
-        val accountId = UUID.fromString("33333333-3333-3333-3333-333333333333")
-        val journalId = UUID.fromString("44444444-4444-4444-4444-444444444444")
-        val toDate = LocalDate.of(2026, 1, 20)
-        stubCapitalization()
-        every { ledgerPostingPort.postWithReceipt(capture(postingSlot)) } returns Uni.createFrom().item(journalId)
-        every { accrualRepo.findPendingCapitalization(accountId, "SAVINGS", toDate) } returns
-            Uni.createFrom().item(listOf(sampleAccrual(accountId, "SAVINGS", toDate, BigDecimal("1.20"))))
-        val result = service.capitalize(accountId, "SAVINGS", toDate).await().indefinitely()
-        assertThat(result.ledgerEntryId).isEqualTo(journalId)
-        assertThat(capSlot.captured.ledgerEntryId).isEqualTo(journalId)
-        verify(exactly = 1) { ledgerPostingPort.postWithReceipt(any()) }
-    }
-
-    @Test
     fun `capitalizeAll capitalizes every pending pair and recovers a per-pair failure`() {
         val toDate = LocalDate.of(2026, 1, 20)
         val prod = "SAVINGS"
@@ -749,7 +734,7 @@ class InterestServiceTest {
 
         stubNoClaimOutstanding()
         every { taxProfilePort.resolve(any()) } returns Uni.createFrom().item(TaxProfile.FAIL_SAFE_DEFAULT)
-        every { ledgerPostingPort.postWithReceipt(any()) } returns Uni.createFrom().nullItem()
+        every { ledgerPostingPort.post(any()) } returns Uni.createFrom().item(Unit)
         every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
             Uni.createFrom().item(accruals)
         // Mirrors the repo's status guard tripping (a concurrent run flipped the accruals first):
@@ -779,7 +764,7 @@ class InterestServiceTest {
 
         // Without this the bank remits withholding tax on interest it never credited (the ADR-0033
         // §D hole): the split must reach the ledger, not just interest-service's own tables.
-        verify(exactly = 1) { ledgerPostingPort.postWithReceipt(any()) }
+        verify(exactly = 1) { ledgerPostingPort.post(any()) }
         assertThat(postingSlot.captured.accountId).isEqualTo(accountId)
         assertThat(postingSlot.captured.currency).isEqualTo("CZK")
         assertThat(postingSlot.captured.gross.amount).isEqualByComparingTo(BigDecimal("100.00"))
@@ -809,7 +794,7 @@ class InterestServiceTest {
         every { taxProfilePort.resolve(any()) } returns Uni.createFrom().item(TaxProfile.FAIL_SAFE_DEFAULT)
         every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
             Uni.createFrom().item(accruals)
-        every { ledgerPostingPort.postWithReceipt(any()) } returns
+        every { ledgerPostingPort.post(any()) } returns
             Uni.createFrom().failure(IllegalStateException("ledger unavailable"))
 
         assertThatThrownBy { service.capitalize(accountId, productId, toDate).await().indefinitely() }
@@ -841,7 +826,7 @@ class InterestServiceTest {
         service.capitalize(accountId, productId, toDate).await().indefinitely()
 
         // Every leg would be zero, and the ledger requires >=2 lines each with amount > 0.
-        verify(exactly = 0) { ledgerPostingPort.postWithReceipt(any()) }
+        verify(exactly = 0) { ledgerPostingPort.post(any()) }
         verify(exactly = 1) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
         assertThat(capSlot.captured.grossAmount).isEqualByComparingTo(BigDecimal.ZERO)
     }
@@ -932,7 +917,7 @@ class InterestServiceTest {
         // leave the same window open.
         verifyOrder {
             accrualRepo.claimForCapitalization(any(), any(), any())
-            ledgerPostingPort.postWithReceipt(any())
+            ledgerPostingPort.post(any())
             capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any())
         }
         assertThat(claimIdsSlot.captured).containsExactlyElementsOf(accruals.map { it.id })
@@ -1028,7 +1013,7 @@ class InterestServiceTest {
             .hasMessageContaining("already CAPITALIZING")
             .hasMessageContaining("2026-01-20")
 
-        verify(exactly = 0) { ledgerPostingPort.postWithReceipt(any()) }
+        verify(exactly = 0) { ledgerPostingPort.post(any()) }
         verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
     }
 
@@ -1056,7 +1041,7 @@ class InterestServiceTest {
         // The old code returned Unit here and committed the capitalization anyway: the row said the
         // customer had been CHARGED while the GL recorded nothing. Nothing may commit, and the
         // accruals must stay claimable so an operator can fix the rate and re-run.
-        verify(exactly = 0) { ledgerPostingPort.postWithReceipt(any()) }
+        verify(exactly = 0) { ledgerPostingPort.post(any()) }
         verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
         verify(exactly = 0) { accrualRepo.claimForCapitalization(any(), any(), any()) }
         verify(exactly = 0) { taxProfilePort.resolve(any()) }
