@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.2...domestic-payment-v1.2.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* **sepa-payment:** alert on unsettled bookings and re-drive held settlement ([#13662](https://github.com/JiRaska/open-bank-oss/issues/13662)) ([bbc2b48](https://github.com/JiRaska/open-bank-oss/commit/bbc2b489726cd02d885cd0ed4452c814a17d1b1a))
+
 ## [1.2.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.1...domestic-payment-v1.2.2) (2026-10-23)
 
 
