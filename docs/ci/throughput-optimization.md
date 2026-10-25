@@ -55,9 +55,26 @@ Image scanning, signing, attestation and deployment authorization still run.
 
 Without completion ordering, a first push can reach deployment before CI finishes.
 Artifact reuse on that path is opportunistic; a recovery run can reuse a completed
-producer. Do not count a cache lookup as a saved build. A completed-CI scheduling pilot
-must prove exact source propagation through checkout, tags, Pact and SLSA materials,
-and must not deploy the same component from both event lanes.
+producer. Do not count a cache lookup as a saved build.
+
+The completed-CI scheduling pilot is disabled by default. Only the repository variable
+`CONTEXT_BUILD_HANDOFF_ENABLED=true` enables it. While enabled, the push lane excludes
+context-service; a successful same-repository Services CI main-push completion selects
+only context-service, and only if the ordinary change detector selected it. Manual and
+scheduled recovery retain their existing selection. Failed CI does not trigger a deployment.
+Before checking out producer code, the trusted workflow revision validates the event and
+requires the source commit to be an ancestor of main. Checkout, image tags, Pact selection,
+GitOps metadata and SLSA materials use that source explicitly. Workflow provenance retains
+GitHub's workflow revision; `GITHUB_SHA` is never rewritten. Missing Pact evidence refuses
+the handoff instead of selecting a moving main tag. A provenance preflight rejects a source
+without the split-source helper before credentials or image publication.
+
+Activation is separate from merging this change. First verify a successful main context
+artifact with the matching ARM64 recipe, current source support and exact/equivalent Pact
+evidence; then compare the enabled pilot against the measurements below. Setting the
+variable to `false` restores ordinary push selection for new runs. Already running jobs
+retain their evaluated selection and must be considered before changing the flag; the
+variable is not a cancellation mechanism.
 
 ## Evidence lookup
 

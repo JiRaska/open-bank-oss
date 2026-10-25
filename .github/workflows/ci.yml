@@ -96,6 +96,9 @@ jobs:
           python3 .github/scripts/test-ci-latency-report.py
           python3 .github/scripts/test-service-build-artifact.py
           python3 .github/scripts/test-prepare-test-priority.py
+          python3 .github/scripts/test-context-deploy-handoff.py
+          python3 .github/scripts/test-can-i-deploy-source.py
+          python3 .github/scripts/test-slsa-source-identity.py
           if [ "${{ github.event_name }}" = "push" ]; then
             # Post-merge main build always includes admin-ui.
             echo "changed=true" >> "$GITHUB_OUTPUT"
