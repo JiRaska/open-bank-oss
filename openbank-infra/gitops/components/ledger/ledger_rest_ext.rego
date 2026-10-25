@@ -210,6 +210,26 @@ allowed_reasons contains "service-lending-ledger-post" if {
 	input.action == "ledger.create"
 }
 
+# ── ledger.close.participate: day-close participation reports (ADR-0342 D2, #13167) ─────────
+# PUT /api/v1/ledger/accounting-days/{date}/participants/{participant} authorizes as its OWN
+# action, never ledger.create, so reporting a day does not need (or grant) a journal-create grant.
+# Each machine account may report for exactly ONE participant: the resource is the participant
+# name from the path, and the use case additionally checks the verified caller against
+# openbank.ledger.close.participants.<name>.principal. A new participant adds one map entry here
+# and its test; nothing else reaches this action (no staff role, no shared client).
+close_participant_accounts := {
+	"service-account-openbank-interest": "interest",
+	"service-account-openbank-lending": "lending",
+}
+
+allowed_reasons contains "service-close-participation" if {
+	input.principal.type == "HUMAN"
+	input.action == "ledger.close.participate"
+	some account, participant in close_participant_accounts
+	machine_named(account)
+	input.resource == participant
+}
+
 allowed_reasons contains "service-clearing-ledger-post" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-clearing")
