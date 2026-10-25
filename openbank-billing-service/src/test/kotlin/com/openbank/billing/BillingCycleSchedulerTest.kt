@@ -82,7 +82,9 @@ class BillingCycleSchedulerTest {
 
         scheduler.runSweep()
 
-        coVerify(exactly = 1) { cycleService.runCycleWithOutcome("2026-07", listOf("acc-1", "acc-2"), "CZK", "MONTHLY") }
+        coVerify(exactly = 1) {
+            cycleService.runCycleWithOutcome("2026-07", listOf("acc-1", "acc-2"), "CZK", "MONTHLY")
+        }
     }
 
     // ── Discovered sweep (ADR-0143 / issue #548 follow-up) ────────────────────────────────
@@ -113,11 +115,14 @@ class BillingCycleSchedulerTest {
             BillableAccountsPage(listOf("acc-3"), nextCursor = null)
         coEvery { cycleService.runCycleWithOutcome("2026-07", listOf("acc-1", "acc-2"), "CZK", "MONTHLY") } returns
             CycleOutcome(2, 0)
-        coEvery { cycleService.runCycleWithOutcome("2026-07", listOf("acc-3"), "CZK", "MONTHLY") } returns CycleOutcome(1, 0)
+        coEvery { cycleService.runCycleWithOutcome("2026-07", listOf("acc-3"), "CZK", "MONTHLY") } returns
+            CycleOutcome(1, 0)
 
         discoveryScheduler(cycleService, discovery).runSweep()
 
-        coVerify(exactly = 1) { cycleService.runCycleWithOutcome("2026-07", listOf("acc-1", "acc-2"), "CZK", "MONTHLY") }
+        coVerify(exactly = 1) {
+            cycleService.runCycleWithOutcome("2026-07", listOf("acc-1", "acc-2"), "CZK", "MONTHLY")
+        }
         coVerify(exactly = 1) { cycleService.runCycleWithOutcome("2026-07", listOf("acc-3"), "CZK", "MONTHLY") }
     }
 
@@ -125,7 +130,8 @@ class BillingCycleSchedulerTest {
     fun `operator-configured CSV wins over discovery`(): Unit = runBlocking {
         val cycleService = mockk<BillingCycleService>()
         val discovery = mockk<BillableAccountDiscoveryPort>()
-        coEvery { cycleService.runCycleWithOutcome("2026-07", listOf("acc-9"), "CZK", "MONTHLY") } returns CycleOutcome(1, 0)
+        coEvery { cycleService.runCycleWithOutcome("2026-07", listOf("acc-9"), "CZK", "MONTHLY") } returns
+            CycleOutcome(1, 0)
 
         discoveryScheduler(cycleService, discovery, csv = Optional.of("acc-9")).runSweep()
 
@@ -158,6 +164,8 @@ class BillingCycleSchedulerTest {
 
         // The first page was processed; the failure stopped the sweep (idempotent monthly retry)
         // and did not propagate out of the @Scheduled entrypoint.
-        coVerify(exactly = 1) { cycleService.runCycleWithOutcome("2026-07", listOf("acc-1", "acc-2"), "CZK", "MONTHLY") }
+        coVerify(exactly = 1) {
+            cycleService.runCycleWithOutcome("2026-07", listOf("acc-1", "acc-2"), "CZK", "MONTHLY")
+        }
     }
 }
