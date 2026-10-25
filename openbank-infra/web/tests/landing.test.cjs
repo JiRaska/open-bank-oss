@@ -96,8 +96,8 @@ for (const mode of ['server', 'network']) test(`signup ${mode} failure permits r
   dom.window.close();
 });
 
-test('every local link, fragment and image resolves on all four pages', () => {
-  for (const page of ['index.html', 'platform.html', 'labs.html', 'classic.html']) {
+test('every local link, fragment and image resolves on all entry pages', () => {
+  for (const page of ['index.html', 'platform.html', 'labs.html', 'classic.html', 'product-as-code.html', 'controls-as-code.html', 'ai-as-code.html']) {
     const d = new JSDOM(read(page)).window.document;
     const ids = [...d.querySelectorAll('[id]')].map(el => el.id);
     assert.equal(new Set(ids).size, ids.length, `${page}: duplicate IDs`);
@@ -147,7 +147,7 @@ test('catalog search finds treasury, handles no results and restores the full in
 
 
 test('indexable pages expose unique canonical metadata and matching structured data', () => {
-  const pages = ['index.html', 'platform.html', 'labs.html'];
+  const pages = ['index.html', 'platform.html', 'labs.html', 'product-as-code.html', 'controls-as-code.html', 'ai-as-code.html'];
   const urls = pages.map(page => page === 'index.html' ? 'https://open-bank.tech/' : `https://open-bank.tech/${page}`);
   const titles = new Set();
   for (const [index, page] of pages.entries()) {
@@ -193,7 +193,7 @@ function brandBrowser({ reduced = false, rejectPlayback = false } = {}) {
 }
 
 test('current pages share the canonical identity and retain the header-only animation', () => {
-  for (const page of ['index.html', 'platform.html', 'labs.html']) {
+  for (const page of ['index.html', 'platform.html', 'labs.html', 'product-as-code.html', 'controls-as-code.html', 'ai-as-code.html']) {
     const dom = new JSDOM(read(page)), d = dom.window.document;
     assert.equal(d.querySelectorAll('.brand-film').length, 1);
     assert.ok(d.querySelector('link[rel="stylesheet"][href^="styles.css?v="]'), 'returning visitors must receive the header sizing styles');
@@ -241,7 +241,7 @@ test('blocked autoplay falls back to the completed-logo poster', async () => {
 // Cover every entry page: favicon/share images and embedded art are part of a brand release.
 test('all entry pages use current brand assets, including archive and social metadata', () => {
   const legacy = /(?:ob-mark-complete\.svg|openbank-logo\.png|explorers-hero\.webp|openbank-labs-kernel\.jpg|app-screen(?:-current)?\.png)/;
-  for (const page of ['index.html', 'platform.html', 'labs.html', 'classic.html']) {
+  for (const page of ['index.html', 'platform.html', 'labs.html', 'classic.html', 'product-as-code.html', 'controls-as-code.html', 'ai-as-code.html']) {
     const html = read(page), d = new JSDOM(html).window.document;
     assert.doesNotMatch(html, legacy, page);
     assert.ok(d.querySelector('link[rel="icon"][type="image/svg+xml"]'));

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controls and evidence as Code | OpenBank</title>
+<meta name="description" content="Explore Compliance as Code, AML as Code and Fraud as Code with project examples that connect requirements, checks, decisions and evidence for human review.">
+<meta name="theme-color" content="#f8f6f1">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="OpenBank">
+<meta property="og:url" content="https://open-bank.tech/controls-as-code.html">
+<meta property="og:title" content="Controls and evidence as Code | OpenBank">
+<meta property="og:description" content="Explore Compliance as Code, AML as Code and Fraud as Code with project examples that connect requirements, checks, decisions and evidence for human review.">
+<meta property="og:image" content="https://open-bank.tech/assets/explorers-lipa.webp">
+<meta property="og:image:width" content="1536">
+<meta property="og:image:height" content="1024">
+<meta property="og:image:alt" content="OpenBank lion, lioness and AI companion">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/lipa-icon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico?v=lipa-20261024" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/lipa-icon-180.png">
+<link rel="canonical" href="https://open-bank.tech/controls-as-code.html">
+<script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "url": "https://open-bank.tech/controls-as-code.html",
+  "name": "Controls and evidence as Code | OpenBank",
+  "description": "Explore Compliance as Code, AML as Code and Fraud as Code with project examples that connect requirements, checks, decisions and evidence for human review.",
+  "inLanguage": "en",
+  "isPartOf": {
+    "@type": "WebSite",
+    "url": "https://open-bank.tech/",
+    "name": "OpenBank"
+  }
+}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=lipa-20261024">
+<link rel="stylesheet" href="bank-as-code.css?v=20261025">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="nav wrap">
+<a class="brand brand-lipa" href="index.html" aria-label="OpenBank home">
+<video class="brand-film" muted="" playsinline="" preload="none" poster="assets/openbank-lipa-final.png" width="960" height="540" aria-hidden="true">
+<source src="assets/openbank-lipa.mp4" type="video/mp4">
+<img src="assets/openbank-lipa-final.png" alt="">
+</video></a>
+<nav aria-label="Main navigation">
+<a class="nav-labs" href="labs.html">Labs <img src="assets/labs-flask.svg" width="15" height="19" alt=""></a>
+<a href="platform.html">Platform</a>
+<a href="index.html#app">App</a>
+<a href="index.html#agents">Agents</a>
+<a href="index.html#join">Community</a>
+</nav>
+<a class="sandbox-cta" href="index.html#sandbox">Explore the sandbox ↗</a>
+</header>
+<main id="main" class="bac">
+<nav class="ob-topic-nav ob-bound" aria-label="Bank as Code stories"><a href="index.html#bank-as-code">← Bank as Code</a><a href="product-as-code.html">Product as Code</a><a href="controls-as-code.html" aria-current="page">Controls &amp; evidence</a><a href="ai-as-code.html">AI as Code</a>
+</nav>
+<section class="ob-bound">
+<div class="ob-article-head">
+<div class="ob-eyebrow">02 / Compliance as Code · AML as Code · Fraud as Code</div>
+<h1>Show the rule.<br><em>Follow the evidence.</em>
+</h1>
+<p class="ob-lede">Banks need to understand what happened, which rule applied and who made the decision. Make that story easier to inspect.</p>
+</div>
+<div class="ob-switches" aria-label="Control examples">
+<button type="button" data-control="compliance" aria-pressed="true">Compliance as Code</button>
+<button type="button" data-control="aml" aria-pressed="false">AML as Code</button>
+<button type="button" data-control="fraud" aria-pressed="false">Fraud as Code</button>
+</div>
+<div class="ob-lab">
+<div class="ob-dark-head"><span id="ob-control-title">SERVICE DECLARATION / GOVERNANCE CHECK</span>
+<button type="button" id="ob-play-control" class="ob-button" hidden="">Follow the evidence ▷</button>
+</div>
+<div class="ob-evidence">
+<div class="ob-evidence-flow" id="ob-control-flow">
+<div class="ob-evidence-node" data-active="true"><b>01</b><span id="ob-ctrl-1">A service declares its data handling.</span>
+</div>
+<div class="ob-evidence-node"><b>02</b><span id="ob-ctrl-2">A check compares the declaration with code.</span>
+</div>
+<div class="ob-evidence-node"><b>03</b><span id="ob-ctrl-3">A mismatch becomes visible.</span>
+</div>
+<div class="ob-evidence-node"><b>04</b><span id="ob-ctrl-4">A reviewer examines the result.</span>
+</div>
+</div>
+<div class="ob-receipt"><small>ILLUSTRATIVE REVIEW RECORD</small>
+<h3 id="ob-receipt-title">Evidence with context.</h3>
+<dl>
+<div>
+<dt>subject</dt>
+<dd id="ob-rec-subject">service declaration</dd>
+</div>
+<div>
+<dt>check</dt>
+<dd id="ob-rec-check">implementation match</dd>
+</div>
+<div>
+<dt>question</dt>
+<dd id="ob-rec-question">does the code agree?</dd>
+</div>
+<div>
+<dt>next step</dt>
+<dd id="ob-rec-next">human review</dd>
+</div>
+</dl>
+<div class="ob-receipt-stamp" id="ob-control-status" aria-live="polite">Start with the declared requirement.</div>
+</div>
+</div>
+<div class="ob-lab-note"><span>Conceptual evidence view based on project examples. Explore the checks and models behind each story.</span><a id="ob-control-source" href="https://github.com/JiRaska/open-bank-oss/blob/main/openbank-admin-ui/src/test/generate-governance.test.ts" target="_blank" rel="noopener">Inspect the source ↗</a>
+</div>
+</div>
+</section>
+<section class="ob-section ob-bound">
+<div class="ob-section-head">
+<div>
+<div class="ob-eyebrow">Built for scrutiny</div>
+<h2>Evidence is useful<br><em>when you can follow it.</em>
+</h2>
+</div>
+<p>Connect requirements, checks and decisions. Give reviewers the context they need to challenge a result.</p>
+</div>
+<div class="ob-two-columns">
+<div>
+<h3>Make the logic inspectable.</h3>
+<p>Explicit rules make it easier to discuss what a control checks, what it misses and how it should change.</p>
+</div>
+<div>
+<h3>Keep judgement accountable.</h3>
+<p>Automation provides signals and repeatable checks. People need the evidence, authority and context to decide what happens next.</p>
+</div>
+</div>
+<div class="ob-next">
+<p>AI belongs in this story too. Its authority should be just as explicit.</p><a href="ai-as-code.html" class="ob-button">Explore AI as Code →</a>
+</div>
+</section>
+</main>
+<footer class="footer wrap"><a class="brand" href="index.html"><img class="brand-lockup" src="assets/lipa-lockup-light.svg" width="190" height="36" alt="OpenBank"></a>
+<div>
+<p>An open banking reference implementation. Built to be explored.</p>
+<p class="fine">Early-stage software · not a licensed bank · not production-ready. Demo data only.</p>
+<p class="fine">Platform: Apache-2.0. AI agent licensing: AGPL-3.0-only + commercial. <a href="https://github.com/JiRaska/open-bank-oss#license">License details ↗</a>
+</p>
+<p class="fine">© 2026 OpenBank contributors · <a href="classic.html">Previous website</a> · <a href="https://github.com/JiRaska/open-bank-oss/blob/main/TRADEMARKS.md">Independent project / trademark notice</a>
+</p>
+</div>
+</footer>
+<script src="brand.js">
+</script>
+<script src="bank-as-code.js?v=20261025" defer>
+</script>
+</body>
+</html>
