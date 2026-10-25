@@ -1312,6 +1312,12 @@ close_participants:
     interest:
       service: openbank-interest-service
       principal: service-account-openbank-interest
+    lending:                                # #13167: accrual + provisioning passes
+      service: openbank-lending-service
+      principal: service-account-openbank-lending
+    billing:                                # #13167: monthly billing cycle + its fee postings
+      service: openbank-billing-service
+      principal: service-account-openbank-billing
 
 money_path_services:
   - openbank-ledger-service
@@ -2285,7 +2291,7 @@ architecture:
   # baseline-ratcheted — grandfathered violations burn down as touched, any NEW
   # framework reference fails CI. Scope is every per-service */domain/* package PLUS
   # the whole openbank-libs-domain module and its ADR-0317 context modules
-  # (openbank-libs-lending, openbank-libs-iso20022, openbank-libs-finance); openbank-libs-runtime is module-exempt
+  # (openbank-libs-lending, openbank-libs-iso20022, openbank-libs-finance, openbank-libs-fincrime); openbank-libs-runtime is module-exempt
   # (shares the domain package string for its JPA converters but IS the framework
   # side of the ADR-0122 split). Both an `import` and a fully-qualified reference
   # count — #3670 hid `jakarta.interceptor.InterceptorBinding` in the second form,
@@ -4657,6 +4663,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/com/openbank/billing/infrastructure/adapter/LegacyRevisionBridge.kt"
       - "src/main/kotlin/com/openbank/billing/infrastructure/client/BillingRestClients.kt"
+      - "src/main/kotlin/com/openbank/billing/infrastructure/client/LedgerCloseParticipationClient.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
@@ -4833,6 +4840,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/CreditOfferGateAdapters.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerCloseParticipationClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/ProductCatalogLoanProfileAdapter.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
@@ -4943,6 +4951,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/**/domain/model/Legs.kt"  # ADR-0344 D4: the leg-spec SHA-256 decides whether an override survives regeneration
+      - "src/main/kotlin/**/domain/marketdata/**"  # ADR-0344 D5: observation provenance hashes behind every fixed rate
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"

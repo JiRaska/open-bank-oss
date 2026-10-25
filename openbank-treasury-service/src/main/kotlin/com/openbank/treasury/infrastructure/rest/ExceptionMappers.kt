@@ -122,6 +122,10 @@ class ExceptionMappers {
     ).build()
 
     @ServerExceptionMapper
+    fun batchNotFound(e: com.openbank.treasury.application.port.out.ObservationBatchNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
     fun flowInPayment(e: com.openbank.treasury.domain.cashflow.FlowAlreadyInPaymentException): Response =
         error(Response.Status.CONFLICT.statusCode, "FLOW_ALREADY_IN_PAYMENT", e.message)
 
