@@ -27,6 +27,26 @@ class HmacIrSignerTest {
     }
 
     @Test
+    fun `unpaired high and low surrogates are refused at the identity boundary`() {
+        for (code in listOf("SAV-\uD800", "SAV-\uDC00")) {
+            assertThatThrownBy { identity.copy(productCode = code) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessage("productCode must contain only well-formed Unicode")
+        }
+    }
+
+    @Test
+    fun `valid supplementary Unicode remains intact and distinct from a replacement character`() {
+        val supplementary = identity.copy(productCode = "SAV-\uD83D\uDE00")
+        val replacement = identity.copy(productCode = "SAV-?")
+        val signature = signer.sign(supplementary)
+        assertThat(supplementary.signingInput().toString(Charsets.UTF_8)).contains(supplementary.productCode)
+        assertThat(supplementary.signingInput()).isNotEqualTo(replacement.signingInput())
+        assertThat(signer.verify(supplementary, signature)).isTrue()
+        assertThat(signer.verify(replacement, signature)).isFalse()
+    }
+
+    @Test
     fun `a different hash, secret, key id, algorithm or tampered bytes do not verify`() {
         val sig = signer.sign(identity)
         assertThat(signer.verify(identity.copy(revisionHash = "b".repeat(64)), sig)).isFalse()

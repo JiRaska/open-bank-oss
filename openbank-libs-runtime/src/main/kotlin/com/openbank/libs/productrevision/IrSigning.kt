@@ -34,6 +34,11 @@ data class RevisionIdentity(
 ) {
     init {
         require(productCode.isNotBlank()) { "productCode must not be blank" }
+        // UTF-8 encoding replaces lone UTF-16 surrogates with '?'. Refuse them before signing
+        // so two distinct product codes cannot collapse to the same envelope bytes.
+        require(Charsets.UTF_8.newEncoder().canEncode(productCode)) {
+            "productCode must contain only well-formed Unicode"
+        }
         require(revisionNumber > 0) { "revisionNumber must be positive" }
         require(irVersion > 0) { "irVersion must be positive" }
         require(HASH_PATTERN.matches(revisionHash)) { "revisionHash must be 64 lower-case hex characters" }
