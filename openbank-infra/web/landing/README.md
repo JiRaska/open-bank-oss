@@ -21,6 +21,8 @@ Open `http://127.0.0.1:8766`. Check the homepage, TestFlight form, demo dialogs,
 - `platform.html`: capability navigation and the **complete** repository module inventory.
   The marked catalog section is generated; never edit it by hand.
 - `labs.html`: shared banking kernel overview, with links to the corresponding library modules.
+- `product-as-code.html`, `controls-as-code.html`, `ai-as-code.html`: Bank as Code stories using the existing site identity. `bank-as-code.css` is scoped to `.bac`; the homepage hero, app and forms retain their original styles.
+- `bank-as-code.js`: local illustrations only. Product rates update a simple annual example; control and AI journeys animate explanatory scenarios without contacting services or performing approvals. Reduced motion completes journeys immediately.
 - `catalog.js`: local search only. All modules are readable without JavaScript.
 - `main.js`: existing demo modal and TestFlight integration, plus a hash entry point for
   opening the sandbox instructions from Labs.
@@ -65,7 +67,7 @@ uses Node and `yaml`), then run:
 ```sh
 python3 openbank-infra/web/generate-public-catalog.py
 python3 openbank-infra/web/generate-public-catalog.py --check
-node --test openbank-infra/web/tests/landing.test.cjs
+node --test openbank-infra/web/tests/*.test.cjs
 ```
 
 The updater invokes `openbank-admin-ui/scripts/generate-catalog.mjs`; it does not create

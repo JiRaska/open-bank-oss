@@ -52,7 +52,7 @@ class VerdictTest(unittest.TestCase):
     def test_aggregates_share_one_verdict_without_serial_queue(self):
         validate = self.workflow.split("  validate:\n", 1)[1].split("\n  app-status:", 1)[0]
         needs = re.search(r"    needs: \[(.+)\]", validate).group(1).split(", ")
-        self.assertEqual(set(needs), {"agent-admission", "gates", "changes-ui", "ui-build", "ui-rbac-contract"})
+        self.assertEqual(set(needs), {"agent-admission", "ruleset-evidence", "gates", "changes-ui", "ui-build", "ui-rbac-contract"})
         self.assertIn("      - *admin-ui-verdict", validate)
         self.assertNotIn("needs.ui.result", validate)
         self.assertIn("    name: Admin UI\n", self.workflow)
