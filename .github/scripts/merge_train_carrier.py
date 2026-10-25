@@ -87,18 +87,36 @@ def deepen_for_chain(base: str, head: str = "HEAD", cwd: str | None = None, time
     29.4 s and `git fetch --no-tags --deepen=128 origin <sha>` took 1.7 s for the same walkable chain.
     No network at all when the chain is already complete. Raises CarrierUnavailable on a timeout or a
     failed fetch — the chain was not read, which is not the same as a malformed chain."""
+    deadline = time.monotonic() + timeout
     if _git("rev-parse", "--is-shallow-repository", cwd=cwd).stdout.strip() != "true" or _chain_complete(base, head, cwd):
         return
     sha = _git("rev-parse", "--verify", "--quiet", f"{head}^{{commit}}", cwd=cwd, check=False).stdout.strip()
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise CarrierUnavailable(f"cannot resolve {head} to a commit")
-    try:
-        r = runner(["git", "fetch", "-q", "--no-tags", "--deepen=128", "origin", sha],
-                   capture_output=True, text=True, cwd=cwd, timeout=max(1.0, timeout))
-    except subprocess.TimeoutExpired:
-        raise CarrierUnavailable(f"deepening the carrier chain timed out after {timeout:.0f}s") from None
-    if r.returncode != 0:
-        raise CarrierUnavailable(f"deepening the carrier chain failed: {(r.stderr or '').strip()[:160]}")
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise CarrierUnavailable(f"deepening the carrier chain timed out after {timeout:g}s")
+        try:
+            r = runner(["git", "fetch", "-q", "--no-tags", "--deepen=128", "origin", sha],
+                       capture_output=True, text=True, cwd=cwd, timeout=remaining)
+        except subprocess.TimeoutExpired:
+            raise CarrierUnavailable(f"deepening the carrier chain timed out after {timeout:g}s") from None
+        if r.returncode == 0:
+            return
+        error = (r.stderr or "").strip()
+        # Other gates fetch concurrently in this checkout. Only this specific Git contention is
+        # transient here; never unlink a writer's lock or retry authentication/transport failures.
+        if not re.search(r"Unable to create ['\"][^'\"]*[/\\]shallow\.lock['\"]: File exists\.", error):
+            raise CarrierUnavailable(f"deepening the carrier chain failed: {error[:160]}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise CarrierUnavailable(f"deepening the carrier chain timed out after {timeout:g}s")
+        if _chain_complete(base, sha, cwd):
+            return  # The competing fetch may already have supplied the required history.
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(0.1, remaining))
 
 
 def carrier_members(base: str, head: str = "HEAD", cwd: str | None = None,
