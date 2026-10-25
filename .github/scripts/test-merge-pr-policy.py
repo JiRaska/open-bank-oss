@@ -5,6 +5,7 @@
 import base64
 import copy
 import hashlib
+import gzip
 import importlib.util
 from pathlib import Path
 import sys
@@ -74,6 +75,27 @@ class PolicyEvidenceTests(unittest.TestCase):
         self.assertEqual(observed['policyCommitSha'], PARENT)
         self.assertEqual(observed['policyBlobSha'], github.blob_sha)
         self.assertTrue(all('/contents/' not in call for call in github.calls))
+
+    def test_reviewed_13794_first_parent_policy_preserves_pr_intent(self):
+        # Public immutable source at dcca6099c35d87a57631fa9d5484e34b580d9a16,
+        # archived without executing it. Exercise the real allowlist and blob digest.
+        raw = gzip.decompress(Path(__file__).with_name('fixtures').joinpath(
+            'merge-policy-0d061611.py.gz').read_bytes())
+        sha = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+        self.assertEqual(sha, '0d0616110f79ec217cba1709a0a3908ae3c8e933')
+        github = PolicyGitHub()
+        github.responses[f'/git/trees/{SCRIPTS}']['tree'][0]['sha'] = sha
+        github.responses[f'/git/blobs/{sha}'] = {
+            'sha': sha, 'size': len(raw), 'encoding': 'base64',
+            'content': base64.b64encode(raw).decode(),
+        }
+        observed = proof.app_authorization(copy.deepcopy(github.pull), old.REPO, github)
+        self.assertNotIn('authorization', observed)
+        self.assertEqual(observed['mergedById'], old.BOT['id'])
+        self.assertEqual(observed['policyAuthorization']['policyBlobSha'], sha)
+        self.assertEqual(observed['policyAuthorization']['kind'], 'POLICY_PR_AUTO_MERGE')
+        self.assertEqual(observed['policyAuthorization']['scope'], 'PR')
+        self.assertEqual(observed['policyAuthorization']['approvedById'], old.OWNER['id'])
 
     def test_branch_spoofing_rejected(self):
         github = PolicyGitHub()

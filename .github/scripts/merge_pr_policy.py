@@ -12,10 +12,11 @@ import re
 
 POLICY_PATH = '.github/scripts/merge-train.py'
 # Deliberately bounded reconstruction, not a Python sandbox. Whole-source identities from
-# the canonical first parents of #13750 and #13725 require independent review before extension.
+# the canonical first parents of #13750, #13725 and #13794 require independent review before extension.
 REVIEWED_POLICY_BLOBS = frozenset({
     '1cb6da5c76d3503d4361507a965dc17d28856d9c',
     '0943c6749913e153f4687df42b7e2a53592cf064',
+    '0d0616110f79ec217cba1709a0a3908ae3c8e933',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}

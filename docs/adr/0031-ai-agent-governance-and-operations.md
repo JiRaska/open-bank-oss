@@ -433,7 +433,10 @@ with no trusted exact-head decision, the recorder may preserve independently obs
 intent as `POLICY_PR_AUTO_MERGE`, scope `PR`, only when the canonical merge's first-parent tree
 contains an explicitly reviewed whole-source policy blob and its recognized owner-prefix rule
 permits this branch without exact-head approval. The initial reviewed source identities are the
-first-parent policy blobs of #13750 and #13725. Unknown blobs require a reviewed code change;
+first-parent policy blobs of #13750, #13725 and #13794. The latter source differs from the
+previously reviewed policy only inside its diagnostic/clock-pin self-test, with unchanged
+production AST; its exact blob is archived as an offline regression fixture. Unknown blobs
+require a reviewed code change;
 AST matching alone is not a sandbox or a proof of arbitrary Python semantics. The producer
 verifies main ancestry, regular-file tree identity and the Git blob digest without executing it.
 It stores `policyCommitSha` and `policyBlobSha` alongside complete owner-request/merge-event
