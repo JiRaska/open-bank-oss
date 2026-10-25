@@ -135,3 +135,13 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Switching the Kafka producer off per instance
 
 `mp.messaging.outgoing.ledger-events-out.enabled` is backed by the `LEDGER_EVENTS_OUT_ENABLED` environment variable (default `true`). An instance with no Kafka bus, such as the pension co-instance, sets it to `false`, so no producer is built at boot; the `@Channel` emitter still injects. `lazy-client=true` does not achieve this, because the producer is still created at boot.
+
+## Day-close participants: authorization (#13167)
+
+`PUT /api/v1/ledger/accounting-days/{date}/participants/{participant}` authorizes as its own action,
+`ledger.close.participate`, never `ledger.create`. `ledger_rest_ext.rego: close_participant_accounts`
+maps each machine account to the ONE participant it may report for (interest, lending); the use case
+then checks the verified caller against `openbank.ledger.close.participants.<name>.principal`. Adding a
+participant is therefore three edits that `check-close-participants.py` keeps in step: `rules.yaml:
+close_participants`, the ledger `application.yaml` map, and the rego map entry (then regenerate the
+bundles). Declared participants today: interest, lending. Mode: `shadow`.
