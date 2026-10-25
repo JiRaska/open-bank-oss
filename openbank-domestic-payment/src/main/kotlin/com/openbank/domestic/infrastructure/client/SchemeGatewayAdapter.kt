@@ -165,10 +165,6 @@ class SchemeGatewayAdapter(
             creditorName = payment.creditorName,
             creditorIban = creditorIban,
             remittanceInfo = buildRemittanceInfo(payment),
-            // Decided, not inherited (#13663): no PmtTpInf. The SEPA service level is an EPC code for
-            // EUR SEPA schemes and does not apply to a domestic CZK clearing transfer, and the domestic
-            // scheme's own priority/instant code is not modelled yet — sending SEPA here would be wrong.
-            paymentTypeInformation = null,
         )
     }
 

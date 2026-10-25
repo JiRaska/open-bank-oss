@@ -156,12 +156,3 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ### Unsettled booking alert and re-drive (#13623)
 
 `DomesticPaymentBookingUnsettled` fires when the oldest open booking clock is older than 1h (`openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`, tested by `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`). Temporal keeps retrying settlement every 5 minutes for 7 days under the same key, which heals a transient outage but never a deterministic answer. The operator remedy (query transaction-service by key, then reconcile, reverse or re-drive, including a reset of a workflow that has already failed) is `docs/runbooks/0032-payment-rail-unsettled-booking.md`.
-
-## Payment type on pacs.008 (#13663)
-
-The domestic adapter explicitly leaves the optional payment-type block absent. The EPC service
-level SEPA is not a domestic clearing-scheme code; introducing the shared library field does not
-make a domestic transfer a SEPA payment. The default no-block XML remains unchanged.
-`DomesticPaymentPriority.INSTANT` still has no corresponding scheme code on this wire: choosing
-the domestic scheme's service-level/local-instrument code remains unresolved. Do not interpret
-this compatibility decision as proof that instant priority is communicated to the scheme.
