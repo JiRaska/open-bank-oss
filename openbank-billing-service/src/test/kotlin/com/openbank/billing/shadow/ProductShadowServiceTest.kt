@@ -14,6 +14,7 @@ import com.openbank.billing.application.port.out.StoredRevisionIr
 import com.openbank.billing.application.usecase.FeeShadowComparator
 import com.openbank.billing.application.usecase.ProductShadowService
 import com.openbank.billing.domain.ProductShadowInput
+import com.openbank.billing.domain.ShadowLegacyFee
 import com.openbank.libs.finance.deposit.FinanceProductArithmetic
 import com.openbank.libs.product.ir.ProductInterpreter
 import com.openbank.libs.product.ir.ProductIrParser
@@ -25,6 +26,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
 import java.util.UUID
 
 class ProductShadowServiceTest {
@@ -84,6 +86,7 @@ class ProductShadowServiceTest {
         val queue = Queue(agree, diverge)
         service(queue, { signed(it) }).runOnce(10)
         assertThat(queue.completed.values).containsExactlyInAnyOrder("AGREED", "DIVERGED")
+        assertThat(queue.compared).containsExactlyInAnyOrderElementsOf(queue.completed.keys)
         val tags = arrayOf("consumer", "billing", "product", "CA-TEST", "rule_id", "fee.maintenance")
         assertThat(count(ProductShadowRecorder.COMPARED, *tags)).isEqualTo(2.0)
         assertThat(count(ProductShadowRecorder.DIVERGED, *tags)).isEqualTo(1.0)
@@ -94,9 +97,34 @@ class ProductShadowServiceTest {
         val queue = Queue(ShadowFixtures.input(null, listOf(ShadowFixtures.charged())))
         service(queue, { signed(it) }).runOnce(10)
         assertThat(queue.completed.values).containsExactly("INPUT_UNKNOWN")
+        assertThat(queue.compared).isEmpty()
         assertThat(count(ProductShadowRecorder.NOT_COMPARABLE, "reason", "input_unknown")).isEqualTo(1.0)
         assertThat(registry.find(ProductShadowRecorder.COMPARED).counters()).isEmpty()
         assertThat(registry.find(ProductShadowRecorder.DIVERGED).counters()).isEmpty()
+    }
+
+    @Test
+    fun `all unmapped fees keep the frozen facts without recording a comparison`(): Unit = runBlocking {
+        val unmapped = ShadowLegacyFee("OTHER", BigDecimal("2.00"), waived = false)
+        val queue = Queue(ShadowFixtures.input("500.00", listOf(unmapped)))
+        service(queue, { signed(it) }).runOnce(10)
+        assertThat(queue.completed.values).containsExactly("RULE_UNMAPPED")
+        assertThat(queue.compared).isEmpty()
+        assertThat(registry.find(ProductShadowRecorder.COMPARED).counters()).isEmpty()
+    }
+
+    @Test
+    fun `a compared fee never erases facts still needed by an unmapped fee`(): Unit = runBlocking {
+        val unmapped = ShadowLegacyFee("OTHER", BigDecimal("2.00"), waived = false)
+        val agree = ShadowFixtures.input("500.00", listOf(ShadowFixtures.charged(), unmapped))
+        val diverge = agree.copy(balance = BigDecimal("5000.00"))
+        val queue = Queue(agree, diverge)
+        service(queue, { signed(it) }).runOnce(10)
+        assertThat(queue.completed.values).containsExactlyInAnyOrder("RULE_UNMAPPED", "DIVERGED")
+        assertThat(queue.compared).isEmpty()
+        val tags = arrayOf("consumer", "billing", "product", "CA-TEST", "rule_id", "fee.maintenance")
+        assertThat(count(ProductShadowRecorder.COMPARED, *tags)).isEqualTo(2.0)
+        assertThat(count(ProductShadowRecorder.DIVERGED, *tags)).isEqualTo(1.0)
     }
 
     @Test
@@ -220,6 +248,7 @@ class ProductShadowServiceTest {
         val queue = Queue(ShadowFixtures.input("500.00", emptyList()))
         service(queue, { StoredRevisionIr(it, true, emptyHash, empty, signer.sign(emptyHash)) }).runOnce(10)
         assertThat(queue.completed.values).containsExactly(ProductShadowService.NO_FEES)
+        assertThat(queue.compared).isEmpty()
         assertThat(count(ProductShadowService.NOTHING_TO_COMPARE)).isEqualTo(1.0)
         assertThat(registry.find(ProductShadowRecorder.COMPARED).counters()).isEmpty()
     }

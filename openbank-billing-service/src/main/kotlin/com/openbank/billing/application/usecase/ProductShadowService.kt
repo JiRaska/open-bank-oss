@@ -111,7 +111,10 @@ class ProductShadowService(
             log.warnf("product shadow: IR of %s not evaluable: %s", revision.productCode, e.message)
             return notComparable(ShadowNotComparable.IR_EVALUATION_FAILED)
         }
-        return Outcome.Done(record(revision.productCode, results), compared = true)
+        // The facts are shared by every fee: a partial comparison must preserve what unresolved
+        // fees still need. An empty result did not re-decide any fee either.
+        val fullyCompared = results.isNotEmpty() && results.all { it is FeeShadowResult.Compared }
+        return Outcome.Done(record(revision.productCode, results), compared = fullyCompared)
     }
 
     /** Billing's local copy, fetched from the catalog and stored on first sight; null when the catalog cannot answer. */
