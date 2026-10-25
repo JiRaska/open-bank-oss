@@ -28,6 +28,9 @@ jobs:
           # is implicit. No contents/status/check/PR permission or bypass is granted.
           # Installation must already allow this; never fall back to a broad PAT.
           permission-administration: write
+          # The action's default post hook only warns if revocation fails. The
+          # explicit always-run step below must succeed before publishing evidence.
+          skip-token-revoke: true
       - name: Collect configuration using GET requests only
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
@@ -56,6 +59,13 @@ jobs:
               summaries, details
             };
             require('fs').writeFileSync(`${process.env.RUNNER_TEMP}/snapshot.json`, JSON.stringify(snapshot));
+      - name: Revoke the installation token before publishing evidence
+        if: always() && steps.token.outcome == 'success'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ steps.token.outputs.token }}
+          script: |
+            await github.request('DELETE /installation/token', {request: {timeout: 15000}});
       - name: Publish data only for the triggering CI attempt
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -63,5 +73,3 @@ jobs:
           path: ${{ runner.temp }}/snapshot.json
           if-no-files-found: error
           retention-days: 1
-      # create-github-app-token revokes the token in its post step (default).
-      # The consumer accepts evidence only after this workflow completes successfully.
