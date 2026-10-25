@@ -6,8 +6,8 @@ package com.openbank.document.integration
 
 import com.openbank.document.contract.PdfRendererStubResource
 import com.openbank.document.it.PostgresRedisTestResource
-import com.openbank.document.it.TraceContractProfile
 import com.openbank.libs.testing.trace.RecordingSpanExporter
+import com.openbank.libs.testing.trace.TraceContractProfile
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
