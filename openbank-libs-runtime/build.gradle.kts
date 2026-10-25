@@ -62,7 +62,9 @@ dependencies {
     // Hibernate types, but a service without an ORM must not inherit one from libs-runtime just to
     // get the shared error handling. compileOnly keeps it off every consumer's runtime classpath;
     // this line only lets libs-runtime's OWN tests construct a DataException to assert against.
-    testImplementation("io.quarkus:quarkus-hibernate-reactive-panache-kotlin:${libs.versions.quarkus.asProvider().get()}")
+    testImplementation(
+        "io.quarkus:quarkus-hibernate-reactive-panache-kotlin:${libs.versions.quarkus.asProvider().get()}",
+    )
     compileOnly("io.quarkus:quarkus-scheduler:${libs.versions.quarkus.asProvider().get()}")
     compileOnly("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")
     // 1.14.5 -> 1.17.0: GHSA-g3pr-3p32-fp23 / CVE-2026-40984 (HIGH, DoS in Micrometer's HTTP
@@ -173,7 +175,9 @@ dependencies {
     // quarkus-rest-client) against a stub HTTP server, so the keyed-only retry classification of
     // ADR-0321 D2 is proven on actual 5xx / connect-refused / timeout failures rather than mocks.
     // Test-only; already in gradle/verification-metadata.xml because every service resolves it.
-    testImplementation("io.quarkus.resteasy.reactive:resteasy-reactive-client:${libs.versions.quarkus.asProvider().get()}")
+    testImplementation(
+        "io.quarkus.resteasy.reactive:resteasy-reactive-client:${libs.versions.quarkus.asProvider().get()}",
+    )
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
