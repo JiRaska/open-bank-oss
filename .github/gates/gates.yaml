@@ -3616,7 +3616,7 @@ gates:
       capability preflight, committed read-back, canonical parent/tree/blob identity and
       PR timeline. Unknown policy source, codex downgrade and revoked intent fail closed.
     budget_seconds: 60
-    min_subjects: 26
+    min_subjects: 29
     rationale: >-
       PR intent under a reviewed pre-merge prefix rule is distinct from exact-head approval
       and from bounded legacy reconstruction. The original evidence gate retains its floor.
