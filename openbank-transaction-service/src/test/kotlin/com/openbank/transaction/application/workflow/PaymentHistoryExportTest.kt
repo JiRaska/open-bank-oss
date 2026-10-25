@@ -24,15 +24,17 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * Explicit baseline capture, run on the pre-upgrade SDK. Never rewrites committed fixtures.
+ * Explicit synthetic capture for a named SDK. Never rewrites committed fixtures.
  * Only synthetic activities execute; this test never creates a production Temporal connection.
  */
 @EnabledIfEnvironmentVariable(named = "OPENBANK_EXPORT_PAYMENT_HISTORIES", matches = "true")
 class PaymentHistoryExportTest {
     @Test
     fun `export synthetic payment histories for review`() {
-        check(Version.LIBRARY_VERSION == "1.25.1") { "Baseline export requires the original Temporal SDK 1.25.1" }
-        val output = Path.of("build", "payment-history-export")
+        val captureVersion = System.getenv("OPENBANK_PAYMENT_CAPTURE_SDK") ?: "1.25.1"
+        check(captureVersion in setOf("1.25.1", "1.40.0")) { "Unsupported capture SDK" }
+        check(Version.LIBRARY_VERSION == captureVersion) { "Capture SDK must match the actual runtime" }
+        val output = Path.of("build", "payment-history-export", "sdk-$captureVersion")
         Files.createDirectories(output)
         for (scenario in Scenario.entries) {
             TestWorkflowEnvironment.newInstance(

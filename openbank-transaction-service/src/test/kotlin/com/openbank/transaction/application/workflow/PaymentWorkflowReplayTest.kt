@@ -9,32 +9,46 @@ import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.transaction.domain.saga.SagaState
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.temporal.client.WorkflowClientOptions
+import io.temporal.serviceclient.Version
 import io.temporal.testing.TestEnvironmentOptions
 import io.temporal.testing.TestWorkflowEnvironment
 import io.temporal.testing.WorkflowReplayer
 import io.temporal.workflow.Workflow
+import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.ValueSource
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
 import java.time.Duration
 import java.util.UUID
+import java.util.stream.Stream
 
 class PaymentWorkflowReplayTest {
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "debit-success", "credit-success", "hold-failure", "journal-failure",
-            "credit-journal-failure", "terminal-failure", "journal-retry-success",
-        ],
-    )
-    fun `SDK 1_25_1 history replays against current workflow`(scenario: String) {
+    @Test
+    fun `replay uses the requested SDK runtime`() {
+        assertThat(Version.LIBRARY_VERSION)
+            .isEqualTo(System.getProperty("openbank.payment.replay.expected-sdk", "1.40.0"))
+    }
+
+    @ParameterizedTest(name = "SDK {0} history: {1}")
+    @MethodSource("histories")
+    fun `retained history has the recorded compatibility with the loaded SDK`(sdk: String, scenario: String) {
         replayEnvironment().use { env ->
-            WorkflowReplayer.replayWorkflowExecutionFromResource(
-                "temporal/payment/sdk-1.25.1/$scenario.json",
-                env,
-                PaymentWorkflowImpl::class.java,
-            )
+            val replay = {
+                WorkflowReplayer.replayWorkflowExecutionFromResource(
+                    "temporal/payment/sdk-$sdk/$scenario.json",
+                    env,
+                    PaymentWorkflowImpl::class.java,
+                )
+            }
+            if (Version.LIBRARY_VERSION == "1.25.1" && sdk == "1.40.0") {
+                // Captured evidence: SDK 1.40 records flag 3 even on the simple payment path.
+                // Missing resources or arbitrary failures must not satisfy this boundary check.
+                assertThatThrownBy { replay() }.hasStackTraceContaining("Unknown SDK flag:3")
+            } else {
+                replay()
+            }
         }
     }
 
@@ -49,6 +63,21 @@ class PaymentWorkflowReplayTest {
                 )
             }.hasStackTraceContaining("NonDeterministicException")
         }
+    }
+
+    companion object {
+        @JvmStatic
+        fun histories(): Stream<Arguments> = listOf("1.25.1", "1.40.0").flatMap { sdk ->
+            listOf(
+                "debit-success",
+                "credit-success",
+                "hold-failure",
+                "journal-failure",
+                "credit-journal-failure",
+                "terminal-failure",
+                "journal-retry-success",
+            ).map { Arguments.of(sdk, it) }
+        }.stream()
     }
 
     /** Test-only negative control: a timer cannot match the recorded first activity. */
