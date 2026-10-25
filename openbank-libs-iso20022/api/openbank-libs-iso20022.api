@@ -1,0 +1,376 @@
+public final class com/openbank/libs/domain/payment/InstructionType : java/lang/Enum {
+	public static final field DIRECT_DEBIT Lcom/openbank/libs/domain/payment/InstructionType;
+	public static final field FUTURE_DATED Lcom/openbank/libs/domain/payment/InstructionType;
+	public static final field ONE_OFF Lcom/openbank/libs/domain/payment/InstructionType;
+	public static final field STANDING_ORDER Lcom/openbank/libs/domain/payment/InstructionType;
+	public static final field SYSTEM Lcom/openbank/libs/domain/payment/InstructionType;
+	public static final field UNKNOWN Lcom/openbank/libs/domain/payment/InstructionType;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/domain/payment/InstructionType;
+	public static fun values ()[Lcom/openbank/libs/domain/payment/InstructionType;
+}
+
+public final class com/openbank/libs/domain/payment/PaymentRail : java/lang/Enum {
+	public static final field CARD Lcom/openbank/libs/domain/payment/PaymentRail;
+	public static final field CASH Lcom/openbank/libs/domain/payment/PaymentRail;
+	public static final field DOMESTIC Lcom/openbank/libs/domain/payment/PaymentRail;
+	public static final field FEE Lcom/openbank/libs/domain/payment/PaymentRail;
+	public static final field INTEREST Lcom/openbank/libs/domain/payment/PaymentRail;
+	public static final field INTERNAL Lcom/openbank/libs/domain/payment/PaymentRail;
+	public static final field SEPA_CT Lcom/openbank/libs/domain/payment/PaymentRail;
+	public static final field SEPA_INST Lcom/openbank/libs/domain/payment/PaymentRail;
+	public static final field SWIFT Lcom/openbank/libs/domain/payment/PaymentRail;
+	public static final field UNKNOWN Lcom/openbank/libs/domain/payment/PaymentRail;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/domain/payment/PaymentRail;
+	public static fun values ()[Lcom/openbank/libs/domain/payment/PaymentRail;
+}
+
+public final class com/openbank/libs/domain/payment/SettlementScope {
+	public static final field INSTANCE Lcom/openbank/libs/domain/payment/SettlementScope;
+	public final fun staysInTheBank (Lcom/openbank/libs/domain/payment/PaymentRail;Z)Z
+}
+
+public final class com/openbank/libs/iso20022/Camt054Builder {
+	public static final field Companion Lcom/openbank/libs/iso20022/Camt054Builder$Companion;
+	public static final field ENTRY_STATUS_BOOKED Ljava/lang/String;
+	public static final field NAMESPACE Ljava/lang/String;
+	public static final field SCHEMA_RESOURCE Ljava/lang/String;
+	public fun <init> ()V
+	public final fun build (Lcom/openbank/libs/iso20022/DebitCreditNotification;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/Camt054Builder$Companion {
+}
+
+public final class com/openbank/libs/iso20022/Camt056Builder {
+	public static final field Companion Lcom/openbank/libs/iso20022/Camt056Builder$Companion;
+	public static final field NAMESPACE Ljava/lang/String;
+	public static final field SCHEMA_RESOURCE Ljava/lang/String;
+	public fun <init> ()V
+	public final fun build (Lcom/openbank/libs/iso20022/PaymentCancellationRequest;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/Camt056Builder$Companion {
+}
+
+public final class com/openbank/libs/iso20022/ChargeBearer : java/lang/Enum {
+	public static final field CRED Lcom/openbank/libs/iso20022/ChargeBearer;
+	public static final field DEBT Lcom/openbank/libs/iso20022/ChargeBearer;
+	public static final field SHAR Lcom/openbank/libs/iso20022/ChargeBearer;
+	public static final field SLEV Lcom/openbank/libs/iso20022/ChargeBearer;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/iso20022/ChargeBearer;
+	public static fun values ()[Lcom/openbank/libs/iso20022/ChargeBearer;
+}
+
+public final class com/openbank/libs/iso20022/CreditDebitIndicator : java/lang/Enum {
+	public static final field CRDT Lcom/openbank/libs/iso20022/CreditDebitIndicator;
+	public static final field DBIT Lcom/openbank/libs/iso20022/CreditDebitIndicator;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/iso20022/CreditDebitIndicator;
+	public static fun values ()[Lcom/openbank/libs/iso20022/CreditDebitIndicator;
+}
+
+public final class com/openbank/libs/iso20022/CreditTransferInstruction {
+	public fun <init> (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/ChargeBearer;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/lang/String;
+	public final fun component11 ()Ljava/lang/String;
+	public final fun component12 ()Ljava/lang/String;
+	public final fun component13 ()Ljava/lang/String;
+	public final fun component14 ()Ljava/lang/String;
+	public final fun component15 ()Ljava/lang/String;
+	public final fun component16 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/time/OffsetDateTime;
+	public final fun component3 ()Ljava/time/OffsetDateTime;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/math/BigDecimal;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun component8 ()Lcom/openbank/libs/iso20022/ChargeBearer;
+	public final fun component9 ()Lcom/openbank/libs/iso20022/SettlementMethod;
+	public final fun copy (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/ChargeBearer;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/iso20022/CreditTransferInstruction;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/CreditTransferInstruction;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/ChargeBearer;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/CreditTransferInstruction;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAmount ()Ljava/math/BigDecimal;
+	public final fun getChargeBearer ()Lcom/openbank/libs/iso20022/ChargeBearer;
+	public final fun getCreationDateTime ()Ljava/time/OffsetDateTime;
+	public final fun getCreditorAgentBic ()Ljava/lang/String;
+	public final fun getCreditorIban ()Ljava/lang/String;
+	public final fun getCreditorName ()Ljava/lang/String;
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getDebtorAgentBic ()Ljava/lang/String;
+	public final fun getDebtorIban ()Ljava/lang/String;
+	public final fun getDebtorName ()Ljava/lang/String;
+	public final fun getEndToEndId ()Ljava/lang/String;
+	public final fun getInterbankSettlementDate ()Ljava/time/OffsetDateTime;
+	public final fun getMessageId ()Ljava/lang/String;
+	public final fun getRemittanceInfo ()Ljava/lang/String;
+	public final fun getSettlementMethod ()Lcom/openbank/libs/iso20022/SettlementMethod;
+	public final fun getTransactionId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/DebitCreditNotification {
+	public fun <init> (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/CreditDebitIndicator;Ljava/time/LocalDate;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/time/OffsetDateTime;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/math/BigDecimal;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun component8 ()Lcom/openbank/libs/iso20022/CreditDebitIndicator;
+	public final fun component9 ()Ljava/time/LocalDate;
+	public final fun copy (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/CreditDebitIndicator;Ljava/time/LocalDate;Ljava/lang/String;)Lcom/openbank/libs/iso20022/DebitCreditNotification;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/DebitCreditNotification;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Lcom/openbank/libs/iso20022/CreditDebitIndicator;Ljava/time/LocalDate;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/DebitCreditNotification;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccountIban ()Ljava/lang/String;
+	public final fun getAmount ()Ljava/math/BigDecimal;
+	public final fun getBookingDate ()Ljava/time/LocalDate;
+	public final fun getCreationDateTime ()Ljava/time/OffsetDateTime;
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getDirection ()Lcom/openbank/libs/iso20022/CreditDebitIndicator;
+	public final fun getEndToEndId ()Ljava/lang/String;
+	public final fun getEntryReference ()Ljava/lang/String;
+	public final fun getMessageId ()Ljava/lang/String;
+	public final fun getNotificationId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/openbank/libs/iso20022/Iso20022ValidationResult {
+}
+
+public final class com/openbank/libs/iso20022/Iso20022ValidationResult$Invalid : com/openbank/libs/iso20022/Iso20022ValidationResult {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lcom/openbank/libs/iso20022/Iso20022ValidationResult$Invalid;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/Iso20022ValidationResult$Invalid;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/Iso20022ValidationResult$Invalid;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getErrors ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/Iso20022ValidationResult$Valid : com/openbank/libs/iso20022/Iso20022ValidationResult {
+	public static final field INSTANCE Lcom/openbank/libs/iso20022/Iso20022ValidationResult$Valid;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/Iso20022Validator {
+	public static final field Companion Lcom/openbank/libs/iso20022/Iso20022Validator$Companion;
+	public fun <init> (Ljavax/xml/validation/Schema;)V
+	public final fun validate (Ljava/lang/String;)Lcom/openbank/libs/iso20022/Iso20022ValidationResult;
+}
+
+public final class com/openbank/libs/iso20022/Iso20022Validator$Companion {
+	public final fun forSchema (Ljava/lang/String;)Lcom/openbank/libs/iso20022/Iso20022Validator;
+}
+
+public final class com/openbank/libs/iso20022/Pacs002Builder {
+	public static final field Companion Lcom/openbank/libs/iso20022/Pacs002Builder$Companion;
+	public static final field NAMESPACE Ljava/lang/String;
+	public static final field SCHEMA_RESOURCE Ljava/lang/String;
+	public fun <init> ()V
+	public final fun build (Lcom/openbank/libs/iso20022/PaymentStatusReport;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/Pacs002Builder$Companion {
+}
+
+public final class com/openbank/libs/iso20022/Pacs002ParseException : java/lang/RuntimeException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
+public final class com/openbank/libs/iso20022/Pacs002Reader {
+	public fun <init> ()V
+	public final fun read (Ljava/lang/String;)Lcom/openbank/libs/iso20022/ReceivedStatusReport;
+}
+
+public final class com/openbank/libs/iso20022/Pacs004Builder {
+	public static final field Companion Lcom/openbank/libs/iso20022/Pacs004Builder$Companion;
+	public static final field NAMESPACE Ljava/lang/String;
+	public static final field SCHEMA_RESOURCE Ljava/lang/String;
+	public fun <init> ()V
+	public final fun build (Lcom/openbank/libs/iso20022/PaymentReturn;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/Pacs004Builder$Companion {
+}
+
+public final class com/openbank/libs/iso20022/Pacs004ParseException : java/lang/RuntimeException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
+public final class com/openbank/libs/iso20022/Pacs004Reader {
+	public fun <init> ()V
+	public final fun read (Ljava/lang/String;)Lcom/openbank/libs/iso20022/PaymentReturn;
+}
+
+public final class com/openbank/libs/iso20022/Pacs008Builder {
+	public static final field Companion Lcom/openbank/libs/iso20022/Pacs008Builder$Companion;
+	public static final field NAMESPACE Ljava/lang/String;
+	public static final field SCHEMA_RESOURCE Ljava/lang/String;
+	public fun <init> ()V
+	public final fun build (Lcom/openbank/libs/iso20022/CreditTransferInstruction;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/Pacs008Builder$Companion {
+}
+
+public final class com/openbank/libs/iso20022/Pacs008ParseException : java/lang/RuntimeException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
+public final class com/openbank/libs/iso20022/Pacs008Reader {
+	public fun <init> ()V
+	public final fun read (Ljava/lang/String;)Lcom/openbank/libs/iso20022/ReceivedCreditTransfer;
+}
+
+public final class com/openbank/libs/iso20022/PaymentCancellationRequest {
+	public fun <init> (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/time/OffsetDateTime;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/iso20022/PaymentCancellationRequest;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/PaymentCancellationRequest;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/PaymentCancellationRequest;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAdditionalInfo ()Ljava/lang/String;
+	public final fun getAssignmentId ()Ljava/lang/String;
+	public final fun getCancellationId ()Ljava/lang/String;
+	public final fun getCancellationReasonCode ()Ljava/lang/String;
+	public final fun getCreationDateTime ()Ljava/time/OffsetDateTime;
+	public final fun getOriginalEndToEndId ()Ljava/lang/String;
+	public final fun getOriginalTransactionId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/PaymentReturn {
+	public fun <init> (Ljava/lang/String;Ljava/time/OffsetDateTime;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/time/OffsetDateTime;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/time/OffsetDateTime;
+	public final fun component3 ()Lcom/openbank/libs/iso20022/SettlementMethod;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/math/BigDecimal;
+	public final fun component8 ()Ljava/lang/String;
+	public final fun component9 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/time/OffsetDateTime;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/iso20022/PaymentReturn;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/PaymentReturn;Ljava/lang/String;Ljava/time/OffsetDateTime;Lcom/openbank/libs/iso20022/SettlementMethod;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/PaymentReturn;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAdditionalInfo ()Ljava/lang/String;
+	public final fun getCreationDateTime ()Ljava/time/OffsetDateTime;
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getMessageId ()Ljava/lang/String;
+	public final fun getOriginalEndToEndId ()Ljava/lang/String;
+	public final fun getOriginalTransactionId ()Ljava/lang/String;
+	public final fun getReturnId ()Ljava/lang/String;
+	public final fun getReturnReasonCode ()Ljava/lang/String;
+	public final fun getReturnedAmount ()Ljava/math/BigDecimal;
+	public final fun getSettlementMethod ()Lcom/openbank/libs/iso20022/SettlementMethod;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/PaymentStatus : java/lang/Enum {
+	public static final field ACSC Lcom/openbank/libs/iso20022/PaymentStatus;
+	public static final field ACSP Lcom/openbank/libs/iso20022/PaymentStatus;
+	public static final field RCVD Lcom/openbank/libs/iso20022/PaymentStatus;
+	public static final field RJCT Lcom/openbank/libs/iso20022/PaymentStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/iso20022/PaymentStatus;
+	public static fun values ()[Lcom/openbank/libs/iso20022/PaymentStatus;
+}
+
+public final class com/openbank/libs/iso20022/PaymentStatusReport {
+	public fun <init> (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/iso20022/PaymentStatus;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/iso20022/PaymentStatus;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/time/OffsetDateTime;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Lcom/openbank/libs/iso20022/PaymentStatus;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/iso20022/PaymentStatus;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/iso20022/PaymentStatusReport;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/PaymentStatusReport;Ljava/lang/String;Ljava/time/OffsetDateTime;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/iso20022/PaymentStatus;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/PaymentStatusReport;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAdditionalInfo ()Ljava/lang/String;
+	public final fun getCreationDateTime ()Ljava/time/OffsetDateTime;
+	public final fun getMessageId ()Ljava/lang/String;
+	public final fun getOriginalEndToEndId ()Ljava/lang/String;
+	public final fun getOriginalTransactionId ()Ljava/lang/String;
+	public final fun getReasonCode ()Ljava/lang/String;
+	public final fun getStatus ()Lcom/openbank/libs/iso20022/PaymentStatus;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/ReceivedCreditTransfer {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/math/BigDecimal;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun component8 ()Ljava/lang/String;
+	public final fun component9 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/iso20022/ReceivedCreditTransfer;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/ReceivedCreditTransfer;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/ReceivedCreditTransfer;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAmount ()Ljava/math/BigDecimal;
+	public final fun getCreditorAgentBic ()Ljava/lang/String;
+	public final fun getCreditorIban ()Ljava/lang/String;
+	public final fun getCreditorName ()Ljava/lang/String;
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getDebtorIban ()Ljava/lang/String;
+	public final fun getEndToEndId ()Ljava/lang/String;
+	public final fun getMessageId ()Ljava/lang/String;
+	public final fun getTransactionId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/ReceivedStatusReport {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/iso20022/PaymentStatus;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/iso20022/PaymentStatus;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/iso20022/PaymentStatus;Ljava/lang/String;)Lcom/openbank/libs/iso20022/ReceivedStatusReport;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/ReceivedStatusReport;Ljava/lang/String;Lcom/openbank/libs/iso20022/PaymentStatus;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/ReceivedStatusReport;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOriginalEndToEndId ()Ljava/lang/String;
+	public final fun getReasonCode ()Ljava/lang/String;
+	public final fun getStatus ()Lcom/openbank/libs/iso20022/PaymentStatus;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/SettlementMethod : java/lang/Enum {
+	public static final field CLRG Lcom/openbank/libs/iso20022/SettlementMethod;
+	public static final field COVE Lcom/openbank/libs/iso20022/SettlementMethod;
+	public static final field INDA Lcom/openbank/libs/iso20022/SettlementMethod;
+	public static final field INGA Lcom/openbank/libs/iso20022/SettlementMethod;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/iso20022/SettlementMethod;
+	public static fun values ()[Lcom/openbank/libs/iso20022/SettlementMethod;
+}
+

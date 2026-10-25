@@ -72,6 +72,7 @@ export const STATIC_ROUTE_INVENTORY: Record<string, { disposition: StaticRouteDi
   "/docs/sensors/proximity": { disposition: "static-direct-load-smoke", path: "/docs/sensors/proximity" },
   "/docs/sensors/shortcuts": { disposition: "static-direct-load-smoke", path: "/docs/sensors/shortcuts" },
   "/docs/service-map": { disposition: "sidebar-navigation-smoke", path: "/docs/service-map" },
+  "/docs/spayd-uri": { disposition: "sidebar-navigation-smoke", path: "/docs/spayd-uri" },
   "/docs/threat-models": { disposition: "static-direct-load-smoke", path: "/docs/threat-models" },
   "/docs/zero-trust": { disposition: "static-direct-load-smoke", path: "/docs/zero-trust" },
   "/document-templates": { disposition: "sidebar-navigation-smoke", path: "/document-templates" },

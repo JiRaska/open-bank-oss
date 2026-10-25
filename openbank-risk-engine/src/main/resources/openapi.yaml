@@ -76,7 +76,9 @@ info:
   #        own treasury book; curve quotes gain `instrument` (DEPOSIT | FRA | SWAP); the run manifest's
   #        modelVersions gains optional curveModelVersion / valuationModelVersion; limit metrics gain
   #        pv01 and var-99-1d.
-  version: 1.26.0
+  # 1.26.0 -> 1.26.1: documentation only — the pricing request's lag bounds (0 to 30 business days)
+  #        are stated; no schema change.
+  version: 1.26.1
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -645,7 +647,8 @@ paths:
         PV and PV by leg, PV01 (PV(+1bp) − PV, a payer of fixed is positive), key-rate DV01 on the
         IRRBB ladder and FX delta (1 % of each foreign leg's PV). Header fields it does not price are
         accepted and ignored. Nothing is persisted. Bounds: at most 8 legs, each spanning at most 50
-        years, no frequency finer than daily, at most 2,000 periods per leg (400 otherwise); a
+        years, no frequency finer than daily, at most 2,000 periods per leg, payment and fixing lags of
+        0 to 30 business days (400 otherwise); a
         computation past `openbank.risk.pricing.timeout` answers 503 `COMPUTATION_TIMEOUT`.
       requestBody:
         required: true

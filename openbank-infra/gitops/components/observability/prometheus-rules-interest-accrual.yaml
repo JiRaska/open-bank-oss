@@ -1,0 +1,41 @@
+# Interest accrual held by an unresolvable catalog pin (ADR-0341 / ADR-0342).
+# Picked up by the Prometheus operator automatically, same as every PrometheusRule here.
+#
+# WHY THIS EXISTS: when an account's pinned catalog revision cannot be resolved to a cached rate
+# config, interest-service REFUSES to accrue it at "the currently effective" rate (that would silently
+# reprice a live contract). The account accrues nothing, the daily accrual run is reported
+# incomplete, and the ledger holds the accounting day (REFUSED) instead of closing it without that
+# interest. The counter below increments once per such account per run. Nothing else pages: the pod
+# is Ready and the scheduler tick completes, so this counter is the only live signal.
+#
+# The subject is the once-a-day accrual run (period 24h), so the window is 2d: wider than
+# 1.5 x the period, which keeps the condition true between runs until a run no longer increments.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-interest-accrual-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.interest.accrual
+      rules:
+        - alert: InterestAccrualCatalogRevisionUnresolved
+          expr: |
+            sum(increase(openbank_interest_accrual_catalog_revision_unresolved_total[2d])) > 0
+            or
+            sum(increase(openbank_interest_accrual_catalog_rate_unpinned_total[2d])) > 0
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            subject_period: 24h
+            summary: "Interest accrual refused for accounts whose catalog revision is unresolvable"
+            description: >-
+              interest-service refused to accrue at least one account in the last two days because the
+              revision it is pinned to has no cached rate config (or the account has catalog history
+              but no pin, or a catalog rate applied with no pin). The accrual run is reported incomplete and the ledger holds the accounting
+              day. Repair the catalog cache (or the missing pin) and re-run the accrual for the same
+              business date; it is idempotent per account and day.

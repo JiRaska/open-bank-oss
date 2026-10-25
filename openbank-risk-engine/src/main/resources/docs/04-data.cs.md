@@ -16,3 +16,7 @@ Tato stránka zatím popisuje jen outbox limitních událostí a jeho deduplika�
 - **`curve_set_quote.instrument`** je `DEPOSIT`, `FRA` nebo `SWAP`; stávající řádky jsou depozita. Unikátnost nově zahrnuje nástroj.
 - **`snapshot_run`** eviduje verzi modelu křivky a ocenění daného běhu; starší běhy ji nemají.
 - **Rollback V11:** příkazy jsou uvedeny v hlavičce migrace. Odstranění nových sloupců zahodí nohy a uložené toky; obnoví se přehráním událostí obchodů.
+
+## Slovník druhů obchodu (ADR-0344)
+
+`DealKind` (`ACTUAL`, `PLANNED`, `HYPOTHETICAL`) nově vlastní `openbank-libs-finance`, se kterou pracuje i treasury. Risk engine na něj odkazuje přes typealias, takže hodnoty na drátě ani chování se nemění. Do měření snapshotu vstupují jen obchody ACTUAL.

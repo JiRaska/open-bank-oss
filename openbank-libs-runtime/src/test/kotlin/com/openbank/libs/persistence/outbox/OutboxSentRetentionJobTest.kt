@@ -12,7 +12,12 @@ import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.runtime.StartupEvent
 import jakarta.enterprise.inject.Instance
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.supervisorScope
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -49,6 +54,7 @@ class OutboxSentRetentionJobTest {
         enabled: Boolean = true,
         batchSize: Int = 2,
         maxBatches: Int = 100,
+        sentDays: Long = 7,
     ): OutboxSentRetentionJob {
         val regInst = mockk<Instance<MeterRegistry>>()
         every { regInst.isResolvable } returns true
@@ -58,7 +64,7 @@ class OutboxSentRetentionJobTest {
         every { targetInst.stream() } answers { Stream.of(*targets) }
         return OutboxSentRetentionJob(
             enabled = enabled,
-            sentDays = 7,
+            sentDays = sentDays,
             batchSize = batchSize,
             maxBatches = maxBatches,
         ).apply {
@@ -126,8 +132,89 @@ class OutboxSentRetentionJobTest {
     }
 
     @Test
+    fun `enabled scheduled entry point honors one day window clock and batch cap`(): Unit = runBlocking {
+        val calls = mutableListOf<Triple<Duration, Int, Instant>>()
+        val target = object : SentOutboxRetention {
+            override val retentionLabel = "bounded"
+            override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int {
+                calls += Triple(olderThan, batch, now)
+                return batch
+            }
+        }
+        val j = job(target, sentDays = 1, batchSize = 3, maxBatches = 2)
+        j.registerLiveness(StartupEvent())
+
+        j.purge()
+
+        assertThat(calls).containsExactly(
+            Triple(Duration.ofDays(1), 3, now),
+            Triple(Duration.ofDays(1), 3, now),
+        )
+        assertThat(registry.find("openbank.outbox.purged").tag("service", "bounded").counter()?.count())
+            .isEqualTo(6.0)
+        assertThat(registry.find("openbank.outbox.purge.cap.reached").tag("service", "bounded").gauge()?.value())
+            .isEqualTo(1.0)
+        assertThat(successRecorded()).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `suspended cancellation stops subsequent targets and withholds heartbeat`(): Unit = runBlocking {
+        supervisorScope {
+            val gate = CompletableDeferred<Int>()
+            val target = object : SentOutboxRetention {
+                override val retentionLabel = "cancelled"
+                override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int = gate.await()
+            }
+            val untouched = Target("untouched", rows = 1)
+            val j = job(target, untouched)
+            j.registerLiveness(StartupEvent())
+            val run = async(start = CoroutineStart.UNDISPATCHED) { j.purge() }
+            assertThat(run.isCompleted).isFalse()
+
+            gate.completeExceptionally(CancellationException("retention shutdown"))
+            val failure = runCatching { run.await() }.exceptionOrNull()
+
+            assertThat(failure).isInstanceOf(CancellationException::class.java).hasMessage("retention shutdown")
+            assertThat(untouched.seen).isNull()
+            assertThat(successRecorded()).isEqualTo(0.0)
+            assertThat(registry.find("openbank.outbox.purge.failed").tag("service", "cancelled").counter()).isNull()
+        }
+    }
+
+    @Test
+    fun `scheduled entry point isolates suspended failure and recovers on its next run`(): Unit = runBlocking {
+        supervisorScope {
+            val gate = CompletableDeferred<Int>()
+            var recovered = false
+            val target = object : SentOutboxRetention {
+                override val retentionLabel = "recovering"
+                override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int =
+                    if (recovered) 0 else gate.await()
+            }
+            val healthy = Target("healthy", rows = 1)
+            val j = job(target, healthy)
+            j.registerLiveness(StartupEvent())
+            val run = async(start = CoroutineStart.UNDISPATCHED) { j.purge() }
+            assertThat(run.isCompleted).isFalse()
+            gate.completeExceptionally(IllegalStateException("db unavailable"))
+            run.await()
+
+            assertThat(healthy.seen).isEqualTo(Duration.ofDays(7))
+            assertThat(successRecorded()).isEqualTo(0.0)
+            assertThat(registry.find("openbank.outbox.purge.failed").tag("service", "recovering").counter()?.count())
+                .isEqualTo(1.0)
+            recovered = true
+            j.purge()
+            assertThat(successRecorded()).isEqualTo(1.0)
+            assertThat(registry.find("openbank.outbox.purge.failed").tag("service", "recovering").counter()?.count())
+                .isEqualTo(1.0)
+        }
+    }
+
+    @Test
     fun `invalid batch limits fail service startup before a scheduled purge`() {
         val invalidLimits = listOf(
+            "sent-days" to job(Target("sca", rows = 1), sentDays = 0),
             "batch-size" to job(Target("sca", rows = 1), batchSize = 0),
             "max-batches" to job(Target("sca", rows = 1), maxBatches = 0),
         )

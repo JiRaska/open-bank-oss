@@ -1,5 +1,31 @@
 # 05 — Provoz
 
+## Varování při vyhodnocení poplatků
+
+Varování o nedostupných podmínkách revize, selhání úložiště pinů, vyhledání v katalogu a
+vynechaných složkách poplatků mají pevný text. Neobsahují účet, produkt, cyklus, revizi,
+podrobnosti výjimky ani počty složek. Zaznamenané důvody přeskočení určuje omezený štítek
+`reason` čítače `openbank.billing.assessment.skipped`; čítač nepokrývá všechna vynechaná vyhodnocení.
+`openbank.billing.assessment.dropped_components` počítá vyhodnocení s jednou či více
+vynechanými složkami, nikoli samotné složky. Tyto souhrnné čítače neurčují konkrétní vyhodnocení;
+dotčené záznamy vyšetřujte přes oprávněný přístup k obchodním datům, nikoli provozní logy.
+
+## Které cenové složky se účtují (#13230)
+
+Revize, jejíž cenové složky nesou `role` z katalogu, se účtuje podle role. Účtuje se jen `FEE`; `LIMIT`,
+`THRESHOLD` ani `RATE` nikdy. Obsahuje-li revize také dokument v1, účtuje se `FEE` jen tehdy, když jeho kód
+odvozuje dokument v1, a ponechá si id tohoto poplatku v1. Idempotenční klíč (cyklus, účet, id poplatku,
+měna) proto zůstane stejný i při přepnutí účtu na jinou revizi uprostřed cyklu a nic se nezaúčtuje dvakrát.
+`FEE` s jakýmkoli jiným kódem se vynechá a započítá jako
+`openbank.billing.fee.component.dropped{reason=NOT_IN_LEGACY_DOCUMENT}`. Revize bez rolí se účtuje
+starým párováním proti vloženým poplatkům v1, přesně jako dřív.
+
+Vynechaný poplatek `NOT_IN_LEGACY_DOCUMENT` se nikdy nezaúčtuje, takže jde o ušlý výnos při každém
+vyhodnocení pod danou revizí. Hlásí ho alert `BillingFeeComponentNotBilledNotInLegacyDocument`
+(warning). Nápravou je nová revize katalogu: buď poplatek doplňte do produktu v1, aby se jeho kód
+odvodil, nebo publikujte revizi bez vloženého dokumentu v1. Potom dotčené účty znovu napinujte.
+Postup popisuje `docs/runbooks/0031-billing-fee-not-in-legacy-document.md`.
+
 ## Přechod na prefix metrik billingu
 
 Sedm čítačů billingu nyní používá prefix Micrometer `openbank.billing.*`. Jejich koncovky jsou
@@ -29,9 +55,15 @@ Pořadí nasazení, vždy:
 
 Nasazení Billing před ledgerem je bezpečné, dokud je příznak `false`.
 
-S `false` řádky poplatků obsahují účty, na které billing vždy účtoval (2100 / 4003). S `true` uvádějí třídu
-a roli a rozhoduje mapa ledgeru; poplatky v měně bez namapovaného účtu výnosů z poplatků ledger odmítne
-(422, sleduje #13226), stejně jako je odmítal dříve.
+S `false` obsahují řádky poplatku v **CZK** účty, na které billing vždy účtoval (2100 / 4003). Poplatek
+v jiné měně uvádí třídu a roli vždy, bez ohledu na přepínač: oba pevné účty jsou v CZK a ledger je pro
+jinou měnu odmítá (#13226). S `true` uvádí třídu a roli každý poplatek a rozhoduje mapa ledgeru. Výnos
+z poplatku se účtuje v původní měně poplatku na 4003 (CZK), 4004 (EUR), 4005 (USD) a 4006 (GBP). Tyto
+účty zakládá ledger `V34`, proto ho nasaďte před tímto vydáním Billingu. Poplatek v jakékoli jiné měně se
+do outboxu nezapíše a započítá se jako
+`openbank_billing_assessment_skipped_total{reason="FEE_INCOME_CURRENCY_UNMAPPED"}`. Postup pro změření
+a přehrání nedoručených poplatků v jiné měně než CZK popisuje
+`docs/runbooks/0030-billing-non-czk-fee-backlog.md`.
 
 **Rollback.** S příznakem `true` řádky účet neobsahují, takže starší ledger (pod `V32`) odmítne každý
 řádek. Samotnou konfigurací se vrátit nelze: nejdřív nastavte `OPENBANK_BILLING_LEDGER_POST_BY_CLASS=false` a znovu nasaďte Billing,

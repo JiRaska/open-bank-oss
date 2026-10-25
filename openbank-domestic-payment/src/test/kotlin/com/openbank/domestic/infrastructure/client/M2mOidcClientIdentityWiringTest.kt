@@ -31,13 +31,15 @@ class M2mOidcClientIdentityWiringTest {
     }
 
     @Test
-    fun `the settlement adapter injects the named m2m oidc-client`() {
+    fun `the transaction-service client mints its bearer from the named m2m oidc-client`() {
+        // #13224: the token is attached by the filter on the generated client, not by hand in the adapter.
+        val named = TransactionServiceClient::class.java.getAnnotation(OidcClientFilter::class.java)
+        assertThat(named).describedAs("@OidcClientFilter on TransactionServiceClient").isNotNull
+        assertThat(named.value).isEqualTo(M2M)
         val qualifiers = SettlementAdapter::class.java.declaredConstructors.single().parameterAnnotations
             .flatMap { it.toList() }
             .filterIsInstance<NamedOidcClient>()
-        assertThat(qualifiers.map { it.value })
-            .describedAs("SettlementAdapter must mint its bearer from the named client, not the shared default")
-            .containsExactly(M2M)
+        assertThat(qualifiers).describedAs("SettlementAdapter must not mint a bearer by hand").isEmpty()
     }
 
     @Test

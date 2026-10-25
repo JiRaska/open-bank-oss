@@ -906,3 +906,9 @@ display:none!important}
   .tf-field{
   min-width:0}
 }
+
+/* The new identity is confined to the header. All illustrations stay unchanged. */
+.nav .brand-lipa{display:block;flex:0 0 210px;width:210px;line-height:0;letter-spacing:normal}
+.nav .brand-lipa video{display:block;width:100%;height:auto;aspect-ratio:16/9;mix-blend-mode:darken}
+@media(max-width:1000px){.nav .brand-lipa{flex-basis:175px;width:175px}}
+@media(max-width:720px){.nav .brand-lipa{flex-basis:165px;width:165px;margin-block:-18px}}

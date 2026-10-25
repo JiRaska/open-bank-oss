@@ -168,7 +168,7 @@ simply stops existing).
   libs-runtime, fixed in #11033/#11047).
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -348,7 +348,7 @@ simply stops existing).
   dependency introduced, no behavior change. Attack surface, trust boundaries, and STRIDE rows above are
   unaffected. No DB change; rollback = revert the commit.
 - **2026-07-07** — ADR-0155 four-eyes enforcement pilot. New endpoint `PATCH
-  /api/v1/sepa-payments/approvals/{id}` + `ApprovalConfig` (Redis-backed `ApprovalStore`) +
+  /api/v1/sepa-payments/approvals/{id}` + ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`) (Redis-backed `ApprovalStore`) +
   `AuthorizeInterceptor` four-eyes gate (openbank-libs-runtime, shared, opt-in). New STRIDE
   supplement §4a. `authz.four-eyes.enforce` defaults `false` — no behavior change to any
   existing request in this PR; flipping it is a tracked follow-up. No DB schema change (Redis,
@@ -569,3 +569,75 @@ together; the nginx Ingress and network allowance remain through Phase 5.
   Rollout verification must exercise this caller against 8443 with valid and invalid
   client certificates and check that failures do not reroute to HTTP. Rollback restores
   the previous client URL/configuration while the AML listener remains available.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-22** — **Transaction-service edge moved to the generated client; bookings bound to the request (#13224, #13217, #13225).** `SettlementAdapter` and `ReversalAdapter` call transaction-service through the shared `TransactionClient` facade over the generated `TransactionsApi` (ADR-0319). **Spoofing:** the bearer is no longer minted by hand. `TransactionServiceClient` carries `@OidcClientFilter("m2m")`, so it is the same named Keycloak client `openbank-sepa-payment` with the same grants (`transaction.create`, `transaction.reverse`). `SepaTransactionClientWorkerThreadIT` proves that the m2m bearer reaches the wire from a non-Vert.x thread through the activity wrapper. **Tampering / repudiation:** settlement is confirmed only by HTTP 201 with a COMPLETED transaction whose type, source account, amount, currency, rail and instruction type match the request. A COMPLETED answer for a different booking no longer marks the payment COMPLETED. A 409 used to read as "already booked" for settlement and reversal; it is now a concurrent-state conflict and proves nothing. An unproven reversal leaves a durable unresolved return intent; it does not emit terminal return evidence. Uncertain completions (unreadable, non-final, 5xx) retry under the same idempotency key and never produce a second booking. **Availability:** the request now sends `instructionType = ONE_OFF`. The scheme name it sent before is rejected 400 by the provider's strict enum parsing. No new endpoint, caller, privilege, credential or event. Rollback: revert the commit.
+
+
+## Durable return intent and reconciliation (#13623)
+
+**Tampering / repudiation:** a short database transaction records the first return receipt,
+original transaction identity when known, reason and server-derived actor/correlation before an
+outbound reversal. General aggregate writes cannot replace that metadata or clear a pending
+intent. No database lock is held across the network call. Only a proven completed reversal with
+a distinct transaction identity may atomically mark RETURNED, resolve the intent and write status and return-evidence
+outbox messages. A failed evidence insert rolls back all of those local writes; retry
+uses the same `sepa-reversal-<payment-id>` key. A late validated settlement completion may attach
+the first missing original identity while preserving the pending intent. Conflicting identities
+or terminal transitions are refused; compatible repeated completions emit no duplicate event.
+
+**Availability / recovery:** 409 and 503 do not prove that no ledger credit occurred. A missing
+original identity remains unresolved rather than authorising a fresh booking. Refund age is
+measured from the immutable receipt independently of payment creation and outbound booking.
+Attempt counters use bounded rail/outcome labels, no account, payment, key or exception text.
+SCT uses SEPA_CT and SCT_INST uses SEPA_INST with ONE_OFF instruction type. An old-key response
+whose rail does not match the original request remains a mismatch: no key rotation or historical
+rewrite is authorised.
+
+**Residual risk and proof limits:** local HTTP/PostgreSQL return tests use a test reversal port;
+they do not establish a live ledger reversal. Historical RETURNED rows are not backfilled as
+proven refunds. There is no new operator API, read-only transaction lookup by key, recovery
+scheduler, outbound booking-age clock or approved SLA/alert threshold in this change. Without
+an approved reconciliation read path, operator recovery stays blocked. Existing authentication,
+M2M privileges and review requirements remain in force. Retain intent data during application rollback; reconcile/export pending intents before the
+destructive schema downgrade using the migration's documented reverse SQL.
+
+
+Booking observability (#13623): an entity-only first-due marker commits with accepted PROCESSING before provider IO. Only the validated completion port records proof in the locked lifecycle/outbox transaction. Generic writes preserve pending evidence; nullable historical coverage is reported separately and never suppresses tracked pending age. This does not authorize retries, reconciliation actions, SLA policy or a transaction lookup API.
+
+## Unsettled-booking alerts and settlement re-drive (#13623)
+
+**Change.** `SepaPaymentBookingUnsettled` (open outbound booking clock > 30m) and `SepaPaymentRefundUnsettled`
+(unproven return > 1h) page on the two durable clocks; runbook `docs/runbooks/0032-payment-rail-unsettled-booking.md`.
+`submitToScheme` now re-enters for a PROCESSING payment whose booking clock is open and calls settlement again.
+
+**STRIDE.**
+- *Tampering / double booking:* the re-drive reuses `sepa-settlement-<paymentId>`; transaction-service dedups on
+  the key alone and replays the stored answer, so a re-drive can complete a booking but never create a second one.
+  Completion still requires the strict request/response match and the locked completion write.
+- *Elevation (booking an unaccepted payment):* re-entry is gated on the durable first-due marker, which only the
+  accepted VALIDATED -> PROCESSING write sets. A PROCESSING row reached by a generic status write or a legacy row
+  has no marker and is never settled. The scheme is never resubmitted on re-entry.
+- *Repudiation:* re-drive is a Temporal reset by an operator with `--reason`, recorded in workflow history; the
+  reversal re-drive goes through the existing `sepaPayment.handleReturn` authorization and keeps the original
+  server-derived actor/correlation on the intent.
+- *Denial of service / silent loss:* the previously unwatched holds now page. A cold pod reads NaN and a stopped
+  sweep is caught by `WorkflowLivenessStale`, so neither silences the alert by reading zero.
+- *Information disclosure:* alert labels are `rail`/`service`/`severity` only; no payment, account or key.
+
+- *Tampering (value date drift):* the request's value date is pinned to the durable acceptance instant, so a
+  re-drive days later sends the identical request. transaction-service answers a known key from the stored row
+  and ignores the body, so nothing fingerprints it today; the pin keeps that true if it ever does.
+- *Automatic re-settlement:* because `submitToScheme` re-enters for a held payment, ANY Temporal retry of that
+  activity (3 attempts within 10 minutes) re-settles on its own. Accepted on the same grounds as the operator
+  re-drive: same key, same request, and only the locked completion write may close the clock. A real-DB IT
+  (`SepaSettlementRedriveIT`) runs two re-drives concurrently and asserts one proof and one COMPLETED event.
+
+**Residual.** No retry beyond the workflow's own 3 attempts for a held booking, and none for a return (deterministic answers would replay anyway); no
+in-band "mark reconciled" after an out-of-band correction, so such a payment is silenced with a ticket, never by
+writing `booking_proven_at`. The pacs.008 carries no payment-type information (service level SEPA, local instrument INST) for SCT_INST; the clearing
+simulator ignores it, a real SCT Inst connection would not. Tracked in #13663.
+

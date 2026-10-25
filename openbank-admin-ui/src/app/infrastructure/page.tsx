@@ -19,6 +19,7 @@ import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { EVENT_INSIGHTS } from '@/components/insights/catalog'
 import { parseInfrastructureStatuses, type InfrastructureStatus, type InfrastructureStatusResult } from '@/lib/infra/statusContract'
 import { classifyBffFailure } from '@/lib/services/bff'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 import { usePlatformView } from '@/lib/use-platform-view'
 
 type InfraStatus = InfrastructureStatus
@@ -32,6 +33,7 @@ interface InfraComponent {
 
 const INFRA_COMPONENTS: InfraComponent[] = [
   { id: 'postgres',        name: 'PostgreSQL',        probeNote: 'TCP :5432 service probe',              icon: <Database size={20} /> },
+  { id: 'clickhouse',      name: 'ClickHouse',        probeNote: 'Configured endpoint TCP reachability', icon: <Database size={20} /> },
   { id: 'kafka',           name: 'Apache Kafka',       probeNote: 'TCP :9093 mTLS listener',               icon: <Layers size={20} /> },
   { id: 'keycloak',        name: 'Keycloak IAM',       probeNote: 'HTTP /realms/master',                   icon: <Lock size={20} /> },
   { id: 'valkey',          name: 'Valkey (Cache)',      probeNote: 'Prometheus readiness (≤2m sample age)', icon: <HardDrive size={20} /> },
@@ -176,6 +178,7 @@ export default function InfrastructurePage() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
+      <ContentSourceNote source={platformView?.declarationSource} />
       <PageHeader
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Platforma', 'Platform')}</span></div>}
         icon={<Server size={20} aria-hidden="true" />}
@@ -221,7 +224,7 @@ export default function InfrastructurePage() {
         }}>
           <DataUnavailable
             kind={unavailable.kind}
-            service={t('Gatus monitoring agent', 'Gatus monitoring agent')}
+            service={t('Sonda infrastruktury', 'Infrastructure probe')}
             feature={t('Stav infrastruktury', 'Infrastructure status')}
             lang={language}
             detail={Object.keys(statuses).length > 0

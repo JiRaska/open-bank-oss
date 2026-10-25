@@ -57,7 +57,8 @@ class TreasuryOutboxAtomicityIT {
 
     class NoDispatchInMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("treasury-events-out") +
+            InMemoryConnector.switchOutgoingChannelsToInMemory("treasury-events-out", "treasury-payments-out") +
+                InMemoryConnector.switchIncomingChannelsToInMemory("institution-transfer-status-in") +
                 mapOf("openbank.outbox.dispatch-enabled" to "false")
 
         override fun stop() = InMemoryConnector.clear()
@@ -127,7 +128,7 @@ class TreasuryOutboxAtomicityIT {
             from deals d
             join treasury_outbox o on o.aggregate_id = d.deal_id
             join deal_transitions t on t.deal_id = d.deal_id and t.to_state = 'BOOKED'
-            where d.deal_id = ?
+            where d.deal_id = ? and o.event_type = 'treasury.deal.booked.v1'
             order by o.id
             """.trimIndent(),
         ).use { statement ->
