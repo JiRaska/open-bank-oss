@@ -7,6 +7,7 @@ import com.openbank.libs.authz.PolicyDecisionPoint
 import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.mtls.ListenerMaterial
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -31,7 +32,10 @@ import java.util.concurrent.CopyOnWriteArrayList
 /** Real OIDC discovery/signature validation, HTTP adapter, assignment lookup and custom PDP call. */
 @QuarkusTest
 @TestProfile(ContextVerifiedIdentityProfile::class)
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_context_it")],
+)
 @QuarkusTestResource(ContextMessagingTestResource::class)
 class ContextVerifiedIdentityIT {
     @Inject
