@@ -672,12 +672,23 @@ def bisect_size(app: dict[str, tuple[str, str]]) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def batch_cap(train_cands: list[Member], sizes: dict[int, int | None], default: int) -> int:
+    """How many members this train may APPLY: the smallest `bisect size N` on ANY candidate in the
+    default window, else the default. It used to be read off the OLDEST candidate only, and halving
+    posts the status on the carrier's MEMBERS — measured 2026-10-25 (#13801..#13817): the oldest
+    candidate #13697 was dropped by every build (its squash is a no-op on main), so it never rode a
+    carrier, never got a status, and the cap stayed 8 while the five halved members carried
+    `bisect size 2` through six carriers. A newly armed older PR (#13710) defeated it the same way."""
+    window = train_cands[:max(1, default)]
+    got = [sizes[m.number] for m in window if sizes.get(m.number)]
+    return max(1, min([default, *got]))
+
+
 def select_batch(train_cands: list[Member], sizes: dict[int, int | None], default: int) -> list[Member]:
-    """Oldest first. A bisect size on the OLDEST candidate caps the batch (halving across ticks)."""
-    if not train_cands:
-        return []
-    limit = sizes.get(train_cands[0].number) or default
-    return train_cands[:max(1, min(limit, default))]
+    """Oldest first: the default window. The cap (batch_cap) bounds the members build APPLIES, not the
+    candidates it tries — a candidate build drops (no-op, conflict, untrainable) must not consume a slot,
+    or a permanently dropped oldest PR at cap 1 would starve the train."""
+    return train_cands[:max(1, default)] if train_cands else []
 
 
 def first_paragraph(body: str | None) -> str:
@@ -802,6 +813,8 @@ class TrainBuilder:
         # are DEFERRED (no drop notice; the next tick takes them), never dropped.
         self.separate_gate_code = True
         self.deferred: list[int] = []
+        self.limit: int | None = None        # most members one train may APPLY (bisect cap); None = all
+        self.attempted: list[int] = []       # members _build tried (applied or dropped), in order
 
     def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         return sh(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=self.workdir, check=check, env=self.env)
@@ -833,7 +846,11 @@ class TrainBuilder:
         applied: list[int] = []
         dropped: list[int] = []
         gate: list[int] = []
+        self.attempted = []
         for m in members:
+            if self.limit is not None and len(applied) >= self.limit:
+                break   # the bisect cap counts APPLIED members; the rest are not tried, not dropped
+            self.attempted.append(m.number)
             r = self.git("merge", "--squash", "--no-commit", m.ref, check=False)
             staged = changed_paths(self.git, cached=True) if r.returncode == 0 else []
             if r.returncode != 0 or not staged or any(unsafe_path(f) or self.untrainable(f) for f in staged):
@@ -1507,10 +1524,10 @@ def plan_train(gh, git, repo: str, base: str) -> tuple[list[Member], list[Member
     return fast, train, {n: bisect_size(a) for n, a in apps.items()}
 
 
-def plan_batch(gh, git, repo: str, base: str, batch_size: int) -> tuple[list[Member], list[Member]]:
-    """(fast lane, this tick's train batch) — the same function in build and settle."""
+def plan_batch(gh, git, repo: str, base: str, batch_size: int) -> tuple[list[Member], list[Member], int]:
+    """(fast lane, this tick's candidate window, how many may apply) — the same function in build and settle."""
     fast, train, sizes = plan_train(gh, git, repo, base)
-    return fast, select_batch(train, sizes, batch_size)
+    return fast, select_batch(train, sizes, batch_size), batch_cap(train, sizes, batch_size)
 
 
 MANIFEST_RE = re.compile(r"^([0-9]{1,9}) ([0-9a-f]{40})$")
@@ -1542,9 +1559,8 @@ def declared_batch(manifest_text: str, train: list[Member], sizes: dict[int, int
             raise Reject(f"declared member #{n} is no longer a live train candidate at that head — the next tick rebuilds",
                          member_fault=False)
     batch = [m for m in train if m.number in want]
-    cap = max(1, min(sizes.get(batch[0].number) or batch_size, batch_size))
-    if len(batch) > cap:
-        raise Reject(f"declared batch of {len(batch)} exceeds the cap of {cap}", member_fault=False)
+    if len(batch) > max(1, batch_size):
+        raise Reject(f"declared batch of {len(batch)} exceeds the batch size of {batch_size}", member_fault=False)
     return batch
 
 
@@ -1556,7 +1572,10 @@ def live_base(gh, git) -> str:
 # --------------------------------------------------------------------------- the three modes
 def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_size: int) -> list[int]:
     base = live_base(gh, git)
-    _fast, batch = plan_batch(gh, git, repo, base, batch_size)
+    _fast, batch, cap = plan_batch(gh, git, repo, base, batch_size)
+    builder.limit = cap
+    if cap < len(batch):
+        log(f"build: bisect cap {cap} — at most {cap} of {len(batch)} candidate(s) apply")
     regen_text = main_regen_text(git, base)
     builder.untrainable = Untrainable(regen_text)
     builder.declared_inputs = regen_inventory_fragments(regen_text)
@@ -1570,7 +1589,9 @@ def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_si
         heads = {m.number: m.head_sha for m in batch}
         pathlib.Path(out_dir, DROPS_FILE).write_text("".join(f"{n} {heads[n]}\n" for n in dropped))
     if applied:
-        write_manifest(os.path.join(out_dir, MANIFEST_FILE), [m for m in batch if m.number not in builder.deferred])
+        tried = set(builder.attempted)
+        write_manifest(os.path.join(out_dir, MANIFEST_FILE),
+                       [m for m in batch if m.number in tried and m.number not in builder.deferred])
         git("update-ref", BUNDLE_REF, tip)
         git("bundle", "create", os.path.join(out_dir, BUNDLE_FILE), BUNDLE_REF, f"^{base}")
     return applied
@@ -1679,6 +1700,9 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
         git("fetch", "-q", bundle, f"+{BUNDLE_REF}:refs/merge-train/bundle")
         tip = git("rev-parse", "refs/merge-train/bundle").stdout.strip()
         v = verify_bundle_train(git, base, batch, tip, outputs)
+        cap = batch_cap(train, sizes, batch_size)
+        if len(v.applied) > cap:
+            raise Reject(f"train applies {len(v.applied)} member(s), over the bisect cap of {cap}", member_fault=False)
     except Reject as exc:
         log(f"::warning::train rejected: {exc}")
         if exc.member_fault:
@@ -2952,7 +2976,16 @@ def self_test() -> int:
           not fast_lane_eligible(["a"], ["a"], [], frags)[0] and not fast_lane_eligible(["a"], [], ["a"], frags)[0])
     mk = lambda *ns: [Member(n, "", "", "a" * 40, "", "") for n in ns]  # noqa: E731
     check("batch: default size", [m.number for m in select_batch(mk(1, 2, 3), {}, 2)] == [1, 2])
-    check("batch: a bisect size on the oldest caps it", [m.number for m in select_batch(mk(1, 2, 3, 4), {1: 2}, 8)] == [1, 2])
+    check("batch: a bisect size on the oldest caps it", batch_cap(mk(1, 2, 3, 4), {1: 2}, 8) == 2)
+    # NEGATIVE first (2026-10-25, #13801..#13817): halving posted `bisect size 2` on the carrier's
+    # members, but the oldest candidate (#13697, dropped by every build) and a newly armed older PR
+    # (#13710) carried none — the cap read the oldest only, and stayed at the default.
+    check("batch: a bisect size on a NON-oldest candidate still caps (oldest never rides)",
+          batch_cap(mk(1, 2, 3, 4, 5), {2: 2, 3: 2}, 8) == 2)
+    check("batch: the smallest bisect size in the window wins", batch_cap(mk(1, 2, 3), {2: 2, 3: 1}, 8) == 1)
+    check("batch: a size outside the default window does not cap", batch_cap(mk(1, 2, 3), {3: 1}, 2) == 2)
+    check("batch: the window is the default size; the cap bounds APPLIED members, not candidates",
+          [m.number for m in select_batch(mk(1, 2, 3, 4), {1: 2}, 3)] == [1, 2, 3])
     check("bisect status: only a pending `bisect size N` counts",
           bisect_size({STATUS_CONTEXT: ("pending", "bisect size 2")}) == 2
           and bisect_size({STATUS_CONTEXT: ("success", "bisect size 2")}) is None
@@ -3331,6 +3364,38 @@ def self_test() -> int:
             drain()
             check("budget livelock: once green, every member still merges through verified carriers",
                   sorted(gh.merged) == [1, 2, 4], str(gh.merged))
+            gh.reruns.clear()
+            reset()
+
+            # #13400 follow-up, the REAL 2026-10-25 sequence (#13801..#13817): the OLDEST candidate is
+            # dropped by every build (its squash is a no-op on main — #13697), so it never rides a carrier
+            # and never receives the halving status. The cap used to be read off it alone: the halved
+            # members were rebuilt into a full-size carrier again, six times in five hours.
+            gh.g("checkout", "-q", "-f", "main")
+            gh.g("merge", "-q", "--squash", "p1")
+            subprocess.run([sys.executable, SYN_GENERATOR], cwd=origin, check=True, env=base_env())
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "main already carries p1's change: p1's squash is a no-op")
+            open_only("p1", "p2", "p4")
+            tick()
+            first = max(gh.carriers.values(), key=lambda c: c["number"]) if gh.carriers else None
+            first_members = [n for n, _ in (parse_own_chain(gh.g, first["head"]["sha"]) or ("", []))[1]] if first else []
+            gh.carrier_override = {"gates (data)": "failure", "Validate manifests": "failure"}
+            gh.gate_records = {"data": [{"id": "security-checklist-money-path", "status": "failed", "failure_kind": "budget"}]}
+            settle_once()
+            s = settle_once()
+            gh.carrier_override, gh.gate_records = {}, {}
+            _, st = tick()
+            newest = max(gh.carriers.values(), key=lambda c: c["number"]) if gh.carriers else None
+            rebuilt = [n for n, _ in (parse_own_chain(gh.g, newest["head"]["sha"]) or ("", []))[1]] if newest else []
+            check("budget livelock (oldest never rides): halving converges although the oldest candidate "
+                  "carries no bisect status",
+                  first_members == [2, 4] and s["bisected"] == [[2, 4]] and bisect_of(1) is None
+                  and st == "published" and newest is not first and rebuilt == [2],
+                  f"first={first_members} s={s} st={st} rebuilt={rebuilt} sizes={[bisect_of(n) for n in (1, 2, 4)]}")
+            drain()
+            check("budget livelock (oldest never rides): both halved members still merge",
+                  sorted(gh.merged) == [2, 4], str(gh.merged))
             gh.reruns.clear()
             reset()
 
@@ -3810,7 +3875,7 @@ def self_test() -> int:
             open_only("p1", "p2")
             pub = Git(clone("publish"))
             base = live_base(gh, pub)
-            _f, batch = plan_batch(gh, pub, "o/r", base, 8)
+            _f, batch, _cap = plan_batch(gh, pub, "o/r", base, 8)
             bdir = clone("build")
             b = TrainBuilder(bdir, regen_commands=(), overlay_roots=(".github/scripts",))
             for m in batch:
