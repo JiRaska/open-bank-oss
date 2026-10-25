@@ -441,6 +441,8 @@ class ThinCalleeTest(unittest.TestCase):
     # Golden bodies captured before extraction; intentional preservation boundary.
     BODIES: ClassVar[dict] = {'build-test.sh': ('build', 'Build + test (:${{ inputs.service }})', '7d8c1749e22e575911efb4b7d3147470d64af8ef8d58aa3ed5fe9c949981c894', {'SERVICE': '${{ inputs.service }}'}), 'checkout-provider-ref.sh': ('contract', 'Check out a requested provider version only after proving it is on main', '9359271c9fbb762b315b2cc0b0da49b326d93fab2901a15e4b1ca21b294495fd', {}), 'prepare-provider-overlay.sh': ('contract', 'Check out P and overlay the provider test tree from F (equivalence-proven)', '0f445699cbeda8ff0dbad68672a9a71bc53219d33bbf96b23a43f4c9371708f0', {}), 'prewarm-images.sh': ('contract', 'Pre-warm Testcontainers image cache via ECR', '36f9392b6a9fd8ab7df2d878ba0b936420502a88fccfa77085755f22103b0bfc', {'ECR_LOGIN_OUTCOME': '${{ steps.ecr_login.outcome }}'}), 'configure-maven-mirror.sh': ('contract', 'Configure CodeArtifact Maven mirror', '8a6a6c1a11a5623f49afbd15dff4af80c338c295e695c27f7959a71aeedb15bf', {}), 'warm-gradle-cache.sh': ('contract', 'Warm Gradle dependency cache (self-heal corrupted entries)', '5c234b880455ce780fae589d39d1f91d0cd08b43644e567b7b6f88c8a691bd44', {'SERVICE': '${{ inputs.service }}'}), 'publish-consumer-pacts.sh': ('contract', 'Publish consumer pacts to broker', '6bdbc08d0209bd0dd7c545679063a38479c14b3e835ceab2f744ab1ea9d3844f', {'SERVICE': '${{ inputs.service }}'}), 'discover-provider-task.sh': ('contract', 'Discover provider Pact task', 'e78a0cf60a5611406644949246814eda227c7d6c91534cfd74341ed2c32560a1', {'REQUIRE_PROVIDER_PACT_TEST': '${{ inputs.require_provider_pact_test }}'}), 'preflight-pact-broker.sh': ('contract', 'Preflight Pact Broker selector/HAL response', '771d0c340377a6d4d43e0d19a7a0648ac79b39783e3a51469df9979d92565049', {})}
 
+    BODIES['render-coverage-report.sh'] = ('build', 'Generate Kover XML report', '51c948df0397703c3039daf387f172b0e0028e159ab4b797b96830f459f614e0', {'SERVICE': '${{ inputs.service }}'})
+
     def test_exact_bodies_and_explicit_environment(self):
         import hashlib
         import subprocess
@@ -457,7 +459,11 @@ class ThinCalleeTest(unittest.TestCase):
                 self.assertNotIn('${{', body)
                 subprocess.run(['bash', '-n', str(path)], check=True)
                 step = next(s for s in workflow['jobs'][job]['steps'] if s.get('name') == name)
-                self.assertEqual(step['run'], f'bash -e "$SERVICE_CI_HELPERS/{filename}"')
+                expected = f'bash -e "$SERVICE_CI_HELPERS/{filename}"'
+                if filename == 'render-coverage-report.sh':
+                    expected = 'timeout --kill-after=10s 600s ' + expected
+                    self.assertTrue(step['continue-on-error'])
+                self.assertEqual(step['run'], expected)
                 for key, expression in bindings.items():
                     self.assertEqual(step['env'][key], expression)
 
@@ -635,6 +641,87 @@ class ThinCalleeTest(unittest.TestCase):
                 if expected == 0:
                     self.assertEqual(output.read_text().strip(),
                                      'available=' + str(owns_test and has_task).lower())
+
+
+class CoverageReportTaskDiscoveryTests(unittest.TestCase):
+    def run_report(self, tasks, *, module='openbank-libs-runtime', raw=True, discovery_rc=0, report_rc=0):
+        import os
+        import subprocess
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        raw_file = root / module / 'build/kover/bin-reports/test.ic'
+        if raw:
+            raw_file.parent.mkdir(parents=True)
+            raw_file.write_bytes(b'immutable-enforcing-coverage')
+        fake = root / 'gradlew'
+        fake.write_text('''#!/usr/bin/env python3
+import json, os, pathlib, sys
+log = pathlib.Path('calls.json')
+calls = json.loads(log.read_text()) if log.exists() else []
+calls.append(sys.argv[1:]); log.write_text(json.dumps(calls))
+if any(a.endswith(':openbankCoverageReportTestTasks') for a in sys.argv):
+    init = pathlib.Path(sys.argv[sys.argv.index('--init-script') + 1])
+    pathlib.Path('discovery-init.gradle').write_text(init.read_text())
+    if int(os.environ['DISCOVERY_RC']): sys.exit(int(os.environ['DISCOVERY_RC']))
+    print('OPENBANK_COVERAGE_TEST_TASKS=' + os.environ['TASK_PLAN'])
+else:
+    sys.exit(int(os.environ['REPORT_RC']))
+''')
+        fake.chmod(0o700)
+        env = dict(os.environ, SERVICE=module, TASK_PLAN=json.dumps(tasks),
+                   DISCOVERY_RC=str(discovery_rc), REPORT_RC=str(report_rc), RUNNER_TEMP=str(root))
+        helper = graph.ROOT / '.github/scripts/service-ci-steps/render-coverage-report.sh'
+        result = subprocess.run(['bash', str(helper)], cwd=root, env=env, capture_output=True, text=True)
+        calls_file = root / 'calls.json'
+        calls = json.loads(calls_file.read_text()) if calls_file.exists() else []
+        if raw:
+            self.assertEqual(raw_file.read_bytes(), b'immutable-enforcing-coverage')
+        self.assertFalse(list(root.glob('coverage-report.*')), 'temporary discovery scripts must be removed')
+        return result, calls, root
+
+    def test_library_does_not_exclude_nonexistent_provider_or_native_tasks(self):
+        result, calls, root = self.run_report([':openbank-libs-runtime:test'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 2)
+        exclusions = [calls[1][i + 1] for i, arg in enumerate(calls[1]) if arg == '--exclude-task']
+        self.assertEqual(exclusions, [':openbank-libs-runtime:test'])
+        self.assertIn('tasks.withType(org.gradle.api.tasks.testing.Test)',
+                      (root / 'discovery-init.gradle').read_text())
+        self.assertIn(':openbank-libs-runtime:koverXmlReport', calls[1])
+
+    def test_service_excludes_every_discovered_test_variant_without_running_tests(self):
+        tasks = [f':openbank-document-service:{name}' for name in
+                 ['test', 'providerPactTest', 'quarkusIntTest', 'testNative', 'customDatabaseTest']]
+        result, calls, _ = self.run_report(tasks, module='openbank-document-service')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([calls[1][i + 1] for i, arg in enumerate(calls[1]) if arg == '--exclude-task'], tasks)
+        self.assertNotIn('--rerun-tasks', calls[1])
+
+    def test_missing_coverage_data_never_starts_gradle(self):
+        result, calls, _ = self.run_report([':openbank-libs-runtime:test'], raw=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, [])
+
+    def test_invalid_discovery_never_renders_empty_or_foreign_evidence(self):
+        for tasks in [[], [':other:test'], [':openbank-libs-runtime:test'] * 2,
+                      [':openbank-libs-runtime:providerPactTest'],
+                      [':openbank-libs-runtime:test', ':openbank-libs-runtime:test;touch marker']]:
+            with self.subTest(tasks=tasks):
+                result, calls, _ = self.run_report(tasks)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(len(calls), 1)
+
+    def test_discovery_error_is_not_a_successful_report(self):
+        result, calls, _ = self.run_report([':openbank-libs-runtime:test'], discovery_rc=23)
+        self.assertEqual(result.returncode, 23)
+        self.assertEqual(len(calls), 1)
+
+    def test_report_failure_is_propagated(self):
+        result, calls, _ = self.run_report([':openbank-libs-runtime:test'], report_rc=24)
+        self.assertEqual(result.returncode, 24)
+        self.assertEqual(len(calls), 2)
 
 
 if __name__ == '__main__':
