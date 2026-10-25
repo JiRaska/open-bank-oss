@@ -3156,6 +3156,7 @@ gates:
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
       python3 .github/scripts/test-merge-train-owner-approval.py
+      python3 .github/scripts/e2e/merge-train-gates-yaml.test.py
     selftest_expect: pass
     # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
     # every workflow, so a PR adding a carrier- or ruleset-judging check script must re-run it (#13750).
