@@ -33,8 +33,9 @@ import java.time.LocalDate
  * Day-close participation (ADR-0342).
  *
  * - `PUT …/{participant}` — a product service reports its outcome for the day. Admitted under
- *   `ledger.create`, the grant each participant already holds to post journals; the use case then
- *   narrows it to the ONE service-account declared for that participant.
+ *   its own action `ledger.close.participate` (never the generic `ledger.create`), which
+ *   `ledger_rest_ext.rego` grants each participant account for its OWN participant name only; the
+ *   use case then checks the verified caller is the ONE service-account declared for it.
  * - `PUT …/{participant}/waiver` — an operator records that a missing participant is not required
  *   for this day. `ledger.approve`, like every other day transition.
  * - `GET` — the day's completeness: every declared participant with its latest record, or MISSING.
@@ -74,7 +75,9 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
     @PUT
     @Path("/{participant}")
     @RolesAllowed(Roles.API)
-    @Authorize(action = "ledger.create", resource = "#participant")
+    // Its own action (#13167 review): a participant principal may report its day without holding a
+    // generic journal-create grant. ledger_rest_ext.rego binds each account to its one participant.
+    @Authorize(action = "ledger.close.participate", resource = "#participant")
     @Operation(summary = "Report a product service's day-close outcome (RAN, SKIPPED or REFUSED)")
     suspend fun report(
         @PathParam("businessDate") businessDate: String,

@@ -194,6 +194,13 @@ openbank:
       # `enabled`, so flipping the scheduler on for a scoped manual run can never fan out.
       discovery-enabled: "${BILLING_SCHEDULER_DISCOVERY_ENABLED:false}"
       discovery-page-size: "${BILLING_SCHEDULER_DISCOVERY_PAGE_SIZE:100}"
+    # Day-close participation (ADR-0342, #13167): BillingCloseParticipationScheduler reports each
+    # completed accounting day (RAN / SKIPPED / REFUSED, from billing_close_job_run plus the cycle's
+    # fee posting status) to ledger-service as participant `billing`, re-offering the last
+    # `lookback-days` days every tick. Runs even while the cycle is off: those days report SKIPPED.
+    close:
+      report-cron: "${BILLING_CLOSE_REPORT_CRON:0 50 * * * ?}"
+      lookback-days: "${BILLING_CLOSE_LOOKBACK_DAYS:3}"
     annual-fee-summary:
       scheduler:
         # ADR-0248. Disabled by default — see AnnualFeeSummaryScheduler's class KDoc for why this

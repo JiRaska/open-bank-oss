@@ -240,8 +240,15 @@ diff_deploy_holds() {
 import sys, yaml
 def held(path):
     with open(path) as f:
-        doc = yaml.safe_load(f) or {}
-    services = ((doc.get("deploy_holds") or {}).get("services")) or {}
+        doc = yaml.safe_load(f)
+    # Fail closed: an empty body parses to None, which would read as "no holds".
+    if not isinstance(doc, dict) or not doc:
+        raise SystemExit("rules.yaml is empty or not a mapping: " + path)
+    if "deploy_holds" not in doc or not isinstance(doc["deploy_holds"], dict):
+        raise SystemExit("deploy_holds missing or not a map: " + path)
+    services = doc["deploy_holds"].get("services")
+    if services is None:
+        services = {}
     if not isinstance(services, dict):
         raise SystemExit("deploy_holds.services is not a map")
     return set(services)
@@ -1033,6 +1040,51 @@ HOOK
     echo "self-test case 48 OK (>200 KiB rules.yaml diffed by file -> rc=0, openbank-fraud-service)"
   fi
   rm -rf "$bigd"
+
+  # case 48b — platform-independent E2BIG guard: the hold check must receive FILE PATHS whose
+  # content is the fetched rules.yaml, never the content in argv/env (Linux caps one string at
+  # 128 KiB, macOS does not, so a size-based test cannot see a revert there).
+  local fk fkd fkrc
+  fkd="$(mktemp -d)"
+  mkdir "$fkd/bin"
+  cat >"$fkd/bin/gh" <<'GHSTUB'
+#!/bin/bash
+case "$*" in
+  *"pr view"*) echo 0123456789012345678901234567890123456789 ;;
+  *) printf 'deploy_holds:\n  services: {}\n' ;;
+esac
+GHSTUB
+  cat >"$fkd/py" <<'PYSTUB'
+#!/bin/bash
+# stub python3: records whether its two trailing args are readable files holding a mapping doc
+shift 2
+[ -f "$1" ] && [ -f "$2" ] && grep -q '^deploy_holds:' "$1" && grep -q '^deploy_holds:' "$2" && exit 0
+echo "hold check got non-file args" >&2; exit 97
+PYSTUB
+  chmod +x "$fkd/bin/gh" "$fkd/py"
+  # shellcheck disable=SC2031
+  ( export PATH="$fkd/bin:$PATH" REPO=fixture/repo DEPLOY_HOLD_PYTHON="$fkd/py"; unmigrated_branch_holds 1 ) >/dev/null 2>&1 && fkrc=0 || fkrc=$?
+  if [ "$fkrc" -ne 0 ]; then
+    echo "SELF-TEST FAIL case 48b: hold check was not invoked with readable rules.yaml file paths; rc=$fkrc"; ok=1
+  else
+    echo "self-test case 48b OK (hold check invoked with file paths)"
+  fi
+  # case 48c — empty body and malformed YAML must be non-zero (fail closed), not "no holds".
+  for fk in empty malformed scalar nodeploy_holds; do
+    case "$fk" in
+      empty) : >"$fkd/a.yaml" ;;
+      malformed) printf 'deploy_holds: [unclosed\n  - : :\n' >"$fkd/a.yaml" ;;
+      scalar) printf 'just a string\n' >"$fkd/a.yaml" ;;
+      nodeploy_holds) printf 'other: 1\n' >"$fkd/a.yaml" ;;
+    esac
+    printf 'deploy_holds:\n  services: {}\n' >"$fkd/b.yaml"
+    diff_deploy_holds "$fkd/a.yaml" "$fkd/b.yaml" >/dev/null 2>&1 && fkrc=0 || fkrc=$?
+    [ "$fkrc" -ne 0 ] || { echo "SELF-TEST FAIL case 48c: $fk branch rules.yaml read as no-holds (rc=0)"; ok=1; }
+    diff_deploy_holds "$fkd/b.yaml" "$fkd/a.yaml" >/dev/null 2>&1 && fkrc=0 || fkrc=$?
+    [ "$fkrc" -ne 0 ] || { echo "SELF-TEST FAIL case 48c: $fk main rules.yaml read as no-holds (rc=0)"; ok=1; }
+  done
+  echo "self-test case 48c checked (empty/malformed/scalar/no deploy_holds -> non-zero)"
+  rm -rf "$fkd"
 
   # case 29 — producer-run isolation (#13460) suffixes every branch with `-run<id>`. The sha must
   # still parse, or KEEP_SHA is empty and every run classifies every predecessor SKIP — measured on

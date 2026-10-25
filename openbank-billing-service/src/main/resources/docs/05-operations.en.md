@@ -71,6 +71,30 @@ every line. There is no rollback by configuration alone: set `OPENBANK_BILLING_L
 and only then roll the ledger back. Rolling the ledger back first fails every posting until Billing is
 redeployed.
 
+## Day-close participation (ADR-0342, #13167)
+
+Billing reports each completed Prague accounting day to ledger-service as participant `billing`
+(`BillingCloseParticipationScheduler`, hourly at :50; `openbank.billing.close.report-cron`, lookback
+`openbank.billing.close.lookback-days`, default 3), on its own identity (named oidc-client `m2m`,
+Keycloak `openbank-billing`), authorized by the ledger as `ledger.close.participate` for `billing` only.
+
+| Day state | What is reported |
+|---|---|
+| the cycle is not due (not the cron's day), or the sweep is off | SKIPPED with the reason |
+| the cycle was due and has no `billing_close_job_run` row, or a fee of the cycle is still PENDING | nothing yet - the ledger holds the day |
+| cycle ran, every fee booked | RAN (journals = POSTED/reversed fees) |
+| accounts failed to assess, sweep aborted, or a fee ended FAILED | REFUSED with a fixed category |
+
+**Missed cycle.** The cron fires once a month in Europe/Prague. `BillingCycleScheduler.catchUp`
+(every `openbank.billing.scheduler.catch-up-every`, default 15m, first 2m after boot) runs the sweep
+for the due day when the cron has already fired this month and no cycle run is recorded. It is
+idempotent by cycle id and never overlaps a running sweep.
+
+**Fee refused into a closed day.** A `409 ACCOUNTING_DAY_CLOSED` marks the fee FAILED at once and
+increments `openbank_billing_fee_post_closed_day_refusals_total`. Alert `BillingFeeRefusedIntoClosedDay`
+fires. Recover with runbook `0033-billing-fee-refused-into-closed-day.md` (four-eyes re-bill under a new
+key recorded in `billing_fee_rebill`).
+
 ## Product-IR shadow comparator (ADR-0352 phase 3)
 
 Billing still decides every fee the legacy way; the shadow only measures. `openbank.billing.product-ir.decision-mode` is `shadow` (default and the only accepted value); `ir`, the ADR-0352 §9 switch, is refused at boot until it is built. `ProductShadowScheduler` runs every `openbank.billing.product-shadow.every` (default 5 minutes, on by default) and re-decides committed assessments with the product IR of the account's pinned revision. It reads the IR and its signature from product-catalog once per revision and keeps a local immutable copy; the posting path never calls the catalog for it.
