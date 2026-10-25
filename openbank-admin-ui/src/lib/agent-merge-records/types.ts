@@ -24,6 +24,7 @@ export interface AgentMergeRecord {
   headSha?: string | null
   mergeCommitSha?: string | null
   authorization?: MergeAuthorization | null
+  policyAuthorization?: PolicyMergeAuthorization | null
   mergedAt: string
   title: string
   proposalId: string | null
@@ -45,6 +46,13 @@ export interface MergeAuthorization {
   mergeEventNodeId?: string | null
   mergeEventAt?: string | null
   observedAt?: string | null
+}
+
+export interface PolicyMergeAuthorization extends Omit<MergeAuthorization, 'kind' | 'scope'> {
+  kind: 'POLICY_PR_AUTO_MERGE'
+  scope: 'PR'
+  policyCommitSha: string
+  policyBlobSha: string
 }
 
 export interface AgentMergeRecordParseResult {
@@ -73,8 +81,16 @@ function appEvidence(record: Record<string, unknown>, repo: string): boolean {
   if (record.mergedBy !== 'openbank-gitops-bot[bot]' || !positiveId(record.mergedById) ||
     typeof record.headSha !== 'string' || !/^[0-9a-f]{40}$/.test(record.headSha) ||
     typeof record.mergeCommitSha !== 'string' || !/^[0-9a-f]{40}$/.test(record.mergeCommitSha) ||
-    typeof record.authorization !== 'object' || record.authorization === null || Array.isArray(record.authorization)) return false
-  const proof = record.authorization as Record<string, unknown>
+    (record.authorization != null && record.policyAuthorization != null)) return false
+  const raw = record.policyAuthorization ?? record.authorization
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false
+  const proof = raw as Record<string, unknown>
+  const policy = record.policyAuthorization != null
+  if (policy && (proof.kind !== 'POLICY_PR_AUTO_MERGE' ||
+    typeof proof.policyCommitSha !== 'string' || !/^[0-9a-f]{40}$/.test(proof.policyCommitSha) ||
+    typeof proof.policyBlobSha !== 'string' || !/^[0-9a-f]{40}$/.test(proof.policyBlobSha) ||
+    (record.headBranch as string).startsWith('codex/'))) return false
+  if (!policy && (proof.policyCommitSha != null || proof.policyBlobSha != null)) return false
   if (typeof proof.approvedBy !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(proof.approvedBy) ||
     !positiveId(proof.approvedById) || !instant(proof.approvedAt) ||
     Date.parse(proof.approvedAt) > Date.parse(record.mergedAt as string)) return false
@@ -83,8 +99,8 @@ function appEvidence(record: Record<string, unknown>, repo: string): boolean {
       proof.evidenceUrl === `https://github.com/${repo}/actions/runs/${proof.workflowRunId}` &&
       [proof.pullRequestNodeId, proof.mergeEventNodeId, proof.mergeEventAt, proof.observedAt].every(v => v == null)
   }
-  if (proof.kind !== 'LEGACY_PR_AUTO_MERGE' || proof.scope !== 'PR' ||
-    Date.parse(record.mergedAt as string) > Date.parse('2026-10-23T19:42:17Z') ||
+  if ((!policy && proof.kind !== 'LEGACY_PR_AUTO_MERGE') || proof.scope !== 'PR' ||
+    (!policy && Date.parse(record.mergedAt as string) > Date.parse('2026-10-23T19:42:17Z')) ||
     proof.evidenceUrl !== record.prUrl || proof.statusId != null || proof.workflowRunId != null ||
     !nonEmpty(proof.pullRequestNodeId) || !nonEmpty(proof.mergeEventNodeId) ||
     !instant(proof.mergeEventAt) || !instant(proof.observedAt)) return false
@@ -116,7 +132,7 @@ export function parseAgentMergeRecord(value: unknown): AgentMergeRecord | null {
   const actor = record.mergedByType ?? 'HUMAN'
   if (actor === 'GITHUB_APP') {
     if (!appEvidence(record, pr[1])) return null
-  } else if (actor !== 'HUMAN' || record.mergedByType === null || record.authorization != null ||
+  } else if (actor !== 'HUMAN' || record.mergedByType === null || record.authorization != null || record.policyAuthorization != null ||
     !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(record.mergedBy as string)) return null
   // proposalId is optional upstream (a GitHub webhook knows PR numbers, not proposal ids) —
   // normalise an absent value to null so downstream rendering never sees undefined.

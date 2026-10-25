@@ -8,7 +8,7 @@ openapi: "3.1.0"
 info:
   title: OpenBank Agent Service API (MCP)
 
-  version: "1.17.0"
+  version: "1.18.0"
   description: |
     Model Context Protocol (MCP) 2.0 server exposing OpenBank domain operations as AI-callable tools.
     All requests use JSON-RPC 2.0 over HTTP POST `/mcp`.
@@ -425,6 +425,38 @@ paths:
         "409":
           description: The stored executor, source, or authorization conflicts with the request
 
+  /api/v1/agent-merge-records/app-policy:
+    post:
+      tags:
+      - merge-records
+      operationId: recordPolicyAuthorizedAppMerge
+      summary: Record a GitHub App merge with an observed owner PR request and immutable policy context
+      description: ROLE_MERGE_RECORDER only. Requires PR-scoped owner intent, matching actual App merge event, and immutable
+        first-parent policy commit/blob context. This is neither exact-head approval nor a certificate of historical policy
+        compliance. Codex branches require exact-head approval. Conflicting retries return 409; original observation times
+        are retained.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyAppMergeRecordIngestRequest'
+      responses:
+        '200':
+          description: The durable merge record; inserted is false for an identical redelivery
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MergeRecordDto'
+        '400':
+          description: Missing, invalid, or inconsistent App provenance
+        '401':
+          description: Authentication required
+        '403':
+          description: Authenticated principal lacks ROLE_MERGE_RECORDER
+        '409':
+          description: The stored executor, source, or authorization conflicts with the request
+
   /api/v1/agent-merge-records/capabilities:
     get:
       tags: [merge-records]
@@ -440,6 +472,7 @@ paths:
                 required: [evidenceSchemaVersion]
                 properties:
                   evidenceSchemaVersion: {type: integer, enum: [2]}
+                  policyPrAuthorization: {type: boolean, description: True when the separate policy PR endpoint and read-back slot are supported.}
         "401":
           description: Authentication required
         "403":
@@ -1073,6 +1106,9 @@ components:
         authorization:
           $ref: '#/components/schemas/MergeAuthorization'
           description: Required separate human authorization evidence; never substitutes the actual merge executor.
+        policyAuthorization:
+          type: "null"
+          description: The policy proof uses /app-policy; mixed non-null proof families are rejected.
         mergedAt:
           type: string
           format: date-time
@@ -1087,6 +1123,133 @@ components:
           type: string
           nullable: true
           description: Ingest origin, e.g. "github-actions". Defaults to "unknown".
+
+    PolicyMergeAuthorization:
+      type: object
+      required:
+      - approvedBy
+      - approvedById
+      - approvedAt
+      - evidenceUrl
+      - kind
+      - scope
+      - pullRequestNodeId
+      - mergeEventNodeId
+      - mergeEventAt
+      - observedAt
+      - policyCommitSha
+      - policyBlobSha
+      description: Observed owner PR auto-merge request under a recognized pre-merge prefix rule. Immutable policy context
+        is not proof of the workflow code actually executed, exact-head approval, or complete historical governance compliance.
+      properties:
+        approvedBy:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$
+        approvedById:
+          type: integer
+          format: int64
+          minimum: 1
+        approvedAt:
+          type: string
+          format: date-time
+          description: Human approval time, no later than mergedAt.
+        evidenceUrl:
+          type: string
+          description: Canonical trusted workflow run URL for exact-head evidence, or this PR URL for legacy evidence.
+        statusId:
+          type: 'null'
+        workflowRunId:
+          type: 'null'
+        kind:
+          type: string
+          enum:
+          - POLICY_PR_AUTO_MERGE
+        scope:
+          type: string
+          enum:
+          - PR
+        pullRequestNodeId:
+          type: string
+          minLength: 1
+        mergeEventNodeId:
+          type: string
+          minLength: 1
+        mergeEventAt:
+          type: string
+          format: date-time
+        observedAt:
+          type: string
+          format: date-time
+        policyCommitSha:
+          type: string
+          pattern: ^[0-9a-f]{40}$
+        policyBlobSha:
+          type: string
+          pattern: ^[0-9a-f]{40}$
+    PolicyAppMergeRecordIngestRequest:
+      type: object
+      required:
+      - agentId
+      - prNumber
+      - prUrl
+      - headBranch
+      - mergedBy
+      - mergedAt
+      - title
+      - mergedByType
+      - mergedById
+      - headSha
+      - mergeCommitSha
+      - policyAuthorization
+      properties:
+        agentId:
+          type: string
+          description: The declared agent id (e.g. "flaky-test-hunter"), derived from the PR head branch prefix/author by
+            the caller.
+        prNumber:
+          type: integer
+          format: int64
+          description: "The GitHub PR number \u2014 the idempotency key; a redelivery returns the stored record."
+        prUrl:
+          type: string
+        headBranch:
+          type: string
+        mergedBy:
+          type: string
+          description: The actual merge executor login, preserved independently of the human approver.
+        mergedByType:
+          type: string
+          enum:
+          - GITHUB_APP
+          description: This endpoint records only the actual trusted GitHub App executor.
+        mergedById:
+          type: integer
+          format: int64
+          minimum: 1
+        headSha:
+          type: string
+          pattern: ^[0-9a-f]{40}$
+        mergeCommitSha:
+          type: string
+          pattern: ^[0-9a-f]{40}$
+        mergedAt:
+          type: string
+          format: date-time
+        title:
+          type: string
+        proposalId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Links the agent_proposal row when the caller can establish it.
+        source:
+          type: string
+          nullable: true
+          description: Ingest origin, e.g. "github-actions". Defaults to "unknown".
+        authorization:
+          type: 'null'
+        policyAuthorization:
+          $ref: '#/components/schemas/PolicyMergeAuthorization'
 
     MergeRecordDto:
       type: object
@@ -1125,7 +1288,12 @@ components:
           anyOf:
             - $ref: '#/components/schemas/MergeAuthorization'
             - type: "null"
-          description: Required for GITHUB_APP, prohibited for HUMAN. Ingested by the trusted recorder, not user identity substitution.
+          description: Existing exact-head or legacy proof. Null when the separate policyAuthorization proof is present; prohibited for HUMAN. Ingested by the trusted recorder, not user identity substitution.
+        policyAuthorization:
+          anyOf:
+            - $ref: '#/components/schemas/PolicyMergeAuthorization'
+            - type: "null"
+          description: Separate PR-scoped policy proof. Exactly one proof family is present for an App row.
         mergedAt:
           type: string
           format: date-time
