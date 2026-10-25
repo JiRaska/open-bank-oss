@@ -5,6 +5,11 @@
 package com.openbank.transaction.infrastructure.client
 
 import com.openbank.libs.testing.oidc.M2mOidcClientIdentityWiringConformance
+import io.quarkus.oidc.client.filter.OidcClientFilter
+import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
+import org.junit.jupiter.api.Test
 
 /**
  * #10486 batch 2: this service's money-path writes are made as its OWN principal,
@@ -20,4 +25,17 @@ class M2mOidcClientIdentityWiringTest : M2mOidcClientIdentityWiringConformance()
     override val clientId = "openbank-transaction"
 
     override val namedClients: List<Class<*>> = listOf(LedgerRestClient::class.java, BalanceCoverRestClient::class.java)
+
+    @Test
+    fun `the not-yet-migrated rest-clients keep the default (shared) client`() {
+        listOf(FxServiceRestClient::class.java).forEach { client ->
+            assertThat(providers(client))
+                .describedAs("%s still uses the default (shared) client", client.simpleName)
+                .contains(OidcClientRequestReactiveFilter::class.java)
+            assertThat(client.getAnnotation(OidcClientFilter::class.java)).isNull()
+        }
+    }
+
+    private fun providers(type: Class<*>): List<Class<*>> =
+        type.getAnnotationsByType(RegisterProvider::class.java).map { it.value.java }
 }
