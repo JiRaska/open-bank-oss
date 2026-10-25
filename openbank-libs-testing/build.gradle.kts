@@ -71,10 +71,9 @@ dependencies {
     // quarkus-vertx: VertxContextSupport (reactive Panache needs a Vert.x duplicated context).
     // quarkus-messaging-kafka: OutgoingKafkaRecordMetadata (kafka-api), for reading the produced
     // record's key/headers back out of the in-memory connector's sink.
-    // No Quarkus BOM here (this module isn't a Quarkus service), so pinned directly, matching
-    // libs.versions.toml's quarkus = "3.33.2".
-    api("io.quarkus:quarkus-vertx:3.33.2")
-    api("io.quarkus:quarkus-messaging-kafka:3.33.2")
+    // This plain JVM library reads Quarkus versions from the shared platform catalog.
+    api("io.quarkus:quarkus-vertx:${libs.versions.quarkus.asProvider().get()}")
+    api("io.quarkus:quarkus-messaging-kafka:${libs.versions.quarkus.asProvider().get()}")
     // Bridges a Kotlin suspend block into the Uni VertxContextSupport.subscribeAndAwait expects
     // (io.smallrye.mutiny.coroutines.uni), matching LedgerOutboxDispatchIT's own pattern.
     api("io.smallrye.reactive:mutiny-kotlin:3.1.1")
@@ -86,14 +85,12 @@ dependencies {
     // which transitively brings quarkus-test-common) + the container types the canonical
     // Postgres*TestResource classes provision. No Quarkus BOM here either; a consuming
     // service's own enforcedPlatform(libs.quarkus.bom) aligns final resolved versions.
-    // Version pinned directly (no version.ref on this catalog alias — every other consumer
-    // relies on enforcedPlatform(libs.quarkus.bom), which this non-Quarkus module doesn't
-    // apply). Matches libs.versions.toml's quarkus = "3.33.2".
+    // Read the version from the catalog even without a service's enforced platform.
     // quarkus-test-common (not the heavier quarkus-junit5) — just enough for
     // QuarkusTestResourceLifecycleManager / ResourceArg, without quarkus-junit5's full
     // RestAssured + JUnit5-extension transitive graph, which pulled in an older docker-java
     // that shadowed this module's own constraint below.
-    api("io.quarkus:quarkus-test-common:3.33.2")
+    api("io.quarkus:quarkus-test-common:${libs.versions.quarkus.asProvider().get()}")
     api(libs.testcontainers)
     api(libs.testcontainers.postgresql)
     api(libs.testcontainers.redpanda)
