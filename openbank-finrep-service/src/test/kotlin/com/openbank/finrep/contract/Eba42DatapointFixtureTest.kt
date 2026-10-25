@@ -33,7 +33,7 @@ class Eba42DatapointFixtureTest {
         assertThat(EbaReportingFramework42.TAXONOMY_VERSION).isEqualTo(fixture["taxonomyVersion"].asText())
         assertThat(fixture["taxonomyPackageSha256"].asText())
             .isEqualTo("0bf9e33720de1472e809417999cfd29e4b5eadb31750c7770622e502590bbdd0")
-        assertThat(fixture["supportedFacts"]).hasSize(33)
+        assertThat(fixture["supportedFacts"]).hasSize(36)
         assertThat(fixture["supportedFacts"].map { it["meaning"].asText() })
             .contains("TOTAL ASSETS", "TOTAL LIABILITIES", "TOTAL EQUITY", "PROFIT OR LOSS FOR THE YEAR")
 
@@ -58,6 +58,13 @@ class Eba42DatapointFixtureTest {
         }
 
         assertThat(actual).containsExactlyElementsOf(expected)
+    }
+
+    @Test
+    fun `a coordinate outside the pinned fixture is notFound and never a supported fact`() {
+        val supported = fixture["supportedFacts"].map { it["templateId"].asText() to it["rowRef"].asText() }
+
+        assertThat(supported).doesNotContain("F99.99" to "r0010", "F01.01" to "r9999")
     }
 
     private fun line(code: String, accountType: String, net: String) = TrialBalanceLineDto(

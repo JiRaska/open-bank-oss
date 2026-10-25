@@ -14,8 +14,10 @@ WHAT IT CHECKS — only when the PR diff touches a `money_path_services` directo
 (read from rules.yaml, the one list, so the two-lists-drift bug class cannot apply):
   * the PR body keeps a "## Security checklist" section (deleting the section is a
     finding, same as leaving it blank — otherwise the fix is "delete the question");
-  * every checkbox inside that section is ticked (`[x]`/`[X]`). An unticked box is
-    listed verbatim in the error, so the author ticks it or states why in the PR.
+  * when human judgement is needed, all six canonical question categories are present;
+  * every human-judgement checkbox is ticked (`[x]`/`[X]`), except a negative
+    cardholder answer may remain unticked with a specific, same-line exception
+    when no cardholder-named path, cardholder field or sensitive-path declaration changes.
 
 Deliberately NOT checked: the checkboxes' truthfulness (CI cannot know whether the
 author really ran a secrets sweep — the control is the pause, not the proof) and
@@ -106,10 +108,37 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import merge_train_carrier as carrier_lib  # noqa: E402  (sibling module; scripts run as files)
+
 RULES = Path("openbank-libs/governance/rules.yaml")
 SECTION = re.compile(r"^##\s+Security checklist\s*$", re.M | re.I)
 NEXT_HEADING = re.compile(r"^##\s+", re.M)
 BOX = re.compile(r"^\s*-\s*\[(?P<mark>[ xX])\]\s*(?P<text>.*)$", re.M)
+PCI_NEGATIVE = re.compile(
+    r"^Cardholder data path changed\? → tag `pci-review-required`\.\s+"
+    r"Exception: No cardholder data path changed;\s+(?P<reason>\S.*)$"
+)
+PCI_FIELD = re.compile(
+    r"(?i:\b(?:pan|masked_?pan|cvv2?|cvc2?|card_?(?:number|token|data)|cardholder_?data|cardholder|"
+    r"primary_?account_?number|track_?2)(?:_[a-z0-9]+)*\b)"
+    r"|\b[a-z]+(?:Pan|PAN|Card|Cvv|Cvc|CVV|CVC)(?:[A-Z][A-Za-z0-9]*)?\b"
+    r"|\b(?:Pan|PAN|Card|Cvv|Cvc|CVV|CVC)(?:[A-Z][A-Za-z0-9]*)?\b"
+    r"|\b(?:pan|card|cardholder|cvv|cvc)[A-Z][A-Za-z0-9_]*\b"
+    r"|\b[a-z0-9_]+_(?i:pan|card|cvv|cvc|track2)(?:_[a-z0-9]+)*\b",
+)
+
+
+def negative_pci_exception(text: str, files: list[str], changed_lines: list[tuple[str, str]],
+                           declaration_changed: bool) -> bool:
+    """Accept a specific negative PCI attestation only without PCI signals on either diff side."""
+    match = PCI_NEGATIVE.fullmatch(text.strip())
+    if (not match or declaration_changed or any(CARDHOLDER.search(f) for f in files) or
+            any(PCI_FIELD.search(line) for _, line in changed_lines)):
+        return False
+    reason = match.group("reason").strip()
+    return len(reason) >= 20 and reason.lower() not in {"n/a", "not applicable", "none"}
+
 
 # Files release-please writes, and the only files a release-only PR contains. Matched on the
 # BASENAME, because each lives under its own service directory (and the manifest at the root).
@@ -145,14 +174,15 @@ PII = re.compile(
     r"email|phone|birth|/pid)", re.I)
 CARDHOLDER = re.compile(r"(card|pci|cardholder|\bpan\b|cvv|emv|tokeni[sz])", re.I)
 
-# The six template boxes, recognised by stable phrases. A box matching none is UNKNOWN → human.
+# Match only the stable leading label. Free-text reasons must not relabel a PCI box as another item.
+# A box matching none is UNKNOWN → human.
 ITEMS = (
-    ("secrets", re.compile(r"secrets", re.I)),
-    ("suppressions", re.compile(r"Suppress|as Any", re.I)),
-    ("dependency", re.compile(r"third-party dependency", re.I)),
-    ("auth", re.compile(r"Auth\s*/\s*crypto", re.I)),
-    ("pii", re.compile(r"PII path", re.I)),
-    ("cardholder", re.compile(r"Cardholder", re.I)),
+    ("secrets", re.compile(r"^No secrets\b", re.I)),
+    ("suppressions", re.compile(r"^No new (?:`@SuppressWarnings`|suppressions\b)", re.I)),
+    ("dependency", re.compile(r"^No new third-party dependency\b", re.I)),
+    ("auth", re.compile(r"^Auth\s*/\s*crypto\s*/\s*payment code changed\?", re.I)),
+    ("pii", re.compile(r"^PII path changed\?", re.I)),
+    ("cardholder", re.compile(r"^Cardholder data path changed\?", re.I)),
 )
 
 
@@ -163,14 +193,14 @@ def is_inert(path: str) -> bool:
 
 def item_of(text: str) -> str | None:
     for key, rx in ITEMS:
-        if rx.search(text):
+        if rx.match(text):
             return key
     return None
 
 
-def diff_lines(base: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+def diff_lines(base: str, head: str = "HEAD") -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """(added, removed) lines of the diff as (path, text). A deleted file's lines carry its old path."""
-    out = subprocess.run(["git", "diff", "-U0", "--no-color", f"{base}...HEAD"],
+    out = subprocess.run(["git", "diff", "-U0", "--no-color", f"{base}...{head}"],
                          capture_output=True, text=True, check=True).stdout
     cur, old, add, rem = "", "", [], []
     for ln in out.splitlines():
@@ -347,6 +377,12 @@ def decide(files: list[str], touched: list[str], added: list[tuple[str, str]],
         if not cat_hits(cat):
             ans[key] = (decl_note + f"; none matches the service's `{cat}` globs, and no non-money-path "
                         f"file in the diff matches a {what} path pattern")
+    # A sensitive field can be added to a generically named file outside the declared cardholder
+    # globs. Do not let the normal declared-path auto-answer return before examining both diff sides.
+    if any(CARDHOLDER.search(f) for f in files) or any(
+        PCI_FIELD.search(line) for _, line in added + (removed or [])
+    ):
+        ans["cardholder"] = None
     return ans
 
 
@@ -427,22 +463,37 @@ def declarations_from_text(text: str) -> dict[str, dict[str, list[str]]] | None:
     return out
 
 
-def load_declarations(root: Path) -> dict[str, dict[str, list[str]]]:
-    d = declarations_from_text((root / RULES).read_text())
+def rules_text(root: Path, ref: str = "HEAD") -> str | None:
+    """Read governance at the assessed tree; a carrier's later member must not classify an earlier one."""
+    if ref == "HEAD":
+        path = root / RULES
+        return path.read_text() if path.is_file() else None
+    shown = subprocess.run(["git", "show", f"{ref}:{RULES}"], cwd=root,
+                           capture_output=True, text=True, check=False)
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def load_declarations(root: Path, ref: str = "HEAD") -> dict[str, dict[str, list[str]]]:
+    text = rules_text(root, ref)
+    d = declarations_from_text(text) if text is not None else None
     if d is None:
-        print(f"::warning::{DECL_KEY} unreadable — every money-path service treated as undeclared (fail closed)")
+        print(f"::warning::{DECL_KEY} unreadable at {ref} — every money-path service treated as undeclared (fail closed)")
         return {}
     return d
 
 
-def declaration_changed(base: str) -> bool:
+def declaration_changed(base: str, head: str = "HEAD") -> bool:
     """True when the diff changes the declaration block (or it cannot be compared)."""
     try:
         old = subprocess.run(["git", "show", f"{base}:{RULES}"], capture_output=True, text=True,
                              check=True).stdout
     except subprocess.CalledProcessError:
         return False  # no rules.yaml at base: nothing to narrow
-    new = RULES.read_text() if RULES.exists() else ""
+    if head == "HEAD":
+        new = RULES.read_text() if RULES.exists() else ""
+    else:
+        shown = subprocess.run(["git", "show", f"{head}:{RULES}"], capture_output=True, text=True)
+        new = shown.stdout if shown.returncode == 0 else ""
     a, b = declarations_from_text(old), declarations_from_text(new)
     return a is None or b is None or a != b
 
@@ -472,12 +523,15 @@ def coverage_findings(root: Path, decls: dict[str, dict[str, list[str]]]) -> lis
     return bad
 
 
-def money_path_dirs(root: Path) -> list[str]:
-    """The one list from rules.yaml; a bare `- openbank-foo-service` under
-    `money_path_services:` — no YAML dependency for a 20-line block."""
+def money_path_dirs(root: Path, ref: str = "HEAD") -> list[str]:
+    """The one list from rules.yaml at the assessed tree; no YAML dependency for this 20-line block."""
+    text = rules_text(root, ref)
+    if text is None:
+        print(f"::error::money_path_services unreadable at {ref} — fail closed")
+        sys.exit(1)
     names: list[str] = []
     in_block = False
-    for line in (root / RULES).read_text().splitlines():
+    for line in text.splitlines():
         if line.startswith("money_path_services:"):
             in_block = True
             continue
@@ -493,9 +547,9 @@ def money_path_dirs(root: Path) -> list[str]:
     return names
 
 
-def changed_files(base: str) -> list[str]:
+def changed_files(base: str, head: str = "HEAD") -> list[str]:
     out = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}...HEAD"],
+        ["git", "diff", "--no-renames", "--name-only", f"{base}...{head}"],
         capture_output=True, text=True, check=True,
     )
     return [ln for ln in out.stdout.splitlines() if ln]
@@ -514,13 +568,13 @@ def unticked(body: str) -> tuple[str, list[str]] | None:
 
 
 def run(root: Path, body: str, base: str, enforce: bool,
-        live_body: Callable[[], str | None] | None = None) -> int:
-    dirs = money_path_dirs(root)
-    files = changed_files(base)
+        live_body: Callable[[], str | None] | None = None, head: str = "HEAD") -> int:
+    dirs = money_path_dirs(root, head)
+    files = changed_files(base, head)
     in_money_path = [f for f in files if any(f == d or f.startswith(d + "/") for d in dirs)]
     touched = [f for f in in_money_path if not is_release_derived(f)]
     derived = len(in_money_path) - len(touched)
-    decl_changed = declaration_changed(base)
+    decl_changed = declaration_changed(base, head)
     if decl_changed:
         print(f"security-checklist: rules.yaml `{DECL_KEY}` changed — governance change, the auth, PII "
               "and cardholder items need a human tick regardless of which files moved")
@@ -539,11 +593,11 @@ def run(root: Path, body: str, base: str, enforce: bool,
     print(f"security-checklist: {len(touched)} money-path file(s) touched "
           f"({', '.join(sorted({t.split('/')[0] for t in touched}))})")
 
-    decls = load_declarations(root)
+    decls = load_declarations(root, head)
     for svc in sorted({t.split("/")[0] for t in touched if not is_inert(t)}):
         print(f"security-checklist: {svc}: " + (f"declared in {DECL_KEY}" if svc in decls
               else f"NOT declared in {DECL_KEY} — judgement items fail closed"))
-    add, rem = diff_lines(base)
+    add, rem = diff_lines(base, head)
     answers = decide(files, touched, add, decls, decl_changed, removed=rem)
     auto = {k: v for k, v in answers.items() if v is not None}
     human = [k for k, v in answers.items() if v is None]
@@ -590,23 +644,104 @@ def run(root: Path, body: str, base: str, enforce: bool,
               "A PR created with `gh pr create --body-file` never gets the template automatically.")
         _write_summary(summary)
         return 1 if enforce else 0
-    _, missing = res
-    required = [t for t in missing if item_of(t) is None or item_of(t) in human]
+    section, missing = res
+    # Count distinct canonical categories, never arbitrary checked boxes or duplicate labels.
+    # Auto-answered categories may remain unticked, but cannot replace an omitted question.
+    present = {item_of(b.group("text").strip()) for b in BOX.finditer(section)}
+    absent = [key for key, _ in ITEMS if key not in present]
+    if absent:
+        print("::error::Security checklist is incomplete; restore these canonical categories "
+              "from .github/PULL_REQUEST_TEMPLATE.md: " + ", ".join(absent))
+        summary.append("\nMissing canonical categories: " + ", ".join(absent))
+        _write_summary(summary)
+        return 1 if enforce else 0
+    required = [t for t in missing if (item_of(t) is None or item_of(t) in human)
+                and not (item_of(t) == "cardholder" and
+                         negative_pci_exception(t, files, add + rem, decl_changed))]
     waived = [t for t in missing if t not in required]
     for t in waived:
-        print(f"security-checklist: unticked but answered by the diff: [{item_of(t)}] {t}")
+        if item_of(t) == "cardholder" and negative_pci_exception(t, files, add + rem, decl_changed):
+            print(f"security-checklist: unticked with explicit negative PCI attestation: {t}")
+        else:
+            print(f"security-checklist: unticked but answered by the diff: [{item_of(t)}] {t}")
     if required:
         print(f"::error::PR touches money-path code and {len(required)} Security checklist box(es) "
               f"need a human answer for THIS diff and are unticked:")
         for t in required:
             k = item_of(t)
             print(f"  - [ ] {t}\n        why a human: {why.get(k, 'unrecognised checklist line — fail closed')}")
-        print("Tick each once true (and apply the review label it names), or state the exception in the PR body.")
+        print("Tick each once true (and apply the review label it names). For a negative PCI answer, "
+              "leave only that box unticked and append 'Exception: No cardholder data path changed; "
+              "<concrete reason>' on its line. This exception is unavailable if a cardholder-named "
+              "path, cardholder field/column, or sensitive-path declaration changed.")
         _write_summary(summary)
         return 1 if enforce else 0
     print("security-checklist: every human-judgement box ticked")
     _write_summary(summary)
     return 0
+
+
+def run_carrier(root: Path, base: str, enforce: bool, member_body: Callable[[int], str | None],
+                head: str = "HEAD") -> int:
+    """A verified merge-train carrier (ADR-0343): the attestation lives on the MEMBERS. Each member's
+    own live body is judged by the same rule against that member's own diff — its train commit, which
+    is exactly the member's change as applied in this train. The carrier's own (bot) body is never
+    read and never written. The single regeneration commit is not a member's diff: it is bounded to
+    DERIVED_OUTPUTS and proven by main's derived-freshness gates on this exact tree."""
+    try:
+        members = carrier_lib.carrier_members(base, head)
+    except carrier_lib.CarrierUnavailable as exc:
+        carrier_lib.not_evaluated("security-checklist", f"carrier members could not be read ({exc})")
+        return 1 if enforce else 0
+    except carrier_lib.CarrierError as exc:
+        print(f"::error::security-checklist: verified merge-train carrier, but its members cannot be "
+              f"derived from its commits ({exc}) — fail closed")
+        return 1 if enforce else 0
+    print(f"security-checklist: merge-train carrier — judging {len(members)} member(s) on their own "
+          f"bodies and diffs: {', '.join(f'#{n}' for n, _ in members)}")
+    # An unreadable body is not an empty one. Judging it as empty used to blame a member for an API
+    # outage; now, when a member's diff actually NEEDS its body (a human box to answer), the carrier is
+    # NOT EVALUATED — red, so nothing merges unjudged, and inconclusive to the train, so nobody is
+    # blamed. A member whose diff the checklist answers mechanically never needs its body at all.
+    class _Unread(Exception):
+        pass
+
+    def need(n: int) -> Callable[[], str | None]:
+        def read() -> str | None:
+            b = member_body(n)
+            if b is None:
+                raise _Unread(n)
+            return b
+        return read
+    lacking: list[int] = []
+    for n, commit in members:
+        print(f"security-checklist: --- member #{n} (train commit {commit[:12]}) ---")
+        try:
+            rc = run(root, "", f"{commit}^", enforce=True, live_body=need(n), head=commit)
+        except _Unread:
+            carrier_lib.not_evaluated("security-checklist", f"member #{n} needs its body and it is unreadable")
+            return 1 if enforce else 0
+        if rc != 0:
+            lacking.append(n)
+    if lacking:
+        print("::error::merge-train carrier: these member PR(s) touch money-path code and their OWN body "
+              "lacks the required Security checklist ticks: " + ", ".join(f"#{n}" for n in lacking)
+              + ". Tick the checklist on that member PR (not on the carrier) and re-run this check.")
+        return 1 if enforce else 0
+    print("security-checklist: every member of the carrier passes on its own body")
+    return 0
+
+
+def judge(root: Path, body: str, base: str, enforce: bool, live_body: Callable[[], str | None] | None,
+          pr: dict | None, repo: str, member_body: Callable[[int], str | None]) -> int:
+    """Dispatch: a VERIFIED carrier is judged by its members; everything else (a spoofed `train/…`
+    included) is judged as an ordinary PR on its own body."""
+    if carrier_lib.is_verified_carrier(pr, repo):
+        return run_carrier(root, base, enforce, member_body)
+    if pr is not None and str((pr.get("head") or {}).get("ref") or "").startswith("train/"):
+        print("security-checklist: head is train/… but the PR is not a verified merge-train carrier "
+              "(author, label or branch) — judged as an ordinary PR")
+    return run(root, body, base, enforce, live_body=live_body)
 
 
 def unknown_box_required(section: str) -> bool:
@@ -639,6 +774,42 @@ def self_test() -> int:
         print("self-test FAIL: fully ticked template still flagged"); bad += 1
     if unticked("## Summary\nno checklist here\n") is not None:
         print("self-test FAIL: missing section not detected"); bad += 1
+    pci = "Cardholder data path changed? → tag `pci-review-required`."
+    negative = pci + (" Exception: No cardholder data path changed; "
+                      "fund positions have no PAN, card token or CVV flow.")
+    for label, text, files, added, removed, changed, accepted in [
+        ("specific negative", negative, ["openbank-pension-fund-service/src/main/Position.kt"], [], [], False, True),
+        ("bare box", pci, [], [], [], False, False),
+        ("vague reason", pci + " Exception: No cardholder data path changed; N/A", [], [], [], False, False),
+        ("ambiguous answer", pci + " Exception: not applicable to fund positions", [], [], [], False, False),
+        ("cardholder path", negative, ["openbank-card-service/src/main/Cardholder.kt"], [], [], False, False),
+        ("added cardholder field", negative, [], [("src/main/X.kt", "val maskedPan: String")], [], False, False),
+        ("removed cardholder field", negative, [], [], [("src/main/X.kt", "val maskedPan: String")], False, False),
+        ("added SQL cardholder column", negative, [], [("src/main/V3.sql", "ALTER TABLE card ADD COLUMN card_number text;")], [], False, False),
+        ("removed SQL cardholder column", negative, [], [], [("src/main/V3.sql", "    masked_pan varchar(19),")], False, False),
+        ("added Java cardholder field", negative, [], [("src/main/Card.java", "private String cardNumber;")], [], False, False),
+        ("added card token field", negative, [], [("src/main/X.kt", "val cardToken: String")], [], False, False),
+        ("camel encrypted PAN", negative, [], [("src/main/X.kt", "val encryptedPan: String")], [], False, False),
+        ("camel PAN hash", negative, [], [("src/main/X.kt", "val panHash: String")], [], False, False),
+        ("camel primary account number", negative, [], [("src/main/X.kt", "val primaryAccountNumber: String")], [], False, False),
+        ("qualified camel PAN", negative, [], [("src/main/X.kt", "dto.encryptedPan = value")], [], False, False),
+        ("camel cardholder ID", negative, [], [("src/main/X.kt", "val cardholderId: UUID")], [], False, False),
+        ("removed snake PAN hash", negative, [], [], [("src/main/V3.sql", "  pan_hash varchar(64),")], False, False),
+        ("removed schema cardholder field", negative, [], [], [("src/main/openapi.yaml", "      cvv:")], False, False),
+        ("added CVV2 field", negative, [], [("src/main/X.kt", "val cvv2: String")], [], False, False),
+        ("removed CVV2 column", negative, [], [], [("src/main/V3.sql", "  cvv2 varchar(4),")], False, False),
+        ("added CVC2 field", negative, [], [("src/main/X.kt", "val cvc2: String")], [], False, False),
+        ("removed CVC2 column", negative, [], [], [("src/main/V3.sql", "  cvc2 varchar(4),")], False, False),
+        ("added card data field", negative, [], [("src/main/X.kt", "val card_data: String")], [], False, False),
+        ("removed card data column", negative, [], [], [("src/main/V3.sql", "  card_data text,")], False, False),
+        ("added cardholderdata field", negative, [], [("src/main/X.kt", "val cardholderdata: String")], [], False, False),
+        ("removed cardholderdata column", negative, [], [], [("src/main/V3.sql", "  cardholderdata text,")], False, False),
+        ("changed declaration", negative, [], [], [], True, False),
+    ]:
+        if negative_pci_exception(text, files, added + removed, changed) != accepted:
+            print(f"self-test FAIL: {label} PCI exception"); bad += 1
+    if PCI_FIELD.search("class FundNavPositionEntity : PanacheEntityBase"):
+        print("self-test FAIL: Panache framework type was mistaken for PAN data"); bad += 1
     # A box OUTSIDE the section must not count.
     other = "## Security checklist\n- [x] done\n\n## Compliance impact\n- [ ] GDPR\n"
     r3 = unticked(other)
@@ -701,6 +872,73 @@ def self_test() -> int:
               "exclusion is swallowing real code, which is the gate switched off")
         bad += 1
 
+    # Presence is distinct from ticking: deleting a human question must not answer it.
+    canonical_boxes = [b.group(0) for b in BOX.finditer(unticked(ticked)[0])]
+    incomplete = [
+        ("empty", "## Security checklist\n"),
+        ("custom only", "## Security checklist\n- [x] Threat model updated\n- [x] Reviewed\n"),
+        ("auth only", "## Security checklist\n" + canonical_boxes[3]),
+        ("six copies of auth", "## Security checklist\n" + "\n".join([canonical_boxes[3]] * 6)),
+    ]
+    for key, _ in ITEMS:
+        remaining = [b for b in canonical_boxes if item_of(BOX.search(b).group("text")) != key]
+        incomplete.append(("omitted " + key, "## Security checklist\n" + "\n".join(remaining)))
+    for label, body in incomplete:
+        if fixture([f"{svc}/src/main/kotlin/Money.kt"], body) == 0:
+            print(f"self-test FAIL: incomplete canonical checklist accepted ({label})"); bad += 1
+    if fixture([f"{svc}/src/main/kotlin/Money.kt"], ticked) != 0:
+        print("self-test FAIL: complete canonical checklist rejected"); bad += 1
+    complete_unknown = ticked.replace("## Security checklist", "## Security checklist\n- [ ] Unknown human question")
+    if fixture([f"{svc}/src/main/kotlin/Money.kt"], complete_unknown) == 0:
+        print("self-test FAIL: complete checklist hid unknown unticked question"); bad += 1
+
+    pci_body = ticked.replace("- [x] " + pci, "- [ ] " + negative)
+    if fixture([f"{svc}/src/main/kotlin/Money.kt"], pci_body) != 0:
+        print("self-test FAIL: specific negative PCI answer rejected on an undeclared money path"); bad += 1
+    if fixture([f"{svc}/src/main/kotlin/Money.kt"],
+               pci_body.replace("- [x] PII path", "- [ ] PII path")) == 0:
+        print("self-test FAIL: PCI exception hid an unticked PII box"); bad += 1
+    if fixture([f"{svc}/src/main/kotlin/Cardholder.kt"], pci_body) == 0:
+        print("self-test FAIL: PCI exception passed a cardholder-named source path"); bad += 1
+    reason_with_other_label = pci_body.replace("fund positions have no", "fund positions contain no secrets and have no")
+    if item_of(negative.replace("fund positions have no", "fund positions contain no secrets and have no")) != "cardholder":
+        print("self-test FAIL: a PCI reason containing 'secrets' reclassified the box"); bad += 1
+    if fixture([f"{svc}/src/main/kotlin/Cardholder.kt"], reason_with_other_label) == 0:
+        print("self-test FAIL: PCI path passed by relabelling a reason as secrets"); bad += 1
+
+    # A deletion or a pure rename is a change to an existing PCI path too. The old side must
+    # remain visible: `git diff --name-only` with rename detection reports only the new name.
+    def existing_pci_edit(rename: bool) -> int:
+        with _tf.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / RULES).parent.mkdir(parents=True)
+            (root / RULES).write_text("money_path_services:\n  - " + svc + "\n", encoding="utf-8")
+            original = root / svc / "src/main/kotlin" / ("Cardholder.kt" if rename else "Money.kt")
+            original.parent.mkdir(parents=True)
+            original.write_text("val maskedPan: String\n", encoding="utf-8")
+            env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@t", "PATH": os.environ.get("PATH", "")}
+            def git(*a):
+                _sp.run(["git", "-C", str(root), *a], check=True, capture_output=True, env=env)
+            git("init", "-q", "-b", "base"); git("add", "-A"); git("commit", "-q", "-m", "base")
+            git("checkout", "-q", "-b", "head")
+            if rename:
+                git("mv", str(original.relative_to(root)), str(original.with_name("Money.kt").relative_to(root)))
+            else:
+                original.write_text("val amount: Long\n", encoding="utf-8")
+            git("add", "-A"); git("commit", "-q", "-m", "head")
+            cwd = os.getcwd()
+            try:
+                os.chdir(root)
+                return run(root, pci_body, "base", enforce=True)
+            finally:
+                os.chdir(cwd)
+
+    if existing_pci_edit(rename=False) == 0:
+        print("self-test FAIL: removing maskedPan from a generic file passed negative PCI"); bad += 1
+    if existing_pci_edit(rename=True) == 0:
+        print("self-test FAIL: renaming Cardholder.kt to Money.kt passed negative PCI"); bad += 1
+
     rc = fixture([f"{svc}/src/main/kotlin/Money.kt"], no_checklist,
                  live_body=lambda: ticked)
     if rc != 0:
@@ -747,9 +985,13 @@ def self_test() -> int:
     sup = {f"{svc}/src/test/kotlin/MoneyTest.kt": '@Suppress("UNCHECKED_CAST")\nval x = y as Any\n'}
     if fixture(sup, no_checklist) == 0:
         print("self-test FAIL (e): an added @Suppress passed without a tick"); bad += 1
-    sup_ticked = "## Security checklist\n- [x] No new `@SuppressWarnings`, `as Any`, `@Suppress(\"...\")`\n"
+    sup_ticked = tpl.replace("- [ ] No new `@SuppressWarnings`", "- [x] No new `@SuppressWarnings`")
     if fixture(sup, sup_ticked) != 0:
         print("self-test FAIL (e2): ticking the one human item did not pass"); bad += 1
+    legacy_sup = sup_ticked.replace("No new `@SuppressWarnings`, `as Any`, `@Suppress(\"...\")` without",
+                                    "No new suppressions without")
+    if fixture(sup, legacy_sup) != 0:
+        print("self-test FAIL: explicit legacy suppression label rejected"); bad += 1
     # (f) an unrecognised checklist line stays required (fail closed on template drift).
     odd = "## Security checklist\n- [ ] something new nobody classified\n"
     if fixture([f"{svc}/src/main/kotlin/Money.kt"], odd.replace("[ ]", "[x]") + "- [ ] Auth / crypto x\n") == 0:
@@ -795,6 +1037,12 @@ def self_test() -> int:
     # (g) refactor outside every sensitive glob, declared service → passes with NO checklist.
     if dfixture(decl_rules, refactor, no_checklist) != 0:
         print("self-test FAIL (g): declared-service refactor outside sensitive globs still demanded ticks"); bad += 1
+    generic_pci = {f"{svc}/src/main/kotlin/com/x/domain/Money.kt": "data class Money(val encryptedPan: String)\n"}
+    if dfixture(decl_rules, generic_pci, pci_body) == 0:
+        print("self-test FAIL (g2): PCI field in a generic declared path passed an unticked PCI box"); bad += 1
+    generic_card_data = {f"{svc}/src/main/kotlin/com/x/domain/Money.kt": "data class Money(val card_data: String)\n"}
+    if dfixture(decl_rules, generic_card_data, pci_body) == 0:
+        print("self-test FAIL (g3): card_data in a generic declared path passed negative PCI"); bad += 1
     # (h) change inside the auth glob → fails without the tick.
     if dfixture(decl_rules, {f"{svc}/src/main/kotlin/com/x/security/Guard.kt": "x\n"}, no_checklist) == 0:
         print("self-test FAIL (h): change inside a declared auth glob passed without a tick"); bad += 1
@@ -964,6 +1212,200 @@ def self_test() -> int:
         if run_coverage(root) == 0:
             print("self-test FAIL (k3): uncovered PAN field not caught"); bad += 1
 
+    # ── merge-train carriers (ADR-0343): the attestation lives on the members ──────────────────
+    # Negative cases first: a spoofed carrier is an ordinary PR; one unticked member fails and is
+    # named; only then the all-ticked carrier passes and a non-money-path carrier is unaffected.
+    carrier_body = "<!-- merge-train -->\nMerge-train carrier (ADR-0343): CI on this head verifies one train."
+    repo = "o/r"
+
+    def carrier_pr(**over) -> dict:
+        pr = {"user": {"login": carrier_lib.BOT_LOGIN, "type": "Bot"}, "labels": [{"name": "merge-train"}],
+              "head": {"ref": "train/123-1", "repo": {"full_name": repo}}}
+        for k, v in over.items():
+            pr[k] = v
+        return pr
+
+    def carrier_fixture(member_paths: dict[int, list[str]], bodies: dict[int, str], pr: dict,
+                        extra_commit: bool = False, inner: Callable[[], int] | None = None,
+                        rules_by_member: dict[int, str] | None = None) -> tuple[int, str, list[int]]:
+        """A real git repo: base, then one train member commit per PR (merge-train.py's exact
+        message), optionally a foreign commit; judged through judge() exactly as main() does."""
+        import contextlib
+        import io
+        reads: list[int] = []
+        with _tf.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "openbank-libs" / "governance").mkdir(parents=True)
+            (root / "openbank-libs" / "governance" / "rules.yaml").write_text(
+                "money_path_services:\n  - " + svc + "\n", encoding="utf-8")
+            env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@t", "PATH": os.environ.get("PATH", "")}
+
+            def git(*a):
+                return _sp.run(["git", "-C", str(root), *a], check=True, capture_output=True, env=env, text=True)
+            git("init", "-q", "-b", "base")
+            git("add", "-A"); git("commit", "-q", "-m", "base")
+            git("checkout", "-q", "-b", "train")
+            for n, paths in member_paths.items():
+                for rel in paths:
+                    f = root / rel
+                    f.parent.mkdir(parents=True, exist_ok=True)
+                    f.write_text(f"member {n}\n", encoding="utf-8")
+                if rules_by_member and n in rules_by_member:
+                    (root / "openbank-libs" / "governance" / "rules.yaml").write_text(
+                        rules_by_member[n], encoding="utf-8")
+                git("add", "-A")
+                git("commit", "-q", "-m", f"merge-train: member #{n}\n\nPR-Number: #{n}\nPR-Head: {'a' * 40}\n")
+            if extra_commit:
+                (root / "foreign.txt").write_text("x\n")
+                git("add", "-A"); git("commit", "-q", "-m", "not a train commit")
+            cwd = os.getcwd()
+            out = io.StringIO()
+            try:
+                os.chdir(root)
+                with contextlib.redirect_stdout(out):
+                    rc = inner() if inner else judge(root, carrier_body, "base", True, lambda: carrier_body, pr, repo,
+                               lambda n: (reads.append(n), bodies.get(n))[1])
+            finally:
+                os.chdir(cwd)
+            return rc, out.getvalue(), reads
+
+    money = {1: [f"{svc}/src/main/kotlin/Money.kt"], 2: [f"{svc}/src/main/kotlin/Ledger.kt"]}
+    all_ticked = {1: ticked, 2: ticked}
+    for label, pr in [("wrong author", carrier_pr(user={"login": "mallory", "type": "User"})),
+                      ("bot-looking login typed User", carrier_pr(user={"login": carrier_lib.BOT_LOGIN, "type": "User"})),
+                      ("wrong branch", carrier_pr(head={"ref": "train/x", "repo": {"full_name": repo}})),
+                      ("fork head", carrier_pr(head={"ref": "train/123-1", "repo": {"full_name": "evil/r"}})),
+                      ("missing label", carrier_pr(labels=[])),
+                      ("unreadable PR", None)]:
+        rc, out, reads = carrier_fixture(money, all_ticked, pr)
+        if rc == 0 or reads:
+            print(f"self-test FAIL (carrier-spoof): {label} was trusted as a carrier (rc={rc}, member reads={reads})"); bad += 1
+    rc, out, _ = carrier_fixture(money, {1: ticked, 2: tpl}, carrier_pr())
+    named = [ln for ln in out.splitlines() if "lacks the required" in ln]
+    if rc == 0 or len(named) != 1 or "#2" not in named[0] or "#1" in named[0]:
+        print("self-test FAIL (carrier-member-unticked): carrier with member #2 unticked passed or did not name #2"); bad += 1
+    rc, out, _ = carrier_fixture(money, {1: ticked}, carrier_pr())
+    if rc == 0 or carrier_lib.NOT_EVALUATED_LINE not in out or "lacks the required" in out:
+        print("self-test FAIL (carrier-member-unreadable): an unreadable member body passed, or was judged "
+              "as a finding instead of NOT EVALUATED:\n" + out[-600:]); bad += 1
+    rc, out, _ = carrier_fixture(money, all_ticked, carrier_pr(), extra_commit=True)
+    if rc == 0:
+        print("self-test FAIL (carrier-foreign-commit): a carrier with a non-train commit passed"); bad += 1
+    rc, out, _ = carrier_fixture(money, all_ticked, carrier_pr())
+    if rc != 0:
+        print("self-test FAIL (carrier-all-ticked): carrier whose members are all ticked failed:\n" + out[-800:]); bad += 1
+    later_declaration = (
+        f"money_path_services:\n  - {svc}\n"
+        f"security_sensitive_paths:\n  {svc}:\n"
+        "    auth_crypto_payment: []\n"
+        "    pii: [src/main/kotlin/Excluded.kt]\n"
+        "    cardholder: []\n"
+    )
+    rc, out, _ = carrier_fixture(
+        {1: [f"{svc}/src/main/kotlin/Business.kt"], 2: []},
+        {1: "", 2: ticked}, carrier_pr(),
+        rules_by_member={2: later_declaration})
+    named = [ln for ln in out.splitlines() if "lacks the required" in ln]
+    if rc == 0 or len(named) != 1 or "#1" not in named[0]:
+        print("self-test FAIL (carrier-member-governance-snapshot): a later member's new declaration "
+              "classified an earlier production-code member:\n" + out[-1000:]); bad += 1
+    rc, out, reads = carrier_fixture({1: ["docs/readme.txt"], 2: ["other-service/src/main/kotlin/X.kt"]}, {}, carrier_pr())
+    if rc != 0:
+        print("self-test FAIL (carrier-non-money-path): non-money-path carrier failed:\n" + out[-800:]); bad += 1
+    # pr_body_with_members (api-contract's per-service section): union only for a verified carrier.
+    got: dict[str, str] = {}
+
+    def fake_pr(pr: dict | None):
+        return lambda _repo, n, **_kw: pr
+
+    def fake_bodies(_repo, numbers, **_kw):
+        return {n: f"member {n} body" for n in numbers}
+    for label, pr in [("carrier", carrier_pr()), ("spoof", carrier_pr(labels=[]))]:
+        carrier_fixture(money, {}, pr, inner=lambda pr=pr, label=label: got.__setitem__(label, carrier_lib.pr_body_with_members(
+            "carrier", "base", env={"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500"}, fetch_pr=fake_pr(pr),
+            fetch_bodies=fake_bodies)) or 0)
+    if got.get("carrier") != "carrier\n\nmember 1 body\n\nmember 2 body" or got.get("spoof") != "carrier":
+        print(f"self-test FAIL: pr_body_with_members union wrong: {got}"); bad += 1
+
+    # ── #13400: one carrier resolution per JOB, and an unreadable subject is NOT EVALUATED ─────────
+    # Carrier #13501 spent 33.7 s / 44.9 s in two gates because each re-derived the carrier (deepening
+    # every origin branch). The first gate resolves; every later gate in the job reads the cache file.
+    calls = {"pr": 0, "bodies": 0}
+
+    def counting_pr(_repo, _n, **_kw):
+        calls["pr"] += 1
+        return carrier_pr()
+
+    def counting_bodies(_repo, ns, **_kw):
+        calls["bodies"] += 1
+        return {n: ticked for n in ns}
+    with _tf.TemporaryDirectory() as cache:
+        env = {"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500", carrier_lib.CACHE_DIR_ENV: cache}
+        seen: list = []
+        before = carrier_lib.FETCHES["resolve"]
+        carrier_fixture(money, {}, carrier_pr(), inner=lambda: [seen.append(carrier_lib.resolve(
+            "base", env, fetch_pr=counting_pr, fetch_bodies=counting_bodies)) for _gate in range(3)] and 0)
+        if (calls != {"pr": 1, "bodies": 1} or carrier_lib.FETCHES["resolve"] - before != 1
+                or [r.kind for r in seen] != ["carrier"] * 3 or [n for n, _, _ in seen[2].members] != [1, 2]):
+            print(f"self-test FAIL (carrier-resolve-once): three gates in one job resolved {calls} "
+                  f"{[r.kind for r in seen]} — want ONE fetch of the PR and ONE of the member bodies"); bad += 1
+    # A real `gh` that hangs past its timeout is unreadable (None), never an empty body or a pass.
+    with _tf.TemporaryDirectory() as fake_bin:
+        gh = Path(fake_bin) / "gh"
+        gh.write_text("#!/bin/sh\nsleep 5\n")
+        gh.chmod(0o755)
+        saved_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{fake_bin}:{saved_path}"
+        try:
+            hung = (carrier_lib.gh_member_bodies(repo, [1], timeout=1), carrier_lib.gh_pr(repo, 1, timeout=1))
+        finally:
+            os.environ["PATH"] = saved_path
+        if hung != (None, None):
+            print(f"self-test FAIL (api-timeout): a hung gh call returned {hung!r}, want unreadable (None)"); bad += 1
+
+    def timed_out(*_a, **_k):
+        raise _sp.TimeoutExpired("git fetch", 1)
+    try:
+        with _tf.TemporaryDirectory() as td:
+            _sp.run(["git", "init", "-q", td], check=True)
+            carrier_lib.deepen_for_chain("HEAD", "HEAD", cwd=td, runner=timed_out)
+        # Not shallow: no fetch is attempted at all, which is the point (no network when not needed).
+    except carrier_lib.CarrierUnavailable:
+        print("self-test FAIL (deepen-not-needed): a non-shallow checkout tried to fetch"); bad += 1
+    # The gate end to end: unreadable PR on a train head, and a timed-out member read, are NOT
+    # EVALUATED (exit 1 + the verdict line), never exit 0.
+    for label, fetch_pr, fetch_bodies in [
+            ("PR object unreadable on a train/ head", lambda *_a, **_k: None, counting_bodies),
+            ("member bodies timed out", lambda *_a, **_k: carrier_pr(), lambda *_a, **_k: None)]:
+        def gate_main(fetch_pr=fetch_pr, fetch_bodies=fetch_bodies) -> int:
+            saved_env = {k: os.environ.get(k) for k in ("GITHUB_REPOSITORY", "PR_NUMBER", "GITHUB_HEAD_REF", carrier_lib.CACHE_DIR_ENV)}
+            os.environ.update({"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500", "GITHUB_HEAD_REF": "train/123-1"})
+            os.environ.pop(carrier_lib.CACHE_DIR_ENV, None)
+            saved = (carrier_lib.gh_pr, carrier_lib.gh_member_bodies, sys.argv)
+            carrier_lib.gh_pr, carrier_lib.gh_member_bodies = fetch_pr, fetch_bodies
+            sys.argv = ["x", "--live-body", "--body", carrier_body, "--base", "base", "--enforce"]
+            try:
+                return main()
+            finally:
+                carrier_lib.gh_pr, carrier_lib.gh_member_bodies, sys.argv = saved
+                for k, v in saved_env.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+        rc, out, _ = carrier_fixture(money, {}, carrier_pr(), inner=gate_main)
+        if rc == 0 or carrier_lib.NOT_EVALUATED_LINE not in out or "lacks the required" in out:
+            print(f"self-test FAIL (not-evaluated: {label}): rc={rc}, want 1 + NOT EVALUATED:\n{out[-600:]}"); bad += 1
+
+    # The helper's constants must equal merge-train.py's: the carrier identity is ONE definition.
+    mt = (Path(__file__).resolve().parent / "merge-train.py").read_text()
+    for name, val in [("BOT_LOGIN", carrier_lib.BOT_LOGIN), ("CARRIER_LABEL", carrier_lib.CARRIER_LABEL)]:
+        if f'{name} = "{val}"' not in mt:
+            print(f"self-test FAIL: merge_train_carrier.{name} drifted from merge-train.py"); bad += 1
+    if carrier_lib.TRAIN_BRANCH_RE.pattern not in mt or carrier_lib.OWN_MEMBER_RE.pattern not in mt:
+        print("self-test FAIL: merge_train_carrier branch/member regex drifted from merge-train.py"); bad += 1
+
     print("security-checklist self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
     return 1 if bad else 0
 
@@ -1024,8 +1466,21 @@ def main() -> int:
             return None
         return result.stdout.strip()
 
-    return run(Path(args.root), body, args.base, args.enforce,
-               live_body=fetch_live_body if args.live_body else None)
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    # One resolution per JOB, shared with every other gate that asks (merge_train_carrier.resolve):
+    # the live PR object, the member chain and every member body, under one deadline.
+    res = carrier_lib.resolve(args.base) if args.live_body else carrier_lib.Resolution("none")
+    if res.kind == "unavailable":
+        carrier_lib.not_evaluated("security-checklist", res.reason)
+        return 1 if args.enforce else 0
+    pr = res.pr
+    member_bodies = {n: b for n, _, b in res.members}
+
+    def member_body(n: int) -> str | None:
+        return member_bodies.get(n)
+
+    return judge(Path(args.root), body, args.base, args.enforce,
+                 fetch_live_body if args.live_body else None, pr, repo, member_body)
 
 
 if __name__ == "__main__":

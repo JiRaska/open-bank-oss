@@ -414,10 +414,6 @@
         <error line="90" column="9" source="standard:wrapping" />
         <error line="90" column="10" source="standard:wrapping" />
     </file>
-    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
-        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
-        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
-    </file>
     <file name="src/test/kotlin/com/openbank/psd2/application/usecase/Psd2ServicesTest.kt">
         <error line="7" column="1" source="standard:import-ordering" />
         <error line="36" column="1" source="standard:no-unused-imports" />

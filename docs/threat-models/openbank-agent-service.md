@@ -10,7 +10,7 @@ the money path; the `deny` tool tier (`money.transfer`, `money.post.ledger`, `gh
 `gh.pr.approve`, `secrets.read.raw`) is hard-forbidden for every charter.
 
 - **Status:** Draft (first pass; opened with the ADR-0031 D3 identity-binding change)
-- **Last reviewed:** 2026-06-28
+- **Last reviewed:** 2026-10-24 (merge-execution evidence boundary)
 - **Owner:** agent-service CODEOWNERS
 - **Related ADRs:** ADR-0031 (AI agent governance — this service), ADR-0080 (security hardening /
   pentest follow-ups), ADR-0034 (unified OPA authz), ADR-0002 (hexagonal), ADR-0008 (OTel),
@@ -172,24 +172,45 @@ browser-provider hiding and the unchanged client-credentials fallback.
     corrected. Measured by `AgentAuditEventPersistenceIT`, which asserts the sentinel rather than
     agreeing with it silently.
 - **T-R3 (ADR-0031 phase 3) — merge-evidence repudiation.** `POST /api/v1/agent-merge-records` exists
+  alongside the additive `POST /api/v1/agent-merge-records/app` for App execution,
   precisely to close the "an agent merged its own PR and nobody can prove a human decided" gap: the
-  record of WHO merged an agent-authored PR enters out-of-band (the `record-agent-merge` CI workflow
-  on a human merge event), the agent has no write tool to self-report, and the ingest is audited once
-  as `agent.pr.merged` with `actorType=HUMAN` under the merging human. **Spoofing controls (trust
+  record of WHO merged an agent-authored PR enters out-of-band (the `record-agent-merge` CI workflow),
+  and the agent has no write tool to self-report. Ingest is audited once as `agent.pr.merged` under
+  the actual executor: `HUMAN` for direct human merges, `SERVICE` for the trusted GitHub App. The
+  approving human is separate authorization evidence, never substituted into the executor.
+  **Spoofing controls (trust
   boundary g):** `@RolesAllowed("ROLE_MERGE_RECORDER")` — not `ROLE_ADMIN`, not `ROLE_OPERATOR`; a
-  dedicated single-endpoint role on the evidence store, proven by a negative IT test (ROLE_ADMIN-only
-  token → 403). The credential is minted per run from a client secret held in GitHub secrets and
+  dedicated role on the merge-evidence API, proven by negative IT tests (ROLE_ADMIN-only token →
+  403). It may ingest, read schema capability, and read back one committed PR record; it cannot
+  enumerate the oversight list or access unrelated resources. The credential is minted per run from a client secret held in GitHub secrets and
   scoped to the recorder job only. **Tampering controls:** `pr_number UNIQUE` + `ON CONFLICT DO
   NOTHING` makes webhook redelivery idempotent — a replayed POST returns the stored row with
   `inserted=false` and emits no second audit event, so the evidence cannot be inflated by re-sending;
-  runtime/checksum audit failures roll back the merge row in the same transaction, so a merge that
+  conflicting App executor/head/authorization evidence returns 409. Runtime/checksum audit failures roll back the merge row in the same transaction, so a merge that
   cannot be audited is not recorded as if it were (`AgentMergeRecordApiIT`). **Residual:** the
   recorder authenticates with a shared client secret, so anyone with GitHub secret read access in
   this repo can forge a merge record — mitigations are repo-level (secret scoping, branch protection,
   and the fact that the recorder's own writes land in the same hash-chained trail they extend, where
   a forgery would collide with GitHub's own merge history on dispute) and the workflow is observable
   (fail-closed, tracking issue on failure). A stolen recorder credential still cannot write anything
-  else: the role reaches exactly one endpoint.
+  else: the role is restricted to merge evidence. **Authorization provenance:** App merges under the `codex/` exclusion
+  require the latest trusted premerge decision on the exact head, a successful main owner workflow
+  and successful writer job; revocation, foreign identity, missing evidence and API errors fail
+  closed. Bounded historical reconstruction is explicitly PR-scoped, with actual request and
+  immutable merged-event references; it never certifies SHA approval or historical compliance.
+  Later non-codex PR-scoped intent uses a separate `POLICY_PR_AUTO_MERGE` proof: the
+  canonical merge's first-parent policy blob must be explicitly reviewed and digest-verified,
+  its recognized prefix rule must allow the branch, and the complete owner-request/merge-event
+  timeline must match. Unknown policy source, mixed proof families, and exact-head revocation
+  fail closed. Policy context does not attest executed workflow source or full historical
+  compliance. The additive `/app-policy` endpoint and optional `policyAuthorization` response
+  preserve the old closed wire enum; the backend rejects codex downgrades and policy-SHA retry
+  conflicts. The producer requires the dedicated capability flag before new-proof writes.
+  The producer verifies backend schema capability before writing and independently reads committed
+  evidence back. Timestamp bounds reject future observations; retries preserve the original
+  historical observation. HTTP/Postgres/outbox regressions cover these properties in
+  `AgentMergeRecordApiIT`; proof-validator negatives and real HTTP redirect-isolation regressions
+  are enforced by `.github/scripts/test-merge-authorization-proof.py`.
 
 ### Information disclosure
 

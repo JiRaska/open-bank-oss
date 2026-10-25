@@ -18,6 +18,7 @@ import io.smallrye.mutiny.Uni
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
@@ -43,6 +44,19 @@ class ProvisioningCycleRunIT {
 
     private fun sql(query: String) = dataSource.connection.use { connection ->
         connection.prepareStatement(query).use { it.executeUpdate() }
+    }
+
+    /**
+     * Isolate the baseline. `markStarted` back-fills MISSED rows from the latest EARLIER period, and
+     * the test database is shared by every @QuarkusTest app in the JVM — any of which runs the real
+     * provisioning scheduler 60s after boot and writes a row for TODAY. Measured on #13708: one such
+     * row turned "2 unresolved days" into 25,697 (every day from today to 2097). Only rows before this
+     * test's own far-future dates are removed, so nothing it asserts on is touched.
+     */
+    @BeforeEach
+    fun dropRealSchedulerRows() {
+        sql("DELETE FROM provisioning_cycle_attempt WHERE period < '2097-01-01'")
+        sql("DELETE FROM provisioning_cycle_run WHERE period < '2097-01-01'")
     }
 
     private fun start(period: LocalDate, time: OffsetDateTime): UUID =
@@ -155,6 +169,7 @@ class ProvisioningCycleRunIT {
                 coverage,
                 runs,
                 null,
+                com.openbank.lending.infrastructure.servicing.RecordingCloseJobRuns(),
             )
 
             VertxContextSupport.subscribeAndAwait { scheduler.runProvisioningPass() }

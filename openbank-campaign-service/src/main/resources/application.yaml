@@ -26,7 +26,7 @@ quarkus:
     # GET /api/v1/campaigns was 500. Same fix, same reason, as fx-service.
     physical-naming-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
   # Backs the four-eyes approval store (libs' RedisApprovalStore, produced by
-  # ApprovalConfig). Without it the ReactiveRedisDataSource bean is inactive and the
+  # RedisApprovalStoreProducer). Without it the ReactiveRedisDataSource bean is inactive and the
   # app cannot start — the deployed pod died with InactiveBeanException. Overridden
   # per environment via QUARKUS_REDIS_HOSTS.
   redis:
@@ -100,11 +100,6 @@ quarkus:
   # application port — the Deployment probes /q/health/{live,ready} on 8085 and the
   # PodMonitor scrapes the same port. Without this block nothing listens there, so the
   # pod never goes ready and the liveness probe restarts it forever.
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   log:
     level: INFO
 
@@ -151,6 +146,11 @@ quarkus:
 
 
 openbank:
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own RedisApprovalStoreProducer. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   temporal:
     enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
     server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}

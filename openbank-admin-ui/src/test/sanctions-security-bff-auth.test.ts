@@ -10,16 +10,33 @@
 // screen. Each assertion below fails against that code.
 
 import { NextRequest } from 'next/server'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/auth', () => ({ auth: vi.fn() }))
 // The security route resolves the scanner through k8s discovery; pin it so the test never
 // touches the API server.
-vi.mock('@/lib/discovery', () => ({ resolveInClusterBaseUrl: vi.fn().mockResolvedValue('http://scanner:8120') }))
+vi.mock('@/lib/discovery', () => ({
+  inCluster: vi.fn().mockReturnValue(true),
+  resolveInClusterService: vi.fn().mockResolvedValue({ state: 'found', service: {}, baseUrl: 'http://scanner:8120', coverage: 'complete' }),
+}))
 
 import { auth } from '@/auth'
+import { OWASP_CATEGORIES } from '@/lib/security/summary'
 
 const SESSION = { user: { accessToken: 'operator-token', roles: ['ROLE_OPERATOR'] } }
+
+function validReport(generatedAt: string) {
+  return {
+    reportId: 'b6ea92e9-c4b4-48af-88f5-b23705db5ef8', generatedAt,
+    totalServices: 0, reachableServices: 0, serviceResults: [],
+    platformScore: 0, platformGrade: 'F', criticalFindings: 0, highFindings: 0,
+    owaspCoverage: Object.fromEntries(OWASP_CATEGORIES.map(category => [category, 0])),
+    complianceStatus: {},
+  }
+}
 
 function lastFetchCall() {
   const mock = vi.mocked(global.fetch)
@@ -119,13 +136,15 @@ describe('security BFF relays the operator bearer', () => {
   })
 
   it('GET /api/security sends Authorization to the scanner', async () => {
-    vi.stubGlobal('fetch', jsonOk({ services: [], averageScore: 91 }))
+    vi.stubGlobal('fetch', jsonOk(validReport(new Date().toISOString())))
 
     const { GET } = await import('@/app/api/security/route')
     const res = await GET()
 
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toMatchObject({ available: true })
+    await expect(res.json()).resolves.toMatchObject({
+      available: true, source: 'scanner', scannerStatus: 'available', freshness: 'fresh',
+    })
     const [url, init] = lastFetchCall()
     expect(String(url)).toContain('/api/v1/security/report')
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer operator-token')
@@ -138,5 +157,122 @@ describe('security BFF relays the operator bearer', () => {
     const body = await (await GET()).json()
 
     expect(body).toEqual({ available: false, reason: 'unauthorized' })
+  })
+
+  it('serves the newer scanner report when both sources are available', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'security-report-'))
+    const bundlePath = path.join(dir, 'security-report.json')
+    try {
+      process.env.OPENBANK_SECURITY_REPORT = bundlePath
+      await writeFile(bundlePath, JSON.stringify(validReport('2000-01-01T00:00:00Z')))
+      vi.stubGlobal('fetch', jsonOk(validReport('2026-10-19T00:00:00Z')))
+
+      const { GET } = await import('@/app/api/security/route')
+      const body = await (await GET()).json()
+
+      expect(body).toMatchObject({ available: true, report: { generatedAt: '2026-10-19T00:00:00Z' }, source: 'scanner' })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('ignores a newer malformed bundle instead of hiding a valid scanner report', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'security-report-'))
+    const bundlePath = path.join(dir, 'security-report.json')
+    try {
+      process.env.OPENBANK_SECURITY_REPORT = bundlePath
+      await writeFile(bundlePath, JSON.stringify({
+        ...validReport('2099-01-01T00:00:00Z'), totalServices: 1, internalDebug: 'must not be returned',
+      }))
+      vi.stubGlobal('fetch', jsonOk(validReport('2026-10-19T00:00:00Z')))
+
+      const { GET } = await import('@/app/api/security/route')
+      const body = await (await GET()).json()
+
+      expect(body).toMatchObject({ available: true, source: 'scanner', report: { generatedAt: '2026-10-19T00:00:00Z' } })
+      expect(JSON.stringify(body)).not.toContain('internalDebug')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('serves only validated bundle fields when the scanner is unavailable', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'security-report-'))
+    const bundlePath = path.join(dir, 'security-report.json')
+    try {
+      process.env.OPENBANK_SECURITY_REPORT = bundlePath
+      await writeFile(bundlePath, JSON.stringify({
+        ...validReport('2026-10-19T00:00:00Z'), internalDebug: 'must not be returned',
+      }))
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('scanner unavailable')))
+
+      const { GET } = await import('@/app/api/security/route')
+      const body = await (await GET()).json()
+
+      expect(body).toMatchObject({ available: true, source: 'ci-bundle', scannerStatus: 'unavailable' })
+      expect(JSON.stringify(body)).not.toContain('internalDebug')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to the bundle when the live scanner rejects the session', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'security-report-'))
+    const bundlePath = path.join(dir, 'security-report.json')
+    try {
+      process.env.OPENBANK_SECURITY_REPORT = bundlePath
+      await writeFile(bundlePath, JSON.stringify(validReport('2000-01-01T00:00:00Z')))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })))
+
+      const { GET } = await import('@/app/api/security/route')
+      const body = await (await GET()).json()
+
+      expect(body).toMatchObject({
+        available: true,
+        report: { generatedAt: '2000-01-01T00:00:00Z' },
+        source: 'ci-bundle',
+        freshness: 'stale',
+        scannerStatus: 'unavailable',
+      })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('marks an invalid HTTP 200 scanner body unavailable and preserves a fresh bundle', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'security-report-'))
+    const bundlePath = path.join(dir, 'security-report.json')
+    const generatedAt = new Date().toISOString()
+    try {
+      process.env.OPENBANK_SECURITY_REPORT = bundlePath
+      await writeFile(bundlePath, JSON.stringify(validReport(generatedAt)))
+      vi.stubGlobal('fetch', jsonOk({}))
+
+      const { GET } = await import('@/app/api/security/route')
+      const body = await (await GET()).json()
+
+      expect(body).toMatchObject({
+        available: true,
+        report: { generatedAt },
+        source: 'ci-bundle',
+        freshness: 'fresh',
+        scannerStatus: 'unavailable',
+      })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not claim the scanner is absent when discovery is incomplete and no bundle exists', async () => {
+    const { resolveInClusterService } = await import('@/lib/discovery')
+    vi.mocked(resolveInClusterService).mockResolvedValue({ state: 'unknown', coverage: 'partial' })
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { GET } = await import('@/app/api/security/route')
+    const body = await (await GET()).json()
+
+    expect(body).toMatchObject({ available: false, reason: 'error', detail: expect.stringContaining('discovery is incomplete') })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

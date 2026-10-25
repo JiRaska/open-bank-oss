@@ -21,6 +21,7 @@
       },
       "response": {
         "body": {
+          "approvalDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "checkerId": "pact-pension-checker",
           "content": {
             "attributes": {
@@ -41,7 +42,6 @@
           "makerId": "pact-pension-maker",
           "number": 1,
           "offeringId": "20000000-0000-0000-0000-000000000084",
-          "pensionApprovalDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "reason": "independently reviewed DIP strategy fixture",
           "schemaRef": {
             "id": "org.openbank.retirement.pension-savings",
@@ -54,6 +54,15 @@
         },
         "matchingRules": {
           "body": {
+            "$.approvalDigest": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{64}"
+                }
+              ]
+            },
             "$.contentHash": {
               "combine": "AND",
               "matchers": [
@@ -105,15 +114,6 @@
                 }
               ]
             },
-            "$.pensionApprovalDigest": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[0-9a-f]{64}"
-                }
-              ]
-            },
             "$.reason": {
               "combine": "AND",
               "matchers": [
@@ -155,7 +155,7 @@
       ],
       "request": {
         "method": "GET",
-        "path": "/api/v2/offerings/20000000-0000-0000-0000-000000000084/revisions/30000000-0000-0000-0000-000000000084/pension-approvals"
+        "path": "/api/v2/offerings/20000000-0000-0000-0000-000000000084/revisions/30000000-0000-0000-0000-000000000084/approvals"
       },
       "response": {
         "body": [

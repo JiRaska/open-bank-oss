@@ -63,8 +63,10 @@ class AgentChatContractTest {
     fun `the contract documents the no-tools catalog draft review seam`() {
         assertThat(openapi)
             .contains("/agent/catalog-reviews:")
+            .contains("operationId: catalogReviewCapability")
             .contains("operationId: createCatalogReview")
-            .contains("self-hosted model with no tools")
+            .contains("catalog-only sandbox opt-in is enabled")
+            .contains("registered through the in-cluster LiteLLM gateway")
             .contains("cannot mutate or publish catalog content")
     }
 
@@ -92,5 +94,19 @@ class AgentChatContractTest {
             .contains("provider:")
             .contains("HOSTED")
             .contains("SELF_HOSTED")
+    }
+
+    @Test
+    fun `merge provenance preserves the original human input and adds a separate App contract`() {
+        val human = openapi.substringAfter("    MergeRecordIngestRequest:")
+            .substringBefore("    AppMergeRecordIngestRequest:")
+        assertThat(human).doesNotContain("mergedByType:", "authorization:", "headSha:")
+        val app = openapi.substringAfter("    AppMergeRecordIngestRequest:").substringBefore("    MergeRecordDto:")
+        assertThat(app).contains("enum: [GITHUB_APP]")
+            .contains("headSha:", "mergeCommitSha:", "mergedById:", "authorization:")
+        assertThat(openapi).contains("/api/v1/agent-merge-records/app:")
+            .contains("/api/v1/agent-merge-records/capabilities:")
+            .contains("/api/v1/agent-merge-records/{prNumber}:")
+            .contains("required: [approvedBy, approvedById, approvedAt, evidenceUrl]")
     }
 }

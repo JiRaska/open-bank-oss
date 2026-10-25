@@ -12,33 +12,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { requireApiPermission } from '@/lib/auth/api-permission'
 import { serverSvcUrl } from '@/lib/services/bff'
-import type { LoyaltyState } from '../../route'
+import type { LoyaltyPartyResponse, LoyaltyState } from '@/lib/loyalty/contracts'
+
+export type { LeafLedgerRow, LoyaltyPartyResponse } from '@/lib/loyalty/contracts'
 
 export const dynamic = 'force-dynamic'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-export interface LeafLedgerRow {
-  id: string
-  type: 'EARN' | 'BURN' | 'EXPIRE' | 'REVERSE'
-  leaves: number
-  remainingLeaves: number
-  earnSourceId: string | null
-  benefitId: string | null
-  ruleVersion: string
-  occurredAt: string
-  expiresAt: string | null
-}
-
-export interface LoyaltyPartyResponse {
-  state: LoyaltyState
-  partyId: string
-  balance: number
-  earnedThisYear: number
-  earnedTotal: number
-  nextExpiry: string | null
-  history: LeafLedgerRow[]
-}
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ partyId: string }> }) {
   const permitted = await requireApiPermission('loyalty:view')

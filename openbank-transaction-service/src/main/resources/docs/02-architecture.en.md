@@ -180,3 +180,7 @@ sequenceDiagram
 3. **No double-entry here** — the GL lives in ledger-service; this service posts and reverses journals through a fault-tolerant client.
 4. **Idempotence end-to-end** — caller `idempotencyKey`, unique DB constraint, ledger-post key, compensation refund tag.
 5. **Domain purity** — saga transitions and settlement-date rules are pure domain logic, framework-free.
+
+## Scheduled-job heartbeat
+
+The stuck-saga gauge refresh (every 30 s) registers the fleet workflow-liveness heartbeat `stuck-saga-gauge-refresh` (`DomainMetrics.registerWorkflowLiveness`, seeded at startup) and records a success only on its success path: a refresh that stops would freeze `openbank.transaction.sagas.stuck` at its last value, which reads as a healthy count; the heartbeat age is what exposes it. `WorkflowLivenessStale` alerts when the age exceeds twice the expected interval.

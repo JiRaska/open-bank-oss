@@ -1,5 +1,5 @@
 # DB-layer alert rules (Dynatrace-parity #0). The fleet's 26 CNPG Postgres
-# clusters now run the built-in exporter (spec.monitoring.enablePodMonitor on
+# clusters now run the built-in exporter (an owned <cluster>-metrics PodMonitor next to
 # every Cluster), so `cnpg_*` series exist for connections, replication lag,
 # deadlocks, transaction-id age and WAL archiving. This was the biggest blind
 # spot vs an APM like Dynatrace, which auto-discovers every DB instance: before

@@ -78,7 +78,11 @@ GET /api/v1/parties/search?q=Novak&limit=20&cursor=<opaque>
 ```
 
 - **Výpis** je stránkovaný page/size (size omezeno na `[1,100]`); volitelný filtr `status` (PENDING_KYC / ACTIVE / SUSPENDED / CLOSED) pohání onboarding cockpit funnel (ADR-0068). Odpověď vrací zpět `statusFilter`. Handler nastaví kosmetickou hlavičku `X-Party-List-Mode: enriched|standard` řízenou flagem `party-list-enriched`.
-- **Vyhledávání** (ADR-0055) je case-insensitive trigramové substring vyhledávání nad právním/obchodním názvem, stránkované keyset kurzorem. Prázdný/`*`/term kratší než 2 znaky vrací prázdnou stránku (žádný full-table enumerate). Hradleno feature flagem `party-search` (`@FeatureFlag`). Vrací **minimalizovaný** souhrn; **rodné číslo není nikdy vyhledatelné**.
+- **Vyhledávání** (ADR-0055) je stránkované keyset kurzorem a hradlené feature flagem `party-search` (`@FeatureFlag`). Prázdný/`*`/term kratší než 2 znaky vrací prázdnou stránku (žádný full-table enumerate). Funguje pro všechny země a pokrývá to, co operátor skutečně zná:
+  - **Jméno / příjmení** — bez ohledu na diakritiku a velikost písmen, po slovech a částečně (`novak ja` najde `Jan Novák`; shodovat se musí každé slovo). Podloženo `party_fold()` + trigramovými indexy (Flyway `V27`).
+  - **Národní / osobní identifikátor** libovolné země (rodné číslo, PESEL, SSN, NINO, DIČ…) — **přesná** shoda po odstranění oddělovačů, nikdy podřetězec, takže identifikátory nejde vyjmenovat podle prefixu. CZ/SK rodné číslo se navíc dohledá přes RČ blind index; surové RČ se v SQL nikdy neporovnává. Telefon se shoduje podle posledních 9 číslic.
+  - **Jméno + datum narození** (`Novák 15.6.1985`, `Smith 1985-06-15`, `Doe 12/31/1985`; nejednoznačné d/m vs m/d hledá obě data) — datum zužuje shodu jména; samotné datum nevrací nic.
+  - Vrací **minimalizovaný** souhrn včetně `dateOfBirth`, aby šlo rozlišit jmenovce.
 
 ### Aktualizace party
 

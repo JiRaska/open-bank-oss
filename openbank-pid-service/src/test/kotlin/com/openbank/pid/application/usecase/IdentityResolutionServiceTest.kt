@@ -5,9 +5,24 @@
 package com.openbank.pid.application.usecase
 
 import com.openbank.libs.identity.BlindIndex
-import com.openbank.pid.application.port.`in`.*
+import com.openbank.pid.application.port.`in`.IdentityAdjudicationUseCase
+import com.openbank.pid.application.port.`in`.PriorAdjudication
+import com.openbank.pid.application.port.`in`.ResolutionResult
+import com.openbank.pid.application.port.`in`.ResolveIdentityCommand
 import com.openbank.pid.application.port.out.PartyRepository
-import com.openbank.pid.domain.model.*
+import com.openbank.pid.domain.model.AmlRiskScore
+import com.openbank.pid.domain.model.CaseVerdict
+import com.openbank.pid.domain.model.ContactAttributes
+import com.openbank.pid.domain.model.CoreAttributes
+import com.openbank.pid.domain.model.ExternalIdType
+import com.openbank.pid.domain.model.Gender
+import com.openbank.pid.domain.model.KycAttributes
+import com.openbank.pid.domain.model.KycLevel
+import com.openbank.pid.domain.model.Party
+import com.openbank.pid.domain.model.PartyStatus
+import com.openbank.pid.domain.model.PartyType
+import com.openbank.pid.domain.model.VerificationSource
+import com.openbank.pid.domain.model.VerificationTrigger
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk

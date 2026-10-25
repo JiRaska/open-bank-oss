@@ -1,0 +1,95 @@
+# PromQL unit tests for prometheus-rules-service-inventory.yaml (GENERATED rule file).
+#
+# Run via openbank-infra/tests/promtool/run.sh, against the SHIPPED rule expressions.
+# Every rule has one case that must fire and one that must stay quiet; the quiet cases are
+# the ones that matter (a scaled-to-zero workload, a workload outside the inventory, a ratio
+# under the absolute floor).
+evaluation_interval: 1m
+rule_files:
+  - prometheus-rules-service-inventory.yaml
+
+tests:
+  # ExpectedWorkloadAbsent ---------------------------------------------------------------
+  # ledger-service/ledger has NO series of any kind -> fires. sepa-payment is a Rollout and
+  # account-service a Deployment scaled to ZERO: both keep their series, so both stay quiet.
+  - interval: 1m
+    input_series:
+      - series: 'rollout_info_replicas_desired{namespace="payments", name="sepa-payment"}'
+        values: "2x60"
+      - series: 'kube_deployment_spec_replicas{namespace="accounts", deployment="account-service"}'
+        values: "0x60"
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="ExpectedWorkloadAbsent", alertstate="firing", namespace="ledger", workload="ledger-service"}'
+        eval_time: 40m
+        exp_samples:
+          - labels: 'ALERTS{alertname="ExpectedWorkloadAbsent", alertstate="firing", namespace="ledger", workload="ledger-service", severity="warning"}'
+            value: 1
+      # negative: present as Rollout
+      - expr: 'ALERTS{alertname="ExpectedWorkloadAbsent", alertstate="firing", workload="sepa-payment"}'
+        eval_time: 40m
+        exp_samples: []
+      # negative: scaled to zero, object still exists
+      - expr: 'ALERTS{alertname="ExpectedWorkloadAbsent", alertstate="firing", workload="account-service"}'
+        eval_time: 40m
+        exp_samples: []
+
+  # ServiceHttp5xxRatioHigh --------------------------------------------------------------
+  # ledger-service: 30% 5xx, 300 in 10m -> fires. account-service: 1% and 10 in 10m -> quiet.
+  # balance-service: 20% but only 10 in 10m (under the floor) -> quiet.
+  # rogue-service: bad but NOT in the inventory -> quiet.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{namespace="ledger", pod="ledger-service-7d9f8b6c5d-abcde", status="500"}'
+        values: "0+30x60"
+      - series: 'http_server_requests_seconds_count{namespace="ledger", pod="ledger-service-7d9f8b6c5d-abcde", status="200"}'
+        values: "0+70x60"
+      - series: 'http_server_requests_seconds_count{namespace="accounts", pod="account-service-6b7c8d9f4-vwxyz", status="503"}'
+        values: "0+1x60"
+      - series: 'http_server_requests_seconds_count{namespace="accounts", pod="account-service-6b7c8d9f4-vwxyz", status="200"}'
+        values: "0+99x60"
+      - series: 'http_server_requests_seconds_count{namespace="balances", pod="balance-service-5c6d7e8f9a-qwert", status="500"}'
+        values: "0+1x60"
+      - series: 'http_server_requests_seconds_count{namespace="balances", pod="balance-service-5c6d7e8f9a-qwert", status="200"}'
+        values: "0+4x60"
+      - series: 'http_server_requests_seconds_count{namespace="payments", pod="rogue-service-5c6d7e8f9a-qwert", status="500"}'
+        values: "0+50x60"
+      - series: 'http_server_requests_seconds_count{namespace="payments", pod="rogue-service-5c6d7e8f9a-qwert", status="200"}'
+        values: "0+10x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: ServiceHttp5xxRatioHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: ledger
+              workload: ledger-service
+            exp_annotations:
+              summary: "ledger-service (ledger) is answering >5% 5xx"
+              description: "More than 5% of HTTP responses from ledger-service were 5xx over 10m, with at least 20 of them. Floor is absolute so a quiet service cannot trip it on two errors."
+              subject_period: continuous
+
+  # ServiceRestartBurst ------------------------------------------------------------------
+  # ledger-service: two pods restarting, 4 restarts summed in <30m -> fires (summing across pods
+  # is the point). account-service: a single restart -> quiet. rogue-service: not inventoried.
+  - interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="ledger", pod="ledger-service-7d9f8b6c5d-abcde", container="ledger-service"}'
+        values: "0 1 2 2x60"
+      - series: 'kube_pod_container_status_restarts_total{namespace="ledger", pod="ledger-service-7d9f8b6c5d-fghij", container="ledger-service"}'
+        values: "0 0 1 2 2x60"
+      - series: 'kube_pod_container_status_restarts_total{namespace="accounts", pod="account-service-6b7c8d9f4-vwxyz", container="account-service"}'
+        values: "0 0 1 1x60"
+      - series: 'kube_pod_container_status_restarts_total{namespace="payments", pod="rogue-service-5c6d7e8f9a-qwert", container="rogue-service"}'
+        values: "0 5 10 15 15x60"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ServiceRestartBurst
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: ledger
+              workload: ledger-service
+            exp_annotations:
+              summary: "ledger-service (ledger) restarted 3+ times in 30m"
+              description: "Container restarts summed across the pods of ledger-service reached 3 in 30m: crash loop, OOMKill or failing liveness probe. kubectl -n ledger describe pods | grep -A5 'Last State'."
+              subject_period: continuous

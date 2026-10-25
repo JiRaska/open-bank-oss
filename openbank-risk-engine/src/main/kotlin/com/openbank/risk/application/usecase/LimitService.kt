@@ -10,11 +10,15 @@ import com.openbank.risk.application.port.`in`.LimitAnalysis
 import com.openbank.risk.application.port.`in`.LimitUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
+import com.openbank.risk.application.port.`in`.ValuationUseCase
 import com.openbank.risk.application.port.out.CurveSetRepository
 import com.openbank.risk.domain.limits.LimitInputs
 import com.openbank.risk.domain.limits.LimitMetric
 import com.openbank.risk.domain.limits.LimitSet
+import com.openbank.risk.domain.limits.MetricInput
 import com.openbank.risk.domain.limits.RiskLimits
+import com.openbank.risk.domain.valuation.BucketSet
+import java.math.BigDecimal
 import java.util.UUID
 
 /**
@@ -33,6 +37,8 @@ class LimitService(
     private val irrbb: IrrbbUseCase,
     private val curveSets: CurveSetRepository,
     private val set: LimitSet,
+    /** ADR-0344 D8 valuation reads for the PV01 / VaR limits; null leaves those limits NOT_EVALUABLE. */
+    private val valuation: ValuationUseCase? = null,
 ) : LimitUseCase {
 
     override suspend fun evaluate(runId: UUID): LimitAnalysis {
@@ -54,8 +60,35 @@ class LimitService(
                 LimitMetric.TOTAL_CAPITAL_RATIO -> LimitInputs.totalCapitalRatio(cap)
                 LimitMetric.IRRBB_EVE_OUTLIER -> LimitInputs.irrbbOutlier(irrbbResult, irrbbMissing, tier1)
                 LimitMetric.LARGE_EXPOSURE_BANK -> LimitInputs.largeExposureToBank(cap, instruments, tier1)
+                LimitMetric.PV01 -> pv01(runId, curveSetId ?: curveSets.latestIdFor(run.asOf))
+                LimitMetric.VAR_99_1D -> valueAtRisk(runId)
             }
         }
         return LimitAnalysis(run, set, RiskLimits.evaluate(set, inputs), curveSetId)
+    }
+
+    private suspend fun pv01(runId: UUID, curveSetId: UUID?): MetricInput {
+        val v = valuation ?: return MetricInput.Gap("valuation is not wired in this deployment")
+        if (curveSetId ==
+            null
+        ) {
+            return MetricInput.Gap("no curve set recorded for the run's as-of date: PV01 cannot be priced")
+        }
+        val s = v.sensitivity(runId, null, curveSetId, BucketSet.IRRBB_STANDARD)
+        return LimitInputs.pv01(s.result?.pv01, s.dataGap)
+    }
+
+    private suspend fun valueAtRisk(runId: UUID): MetricInput {
+        val v = valuation ?: return MetricInput.Gap("valuation is not wired in this deployment")
+        val r = try {
+            v.valueAtRisk(runId, null, VAR_CONFIDENCE, 1)
+        } catch (e: IllegalArgumentException) {
+            return MetricInput.Gap(e.message ?: "VaR could not be computed")
+        }
+        return LimitInputs.valueAtRisk(r.figures?.valueAtRisk, r.dataGap)
+    }
+
+    private companion object {
+        val VAR_CONFIDENCE = BigDecimal("0.99")
     }
 }

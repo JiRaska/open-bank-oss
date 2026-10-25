@@ -11,7 +11,12 @@ info:
   # 1.23.0 -> 1.24.0 (#12501): additive frozen and live calendar-year-to-date flow reads.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 1.25.0
+  # 1.26.0 -> 1.27.0 (ADR-0341 D3): additive. GET /accounting-classes[/resolve] and an alternative way to
+  # name a journal line's account (accountingClass + accountingRole) -- glAccountId stops being required,
+  # which relaxes the request and breaks no caller.
+  # 1.27.0 -> 1.28.0 (ADR-0342): additive. Day-close participants: GET/PUT
+  # /ledger/accounting-days/{businessDate}/participants[/{participant}] and PUT .../{participant}/waiver.
+  version: 1.28.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -391,6 +396,51 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/accounting-classes:
+    get:
+      tags: [Accounting classes]
+      summary: List every accountingClass to GL account mapping (ADR-0341 D3)
+      description: >
+        The ledger owns the chart of accounts and the map from a product's accounting class to its
+        GL accounts. The map changes by reviewed migration only; this is its read side.
+      operationId: listAccountingClasses
+      responses:
+        '200':
+          description: All mappings, ordered by class, role and currency
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountingClassMappingResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/accounting-classes/resolve:
+    get:
+      tags: [Accounting classes]
+      summary: Resolve one (accountingClass, role, currency) to its GL account
+      operationId: resolveAccountingClass
+      parameters:
+        - { name: accountingClass, in: query, required: true, schema: { type: string } }
+        - { name: role, in: query, required: true, schema: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME] } }
+        - { name: currency, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The mapping
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountingClassMappingResponse'
+        '400':
+          description: A required query parameter is missing
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: No GL account is mapped for that class, role and currency
   /api/v1/control-accounts/{controlAccountId}/tie-out:
     get:
       tags: [Ledger]
@@ -712,7 +762,113 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Illegal transition (not the immediate successor), or a concurrent transition won
+          description: >
+            Illegal transition (not the immediate successor), a concurrent transition won, or
+            enforce mode requires a missing or REFUSED day-close participant to report or be explicitly waived.
+
+  /api/v1/ledger/accounting-days/{businessDate}/participants:
+    get:
+      tags: [AccountingDay]
+      summary: Day-close completeness (ADR-0342 D3)
+      description: >
+        Every declared day-close participant with its latest report for the day, or MISSING.
+        While a participant is MISSING the day does not leave CUTOFF once the participant check is
+        enforced (openbank.ledger.close.participants-mode).
+      operationId: getDayCloseParticipants
+      parameters:
+        - $ref: '#/components/parameters/BusinessDatePath'
+      responses:
+        '200':
+          description: Completeness of the day's close over the declared participants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloseCompletenessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/ledger/accounting-days/{businessDate}/participants/{participant}:
+    put:
+      tags: [AccountingDay]
+      summary: Report a product service's day-close outcome (ADR-0342 D1)
+      description: >
+        A participant reports RAN (with journals posted), SKIPPED or REFUSED (both with a reason)
+        for one accounting day. Path-addressed: a re-report appends history and becomes the day's
+        answer (ADR-0294 idiom). Only the service-account declared for the participant may report
+        for it; any other caller is 403. A report for a day already TIED_OUT or LOCKED is stored
+        with late=true and never moves the day.
+      operationId: reportDayCloseParticipation
+      parameters:
+        - $ref: '#/components/parameters/BusinessDatePath'
+        - $ref: '#/components/parameters/ParticipantPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportParticipationRequest'
+      responses:
+        '200':
+          description: Report recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParticipationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/ledger/accounting-days/{businessDate}/participants/{participant}/waiver:
+    put:
+      tags: [AccountingDay]
+      summary: Waive a missing day-close participant (ADR-0342 D3)
+      description: >
+        Operator-only. Records WAIVED with the operator's identity and a mandatory reason, which
+        counts as reported for the day's completeness. Never written by a participant. Allowed only
+        for an existing CUTOFF day (404 for a day never opened, 409 for any other status) and only
+        for a participant with no RAN report (409); it may supersede a REFUSED report, and no
+        existing row is ever rewritten.
+        A verified human JWT is required even in advisory OPA mode; a machine identity is 403.
+        Audit attribution uses its nonblank sub only; missing or unreadable sub is 401, without a display-name fallback.
+      operationId: waiveDayCloseParticipant
+      parameters:
+        - $ref: '#/components/parameters/BusinessDatePath'
+        - $ref: '#/components/parameters/ParticipantPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 1000 }
+      responses:
+        '200':
+          description: Waiver recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParticipationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/ledger/periods:
     get:
@@ -1130,6 +1286,13 @@ components:
       schema:
         type: string
         format: date
+    ParticipantPath:
+      name: participant
+      in: path
+      required: true
+      description: A declared day-close participant name, e.g. interest (ADR-0342).
+      schema:
+        type: string
 
   securitySchemes:
     bearerAuth:
@@ -1266,6 +1429,60 @@ components:
         balanced: { type: boolean }
         recomputedAt: { type: string, format: date-time }
 
+    CloseCompletenessResponse:
+      type: object
+      required: [businessDate, complete, missing, refused, participants]
+      properties:
+        businessDate: { type: string, format: date }
+        complete:
+          type: boolean
+          description: False while any declared participant is missing or its latest report is REFUSED.
+        missing:
+          type: array
+          description: Declared participants with no report for the day.
+          items: { type: string }
+        refused:
+          type: array
+          description: >
+            Declared participants whose latest report is REFUSED - their work was not posted, so
+            they hold the day exactly like a missing one until they report RAN or are waived.
+          items: { type: string }
+        participants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParticipationResponse'
+    ParticipationResponse:
+      type: object
+      required: [participant, status, journalsPosted, itemsProcessed, late]
+      properties:
+        participant: { type: string }
+        status:
+          type: string
+          description: >
+            RAN, SKIPPED and REFUSED are outcomes reported by product services.
+            WAIVED is recorded by a ledger operator; MISSING means no record exists.
+          oneOf:
+            - enum: [RAN, SKIPPED, REFUSED]
+            - enum: [WAIVED, MISSING]
+        journalsPosted: { type: integer, minimum: 0 }
+        itemsProcessed: { type: integer, minimum: 0 }
+        reason: { type: string, nullable: true }
+        reportedBy: { type: string, nullable: true }
+        reportedAt: { type: string, format: date-time, nullable: true }
+        late: { type: boolean }
+    ReportParticipationRequest:
+      type: object
+      required: [outcome]
+      properties:
+        outcome:
+          type: string
+          enum: [RAN, SKIPPED, REFUSED]
+        journalsPosted: { type: integer, minimum: 0 }
+        itemsProcessed: { type: integer, minimum: 0 }
+        reason:
+          type: string
+          maxLength: 1000
+          description: Required unless outcome is RAN.
     CurrentAccountingDayResponse:
       type: object
       description: The current accounting day per the business-date authority (ADR-0207 D1).
@@ -1561,13 +1778,36 @@ components:
             type: number
           description: Net booked delta per currency across the window — a sanity preview of what the replay carries.
 
+    AccountingClassMappingResponse:
+      type: object
+      required: [accountingClass, role, currencyCode, glAccountId, glCode]
+      properties:
+        accountingClass: { type: string }
+        role: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME] }
+        currencyCode: { type: string }
+        glAccountId: { type: string, format: uuid }
+        glCode: { type: string }
+
     PostJournalLineRequest:
       type: object
-      required: [glAccountId, side, amount, currencyCode, baseAmount, baseCurrencyCode]
+      description: >
+        Names its GL account either by `glAccountId` or by `accountingClass` + `accountingRole`
+        (ADR-0341 D3; resolved with the line's `currencyCode`). Exactly one of the two; both or
+        neither is a 400.
+      required: [side, amount, currencyCode, baseAmount, baseCurrencyCode]
       properties:
         glAccountId:
           type: string
           format: uuid
+          nullable: true
+        accountingClass:
+          type: string
+          nullable: true
+          description: Product accounting class, resolved by the ledger to a GL account (ADR-0341 D3).
+        accountingRole:
+          type: string
+          nullable: true
+          enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME]
         side:
           type: string
           enum: [DEBIT, CREDIT]

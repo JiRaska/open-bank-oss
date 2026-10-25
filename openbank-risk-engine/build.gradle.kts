@@ -13,25 +13,15 @@ tasks.test {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     // Plain reactive SQL client, no Hibernate: the store is three narrow tables written with
     // explicit INSERT ... ON CONFLICT, which is what makes every write idempotent by natural key.
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.smallrye.fault.tolerance)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.oidc.client.reactive.filter)
@@ -42,14 +32,14 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
 
     implementation(project(":openbank-libs-domain"))
+    // ADR-0344 D8: schedules, projection, pricing and sensitivities of the own book. One library,
+    // so treasury and the risk engine cannot disagree on a cash flow.
+    implementation(project(":openbank-libs-finance"))
     implementation(project(":openbank-libs-lending"))
     implementation(project(":openbank-libs-runtime"))
 
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)

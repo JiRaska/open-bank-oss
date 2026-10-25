@@ -19,6 +19,7 @@ import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.application.usecase.SimulatedQuoteService
 import com.openbank.treasury.application.usecase.TreasuryDealService
 import com.openbank.treasury.domain.DealFixtures
+import com.openbank.treasury.domain.glCode
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
 import com.openbank.treasury.domain.model.CurvePillar
@@ -32,6 +33,7 @@ import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.QuoteUnavailableException
 import com.openbank.treasury.domain.model.Side
+import com.openbank.treasury.infrastructure.LegWireJackson
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -42,6 +44,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 
+@Suppress("LargeClass") // one service, every lifecycle path
 class TreasuryDealServiceTest {
 
     private val monday = DealFixtures.MONDAY
@@ -57,7 +60,7 @@ class TreasuryDealServiceTest {
         override suspend fun findById(id: String) = all.find { it.id == id }
         override suspend fun list() = all
     }
-    private val mapper = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
+    private val mapper = LegWireJackson.register(ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule()))
     private var fxMid: FxMidRatePort = FxMidRatePort.NONE
     private var tolerance: FxRateTolerance = FxRateTolerance.DISABLED
     private var confirmationRequired = true
@@ -434,7 +437,7 @@ class TreasuryDealServiceTest {
         val accrued = ledger.posted.filter { it.event == PostingEvent.ACCRUED }.sumOf { it.lines.first().amount }
         assertThat(accrued).isEqualByComparingTo(deal.interest)
         val maturity = ledger.posted.single { it.event == PostingEvent.MATURED }
-        assertThat(maturity.lines.map { it.glCode }).doesNotContain("4200").contains("1520")
+        assertThat(maturity.lines.map { it.glCode() }).doesNotContain("4200").contains("1520")
     }
 
     @Test
@@ -446,9 +449,55 @@ class TreasuryDealServiceTest {
         service.reverse(b.id, "test", DealFixtures.approver)
         val accrued = ledger.posted.filter { it.event == PostingEvent.ACCRUED }.sumOf { it.lines.first().amount }
         val reversal = ledger.posted.single { it.event == PostingEvent.REVERSED }
-        val unwound = reversal.lines.single { it.glCode == "4200" }
+        val unwound = reversal.lines.single { it.glCode() == "4200" }
         assertThat(unwound.amount).isEqualByComparingTo(accrued)
     }
+
+    @Test
+    fun `a reversal offsets the accounts the settlement landed on even after the ledger map is re-pointed`(): Unit =
+        runBlocking {
+            val b = book()
+            service.runSimulatedMarket()
+            val settled = ledger.posted.single { it.event == PostingEvent.SETTLED }
+            val landedOn = settled.lines.associate {
+                Triple(it.accountingClass, it.role, it.currency) to ledger.resolve(it)
+            }
+            // A reviewed migration re-points every class between the settlement and its reversal.
+            ledger.mapGeneration = 2
+            service.reverse(b.id, "test", DealFixtures.approver)
+            val reversal = ledger.posted.single { it.event == PostingEvent.REVERSED }
+            reversal.lines.forEach {
+                assertThat(it.glAccountId)
+                    .describedAs("${it.accountingClass}/${it.role}/${it.currency} must keep the settlement's account")
+                    .isEqualTo(landedOn.getValue(Triple(it.accountingClass, it.role, it.currency)))
+                // and re-resolving the class NOW would have been a different account: not vacuous
+                assertThat(it.glAccountId).isNotEqualTo(ledger.resolve(it.copy(glAccountId = null)))
+            }
+        }
+
+    @Test
+    fun `a reversal also pins the accrued-interest unwind to the accounts the accruals landed on`(): Unit =
+        runBlocking {
+            val b = book()
+            service.runSimulatedMarket()
+            clock = Clock.offset(clock, java.time.Duration.ofDays(2))
+            service.accrueInterest(LocalDate.now(clock))
+            val accrual = ledger.posted.first { it.event == PostingEvent.ACCRUED }
+            val accruedOn = accrual.lines.associate {
+                Triple(it.accountingClass, it.role, it.currency) to
+                    ledger.resolve(it)
+            }
+            ledger.mapGeneration = 2
+            service.reverse(b.id, "test", DealFixtures.approver)
+            val reversal = ledger.posted.single { it.event == PostingEvent.REVERSED }
+            val unwind = reversal.lines.filter { Triple(it.accountingClass, it.role, it.currency) in accruedOn }
+            assertThat(unwind).isNotEmpty()
+            unwind.forEach {
+                assertThat(
+                    it.glAccountId,
+                ).isEqualTo(accruedOn.getValue(Triple(it.accountingClass, it.role, it.currency)))
+            }
+        }
 
     @Test
     fun `a failing deal does not stop the accrual pass, and is reported`(): Unit = runBlocking {
@@ -486,8 +535,11 @@ class TreasuryDealServiceTest {
 
     @Test
     fun `an FX spot drafted on a Friday values on the next Tuesday`(): Unit = runBlocking {
-        clock = Clock.fixed(DealFixtures.FRIDAY.atTime(9, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
-        assertThat(service.draft(fx(), DealFixtures.dealer).valueDate).isEqualTo(DealFixtures.FRIDAY.plusDays(4))
+        // The Friday a week after DealFixtures.FRIDAY: the Monday after FRIDAY itself is a CERTIS holiday
+        // (2026-09-28), which is exercised in FxSpotTest; this case is about the weekend alone.
+        val friday = DealFixtures.FRIDAY.plusDays(7)
+        clock = Clock.fixed(friday.atTime(9, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
+        assertThat(service.draft(fx(), DealFixtures.dealer).valueDate).isEqualTo(friday.plusDays(4))
     }
 
     @Test
@@ -499,7 +551,7 @@ class TreasuryDealServiceTest {
         assertThat(service.runSimulatedMarket().moved).isEqualTo(1)
         val settlement = ledger.posted.single()
         assertThat(settlement.idempotencyKey).isEqualTo("treasury:${b.id}:settled")
-        assertThat(settlement.lines.map { "${it.side} ${it.glCode} ${it.amount.toPlainString()} ${it.currency}" })
+        assertThat(settlement.lines.map { "${it.side} ${it.glCode()} ${it.amount.toPlainString()} ${it.currency}" })
             .containsExactly(
                 "DEBIT 1002 1000.00 EUR",
                 "CREDIT 1991 1000.00 EUR",
@@ -525,9 +577,9 @@ class TreasuryDealServiceTest {
         service.runSimulatedMarket()
         service.reverse(b.id, "wrong side", DealFixtures.approver)
         val (settled, reversed) = ledger.posted
-        assertThat(settled.lines.first().let { it.side to it.glCode }).isEqualTo(Side.CREDIT to "1002")
-        assertThat(reversed.lines.map { it.glCode to it.side }).isEqualTo(
-            settled.lines.map { it.glCode to (if (it.side == Side.DEBIT) Side.CREDIT else Side.DEBIT) },
+        assertThat(settled.lines.first().let { it.side to it.glCode() }).isEqualTo(Side.CREDIT to "1002")
+        assertThat(reversed.lines.map { it.glCode() to it.side }).isEqualTo(
+            settled.lines.map { it.glCode() to (if (it.side == Side.DEBIT) Side.CREDIT else Side.DEBIT) },
         )
         assertThat(deals.events.last().eventType).isEqualTo("treasury.deal.reversed.v1")
         assertThat(deals.events.last().payload).contains("\"fxSide\":\"SELL\"")
@@ -548,6 +600,22 @@ class TreasuryDealServiceTest {
             assertThat(service.submit(off.id, DealFixtures.dealer).state).isEqualTo(DealState.PENDING_APPROVAL)
             fxMid = FxMidRatePort.NONE
             assertThat(service.draft(fx(), DealFixtures.dealer).fx!!.rateFlag).contains("mid unavailable")
+        }
+
+    @Test
+    fun `an edit cannot launder an off-market rate - edit and submit flag it exactly as a create would`(): Unit =
+        runBlocking {
+            tolerance = FxRateTolerance(true, BigDecimal("1.0"))
+            fxMid = FxMidRatePort { ccy, _ -> if (ccy == "EUR") BigDecimal("25.00") else null }
+            val fair = service.draft(fx(rate = "25.000000"), DealFixtures.dealer)
+            assertThat(fair.fx!!.rateFlag).isNull()
+            val edited = service.editDraft(fair.id, fx(rate = "27.500000"), DealFixtures.dealer)
+            val created = service.draft(fx(rate = "27.500000"), DealFixtures.dealer)
+            assertThat(edited.fx!!.rateFlag).isNotNull().isEqualTo(created.fx!!.rateFlag)
+            // Submit re-runs the same check: a flag can never be missing on the deal the approver sees.
+            val submitted = service.submit(edited.id, DealFixtures.dealer)
+            assertThat(submitted.fx!!.rateFlag).isEqualTo(created.fx!!.rateFlag)
+            assertThat(submitted.history.count { it.note?.startsWith("rate flagged:") == true }).isEqualTo(1)
         }
 
     // --- ADR-0315 D2: CONFIRMED ------------------------------------------------------------------

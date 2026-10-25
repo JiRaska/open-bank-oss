@@ -209,8 +209,10 @@ spec:
 
               // ---- parse JSON, lift correlation ids into structured metadata ----
               loki.process "parse" {
-                // Quarkus structured JSON formatter (ADR-0082 Phase 3): level,
-                // traceId, spanId and correlationId are ALL top-level keys.
+                // Quarkus structured JSON encoder (ADR-0082 Phase 3, #11630): `level` is a
+                // top-level key, but traceId, spanId and correlationId are nested under
+                // `mdc` (`"mdc":{"traceId":...}`). The top-level fallback below only
+                // serves pods still on a pre-#11630 image. The history of this block follows.
                 //
                 // This block read `mdc.traceId` from 2026-06 to 2026-09-30 and
                 // populated NOTHING for the whole of that time: measured live on

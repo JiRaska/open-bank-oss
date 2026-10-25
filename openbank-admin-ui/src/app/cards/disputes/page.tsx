@@ -9,6 +9,7 @@ import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { Scale, RefreshCw, FileUp } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { CardPicker } from '@/components/cards/CardPicker'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -53,7 +54,6 @@ export default function CardDisputesPage() {
   const { data: session } = useSession()
   const canAct = hasPermission(session?.user?.roles ?? [], 'cards:issue')
 
-  const [cardIdInput, setCardIdInput] = useState('')
   const [cardId, setCardId] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -115,27 +115,7 @@ export default function CardDisputesPage() {
           )}
         </div>
 
-        <form
-          className="flex flex-wrap items-end gap-2"
-          onSubmit={e => {
-            e.preventDefault()
-            setActionError(null)
-            setCardId(cardIdInput.trim() || null)
-          }}
-        >
-          <label className="flex flex-col gap-1 text-xs text-slate-600">
-            {t('ID karty', 'Card id')}
-            <input
-              value={cardIdInput}
-              onChange={e => setCardIdInput(e.target.value)}
-              className="w-96 rounded border border-slate-300 px-2 py-1 text-sm"
-              placeholder="00000000-0000-0000-0000-000000000000"
-            />
-          </label>
-          <button type="submit" className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-700">
-            {t('Načíst', 'Load')}
-          </button>
-        </form>
+        <CardPicker selectedId={cardId} onSelect={c => { setActionError(null); setCardId(c.id) }} />
 
         {actionError && (
           <div className="rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{actionError}</div>

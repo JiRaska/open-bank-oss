@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test
  * Drives the REAL cron of the CZ state-contribution deadline job (#12382; rules.yaml:
  * scheduled_methods). A direct call would supply the Vert.x context the scheduler thread does not
  * have. Success is read from the liveness gauge, which is recorded only on the success branch, and
- * the deadline gauges must have been registered at startup.
+ * the deadline gauges must be registered once the first check completed (absent before it).
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)

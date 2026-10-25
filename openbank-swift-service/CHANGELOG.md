@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.3...swift-service-v0.13.4) (2026-10-24)
+
+
+### Bug Fixes
+
+* **swift:** re-drive an accepted MT103 whose settlement booking is unproven ([#13696](https://github.com/JiRaska/open-bank-oss/issues/13696)) ([2bf26c9](https://github.com/JiRaska/open-bank-oss/commit/2bf26c915898e624056fec3d0f471968de5783e3))
+
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.2...swift-service-v0.13.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* **swift:** alert on an unbooked MT103 the scheme accepted ([#13689](https://github.com/JiRaska/open-bank-oss/issues/13689)) ([7228d8f](https://github.com/JiRaska/open-bank-oss/commit/7228d8f107ce0f790196afcb69faf374ddf03781)), closes [#13623](https://github.com/JiRaska/open-bank-oss/issues/13623)
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.1...swift-service-v0.13.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **swift:** settle only a COMPLETED 201 that matches the request ([#13622](https://github.com/JiRaska/open-bank-oss/issues/13622)) ([fad71f4](https://github.com/JiRaska/open-bank-oss/commit/fad71f4593cbd0f39cb852529f96b6e3a6802bea))
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.0...swift-service-v0.13.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **swift:** send valueDate as ISO so MT103 settlement can book ([#13232](https://github.com/JiRaska/open-bank-oss/issues/13232)) ([220e2b5](https://github.com/JiRaska/open-bank-oss/commit/220e2b536fd890a406ef4f93086d1eabf6aa9c11))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.12.3...swift-service-v0.13.0) (2026-10-16)
 
 

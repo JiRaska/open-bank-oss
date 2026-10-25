@@ -4,6 +4,8 @@
 
 import { describe, it, expect } from 'vitest'
 import { classifyBffFailure } from '@/lib/services/bff'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 
 function res(status: number, body?: unknown): Response {
   return new Response(body === undefined ? '' : JSON.stringify(body), {
@@ -15,6 +17,17 @@ function res(status: number, body?: unknown): Response {
 describe('classifyBffFailure', () => {
   it('maps 404 "Unknown service" to not_deployed', async () => {
     expect(await classifyBffFailure(res(404, { error: 'Unknown service: foo' }))).toBe('not_deployed')
+  })
+
+  it('maps discovery_unavailable 503 to unknown collection state before generic status handling', async () => {
+    expect(await classifyBffFailure(res(503, { error: 'discovery_unavailable' }))).toBe('discovery_unavailable')
+  })
+
+  it('does not classify incomplete discovery as deployed, idle, or unreachable', async () => {
+    const kind = await classifyBffFailure(res(503, { error: 'discovery_unavailable' }))
+    expect(kind).not.toBe('not_deployed')
+    expect(kind).not.toBe('scaled_to_zero')
+    expect(kind).not.toBe('unreachable')
   })
 
   it('maps 503 "scaled_to_zero" to scaled_to_zero (KEDA idle, ADR-0057)', async () => {
@@ -50,5 +63,19 @@ describe('classifyBffFailure', () => {
   it('handles a non-JSON body without throwing', async () => {
     const html = new Response('<html>oops</html>', { status: 503, headers: { 'content-type': 'text/html' } })
     expect(await classifyBffFailure(html)).toBe('error')
+  })
+
+  it('uses the shared distinction in payments, infrastructure, and lineage views', () => {
+    const pages = [
+      'src/app/payments/page.tsx',
+      'src/app/infrastructure/page.tsx',
+      'src/app/docs/lineage/page.tsx',
+    ]
+    for (const page of pages) {
+      const source = readFileSync(path.resolve(process.cwd(), page), 'utf8')
+      expect(source, page).toContain('classifyBffFailure(res)')
+    }
+    const payments = readFileSync(path.resolve(process.cwd(), pages[0]), 'utf8')
+    expect(payments).not.toMatch(/res\.status\s*===\s*404\s*\?\s*'not_deployed'/)
   })
 })

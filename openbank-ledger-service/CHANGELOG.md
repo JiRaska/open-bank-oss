@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.37.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.37.1...ledger-service-v1.37.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **ledger:** add an env-backed enabled switch so ledger-pension-co builds no Kafka producer ([#13646](https://github.com/JiRaska/open-bank-oss/issues/13646)) ([b822b6d](https://github.com/JiRaska/open-bank-oss/commit/b822b6ddecb07ddcf03cca99a8004775359a408e))
+
+## [1.37.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.37.0...ledger-service-v1.37.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **billing:** book non-CZK fees on per-currency fee-income accounts ([#13606](https://github.com/JiRaska/open-bank-oss/issues/13606)) ([bfd0cb1](https://github.com/JiRaska/open-bank-oss/commit/bfd0cb17fe958b53d6d5db91ce14e2de8d5a61fe))
+
+## [1.37.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.36.0...ledger-service-v1.37.0) (2026-10-22)
+
+
+### Features
+
+* **ledger:** day-close participants — the accounting day waits for product services (ADR-0342) ([#13197](https://github.com/JiRaska/open-bank-oss/issues/13197)) ([cc8b400](https://github.com/JiRaska/open-bank-oss/commit/cc8b40005ac00a2c73142a6890fa146556017950))
+
+## [1.36.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.35.0...ledger-service-v1.36.0) (2026-10-19)
+
+
+### Features
+
+* **ledger:** own the accountingClass to GL map; treasury posts by class (ADR-0341) ([#13205](https://github.com/JiRaska/open-bank-oss/issues/13205)) ([b936611](https://github.com/JiRaska/open-bank-oss/commit/b936611a8c9f622a076b30377e0757485c29a6f6))
+
 ## [1.35.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.34.3...ledger-service-v1.35.0) (2026-10-16)
 
 
