@@ -290,12 +290,33 @@ class CustomerEdgeResource(
         if (own.statusInfo.family != Response.Status.Family.SUCCESSFUL) return own
         val shared = sharedAccountsFor(customer.partyId)
         if (shared.isEmpty()) return own
-        val merged = runCatching { objectMapper.readTree(own.entity?.toString() ?: "") }
-            .getOrNull()?.takeIf { it.isArray } ?: return own
-        val out = objectMapper.createArrayNode()
-        merged.forEach { out.add(it) }
-        shared.forEach { out.add(it) }
-        return Response.ok(objectMapper.writeValueAsString(out)).type(MediaType.APPLICATION_JSON).build()
+        val body = runCatching { objectMapper.readTree(own.entity?.toString() ?: "") }.getOrNull()
+            ?: return own
+        // account-service answers a page object {data, pagination}; a bare array is the legacy
+        // shape and is still merged. Anything else is passed through untouched.
+        val rows = when {
+            body.isArray -> body as com.fasterxml.jackson.databind.node.ArrayNode
+            body.path("data").isArray -> body.path("data") as com.fasterxml.jackson.databind.node.ArrayNode
+            else -> return own
+        }
+        val seen = rows.mapNotNull { it.path("id").asText(null) }.toMutableSet()
+        var appended = 0
+        shared.forEach { node ->
+            val id = node.path("id").asText(null)
+            if (id == null || seen.add(id)) {
+                rows.add(node)
+                appended++
+            }
+        }
+        if (appended == 0) return own
+        // Shared accounts sit OUTSIDE cursor pagination: they are appended to whichever page is
+        // fetched, cursors are left as account-service issued them, and only totalCount (when the
+        // upstream supplied one) is raised so the count still describes what the caller can see.
+        val pagination = body.path("pagination")
+        if (pagination is com.fasterxml.jackson.databind.node.ObjectNode && pagination.path("totalCount").isNumber) {
+            pagination.put("totalCount", pagination.path("totalCount").asLong() + appended)
+        }
+        return Response.ok(objectMapper.writeValueAsString(body)).type(MediaType.APPLICATION_JSON).build()
     }
 
     /**

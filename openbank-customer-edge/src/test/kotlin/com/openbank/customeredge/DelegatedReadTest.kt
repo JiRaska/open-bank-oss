@@ -51,6 +51,11 @@ class DelegatedReadTest {
     private fun accountJson(accountId: UUID, ownerParty: UUID) =
         Response.ok("""{"id":"$accountId","partyId":"$ownerParty"}""").build()
 
+    private fun page(vararg rows: String): String {
+        val pagination = """{"limit":50,"hasNextPage":false,"nextCursor":null,"totalCount":${rows.size}}"""
+        return """{"data":[${rows.joinToString(",")}],"pagination":$pagination}"""
+    }
+
     private fun granted(yes: Boolean) = Response.ok("""{"granted":$yes}""").build()
 
     @Test
@@ -152,7 +157,7 @@ class DelegatedReadTest {
         val theirs = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
-            Response.ok("""[{"id":"$mine","partyId":"$grantee"}]""").build()
+            Response.ok(page("""{"id":"$mine","partyId":"$grantee"}""")).build()
         every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
             """
             [{"status":"ACTIVE","resourceType":"ACCOUNT","resourceId":"$theirs",
@@ -164,10 +169,13 @@ class DelegatedReadTest {
         val resp = resourceFor(upstream, grantee).listAccounts()
         val body = ObjectMapper().readTree(resp.entity.toString())
 
-        assertThat(body).hasSize(2)
-        assertThat(body[0].path("sharedWithMe").asBoolean(false)).isFalse()
-        assertThat(body[1].path("id").asText()).isEqualTo(theirs.toString())
-        assertThat(body[1].path("sharedWithMe").asBoolean(false)).isTrue()
+        val data = body.path("data")
+        assertThat(data).hasSize(2)
+        assertThat(data[0].path("sharedWithMe").asBoolean(false)).isFalse()
+        assertThat(data[1].path("id").asText()).isEqualTo(theirs.toString())
+        assertThat(data[1].path("sharedWithMe").asBoolean(false)).isTrue()
+        assertThat(body.path("pagination").path("totalCount").asInt()).isEqualTo(2)
+        assertThat(body.path("pagination").path("hasNextPage").asBoolean(true)).isFalse()
     }
 
     @Test
@@ -177,7 +185,7 @@ class DelegatedReadTest {
         val theirs = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
-            Response.ok("""[{"id":"$mine","partyId":"$grantee"}]""").build()
+            Response.ok(page("""{"id":"$mine","partyId":"$grantee"}""")).build()
         every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
             """
             [{"status":"OFFERED","resourceType":"ACCOUNT","resourceId":"$theirs",
@@ -187,7 +195,8 @@ class DelegatedReadTest {
 
         val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts().entity.toString())
 
-        assertThat(body).hasSize(1)
+        assertThat(body.path("data")).hasSize(1)
+        assertThat(body.path("pagination").path("totalCount").asInt()).isEqualTo(1)
     }
 
     @Test
@@ -196,13 +205,30 @@ class DelegatedReadTest {
         val mine = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
-            Response.ok("""[{"id":"$mine","partyId":"$grantee"}]""").build()
+            Response.ok(page("""{"id":"$mine","partyId":"$grantee"}""")).build()
         every { upstream.get(match { it.contains("/delegations/grantee/") }, any()) } throws
             RuntimeException("connection refused")
 
         // The customer's own money must not vanish because a secondary service is down.
         val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts().entity.toString())
-        assertThat(body).hasSize(1)
-        assertThat(body[0].path("id").asText()).isEqualTo(mine.toString())
+        assertThat(body.path("data")).hasSize(1)
+        assertThat(body.path("data")[0].path("id").asText()).isEqualTo(mine.toString())
+    }
+
+    @Test
+    fun `an account already in the page is not duplicated by its grant`() {
+        val grantee = UUID.randomUUID()
+        val theirs = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
+            Response.ok(page("""{"id":"$theirs","partyId":"$grantee"}""")).build()
+        every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
+            """[{"status":"ACTIVE","resourceType":"ACCOUNT","resourceId":"$theirs","capabilities":["ACCOUNT_READ_BALANCES"]}]""",
+        ).build()
+        every { upstream.get(match { it.contains("/accounts/$theirs") }, any()) } returns accountJson(theirs, grantee)
+
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts().entity.toString())
+        assertThat(body.path("data")).hasSize(1)
+        assertThat(body.path("pagination").path("totalCount").asInt()).isEqualTo(1)
     }
 }
