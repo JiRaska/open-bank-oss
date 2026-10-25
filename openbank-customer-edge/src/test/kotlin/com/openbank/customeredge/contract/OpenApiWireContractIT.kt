@@ -95,7 +95,11 @@ class OpenApiWireContractIT {
             .then().statusCode(200).extract().asString()
 
         assertConforms(body, "/accounts")
-        assertThat(mapper.readTree(body).path("data").isArray).isTrue()
+        val data = mapper.readTree(body).path("data")
+        assertThat(data.isArray).isTrue()
+        assertThat(data.size()).isEqualTo(1)
+        assertThat(data[0].has("closedAt")).isTrue()
+        assertThat(data[0].path("closedAt").isNull).isTrue()
     }
 
     @Test

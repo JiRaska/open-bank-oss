@@ -25,9 +25,13 @@ import org.snakeyaml.engine.v2.api.LoadSettings
  */
 class OpenApiWireValidator private constructor(specYaml: String) {
     private val mapper = ObjectMapper()
-    private val spec: JsonNode = nullableToType(
-        mapper.valueToTree(Load(LoadSettings.builder().build()).loadFromString(specYaml)),
-    )
+    private val spec: JsonNode = mapper.valueToTree<JsonNode>(
+        Load(LoadSettings.builder().build()).loadFromString(specYaml),
+    ).let { parsed ->
+        // Only OpenAPI 3.0 defines nullable. A 3.1 document is already JSON Schema:
+        // translating its annotations would validate a different contract than it publishes.
+        if (parsed.path("openapi").asText().startsWith("3.0.")) nullableToType(parsed) else parsed
+    }
 
     /** Loads `openapi.yaml` from the test classpath (a service's main resources). */
     constructor() : this(

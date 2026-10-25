@@ -8082,14 +8082,11 @@ components:
         hasNextPage:
           type: boolean
         nextCursor:
-          type: string
-          nullable: true
+          type: [string, 'null']
         previousCursor:
-          type: string
-          nullable: true
+          type: [string, 'null']
         totalCount:
-          type: integer
-          nullable: true
+          type: [integer, 'null']
 
     # Mirrors notification-service's NotificationPreferenceDto. No stored row defaults every
     # channel to true.
@@ -8194,23 +8191,18 @@ components:
           type: string
           format: date-time
         closedAt:
-          type: string
+          type: [string, 'null']
           format: date-time
-          nullable: true
         goalName:
-          type: string
-          nullable: true
+          type: [string, 'null']
         goalTargetMinorUnits:
-          type: integer
+          type: [integer, 'null']
           format: int64
-          nullable: true
         goalTargetDate:
-          type: string
+          type: [string, 'null']
           format: date
-          nullable: true
         nickname:
-          type: string
-          nullable: true
+          type: [string, 'null']
         sharedWithMe:
           type: boolean
           default: false
