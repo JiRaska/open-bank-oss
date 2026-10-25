@@ -157,7 +157,12 @@ def github_run(repo: str, token: str, run_id: int) -> dict:
         raise ArtifactApiError("GitHub run has no workflow path")
     head_repository = payload.get("head_repository")
     head_repo_name = head_repository.get("full_name") if isinstance(head_repository, dict) else None
-    return {"path": path, "event": payload.get("event"), "head_repository": head_repo_name}
+    return {
+        "path": path,
+        "event": payload.get("event"),
+        "head_repository": head_repo_name,
+        "status": payload.get("status"),
+    }
 
 
 SERVICES_CI = ".github/workflows/services-ci.yml"
@@ -197,6 +202,7 @@ def latest_main_artifact(
                     run.get("path") == producer
                     and run.get("event") == "push"
                     and run.get("head_repository") == repo
+                    and run.get("status") == "completed"
                 ):
                     return str(artifact_id)
         # Exact-name results are newest-first. A short page proves there is no
@@ -211,8 +217,15 @@ def latest_main_artifact(
 TEST_REPO = "org/repo"
 
 
-def run(path: str, event: str = "push", head_repository: str = TEST_REPO) -> dict:
-    return {"path": path, "event": event, "head_repository": head_repository}
+def run(path: str, event: str = "push", head_repository: str = TEST_REPO,
+        status: str = "completed", conclusion: str = "success") -> dict:
+    return {
+        "path": path,
+        "event": event,
+        "head_repository": head_repository,
+        "status": status,
+        "conclusion": conclusion,
+    }
 
 
 def lookup(name: str, fetch, fetch_run) -> str | None:
@@ -327,6 +340,62 @@ class LookupTests(unittest.TestCase):
         artifact = {"id": 9, "expired": False, "workflow_run": {"head_branch": "main"}}
         with self.assertRaisesRegex(ArtifactApiError, "no run id"):
             lookup("test", lambda *_: [artifact], lambda _: run(".github/workflows/services-ci.yml"))
+
+    def test_newer_incomplete_run_is_skipped_for_older_completed_run(self) -> None:
+        for status in ("queued", "in_progress"):
+            with self.subTest(status=status):
+                artifacts = [
+                    {
+                        "id": 9,
+                        "expired": False,
+                        "workflow_run": {"head_branch": "main", "id": 90},
+                    },
+                    {
+                        "id": 8,
+                        "expired": False,
+                        "workflow_run": {"head_branch": "main", "id": 80},
+                    },
+                ]
+                runs = {
+                    90: run(".github/workflows/services-ci.yml", status=status),
+                    80: run(".github/workflows/services-ci.yml"),
+                }
+
+                self.assertEqual(
+                    lookup("test", lambda *_, artifacts=artifacts: artifacts, runs.__getitem__),
+                    "8",
+                )
+
+    def test_completed_failure_run_remains_valid_evidence_source(self) -> None:
+        artifact = {
+            "id": 9,
+            "expired": False,
+            "workflow_run": {"head_branch": "main", "id": 90},
+        }
+
+        self.assertEqual(
+            lookup(
+                "test", lambda *_: [artifact],
+                lambda _: run(
+                    ".github/workflows/services-ci.yml",
+                    conclusion="failure",
+                ),
+            ),
+            "9",
+        )
+
+    def test_missing_run_status_is_not_selected(self) -> None:
+        artifact = {
+            "id": 9,
+            "expired": False,
+            "workflow_run": {"head_branch": "main", "id": 90},
+        }
+        incomplete_metadata = run(".github/workflows/services-ci.yml")
+        incomplete_metadata.pop("status")
+
+        self.assertIsNone(
+            lookup("test", lambda *_: [artifact], lambda _: incomplete_metadata)
+        )
 
 
 def main() -> int:

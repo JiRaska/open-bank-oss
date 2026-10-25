@@ -1,8 +1,8 @@
 # API
 
-REST/RPC kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.15.0**). Služba je **interní** — **není** vystavena přes API Gateway externím TPP.
+REST/RPC kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.17.0**). Služba je **interní** — **není** vystavena přes API Gateway externím TPP.
 
-Platí dvě verzovací osy (ADR-0048): release verze (`version.txt` = `1.27.4`) a API-kontraktová verze (`openapi.yaml: info.version` = `1.15.0`, `openbank.api.version = "1"`). Jsou nezávislé.
+Platí dvě verzovací osy (ADR-0048): release verze (`version.txt` = `1.27.4`) a API-kontraktová verze (`openapi.yaml: info.version` = `1.17.0`, `openbank.api.version = "1"`). Jsou nezávislé.
 
 ## Povrchy
 
@@ -12,7 +12,8 @@ Platí dvě verzovací osy (ADR-0048): release verze (`version.txt` = `1.27.4`) 
 | Admin asistent | `POST /agent/chat` | JSON | Keycloak OIDC; běží jako `ui-assistant` |
 | Registr modelů | `GET /agent/models` | JSON | Keycloak OIDC |
 | Capability / kontrola katalogu | `GET` / `POST` `/agent/catalog-reviews` | JSON | Keycloak OIDC; operator/admin/compliance |
-| Důkazní záznamy merge | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (role viz níže) |
+| Lidský merge / čtení důkazů | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (role viz níže) |
+| Ingest App merge | `POST /api/v1/agent-merge-records/app` | JSON | `ROLE_MERGE_RECORDER` |
 | Health | `GET /q/health/live`, `/q/health/ready` | JSON | žádné (management port 8085) |
 
 ## MCP — `POST /mcp`
@@ -87,12 +88,41 @@ Hostovaná kontrola je výjimkou pouze pro katalog a sandbox. `catalog-review.al
 
 Neplatné identifikátory, revize mimo stav `DRAFT`, příliš velký snapshot nebo model mimo allow-list vracejí `400`; chybějící způsobilá nakonfigurovaná trasa nebo nedostupný model vrací `503`. Úspěšná odpověď obsahuje id/stav návrhu, hash kontextu, omezené nálezy a použité id modelu.
 
-## Zaznamenané lidské merge — `/api/v1/agent-merge-records`
+## Skutečné sloučení a lidské schválení — `/api/v1/agent-merge-records`
 
-Důkaz „zaznamenaného lidského merge" fáze 3 ADR-0031: trvalý záznam **kdo mergoval PR autora agentem** (tabulka viz [04 — Data](./04-data.md)). Záznamy vstupují **mimo pásmo** — GitHub Actions workflow `record-agent-merge` postuje každý mergovaný PR agenta se servisním credential pipeline `ROLE_MERGE_RECORDER`. Agent své merge **nikdy nenahlašuje sám**.
+Fáze 3 ADR-0031 ukládá **skutečného vykonavatele merge** odděleně od **lidského schvalovatele**.
+Důkazy posílá důvěryhodný CI recorder; nástroje agenta nemohou vlastní merge samy prohlásit.
 
-- **`POST /api/v1/agent-merge-records`** — pouze `ROLE_MERGE_RECORDER` (volajícím je CI pipeline, ne interaktivní operátor; least privilege — ani `ROLE_ADMIN` nesmí zapisovat merge důkazy). Body: `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title` (vše povinné), plus volitelné `proposalId` (UUID — měkký odkaz na `agent_proposal`) a `source` (default `unknown`). Idempotentní podle `prNumber`: znovu doručený webhook nic nevloží (`ON CONFLICT DO NOTHING`) a odpověď vrátí již uložený záznam s `inserted=false`.
-- **`GET /api/v1/agent-merge-records?agentId=`** — `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_COMPLIANCE`. Nejnovější první; volitelný `agentId` zužuje seznam na merge jednoho agenta.
+- `POST /api/v1/agent-merge-records`: pouze `ROLE_MERGE_RECORDER`. Povinná pole zůstávají
+  `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title`; `proposalId` a
+  `source` jsou volitelné. Původní endpoint vždy zaznamenává lidského vykonavatele. Neznámá
+  pole starých požadavků ignoruje a nikdy je nepoužije jako identitu App ani autorizační důkaz.
+- `POST /api/v1/agent-merge-records/app`: samostatná aditivní operace pouze pro App a roli recorder.
+  Vyžaduje `mergedByType=GITHUB_APP`, `mergedById`, `headSha`, `mergeCommitSha` a nenulovou
+  `authorization`; vstup s lidským typem vykonavatele odmítá.
+  `mergedBy` stále obsahuje skutečnou App. Autorizace nese lidský login/id/čas a odkaz na důkaz.
+  `OWNER_WORKFLOW_EXACT_HEAD` / `HEAD` váže rozhodnutí vlastníka před merge na přesné SHA tohoto
+  PR, včetně `statusId` a `workflowRunId`.
+- `LEGACY_PR_AUTO_MERGE` / `PR` platí jen pro merge nejpozději `2026-10-23T19:42:17Z`.
+  Uchovává pozorovanou lidskou žádost o auto-merge, uzel PR, neměnný uzel/čas merge události a
+  čas pozorování. **Nepotvrzuje schválení SHA ani historický soulad s pravidly.** Budoucí časy
+  a rozporné důkazy odmítá. Nové App merge vyžadují přesný důkaz workflow pro HEAD.
+- `GET /api/v1/agent-merge-records/capabilities`: pouze recorder; před zápisem musí potvrdit verzi
+  schématu 2. `GET /api/v1/agent-merge-records/{prNumber}`: pouze recorder, čtení potvrzeného
+  záznamu nebo 404. Samotná `ROLE_ADMIN` tyto dvě operace nepovoluje.
+- `GET /api/v1/agent-merge-records?agentId=` nadále čtou `ROLE_OPERATOR`, `ROLE_ADMIN` a
+  `ROLE_COMPLIANCE`, od nejnovějších a s volitelným filtrem agenta.
+
+Opakování vrací původní záznam s `inserted=false` bez další auditní události. Rozporný App
+vykonavatel, HEAD, merge nebo autorizace vrací 409; nové pozorování historického důkazu ponechá
+původní čas. Neplatný nebo chybějící důkaz vrací 400. Záznam i outbox vznikají atomicky a chyba
+auditního zápisu vrátí transakci zpět. App má auditní typ `SERVICE`, člověk `HUMAN`.
+Přesměrování HTTP recorder odmítá, aby neodeslal credential jinému příjemci.
+
+Nejprve nasadit aditivní migraci V7 a nový backend, potom zapisovat schéma 2. Historii doplní
+workflow vlastníka na `main` s nezávislým čtením každého výsledku. Nový zelený běh sám neopraví
+starší mezeru. Rollback ponechá důkazy a zastaví App ingest před návratem nekompatibilního readeru;
+nesmí mazat autorizace jen proto, aby se starší backend jevil jako kompatibilní.
 
 ## Chybový model
 

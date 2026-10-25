@@ -127,7 +127,7 @@ not change any existing request's outcome until explicitly flipped.
   libs-runtime, fixed in #11033/#11047).
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -142,7 +142,7 @@ not change any existing request's outcome until explicitly flipped.
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal clearing and transaction REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-05-30** — Added `swift_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/
-  boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
+  boundary. Risk class = **availability**, mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`).
   Rollback: `DROP SEQUENCE`.
 - **2026-06-23** — ADR-0104 D4: real ISO 20022 `pacs.008` submission to SWIFT SWIFTNet via
   `clearing-simulator`. New outbound trust boundary: `swift-service → clearing-simulator`
@@ -179,7 +179,7 @@ not change any existing request's outcome until explicitly flipped.
   annotations. Also updated `SwiftResourceAuthzTest`'s anonymous-access assertion (404 -> 401)
   to match the new `@RolesAllowed` outer gate.
 - **2026-07-08** — ADR-0155 four-eyes enforcement rollout (issue #413), mirroring the
-  sepa-payment pilot. New endpoint `PATCH /api/v1/swift/approvals/{id}` + `ApprovalConfig`
+  sepa-payment pilot. New endpoint `PATCH /api/v1/swift/approvals/{id}` + ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`)
   (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate (openbank-libs-runtime,
   shared, opt-in) on `swift.send`. New STRIDE supplement §4a; new residual risk noting
   `swift.send`'s `PendingApproval` has no `resourceId` binding (action-scoped only, no path
@@ -274,3 +274,35 @@ not change any existing request's outcome until explicitly flipped.
   the change: 6 rows, all `EUR` (5000–12345 minor units), so no stored row reads differently. The
   `GET`/`POST` response shape is held by a `SwiftMessageView` mirroring the former domain members.
   No new endpoint, caller, privilege or event. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-22** — **Settlement answer bound to the request (#13217).** `SettlementAdapter` settles an MT103 only on HTTP 201 with a COMPLETED transaction (enforced by the shared facade) that has an id and matches the request's type, source account, amount, currency, rail and instruction type. HTTP 200/202 and a COMPLETED booking for something else no longer mark the message settled; it stays SENT. **Tampering / repudiation:** a wrong or foreign booking can no longer be recorded as this message's settlement. Same edge, identity, credential and endpoint; no new event. The consumer pact pins the bound response fields so the provider replay keeps them honest. Rollback: revert the commit.
+
+- **Outbound local booking proof (#13623).** Internal nullable due/proof/transaction columns
+  retain unresolved obligations across independent ACK/reject status changes. Narrow row-locked,
+  version-checked writes commit accepted-due/SENT/event and proven-booking/COMPLETED/event
+  atomically. Network calls hold no database lock. Existing strict provider binding and booking
+  key remain unchanged; callbacks win over stale completion. Pending local proof is not evidence
+  that the provider did not book. Coverage of historical rows is explicitly unknown rather than
+  backfilled from creation. Fixed-rail gauges expose tracked age and unknown coverage separately;
+  no payment identities or private errors enter labels. No new endpoint, caller privilege,
+  financial retry, SLA or alert. Rollback readers/writers while retaining additive metadata;
+  reconcile/export obligations before any destructive schema removal.
+
+- **2026-10-23** — **Unsettled-booking alert (#13623).** `SwiftBookingUnsettled` pages when the oldest open MT103 booking clock passes 30 minutes; runbook `docs/runbooks/0032-payment-rail-unsettled-booking.md` (SWIFT section). **Threats addressed:** *denial of service / silent loss.* A message the scheme accepted whose debit never booked used to sit in SENT with one WARN line. swift-service makes a single transaction-service call with no retry, so every non-booking was permanent and invisible. It now pages, including the two holds the outcome counter never sees: no ordering account id, and an unparseable value date. A cold pod reads NaN and never fires; a stopped sweep is caught by `WorkflowLivenessStale` (`swift-booking-age`). *Information disclosure:* the alert carries `rail`/`service`/`severity` labels only. *Repudiation:* the runbook forbids using `ack`/`reject` to silence it. They do not touch the booking clock, and a REJECTED status on a scheme-accepted message would misstate the record. **Residual:** there is no re-drive (#13686), so a transport failure on the only call can be resolved only by a finance correction plus an Alertmanager silence with a ticket. No code, authorization, endpoint or retry change in this service. Rollback: revert the rule.
+
+- **2026-10-23** — **Settlement re-drive (#13686).** `SwiftSettlementRedriveScheduler` (suspend `@Scheduled`, every 60 s) re-settles an MT103 that is `SENT` with an open booking clock (`booking_first_due_at` set, `booking_proven_at` null), never on `SENT` alone, through `SwiftService.settleAccepted`. **Threats addressed:** *denial of service / silent loss.* A transport failure on the only transaction-service call used to leave the ordering customer's debit unbooked for good; it is now retried with bounded backoff (2m doubling to 1h, 10 attempts), and an exhausted message is counted (`openbank_payment_unsettled_total{outcome="redrive-exhausted"}`) while its open clock keeps `SwiftBookingUnsettled` firing. *Tampering / double booking:* the re-drive never calls the scheme, reuses the `swift-settlement-<messageId>` key, and rebuilds the request from the stored message, so the value date is the MT103's 32A date and the body equals the first attempt's. Three independent guards: a durable claim (token + 2m lease, one conditional UPDATE, every later write conditional on the token) lets one caller per message call transaction-service; the idempotency key makes a second landing a replay; the locked completion write allows one proof and one COMPLETED event. `SwiftSettlementRedriveIT` runs two concurrent re-drives against PostgreSQL and asserts one call, one proof and one COMPLETED event; removing the claim's lease predicate makes it fail. *Elevation of privilege:* no new endpoint or caller; the runbook's re-arm of an exhausted message is a DB write to bookkeeping columns only, which may not touch the proof columns. *Information disclosure:* no new metric labels beyond the bounded `outcome` value. *Double debit by a racing manual remedy:* the alert fires at 30m while the re-drive may still be live for hours, so the runbook's first SWIFT step is a four-eyes stop (`booking_redrive_stopped_at` + reason with ticket, approver and executor) that is refused while a live claim exists and that the claim SQL honours; `ack`/`reject` stop it too and answer 409 during a live claim. `SwiftSettlementRedriveSweepIT` drives the real cron and asserts no call for a stopped message. Unparseable stored data is `bad-data` and exhausts at once; a per-message database error is counted (`redrive-error`) without aborting the batch. *Stalled lease:* a re-drive stalled past its lease can let a stop succeed while its call is in flight. The completion is deliberately not conditional on the claim (a booking made must never lose its proof); losing the claim is counted as `late-completion`, and the runbook requires any manual booking to use the same `swift-settlement-<messageId>` key and to read transaction-service for it after the stop, so dedup makes a second debit impossible. The operator stop commits in its own transaction before the status write; that fails safe (a stopped message the sweep never books, alert still firing). *No booking owed:* a four-eyes runbook-only waive (`booking_waived_at`, reason, approver; never written by the service, read-only on the entity) removes a message from the age gauge, the alert and the sweep. **Residual:** the booking clock is not closed by `ack`/`reject` (it closes only on a proven booking, so the alert keeps naming the unbooked debit); a stored `FAILED` or mismatched answer still exhausts and needs the runbook's reconcile or reverse; an acknowledged or rejected message is not re-driven. Rollback: `SWIFT_SETTLEMENT_REDRIVE_ENABLED=false`; the V12 columns are additive and inert without the sweep.
+
+
+- **2026-10-23 — Nullable destination binding (#13217).** The outbound SWIFT booking
+  has no internal `targetAccountId`. A completed response must preserve that expected null;
+  an otherwise matching transaction naming an internal destination is rejected and counted as
+  a mismatch, without confirming settlement. The existing type, source account, amount, currency,
+  rail, instruction type, completion and transaction-id checks remain in force. Same identity,
+  endpoint and idempotency key; no retry, API or schema change. Rollback: revert this predicate
+  change; the prior acceptance of an unexpected destination returns.
+
+- **2026-10-23 — Late booking proof (#13686/#13217).** After a stalled re-drive, an operator ACK/REJECT may already have committed. A separate short row-locked internal write retains strictly validated provider proof only for the unchanged original request and a durable operator stop. It preserves the operator status and metadata, emits no invented COMPLETED transition, replays the same transaction id without another write, and refuses conflicting proof. Normal completion CAS remains strict. Waiver evidence requires a complete non-null, nonblank triple; SQL NULL cannot silently exclude an obligation. No new endpoint, retry key or scheme submission.

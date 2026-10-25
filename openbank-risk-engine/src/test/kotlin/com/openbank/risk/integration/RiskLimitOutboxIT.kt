@@ -103,7 +103,7 @@ class RiskLimitOutboxIT {
             TestDb.count(
                 "SELECT count(*) FROM risk_outbox WHERE aggregate_id = '$runId' AND status = 'PENDING' " +
                     "AND event_type = 'risk.limit.breach.v1' AND attempt_count = 0 AND synthetic = false " +
-                    "AND dedup_key = '$runId:lcr-min:openbank-risk-appetite:1'",
+                    "AND dedup_key = '$runId:lcr-min:openbank-risk-appetite:2'",
             ),
         ).isEqualTo(1)
         val payload = json.readTree(payloadOf(runId))
@@ -190,7 +190,7 @@ class RiskLimitOutboxIT {
         assertThat(rows(runId)).isEqualTo(0)
         assertThat(
             TestDb.count(
-                "SELECT count(*) FROM risk_limit_event_dedup WHERE dedup_key = '$runId:lcr-min:openbank-risk-appetite:1'",
+                "SELECT count(*) FROM risk_limit_event_dedup WHERE dedup_key = '$runId:lcr-min:openbank-risk-appetite:2'",
             ),
         ).isEqualTo(1)
     }
@@ -200,7 +200,7 @@ class RiskLimitOutboxIT {
     fun `a legacy pod writing after the backfill cannot lose its replay guard during retention`() {
         val analysis = onEventLoop { limits.evaluate(breachingRun("2024-04-07")) }
         val runId = analysis.run.id
-        val key = "$runId:lcr-min:openbank-risk-appetite:1"
+        val key = "$runId:lcr-min:openbank-risk-appetite:2"
         // Simulate an old pod still running after V10 Flyway completed. Its INSERT knows only
         // risk_outbox, so a one-time migration backfill cannot see this row.
         TestDb.execute(

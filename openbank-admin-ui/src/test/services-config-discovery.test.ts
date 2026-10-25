@@ -38,6 +38,16 @@ describe('GET /api/services/config discovery coverage', () => {
     expect(body.services[0].name).toBe('account-service')
   })
 
+  it('preserves namespace identity for same-named discovered services', async () => {
+    state.snapshot = { status: 'complete', services: [service, { ...service, namespace: 'payments' }] }
+    const response = await GET()
+    const body = await response.json()
+
+    expect(body.map((row: { name: string; namespace?: string }) => [row.name, row.namespace])).toEqual([
+      ['account-service', 'accounts'], ['account-service', 'payments'],
+    ])
+  })
+
   it('does not probe static localhost services when in-cluster discovery is unavailable', async () => {
     state.snapshot = { status: 'unavailable', services: [] }
     const fetchMock = vi.mocked(fetch)

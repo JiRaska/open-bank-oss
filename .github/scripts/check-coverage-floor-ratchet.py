@@ -207,11 +207,38 @@ def git_show(ref: str, path: str) -> str | None:
 
 
 def pr_trailer_text(base: str, body: str | None) -> str:
+    """The PR body plus every commit message of base..HEAD — everything local, no API read."""
     parts = [body or os.environ.get("PR_BODY", "")]
     log = subprocess.run(["git", "-C", str(REPO), "log", "--format=%B", f"{base}..HEAD"],
                          capture_output=True, text=True, check=False)
     parts.append(log.stdout if log.returncode == 0 else "")
     return "\n".join(parts)
+
+
+def carrier_trailer_text(base: str, env=None, fetch_pr=None, fetch_bodies=None) -> tuple[str | None, str]:
+    """For a VERIFIED merge-train carrier (ADR-0343), its members' live bodies — the place a
+    `coverage-floor-lowered:` trailer was written; the carrier's bot body never carries one.
+    Returns (text, "") — text None when the PR is not a verified carrier (a human `train/…` PR
+    included) — or (None, reason) when the carrier's members could not be READ: NOT EVALUATED.
+    Only ever called once a lowering is found, so a carrier lowering nothing costs no API call and
+    no fetch at all; the resolution itself is shared with every other gate in the job."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    import merge_train_carrier as carrier_lib
+    kw = {k: v for k, v in (("fetch_pr", fetch_pr), ("fetch_bodies", fetch_bodies)) if v is not None}
+    res = carrier_lib.resolve(base, env, cwd=str(REPO), **kw)
+    if res.kind == "unavailable":
+        return None, res.reason
+    if res.kind == "invalid":
+        print(f"::warning::coverage-floor-ratchet: carrier members not derivable ({res.reason}) — carrier body only")
+        return None, ""
+    if res.kind != "carrier":
+        return None, ""
+    unread = [n for n, _, b in res.members if b is None]
+    if unread:
+        return None, "member body unreadable: " + ", ".join(f"#{n}" for n in unread)
+    print(f"coverage-floor-ratchet: merge-train carrier — trailers read from members "
+          f"{', '.join(f'#{n}' for n, _, _ in res.members)}")
+    return "\n".join(b for _, _, b in res.members), ""
 
 
 def changed_build_scripts(base: str) -> list[str]:
@@ -251,9 +278,21 @@ def main_check(base_arg: str, body: str | None) -> int:
             head_floors[p] = []
             errors.append(f"::error file={p}::{p}: `{exc}` is not a bare integer floor. Write "
                           f"`minValue = <int>` so the ratchet can read it; an expression here is refused.")
-    errors += evaluate(base_floors, head_floors, pr_trailer_text(base, body))
+    text = pr_trailer_text(base, body)
+    lowered = evaluate(base_floors, head_floors, text)
     subjects = sum(1 for p in tracked_build_scripts("HEAD") if floors((REPO / p).read_text(errors="ignore")))
     print(f"SUBJECTS={subjects}  # build scripts carrying a Kover floor at HEAD")
+    if lowered:
+        # Only now can a merge-train carrier's members matter (their bodies may carry the trailer).
+        member_text, unreadable = carrier_trailer_text(base)
+        if unreadable:
+            sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+            import merge_train_carrier as carrier_lib
+            carrier_lib.not_evaluated("coverage-floor-ratchet", f"a floor is lowered and {unreadable}")
+            return 1
+        if member_text is not None:
+            lowered = evaluate(base_floors, head_floors, text + "\n" + member_text)
+    errors += lowered
     for line in errors:
         print(line)
     if errors:
@@ -405,8 +444,14 @@ def git_plumbing_test() -> bool:
         return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
 
     def gate(base: str) -> int:
-        with redirect_stdout(io.StringIO()):
-            return main_check(base, "")
+        # Hermetic: on CI the real PR_NUMBER is set, and the temp repo must never consult the live PR.
+        saved_pr = os.environ.pop("PR_NUMBER", None)
+        try:
+            with redirect_stdout(io.StringIO()):
+                return main_check(base, "")
+        finally:
+            if saved_pr is not None:
+                os.environ["PR_NUMBER"] = saved_pr
 
     try:
         with tempfile.TemporaryDirectory(prefix="floor-ratchet-") as tmp:
@@ -446,6 +491,30 @@ def git_plumbing_test() -> bool:
             plugin.write_text(plugin.read_text().replace("minValue = 50", "minValue = 40"))
             run("git", "commit", "-q", "-am", "lower plugin floor", cwd=repo)
             results.append(("a floor lowered in build-logic must exit 1", gate(base2) == 1))
+            # Merge-train carrier (ADR-0343): members' bodies carry the trailer, never the bot body.
+            base3 = run("git", "rev-parse", "HEAD", cwd=repo)
+            plugin.write_text(plugin.read_text().replace("minValue = 40", "minValue = 50"))
+            run("git", "commit", "-q", "-am", f"merge-train: member #7\n\nPR-Number: #7\nPR-Head: {'a' * 40}\n", cwd=repo)
+            carrier = {"user": {"login": "openbank-gitops-bot[bot]", "type": "Bot"}, "labels": [{"name": "merge-train"}],
+                       "head": {"ref": "train/1-1", "repo": {"full_name": "o/r"}}}
+            env = {"GITHUB_REPOSITORY": "o/r", "PR_NUMBER": "500"}
+
+            def trailer(pr, bodies):
+                return carrier_trailer_text(base3, env, fetch_pr=lambda _r, _n, **_k: pr,
+                                            fetch_bodies=lambda _r, ns, **_k: bodies)
+            results.append(("a verified carrier reads its members' bodies",
+                            trailer(carrier, {7: "body of #7"}) == ("body of #7", "")))
+            spoof = {**carrier, "user": {"login": "mallory", "type": "User"}}
+            results.append(("a spoofed train/ PR reads no member body", trailer(spoof, {7: "x"}) == (None, "")))
+            results.append(("an unlabelled carrier reads no member body",
+                            trailer({**carrier, "labels": []}, {7: "x"}) == (None, "")))
+            results.append(("an unreadable member body is NOT EVALUATED, never an empty body",
+                            trailer(carrier, None)[0] is None and "#7" in trailer(carrier, None)[1]))
+            unread_head = trailer(None, {})
+            results.append(("an unreadable PR object is not a carrier off a train/ head", unread_head == (None, "")))
+            got = carrier_trailer_text(base3, {**env, "GITHUB_HEAD_REF": "train/1-1"},
+                                       fetch_pr=lambda _r, _n, **_k: None, fetch_bodies=lambda *a, **k: {})
+            results.append(("an unreadable PR object ON a train/ head is NOT EVALUATED", got[0] is None and bool(got[1])))
     finally:
         REPO = saved
     for label, passed in results:

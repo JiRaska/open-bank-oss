@@ -37,6 +37,7 @@ class AccountingDayService(
     private val objectMapper: ObjectMapper,
     private val accountingClock: AccountingClock,
     private val clock: Clock,
+    private val closeParticipantsConfig: CloseParticipantsConfig,
 ) : AccountingDayUseCase {
 
     override fun currentBusinessDate(): LocalDate = accountingClock.today()
@@ -86,6 +87,12 @@ class AccountingDayService(
             record = moved,
             expectedVersion = current.version,
             outbox = transitionMessage(moved, from = current.status.name, by = command.transitionedBy),
+            // Policy belongs here: every caller, including the operator HTTP route, is checked.
+            // The repository re-reads completeness under its existing atomic day lock.
+            requiredParticipants = closeParticipantsConfig.participants().keys.takeIf {
+                moved.status == AccountingDayStatus.TIED_OUT &&
+                    closeParticipantsConfig.participantsMode() == CloseParticipantsConfig.MODE_ENFORCE
+            },
         )
     }
 

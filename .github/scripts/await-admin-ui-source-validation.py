@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -304,8 +305,31 @@ def github_fetch(token):
                      "Accept": "application/vnd.github+json",
                      "X-GitHub-Api-Version": "2022-11-28"},
         )
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return json.load(response)
+        parsed = urllib.parse.urlsplit(request.full_url)
+        endpoint = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                try:
+                    return json.load(response)
+                except (json.JSONDecodeError, UnicodeError):
+                    raise RuntimeError(f"GitHub API {endpoint} returned invalid JSON") from None
+        except urllib.error.HTTPError as error:
+            # Do not print the response body or request headers: GitHub's body is
+            # untrusted, and the request carries GH_TOKEN. Only expose a small
+            # allowlist of rate-limit response headers to diagnose quota failures.
+            details = [f"HTTP {error.code}"]
+            for header, label in (
+                ("X-RateLimit-Remaining", "rate-limit-remaining"),
+                ("X-RateLimit-Reset", "rate-limit-reset"),
+                ("Retry-After", "retry-after"),
+            ):
+                value = error.headers.get(header) if error.headers else None
+                if value is None:
+                    continue
+                safe_value = str(value).strip()
+                if re.fullmatch(r"[0-9]{1,12}", safe_value):
+                    details.append(f"{label}={safe_value}")
+            raise RuntimeError(f"GitHub API {endpoint} failed ({'; '.join(details)})") from None
     return fetch
 
 

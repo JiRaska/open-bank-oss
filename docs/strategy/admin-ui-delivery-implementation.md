@@ -27,6 +27,28 @@ suites. They are not a claim that every route or business transaction has been m
 audited. Backend financial authorization remains authoritative; BCP is a read-only
 readiness view, not a payment execution gate.
 
+## Readiness and BCP component scope
+
+The Production Readiness matrix and BCP roster use the shared
+`openbank-admin-ui/scripts/service-inventory.mjs` detector: root Gradle modules with
+`src/main` and the Quarkus service convention plus shared runtime dependency, or the
+direct Quarkus plugin. The detector is structural; naming suffix, governance metadata,
+release registration and a GitOps workload do not decide whether an application is in
+scope. Thus runnable agents and analytics/product/risk components remain visible, and a
+runnable component without a workload remains an explicit `NOT-DEPLOYED` row. Catalog
+evidence gaps such as missing `version.txt`, release registration or `governance.yaml`
+remain visible; they do not imply production readiness.
+
+Python readiness collection invokes this helper through `node`, so Node.js is required
+for both collector implementations. The helper and collectors fail closed on execution
+or roster errors. In particular, a declared money-path module missing from the runnable
+inventory stops collection rather than disappearing from the matrix. Distinct module
+names that normalize to one short identity also stop inventory generation. The readiness
+report retains its existing `services[]` and `service_count` schema. BCP uses the same
+`runnable` catalog marker; it applies only explicit policy tiers, including the authored
+“all other services” tier when present. Without that policy row, unclassified components
+remain unknown and coverage is incomplete.
+
 ## Delivery baseline
 
 Run `python3 .github/scripts/admin-ui-delivery-baseline.py --repo OWNER/REPO --target 30

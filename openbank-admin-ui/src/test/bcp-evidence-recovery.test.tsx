@@ -15,8 +15,9 @@ const graph = JSON.parse(readFileSync(path.resolve(__dirname, '../../service-gra
 const bcpPolicy = parseBcpPolicy(readFileSync(path.resolve(__dirname, '../../../docs/bcp/bcp-policy.md'), 'utf8'))
 if (!bcpPolicy) throw new Error('canonical BCP policy §2 could not be parsed')
 const paymentPath = ['ledger-service', 'balance-service', 'transaction-service', 'clearing-service', 'aml-service', 'sanctions-service']
-const allPaymentPathUp = () => ({ services: paymentPath.map(name => ({ name, status: 'UP' })) })
+const allPaymentPathUp = () => ({ discoveryStatus: 'complete', services: paymentPath.map(name => ({ name, status: 'UP' })) })
 const allCatalogServicesUp = () => ({
+  discoveryStatus: 'complete',
   services: catalog.services.filter((service: { kind: string }) => service.kind === 'service')
     .map((service: { short: string }) => ({ name: service.short, status: 'UP' })),
 })
@@ -24,11 +25,11 @@ const allInfraUp = Object.fromEntries(graph.infraNodes
   .filter((node: { kind: string }) => node.kind === 'infra')
   .map((node: { id: string }) => [node.id.replace(/^infra:/, ''), { status: 'UP' }]))
 const json = (body: unknown) => new Response(JSON.stringify(body))
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-function mount(services: () => Response | Promise<Response>) {
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
+function mount(services: () => Response | Promise<Response>, infra: () => Response | Promise<Response> = () => json(allInfraUp)) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => url === '/api/services/health'
     ? services()
-    : url === '/api/infra/status' ? json(allInfraUp)
+    : url === '/api/infra/status' ? infra()
       : url === '/api/catalog/services' ? json({ ...catalog, available: true })
       : url === '/api/catalog/graph' ? json({ ...graph, available: true })
         : url === '/api/bcp/policy' ? json({ available: true, policy: bcpPolicy })
@@ -54,15 +55,78 @@ describe('BCP incomplete evidence', () => {
     expect(await screen.findByText('HEALTHY')).toBeInTheDocument()
     expect(screen.getByText('UNVERIFIED')).toBeInTheDocument()
     expect(screen.queryByText('CLEAR')).not.toBeInTheDocument()
+    expect(screen.getByText(/Last successful refresh:/)).toBeInTheDocument()
     expect(screen.getByText('The BCP policy names a service absent from the current catalog; it is not guessed into a replacement:')).toBeInTheDocument()
     broken = true
     fireEvent.click(screen.getByRole('button', { name: 'Refresh BCP status' }))
     expect(await screen.findAllByText('UNVERIFIED')).toHaveLength(2)
+    expect(screen.getByRole('status')).toHaveTextContent('Some health sources are incomplete or unavailable')
+    expect(screen.getByText(/Last successful refresh:/)).toBeInTheDocument()
     expect(screen.queryByText('CLEAR')).not.toBeInTheDocument()
     broken = false
     fireEvent.click(screen.getByRole('button', { name: 'Refresh BCP status' }))
     expect(await screen.findByText('HEALTHY')).toBeInTheDocument()
     expect(screen.getByText('UNVERIFIED')).toBeInTheDocument()
+  })
+
+  it('keeps the last successful refresh time and marks all health unknown after source failures', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-20T12:00:00.000Z'))
+    let failing = false
+    mount(
+      () => failing ? Promise.reject(new Error('service health unavailable')) : json(allCatalogServicesUp()),
+      () => failing ? Promise.reject(new Error('infrastructure health unavailable')) : json(allInfraUp),
+    )
+    expect(await screen.findByText('HEALTHY')).toBeInTheDocument()
+    const lastSuccessfulRefresh = screen.getByText(/Last successful refresh:/).textContent
+
+    vi.setSystemTime(new Date('2026-10-20T13:00:00.000Z'))
+    failing = true
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh BCP status' }))
+    expect(await screen.findByText('UNKNOWN')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Health sources are unavailable')
+    expect(screen.getByText(/Last successful refresh:/).textContent).toBe(lastSuccessfulRefresh)
+  })
+
+  it('does not call valid partial discovery a complete health refresh', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-20T12:00:00.000Z'))
+    let payload: unknown = allCatalogServicesUp()
+    mount(() => json(payload), () => json(allInfraUp))
+    expect(await screen.findByText('HEALTHY')).toBeInTheDocument()
+    const lastSuccessfulRefresh = screen.getByText(/Last successful refresh:/).textContent
+
+    vi.setSystemTime(new Date('2026-10-20T13:00:00.000Z'))
+    payload = { ...allCatalogServicesUp(), discoveryStatus: 'partial' }
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh BCP status' }))
+    expect(await screen.findByText('Some health sources are incomplete or unavailable; unverified statuses are marked as such.')).toBeInTheDocument()
+    expect(screen.getByText(/Last successful refresh:/).textContent).toBe(lastSuccessfulRefresh)
+  })
+
+  it('rejects empty and malformed service payloads as partial health reads', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-20T12:00:00.000Z'))
+    let payload: unknown = allCatalogServicesUp()
+    mount(() => json(payload), () => json(allInfraUp))
+    expect(await screen.findByText('HEALTHY')).toBeInTheDocument()
+    const lastSuccessfulRefresh = screen.getByText(/Last successful refresh:/).textContent
+
+    vi.setSystemTime(new Date('2026-10-20T13:00:00.000Z'))
+    payload = { discoveryStatus: 'complete', services: [] }
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh BCP status' }))
+    expect(await screen.findByText('Some health sources are incomplete or unavailable; unverified statuses are marked as such.')).toBeInTheDocument()
+    expect(screen.getByText(/Last successful refresh:/).textContent).toBe(lastSuccessfulRefresh)
+
+    for (const invalidPayload of [
+      { discoveryStatus: 'complete', services: [{ name: 'ledger-service', status: 'OK' }] },
+      { discoveryStatus: 'complete', services: [{ name: 'ledger-service', status: ['UP'] }] },
+    ]) {
+      payload = invalidPayload
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh BCP status' }))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh BCP status' })).toHaveAttribute('aria-busy', 'false'))
+      expect(screen.getByText('Some health sources are incomplete or unavailable; unverified statuses are marked as such.')).toBeInTheDocument()
+      expect(screen.getByText(/Last successful refresh:/).textContent).toBe(lastSuccessfulRefresh)
+    }
   })
 
   it('ignores a late response from before a newer interval refresh', async () => {

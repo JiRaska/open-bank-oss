@@ -121,7 +121,7 @@ function graphInfrastructureShortNames(graph?: BcpServiceGraph): Set<string> {
 
 export function buildBcpRoster(catalog: readonly BcpCatalogService[], graph: BcpServiceGraph | undefined, policy: BcpPolicy | null): BcpRoster {
   const services = catalog
-    .filter(service => service.kind === 'service')
+    .filter(service => service.runnable === true)
     .slice()
     .sort((a, b) => a.short.localeCompare(b.short))
   if (!policy) return { tiers: [], policyServicesMissingFromCatalog: [], unclassifiedCatalogServices: services.map(service => service.short), catalogServiceCount: services.length }

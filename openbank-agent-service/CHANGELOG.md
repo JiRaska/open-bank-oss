@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.1...agent-service-v1.31.2) (2026-10-24)
+
+
+### Bug Fixes
+
+* **agent-service:** preserve merge actors and authorization evidence ([#13764](https://github.com/JiRaska/open-bank-oss/issues/13764)) ([5715671](https://github.com/JiRaska/open-bank-oss/commit/571567125e6762da9edd6c5d6adabac9848e6720))
+
 ## [1.31.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.0...agent-service-v1.31.1) (2026-10-19)
 
 

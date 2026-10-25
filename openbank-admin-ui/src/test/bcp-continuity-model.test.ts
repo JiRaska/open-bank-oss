@@ -20,9 +20,9 @@ const graph = { edges: [], infraEdges: [], infraNodes: [{ id: 'infra:keycloak', 
 
 describe('BCP recovery roster', () => {
   it('reconciles every current catalog service exactly once, including new services under the policy T3 default', () => {
-    const current = catalog.services.filter(service => service.kind === 'service')
+    const current = catalog.services.filter(service => service.runnable === true)
     const newService: BcpCatalogService = {
-      name: 'openbank-future-service', short: 'future-service', kind: 'service',
+      name: 'openbank-future-service', short: 'future-service', kind: 'service', runnable: true,
     }
     const roster = buildBcpRoster([...current, newService], graph, policy)
 
@@ -61,9 +61,18 @@ describe('BCP recovery roster', () => {
 
   it('does not treat an incomplete or duplicate tier roster as catalog coverage', () => {
     const roster = buildBcpRoster([
-      { name: 'openbank-account-service', short: 'account-service', kind: 'service' },
+      { name: 'openbank-account-service', short: 'account-service', kind: 'service', runnable: true },
     ], graph, policy)
     expect(bcpCatalogCoverageIsComplete({ ...roster, tiers: roster.tiers.map(tier => ({ ...tier, services: [] })) })).toBe(false)
+  })
+
+  it('excludes non-runnable catalog entries from the BCP roster', () => {
+    const roster = buildBcpRoster([
+      { name: 'openbank-account-service', short: 'account-service', kind: 'service', runnable: true },
+      { name: 'openbank-ui-helper', short: 'ui-helper', kind: 'component', runnable: false },
+    ], graph, policy)
+    expect(roster.catalogServiceCount).toBe(1)
+    expect(roster.unclassifiedCatalogServices).not.toContain('ui-helper')
   })
 
   it('fails closed if the policy removes its all-other-services default or changes into an unsupported shape', () => {

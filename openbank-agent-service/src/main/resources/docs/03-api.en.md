@@ -1,8 +1,8 @@
 # API
 
-The REST/RPC contract is formalised in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.15.0**). The service is **internal** — it is **not** exposed via the API Gateway to external TPPs.
+The REST/RPC contract is formalised in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.17.0**). The service is **internal** — it is **not** exposed via the API Gateway to external TPPs.
 
-Two version axes apply (ADR-0048): the release version (`version.txt` = `1.27.4`) and the API-contract version (`openapi.yaml: info.version` = `1.15.0`, `openbank.api.version = "1"`). They are independent.
+Two version axes apply (ADR-0048): the release version (`version.txt` = `1.27.4`) and the API-contract version (`openapi.yaml: info.version` = `1.17.0`, `openbank.api.version = "1"`). They are independent.
 
 ## Surfaces
 
@@ -12,7 +12,8 @@ Two version axes apply (ADR-0048): the release version (`version.txt` = `1.27.4`
 | Admin assistant | `POST /agent/chat` | JSON | Keycloak OIDC; runs as `ui-assistant` |
 | Model registry | `GET /agent/models` | JSON | Keycloak OIDC |
 | Catalog review capability/review | `GET` / `POST` `/agent/catalog-reviews` | JSON | Keycloak OIDC; operator/admin/compliance |
-| Merge-record evidence | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (roles below) |
+| Human merge ingest / evidence reads | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (roles below) |
+| App merge ingest | `POST /api/v1/agent-merge-records/app` | JSON | `ROLE_MERGE_RECORDER` |
 | Health | `GET /q/health/live`, `/q/health/ready` | JSON | none (management port 8085) |
 
 ## MCP — `POST /mcp`
@@ -40,6 +41,8 @@ Tools are grouped by the charter capability they require (`McpToolRegistry`):
 | `query.disputes.readonly` | `dispute_list`, `dispute_get`, `dispute_list_by_account`, `dispute_get_timeline` |
 
 A tool **not** present in the capability map has no capability and is **denied by default** — registering a new tool without a mapping fails closed, it does not silently bypass governance.
+
+The `sepa_instant_list`, `sepa_instant_get`, and `sepa_instant_list_by_debtor` read tools are contract-tested against the `openbank-sepa-instant` API. The consumer contract pins the response shape and verifies that an unknown payment ID fails closed.
 
 > Schema note: numeric tool arguments (`limit`, `size`) are declared as JSON `string` on purpose. The Groq llama backend frequently emits numeric arguments as strings and rejects an `integer` schema; the handler coerces with `asInt()`, so a string schema is both accepted and correct.
 
@@ -87,12 +90,40 @@ Hosted review is a catalog-only sandbox exception. `catalog-review.allow-hosted-
 
 Invalid identifiers, non-DRAFT revisions, oversized snapshots, or a model outside the allow-list return `400`; no eligible configured route or an unavailable model returns `503`. A successful response includes the proposal id/state, context hash, bounded findings, and the model id used.
 
-## Recorded human merges — `/api/v1/agent-merge-records`
+## Merge execution and human authorization — `/api/v1/agent-merge-records`
 
-ADR-0031 phase 3 "recorded human merge" evidence: a durable record of **who merged an agent-authored PR** (table in [04 — Data](./04-data.md)). Records enter **out-of-band** — the `record-agent-merge` GitHub Actions workflow POSTs every merged agent PR with the pipeline's `ROLE_MERGE_RECORDER` service credential. The agent never self-reports its own merges.
+ADR-0031 phase 3 stores the **actual merge executor** separately from the **human authorizer**.
+The trusted CI recorder submits the evidence; agent tools cannot self-report a merge.
 
-- **`POST /api/v1/agent-merge-records`** — `ROLE_MERGE_RECORDER` only (the caller is the CI pipeline, not an interactive operator; least privilege — not even `ROLE_ADMIN` may write merge evidence). Body: `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title` (all required), plus optional `proposalId` (UUID — soft link to `agent_proposal`) and `source` (default `unknown`). Idempotent by `prNumber`: a redelivered webhook inserts nothing (`ON CONFLICT DO NOTHING`) and the response returns the already-stored record with `inserted=false`.
-- **`GET /api/v1/agent-merge-records?agentId=`** — `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_COMPLIANCE`. Newest first; the optional `agentId` narrows the list to one agent's merges.
+- `POST /api/v1/agent-merge-records`: `ROLE_MERGE_RECORDER` only. Existing required fields remain
+  `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title`; `proposalId` and
+  `source` remain optional. This original endpoint always records a human executor. Unknown
+  legacy fields remain ignored and never become App identity or authorization evidence.
+- `POST /api/v1/agent-merge-records/app`: the separate additive App-only ingest operation, also
+  recorder-only. Requires `mergedByType=GITHUB_APP`, `mergedById`, `headSha`, `mergeCommitSha` and
+  non-null `authorization`; human actor input is rejected. `mergedBy` remains the actual trusted App login. Authorization contains the
+  human login/id/time and evidence reference. `OWNER_WORKFLOW_EXACT_HEAD` / `HEAD` binds the
+  premerge owner workflow decision to this exact PR head, with `statusId` and `workflowRunId`.
+- `LEGACY_PR_AUTO_MERGE` / `PR` is bounded to merges through `2026-10-23T19:42:17Z`. It stores the
+  observed human auto-merge request, PR node, immutable merge-event node/time and observation time.
+  It does **not** certify SHA approval or historical policy compliance. Future observations and
+  contradictory proof are rejected. New App merges require exact-head workflow evidence.
+- `GET /api/v1/agent-merge-records/capabilities`: recorder-only; schema version 2 must be confirmed
+  before writing. `GET /api/v1/agent-merge-records/{prNumber}`: recorder-only committed read-back,
+  or 404 when missing. Neither read is granted to `ROLE_ADMIN` alone.
+- `GET /api/v1/agent-merge-records?agentId=` remains available to `ROLE_OPERATOR`, `ROLE_ADMIN` and
+  `ROLE_COMPLIANCE`, newest first, optionally restricted by agent.
+
+A duplicate returns the original record with `inserted=false`, without another audit event.
+Conflicting App executor, head, merge or authorization evidence returns 409; a refreshed historical
+observation retains the original timestamp. Invalid or missing proof returns 400. Merge-row and
+outbox insertion are atomic, so failed audit enqueue rolls back both. The App is audited as
+`SERVICE`; a human executor remains `HUMAN`. Recorder redirects are refused to protect credentials.
+
+Deploy the additive V7 migration and new reader before schema-2 writes. Then backfill merged PRs
+through an owner-only main workflow and independently read each result. A new green run does not
+repair an earlier gap by itself. Rollback retains evidence and stops App ingestion before reverting
+an incompatible reader; do not discard authorization rows to make rollback appear successful.
 
 ## Error model
 
