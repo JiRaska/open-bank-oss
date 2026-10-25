@@ -166,7 +166,7 @@ class DelegatedReadTest {
         ).build()
         every { upstream.get(match { it.contains("/accounts/$theirs") }, any()) } returns accountJson(theirs, owner)
 
-        val resp = resourceFor(upstream, grantee).listAccounts()
+        val resp = resourceFor(upstream, grantee).listAccounts(null)
         val body = ObjectMapper().readTree(resp.entity.toString())
 
         val data = body.path("data")
@@ -193,7 +193,7 @@ class DelegatedReadTest {
             """.trimIndent().replace("\n", ""),
         ).build()
 
-        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts().entity.toString())
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts(null).entity.toString())
 
         assertThat(body.path("data")).hasSize(1)
         assertThat(body.path("pagination").path("totalCount").asInt()).isEqualTo(1)
@@ -210,7 +210,7 @@ class DelegatedReadTest {
             RuntimeException("connection refused")
 
         // The customer's own money must not vanish because a secondary service is down.
-        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts().entity.toString())
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts(null).entity.toString())
         assertThat(body.path("data")).hasSize(1)
         assertThat(body.path("data")[0].path("id").asText()).isEqualTo(mine.toString())
     }
@@ -227,8 +227,57 @@ class DelegatedReadTest {
         ).build()
         every { upstream.get(match { it.contains("/accounts/$theirs") }, any()) } returns accountJson(theirs, grantee)
 
-        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts().entity.toString())
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts(null).entity.toString())
         assertThat(body.path("data")).hasSize(1)
         assertThat(body.path("pagination").path("totalCount").asInt()).isEqualTo(1)
+    }
+
+    private fun sharedSetup(grantee: UUID, theirs: UUID, body: String): UpstreamClient {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
+            Response.ok(page("""{"id":"${UUID.randomUUID()}","partyId":"$grantee"}""")).build()
+        every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
+            """[{"status":"ACTIVE","resourceType":"ACCOUNT","resourceId":"$theirs","capabilities":["ACCOUNT_READ_BALANCES"]}]""",
+        ).build()
+        every { upstream.get(match { it.contains("/accounts/$theirs") }, any()) } returns Response.ok(body).build()
+        return upstream
+    }
+
+    @Test
+    fun `a cursor page does not get shared accounts or a bumped totalCount`() {
+        val grantee = UUID.randomUUID()
+        val theirs = UUID.randomUUID()
+        val upstream = sharedSetup(grantee, theirs, """{"id":"$theirs","partyId":"${UUID.randomUUID()}"}""")
+        every { upstream.get(match { it.contains("accounts?partyId=$grantee&cursor=abc") }, any()) } returns
+            Response.ok(page("""{"id":"${UUID.randomUUID()}","partyId":"$grantee"}""")).build()
+
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts("abc").entity.toString())
+
+        assertThat(body.path("data")).hasSize(1)
+        assertThat(body.path("pagination").path("totalCount").asInt()).isEqualTo(1)
+        verify(exactly = 0) { upstream.get(match { it.contains("/delegations/grantee/") }, any()) }
+    }
+
+    @Test
+    fun `an account body whose id differs from the granted id is dropped`() {
+        val grantee = UUID.randomUUID()
+        val theirs = UUID.randomUUID()
+        val upstream = sharedSetup(grantee, theirs, """{"id":"${UUID.randomUUID()}","partyId":"x"}""")
+
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts(null).entity.toString())
+
+        assertThat(body.path("data")).hasSize(1)
+        assertThat(body.path("pagination").path("totalCount").asInt()).isEqualTo(1)
+    }
+
+    @Test
+    fun `an account body with no id is dropped`() {
+        val grantee = UUID.randomUUID()
+        val theirs = UUID.randomUUID()
+        val upstream = sharedSetup(grantee, theirs, """{"partyId":"x"}""")
+
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts(null).entity.toString())
+
+        assertThat(body.path("data")).hasSize(1)
     }
 }

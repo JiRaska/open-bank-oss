@@ -9,6 +9,7 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
+import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import org.hamcrest.Matchers.contains
@@ -90,6 +91,26 @@ class DelegatedAccountsListIT {
         grants(grant(SHARED, caps = "\"ACCOUNT_INITIATE_PAYMENT\""))
         When { get("/customer/v1/accounts") } Then {
             body("data.id", not(hasItem(SHARED)))
+            body("pagination.totalCount", equalTo(7))
+        }
+    }
+
+    @Test
+    fun `a cursor page carries no shared accounts and an unchanged totalCount`() {
+        grants(grant(SHARED))
+        Given { queryParam("cursor", "abc") } When { get("/customer/v1/accounts") } Then {
+            body("data.id", contains(OWN_ACCOUNT))
+            body("pagination.totalCount", equalTo(7))
+        }
+    }
+
+    @Test
+    fun `a fetched body whose id differs from the grant is not listed`() {
+        grants(grant(OTHER))
+        StubUpstreamResource.stub("/api/v1/accounts/$OTHER", body = """{"id":"$SHARED","partyId":"$OWNER"}""")
+        When { get("/customer/v1/accounts") } Then {
+            body("data.id", contains(OWN_ACCOUNT))
+            body("pagination.totalCount", equalTo(7))
         }
     }
 
