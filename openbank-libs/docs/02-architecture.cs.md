@@ -47,3 +47,12 @@ Kořenový build používá Gradle subprojekty. Služby zpravidla deklarují `im
 ## Trace kontext outboxu
 
 `PanacheOutboxEntityTraced` (libs-runtime) rozšiřuje entitu outboxu v2 o nullable sloupec `trace_context` s W3C `traceparent`, který při zápisu řádku zachytí `TraceparentCapture`. `OutboxEntry.traceparent` ho přenese do dispatcheru a `OutboxKafkaHeaders` ho vydá jako Kafka hlavičku `traceparent`. Služba ho přebírá dobrovolně spolu s migrací `ALTER TABLE ... ADD COLUMN trace_context TEXT`; základy v1 a v2 se nemění, protože namapovaný sloupec, který tabulka nemá, shodí každý SELECT.
+
+## Slovník kanálu vlastních převodů banky (ADR-0344, fáze 1b)
+
+`openbank-libs-iso20022` drží slovník kanálu vlastních převodů banky, aby jej swift-service i treasury pojmenovávaly stejně:
+- `InstitutionTransferRail` je CERTIS, TARGET2 nebo SWIFT, každý se svou měnou a kódem clearingového systému pro pacs.009.
+- `InstitutionTransferStatus` je životní cyklus převodu. Publikují se jen ACCEPTED, SENT, SETTLED a REJECTED (kontrakt 9.2).
+- Builder a reader pro pacs.009 validují proti přiloženému XSD `pacs.009.001.08`.
+
+Sdílená tabulka `TopicProducers` v `openbank-libs-domain` přiřazuje topik `openbank.swift.institution-transfers` službě swift-service. Podle ní audit-service označuje záznamy, které z tohoto topiku čte.
