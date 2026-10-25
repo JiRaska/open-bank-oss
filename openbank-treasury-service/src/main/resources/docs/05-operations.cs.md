@@ -43,3 +43,17 @@ znovu nenasadí.
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Odmítnutí fixingu po změně stavu obchodu
+
+Před provedením fixingu repository znovu načte stav obchodu a verzi splátkového kalendáře pod
+zámkem řádku obchodu (`FOR UPDATE`). Stavy `CANCELLED`, `REVERSED` a `DRAFT` vyvolají typovanou
+výjimku `DealNotLiveForFixingException` ještě před změnou peněžního toku nebo zápisem události
+`treasury.cashflow.fixed.v1` do outboxu. Odmítnutí zvýší čítač
+`openbank.treasury.fixings{outcome="deal_not_live"}`; `FixingService` obchod přeskočí, aniž by započetl
+selhání indexu. Stav `MATURED` zůstává způsobilý podle stávajícího filtru stavů a tvar REST odpovědi
+se nemění.
+
+`FixingApiIT` pokrývá zrušení potvrzené po načtení splatných toků a před zamčeným zápisem:
+odpověď uvádí nulový počet fixovaných toků i selhání, projektované toky zůstanou nezměněné,
+událost fixingu nevznikne a čítač odmítnutí se zvýší o jedna.
