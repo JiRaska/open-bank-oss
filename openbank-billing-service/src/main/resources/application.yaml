@@ -219,6 +219,9 @@ openbank:
       every: "${BILLING_PRODUCT_SHADOW_EVERY:5m}"
       batch-size: "${BILLING_PRODUCT_SHADOW_BATCH_SIZE:200}"
       max-batches-per-run: "${BILLING_PRODUCT_SHADOW_MAX_BATCHES:10}"
+      # Age threshold for batch-capped cleanup of frozen account facts, whatever the outcome.
+      # Backlog, live claims and scheduler downtime/failures can delay physical erasure past this age.
+      fact-retention: "${BILLING_PRODUCT_SHADOW_FACT_RETENTION:P30D}"
       verification:
         mode: "${BILLING_PRODUCT_SHADOW_VERIFICATION_MODE:disabled}"
         key-id: "${BILLING_PRODUCT_SHADOW_VERIFICATION_KEY_ID:product-ir-publish}"

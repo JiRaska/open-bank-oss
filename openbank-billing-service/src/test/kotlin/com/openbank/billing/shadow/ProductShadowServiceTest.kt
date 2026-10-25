@@ -48,6 +48,7 @@ class ProductShadowServiceTest {
         override suspend fun retryLater(id: UUID, outcome: String) {
             retried[id] = outcome
         }
+        override suspend fun eraseExpiredFacts(maxAge: java.time.Duration, limit: Int) = 0
     }
 
     private class Copies : RevisionIrCopyPort {
