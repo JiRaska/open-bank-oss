@@ -29310,6 +29310,9 @@
          <artifact name="jackson-dataformat-cbor-2.21.7.module">
             <sha256 value="c9b00255166a78021b74825488e04c62f8e03ba74dcca630a69f54aa98ffd7cb" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
          </artifact>
+         <artifact name="jackson-dataformat-cbor-2.21.7.pom">
+            <sha256 value="c76cadb110edf2be447d6e840be47786b3d029ff7ce4c3f68277c67d51bd9bc1" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
       </component>
       <component group="com.fasterxml.jackson.dataformat" name="jackson-dataformats-binary" version="2.21.7">
          <artifact name="jackson-dataformats-binary-2.21.7.pom">
