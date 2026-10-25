@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,OPTIONS
       headers: Content-Type,Authorization
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
   log:
     level: INFO
     console:
@@ -36,11 +21,6 @@ quarkus:
     path: /api/docs
   scheduler:
     enabled: true
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
   # quarkus-flyway was a build dependency and `db/migration/` held V2/V3, but nothing ever

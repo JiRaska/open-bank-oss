@@ -6,7 +6,8 @@ package com.openbank.treasury.domain.model
 
 import java.math.BigDecimal
 
-enum class CounterpartyKind { BANK, CENTRAL_BANK }
+/** CORPORATE and ISSUER arrive with the ADR-0344 D3 counterparty records. */
+enum class CounterpartyKind { BANK, CENTRAL_BANK, CORPORATE, ISSUER }
 
 /**
  * Counterparty master (ADR-0315 D4). A limit is per counterparty AND per currency and caps the

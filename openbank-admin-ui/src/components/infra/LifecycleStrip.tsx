@@ -137,12 +137,14 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
         <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
           {data.running.source === 'prometheus-workload-image-digest'
             ? t('Identita běžícího obrazu zjištěna', 'Running image identity observed')
-            : t('Obraz běžícího workloadu změřen', 'Running workload image measured')}: {new Date(data.running.observedAt).toLocaleTimeString(dateLocale)}
+            : data.running.source === 'prometheus-runtime-build-info'
+              ? t('Běhová verze z build-info změřena', 'Runtime build version measured')
+              : t('Obraz běžícího workloadu změřen', 'Running workload image measured')}: {new Date(data.running.observedAt).toLocaleTimeString(dateLocale)}
         </div>
       )}
       {data.running.mixed && (
         <div style={{ fontSize: 10, color: 'var(--warning-text)' }}>
-          {t('Během rollout běží více verzí; lifecycle verdict čeká na jednotnou verzi.', 'Multiple versions are running during rollout; lifecycle verdict is withheld until one version remains.')}
+          {t('Napříč sledovanými workloady běží více verzí; souhrnné hodnocení životního cyklu není dostupné.', 'Multiple versions are running across observed workloads; an aggregate lifecycle verdict is unavailable.')}
         </div>
       )}
 

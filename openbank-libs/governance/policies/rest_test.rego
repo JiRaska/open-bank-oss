@@ -1593,6 +1593,46 @@ test_commstyle_publish_allows_human_approver if {
 	decision.reason == "commstyle-publish"
 }
 
+# ---------------------------------------------------------------------------------------
+# catalog-publish-ir (ADR-0352 §7): a human operator may publish an IR-bearing revision (and
+# four-eyes pauses it, four_eyes.actions); a Keycloak service account may not, whatever roles it
+# holds; a human without an operator/admin role may not. Real rules data, so a later
+# role_action_matrix grant of catalog.publish-ir turns the deny case red instead of widening.
+# ---------------------------------------------------------------------------------------
+test_catalog_publish_ir_allows_human_operator if {
+	decision := rest.allow with input as {
+		"principal": {"service_account": false, "id": "user-7", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "catalog.publish-ir",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.rules as rules_real
+	decision.allow
+	decision.reason == "catalog-publish-ir"
+}
+
+test_catalog_publish_ir_denies_service_account_with_every_role if {
+	not rest.allow with input as {
+		"principal": {
+			"service_account": true,
+			"id": "service-account-openbank-services",
+			"type": "HUMAN",
+			"roles": ["ROLE_OPERATOR", "ROLE_ADMIN"],
+		},
+		"action": "catalog.publish-ir",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.rules as rules_real
+}
+
+test_catalog_publish_ir_denies_human_without_operator_role if {
+	not rest.allow with input as {
+		"principal": {"service_account": false, "id": "user-7", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE", "CATALOG_SCOPE_READ"]},
+		"action": "catalog.publish-ir",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.rules as rules_real
+}
+
 test_pension_catalog_approval_allows_role_qualified_human if {
 	decision := rest.allow with input as {
 		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["PENSION_LEGAL_APPROVER"]},

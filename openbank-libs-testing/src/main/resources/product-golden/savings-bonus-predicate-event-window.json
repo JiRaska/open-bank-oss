@@ -1,0 +1,183 @@
+{
+  "name": "savings-bonus-predicate-event-window",
+  "description": "Bonus 3.65 % earned while no withdrawal happened in 30 days and the 30-day minimum balance stayed at or above 1 000: true before the withdrawal (two accrual posts, base and bonus), false after it (base only).",
+  "revision": {
+    "irVersion": 1,
+    "productCode": "SAV-GOLD-BONUS",
+    "currency": "EUR",
+    "interest": {
+      "ruleId": "interest.base",
+      "rateType": "FIXED",
+      "dayCount": "ACT_365_FIXED",
+      "accrualCadence": "DAILY",
+      "capitalisationCadence": "MONTHLY",
+      "accrualRounding": "INTEREST_ACCRUAL",
+      "postingRounding": "LEDGER_POSTING",
+      "rate": "0.0365",
+      "bonus": {
+        "ruleId": "interest.bonus",
+        "rate": "0.0365",
+        "predicate": {
+          "type": "and",
+          "operands": [
+            {
+              "type": "noEvents",
+              "kind": "WITHDRAWAL",
+              "window": {
+                "days": 30
+              }
+            },
+            {
+              "type": "balanceMin",
+              "window": {
+                "days": 30
+              },
+              "operator": "GTE",
+              "amount": "1000.00"
+            }
+          ]
+        }
+      }
+    },
+    "fees": [],
+    "hooks": {
+      "onOpen": [
+        {
+          "ruleId": "open.schedule-accrual",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "ACCRUAL",
+            "cadence": "DAILY"
+          }
+        },
+        {
+          "ruleId": "open.schedule-capitalisation",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "CAPITALISATION",
+            "cadence": "MONTHLY"
+          }
+        }
+      ],
+      "scheduled": [
+        {
+          "ruleId": "scheduled.accrue",
+          "trigger": "ACCRUAL",
+          "action": {
+            "type": "ACCRUE_INTEREST"
+          }
+        },
+        {
+          "ruleId": "scheduled.capitalise",
+          "trigger": "CAPITALISATION",
+          "action": {
+            "type": "CAPITALISE_INTEREST"
+          }
+        }
+      ]
+    }
+  },
+  "clock": {
+    "zone": "UTC"
+  },
+  "state": {
+    "currency": "EUR",
+    "balance": "10000.00",
+    "accruedInterest": "0.000000",
+    "openedOn": "2026-01-01",
+    "balanceSamples": [
+      {
+        "on": "2026-03-01",
+        "balance": "10000.00"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "at": "2026-03-15T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "ACCRUAL",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "interest.base",
+          "irVersion": 1,
+          "narrative": "interest accrual",
+          "lines": [
+            {
+              "accountingClass": "INTEREST_EXPENSE",
+              "direction": "DEBIT",
+              "amount": "1.000000",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "CREDIT",
+              "amount": "1.000000",
+              "currency": "EUR"
+            }
+          ]
+        },
+        {
+          "type": "POST",
+          "ruleId": "interest.bonus",
+          "irVersion": 1,
+          "narrative": "bonus interest accrual",
+          "lines": [
+            {
+              "accountingClass": "INTEREST_EXPENSE",
+              "direction": "DEBIT",
+              "amount": "1.000000",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "CREDIT",
+              "amount": "1.000000",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-03-16T10:00:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "WITHDRAWAL",
+        "direction": "DEBIT",
+        "amount": "500.00"
+      },
+      "expected": []
+    },
+    {
+      "at": "2026-03-17T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "ACCRUAL",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "interest.base",
+          "irVersion": 1,
+          "narrative": "interest accrual",
+          "lines": [
+            {
+              "accountingClass": "INTEREST_EXPENSE",
+              "direction": "DEBIT",
+              "amount": "0.950000",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "CREDIT",
+              "amount": "0.950000",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

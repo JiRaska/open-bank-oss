@@ -14,6 +14,7 @@ import {
   derivePlatformVersions,
   deriveGitopsInventory,
   deriveIac,
+  isRepositoryPath,
   parseKubernetesVersion,
   parseLoki,
   parseNodeGroup,
@@ -174,4 +175,12 @@ it('preserves module identity when a quoted comment precedes its label', () => {
     expect(deriveIac(root).helmReleaseDeclarations.map((item: { address: string }) => item.address))
       .toEqual(['module.actual.helm_release.operator'])
   })
+})
+
+it('accepts staged IaC paths when the Docker repository root is / and rejects sibling escapes', () => {
+  expect(isRepositoryPath('/', '/openbank-infra/aws/envs/sandbox')).toBe(true)
+  expect(isRepositoryPath('/repo', '/repo/openbank-infra/aws/modules/shared')).toBe(true)
+  expect(isRepositoryPath('/repo', '/repo/../outside')).toBe(false)
+  expect(isRepositoryPath('/repo', '/repo-sibling/module')).toBe(false)
+  expect(isRepositoryPath('/repo', '/repo/../../outside')).toBe(false)
 })

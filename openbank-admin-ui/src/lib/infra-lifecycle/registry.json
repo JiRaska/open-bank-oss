@@ -9,6 +9,12 @@
       "releaseNotes": "https://www.postgresql.org/docs/release/{version}/"
     },
     {
+      "id": "clickhouse",
+      "eolProduct": "clickhouse",
+      "versionSource": "unknown",
+      "releaseNotes": "https://github.com/ClickHouse/ClickHouse/releases"
+    },
+    {
       "id": "kafka",
       "eolProduct": "apache-kafka",
       "versionSource": "unknown",

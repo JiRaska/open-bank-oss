@@ -89,9 +89,16 @@ data class LegDto(
  * silently drop it from valuation, VaR and limits. A booked deal is bounded only by libs-finance's
  * own per-leg period cap, and a deal that fails it is stored as unvaluable, never discarded.
  */
-enum class LegBounds(val maxLegs: Int?, val maxSpanYears: Long?) {
-    PRICING_REQUEST(LegSpecJson.MAX_LEGS, LegSpecJson.MAX_SPAN_YEARS),
-    BOOKED(null, null),
+enum class LegBounds(val maxLegs: Int?, val maxSpanYears: Long?, val maxLagBusinessDays: Int?) {
+    PRICING_REQUEST(LegSpecJson.MAX_LEGS, LegSpecJson.MAX_SPAN_YEARS, LegSpecJson.MAX_LAG_BUSINESS_DAYS),
+    BOOKED(null, null, null),
+    ;
+
+    /** A lag of `0..maxLagBusinessDays`, or absent; a breach is an [IllegalArgumentException] (400). */
+    fun requireLag(i: Int, field: String, value: Int?) {
+        val max = maxLagBusinessDays ?: return
+        require(value == null || value in 0..max) { "legs[$i].$field $value must be between 0 and $max" }
+    }
 }
 
 /** Deal-level defaults a leg inherits (contract section 8.1 header: `calendars`, `businessDayConvention`). */
@@ -154,6 +161,8 @@ object LegSpecJson {
                 "legs[$i]: accrualStart $start to accrualEnd $end exceeds $years years"
             }
         }
+        bounds.requireLag(i, "paymentLagBusinessDays", d.paymentLagBusinessDays)
+        bounds.requireLag(i, "rate.fixingLagBusinessDays", d.rate?.fixingLagBusinessDays)
         return LegSpec(
             payReceive = enumOf(i, "payReceive", req(d.payReceive, "payReceive")),
             currency = CurrencyCode.of(currency),
@@ -256,6 +265,9 @@ object LegSpecJson {
      */
     const val MAX_LEGS = 8
     const val MAX_SPAN_YEARS = 50L
+
+    /** A payment or fixing lag is a handful of business days; each one is walked day by day by the calendar. */
+    const val MAX_LAG_BUSINESS_DAYS = 30
 
     /** Kernel day-count names, with the usual market spellings (`ACT/360`, `30E/360`). */
     fun dayCount(i: Int, raw: String): DayCount {

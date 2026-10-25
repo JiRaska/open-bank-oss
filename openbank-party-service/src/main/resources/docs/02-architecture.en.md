@@ -86,7 +86,6 @@ com.openbank.party/
     ├── persistence/repository/      *RepositoryImpl (Panache reactive)
     ├── outbox/                      PartyOutboxDispatcher (@Scheduled)
     ├── kafka/                       KafkaPartyOutboxEventPublisher, KycAmlEventConsumer
-    ├── authz/                       AuthzProducer (OPA, ADR-0034)
     └── flags/                       FlagdProducer (OpenFeature, ADR-0067)
 ```
 
@@ -186,3 +185,14 @@ The write-operation COMPLETED check is not applied to listing: failed and in-pro
 transactions remain eligible for the existing export mapping. Authorization refusals still
 fail the export, while the existing unavailable-slice behavior is preserved. No new caller
 permission, data source or export field is introduced by the facade migration.
+
+
+## Deferred request guards
+
+Party authorization and feature-flag decisions can wait for a provider without blocking the event
+loop. The feature-flag call site uses the shared suspending client extension. A deferred authorization
+guard preserves request identity, headers and the original Vert.x context; a denial never invokes
+the target operation. Cancellation propagates instead of being reported as a fallback decision.
+PartyReactiveGuardIT verifies delayed Uni and CompletionStage allow/deny through real HTTP and CDI,
+including a heartbeat on a single event loop while the decision remains pending. No REST or event
+contract changes are introduced.
