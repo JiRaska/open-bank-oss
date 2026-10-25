@@ -74,19 +74,40 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   rozlišit, když ledger odpověděl `409 ACCOUNTING_DAY_CLOSED`, když vyčerpal rozpočet a obchody zbyly,
   nebo když průchod selhal. Odmítnutí uzavřeným dnem má vlastní kategorii. Pokud nejde zapsat značka
   rozběhnutí, průchod se nespustí.
-- **Jak se den nahlásí.** Je-li rozlišení vypnuté, den je SKIPPED. Pokud pro den žádný průchod
-  nedoběhl, nehlásí se nic a ledger den drží v CUTOFF. Jinak rozhoduje poslední průchod: RAN, nebo
-  REFUSED se spočtenými důvody. Počet žurnálů je počet řádků `deal_journals` zaúčtovaných v daném
-  pražském dni: rozlišení, vypořádání, splatnosti a storna.
-- **Pozdržení.** Den drží průchod, který ještě běží. Drží ho také událost
-  `treasury.deal.settled|matured|reversed.v1` vytvořená ten den, dokud je v `treasury_outbox` ve stavu
-  PENDING, DISPATCHING nebo FAILED. Událost ve stavu DEAD udělá z dne REFUSED
-  (`journal event(s) never delivered`).
-- **Práh zastarání.** Je odvozený, nikdy se nenastavuje samostatně. Průchod přestane začínat nové
-  obchody, jakmile vyčerpá `openbank.treasury.accrual.pass-budget` (20 minut), takže
-  `TreasuryCloseJobs.staleAfter` je rozpočet plus 30 minut. Starší značka znamená, že průchod zemřel, a
-  den se nahlásí jako REFUSED (`pass started and never completed`). Další úplný průchod téhož dne ho
-  nahradí.
-- **Provoz.** Den REFUSED kvůli `ACCOUNTING_DAY_CLOSED` znamená, že rozlišení zkusilo účtovat do dne,
-  který ledger už uzavřel. V režimu `shadow` ledger pozdržení jen počítá. V režimu `enforce` operátor
-  den posoudí a na stránce konce dne v ledgeru mu udělí výjimku (waiver).
+- **Datování žurnálů.** Ledger přijímá účtování jen do otevřeného dne. Každý žurnál treasury se
+  proto účtuje s `entryDate` = dnešní otevřený pražský den a nese svůj ekonomický den jako `valueDate`
+  (den rozlišení, datum valuty vypořádání). Stejně se rozhodl lending. Dohánění za dřívější den tak už
+  nemůže narazit na `409 ACCOUNTING_DAY_CLOSED` jen proto, že ten den přešel do CUTOFF. Každý žurnál
+  se zapisuje do `deal_journals` se svým dnem valuty (V21 `value_date`).
+- **Jak se den nahlásí.** Pozdržení kvůli outboxu a kontrola DEAD běží vždy, ať je splatné cokoli.
+  - Je-li rozlišení vypnuté, den je REFUSED při událostech DEAD, RAN má-li žurnály, a SKIPPED jen
+    tehdy, když nemá ani jedno.
+  - Je-li rozlišení zapnuté a pro den žádný průchod nedoběhl, nehlásí se nic a ledger den drží
+    v CUTOFF.
+  - Jinak rozhoduje poslední průchod: RAN, nebo REFUSED se spočtenými důvody.
+  - Počet žurnálů je počet řádků `deal_journals` s daným dnem VALUTY: rozlišení, vypořádání,
+    splatnosti a storna.
+- **Pozdní žurnály.** Žurnál s valutou do již skončeného dne se počítá pod tento den a zvýší
+  `openbank.treasury.close.late_journals`. Další běh den nahlásí znovu s novým počtem a ledger hlášení
+  za uzavřený den uloží jako pozdní.
+- **Pozdržení.** Den drží kterékoli z těchto:
+  - průchod, který ještě běží;
+  - událost `treasury.deal.settled|matured|reversed.v1` vytvořená ten den, dokud je v `treasury_outbox`
+    ve stavu PENDING, DISPATCHING nebo FAILED (událost DEAD udělá z dne REFUSED);
+  - vypořádání nebo splatnost s valutou ten den, zapsané až po startu posledního dokončeného průchodu
+    rozlišení. Počítá se i průchod zapsaný pod pozdější den, protože po půlnoci rozliší i tento den.
+- **Práh zastarání.** Je odvozený, nikdy se nenastavuje samostatně. Průchod kontroluje
+  `openbank.treasury.accrual.pass-budget` (20 minut) před každým obchodem i před každým dnem rozlišení.
+  Rozpočet tak nemůže překročit o víc než jedno účtování, a `TreasuryCloseJobs.staleAfter` je proto
+  rozpočet plus 30 minut. Starší značka znamená, že průchod zemřel, a den se nahlásí jako REFUSED
+  (`pass started and never completed`).
+- **Hojení.** Úplný průchod (žádný obchod neselhal ani nezbyl) rozlišil i všechny dřívější dny.
+  Každý den v okně zpětného pohledu, který je REFUSED nebo nezapsaný, proto znovu zapíše jako RAN,
+  ledaže jeho vlastní průchod ještě běží.
+- **Zapsáno před potvrzením.** Vypořádání, splatnost a storno zapíšou žurnál ve vlastní transakci,
+  jakmile ho ledger přijme, ještě před potvrzením změny stavu obchodu. Když se toto potvrzení vrátí
+  zpět, žurnál se přesto započítá. Opakování účtuje pod stejným idempotentním klíčem, dostane zpět
+  původní žurnál a najde ho zapsaný. Zbývá okno pádu mezi odpovědí ledgeru a tímto zápisem; řešení
+  „záměr napřed“ se sleduje zvlášť.
+- **Provoz.** V režimu `shadow` ledger pozdržení jen počítá. V režimu `enforce` operátor den REFUSED
+  posoudí a na stránce konce dne v ledgeru mu udělí výjimku (waiver).

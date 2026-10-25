@@ -5,16 +5,20 @@
 package com.openbank.treasury.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonInclude
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.PostedJournal
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.ResolvedAccount
 import com.openbank.treasury.domain.model.Side
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -25,6 +29,7 @@ import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
 
@@ -84,7 +89,7 @@ data class JournalResponse(
 data class JournalLineResponse(val glAccountId: UUID, val sequence: Int = 0)
 
 @ApplicationScoped
-class LedgerPostingAdapter(
+class LedgerPostingAdapter @Inject constructor(
     @RestClient private val client: LedgerRestClient,
     /**
      * `openbank.treasury.ledger.post-by-class`. FALSE (default) keeps the explicit-`glAccountId`
@@ -93,18 +98,33 @@ class LedgerPostingAdapter(
      */
     @ConfigProperty(name = "openbank.treasury.ledger.post-by-class", defaultValue = "false")
     private val postByClass: Boolean,
+    private val clock: Clock,
+    private val meters: MeterRegistry,
 ) : LedgerPostingPort {
+
+    /** Test construction: the system clock and a throwaway registry. */
+    constructor(client: LedgerRestClient, postByClass: Boolean) :
+        this(client, postByClass, Clock.systemUTC(), SimpleMeterRegistry())
 
     /**
      * `transactionId` is the deal id, so `GET /api/v1/journals/transaction/{dealId}` lists every
      * journal a deal produced. Lines are single-currency (base = transaction currency, no FX).
      */
-    override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): PostedJournal {
+    override suspend fun post(spec: JournalSpec, valueDate: LocalDate, description: String): PostedJournal {
+        // ADR-0342 (#13167 review, the lending decision): the ledger accepts postings only into an
+        // OPEN accounting day and answers 409 ACCOUNTING_DAY_CLOSED for one in CUTOFF or later, so a
+        // catch-up for an earlier day is booked in TODAY's open day (entryDate) and carries the
+        // economic day as its valueDate. Treasury's day-close evidence attributes the journal to its
+        // value day; one valued on a day that has already ended is counted here as late.
+        val openDay = AccountingClock.bank(clock).today()
+        if (valueDate.isBefore(openDay)) {
+            meters.counter("openbank.treasury.close.late_journals", "event", spec.event.name).increment()
+        }
         val request = PostJournalRequest(
             idempotencyKey = spec.idempotencyKey,
             transactionId = spec.dealId,
-            entryDate = entryDate.toString(),
-            valueDate = entryDate.toString(),
+            entryDate = maxOf(openDay, valueDate).toString(),
+            valueDate = valueDate.toString(),
             description = description,
             lines = spec.lines.map {
                 val explicit = it.glAccountId ?: if (postByClass) null else LegacyGlChart.glAccountId(it)

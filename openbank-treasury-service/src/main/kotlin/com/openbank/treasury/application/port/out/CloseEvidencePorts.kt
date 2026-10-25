@@ -29,6 +29,13 @@ interface CloseJobRunPort {
 
     /** Every pass with `businessDate` in `[from, to]` that started and has not completed. */
     fun inFlightBetween(from: LocalDate, to: LocalDate): Uni<List<InFlightRun>>
+
+    /**
+     * The start of the latest COMPLETED pass of [job] filed under [from] or any later day, or null.
+     * A pass filed under a later day accrues every SETTLED deal through that day, so it has assessed
+     * [from] as well.
+     */
+    fun latestCompletedPassStart(job: String, from: LocalDate): Uni<Instant?>
 }
 
 /** A started-but-unfinished pass. */
@@ -40,11 +47,19 @@ data class InFlightRun(val businessDate: LocalDate, val job: String, val started
  * (`treasury.deal.settled|matured|reversed.v1`) leaves through `treasury_outbox`. The day is complete
  * only once none of those events is still in the outbox.
  *
- * @property journals journals the ledger acknowledged to treasury on the day (`deal_journals.posted_at`)
- * @property pending journal events not yet delivered: PENDING, DISPATCHING, or FAILED and still retried
+ * @property journals journals recorded with this VALUE day (`deal_journals.value_date`), whenever posted
+ * @property pending journal events created on the day and not yet delivered: PENDING, DISPATCHING, or
+ *   FAILED and still retried
  * @property dead journal events the outbox gave up on (DEAD): the day's journal record is incomplete
+ * @property lastSettlementAt when the day's latest SETTLED or MATURED journal was recorded, or null: a
+ *   deal settled after the last accrual pass has not been assessed yet
  */
-data class DayJournalPostings(val journals: Int, val pending: Int, val dead: Int)
+data class DayJournalPostings(
+    val journals: Int,
+    val pending: Int,
+    val dead: Int,
+    val lastSettlementAt: Instant? = null,
+)
 
 /** Read side of [DayJournalPostings]. */
 fun interface DayJournalPostingsPort {

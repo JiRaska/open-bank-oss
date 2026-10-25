@@ -74,6 +74,53 @@ class TreasuryCloseParticipationSchedulerTest {
         assertThat(report(accrualEnabled = false)!!.outcome).isEqualTo(CloseOutcome.SKIPPED)
     }
 
+    // --- #13882 review item 1: accrual off must not fail open ---------------------------------------
+
+    @Test
+    fun `with the accrual off a day with pending journal events is still held`() {
+        evidence.postings[DAY] = DayJournalPostings(journals = 1, pending = 1, dead = 0)
+        assertThat(report(accrualEnabled = false)).isNull()
+    }
+
+    @Test
+    fun `with the accrual off a DEAD journal event is REFUSED, never SKIPPED`() {
+        evidence.postings[DAY] = DayJournalPostings(journals = 0, pending = 0, dead = 1)
+        val r = report(accrualEnabled = false)!!
+        assertThat(r.outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(r.reason).contains(TreasuryCloseJobs.REASON_JOURNAL_EVENTS_DEAD)
+    }
+
+    @Test
+    fun `with the accrual off a day with journals is RAN with them`() {
+        evidence.postings[DAY] = DayJournalPostings(journals = 2, pending = 0, dead = 0)
+        val r = report(accrualEnabled = false)!!
+        assertThat(r.outcome).isEqualTo(CloseOutcome.RAN)
+        assertThat(r.journalsPosted).isEqualTo(2)
+    }
+
+    // --- #13882 review item 4: a deal settled after the last pass holds its day ---------------------
+
+    @Test
+    fun `a settlement recorded after the last completed pass holds the day`() {
+        ran()
+        evidence.started[DAY to TreasuryCloseJobs.ACCRUAL] = CLOCK.instant().minus(Duration.ofHours(10))
+        evidence.postings[DAY] =
+            DayJournalPostings(1, 0, 0, lastSettlementAt = CLOCK.instant().minus(Duration.ofHours(9)))
+        assertThat(report()).isNull()
+    }
+
+    @Test
+    fun `a pass after midnight that started after the settlement releases the day`() {
+        ran()
+        evidence.started[DAY to TreasuryCloseJobs.ACCRUAL] = CLOCK.instant().minus(Duration.ofHours(10))
+        evidence.runs[TODAY to TreasuryCloseJobs.ACCRUAL] =
+            CloseJobRun(TODAY, TreasuryCloseJobs.ACCRUAL, 1, 0, 0, null, CLOCK.instant())
+        evidence.started[TODAY to TreasuryCloseJobs.ACCRUAL] = CLOCK.instant().minus(Duration.ofHours(1))
+        evidence.postings[DAY] =
+            DayJournalPostings(1, 0, 0, lastSettlementAt = CLOCK.instant().minus(Duration.ofHours(9)))
+        assertThat(report()!!.outcome).isEqualTo(CloseOutcome.RAN)
+    }
+
     @Test
     fun `the day is held while its journal events are still pending in the outbox`() {
         ran()

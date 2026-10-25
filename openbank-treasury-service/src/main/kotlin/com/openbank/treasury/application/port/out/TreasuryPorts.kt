@@ -34,6 +34,12 @@ data class LedgerJournalRef(
     val postedAt: Instant,
     /** The accounts the ledger resolved each leg to, so a reversal can offset exactly these. */
     val accounts: List<ResolvedAccount> = emptyList(),
+    /**
+     * The journal's value day: the economic accounting day it belongs to (an accrual's day, a
+     * settlement's value date). ADR-0342: treasury's day-close count attributes the journal to it.
+     * Null only for rows recorded before V21 (backfilled there from posted_at).
+     */
+    val valueDate: LocalDate? = null,
 )
 
 /**
@@ -104,10 +110,11 @@ interface CounterpartyRepository {
  */
 interface LedgerPostingPort {
     /**
-     * Returns the ledger's journal — the original one on an idempotent replay, with the accounts its
+     * Posts [spec] valued on [valueDate]; the adapter books it in the ledger's current open day when
+     * [valueDate] has already ended (ADR-0342). Returns the ledger's journal — the original one on an idempotent replay, with the accounts its
      * legs were ORIGINALLY resolved to.
      */
-    suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): PostedJournal
+    suspend fun post(spec: JournalSpec, valueDate: LocalDate, description: String): PostedJournal
 }
 
 /**

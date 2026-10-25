@@ -30,7 +30,7 @@ class InterestAccrualSchedulerTest {
     private val budget = Duration.ofMinutes(20)
 
     private fun scheduler(clock: Clock) =
-        InterestAccrualScheduler(deals, DomainMetrics(), clock, true, evidence, budget)
+        InterestAccrualScheduler(deals, DomainMetrics(), clock, true, evidence, budget, 3)
 
     private fun accruesThrough(at: String, expected: String): Unit = runBlocking {
         coEvery { deals.accrueInterest(any(), any()) } returns AccrualRun(0, emptyList())
@@ -38,7 +38,7 @@ class InterestAccrualSchedulerTest {
         scheduler(clock).run()
         coVerify(exactly = 1) { deals.accrueInterest(LocalDate.parse(expected), Instant.parse(at).plus(budget)) }
         // The evidence is filed under the same Prague day the pass accrued for.
-        assertThat(evidence.runs.keys).containsExactly(LocalDate.parse(expected) to TreasuryCloseJobs.ACCRUAL)
+        assertThat(evidence.started.keys).containsExactly(LocalDate.parse(expected) to TreasuryCloseJobs.ACCRUAL)
     }
 
     @Test
@@ -102,6 +102,48 @@ class InterestAccrualSchedulerTest {
     private fun closedDay() = WebApplicationException(
         Response.status(409).entity("""{"code":"ACCOUNTING_DAY_CLOSED","message":"day is LOCKED"}""").build(),
     )
+
+    // --- #13882 review item 6: a later complete pass heals earlier REFUSED / unrecorded days -------
+
+    private fun refused(day: LocalDate) {
+        evidence.runs[day to TreasuryCloseJobs.ACCRUAL] = com.openbank.libs.close.CloseJobRun(
+            day,
+            TreasuryCloseJobs.ACCRUAL,
+            1,
+            0,
+            2,
+            "2 ${TreasuryCloseJobs.REASON_ACCRUAL_UNFINISHED}",
+            CLOCK.instant().minus(Duration.ofDays(1)),
+        )
+    }
+
+    @Test
+    fun `a complete pass after midnight re-records an earlier REFUSED day and an unrecorded day as RAN`(): Unit =
+        runBlocking {
+            refused(DAY.minusDays(1))
+            coEvery { deals.accrueInterest(any(), any()) } returns AccrualRun(2, emptyList(), deals = 3)
+            scheduler(CLOCK).run()
+            assertThat(evidence.runs.getValue(DAY.minusDays(1) to TreasuryCloseJobs.ACCRUAL).refused).isZero()
+            assertThat(evidence.runs.getValue(DAY.minusDays(2) to TreasuryCloseJobs.ACCRUAL).refused).isZero()
+        }
+
+    @Test
+    fun `an incomplete pass heals nothing`(): Unit = runBlocking {
+        refused(DAY.minusDays(1))
+        coEvery { deals.accrueInterest(any(), any()) } returns AccrualRun(0, emptyList(), deals = 1, unassessed = 1)
+        scheduler(CLOCK).run()
+        assertThat(evidence.runs.getValue(DAY.minusDays(1) to TreasuryCloseJobs.ACCRUAL).refused).isEqualTo(2)
+    }
+
+    @Test
+    fun `a day whose own pass is still live is not healed under it`(): Unit = runBlocking {
+        refused(DAY.minusDays(1))
+        evidence.inFlight[DAY.minusDays(1) to TreasuryCloseJobs.ACCRUAL] = CLOCK.instant().minusSeconds(60)
+        coEvery { deals.accrueInterest(any(), any()) } returns AccrualRun(0, emptyList(), deals = 1)
+        scheduler(CLOCK).run()
+        assertThat(evidence.inFlight).containsKey(DAY.minusDays(1) to TreasuryCloseJobs.ACCRUAL)
+        assertThat(evidence.runs.getValue(DAY.minusDays(1) to TreasuryCloseJobs.ACCRUAL).refused).isEqualTo(2)
+    }
 
     private companion object {
         val CLOCK: Clock = Clock.fixed(Instant.parse("2026-10-20T08:00:00Z"), ZoneOffset.UTC)

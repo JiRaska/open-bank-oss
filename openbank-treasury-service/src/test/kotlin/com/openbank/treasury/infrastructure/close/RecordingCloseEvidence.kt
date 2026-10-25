@@ -29,8 +29,17 @@ class RecordingCloseEvidence : TreasuryCloseEvidencePort {
     override fun markStarted(businessDate: LocalDate, job: String, at: Instant): Uni<Unit> {
         if (markerDown) return Uni.createFrom().failure(IllegalStateException("db down"))
         inFlight[businessDate to job] = at
+        started[businessDate to job] = at
         return Uni.createFrom().item(Unit)
     }
+
+    /** `started_at` per row: it survives the pass completing, as in the table. */
+    val started = linkedMapOf<Pair<LocalDate, String>, Instant>()
+
+    override fun latestCompletedPassStart(job: String, from: LocalDate): Uni<Instant?> = Uni.createFrom().item(
+        started.filter { (key, _) -> key.second == job && !key.first.isBefore(from) && key in runs && key !in inFlight }
+            .values.maxOrNull(),
+    )
 
     override fun record(run: CloseJobRun): Uni<Unit> {
         val key = run.businessDate to run.job

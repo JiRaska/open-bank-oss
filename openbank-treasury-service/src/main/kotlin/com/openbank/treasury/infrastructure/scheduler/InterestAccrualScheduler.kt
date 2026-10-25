@@ -48,6 +48,7 @@ class InterestAccrualScheduler(
     private val enabled: Boolean,
     private val closeJobRuns: CloseJobRunPort,
     @ConfigProperty(name = "openbank.treasury.accrual.pass-budget") private val passBudget: Duration,
+    @ConfigProperty(name = "openbank.treasury.close.lookback-days") private val lookbackDays: Long,
 ) {
     private val log: Logger = Logger.getLogger(InterestAccrualScheduler::class.java)
 
@@ -82,6 +83,7 @@ class InterestAccrualScheduler(
                 if (r.journals > 0) log.infof("interest accrual posted %d journal(s)", r.journals)
                 if (r.unassessed > 0) log.warnf("interest accrual pass budget spent: %d deal(s) left", r.unassessed)
                 recordEvidence(asOf, r)
+                if (r.failures.isEmpty() && r.unassessed == 0) healEarlierDays(asOf)
             }
             .onFailure {
                 log.error("interest accrual pass failed", it)
@@ -120,6 +122,37 @@ class InterestAccrualScheduler(
             reason = reasons.joinToString("; ").ifBlank { null },
         ).awaitSuspending()
     }
+
+    /**
+     * A COMPLETE pass as of [asOf] has accrued every SETTLED deal through [asOf], which includes every
+     * earlier day: whatever left an earlier day REFUSED (a failed deal, the budget, a closed day, a pass
+     * that died) or never recorded (the pod was down all day) is now accrued. Each such day in the
+     * lookback is re-recorded RAN (#13882 review; lending's catch-up does the same), so it does not stay
+     * REFUSED or unreported for good. A day with a LIVE marker (inside the stale threshold) is left
+     * alone: that pass is still changing it. A healed day already reported is re-reported; the ledger
+     * stores a report for a closed day as late and never moves the day.
+     */
+    private suspend fun healEarlierDays(asOf: LocalDate) {
+        val from = asOf.minusDays(lookbackDays)
+        val to = asOf.minusDays(1)
+        val now = clock.instant()
+        val runs = closeJobRuns.findBetween(from, to).awaitSuspending()
+            .filter { it.job == TreasuryCloseJobs.ACCRUAL }
+            .associateBy { it.businessDate }
+        val live = closeJobRuns.inFlightBetween(from, to).awaitSuspending()
+            .filter { it.job == TreasuryCloseJobs.ACCRUAL && it.startedAt.plus(staleAfter).isAfter(now) }
+            .map { it.businessDate }
+            .toSet()
+        generateSequence(from) { it.plusDays(1) }.takeWhile { !it.isAfter(to) }
+            .filter { day -> day !in live && (runs[day]?.refused ?: 1) > 0 }
+            .forEach { day ->
+                log.infof("treasury accrual: %s re-recorded complete by the pass as of %s", day, asOf)
+                TreasuryCloseJobs.record(closeJobRuns, clock, day, TreasuryCloseJobs.ACCRUAL, items = 0)
+                    .awaitSuspending()
+            }
+    }
+
+    private val staleAfter: Duration get() = TreasuryCloseJobs.staleAfter(passBudget)
 
     private companion object {
         const val WORKFLOW_NAME = "treasury-interest-accrual"

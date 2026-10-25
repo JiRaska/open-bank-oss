@@ -77,15 +77,24 @@ class TreasuryCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : T
             s.createNativeQuery<Array<Any?>>(POSTINGS_SQL)
                 .setParameter(1, start)
                 .setParameter(2, end)
+                .setParameter(P_VALUE_DATE, accountingDate)
                 .singleResult
         }.map { row ->
             DayJournalPostings(
                 journals = (row[0] as Number).toInt(),
                 pending = (row[1] as Number).toInt(),
                 dead = (row[2] as Number).toInt(),
+                lastSettlementAt = row[COL_LAST_SETTLEMENT]?.let { asInstant(it) },
             )
         }
     }
+
+    override fun latestCompletedPassStart(job: String, from: LocalDate): Uni<Instant?> = sf.withSession { s ->
+        s.createNativeQuery<Any?>(LATEST_PASS_SQL)
+            .setParameter(P_DATE, job)
+            .setParameter(P_JOB, from)
+            .singleResult
+    }.map { it?.let { v -> asInstant(v) } }
 
     // Column order of SELECT_SQL.
     private fun Array<Any?>.toRun() = CloseJobRun(
@@ -159,12 +168,22 @@ class TreasuryCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : T
         // FAILED is a retryable outbox state (the dispatcher re-claims it), so it is still pending;
         // only DEAD means the event will never leave. SENT rows are not counted at all: SENT retention
         // purges them, so the day's journal count comes from deal_journals instead.
+        const val P_VALUE_DATE = 3
+        const val COL_LAST_SETTLEMENT = 3
+
+        const val LATEST_PASS_SQL =
+            "SELECT max(started_at) FROM treasury_close_job_run WHERE job = ?1 AND business_date >= ?2 " +
+                "AND NOT running AND completed_at IS NOT NULL"
+
+        // Journals by VALUE day (#13882 review); the outbox events by the day they were created.
         const val POSTINGS_SQL =
             "SELECT " +
-                "(SELECT count(*) FROM deal_journals WHERE posted_at >= ?1 AND posted_at < ?2), " +
+                "(SELECT count(*) FROM deal_journals WHERE value_date = ?3), " +
                 "(SELECT count(*) FROM treasury_outbox WHERE event_type IN (" + JOURNAL_EVENTS + ") " +
                 "AND status IN ('PENDING', 'DISPATCHING', 'FAILED') AND created_at >= ?1 AND created_at < ?2), " +
                 "(SELECT count(*) FROM treasury_outbox WHERE event_type IN (" + JOURNAL_EVENTS + ") " +
-                "AND status = 'DEAD' AND created_at >= ?1 AND created_at < ?2)"
+                "AND status = 'DEAD' AND created_at >= ?1 AND created_at < ?2), " +
+                "(SELECT max(posted_at) FROM deal_journals WHERE value_date = ?3 " +
+                "AND event IN ('SETTLED', 'MATURED'))"
     }
 }

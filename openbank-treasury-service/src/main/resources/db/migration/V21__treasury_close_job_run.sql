@@ -29,8 +29,17 @@ CREATE TABLE treasury_close_job_run (
     PRIMARY KEY (business_date, job)
 );
 
--- The reporter counts, per Prague accounting day, the journals treasury recorded in deal_journals
--- (posted_at in that day). deal_journals had no index on posted_at; a plain build at boot holds a
--- SHARE lock on a table that grows by a few rows per deal, so it costs one short scan.
--- Rollback: DROP INDEX IF EXISTS idx_deal_journals_posted_at; (queries stay correct, only slower).
-CREATE INDEX IF NOT EXISTS idx_deal_journals_posted_at ON deal_journals (posted_at);
+-- The reporter counts, per Prague accounting day, the journals treasury recorded in deal_journals by
+-- their VALUE day (#13882 review): the economic day a journal belongs to (an accrual's day, a
+-- settlement's value date), not the instant it was posted. The ledger books a catch-up in its open
+-- day (entryDate) and carries the value day as valueDate, so a catch-up for D counts under D, and one
+-- arriving after D was reported changes D's count and is re-reported (stored late by the ledger).
+-- Rows from before this migration are backfilled with their Prague posting day, which is what their
+-- entryDate/valueDate was for every journal treasury posted on its own day.
+-- A plain index build at boot holds a SHARE lock on a table that grows by a few rows per deal.
+-- Rollback: DROP INDEX IF EXISTS idx_deal_journals_value_date; ALTER TABLE deal_journals DROP COLUMN
+-- value_date; (the reporter then cannot attribute journals, so revert the reporter with it).
+ALTER TABLE deal_journals ADD COLUMN value_date DATE;
+UPDATE deal_journals SET value_date = CAST(posted_at AT TIME ZONE 'Europe/Prague' AS DATE)
+    WHERE value_date IS NULL;
+CREATE INDEX IF NOT EXISTS idx_deal_journals_value_date ON deal_journals (value_date);

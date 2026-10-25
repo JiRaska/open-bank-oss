@@ -512,6 +512,51 @@ class TreasuryDealServiceTest {
         assertThat(ledger.posted.filter { it.event == PostingEvent.ACCRUED }.map { it.dealId }).containsExactly(b.id)
     }
 
+    // --- #13882 review: day-close evidence the service must keep -----------------------------------
+
+    @Test
+    fun `the pass deadline is checked before every accrual day, not only between deals`(): Unit = runBlocking {
+        val b = book()
+        service.runSimulatedMarket()
+        val start = clock.instant().plus(java.time.Duration.ofDays(3))
+        var now = start
+        clock = object : Clock() {
+            override fun getZone() = ZoneOffset.UTC
+            override fun withZone(zone: java.time.ZoneId?) = this
+            override fun instant() = now
+        }
+        // Each accepted post takes an hour: day 1 at t0, day 2 at t0+1h, day 3 would start past the deadline.
+        ledger.onPost = { now = now.plus(java.time.Duration.ofHours(1)) }
+        val run = service.accrueInterest(LocalDate.ofInstant(start, ZoneOffset.UTC), start.plusSeconds(90 * 60))
+        ledger.onPost = {}
+        assertThat(ledger.posted.filter { it.dealId == b.id && it.event == PostingEvent.ACCRUED }).hasSize(2)
+        assertThat(run.unassessed).isEqualTo(1)
+        assertThat(run.deals).isZero()
+    }
+
+    @Test
+    fun `an accrual journal is recorded with its own day as the value date`(): Unit = runBlocking {
+        val b = book()
+        service.runSimulatedMarket()
+        clock = Clock.offset(clock, java.time.Duration.ofDays(2))
+        service.accrueInterest(LocalDate.now(clock))
+        val accruals = deals.journals.filter { it.dealId == b.id && it.event == PostingEvent.ACCRUED }
+        assertThat(accruals.map { it.valueDate }).containsExactly(monday.plusDays(1), monday.plusDays(2))
+        accruals.forEach { assertThat(ledger.entryDates.getValue(it.idempotencyKey)).isEqualTo(it.valueDate) }
+    }
+
+    @Test
+    fun `an accepted settlement stays recorded when the state change rolls back, once`(): Unit = runBlocking {
+        confirmationRequired = false
+        val b = book()
+        deals.failNextSave = true
+        assertThatThrownBy { runBlocking { service.settle(b.id, DealFixtures.approver) } }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(deals.journals.filter { it.dealId == b.id && it.event == PostingEvent.SETTLED }).hasSize(1)
+        assertThat(service.settle(b.id, DealFixtures.approver).state).isEqualTo(DealState.SETTLED)
+        assertThat(deals.journals.filter { it.dealId == b.id && it.event == PostingEvent.SETTLED }).hasSize(1)
+    }
+
     // --- #10896: FX spot ---------------------------------------------------------------------------
 
     @Test
