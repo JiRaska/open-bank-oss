@@ -1586,13 +1586,6 @@ components:
       in: path
       required: true
       schema: { type: integer, minimum: 1 }
-    PortfolioDate:
-      name: date
-      in: query
-      required: true
-      schema:
-        type: string
-        format: date
 
   responses:
     DealOk:
