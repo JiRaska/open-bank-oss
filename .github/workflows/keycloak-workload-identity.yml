@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+name: Keycloak workload identity
+
+on:
+  pull_request:
+    paths:
+      - 'openbank-infra/gitops/components/keycloak/realm-template.json'
+      - 'openbank-infra/docker/keycloak/Dockerfile'
+      - 'openbank-infra/e2e/keycloak_workload_identity_test.py'
+      - '.github/workflows/keycloak-workload-identity.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'openbank-infra/gitops/components/keycloak/realm-template.json'
+      - 'openbank-infra/docker/keycloak/Dockerfile'
+      - 'openbank-infra/e2e/keycloak_workload_identity_test.py'
+      - '.github/workflows/keycloak-workload-identity.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workload-identity-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+jobs:
+  native-exchange:
+    name: Native workload grant and standard exchange
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Exercise the committed pilot configuration with synthetic assertions
+        run: python3 openbank-infra/e2e/keycloak_workload_identity_test.py

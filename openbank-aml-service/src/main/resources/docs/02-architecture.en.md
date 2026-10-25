@@ -168,3 +168,7 @@ sequenceDiagram
 3. **No remote calls in TX** — synchronous within request/response, async via outbox + Kafka.
 4. **Idempotence at edge** — `Idempotency-Key` on `POST`, plus a unique per-case `idempotency_key` column.
 5. **Four-eyes for terminal decisions** — sandbox auto-clear is feature-flagged off; production requires an explicit analyst decision.
+
+## Shared case severity (ADR-0353)
+
+`AmlRiskLevel` is a typealias of `AmlCaseSeverity` from `openbank-libs-fincrime`, the one declaration the payment rails also use when they open a case. The values (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) and the `aml_cases.risk_level` column are unchanged. The scale rates the alert, not the customer: the customer risk rating is kyc-service's and is never derived from it.

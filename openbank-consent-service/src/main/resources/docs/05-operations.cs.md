@@ -9,8 +9,8 @@
 # Dev mód (live reload, OIDC vypnuto)
 ./gradlew :openbank-consent-service:quarkusDev
 
-# Docker (multi-stage, fast-jar; viz Dockerfile)
-docker build -t openbank/consent-service -f openbank-consent-service/Dockerfile .
+# Image: staví .github/workflows/Dockerfile.deploy z fast-jaru sestaveného na hostu (bez per-service Dockerfile)
+./gradlew :openbank-consent-service:quarkusBuild -Dquarkus.package.jar.type=fast-jar
 ```
 
 Runtime entrypoint používá ZGC: `java -XX:+UseZGC -jar /app/quarkus-run.jar` na Eclipse Temurin 25 JRE (alpine), jako non-root uživatel.
@@ -104,6 +104,10 @@ Příčina: byla editována aplikovaná migrace. Dočasná oprava: nastav `QUARK
 - **Verze API kontraktu:** `openapi.yaml info.version` (`1.0.0`) je samostatná osa (ADR 0048).
 - **Money-path:** každá změna vyžaduje 2 schválení + aktuální threat model (`docs/threat-models/openbank-consent-service.md`, ADR 0030) a nikdy se nemerguje automaticky.
 - **CD:** image se buildí na hostu (fast-jar) a rolluje přes ArgoCD z gitops manifestů.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
 
 ## Sdílené závislosti sestavení
 

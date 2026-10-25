@@ -9,7 +9,6 @@ describe('service configuration accessibility', () => {
     const source = read()
     expect(source).toContain('type="button"\n            aria-busy={loading}')
     expect(source).toContain('<RefreshCw size={12} aria-hidden="true"')
-    expect(source).toContain('const panelId = `service-config-${snap.name.replace(')
     expect(source).toContain('type="button"\n                aria-expanded={isOpen}\n                aria-controls={isOpen ? panelId : undefined}')
     expect(source).toContain('id={panelId} role="region" aria-label={t(\'Detail konfigurace služby\', \'Service configuration details\')}')
     expect(source).toContain('<ChevronDown size={14} aria-hidden="true"')

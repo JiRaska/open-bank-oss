@@ -3,10 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { DocsHub } from '@/components/docs/DocsHub'
-import { listBpmnSlugs } from '@/lib/docs/bpmn/load'
+import { loadBpmnContent } from '@/lib/docs/bpmn/load'
 
-// Server component: the BPMN process count is read from the manifests on disk (the same listing
-// /docs/bpmn renders), so the hub card can never disagree with the page it links to.
-export default function DocsPage() {
-  return <DocsHub bpmnCount={listBpmnSlugs().length} />
+export const dynamic = 'force-dynamic'
+
+// Resolve the same published manifests as /docs/bpmn, independently of image rebuilds.
+export default async function DocsPage() {
+  const { processes } = await loadBpmnContent()
+  return <DocsHub bpmnCount={processes.length} />
 }

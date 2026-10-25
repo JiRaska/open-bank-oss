@@ -116,10 +116,58 @@ Remove the temporary GitOps environment entry only after **every** target databa
 ### Flyway checksum mismatch on startup
 Never rewrite an applied migration. Set `QUARKUS_FLYWAY_REPAIR_AT_START=true` transiently, let the DB settle, then remove it.
 
+## Metric naming
+
+Custom Micrometer counters carry the `openbank.` prefix (enforced by the `metric-name-prefix` CI gate). The origination SLA counters are scraped as `openbank_lending_origination_docs_sla_reminder_total` and `openbank_lending_origination_four_eyes_sla_escalation_total`; the earlier unprefixed `lending_origination_*` names are no longer emitted after this version is deployed, so any external query on them must be updated.
+
 ## Deploy
 
 GitOps (ArgoCD) per the platform pattern. For image-tag merge conflicts take `--ours` (freshly-built tag), `--theirs` for RBAC/config/env (CLAUDE.md). Version bumps and changelog are owned by release-please from Conventional Commits — never hand-edit `version.txt` or `CHANGELOG.md`.
 
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
+
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Day-close participation (ADR-0342, #13167)
+
+Lending reports each completed Prague accounting day to ledger-service as participant `lending`
+(`LendingCloseParticipationScheduler`, hourly at :40; `lending.close.report-cron`, lookback
+`lending.close.lookback-days`, default 3). The evidence is `lending_close_job_run` (V28): one row per
+day and job (`accrual`, `provisioning`).
+
+| Day state | What is reported |
+|---|---|
+| both passes ran, nothing refused, allowance journals delivered | RAN (journals = accrual journals + SENT allowance rows) |
+| a pass has not run, is in flight, or allowance rows are still in the outbox | nothing yet - the ledger holds the day |
+| accrual answered `409 ACCOUNTING_DAY_CLOSED`, failed, or stayed truncated after its drain budget | REFUSED with a fixed category |
+| provisioning left exposures unprovisioned, could not count coverage, or failed; an allowance row went DEAD | REFUSED with a fixed category |
+| an in-flight marker older than drain-budget × (lookback + 1) + 30m (70m by default) | REFUSED `pass started and never completed`; the next accrual pass re-runs that day and re-records it |
+| both intervals `off` | SKIPPED |
+
+The accrual drains truncated batches within `lending.servicing.accrual.drain-budget` (PT10M) and
+`max-drain-rounds` (100), and each pass first re-drains earlier lookback days still REFUSED as
+truncated, re-recording them RAN once nothing is left. A REFUSED day stays held until a later RAN
+report or an operator waiver on the ledger. A report that reaches the ledger after the day closed is
+stored `late` and never moves the day. Metric: `openbank_close_participation_reports_total{participant="lending"}`.
+
+### Durable accrual receipts (#13708)
+
+Before contacting ledger, `lending_accrual_progress` (V28) commits the installment's complete dated
+journal request, deterministic reference and transaction identity. A retry reuses that request,
+including its original date and GL accounts. It does not rebuild it from the current clock or chart.
+Only a POSTED response with matching transaction identity and entry date confirms the intent.
+A closed-day refusal remains visible; the same idempotency key is never retargeted to another date.
+
+One local database transaction completes the intent, marks the installment, writes its existing
+`loan.interest_accrued` outbox event, and increments work-day items and actual receipt-day journals.
+A later installment failure cannot discard a committed prefix. An acknowledgement followed by a
+local rollback leaves the intent pending; retrying its exact request can reconcile it once.
+Pending intents prevent RAN. Erasing an unresolved intent follows the installment lifecycle and
+sets scoped aggregate `unreconciled` evidence for its work/requested dates; later successful passes
+cannot clear it. Use the existing controlled ledger reconciliation/waiver process for disposition.
+No per-customer tombstone or new retention period is introduced. Rollback retains V28 tables and
+pending evidence; reverting code does not prove an unresolved remote posting absent.

@@ -133,6 +133,13 @@ class SwiftSettlementPactConsumerTest {
                 // class KDoc. `SWIFT` is pinned by no other committed contract.
                 o.stringValue("rail", "SWIFT")
                 o.stringValue("instructionType", "ONE_OFF")
+                // #13217: SettlementAdapter settles only a booking that matches its request, so the
+                // provider must keep answering with these. Values, not types: they are what is compared.
+                o.stringValue("type", "DEBIT")
+                o.stringValue("sourceAccountId", ORDERING_CUSTOMER_ACCOUNT_ID)
+                o.stringValue("currencyCode", "EUR")
+                // Compared numerically (compareTo), so the provider's scale is free; the field must exist.
+                o.decimalType("amount", BigDecimal("12500.00"))
             }.build(),
         )
         .toPact()
@@ -182,7 +189,7 @@ class SwiftSettlementPactConsumerTest {
             .post(clientDerivedTransactionsPath())
             .then()
             // The shared facade requires a readable COMPLETED body; the adapter additionally
-            // retains its original HTTP 200/201/202 bound. Other statuses do not settle.
+            // settles only on HTTP 201 with a booking that matches the request (#13217).
             .statusCode(201)
             .extract().jsonPath()
 
@@ -192,6 +199,10 @@ class SwiftSettlementPactConsumerTest {
         assertThat(body.getString("status")).isEqualTo("COMPLETED")
         assertThat(body.getString("rail")).isEqualTo("SWIFT")
         assertThat(body.getString("instructionType")).isEqualTo("ONE_OFF")
+        assertThat(body.getString("type")).isEqualTo(settlementDebit.type)
+        assertThat(body.getString("sourceAccountId")).isEqualTo(ORDERING_CUSTOMER_ACCOUNT_ID)
+        assertThat(body.getString("currencyCode")).isEqualTo(settlementDebit.currencyCode)
+        assertThat(body.getDouble("amount")).isEqualTo(settlementDebit.amount.toDouble())
     }
 
     /**

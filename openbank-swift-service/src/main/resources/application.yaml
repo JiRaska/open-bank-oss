@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -105,11 +90,6 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -146,7 +126,18 @@ quarkus:
     # so the management interface (default :8085) must be folded back in (else /q/health/* 404s).
     management:
       enabled: false
+  # The re-drive sweep would race the booking-clock ITs that hold messages SENT on purpose;
+  # SwiftSettlementRedriveIT drives the re-drive directly instead.
+  openbank:
+    swift:
+      settlement-redrive:
+        enabled: false
 openbank:
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:
@@ -156,6 +147,16 @@ openbank:
     scheme-submission:
       # ADR-0104 D4 SWIFT pilot. OFF by default; when off, behaviour is exactly as before.
       enabled: ${SWIFT_SCHEME_SUBMISSION_ENABLED:false}
+    # #13686: re-drive of an accepted MT103 whose settlement booking is unproven. Same
+    # swift-settlement-<messageId> key, never resubmits to the scheme; bounded backoff, then exhausted.
+    settlement-redrive:
+      enabled: ${SWIFT_SETTLEMENT_REDRIVE_ENABLED:true}
+      min-age: PT2M
+      lease: PT2M
+      backoff-base: PT2M
+      backoff-max: PT1H
+      max-attempts: 10
+      batch-size: 20
   rate-limit:
     enabled: true
     max-concurrent-requests: 200

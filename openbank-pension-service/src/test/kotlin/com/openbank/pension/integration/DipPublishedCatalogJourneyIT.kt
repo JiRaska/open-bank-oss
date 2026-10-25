@@ -109,7 +109,7 @@ class DipPublishedCatalogJourneyIT {
         revisions.forEach { (offering, revision) ->
             val base = "/api/v2/offerings/$offering/revisions/$revision"
             catalogPost(
-                "$base/pension-approvals/LEGAL_COUNSEL",
+                "$base/approvals/LEGAL_COUNSEL",
                 lawyer,
                 """{"reason":"synthetic legal review"}""",
                 201,
@@ -119,7 +119,7 @@ class DipPublishedCatalogJourneyIT {
                 catalogPost(publish, checker, """{"reason":"synthetic publication proof"}""", 409, true)
             }
             catalogPost(
-                "$base/pension-approvals/PRODUCT_OWNER",
+                "$base/approvals/PRODUCT_OWNER",
                 product,
                 """{"reason":"synthetic product review"}""",
                 201,
@@ -134,7 +134,7 @@ class DipPublishedCatalogJourneyIT {
             )
             assertThat(published.path<String>("state")).isEqualTo("PUBLISHED")
             val approvals = given().baseUri(catalogUrl).auth().oauth2(lawyer)
-                .get("$base/pension-approvals").then().statusCode(200).extract()
+                .get("$base/approvals").then().statusCode(200).extract()
                 .path<List<Map<String, String>>>("")
             assertThat(approvals.map { it["role"] }).containsExactlyInAnyOrder("LEGAL_COUNSEL", "PRODUCT_OWNER")
             assertThat(approvals.map { it["digest"] }.toSet()).hasSize(1)
@@ -166,14 +166,14 @@ class DipPublishedCatalogJourneyIT {
         ).path<String>("id")
         val updatedBase = "/api/v2/offerings/$changedOffering/revisions/$newRevision"
         catalogPost(
-            "$updatedBase/pension-approvals/LEGAL_COUNSEL",
+            "$updatedBase/approvals/LEGAL_COUNSEL",
             lawyer,
             """{"reason":"synthetic revised composition review"}""",
             201,
             true,
         )
         catalogPost(
-            "$updatedBase/pension-approvals/PRODUCT_OWNER",
+            "$updatedBase/approvals/PRODUCT_OWNER",
             product,
             """{"reason":"synthetic revised composition review"}""",
             201,
