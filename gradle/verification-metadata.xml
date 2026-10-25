@@ -29548,6 +29548,9 @@
          <artifact name="nexus-sdk-0.6.0-alpha.module">
             <sha256 value="b02f9647cd2aa46077e038822c28046c69c4f3b1b745b6619e48e81bc7b6d705" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
          </artifact>
+         <artifact name="nexus-sdk-0.6.0-alpha.pom">
+            <sha256 value="7abfa7586881b0a176782d30ee41e557d74c00eba7671b799af06c5db86cea02" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
       </component>
       <component group="io.temporal" name="temporal-sdk" version="1.40.0">
          <artifact name="temporal-sdk-1.40.0.jar">
@@ -29556,6 +29559,9 @@
          <artifact name="temporal-sdk-1.40.0.module">
             <sha256 value="92ce3a9a83ff49d2c1d88bfdfd72e25783a985586ea74a3036d6ef70b2473907" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
          </artifact>
+         <artifact name="temporal-sdk-1.40.0.pom">
+            <sha256 value="40cbad4b172e2fce197972d5b74d48c4ec6aa80c2125a4b38817889648aa510d" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
       </component>
       <component group="io.temporal" name="temporal-serviceclient" version="1.40.0">
          <artifact name="temporal-serviceclient-1.40.0.jar">
@@ -29563,6 +29569,9 @@
          </artifact>
          <artifact name="temporal-serviceclient-1.40.0.module">
             <sha256 value="a5e3570cc159bff47ea0c6e0f73267d4ada7b51e6ca1e7243a53f44bb5756cdc" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+         <artifact name="temporal-serviceclient-1.40.0.pom">
+            <sha256 value="faa170aa239b7cd787abffcc3827d30ad5a8700d53666eb3734c8743a07d7483" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
          </artifact>
       </component>
       <component group="io.temporal" name="temporal-test-server" version="1.40.0">
