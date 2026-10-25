@@ -94,6 +94,23 @@ Pool size: 30 (default). If saturated:
 2. Long-running TX? Kill: `SELECT pg_cancel_backend(pid)`
 3. Raise pool: `quarkus.datasource.reactive.max-size=50` (via config map).
 
+### Account opening refused: PRODUCT_CATALOG_UNAVAILABLE / PRODUCT_REVISION_NOT_PUBLISHED
+
+Since ADR-0341 D1 an account opens only with a pinned PUBLISHED catalog revision (fail-closed on the
+pin; nothing is persisted on a refusal). Outcomes are counted by
+`openbank_account_product_revision_pin_total{outcome}` (`pinned`, `catalog_unavailable`,
+`no_published_revision`, `product_not_found`, `product_not_eligible`).
+
+- `catalog_unavailable` rising: product-catalog is down, scaled to zero, or refusing the service
+  token (a 401/403 is counted here too, never as "not found"). Catalog reads use the shared `read`
+  resilience profile (2 s timeout, 2 retries, circuit breaker); check the catalog's pods and the
+  `product-catalog-api` rest-client URL / Host override. Onboarding openings from Kafka retry and then
+  dead-letter, so they replay once the catalog is back.
+- `no_published_revision`: the product has no revision published at the opening instant. A catalog
+  owner publishes one; the service cannot work around it.
+- `openbank_account_product_revision_unpinned` is the backfill debt (accounts opened before V33); it
+  must not grow. A rise means an opening path skipped the pin. See 04-data, backfill plan.
+
 ## Tech-stack version matrix
 
 Auto-generated from `libs.versions.toml` at build, available in the `/api/v1/info` payload:

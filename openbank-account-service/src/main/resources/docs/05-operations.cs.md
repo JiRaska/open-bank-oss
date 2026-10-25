@@ -94,6 +94,22 @@ Pool size: 30 (default). Pokud saturated:
 2. Long-running TX? Kill: `SELECT pg_cancel_backend(pid)`
 3. Zvyš pool: `quarkus.datasource.reactive.max-size=50` (přes config map).
 
+### Otevření účtu odmítnuto: PRODUCT_CATALOG_UNAVAILABLE / PRODUCT_REVISION_NOT_PUBLISHED
+
+Od ADR-0341 D1 se účet otevře jen s pinem PUBLIKOVANÉ revize katalogu (fail-closed na pinu; při
+odmítnutí se nic neuloží). Výsledky počítá `openbank_account_product_revision_pin_total{outcome}`
+(`pinned`, `catalog_unavailable`, `no_published_revision`, `product_not_found`, `product_not_eligible`).
+
+- Roste `catalog_unavailable`: product-catalog neběží, je škálovaný na nulu, nebo odmítá token služby
+  (401/403 se počítá sem, nikdy jako „nenalezeno“). Čtení katalogu používá sdílený resilience profil
+  `read` (timeout 2 s, 2 opakování, circuit breaker); zkontrolujte pody katalogu a URL / Host override
+  rest-clientu `product-catalog-api`. Otevření z onboardingu (Kafka) se opakuje a pak jde do DLQ, takže
+  se po obnovení katalogu přehraje.
+- `no_published_revision`: produkt nemá k okamžiku otevření publikovanou revizi. Vlastník katalogu ji
+  publikuje; služba to nemůže obejít.
+- `openbank_account_product_revision_unpinned` je dluh backfillu (účty z doby před V33); nesmí růst.
+  Růst znamená, že nějaká cesta otevření pin vynechala. Viz 04-data, plán backfillu.
+
 ## Tech-stack version matrix
 
 Auto-generated z `libs.versions.toml` při buildu, dostupné v `/api/v1/info` payloadu:
