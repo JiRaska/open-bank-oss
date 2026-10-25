@@ -480,7 +480,9 @@ jobs:
   gates:
     name: gates (${{ matrix.slug }})
     needs: [agent-admission, ruleset-evidence]
-    if: needs.agent-admission.outputs.proceed == 'true'
+    # Missing evidence must produce NOT_EVALUATED in the gate report while the
+    # independent governance checks still run. Admission refusal still blocks all.
+    if: always() && needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:

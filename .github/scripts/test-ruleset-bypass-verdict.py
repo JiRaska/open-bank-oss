@@ -129,6 +129,7 @@ print(json.dumps(value))
         self.assertNotIn('secrets.', json.dumps(job))
         self.assertNotIn('continue-on-error', json.dumps(job))
         self.assertIn('ruleset-evidence', workflow['jobs']['gates']['needs'])
+        self.assertIn('always()', workflow['jobs']['gates']['if'])
         self.assertIn('ruleset-evidence', workflow['jobs']['validate']['needs'])
         locate, download, read = job['steps']
         self.assertEqual(download['with']['artifact-ids'], '${{ steps.locate.outputs.artifact-id }}')
