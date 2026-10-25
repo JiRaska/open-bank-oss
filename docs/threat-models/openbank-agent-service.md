@@ -164,11 +164,19 @@ private DNS zone.
   and the fact that the recorder's own writes land in the same hash-chained trail they extend, where
   a forgery would collide with GitHub's own merge history on dispute) and the workflow is observable
   (fail-closed, tracking issue on failure). A stolen recorder credential still cannot write anything
-  else: the role is restricted to merge evidence. **Authorization provenance:** new App merges
+  else: the role is restricted to merge evidence. **Authorization provenance:** App merges under the `codex/` exclusion
   require the latest trusted premerge decision on the exact head, a successful main owner workflow
   and successful writer job; revocation, foreign identity, missing evidence and API errors fail
   closed. Bounded historical reconstruction is explicitly PR-scoped, with actual request and
   immutable merged-event references; it never certifies SHA approval or historical compliance.
+  Later non-codex PR-scoped intent uses a separate `POLICY_PR_AUTO_MERGE` proof: the
+  canonical merge's first-parent policy blob must be explicitly reviewed and digest-verified,
+  its recognized prefix rule must allow the branch, and the complete owner-request/merge-event
+  timeline must match. Unknown policy source, mixed proof families, and exact-head revocation
+  fail closed. Policy context does not attest executed workflow source or full historical
+  compliance. The additive `/app-policy` endpoint and optional `policyAuthorization` response
+  preserve the old closed wire enum; the backend rejects codex downgrades and policy-SHA retry
+  conflicts. The producer requires the dedicated capability flag before new-proof writes.
   The producer verifies backend schema capability before writing and independently reads committed
   evidence back. Timestamp bounds reject future observations; retries preserve the original
   historical observation. HTTP/Postgres/outbox regressions cover these properties in
