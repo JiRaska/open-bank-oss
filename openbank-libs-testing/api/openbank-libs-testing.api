@@ -178,6 +178,11 @@ public abstract class com/openbank/libs/testing/mtls/ProductionListenerProfile :
 	public fun testResources ()Ljava/util/List;
 }
 
+public final class com/openbank/libs/testing/openapi/OpenApiWireValidator {
+	public fun <init> ()V
+	public final fun violations (Ljava/lang/String;Ljava/lang/String;)Ljava/util/List;
+}
+
 public abstract class com/openbank/libs/testing/outbox/OutboxDispatchConformanceIT {
 	public fun <init> ()V
 	public final fun dispatch publishes pending rows with a stable per-aggregate key plus CloudEvents headers, marks SENT ()V
