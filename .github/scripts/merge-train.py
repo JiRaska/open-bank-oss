@@ -87,6 +87,7 @@ REGEN_INVENTORY = ".github/scripts/regen-derived.sh"
 STATUS_CONTEXT = "merge-train"
 RECORD_CONTEXT = "merge-train/record"          # publish's record of the tree it pushed
 BOT_LOGIN = "openbank-gitops-bot[bot]"          # the only creator whose statuses/PRs are trusted
+BOT_ID = 305862397                             # its numeric user id (carrier #13817); merge_train_carrier pins it too
 EXCLUDED_BRANCH_PREFIXES = ("codex/",)
 OWNER_APPROVAL_CONTEXT = "merge-train/owner-approval"
 OWNER_APPROVAL_WORKFLOW = pathlib.Path(".github/workflows/merge-train-owner-approval.yml")
@@ -197,7 +198,7 @@ FRESHNESS_GATE_CODE = (".github/scripts/check-adr-registry.sh", ".github/scripts
 # real tree and fails when a new script of that kind is missing here.
 PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/check-codeql-compile-coverage.py",     # security.yml (extra gate's workflow)
-    ".github/scripts/check-security-checklist.py",          # judges a carrier by its members
+    ".github/scripts/check-security-checklist.py",          # passes a carrier on its chain + App record
     ".github/scripts/check-api-contract.py",                # judges a carrier by its members
     ".github/scripts/check-coverage-floor-ratchet.py",      # judges a carrier by its members
     ".github/scripts/check-deploy-holds.py",                # reads the merge-train / ruleset contract
@@ -672,15 +673,18 @@ def bisect_size(app: dict[str, tuple[str, str]]) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def batch_cap(train_cands: list[Member], sizes: dict[int, int | None], default: int) -> int:
-    """How many members this train may APPLY: the smallest `bisect size N` on ANY candidate in the
-    default window, else the default. It used to be read off the OLDEST candidate only, and halving
-    posts the status on the carrier's MEMBERS — measured 2026-10-25 (#13801..#13817): the oldest
-    candidate #13697 was dropped by every build (its squash is a no-op on main), so it never rode a
-    carrier, never got a status, and the cap stayed 8 while the five halved members carried
-    `bisect size 2` through six carriers. A newly armed older PR (#13710) defeated it the same way."""
-    window = train_cands[:max(1, default)]
-    got = [sizes[m.number] for m in window if sizes.get(m.number)]
+def batch_cap(applied: list[Member], sizes: dict[int, int | None], default: int) -> int:
+    """How many members a train may APPLY: the smallest `bisect size N` among the members that
+    actually APPLY, else the default. Two earlier rules failed against the live queue:
+    - read off the OLDEST candidate only (#13794): measured 2026-10-25 (#13801..#13817), the oldest
+      candidate #13697 was dropped by every build (its squash is a no-op on main), so it never rode,
+      never got a status, and the cap stayed 8 while the five halved members carried `bisect size 2`
+      through six carriers; a newly armed older PR (#13710) defeated it the same way;
+    - the smallest size over the candidate WINDOW: a member that carries `bisect size 1` and is then
+      dropped by every build would pin the whole train at one forever (review of #13840).
+    A dropped candidate's size therefore never counts — build applies one member at a time and stops
+    before the member that would exceed the cap of those applied so far (TrainBuilder._build)."""
+    got = [sizes[m.number] for m in applied if sizes.get(m.number)]
     return max(1, min([default, *got]))
 
 
@@ -813,7 +817,8 @@ class TrainBuilder:
         # are DEFERRED (no drop notice; the next tick takes them), never dropped.
         self.separate_gate_code = True
         self.deferred: list[int] = []
-        self.limit: int | None = None        # most members one train may APPLY (bisect cap); None = all
+        self.sizes: dict[int, int | None] = {}   # live `bisect size N` per candidate (batch_cap)
+        self.default_size: int | None = None      # batch size; None = no cap (direct builds in tests)
         self.attempted: list[int] = []       # members _build tried (applied or dropped), in order
 
     def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -847,17 +852,24 @@ class TrainBuilder:
         dropped: list[int] = []
         gate: list[int] = []
         self.attempted = []
+        by_number = {m.number: m for m in members}
         for m in members:
-            if self.limit is not None and len(applied) >= self.limit:
-                break   # the bisect cap counts APPLIED members; the rest are not tried, not dropped
-            self.attempted.append(m.number)
             r = self.git("merge", "--squash", "--no-commit", m.ref, check=False)
             staged = changed_paths(self.git, cached=True) if r.returncode == 0 else []
             if r.returncode != 0 or not staged or any(unsafe_path(f) or self.untrainable(f) for f in staged):
                 self.git("merge", "--abort", check=False)
                 self.git("reset", "-q", "--hard", "HEAD")
+                self.attempted.append(m.number)
                 dropped.append(m.number)
                 continue
+            if self.default_size is not None:
+                cap = batch_cap([by_number[n] for n in applied] + [m], self.sizes, self.default_size)
+                if len(applied) + 1 > cap:
+                    # The bisect cap counts APPLIED members only; this one and the rest are not
+                    # tried this train (not dropped, no notice) and lead the next one.
+                    self.git("reset", "-q", "--hard", "HEAD")
+                    break
+            self.attempted.append(m.number)
             self.git("commit", "-q", "-m", squash_message(m))
             applied.append(m.number)
             if any(gate_code(f) for f in staged):
@@ -1524,10 +1536,10 @@ def plan_train(gh, git, repo: str, base: str) -> tuple[list[Member], list[Member
     return fast, train, {n: bisect_size(a) for n, a in apps.items()}
 
 
-def plan_batch(gh, git, repo: str, base: str, batch_size: int) -> tuple[list[Member], list[Member], int]:
-    """(fast lane, this tick's candidate window, how many may apply) — the same function in build and settle."""
+def plan_batch(gh, git, repo: str, base: str, batch_size: int) -> tuple[list[Member], list[Member], dict[int, int | None]]:
+    """(fast lane, this tick's candidate window, live bisect sizes) — the same function in build and settle."""
     fast, train, sizes = plan_train(gh, git, repo, base)
-    return fast, select_batch(train, sizes, batch_size), batch_cap(train, sizes, batch_size)
+    return fast, select_batch(train, sizes, batch_size), sizes
 
 
 MANIFEST_RE = re.compile(r"^([0-9]{1,9}) ([0-9a-f]{40})$")
@@ -1572,10 +1584,11 @@ def live_base(gh, git) -> str:
 # --------------------------------------------------------------------------- the three modes
 def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_size: int) -> list[int]:
     base = live_base(gh, git)
-    _fast, batch, cap = plan_batch(gh, git, repo, base, batch_size)
-    builder.limit = cap
-    if cap < len(batch):
-        log(f"build: bisect cap {cap} — at most {cap} of {len(batch)} candidate(s) apply")
+    _fast, batch, sizes = plan_batch(gh, git, repo, base, batch_size)
+    builder.sizes, builder.default_size = sizes, batch_size
+    capped = sorted({sizes[m.number] for m in batch if sizes.get(m.number)})
+    if capped:
+        log(f"build: bisect size(s) {capped} on candidates — the cap counts only members that apply")
     regen_text = main_regen_text(git, base)
     builder.untrainable = Untrainable(regen_text)
     builder.declared_inputs = regen_inventory_fragments(regen_text)
@@ -1700,7 +1713,8 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
         git("fetch", "-q", bundle, f"+{BUNDLE_REF}:refs/merge-train/bundle")
         tip = git("rev-parse", "refs/merge-train/bundle").stdout.strip()
         v = verify_bundle_train(git, base, batch, tip, outputs)
-        cap = batch_cap(train, sizes, batch_size)
+        live = {m.number: m for m in train}
+        cap = batch_cap([live[n] for n in v.applied if n in live], sizes, batch_size)
         if len(v.applied) > cap:
             raise Reject(f"train applies {len(v.applied)} member(s), over the bisect cap of {cap}", member_fault=False)
     except Reject as exc:
@@ -2976,14 +2990,14 @@ def self_test() -> int:
           not fast_lane_eligible(["a"], ["a"], [], frags)[0] and not fast_lane_eligible(["a"], [], ["a"], frags)[0])
     mk = lambda *ns: [Member(n, "", "", "a" * 40, "", "") for n in ns]  # noqa: E731
     check("batch: default size", [m.number for m in select_batch(mk(1, 2, 3), {}, 2)] == [1, 2])
-    check("batch: a bisect size on the oldest caps it", batch_cap(mk(1, 2, 3, 4), {1: 2}, 8) == 2)
+    check("batch: a bisect size on an applied member caps it", batch_cap(mk(1, 2, 3, 4), {1: 2}, 8) == 2)
     # NEGATIVE first (2026-10-25, #13801..#13817): halving posted `bisect size 2` on the carrier's
-    # members, but the oldest candidate (#13697, dropped by every build) and a newly armed older PR
-    # (#13710) carried none — the cap read the oldest only, and stayed at the default.
-    check("batch: a bisect size on a NON-oldest candidate still caps (oldest never rides)",
-          batch_cap(mk(1, 2, 3, 4, 5), {2: 2, 3: 2}, 8) == 2)
-    check("batch: the smallest bisect size in the window wins", batch_cap(mk(1, 2, 3), {2: 2, 3: 1}, 8) == 1)
-    check("batch: a size outside the default window does not cap", batch_cap(mk(1, 2, 3), {3: 1}, 2) == 2)
+    # members, but the oldest candidate (#13697, dropped by every build) carried none.
+    check("batch: a bisect size on a NON-oldest applied member still caps (oldest never rides)",
+          batch_cap(mk(2, 3, 4), {2: 2, 3: 2}, 8) == 2)
+    check("batch: the smallest bisect size among applied members wins", batch_cap(mk(2, 3), {2: 2, 3: 1}, 8) == 1)
+    # ...and a DROPPED candidate's size never counts (review of #13840): #1 carries 1 and never applies.
+    check("batch: a dropped candidate's bisect size does not pin the train", batch_cap(mk(2, 3), {1: 1}, 8) == 8)
     check("batch: the window is the default size; the cap bounds APPLIED members, not candidates",
           [m.number for m in select_batch(mk(1, 2, 3, 4), {1: 2}, 3)] == [1, 2, 3])
     check("bisect status: only a pending `bisect size N` counts",
@@ -3396,6 +3410,24 @@ def self_test() -> int:
             drain()
             check("budget livelock (oldest never rides): both halved members still merge",
                   sorted(gh.merged) == [2, 4], str(gh.merged))
+            gh.reruns.clear()
+            reset()
+
+            # Review of #13840: a DROPPED candidate carrying `bisect size 1` must not pin the train at one.
+            gh.g("checkout", "-q", "-f", "main")
+            gh.g("merge", "-q", "--squash", "p1")
+            subprocess.run([sys.executable, SYN_GENERATOR], cwd=origin, check=True, env=base_env())
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "main already carries p1's change: p1's squash is a no-op")
+            open_only("p1", "p2", "p4")
+            gh.post_status(gh.prs[1]["head"]["sha"], "pending", "bisect size 1")
+            _, st = tick()
+            newest = max(gh.carriers.values(), key=lambda c: c["number"]) if gh.carriers else None
+            got = [n for n, _ in (parse_own_chain(gh.g, newest["head"]["sha"]) or ("", []))[1]] if newest else []
+            check("dropped candidate's bisect size: a no-op oldest PR at size 1 does not pin the train",
+                  st == "published" and got == [2, 4] and bisect_of(1) == 1, f"st={st} members={got}")
+            drain()
+            check("dropped candidate's bisect size: both members still merge", sorted(gh.merged) == [2, 4], str(gh.merged))
             gh.reruns.clear()
             reset()
 
@@ -3875,7 +3907,7 @@ def self_test() -> int:
             open_only("p1", "p2")
             pub = Git(clone("publish"))
             base = live_base(gh, pub)
-            _f, batch, _cap = plan_batch(gh, pub, "o/r", base, 8)
+            _f, batch, _sizes = plan_batch(gh, pub, "o/r", base, 8)
             bdir = clone("build")
             b = TrainBuilder(bdir, regen_commands=(), overlay_roots=(".github/scripts",))
             for m in batch:

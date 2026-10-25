@@ -682,22 +682,22 @@ def run(root: Path, body: str, base: str, enforce: bool,
     return 0
 
 
-CARRIER_NOTE = ("security-checklist: verified merge-train carrier — PASS; carrier: members judged on their own "
-                "heads. Every member qualified only with ALL required contexts green on its OWN head "
-                "(merge-train.py qualifies()), this gate among them, and settle merges each member at exactly "
-                "that head, so the members' own checks are what GitHub enforces. The carrier's bot body is "
-                "not an attestation and is not read; no member body is fetched.")
+CARRIER_NOTE = ("carrier: members judged on their own heads. Every member qualified only with ALL required "
+                "contexts green on its OWN head (merge-train.py qualifies()), this gate among them, and settle "
+                "merges each member at exactly that head. The carrier's bot body is not an attestation and is "
+                "not read; no member body is fetched.")
 
 
 def identify(env, fetch_pr) -> tuple[str, dict | None, int]:
     """("carrier" | "ordinary" | "unavailable", the PR object, live API reads made).
 
-    The identification is merge_train_carrier.is_verified_carrier — App author typed Bot, an exact
-    `train/<run>-<attempt>` branch in THIS repo, the `merge-train` label — the train's own definition,
-    never a branch-name prefix a contributor can push. It is answered from the pull_request EVENT
-    payload GitHub wrote for this run, so a carrier costs ZERO API calls. Only a PR whose event already
-    LOOKS like a train head but does not verify (the carrier is labelled after it is opened, so the
-    `opened` payload has no label yet) reads the live PR once; if that read fails, nobody may judge it."""
+    The identification is merge_train_carrier.is_verified_carrier — the App bot by login, type AND
+    numeric id, an exact `train/<run>-<attempt>` branch in THIS repo, the `merge-train` label — the
+    train's own definition, never a branch-name prefix a contributor can push. The pull_request EVENT
+    payload GitHub wrote for this run answers it, except: (a) a re-run (GITHUB_RUN_ATTEMPT > 1) replays
+    the ORIGINAL payload, so a since-removed label would still read as present — a re-run reads the
+    live PR; (b) the carrier is labelled after it is opened, so the `opened` payload of a train head
+    has no label yet. A live read that fails on a train head is "unavailable": nobody may judge it."""
     repo, number = env.get("GITHUB_REPOSITORY", ""), env.get("PR_NUMBER", "")
     event: dict | None = None
     path = env.get("GITHUB_EVENT_PATH", "")
@@ -708,7 +708,9 @@ def identify(env, fetch_pr) -> tuple[str, dict | None, int]:
             got = None
         if isinstance(got, dict) and str(got.get("number", "")) == number:
             event = got
-    if carrier_lib.is_verified_carrier(event, repo):
+    attempt = env.get("GITHUB_RUN_ATTEMPT", "1")
+    rerun = attempt.isdigit() and int(attempt) > 1
+    if carrier_lib.is_verified_carrier(event, repo) and not rerun:
         return "carrier", event, 0
     ref = str(((event or {}).get("head") or {}).get("ref") or env.get("GITHUB_HEAD_REF", ""))
     if not carrier_lib.TRAIN_BRANCH_RE.fullmatch(ref):
@@ -719,13 +721,62 @@ def identify(env, fetch_pr) -> tuple[str, dict | None, int]:
     return ("carrier" if carrier_lib.is_verified_carrier(live, repo) else "ordinary"), live, 1
 
 
+def _git_out(*args: str) -> str:
+    r = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def run_carrier(base: str, enforce: bool, pr: dict, repo: str,
+                fetch_record: Callable[[str, str], str | None]) -> int:
+    """A verified carrier passes ONLY if its head is the train's own, unmodified work:
+    1. the PR's head sha is the tree under test (HEAD, or the second parent of the merge ref);
+    2. every commit in base..head is a train member squash or the single regeneration commit
+       (merge_train_carrier.carrier_members — local git; a fetch only if the checkout is shallow);
+    3. the App's `merge-train/record` status on exactly that sha names exactly that tree.
+    Anyone with push access can push to `train/*` (no ruleset covers it), and a commit MESSAGE is
+    forgeable — (3) is what a human push cannot produce: it lands on a new sha that publish never
+    recorded. A foreign commit or a missing/mismatched record fails closed; an unreadable record or
+    history is NOT EVALUATED. The members' checklists are their own heads' business (CARRIER_NOTE)."""
+    head = str((pr.get("head") or {}).get("sha") or "")
+    if not re.fullmatch(r"[0-9a-f]{40}", head):
+        print("::error::security-checklist: verified carrier without a head sha — fail closed")
+        return 1 if enforce else 0
+    here = _git_out("rev-parse", "HEAD")
+    if head not in (here, _git_out("rev-parse", "--verify", "--quiet", "HEAD^2")):
+        print(f"::error::security-checklist: the tree under test ({here[:12] or '?'}) is not carrier head "
+              f"{head[:12]} — fail closed")
+        return 1 if enforce else 0
+    try:
+        members = carrier_lib.carrier_members(base, head)
+    except carrier_lib.CarrierUnavailable as exc:
+        carrier_lib.not_evaluated("security-checklist", f"carrier history could not be read ({exc})")
+        return 1 if enforce else 0
+    except carrier_lib.CarrierError as exc:
+        print(f"::error::security-checklist: verified merge-train carrier, but {exc} — a commit that is "
+              "not the train's own never rides on the members' verdicts; fail closed")
+        return 1 if enforce else 0
+    recorded = fetch_record(repo, head)
+    if recorded is None:
+        carrier_lib.not_evaluated("security-checklist", f"the App's merge-train/record on {head[:12]} is unreadable")
+        return 1 if enforce else 0
+    tree = _git_out("rev-parse", f"{head}^{{tree}}")
+    if not recorded or recorded != tree:
+        print(f"::error::security-checklist: carrier head {head[:12]} carries no App merge-train/record of its "
+              f"tree {tree[:12] or '?'} (recorded: {recorded[:12] or 'none'}) — not the train's published head; "
+              "fail closed")
+        return 1 if enforce else 0
+    print(f"security-checklist: verified merge-train carrier — PASS. Head {head[:12]} is the App-recorded tree; "
+          f"{len(members)} member commit(s): {', '.join(f'#{n}' for n, _ in members)}.")
+    print("security-checklist: " + CARRIER_NOTE)
+    return 0
+
+
 def judge(root: Path, body: str, base: str, enforce: bool, live_body: Callable[[], str | None] | None,
-          pr: dict | None, repo: str) -> int:
-    """Dispatch: a VERIFIED carrier passes on its members' own heads; everything else (a spoofed
-    `train/…` included) is judged as an ordinary PR on its own body, fail closed."""
+          pr: dict | None, repo: str, fetch_record: Callable[[str, str], str | None] | None = None) -> int:
+    """Dispatch: a VERIFIED carrier passes on its members' own heads once its chain and record hold;
+    everything else (a spoofed `train/…` included) is judged as an ordinary PR on its own body."""
     if carrier_lib.is_verified_carrier(pr, repo):
-        print(CARRIER_NOTE)
-        return 0
+        return run_carrier(base, enforce, pr, repo, fetch_record or carrier_lib.gh_record_tree)
     if pr is not None and str((pr.get("head") or {}).get("ref") or "").startswith("train/"):
         print("security-checklist: head is train/… but the PR is not a verified merge-train carrier "
               "(author, label or branch) — judged as an ordinary PR")
@@ -1207,15 +1258,17 @@ def self_test() -> int:
     repo = "o/r"
 
     def carrier_pr(**over) -> dict:
-        pr = {"user": {"login": carrier_lib.BOT_LOGIN, "type": "Bot"}, "labels": [{"name": "merge-train"}],
-              "head": {"ref": "train/123-1", "repo": {"full_name": repo}}}
+        pr = {"user": {"login": carrier_lib.BOT_LOGIN, "type": "Bot", "id": carrier_lib.BOT_ID},
+              "labels": [{"name": "merge-train"}],
+              "head": {"ref": "train/123-1", "sha": "HEAD", "repo": {"full_name": repo}}}
         for k, v in over.items():
             pr[k] = v
         return pr
 
     def carrier_fixture(member_paths: dict[int, list[str]], bodies: dict[int, str], pr: dict,
                         extra_commit: bool = False, inner: Callable[[], int] | None = None,
-                        rules_by_member: dict[int, str] | None = None) -> tuple[int, str, list[int]]:
+                        rules_by_member: dict[int, str] | None = None, record: str = "ok",
+                        forge_after: bool = False, pin: str = "head") -> tuple[int, str, list[int]]:
         """A real git repo: base, then one train member commit per PR (merge-train.py's exact
         message), optionally a foreign commit; judged through judge() exactly as main() does."""
         import contextlib
@@ -1247,12 +1300,34 @@ def self_test() -> int:
             if extra_commit:
                 (root / "foreign.txt").write_text("x\n")
                 git("add", "-A"); git("commit", "-q", "-m", "not a train commit")
+            published = git("rev-parse", "HEAD").stdout.strip()
+            if forge_after:
+                # A human push AFTER publish, dressed as a member: a forgeable message, a new sha.
+                f = root / svc / "src/main/kotlin/Forged.kt"
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text("forged\n")
+                git("add", "-A")
+                git("commit", "-q", "-m", f"merge-train: member #99\n\nPR-Number: #99\nPR-Head: {'b' * 40}\n")
+            head = git("rev-parse", "HEAD").stdout.strip()
+            published_tree = git("rev-parse", f"{published}^{{tree}}").stdout.strip()
+            if isinstance(pr, dict) and (pr.get("head") or {}).get("sha") == "HEAD":
+                pr = {**pr, "head": {**pr["head"], "sha": head if pin == "head" else published if pin == "published" else "c" * 40}}
+
+            def fetch_record(_repo: str, sha: str) -> str | None:
+                reads.append(0)
+                if record == "unreadable":
+                    return None
+                if record == "none":
+                    return ""
+                # publish recorded ONLY the sha it pushed, with that sha's tree
+                return published_tree if sha == published else ""
             cwd = os.getcwd()
             out = io.StringIO()
             try:
                 os.chdir(root)
                 with contextlib.redirect_stdout(out):
-                    rc = inner() if inner else judge(root, carrier_body, "base", True, lambda: carrier_body, pr, repo)
+                    rc = inner() if inner else judge(root, carrier_body, "base", True, lambda: carrier_body, pr, repo,
+                                                     fetch_record)
             finally:
                 os.chdir(cwd)
             return rc, out.getvalue(), reads
@@ -1261,57 +1336,94 @@ def self_test() -> int:
     # NEGATIVE first: every spoof of the carrier identity — a faked `train/` branch from a non-App
     # author above all — is an ordinary PR, judged on its own (bot-looking) body and FAILS.
     for label, pr in [("faked train/ branch, non-App author", carrier_pr(user={"login": "mallory", "type": "User"})),
-                      ("bot-looking login typed User", carrier_pr(user={"login": carrier_lib.BOT_LOGIN, "type": "User"})),
-                      ("wrong branch", carrier_pr(head={"ref": "train/x", "repo": {"full_name": repo}})),
-                      ("fork head", carrier_pr(head={"ref": "train/123-1", "repo": {"full_name": "evil/r"}})),
+                      ("bot-looking login typed User", carrier_pr(user={"login": carrier_lib.BOT_LOGIN, "type": "User", "id": carrier_lib.BOT_ID})),
+                      ("bot login and type, wrong numeric id", carrier_pr(user={"login": carrier_lib.BOT_LOGIN, "type": "Bot", "id": 1})),
+                      ("bot login and type, no numeric id", carrier_pr(user={"login": carrier_lib.BOT_LOGIN, "type": "Bot"})),
+                      ("wrong branch", carrier_pr(head={"ref": "train/x", "sha": "HEAD", "repo": {"full_name": repo}})),
+                      ("fork head", carrier_pr(head={"ref": "train/123-1", "sha": "HEAD", "repo": {"full_name": "evil/r"}})),
                       ("missing label", carrier_pr(labels=[])),
                       ("unreadable PR", None)]:
         rc, out, _ = carrier_fixture(money, {}, pr)
         if rc == 0 or CARRIER_NOTE in out:
             print(f"self-test FAIL (carrier-spoof): {label} was trusted as a carrier (rc={rc})"); bad += 1
-    rc, out, _ = carrier_fixture(money, {}, carrier_pr())
-    if rc != 0 or CARRIER_NOTE not in out or "members judged on their own heads" not in out:
+    # NEGATIVE: identity is not enough. Anyone with push access can push to `train/*` (no ruleset
+    # covers it) — each of these is a verified-identity carrier whose head is NOT the train's work.
+    #   carrier-foreign-commit       a non-train commit in the chain                      -> fail closed
+    #   carrier-member-unticked      (replaced) a human push dressed as a member commit,
+    #                                money-path code, no checklist anywhere: new sha, no record -> fail
+    #   carrier-member-unreadable    (replaced) the App record cannot be read             -> NOT EVALUATED
+    #   carrier-member-governance-snapshot (replaced) the PR head is not the tree under test -> fail
+    for label, kw, want_ne in [
+            ("carrier-foreign-commit", {"extra_commit": True}, False),
+            ("carrier-member-unticked: forged member commit after publish", {"forge_after": True}, False),
+            ("carrier-no-record", {"record": "none"}, False),
+            ("carrier-member-unreadable: record unreadable", {"record": "unreadable"}, True),
+            ("carrier-member-governance-snapshot: head not under test", {"pin": "other"}, False)]:
+        rc, out, _ = carrier_fixture(money, {}, carrier_pr(), **kw)
+        if rc == 0 or CARRIER_NOTE in out or ((carrier_lib.NOT_EVALUATED_LINE in out) != want_ne):
+            print(f"self-test FAIL ({label}): rc={rc}, want "
+                  f"{'NOT EVALUATED' if want_ne else 'a fail-closed finding'}:\n{out[-500:]}"); bad += 1
+    rc, out, reads = carrier_fixture(money, {}, carrier_pr())
+    if rc != 0 or CARRIER_NOTE not in out or "members judged on their own heads" not in out or len(reads) != 1:
         print("self-test FAIL (carrier-pass): a verified money-path carrier did not PASS with the "
               "members-on-their-own-heads note:\n" + out[-600:]); bad += 1
 
     # End to end through main(), counting every live read: the event payload names the PR.
-    def gate_main_with(event_pr: dict | None, live: dict | None, head_ref: str = "") -> tuple[int, str, int]:
-        reads = [0]
+    def gate_main_with(event_pr: dict | None, live: dict | None, head_ref: str = "",
+                       attempt: str = "1") -> tuple[int, str, dict]:
+        """main() end to end; counts PR reads, record reads, member-body reads and any other `gh`."""
+        calls = {"pr": 0, "record": 0, "bodies": 0, "gh": 0}
 
-        def fake_pr(*_a, **_k):
-            reads[0] += 1
-            return live
+        def fill(pr: dict | None, head: str) -> dict | None:
+            if isinstance(pr, dict) and (pr.get("head") or {}).get("sha") == "HEAD":
+                return {**pr, "head": {**pr["head"], "sha": head}}
+            return pr
 
-        def no_bodies(*_a, **_k):
-            reads[0] += 1000          # a member-body read on this gate's path is itself a failure
-            return None
         with _tf.TemporaryDirectory() as td:
             ev = Path(td) / "event.json"
-            ev.write_text(json.dumps({"pull_request": event_pr} if event_pr is not None else {}), encoding="utf-8")
             fake_bin = Path(td) / "bin"
             fake_bin.mkdir()
             log = Path(td) / "gh-calls"
             (fake_bin / "gh").write_text(f"#!/bin/sh\necho x >> '{log}'\necho ''\n")
             (fake_bin / "gh").chmod(0o755)
             keys = ("GITHUB_REPOSITORY", "PR_NUMBER", "GITHUB_HEAD_REF", "GITHUB_EVENT_PATH", "PATH",
-                    carrier_lib.CACHE_DIR_ENV)
+                    "GITHUB_RUN_ATTEMPT", carrier_lib.CACHE_DIR_ENV)
             saved_env = {k: os.environ.get(k) for k in keys}
             os.environ.update({"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500", "GITHUB_HEAD_REF": head_ref,
-                               "GITHUB_EVENT_PATH": str(ev), "PATH": f"{fake_bin}:{saved_env['PATH'] or ''}"})
+                               "GITHUB_EVENT_PATH": str(ev), "GITHUB_RUN_ATTEMPT": attempt,
+                               "PATH": f"{fake_bin}:{saved_env['PATH'] or ''}"})
             os.environ.pop(carrier_lib.CACHE_DIR_ENV, None)
-            saved = (carrier_lib.gh_pr, carrier_lib.gh_member_bodies, sys.argv)
-            carrier_lib.gh_pr, carrier_lib.gh_member_bodies = fake_pr, no_bodies
+            saved = (carrier_lib.gh_pr, carrier_lib.gh_member_bodies, carrier_lib.gh_record_tree, sys.argv)
+
+            def inner() -> int:
+                head = _git_out("rev-parse", "HEAD")
+                ev.write_text(json.dumps({"pull_request": fill(event_pr, head)} if event_pr is not None else {}),
+                              encoding="utf-8")
+
+                def fake_pr(*_a, **_k):
+                    calls["pr"] += 1
+                    return fill(live, head)
+
+                def no_bodies(*_a, **_k):
+                    calls["bodies"] += 1
+                    return None
+
+                def record(_repo, sha, **_k):
+                    calls["record"] += 1
+                    return _git_out("rev-parse", f"{sha}^{{tree}}") if sha == head else ""
+                carrier_lib.gh_pr, carrier_lib.gh_member_bodies, carrier_lib.gh_record_tree = fake_pr, no_bodies, record
+                return main()
             sys.argv = ["x", "--live-body", "--body", carrier_body, "--base", "base", "--enforce"]
             try:
-                rc, out, _ = carrier_fixture(money, {}, None, inner=main)
+                rc, out, _ = carrier_fixture(money, {}, None, inner=inner)
             finally:
-                carrier_lib.gh_pr, carrier_lib.gh_member_bodies, sys.argv = saved
+                carrier_lib.gh_pr, carrier_lib.gh_member_bodies, carrier_lib.gh_record_tree, sys.argv = saved
                 for k, v in saved_env.items():
                     if v is None:
                         os.environ.pop(k, None)
                     else:
                         os.environ[k] = v
-            calls = reads[0] + (len(log.read_text().splitlines()) if log.exists() else 0)
+            calls["gh"] = len(log.read_text().splitlines()) if log.exists() else 0
             return rc, out, calls
     real = {**carrier_pr(), "number": 500}
     spoof = {**carrier_pr(user={"login": "mallory", "type": "User"}), "number": 500}
@@ -1319,16 +1431,23 @@ def self_test() -> int:
     if rc == 0 or CARRIER_NOTE in out:
         print(f"self-test FAIL (main-spoof): a faked train/ branch from a non-App author passed (rc={rc}):\n{out[-500:]}"); bad += 1
     rc, out, calls = gate_main_with(real, None, "train/123-1")
-    if rc != 0 or CARRIER_NOTE not in out or calls != 0:
-        print(f"self-test FAIL (main-carrier-no-api): a real carrier made {calls} API call(s) / rc={rc}, "
-              f"want PASS with zero:\n{out[-500:]}"); bad += 1
+    if rc != 0 or CARRIER_NOTE not in out or calls != {"pr": 0, "record": 1, "bodies": 0, "gh": 0}:
+        print(f"self-test FAIL (main-carrier-no-member-reads): a real carrier made {calls} / rc={rc}, want PASS "
+              f"with no PR read, no member body read and exactly ONE record read:\n{out[-500:]}"); bad += 1
     unlabelled = {**real, "labels": []}      # the `opened` payload predates the label
     rc, out, calls = gate_main_with(unlabelled, real, "train/123-1")
-    if rc != 0 or CARRIER_NOTE not in out or calls != 1:
+    if rc != 0 or CARRIER_NOTE not in out or calls["pr"] != 1 or calls["bodies"]:
         print(f"self-test FAIL (main-carrier-opened-payload): rc={rc} calls={calls}, want PASS after ONE live read"); bad += 1
     rc, out, calls = gate_main_with(unlabelled, None, "train/123-1")
     if rc == 0 or carrier_lib.NOT_EVALUATED_LINE not in out:
         print(f"self-test FAIL (main-train-head-unreadable): rc={rc}, want 1 + NOT EVALUATED:\n{out[-500:]}"); bad += 1
+    # A re-run replays the ORIGINAL payload: a label removed since must revoke carrier status.
+    rc, out, calls = gate_main_with(real, unlabelled, "train/123-1", attempt="2")
+    if rc == 0 or CARRIER_NOTE in out or calls["pr"] != 1:
+        print(f"self-test FAIL (main-rerun-label-removed): stale payload kept carrier status (rc={rc} calls={calls})"); bad += 1
+    rc, out, calls = gate_main_with(real, None, "train/123-1", attempt="2")
+    if rc == 0 or carrier_lib.NOT_EVALUATED_LINE not in out:
+        print(f"self-test FAIL (main-rerun-unreadable): rc={rc}, want 1 + NOT EVALUATED:\n{out[-500:]}"); bad += 1
     rc, out, calls = gate_main_with({**real, "head": {"ref": "feature/x", "repo": {"full_name": repo}},
                                      "user": {"login": "someone", "type": "User"}}, None)
     if rc == 0 or CARRIER_NOTE in out:
@@ -1395,10 +1514,12 @@ def self_test() -> int:
         print("self-test FAIL (deepen-not-needed): a non-shallow checkout tried to fetch"); bad += 1
     # The helper's constants must equal merge-train.py's: the carrier identity is ONE definition.
     mt = (Path(__file__).resolve().parent / "merge-train.py").read_text()
-    for name, val in [("BOT_LOGIN", carrier_lib.BOT_LOGIN), ("CARRIER_LABEL", carrier_lib.CARRIER_LABEL)]:
-        if f'{name} = "{val}"' not in mt:
+    for name, val in [("BOT_LOGIN", f'"{carrier_lib.BOT_LOGIN}"'), ("CARRIER_LABEL", f'"{carrier_lib.CARRIER_LABEL}"'),
+                      ("BOT_ID", str(carrier_lib.BOT_ID)), ("RECORD_CONTEXT", f'"{carrier_lib.RECORD_CONTEXT}"')]:
+        if f'{name} = {val}' not in mt:
             print(f"self-test FAIL: merge_train_carrier.{name} drifted from merge-train.py"); bad += 1
-    if carrier_lib.TRAIN_BRANCH_RE.pattern not in mt or carrier_lib.OWN_MEMBER_RE.pattern not in mt:
+    if (carrier_lib.TRAIN_BRANCH_RE.pattern not in mt or carrier_lib.OWN_MEMBER_RE.pattern not in mt
+            or carrier_lib.RECORD_RE.pattern not in mt):
         print("self-test FAIL: merge_train_carrier branch/member regex drifted from merge-train.py"); bad += 1
 
     print("security-checklist self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
