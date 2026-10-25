@@ -128,8 +128,15 @@ dependencies {
     // SecurityIdentity for ApprovalEndpointConformance; services supply it at test runtime.
     compileOnly("io.quarkus.security:quarkus-security")
     compileOnly("io.smallrye.config:smallrye-config-source-yaml")
+    // M2mOidcClientIdentityWiringConformance reflects over the rest-client annotations a consuming
+    // service already carries (quarkus-rest-client-oidc-filter, quarkus-rest-client) and parses its
+    // application.yaml with the snakeyaml the YAML config source brings.
+    compileOnly(libs.quarkus.oidc.client.reactive.filter)
+    compileOnly(libs.quarkus.rest.client.reactive)
     testImplementation(enforcedPlatform(libs.quarkus.bom))
     testImplementation("io.smallrye.config:smallrye-config-source-yaml")
+    testImplementation(libs.quarkus.oidc.client.reactive.filter)
+    testImplementation(libs.quarkus.rest.client.reactive)
 
     testImplementation(libs.mockk)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
