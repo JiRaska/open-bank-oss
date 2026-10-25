@@ -202,13 +202,19 @@ def restore(repo, service, sha, destination):
         item = matches[0]
         require(item.get("expired") is False and type(item.get("id")) is int and item["id"] > 0
                 and type(item.get("size_in_bytes")) is int and 0 < item["size_in_bytes"] <= MAX_BYTES, "invalid artifact metadata")
+        digest = item.get("digest")
+        require(isinstance(digest, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is not None,
+                "missing or invalid artifact digest")
         producer = item.get("workflow_run") or {}
         require(isinstance(producer, dict) and producer.get("id") == run["id"] and producer.get("head_sha") == sha
                 and producer.get("head_branch") == "main", "artifact producer mismatch")
         with tempfile.TemporaryDirectory(prefix="service-build-") as directory:
             archive = Path(directory) / "artifact.zip"
             download(repo, item["id"], archive)
-            outer = read_zip(archive.read_bytes())
+            raw = archive.read_bytes()
+            require(len(raw) == item["size_in_bytes"], "artifact download size mismatch")
+            require("sha256:" + hashlib.sha256(raw).hexdigest() == digest, "artifact download digest mismatch")
+            outer = read_zip(raw)
             require(set(outer) == {"deploy-build.zip"}, "unexpected artifact contents")
             files = validate_bundle(outer["deploy-build.zip"], sha, run["id"], run["run_attempt"])
         # Validate everything first, then atomically install the complete build directory.

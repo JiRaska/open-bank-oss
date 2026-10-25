@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Synthetic artifact/provenance regressions; no network or cloud credentials."""
 import copy
+import hashlib
 import importlib.util
 import io
 import json
@@ -52,7 +53,9 @@ class BuildArtifactTest(unittest.TestCase):
         self.bundle = (self.out / "deploy-build.zip").read_bytes()
         self.destination = self.root / "destination"
         (self.destination / MOD.SERVICE).mkdir(parents=True)
-        self.item = {"id": 456, "expired": False, "size_in_bytes": 1024,
+        self.outer = archive({"deploy-build.zip": self.bundle})
+        self.item = {"id": 456, "expired": False, "size_in_bytes": len(self.outer),
+                     "digest": "sha256:" + hashlib.sha256(self.outer).hexdigest(),
                      "name": MOD.artifact_name(SHA, 2),
                      "workflow_run": {"id": 123, "head_sha": SHA, "head_branch": "main"}}
 
@@ -71,7 +74,7 @@ class BuildArtifactTest(unittest.TestCase):
         fixture.mkdir(exist_ok=True)
         (fixture / "run.json").write_text(json.dumps(RUN if run is None else run))
         (fixture / "artifact.json").write_text(json.dumps(self.item if item is None else item))
-        (fixture / "artifact.zip").write_bytes(archive({"deploy-build.zip": self.bundle if bundle is None else bundle}))
+        (fixture / "artifact.zip").write_bytes(self.outer if bundle is None else archive({"deploy-build.zip": bundle}))
         stub = self.root / "gh"
         stub.write_text("#!/usr/bin/env python3\nimport json, os, pathlib, sys\np=pathlib.Path(os.environ['FIXTURE'])\n"
                         + ("sys.exit(1)\n" if fail else "")
@@ -162,6 +165,31 @@ class BuildArtifactTest(unittest.TestCase):
             self.assertEqual(self.restore_cli(item=item), "restored=false\n")
             (self.root / "output").unlink()
         self.assertEqual(self.restore_cli(bundle=b"not a ZIP"), "restored=false\n")
+        self.assertEqual(list((self.destination / MOD.SERVICE).iterdir()), [])
+
+    def test_missing_malformed_or_mismatched_outer_digest_are_misses(self):
+        for digest in [None, "", "sha256:" + "g" * 64, "sha512:" + "a" * 64, "sha256:" + "0" * 64]:
+            with self.subTest(digest=digest):
+                self.assertEqual(self.restore_cli(item=self.item | {"digest": digest}), "restored=false\n")
+                self.assertEqual(list((self.destination / MOD.SERVICE).iterdir()), [])
+                (self.root / "output").unlink()
+
+    def test_outer_size_mismatch_is_a_miss(self):
+        self.assertEqual(self.restore_cli(item=self.item | {"size_in_bytes": len(self.outer) + 1}), "restored=false\n")
+        self.assertEqual(list((self.destination / MOD.SERVICE).iterdir()), [])
+
+    def test_self_consistent_inner_replacement_cannot_replace_api_bound_archive(self):
+        files = MOD.read_zip(self.bundle)
+        files["quarkus-app/lib/main/example.jar"] = b"replacement-library"
+        manifest = json.loads(files["manifest.json"])
+        manifest["files"]["quarkus-app/lib/main/example.jar"] = {
+            "size": len(files["quarkus-app/lib/main/example.jar"]),
+            "sha256": hashlib.sha256(files["quarkus-app/lib/main/example.jar"]).hexdigest(),
+        }
+        files["manifest.json"] = json.dumps(manifest)
+        altered = archive(files)
+        self.validate(altered)  # Inner self-checks alone accept this replacement.
+        self.assertEqual(self.restore_cli(bundle=altered), "restored=false\n")
         self.assertEqual(list((self.destination / MOD.SERVICE).iterdir()), [])
 
     def test_empty_sbom_and_missing_runner_are_rejected(self):
