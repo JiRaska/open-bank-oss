@@ -34,8 +34,8 @@ describe('commit-addressed evidence store key (#13201)', () => {
     // The reader derives the commit from `sandbox-<prefix>`; a key of any other length is a
     // permanent 404 that reads as "not yet published".
     const workflow = readFileSync(AUTO_DEPLOY, 'utf8')
-    const match = workflow.match(/SHA="\$\{GITHUB_SHA::(\d+)\}"\s*\n\s*TAG="sandbox-\$\{SHA\}"/)
-    expect(match, 'auto-deploy.yml no longer derives the tag as sandbox-${GITHUB_SHA::N}').not.toBeNull()
+    const match = workflow.match(/SHA="\$\{(?:GITHUB_SHA|SOURCE_COMMIT)::(\d+)\}"\s*\n\s*TAG="sandbox-\$\{SHA\}"/)
+    expect(match, 'auto-deploy.yml no longer derives the tag as sandbox-${GITHUB_SHA|SOURCE_COMMIT::N}').not.toBeNull()
     expect(DEPLOY_TAG_SHA_LENGTH).toBe(Number(match![1]))
     expect(evidenceStoreKey('openbank-alpha-service', SHA)).toBe(`openbank-alpha-service/${SHA.slice(0, Number(match![1]))}/test-intelligence.json`)
   })
