@@ -1084,6 +1084,58 @@ gates:
     run: |
       python3 .github/scripts/check-entity-column-names.py
 
+  # ADR-0344 D1: day counts and business-day calendars live in openbank-libs-domain and
+  # openbank-libs-finance only. A private DayCount, a local nextBusinessDay or a hard-coded 360/365
+  # year basis in a service is a second implementation that drifts from the first. Shrink-only
+  # baseline of today's offenders (#11670); a stale baseline line fails too.
+  - id: no-local-daycount-or-calendar
+    name: "no service defines its own day-count or calendar logic (ADR-0344 D1, enforced ratchet)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      Two implementations of ACT/360 or of a holiday roll disagree silently; the first sign is a
+      reconciliation break between services. The baseline only shrinks, and an entry whose
+      offender is gone fails as stale so the declaration cannot outlive the debt.
+    review_after: 2027-02-19
+    min_subjects: 2500   # 3055 src/main Kotlin files outside the two libraries today (2026-10-22)
+    budget_seconds: 30   # measured 3.8 s locally (2026-10-19)
+    selftest_inputs: [".github/scripts/check-no-local-daycount-or-calendar.py"]
+    selftest: |
+      python3 .github/scripts/check-no-local-daycount-or-calendar.py --self-test
+    run: |
+      python3 .github/scripts/check-no-local-daycount-or-calendar.py
+
+  # ADR-0344 D9: the treasury golden parity fixtures. Validates the format, requires one fixture
+  # per DELIVERED product type (REQUIRED_PRODUCTS in the script; phase 0 = the five pre-existing
+  # products, each later phase widens it), re-runs the independent Python oracle on every
+  # `independent-oracle` fixture so `expected` cannot be hand-edited to agree with buggy code, and
+  # requires the Kotlin TreasuryParityReplayTest to replay the whole fixture directory.
+  - id: treasury-parity-fixtures
+    name: "treasury parity fixtures are well-formed, complete, oracle-true and replayed (ADR-0344 D9, enforced)"
+    group: data
+    mode: enforced
+    rationale: >-
+      A parity fixture is evidence only while its expected flows come from an oracle independent
+      of the code under test; re-deriving them on every run is what stops a fixture being edited
+      to match a defect. TreasuryParityReplayTest replays every fixture through the service's own
+      ledger path in the treasury build, and this gate fails if that replay is missing, disabled or
+      narrowed — so a fixture can neither drift from the oracle nor sit unreplayed.
+    review_after: 2027-02-19
+    min_subjects: 10   # 11 fixtures across the 5 phase-0 product types (2026-10-22)
+    budget_seconds: 20   # measured 0.3 s locally (2026-10-19)
+    verified: "2026-10-22 — 11 fixtures across the 5 phase-0 products, 0 findings, self-test 13/13; TreasuryParityReplayTest 13/13 (every fixture replayed through ScheduleService, plus a tampered-amount case that must yield named findings)"
+    selftest_inputs:
+      - ".github/scripts/check-treasury-parity-fixtures.py"
+      - "openbank-treasury-service/src/test/parity-oracle/oracle.py"
+      - "openbank-treasury-service/src/test/parity-oracle/generate_fixtures.py"
+      - "openbank-treasury-service/src/test/kotlin/com/openbank/treasury/parity/TreasuryParityReplayTest.kt"
+      - "openbank-treasury-service/src/test/kotlin/com/openbank/treasury/parity/ParityFixtures.kt"
+    selftest: |
+      python3 .github/scripts/check-treasury-parity-fixtures.py --self-test
+      python3 -m unittest discover -s openbank-treasury-service/src/test/parity-oracle -p 'test_*.py'
+    run: |
+      python3 .github/scripts/check-treasury-parity-fixtures.py
+
   # A Redis-backed four-eyes ApprovalStore reads `redis://localhost:6379` from application.yaml,
   # and a pod has no Redis on localhost, so the deployed host must come from the workload's
   # QUARKUS_REDIS_HOSTS. swift-service and clearing-service shipped without it: Ready pods, a
@@ -3009,6 +3061,20 @@ gates:
     run: |
       bash .github/scripts/gh-retry.sh --self-test
 
+  - id: merge-train-carrier-fetch-selftest
+    name: "carrier shallow fetch recovers from concurrent writers within its original deadline"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run exercises the actual carrier helper with a fake clock and a
+      real local shallow Git clone, including lock contention and fail-closed negative cases.
+    budget_seconds: 20
+    rationale: "Concurrent gates share shallow history. A brief competing fetch must not cache an unavailable carrier for the whole job; recovery must retain the original deadline and never remove another writer's lock."
+    review_after: "2027-10-24"
+    min_subjects: 9
+    run: |
+      python3 .github/scripts/test-merge-train-carrier-lock.py
+
   - id: resolve-tracking-issue-selftest
     name: "a machine-written ledger resolves to exactly one issue, or fails loudly (issue #5266, enforced)"
     group: registry
@@ -3091,7 +3157,9 @@ gates:
       python3 .github/scripts/merge-train.py --self-test
       python3 .github/scripts/test-merge-train-owner-approval.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/merge-train.py", ".github/scripts/test-merge-train-owner-approval.py", ".github/workflows/merge-train-owner-approval.yml", "openbank-libs/governance/rules.yaml"]
+    # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
+    # every workflow, so a PR adding a carrier- or ruleset-judging check script must re-run it (#13750).
+    selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml"]
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
 
@@ -3519,6 +3587,42 @@ gates:
     min_subjects: 30
     run: |
       python3 .github/scripts/test-record-agent-merge.py
+
+  - id: agent-merge-authorization-selftest
+    name: "merge execution and separate authorization evidence regressions (ADR-0031)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — offline adversarial unittest cases exercise the real proof validator,
+      canonical GitHub API identities, exact-head workflow decisions and bounded historical
+      PR-scope reconstruction. They prove rejection of revoked, foreign, after-merge,
+      incomplete and unavailable evidence, old backend capability, and incorrect read-back.
+    budget_seconds: 60
+    min_subjects: 48
+    rationale: >-
+      A successful App merge must preserve the actual executor separately from the human
+      authorizer. A green record with a fabricated HUMAN actor or unverified authorization
+      is false audit evidence. Existing human-recorder regressions retain their own floor.
+    review_after: "2027-10-24"
+    run: |
+      python3 .github/scripts/test-merge-authorization-proof.py
+
+  - id: agent-merge-pr-policy-selftest
+    name: "immutable PR policy authorization evidence regressions (ADR-0031)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — offline adversarial tests exercise the real policy reader, CLI
+      capability preflight, committed read-back, canonical parent/tree/blob identity and
+      PR timeline. Unknown policy source, codex downgrade and revoked intent fail closed.
+    budget_seconds: 60
+    min_subjects: 26
+    rationale: >-
+      PR intent under a reviewed pre-merge prefix rule is distinct from exact-head approval
+      and from bounded legacy reconstruction. The original evidence gate retains its floor.
+    review_after: "2027-10-25"
+    run: |
+      python3 .github/scripts/test-merge-pr-policy.py
 
   # ==== kotlin =========================================================
   # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
@@ -6492,7 +6596,8 @@ gates:
         # openbank-infra/aws and openbank-document-renderer are DEPLOYED Python (the
         # config-recorder-healer Lambda; the WeasyPrint render sidecar) and sat outside every
         # root (#6253). Not yet scripts/ or openbank-ap2-service/demo: they carry findings today.
-        find .github/scripts openbank-infra/scripts docs openbank-infra/aws openbank-document-renderer -name '*.py' -type f | sort
+        find .github/scripts openbank-infra/scripts docs openbank-infra/aws openbank-document-renderer \
+          openbank-treasury-service/src/test/parity-oracle -name '*.py' -type f | sort
       )
       echo "SUBJECTS=${#files[@]}"
       python3 -m ruff check --no-cache --isolated --target-version py311 \
@@ -6936,11 +7041,11 @@ gates:
   # so a new benchmark cannot go uncompared and a removed one cannot leave a stale number. The
   # B/op comparison itself is the last step of .github/workflows/libs-bench.yml (needs a JMH run).
   - id: libs-bench-alloc-baseline
-    name: "libs JMH allocation baseline covers every benchmark (advisory)"
+    name: "libs JMH allocation baseline covers every benchmark (enforced)"
     group: kotlin
-    mode: advisory
+    mode: enforced
+    review_after: "2027-01-23"
     rationale: "An allocation regression in Money, the idempotency fingerprint or the audit hash chain is paid on every request by every service and is invisible to every test; a baseline only protects the benchmarks it actually lists, so its scope is derived from the sources."
-    review_after: "2026-12-15"
     verified: "2026-09-30 — static: 19 @Benchmark, 17 baseline entries + 2 UNSTABLE (MoneyBench.allocate/split, bimodal across forks, reported only), exit 0; --results from three local -f 1 runs all OK (worst compared spread 1.9 %, CanonicalJsonBench.write); the pre-change run against the same baseline is red on all five hex-site benchmarks (+99 % to +971 %)"
     budget_seconds: 10
     min_subjects: 15   # 19 @Benchmark methods 2026-09-30
@@ -6948,7 +7053,7 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-bench-alloc-baseline.py"]
     run: |
-      python3 .github/scripts/check-bench-alloc-baseline.py --root .
+      python3 .github/scripts/check-bench-alloc-baseline.py --root . --enforce
 
   # ADR-0352 §8 — product IR (Product as Code, phase 1). Three gates:
   #   product-ir-determinism  the golden set is indexed, well-formed and fed to GoldenDeterminismTest,

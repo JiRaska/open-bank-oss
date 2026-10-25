@@ -168,3 +168,7 @@ sequenceDiagram
 3. **Žádná vzdálená volání v TX** — synchronně v rámci request/response, asynchronně přes outbox + Kafka.
 4. **Idempotence na hraně** — `Idempotency-Key` na `POST`, plus unikátní `idempotency_key` sloupec na případu.
 5. **Čtyři oči pro terminální rozhodnutí** — sandbox auto-clear je za feature flagem vypnutý; produkce vyžaduje explicitní rozhodnutí analytika.
+
+## Sdílená závažnost případu (ADR-0353)
+
+`AmlRiskLevel` je typealias `AmlCaseSeverity` z `openbank-libs-fincrime`, jediné deklarace, kterou používají i platební kanály při otevření případu. Hodnoty (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) i sloupec `aml_cases.risk_level` se nemění. Škála hodnotí výstrahu, ne klienta: rizikový rating klienta vede kyc-service a z této škály se nikdy neodvozuje.

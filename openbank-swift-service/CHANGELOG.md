@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.3...swift-service-v0.13.4) (2026-10-24)
+
+
+### Bug Fixes
+
+* **swift:** re-drive an accepted MT103 whose settlement booking is unproven ([#13696](https://github.com/JiRaska/open-bank-oss/issues/13696)) ([2bf26c9](https://github.com/JiRaska/open-bank-oss/commit/2bf26c915898e624056fec3d0f471968de5783e3))
+
 ## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.2...swift-service-v0.13.3) (2026-10-23)
 
 

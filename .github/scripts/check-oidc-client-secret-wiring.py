@@ -57,7 +57,7 @@ ENV_NAME = "OIDC_CLIENT_SECRET"
 # `rules.yaml: agpl_modules` shape, not the kind this repo distrusts. openbank-libs-testing is a
 # test-kit jar (its M2mOidcClientIdentityWiringConformance names OidcClientFilter to assert on
 # services); it has no workload either.
-NON_DEPLOYABLE_MODULES = frozenset({"openbank-libs", "openbank-libs-domain", "openbank-libs-finance", "openbank-libs-iso20022", "openbank-libs-lending", "openbank-libs-runtime", "openbank-libs-testing"})
+NON_DEPLOYABLE_MODULES = frozenset({"openbank-libs", "openbank-libs-domain", "openbank-libs-finance", "openbank-libs-fincrime", "openbank-libs-iso20022", "openbank-libs-lending", "openbank-libs-runtime", "openbank-libs-testing"})
 
 # Workloads still carrying `optional: true` on a secret that IS provisioned by an ExternalSecret.
 # Not flipped here on purpose: `optional: false` makes the pod refuse to start if the Secret is

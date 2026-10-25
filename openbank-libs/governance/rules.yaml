@@ -456,6 +456,16 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2027-03-26"   # ADR-0318: enforce once the money-path baseline is empty
     ci_producer: ".github/scripts/check-money-rounding-inline.py"
+  treasury_parity_fixtures:
+    detect: ["openbank-treasury-service/src/test/resources/parity/*.json — the ADR-0344 D9 golden fixtures"]
+    require:
+      - "the fixture format holds (required keys, ISO dates, decimal strings, product in the closed list)"
+      - "every DELIVERED treasury product type has at least one fixture; ids are unique"
+      - "an independent-oracle fixture's expected block equals the Python oracle's output (never hand-edited)"
+    gate: treasury-parity-fixtures
+    enforced: enforce                   # ADR-0344 D9: the Kotlin replay test consumes the fixtures
+    enforced_since: "2026-10-22"
+    ci_producer: ".github/scripts/check-treasury-parity-fixtures.py"
   outbox_conformance_it_present:
     detect: ["openbank-*/src/main/**/*.kt extending AbstractOutboxDispatcher (supertype, comments stripped)"]
     require:
@@ -1302,6 +1312,9 @@ close_participants:
     interest:
       service: openbank-interest-service
       principal: service-account-openbank-interest
+    lending:                                # #13167: accrual + provisioning passes
+      service: openbank-lending-service
+      principal: service-account-openbank-lending
 
 money_path_services:
   - openbank-ledger-service
@@ -2275,7 +2288,7 @@ architecture:
   # baseline-ratcheted — grandfathered violations burn down as touched, any NEW
   # framework reference fails CI. Scope is every per-service */domain/* package PLUS
   # the whole openbank-libs-domain module and its ADR-0317 context modules
-  # (openbank-libs-lending, openbank-libs-iso20022, openbank-libs-finance); openbank-libs-runtime is module-exempt
+  # (openbank-libs-lending, openbank-libs-iso20022, openbank-libs-finance, openbank-libs-fincrime); openbank-libs-runtime is module-exempt
   # (shares the domain package string for its JPA converters but IS the framework
   # side of the ADR-0122 split). Both an `import` and a fully-qualified reference
   # count — #3670 hid `jakarta.interceptor.InterceptorBinding` in the second form,
@@ -4074,14 +4087,11 @@ libs_bench_alloc_baseline:
   require:
     - "every @Benchmark has an entry in alloc-baseline.json and every entry has a @Benchmark (scope derived, both directions)"
     - "B/op from a JMH run (-f 1 -wi 3 -i 3 -prof gc, SerialGC, -Xmx512m) stays within max(5 %, 16 B) above the baseline"
-    - "the baseline is written by check-bench-alloc-baseline.py --write-baseline from a run, never typed by hand"
+    - "the baseline is generated from JMH by check-bench-alloc-baseline.py --write-baseline or --ratchet-baseline, never typed by hand; a selective ratchet cannot raise an existing budget"
     - "a benchmark whose B/op is bimodal across forks (the JIT decides it) is listed in the script's UNSTABLE table with the measurement: it runs and is reported, never compared; a stale UNSTABLE entry is a finding"
   gate: libs-bench-alloc-baseline
   baseline: "openbank-libs-benchmarks/alloc-baseline.json"
-  # ADVISORY first: the comparison is new and its tolerance is a first setting measured on one
-  # machine; enforce once it has run on hosted runners without a false finding.
-  enforced: advisory
-  target_enforce_date: "2026-12-15"   # ADR-0144; matches the gate's review_after
+  enforced: enforced
   ci_producer: ".github/scripts/check-bench-alloc-baseline.py"
 
 product_ir_determinism:
@@ -4826,6 +4836,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/CreditOfferGateAdapters.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerCloseParticipationClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/ProductCatalogLoanProfileAdapter.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
@@ -4935,6 +4946,8 @@ security_sensitive_paths:
       - "src/main/kotlin/**/rest/NostroResource.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/**/domain/model/Legs.kt"  # ADR-0344 D4: the leg-spec SHA-256 decides whether an override survives regeneration
+      - "src/main/kotlin/**/domain/marketdata/**"  # ADR-0344 D5: observation provenance hashes behind every fixed rate
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"

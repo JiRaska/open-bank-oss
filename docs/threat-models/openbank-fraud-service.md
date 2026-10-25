@@ -119,6 +119,9 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 - Money thresholds are **data** (ADR-0347): no money literal in `domain/rules`; the engine takes
   the active `FraudThresholdSet` as an argument; only an EXECUTED set approved by a principal other
   than its proposer is ever read; no active set ⇒ REVIEW, never ALLOW.
+- The verdict type is shared with the rails (`openbank-libs-fincrime`, ADR-0353); its
+  consumer-only `UNKNOWN` is **never rendered by a rule nor emitted on the wire** — `RuleHit`
+  rejects it and `POST /api/v1/fraud/score` answers 500 rather than put it in a response.
 - Once DomainMetrics is added, verdict labels are **low-cardinality and PII-free** (the closed
   `verdict` set only; never account/party/amount/id — ADR-0077).
 
@@ -148,6 +151,12 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 
 ## 6. Change log
 
+- **2026-10-24** — **Verdict type moved to `openbank-libs-fincrime` (ADR-0353, #13439).** The
+  four rails mirrored `FraudVerdict` with an extra consumer-side `UNKNOWN`; there is now one type
+  for producer and consumers. Wire values unchanged (`ALLOW/CHALLENGE/REVIEW/DECLINE`). New
+  fail-closed guards: a rule cannot render `UNKNOWN`, and the score response refuses to emit it, so
+  no rail can receive from this service a value it was told never to trust. Rollback: revert the
+  PR; no data or contract change.
 - **2026-10-21** — **Least privilege on `fraud_threshold_set`** (V10, follow-up to #13457). V9's
   trailing `GRANT ALL ON ALL TABLES IN SCHEMA public TO openbank` was a no-op (the app role owns
   the database), but it left the owner able to DELETE/TRUNCATE the threshold-set audit record.
