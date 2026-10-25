@@ -7,6 +7,8 @@ plugins {
 }
 
 dependencies {
+    implementation("io.quarkus:quarkus-load-shedding")
+    testImplementation("io.quarkus:quarkus-junit-component")
     // Micrometer + Prometheus registry: customer-edge had no MeterRegistry, so it
     // exposed no /q/metrics surface and the openbank-services PodMonitor scraped a
     // 404 -> TargetDown. Adding this wires /q/metrics on the management port like

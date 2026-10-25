@@ -54,6 +54,7 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
+    testImplementation("org.testcontainers:testcontainers-toxiproxy")
 
     // Shared authz conformance kit (issue #467) — LedgerAuthzConformanceTest pilot migration.
     testImplementation(project(":openbank-libs-testing"))
