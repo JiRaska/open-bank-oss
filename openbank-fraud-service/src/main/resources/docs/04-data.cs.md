@@ -15,3 +15,7 @@ Tato stránka zatím popisuje jen životní cyklus outboxu; zbytek datového mod
 ## Přepsání consumer group pro Kafka
 
 Consumer group id, offset reset a dead-letter topic pro kanály fraud-service záměrně nejsou YAML klíče v `application.yaml`; pocházejí ze souboru `fraud-service-msg-override.yaml` načítaného přes `QUARKUS_CONFIG_LOCATIONS`. Referenčním vzorem je kanál `party-events-in` ve službě card-issuance-service, na který komentář v `application.yaml` nyní odkazuje. Jde pouze o změnu komentáře a dokumentace; žádná hodnota konfigurace ani chování za běhu se nemění.
+
+## Sdílený typ verdiktu (ADR-0353)
+
+`FraudVerdict` je deklarován jednou v `openbank-libs-fincrime` a sdílen s platebními kanály. Hodnota `UNKNOWN` je to, co čte konzument, když odpověď nelze přečíst; tato služba ji nikdy nevytváří. `RuleHit` ji odmítne a `POST /api/v1/fraud/score` raději vrátí 500, než aby ji vydal. Verdikty ukládané do `fraud_scores.verdict` a vracené na drátě zůstávají `ALLOW`, `CHALLENGE`, `REVIEW` a `DECLINE`.
