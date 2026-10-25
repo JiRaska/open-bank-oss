@@ -51,6 +51,7 @@ import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
 import java.math.BigDecimal
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -508,13 +509,20 @@ class TreasuryDealService(
      * it is counted and returned for the scheduler to log. Idempotent: a day already accrued is
      * skipped here, and the ledger deduplicates on the per-day key if two passes race.
      */
-    override suspend fun accrueInterest(asOf: LocalDate): AccrualRun {
-        val outcomes = deals.list(DealState.SETTLED).map { d ->
-            runCatching { accrueThrough(d, minOf(asOf, d.maturityDate)) }
+    override suspend fun accrueInterest(asOf: LocalDate): AccrualRun = accrueInterest(asOf, Instant.MAX)
+
+    override suspend fun accrueInterest(asOf: LocalDate, deadline: Instant): AccrualRun {
+        val settled = deals.list(DealState.SETTLED)
+        val outcomes = mutableListOf<Result<Int>>()
+        for (d in settled) {
+            if (clock.instant().isAfter(deadline)) break
+            outcomes += runCatching { accrueThrough(d, minOf(asOf, d.maturityDate)) }
         }
         return AccrualRun(
             journals = outcomes.sumOf { it.getOrDefault(0) },
             failures = outcomes.mapNotNull { it.exceptionOrNull() },
+            deals = outcomes.size,
+            unassessed = settled.size - outcomes.size,
         )
     }
 

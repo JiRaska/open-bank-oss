@@ -57,3 +57,36 @@ se nemění.
 `FixingApiIT` pokrývá zrušení potvrzené po načtení splatných toků a před zamčeným zápisem:
 odpověď uvádí nulový počet fixovaných toků i selhání, projektované toky zůstanou nezměněné,
 událost fixingu nevznikne a čítač odmítnutí se zvýší o jedna.
+
+## Účast na uzávěrce dne (ADR-0342, #13167)
+
+Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
+`TreasuryCloseParticipationScheduler` běží každou hodinu ve 40. minutě, Europe/Prague
+(`openbank.treasury.close.report-cron`). Při každém běhu znovu nabídne posledních
+`openbank.treasury.close.lookback-days` (3) dokončených účetních dnů přes
+`PUT /api/v1/ledger/accounting-days/{date}/participants/treasury`. Hlásí na vlastní m2m identitě treasury
+(`service-account-openbank-treasury`), kterou ledger pustí pod `ledger.close.participate` jen pro tohoto
+účastníka.
+
+- **Doklad.** Každý průchod hodinového časového rozlišení (`InterestAccrualScheduler`) pracuje k jednomu
+  pražskému účetnímu dni. Než cokoli udělá, označí se v `treasury_close_job_run` (V21) jako
+  rozběhnutý. Po skončení zapíše počet posouzených obchodů. Odmítnutí zapíše, když se obchod nepodařilo
+  rozlišit, když ledger odpověděl `409 ACCOUNTING_DAY_CLOSED`, když vyčerpal rozpočet a obchody zbyly,
+  nebo když průchod selhal. Odmítnutí uzavřeným dnem má vlastní kategorii. Pokud nejde zapsat značka
+  rozběhnutí, průchod se nespustí.
+- **Jak se den nahlásí.** Je-li rozlišení vypnuté, den je SKIPPED. Pokud pro den žádný průchod
+  nedoběhl, nehlásí se nic a ledger den drží v CUTOFF. Jinak rozhoduje poslední průchod: RAN, nebo
+  REFUSED se spočtenými důvody. Počet žurnálů je počet řádků `deal_journals` zaúčtovaných v daném
+  pražském dni: rozlišení, vypořádání, splatnosti a storna.
+- **Pozdržení.** Den drží průchod, který ještě běží. Drží ho také událost
+  `treasury.deal.settled|matured|reversed.v1` vytvořená ten den, dokud je v `treasury_outbox` ve stavu
+  PENDING, DISPATCHING nebo FAILED. Událost ve stavu DEAD udělá z dne REFUSED
+  (`journal event(s) never delivered`).
+- **Práh zastarání.** Je odvozený, nikdy se nenastavuje samostatně. Průchod přestane začínat nové
+  obchody, jakmile vyčerpá `openbank.treasury.accrual.pass-budget` (20 minut), takže
+  `TreasuryCloseJobs.staleAfter` je rozpočet plus 30 minut. Starší značka znamená, že průchod zemřel, a
+  den se nahlásí jako REFUSED (`pass started and never completed`). Další úplný průchod téhož dne ho
+  nahradí.
+- **Provoz.** Den REFUSED kvůli `ACCOUNTING_DAY_CLOSED` znamená, že rozlišení zkusilo účtovat do dne,
+  který ledger už uzavřel. V režimu `shadow` ledger pozdržení jen počítá. V režimu `enforce` operátor
+  den posoudí a na stránce konce dne v ledgeru mu udělí výjimku (waiver).
