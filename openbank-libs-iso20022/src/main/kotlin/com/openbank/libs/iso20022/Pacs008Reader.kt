@@ -47,18 +47,21 @@ data class ReceivedCreditTransfer(
         creditorAgentBic, debtorIban, emptyList(), null,
     )
 
-    /** The pre-#13663 all-arguments `copy`, retained for binary compatibility; keeps the payment type. */
+    /**
+     * The pre-#13663 `copy`, retained for binary compatibility; keeps the payment type.
+     * Defaults also retain its old JVM `copy$default` descriptor for already-compiled Kotlin callers.
+     */
     @Suppress("LongParameterList")
     fun copy(
-        messageId: String,
-        endToEndId: String,
-        transactionId: String?,
-        amount: BigDecimal,
-        currency: String,
-        creditorName: String,
-        creditorIban: String,
-        creditorAgentBic: String,
-        debtorIban: String,
+        messageId: String = this.messageId,
+        endToEndId: String = this.endToEndId,
+        transactionId: String? = this.transactionId,
+        amount: BigDecimal = this.amount,
+        currency: String = this.currency,
+        creditorName: String = this.creditorName,
+        creditorIban: String = this.creditorIban,
+        creditorAgentBic: String = this.creditorAgentBic,
+        debtorIban: String = this.debtorIban,
     ): ReceivedCreditTransfer = ReceivedCreditTransfer(
         messageId, endToEndId, transactionId, amount, currency, creditorName, creditorIban,
         creditorAgentBic, debtorIban, serviceLevelCodes, localInstrumentCode,

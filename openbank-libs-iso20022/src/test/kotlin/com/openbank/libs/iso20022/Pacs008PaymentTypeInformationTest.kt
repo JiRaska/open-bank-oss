@@ -132,6 +132,73 @@ class Pacs008PaymentTypeInformationTest {
     }
 
     @Test
+    fun `old instruction default-copy descriptor preserves masks and new payment type`() {
+        val original = legacy().copy(paymentTypeInformation = PaymentTypeInformation.SEPA_INSTANT)
+
+        assertThat(oldDefaultCopy(original, 16)).isEqualTo(original)
+        val changed = oldDefaultCopy(
+            original,
+            16,
+            mapOf(4 to "TX-NEW", 5 to BigDecimal.TEN, 13 to "New creditor", 15 to "New remittance"),
+        ) as CreditTransferInstruction
+        assertThat(changed).isEqualTo(
+            original.copy(
+                transactionId = "TX-NEW",
+                amount = BigDecimal.TEN,
+                creditorName = "New creditor",
+                remittanceInfo = "New remittance",
+            ),
+        )
+        assertThat(changed.paymentTypeInformation).isEqualTo(PaymentTypeInformation.SEPA_INSTANT)
+        val nullable = oldDefaultCopy(original, 16, mapOf(4 to null, 15 to null)) as CreditTransferInstruction
+        assertThat(nullable).isEqualTo(original.copy(transactionId = null, remittanceInfo = null))
+    }
+
+    @Test
+    fun `old received default-copy descriptor preserves masks and new payment type`() {
+        val original = ReceivedCreditTransfer(
+            "M", "E", "TX", BigDecimal.ONE, "EUR", "C", "IBAN", "BIC", "DIBAN",
+            serviceLevelCodes = listOf("NURG", "SEPA"),
+            localInstrumentCode = "INST",
+        )
+
+        assertThat(oldDefaultCopy(original, 9)).isEqualTo(original)
+        val changed = oldDefaultCopy(
+            original,
+            9,
+            mapOf(2 to "TX-NEW", 3 to BigDecimal.TEN, 5 to "New creditor", 8 to "New debtor IBAN"),
+        ) as ReceivedCreditTransfer
+        assertThat(changed).isEqualTo(
+            original.copy(
+                transactionId = "TX-NEW",
+                amount = BigDecimal.TEN,
+                creditorName = "New creditor",
+                debtorIban = "New debtor IBAN",
+            ),
+        )
+        assertThat(changed.serviceLevelCodes).containsExactly("NURG", "SEPA")
+        assertThat(changed.localInstrumentCode).isEqualTo("INST")
+        val nullable = oldDefaultCopy(original, 9, mapOf(2 to null)) as ReceivedCreditTransfer
+        assertThat(nullable).isEqualTo(original.copy(transactionId = null))
+    }
+
+    /** Invoke the old static descriptor, not whichever overload a newly compiled call selects. */
+    private fun oldDefaultCopy(original: Any, fieldCount: Int, explicit: Map<Int, Any?> = emptyMap()): Any {
+        val type = original.javaClass
+        val oldCopy = type.declaredMethods.single { it.name == "copy" && it.parameterCount == fieldCount }
+        val parameterTypes =
+            listOf(type) + oldCopy.parameterTypes + listOf(Int::class.javaPrimitiveType, Any::class.java)
+        val bridge = type.getDeclaredMethod("copy\$default", *parameterTypes.toTypedArray())
+        val arguments = arrayOfNulls<Any>(fieldCount)
+        var mask = (1 shl fieldCount) - 1
+        explicit.forEach { (index, value) ->
+            arguments[index] = value
+            mask = mask and (1 shl index).inv()
+        }
+        return bridge.invoke(null, original, *arguments, mask, null)
+    }
+
+    @Test
     fun `payment type codes outside the ISO lengths are refused at construction`() {
         assertThatThrownBy { PaymentTypeInformation("") }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { PaymentTypeInformation("SEPAX") }.isInstanceOf(IllegalArgumentException::class.java)

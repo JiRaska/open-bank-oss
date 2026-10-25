@@ -72,25 +72,28 @@ data class CreditTransferInstruction(
         creditorName, creditorIban, remittanceInfo, null,
     )
 
-    /** The pre-#13663 all-arguments `copy`, retained for binary compatibility; keeps [paymentTypeInformation]. */
+    /**
+     * The pre-#13663 `copy`, retained for binary compatibility; keeps [paymentTypeInformation].
+     * Defaults also retain its old JVM `copy$default` descriptor for already-compiled Kotlin callers.
+     */
     @Suppress("LongParameterList")
     fun copy(
-        messageId: String,
-        creationDateTime: OffsetDateTime,
-        interbankSettlementDate: OffsetDateTime,
-        endToEndId: String,
-        transactionId: String?,
-        amount: BigDecimal,
-        currency: String,
-        chargeBearer: ChargeBearer,
-        settlementMethod: SettlementMethod,
-        debtorName: String,
-        debtorIban: String,
-        debtorAgentBic: String,
-        creditorAgentBic: String,
-        creditorName: String,
-        creditorIban: String,
-        remittanceInfo: String?,
+        messageId: String = this.messageId,
+        creationDateTime: OffsetDateTime = this.creationDateTime,
+        interbankSettlementDate: OffsetDateTime = this.interbankSettlementDate,
+        endToEndId: String = this.endToEndId,
+        transactionId: String? = this.transactionId,
+        amount: BigDecimal = this.amount,
+        currency: String = this.currency,
+        chargeBearer: ChargeBearer = this.chargeBearer,
+        settlementMethod: SettlementMethod = this.settlementMethod,
+        debtorName: String = this.debtorName,
+        debtorIban: String = this.debtorIban,
+        debtorAgentBic: String = this.debtorAgentBic,
+        creditorAgentBic: String = this.creditorAgentBic,
+        creditorName: String = this.creditorName,
+        creditorIban: String = this.creditorIban,
+        remittanceInfo: String? = this.remittanceInfo,
     ): CreditTransferInstruction = CreditTransferInstruction(
         messageId, creationDateTime, interbankSettlementDate, endToEndId, transactionId, amount, currency,
         chargeBearer, settlementMethod, debtorName, debtorIban, debtorAgentBic, creditorAgentBic,
