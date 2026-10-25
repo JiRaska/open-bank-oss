@@ -42,12 +42,29 @@
 
   <xs:complexType name="PaymentTransaction110">
     <xs:sequence>
+      <xs:element name="OrgnlGrpInf" type="OriginalGroupInformation29" minOccurs="0"/>
       <xs:element name="OrgnlEndToEndId" type="Max35Text" minOccurs="0"/>
       <xs:element name="OrgnlTxId" type="Max35Text" minOccurs="0"/>
+      <xs:element name="OrgnlUETR" type="UUIDv4Identifier" minOccurs="0"/>
       <xs:element name="TxSts" type="ExternalPaymentTransactionStatus1Code"/>
       <xs:element name="StsRsnInf" type="StatusReasonInformation12" minOccurs="0"/>
     </xs:sequence>
   </xs:complexType>
+
+  <!-- Original message identity (official order: OrgnlGrpInf before OrgnlEndToEndId, OrgnlUETR
+       after OrgnlTxId). Lets a rail verify a status answer belongs to the message it asked about. -->
+  <xs:complexType name="OriginalGroupInformation29">
+    <xs:sequence>
+      <xs:element name="OrgnlMsgId" type="Max35Text"/>
+      <xs:element name="OrgnlMsgNmId" type="Max35Text"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:simpleType name="UUIDv4Identifier">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}"/>
+    </xs:restriction>
+  </xs:simpleType>
 
   <xs:complexType name="StatusReasonInformation12">
     <xs:sequence>
