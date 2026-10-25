@@ -145,3 +145,7 @@ Každý Kafka záznam nese hlavičky `ce-id` (= id události), `idempotency-key`
 - `openapi.yaml` `IssueCardRequest` vynechává `productCode`, `cardholderName`, `currency`, `dailyLimitMinorUnits`, `monthlyLimitMinorUnits`, které kód vyžaduje/přijímá, a modeluje `deliveryAddress` jako objekt, zatímco kód používá řetězec.
 - Enumy `cardType` / `cardNetwork` ve specu jsou užší než doména (chybí `VIRTUAL`, `AMEX`, `UNIONPAY`, `CANCELLED`, `PENDING`).
 - `GET /api/v1/cards` (seznam všech) a sémantika rolí / `X-Operator-Id` nejsou ve specu plně popsány.
+
+## Identita volajícího při čtení karet
+
+Čtení jedné karty dovoluje ověřené účty služeb delegation a customer-edge; seznam karet osoby dovoluje účty party a customer-edge. JWT musí svázat pojmenovaný účet s ověřeným klientem. Customer-edge odvozuje osobu z přihlášeného zákazníka a před vrácením karty ověřuje vlastnictví nebo delegaci. Jiná služba nesmí tuto kontrolu obejít ani zaměstnaneckou rolí. Tato oprávnění pro čtení nemění samostatná pravidla pro secure-details ani změny karty.
