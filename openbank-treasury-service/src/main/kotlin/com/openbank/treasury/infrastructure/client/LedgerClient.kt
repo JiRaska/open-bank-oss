@@ -12,8 +12,6 @@ import com.openbank.treasury.application.port.out.PostedJournal
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.ResolvedAccount
 import com.openbank.treasury.domain.model.Side
-import io.micrometer.core.instrument.MeterRegistry
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -99,12 +97,10 @@ class LedgerPostingAdapter @Inject constructor(
     @ConfigProperty(name = "openbank.treasury.ledger.post-by-class", defaultValue = "false")
     private val postByClass: Boolean,
     private val clock: Clock,
-    private val meters: MeterRegistry,
 ) : LedgerPostingPort {
 
-    /** Test construction: the system clock and a throwaway registry. */
-    constructor(client: LedgerRestClient, postByClass: Boolean) :
-        this(client, postByClass, Clock.systemUTC(), SimpleMeterRegistry())
+    /** Test construction: the system clock. */
+    constructor(client: LedgerRestClient, postByClass: Boolean) : this(client, postByClass, Clock.systemUTC())
 
     /**
      * `transactionId` is the deal id, so `GET /api/v1/journals/transaction/{dealId}` lists every
@@ -115,11 +111,9 @@ class LedgerPostingAdapter @Inject constructor(
         // OPEN accounting day and answers 409 ACCOUNTING_DAY_CLOSED for one in CUTOFF or later, so a
         // catch-up for an earlier day is booked in TODAY's open day (entryDate) and carries the
         // economic day as its valueDate. Treasury's day-close evidence attributes the journal to its
-        // value day; one valued on a day that has already ended is counted here as late.
+        // value day. Late posts are counted by TreasuryDealService once the journal is first recorded,
+        // never here, where a refused or replayed post would count too (#13882 final review).
         val openDay = AccountingClock.bank(clock).today()
-        if (valueDate.isBefore(openDay)) {
-            meters.counter("openbank.treasury.close.late_journals", "event", spec.event.name).increment()
-        }
         val request = PostJournalRequest(
             idempotencyKey = spec.idempotencyKey,
             transactionId = spec.dealId,

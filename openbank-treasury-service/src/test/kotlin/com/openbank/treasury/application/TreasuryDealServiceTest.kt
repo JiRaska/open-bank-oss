@@ -74,7 +74,10 @@ class TreasuryDealServiceTest {
         TreasuryDealService(
             deals, cps, ledger, mapper, clock, fxMid, tolerance, confirmationRequired, quotes,
             DealFixtures.permissiveProductLimits,
+            lateJournals = { lateCounts.merge(it, 1, Int::plus) },
         )
+
+    private val lateCounts = mutableMapOf<PostingEvent, Int>()
 
     /** A flat 3.5 % CZEONIA curve: 30-day mid 3.4570 %, SIMBK-A (5 bp) bid 3.4070 / ask 3.5070. */
     private fun quotesOn() {
@@ -556,6 +559,23 @@ class TreasuryDealServiceTest {
         assertThat(service.settle(b.id, DealFixtures.approver).state).isEqualTo(DealState.SETTLED)
         assertThat(deals.journals.filter { it.dealId == b.id && it.event == PostingEvent.SETTLED }).hasSize(1)
     }
+
+    @Test
+    fun `a late journal is counted once - never for a refused post or a replay of a recorded key`(): Unit =
+        runBlocking {
+            confirmationRequired = false
+            val a = book()
+            val b = book(cmd(principal = "50000.00"))
+            clock = Clock.offset(clock, java.time.Duration.ofDays(3)) // both value dates have ended
+            ledger.failFor = b.id
+            assertThatThrownBy { runBlocking { service.settle(b.id, DealFixtures.approver) } }
+            ledger.failFor = null
+            deals.failNextSave = true
+            assertThatThrownBy { runBlocking { service.settle(a.id, DealFixtures.approver) } }
+            assertThat(lateCounts[PostingEvent.SETTLED]).isEqualTo(1)
+            service.settle(a.id, DealFixtures.approver) // replays the recorded key
+            assertThat(lateCounts[PostingEvent.SETTLED]).isEqualTo(1)
+        }
 
     // --- #10896: FX spot ---------------------------------------------------------------------------
 

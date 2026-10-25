@@ -124,6 +124,41 @@ class TreasuryCloseParticipationSchedulerCronIT {
         assertThat(seen(inFlightDay)).isEmpty()
     }
 
+    @Inject
+    lateinit var evidence: com.openbank.treasury.application.port.out.TreasuryCloseEvidencePort
+
+    /** Real SQL: only a COMPLETE pass (refused = 0) counts, and the job/date parameters bind right. */
+    @Test
+    fun `the latest pass start ignores refused and in-flight passes`() {
+        val base = LocalDate.parse("2091-03-01")
+        jdbc { c ->
+            c.createStatement().use { st ->
+                st.executeUpdate("DELETE FROM treasury_close_job_run WHERE business_date >= '$base'")
+                st.executeUpdate(pass(base, refused = 0, started = "2091-03-01 08:00"))
+                st.executeUpdate(pass(base.plusDays(1), refused = 2, started = "2091-03-02 08:00"))
+                st.executeUpdate(
+                    "INSERT INTO treasury_close_job_run (business_date, job, running, started_at) " +
+                        "VALUES ('${base.plusDays(2)}', 'accrual', TRUE, '2091-03-03 08:00+00')",
+                )
+                st.executeUpdate(pass(base.plusDays(3), refused = 0, started = "2091-03-04 08:00", job = "other"))
+            }
+        }
+        val latest = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait<java.time.Instant?> {
+            evidence.latestCompletedPassStart(TreasuryCloseJobs.ACCRUAL, base)
+        }
+        assertThat(latest).isEqualTo(java.time.Instant.parse("2091-03-01T08:00:00Z"))
+        val none = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait<java.time.Instant?> {
+            evidence.latestCompletedPassStart(TreasuryCloseJobs.ACCRUAL, base.plusDays(1))
+        }
+        assertThat(none).isNull()
+        val cleanup = "DELETE FROM treasury_close_job_run WHERE business_date >= '$base'"
+        jdbc { c -> c.createStatement().use { it.executeUpdate(cleanup) } }
+    }
+
+    private fun pass(day: LocalDate, refused: Int, started: String, job: String = "accrual"): String =
+        "INSERT INTO treasury_close_job_run (business_date, job, items_processed, refused, completed_at, " +
+            "running, started_at) VALUES ('$day', '$job', 1, $refused, now(), FALSE, '$started+00')"
+
     private fun completed(day: LocalDate, refused: Int, reason: String?): String =
         "INSERT INTO treasury_close_job_run (business_date, job, items_processed, refused, refusal_reason, " +
             "completed_at) VALUES ('$day', 'accrual', 1, $refused, ${reason?.let { "'$it'" } ?: "NULL"}, now())"

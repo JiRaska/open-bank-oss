@@ -23,6 +23,7 @@ import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
+import com.openbank.treasury.application.port.out.LateJournalMeter
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
@@ -93,6 +94,8 @@ class TreasuryDealService(
     private val schedules: ScheduleService? = null,
     /** ADR-0344 catalogue: the product mandate from the reference store (config seeds the rest). */
     private val mandate: (suspend () -> ProductLimitPolicy)? = null,
+    /** ADR-0342: counts first-recorded journals valued on a day that has already ended. */
+    private val lateJournals: LateJournalMeter = LateJournalMeter.NONE,
 ) : TreasuryDealUseCase {
 
     private suspend fun policy(): ProductLimitPolicy = mandate?.invoke() ?: productLimits
@@ -620,7 +623,9 @@ class TreasuryDealService(
             posted.accounts,
             valueDate,
         )
-        deals.recordJournal(ref)
+        // Late = recorded for the first time HERE (not a replay of a recorded key) for an ended day;
+        // a refused post threw above and never gets this far (#13882 final review).
+        if (deals.recordJournal(ref) && valueDate.isBefore(bankToday())) lateJournals.late(spec.event)
         return ref
     }
 

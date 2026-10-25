@@ -416,19 +416,22 @@ class DealRepositoryImpl(
      * The ledger already deduplicated the journal; here the loser of the unique-key race only
      * confirms the winner's row exists instead of failing the pass.
      */
-    override suspend fun recordJournal(journal: LedgerJournalRef) {
+    override suspend fun recordJournal(journal: LedgerJournalRef): Boolean {
         val recorded = suspend {
             Panache.withSession { journals.find("idempotencyKey", journal.idempotencyKey).count() }.awaitSuspending() >
                 0
         }
-        if (recorded()) return
+        if (recorded()) return false
         try {
             Panache.withTransaction { persistJournal(journal) }.awaitSuspending()
         } catch (e: PersistenceException) {
             if (!recorded()) throw e
+            return false
         } catch (e: PgException) {
             if (!recorded()) throw e
+            return false
         }
+        return true
     }
 
     override suspend fun journals(dealId: UUID): List<LedgerJournalRef> = Panache.withSession {

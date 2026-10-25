@@ -102,7 +102,9 @@ internal class InMemoryDeals : DealRepository {
     override suspend fun pendingLimitOverrides() =
         rows.values.filter { it.state == DealState.PENDING_APPROVAL && it.limitOverride != null }
     override suspend fun journals(dealId: UUID) = journals.filter { it.dealId == dealId }
-    override suspend fun recordJournal(journal: LedgerJournalRef) {
-        if (journals.none { it.idempotencyKey == journal.idempotencyKey }) journals += journal
+    override suspend fun recordJournal(journal: LedgerJournalRef): Boolean {
+        if (journals.any { it.idempotencyKey == journal.idempotencyKey }) return false
+        journals += journal
+        return true
     }
 }

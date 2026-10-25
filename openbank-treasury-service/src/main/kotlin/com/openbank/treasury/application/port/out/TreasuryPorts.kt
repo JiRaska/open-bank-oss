@@ -94,8 +94,23 @@ interface DealRepository {
 
     suspend fun journals(dealId: UUID): List<LedgerJournalRef>
 
-    /** Record a journal that changes no deal state (a daily accrual, ADR-0315 D5). */
-    suspend fun recordJournal(journal: LedgerJournalRef)
+    /**
+     * Record a journal the ledger accepted, idempotent on its key. True only when THIS call recorded
+     * it: false for a key already recorded (a replayed post), so a caller counts each journal once.
+     */
+    suspend fun recordJournal(journal: LedgerJournalRef): Boolean
+}
+
+/**
+ * ADR-0342 (#13882): counts a journal recorded for the first time whose value day has already ended
+ * (a late post for that day). Never a refused post, never a replay of a recorded key.
+ */
+fun interface LateJournalMeter {
+    fun late(event: com.openbank.treasury.domain.model.PostingEvent)
+
+    companion object {
+        val NONE = LateJournalMeter { }
+    }
 }
 
 interface CounterpartyRepository {

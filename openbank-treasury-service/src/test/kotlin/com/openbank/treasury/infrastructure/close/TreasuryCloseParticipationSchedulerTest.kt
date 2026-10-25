@@ -122,6 +122,25 @@ class TreasuryCloseParticipationSchedulerTest {
     }
 
     @Test
+    fun `a later pass that was REFUSED does not release the settlement hold`() {
+        ran()
+        evidence.started[DAY to TreasuryCloseJobs.ACCRUAL] = CLOCK.instant().minus(Duration.ofHours(10))
+        evidence.runs[TODAY to TreasuryCloseJobs.ACCRUAL] = CloseJobRun(
+            TODAY,
+            TreasuryCloseJobs.ACCRUAL,
+            1,
+            0,
+            3,
+            "3 ${TreasuryCloseJobs.REASON_ACCRUAL_UNFINISHED}",
+            CLOCK.instant(),
+        )
+        evidence.started[TODAY to TreasuryCloseJobs.ACCRUAL] = CLOCK.instant().minus(Duration.ofHours(1))
+        evidence.postings[DAY] =
+            DayJournalPostings(1, 0, 0, lastSettlementAt = CLOCK.instant().minus(Duration.ofHours(9)))
+        assertThat(report()).isNull()
+    }
+
+    @Test
     fun `the day is held while its journal events are still pending in the outbox`() {
         ran()
         evidence.postings[DAY] = DayJournalPostings(journals = 5, pending = 1, dead = 0)

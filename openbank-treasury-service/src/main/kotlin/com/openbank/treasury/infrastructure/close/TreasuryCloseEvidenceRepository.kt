@@ -91,8 +91,8 @@ class TreasuryCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : T
 
     override fun latestCompletedPassStart(job: String, from: LocalDate): Uni<Instant?> = sf.withSession { s ->
         s.createNativeQuery<Any?>(LATEST_PASS_SQL)
-            .setParameter(P_DATE, job)
-            .setParameter(P_JOB, from)
+            .setParameter(P_LATEST_JOB, job)
+            .setParameter(P_LATEST_FROM, from)
             .singleResult
     }.map { it?.let { v -> asInstant(v) } }
 
@@ -171,9 +171,15 @@ class TreasuryCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : T
         const val P_VALUE_DATE = 3
         const val COL_LAST_SETTLEMENT = 3
 
+        // Positional parameters of LATEST_PASS_SQL.
+        const val P_LATEST_JOB = 1
+        const val P_LATEST_FROM = 2
+
+        // Only a COMPLETE pass (refused = 0) proves every SETTLED deal was assessed: a pass that ran out
+        // of budget or failed a deal may have skipped exactly the deal settled late (#13882 final review).
         const val LATEST_PASS_SQL =
             "SELECT max(started_at) FROM treasury_close_job_run WHERE job = ?1 AND business_date >= ?2 " +
-                "AND NOT running AND completed_at IS NOT NULL"
+                "AND NOT running AND completed_at IS NOT NULL AND refused = 0"
 
         // Journals by VALUE day (#13882 review); the outbox events by the day they were created.
         const val POSTINGS_SQL =

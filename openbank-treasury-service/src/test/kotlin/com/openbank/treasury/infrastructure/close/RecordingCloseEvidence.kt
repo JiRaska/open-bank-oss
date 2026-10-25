@@ -37,8 +37,9 @@ class RecordingCloseEvidence : TreasuryCloseEvidencePort {
     val started = linkedMapOf<Pair<LocalDate, String>, Instant>()
 
     override fun latestCompletedPassStart(job: String, from: LocalDate): Uni<Instant?> = Uni.createFrom().item(
-        started.filter { (key, _) -> key.second == job && !key.first.isBefore(from) && key in runs && key !in inFlight }
-            .values.maxOrNull(),
+        started.filter { (key, _) ->
+            key.second == job && !key.first.isBefore(from) && key !in inFlight && runs[key]?.refused == 0
+        }.values.maxOrNull(),
     )
 
     override fun record(run: CloseJobRun): Uni<Unit> {
