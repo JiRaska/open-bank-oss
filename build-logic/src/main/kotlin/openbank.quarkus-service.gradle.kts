@@ -240,6 +240,17 @@ tasks.withType<Test>().configureEach {
     systemProperty("quarkus.http.test-port", "0")
     systemProperty("quarkus.http.test-ssl-port", "0")
     systemProperty("quarkus.management.test-port", "0")
+    // Optional context-service pilot: Quarkus keeps its primary resource/profile grouping.
+    // The hint only changes secondary class order; test discovery and method order stay intact.
+    val priorityFile = providers.environmentVariable("OPENBANK_TEST_PRIORITY_FILE").orNull
+        ?.let { file(it) }?.takeIf { it.isFile }
+    if (project.name == "openbank-context-service" && name == "test" && priorityFile != null) {
+        inputs.file(priorityFile).withPropertyName("testClassPriority")
+            .withPathSensitivity(PathSensitivity.NONE)
+        systemProperty("quarkus.test.class-orderer", "com.openbank.libs.testing.evidence.HistoryClassOrderer")
+        systemProperty("openbank.test.priority-file", priorityFile.absolutePath)
+        systemProperty("openbank.test.priority-component", project.name)
+    }
     // Testcontainers Docker endpoint. Inherit the ambient DOCKER_HOST (the ephemeral
     // ARC dind pod exposes the daemon on the unix socket, ADR-0053; a dev workstation
     // sets its own) and fall back to the standard unix socket. The previous hard pin
