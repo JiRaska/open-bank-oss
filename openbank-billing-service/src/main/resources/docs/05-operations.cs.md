@@ -79,3 +79,23 @@ Ověření podpisu řídí `openbank.billing.product-shadow.verification.mode`: 
 Každý IR `Post` se před porovnáním kontroluje na zachování peněz; nevyvážený, nebo vyhodnocení, které interpret odmítne, se počítá jako `ir_evaluation_failed` a nikdy se neporovná. Metriky: `openbank_product_shadow_inputs_total`, `openbank_product_shadow_compared_total{product,rule_id}`, `openbank_product_shadow_diverged_total{product,rule_id}` a `openbank_product_shadow_not_comparable_total{reason}`, všechny s `consumer="billing"`. Alerty: `ProductShadowStalled` (vstupy ve frontě, žádný zpracovaný za 6 hodin), `ProductShadowComparedNothing` (revize s IR, žádné porovnání za 24 hodin) a `ProductShadowDiverged`. Pokud jsou všechny vstupy `no_ir`, žádný alert nevznikne: takové produkty ještě nejsou převedené. Na IR smí billing přejít až po nulové divergenci za celou kadenci každého pravidla poplatku (ADR-0352 §9), za přepínačem, který zatím neexistuje.
 
 Chybějící zůstatek se při vyhodnocení plánovaného triggeru závislého na zůstatku nikdy nenahrazuje naměřenou nulou. Takový poplatek zaznamená `input_unknown` v čítači neporovnatelných vstupů a stav fronty `INPUT_UNKNOWN`, bez zvýšení čítačů porovnání či odchylek. Poplatky, jejichž trigger zůstatek nepotřebuje, zůstávají porovnatelné.
+
+## Účast na uzávěrce dne (ADR-0342, #13167)
+
+Billing hlásí každý dokončený účetní den (pražský čas) do ledger-service jako účastník `billing`
+(`BillingCloseParticipationScheduler`, každou hodinu v :50; zpětné okno 3 dny) pod vlastní identitou
+(`m2m`, Keycloak `openbank-billing`); ledger to autorizuje jako `ledger.close.participate` jen pro `billing`.
+
+- Cyklus není splatný nebo je sweep vypnutý: SKIPPED s důvodem.
+- Splatný cyklus bez záznamu běhu, nebo poplatek cyklu stále PENDING: zatím nic, ledger den drží.
+- Cyklus proběhl a všechny poplatky jsou zaúčtované: RAN.
+- Selhané účty, přerušený sweep nebo poplatek ve stavu FAILED: REFUSED s pevnou kategorií.
+
+**Zmeškaný cyklus.** `BillingCycleScheduler.catchUp` (každých 15 min, poprvé 2 min po startu) spustí
+sweep pro den splatnosti, pokud cron v tomto měsíci už proběhl a žádný běh cyklu není zaznamenán;
+idempotentně podle cycle id a nikdy souběžně s běžícím sweepem.
+
+**Poplatek odmítnutý do uzavřeného dne.** `409 ACCOUNTING_DAY_CLOSED` označí poplatek FAILED a zvýší
+`openbank_billing_fee_post_closed_day_refusals_total`; spustí se alert `BillingFeeRefusedIntoClosedDay`.
+Náprava: runbook `0033-billing-fee-refused-into-closed-day.md` (přefakturace pod novým klíčem se
+čtyřma očima, záznam v `billing_fee_rebill`).

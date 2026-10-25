@@ -22,7 +22,9 @@ def fixture(selected=None, event='pull_request', ref='refs/pull/1/merge', module
     modules = MODULES if modules is None else modules
     selected = modules if selected is None else selected
     lane = 'pr' if event == 'pull_request' else 'other'
-    needs = {'changes': {'result': 'success', 'outputs': {'any': 'true' if selected else 'false'}}}
+    needs = {'changes': {'result': 'success', 'outputs': {
+        'any': 'true' if selected else 'false', 'renderer-changed': 'false'}},
+        'renderer-tests': {'result': 'skipped'}}
     for branch in graph.LANES:
         for module in modules:
             active = branch == lane and module in selected
@@ -47,6 +49,34 @@ def change_result(needs, module, lane, job, value):
 class ResultsTest(unittest.TestCase):
     def check(self, needs, selected=None, event='pull_request', ref='refs/pull/1/merge'):
         return results.verify(MODULES if selected is None else selected, needs, event, ref, MODULES)
+
+    def test_renderer_changed_scope_requires_successful_direct_result(self):
+        for value in ['success', 'failure', 'cancelled', 'skipped', '', None]:
+            with self.subTest(value=value):
+                needs = fixture()
+                needs['changes']['outputs']['renderer-changed'] = 'true'
+                needs['renderer-tests']['result'] = value
+                self.assertEqual(bool(self.check(needs)), value != 'success')
+        needs = fixture()
+        needs['changes']['outputs']['renderer-changed'] = 'true'
+        del needs['renderer-tests']
+        self.assertTrue(self.check(needs))
+
+    def test_renderer_scope_and_unselected_result_fail_closed(self):
+        for value in ['success', 'failure', 'cancelled', '', None]:
+            needs = fixture()
+            needs['renderer-tests']['result'] = value
+            self.assertTrue(self.check(needs))
+        needs = fixture()
+        del needs['renderer-tests']
+        self.assertTrue(self.check(needs))
+        for value in ['True', '', None, True, 1, [], {}]:
+            needs = fixture()
+            needs['changes']['outputs']['renderer-changed'] = value
+            self.assertTrue(self.check(needs))
+        needs = fixture()
+        del needs['changes']['outputs']['renderer-changed']
+        self.assertTrue(self.check(needs))
 
     def test_cancelled_before_runner_rejects_even_when_wrapper_says_success(self):
         needs = fixture()
@@ -186,7 +216,65 @@ class ResultsTest(unittest.TestCase):
             self.assertTrue(self.check(needs))
 
 
+class RendererSelectionTest(unittest.TestCase):
+    def test_renderer_source_dependency_test_and_proof_paths_select(self):
+        for event in ['pull_request', 'push']:
+            for path in ['openbank-document-renderer/app.py',
+                         'openbank-document-renderer/requirements.in',
+                         'openbank-document-renderer/requirements.txt',
+                         'openbank-document-renderer/Dockerfile',
+                         'openbank-document-renderer/tests/test_app.py',
+                         'openbank-document-renderer/tests/test_woff2.py',
+                         *results.RENDERER_PROOF_PATHS]:
+                self.assertTrue(results.renderer_selected([path], event), (event, path))
+
+    def test_unrelated_paths_do_not_select(self):
+        for paths in [[], ['docs/guide.md'], ['openbank-document-service/src/main/App.kt'],
+                      ['openbank-document-renderer-notes.md'],
+                      ['.github/scripts/check-service-build-results.py.backup']]:
+            self.assertFalse(results.renderer_selected(paths, 'pull_request'), paths)
+
+    def test_scheduled_and_manual_runs_always_select(self):
+        for event in ['schedule', 'workflow_dispatch']:
+            self.assertTrue(results.renderer_selected([], event))
+            self.assertTrue(results.renderer_selected(['docs/guide.md'], event))
+
+    def test_unknown_event_and_malformed_inventory_reject(self):
+        with self.assertRaises(ValueError):
+            results.renderer_selected([], 'unknown')
+        for paths in ['openbank-document-renderer/app.py', [None], [''],
+                      ['/openbank-document-renderer/app.py'], ['a/../app.py'],
+                      ['a//app.py'], ['a/\x00app.py']]:
+            with self.subTest(paths=paths), self.assertRaises(ValueError):
+                results.renderer_selected(paths, 'pull_request')
+
+    def test_cli_selection_and_missing_environment(self):
+        import os
+        import subprocess
+        import sys
+        env = dict(os.environ, FILES='openbank-document-renderer/tests/test_woff2.py',
+                   GITHUB_EVENT_NAME='pull_request')
+        command = [sys.executable, results.__file__, '--select-renderer']
+        selected = subprocess.run(command, env=env, capture_output=True, text=True, check=False)
+        self.assertEqual(selected.returncode, 0, selected.stderr)
+        self.assertEqual(selected.stdout, 'renderer-changed=true\n')
+        env['FILES'] = 'docs/guide.md'
+        unselected = subprocess.run(command, env=env, capture_output=True, text=True, check=False)
+        self.assertEqual(unselected.returncode, 0, unselected.stderr)
+        self.assertEqual(unselected.stdout, 'renderer-changed=false\n')
+        del env['FILES']
+        missing = subprocess.run(command, env=env, capture_output=True, text=True, check=False)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertNotIn('renderer-changed=', missing.stdout)
+
+
 class GraphTest(unittest.TestCase):
+    def test_required_graph_includes_direct_renderer_result(self):
+        import yaml
+        needs = yaml.safe_load(graph.needs_block(MODULES))['needs']
+        self.assertIn('renderer-tests', needs)
+        self.assertEqual(needs.count('renderer-tests'), 1)
+
     def test_inactive_names_do_not_classify_small_scope_as_full_fleet(self):
         spec = importlib.util.spec_from_file_location('updater', graph.ROOT / '.github/scripts/auto-update-armed-prs.py')
         updater = importlib.util.module_from_spec(spec)
@@ -353,6 +441,8 @@ class ThinCalleeTest(unittest.TestCase):
     # Golden bodies captured before extraction; intentional preservation boundary.
     BODIES: ClassVar[dict] = {'build-test.sh': ('build', 'Build + test (:${{ inputs.service }})', '7d8c1749e22e575911efb4b7d3147470d64af8ef8d58aa3ed5fe9c949981c894', {'SERVICE': '${{ inputs.service }}'}), 'checkout-provider-ref.sh': ('contract', 'Check out a requested provider version only after proving it is on main', '9359271c9fbb762b315b2cc0b0da49b326d93fab2901a15e4b1ca21b294495fd', {}), 'prepare-provider-overlay.sh': ('contract', 'Check out P and overlay the provider test tree from F (equivalence-proven)', '0f445699cbeda8ff0dbad68672a9a71bc53219d33bbf96b23a43f4c9371708f0', {}), 'prewarm-images.sh': ('contract', 'Pre-warm Testcontainers image cache via ECR', '36f9392b6a9fd8ab7df2d878ba0b936420502a88fccfa77085755f22103b0bfc', {'ECR_LOGIN_OUTCOME': '${{ steps.ecr_login.outcome }}'}), 'configure-maven-mirror.sh': ('contract', 'Configure CodeArtifact Maven mirror', '8a6a6c1a11a5623f49afbd15dff4af80c338c295e695c27f7959a71aeedb15bf', {}), 'warm-gradle-cache.sh': ('contract', 'Warm Gradle dependency cache (self-heal corrupted entries)', '5c234b880455ce780fae589d39d1f91d0cd08b43644e567b7b6f88c8a691bd44', {'SERVICE': '${{ inputs.service }}'}), 'publish-consumer-pacts.sh': ('contract', 'Publish consumer pacts to broker', '6bdbc08d0209bd0dd7c545679063a38479c14b3e835ceab2f744ab1ea9d3844f', {'SERVICE': '${{ inputs.service }}'}), 'discover-provider-task.sh': ('contract', 'Discover provider Pact task', 'e78a0cf60a5611406644949246814eda227c7d6c91534cfd74341ed2c32560a1', {'REQUIRE_PROVIDER_PACT_TEST': '${{ inputs.require_provider_pact_test }}'}), 'preflight-pact-broker.sh': ('contract', 'Preflight Pact Broker selector/HAL response', '771d0c340377a6d4d43e0d19a7a0648ac79b39783e3a51469df9979d92565049', {})}
 
+    BODIES['render-coverage-report.sh'] = ('build', 'Generate Kover XML report', '51c948df0397703c3039daf387f172b0e0028e159ab4b797b96830f459f614e0', {'SERVICE': '${{ inputs.service }}'})
+
     def test_exact_bodies_and_explicit_environment(self):
         import hashlib
         import subprocess
@@ -369,7 +459,11 @@ class ThinCalleeTest(unittest.TestCase):
                 self.assertNotIn('${{', body)
                 subprocess.run(['bash', '-n', str(path)], check=True)
                 step = next(s for s in workflow['jobs'][job]['steps'] if s.get('name') == name)
-                self.assertEqual(step['run'], f'bash -e "$SERVICE_CI_HELPERS/{filename}"')
+                expected = f'bash -e "$SERVICE_CI_HELPERS/{filename}"'
+                if filename == 'render-coverage-report.sh':
+                    expected = 'timeout --kill-after=10s 600s ' + expected
+                    self.assertTrue(step['continue-on-error'])
+                self.assertEqual(step['run'], expected)
                 for key, expression in bindings.items():
                     self.assertEqual(step['env'][key], expression)
 
@@ -547,6 +641,87 @@ class ThinCalleeTest(unittest.TestCase):
                 if expected == 0:
                     self.assertEqual(output.read_text().strip(),
                                      'available=' + str(owns_test and has_task).lower())
+
+
+class CoverageReportTaskDiscoveryTests(unittest.TestCase):
+    def run_report(self, tasks, *, module='openbank-libs-runtime', raw=True, discovery_rc=0, report_rc=0):
+        import os
+        import subprocess
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        raw_file = root / module / 'build/kover/bin-reports/test.ic'
+        if raw:
+            raw_file.parent.mkdir(parents=True)
+            raw_file.write_bytes(b'immutable-enforcing-coverage')
+        fake = root / 'gradlew'
+        fake.write_text('''#!/usr/bin/env python3
+import json, os, pathlib, sys
+log = pathlib.Path('calls.json')
+calls = json.loads(log.read_text()) if log.exists() else []
+calls.append(sys.argv[1:]); log.write_text(json.dumps(calls))
+if any(a.endswith(':openbankCoverageReportTestTasks') for a in sys.argv):
+    init = pathlib.Path(sys.argv[sys.argv.index('--init-script') + 1])
+    pathlib.Path('discovery-init.gradle').write_text(init.read_text())
+    if int(os.environ['DISCOVERY_RC']): sys.exit(int(os.environ['DISCOVERY_RC']))
+    print('OPENBANK_COVERAGE_TEST_TASKS=' + os.environ['TASK_PLAN'])
+else:
+    sys.exit(int(os.environ['REPORT_RC']))
+''')
+        fake.chmod(0o700)
+        env = dict(os.environ, SERVICE=module, TASK_PLAN=json.dumps(tasks),
+                   DISCOVERY_RC=str(discovery_rc), REPORT_RC=str(report_rc), RUNNER_TEMP=str(root))
+        helper = graph.ROOT / '.github/scripts/service-ci-steps/render-coverage-report.sh'
+        result = subprocess.run(['bash', str(helper)], cwd=root, env=env, capture_output=True, text=True)
+        calls_file = root / 'calls.json'
+        calls = json.loads(calls_file.read_text()) if calls_file.exists() else []
+        if raw:
+            self.assertEqual(raw_file.read_bytes(), b'immutable-enforcing-coverage')
+        self.assertFalse(list(root.glob('coverage-report.*')), 'temporary discovery scripts must be removed')
+        return result, calls, root
+
+    def test_library_does_not_exclude_nonexistent_provider_or_native_tasks(self):
+        result, calls, root = self.run_report([':openbank-libs-runtime:test'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 2)
+        exclusions = [calls[1][i + 1] for i, arg in enumerate(calls[1]) if arg == '--exclude-task']
+        self.assertEqual(exclusions, [':openbank-libs-runtime:test'])
+        self.assertIn('tasks.withType(org.gradle.api.tasks.testing.Test)',
+                      (root / 'discovery-init.gradle').read_text())
+        self.assertIn(':openbank-libs-runtime:koverXmlReport', calls[1])
+
+    def test_service_excludes_every_discovered_test_variant_without_running_tests(self):
+        tasks = [f':openbank-document-service:{name}' for name in
+                 ['test', 'providerPactTest', 'quarkusIntTest', 'testNative', 'customDatabaseTest']]
+        result, calls, _ = self.run_report(tasks, module='openbank-document-service')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([calls[1][i + 1] for i, arg in enumerate(calls[1]) if arg == '--exclude-task'], tasks)
+        self.assertNotIn('--rerun-tasks', calls[1])
+
+    def test_missing_coverage_data_never_starts_gradle(self):
+        result, calls, _ = self.run_report([':openbank-libs-runtime:test'], raw=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, [])
+
+    def test_invalid_discovery_never_renders_empty_or_foreign_evidence(self):
+        for tasks in [[], [':other:test'], [':openbank-libs-runtime:test'] * 2,
+                      [':openbank-libs-runtime:providerPactTest'],
+                      [':openbank-libs-runtime:test', ':openbank-libs-runtime:test;touch marker']]:
+            with self.subTest(tasks=tasks):
+                result, calls, _ = self.run_report(tasks)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(len(calls), 1)
+
+    def test_discovery_error_is_not_a_successful_report(self):
+        result, calls, _ = self.run_report([':openbank-libs-runtime:test'], discovery_rc=23)
+        self.assertEqual(result.returncode, 23)
+        self.assertEqual(len(calls), 1)
+
+    def test_report_failure_is_propagated(self):
+        result, calls, _ = self.run_report([':openbank-libs-runtime:test'], report_rc=24)
+        self.assertEqual(result.returncode, 24)
+        self.assertEqual(len(calls), 2)
 
 
 if __name__ == '__main__':

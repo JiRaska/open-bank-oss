@@ -37,10 +37,12 @@ describe('infrastructure snapshot recovery', () => {
         moduleTraversalGaps: [{ environment: 'sandbox', modulePath: 'module.dynamic', reason: 'external-or-dynamic-source' }],
       },
     }
+    let resolveHealth!: (response: Response) => void
+    const healthResponse = new Promise<Response>((resolve) => { resolveHealth = resolve })
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.endsWith('/api/infra/status')) {
-        return json({ postgres: { id: 'postgres', status: 'UP', latencyMs: 8, checkedAt: '2026-09-09T08:00:00Z' } })
+        return healthResponse
       }
       if (url.endsWith('/api/platform-versions')) return json({ inventory: applicationInventory })
       return json({ error: 'unavailable' }, 503)
@@ -61,7 +63,10 @@ describe('infrastructure snapshot recovery', () => {
     expect(screen.getByText('Unknown; declaration is not an instance')).toBeInTheDocument()
     expect(screen.getByText(/IaC inventory is partial: some modules could not be traversed/)).toBeInTheDocument()
     expect(screen.getByText(/sandbox: module.dynamic/)).toBeInTheDocument()
-    const postgres = screen.getByText('PostgreSQL')
+    // Inventory and health load independently: declaration evidence cannot satisfy the live probe.
+    expect(screen.queryByText('PostgreSQL')).not.toBeInTheDocument()
+    resolveHealth(json({ postgres: { id: 'postgres', status: 'UP', latencyMs: 8, checkedAt: '2026-09-09T08:00:00Z' } }))
+    const postgres = await screen.findByText('PostgreSQL')
     expect(within(postgres.closest('.card') as HTMLElement).getByText('UP')).toBeInTheDocument()
     expect(screen.getByText('Source inventory of declarations. It does not prove deployment, runtime, or platform completeness; live probes are shown above.')).toBeInTheDocument()
   })

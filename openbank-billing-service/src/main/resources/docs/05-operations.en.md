@@ -80,3 +80,27 @@ Signature verification is `openbank.billing.product-shadow.verification.mode`: `
 Every IR `Post` is checked for money conservation before it is compared; an unbalanced one, or an evaluation the interpreter refuses, counts as `ir_evaluation_failed` and is never compared. Metrics: `openbank_product_shadow_inputs_total`, `openbank_product_shadow_compared_total{product,rule_id}`, `openbank_product_shadow_diverged_total{product,rule_id}` and `openbank_product_shadow_not_comparable_total{reason}`, all with `consumer="billing"`. Alerts: `ProductShadowStalled` (queued, none processed in 6 hours), `ProductShadowComparedNothing` (IR revisions met, none compared in 24 hours) and `ProductShadowDiverged`. Inputs that are all `no_ir` alert on nothing: those products are not migrated yet. Billing may switch to the IR only after divergence has been zero across a full cadence of every fee rule (ADR-0352 §9), behind a flag that does not exist yet.
 
 A missing balance is never substituted for a measured zero when a scheduled trigger depends on balance. Such a fee records `input_unknown` in the not-comparable counter and `INPUT_UNKNOWN` as the queue outcome, without increasing compared or divergence counters. Fees whose trigger does not need balance remain comparable.
+
+## Day-close participation (ADR-0342, #13167)
+
+Billing reports each completed Prague accounting day to ledger-service as participant `billing`
+(`BillingCloseParticipationScheduler`, hourly at :50; `openbank.billing.close.report-cron`, lookback
+`openbank.billing.close.lookback-days`, default 3), on its own identity (named oidc-client `m2m`,
+Keycloak `openbank-billing`), authorized by the ledger as `ledger.close.participate` for `billing` only.
+
+| Day state | What is reported |
+|---|---|
+| the cycle is not due (not the cron's day), or the sweep is off | SKIPPED with the reason |
+| the cycle was due and has no `billing_close_job_run` row, or a fee of the cycle is still PENDING | nothing yet - the ledger holds the day |
+| cycle ran, every fee booked | RAN (journals = POSTED/reversed fees) |
+| accounts failed to assess, sweep aborted, or a fee ended FAILED | REFUSED with a fixed category |
+
+**Missed cycle.** The cron fires once a month in Europe/Prague. `BillingCycleScheduler.catchUp`
+(every `openbank.billing.scheduler.catch-up-every`, default 15m, first 2m after boot) runs the sweep
+for the due day when the cron has already fired this month and no cycle run is recorded. It is
+idempotent by cycle id and never overlaps a running sweep.
+
+**Fee refused into a closed day.** A `409 ACCOUNTING_DAY_CLOSED` marks the fee FAILED at once and
+increments `openbank_billing_fee_post_closed_day_refusals_total`. Alert `BillingFeeRefusedIntoClosedDay`
+fires. Recover with runbook `0033-billing-fee-refused-into-closed-day.md` (four-eyes re-bill under a new
+key recorded in `billing_fee_rebill`).

@@ -52,3 +52,16 @@ redeployed.
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Fixing refusal after a deal state change
+
+Before applying a fixing, the repository re-reads the deal state and schedule version while holding
+the deal row lock (`FOR UPDATE`). `CANCELLED`, `REVERSED` and `DRAFT` cause a typed
+`DealNotLiveForFixingException` before any cash-flow update or `treasury.cashflow.fixed.v1` outbox
+write. This refusal increments `openbank.treasury.fixings{outcome="deal_not_live"}`; `FixingService`
+skips the deal without counting an index failure. `MATURED` remains eligible under the existing
+state filter, and the REST response shape is unchanged.
+
+`FixingApiIT` covers cancellation committed after the due-flow read and before the locked write:
+the response reports zero fixed flows and failures, projected flows remain unchanged, no fixing
+event is written, and the refusal counter increases by one.
