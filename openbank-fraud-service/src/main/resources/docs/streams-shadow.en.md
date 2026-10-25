@@ -69,6 +69,19 @@ margin, while output snapshots expire after seven days.
 
 ## Evidence and rollback
 
+### Native-store license choice
+
+RocksDB JNI 10.1.3 offers Apache-2.0 OR GPL-2.0. OpenBank selects Apache-2.0,
+as permitted by the [release README](https://github.com/facebook/rocksdb/blob/v10.1.3/README.md#license)
+and its [Apache license](https://github.com/facebook/rocksdb/blob/v10.1.3/LICENSE.Apache).
+This exact choice was approved for #13888. Dependency review checks every RocksDB
+row before its retry and again against the retry's actual comparison, because the
+pinned review action ignores versions when matching package license exclusions.
+A different version, GPL-only/AND expression or unexpected metadata fails the
+choice guard. Vulnerability policy and other packages' license checks still run.
+
+### Test and recovery evidence
+
 ```sh
 ./gradlew :openbank-fraud-service:test \
   --tests '*ShadowVelocityTopologyTest' \
