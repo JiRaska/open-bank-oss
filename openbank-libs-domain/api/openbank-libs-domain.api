@@ -2290,6 +2290,15 @@ public final class com/openbank/libs/domain/money/RoundingPolicy : java/lang/Enu
 	public static fun values ()[Lcom/openbank/libs/domain/money/RoundingPolicy;
 }
 
+public final class com/openbank/libs/domain/portfolio/PortfolioQuantityBasis : java/lang/Enum {
+	public static final field AMORTISED_VALUE Lcom/openbank/libs/domain/portfolio/PortfolioQuantityBasis;
+	public static final field FACE_AMOUNT Lcom/openbank/libs/domain/portfolio/PortfolioQuantityBasis;
+	public static final field UNIT Lcom/openbank/libs/domain/portfolio/PortfolioQuantityBasis;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/domain/portfolio/PortfolioQuantityBasis;
+	public static fun values ()[Lcom/openbank/libs/domain/portfolio/PortfolioQuantityBasis;
+}
+
 public final class com/openbank/libs/flags/DefaultsFeatureClient : com/openbank/libs/flags/FeatureClient {
 	public fun <init> ()V
 	public fun boolean (Ljava/lang/String;ZLcom/openbank/libs/flags/EvalContext;)Lcom/openbank/libs/flags/FlagEvaluation;

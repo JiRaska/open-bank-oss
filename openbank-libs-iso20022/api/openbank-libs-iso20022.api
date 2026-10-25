@@ -364,6 +364,60 @@ public final class com/openbank/libs/iso20022/ReceivedStatusReport {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/openbank/libs/iso20022/SecuritiesHolding {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Lcom/openbank/libs/domain/portfolio/PortfolioQuantityBasis;Ljava/math/BigDecimal;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Lcom/openbank/libs/domain/portfolio/PortfolioQuantityBasis;
+	public final fun component5 ()Ljava/math/BigDecimal;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Lcom/openbank/libs/domain/portfolio/PortfolioQuantityBasis;Ljava/math/BigDecimal;Ljava/lang/String;)Lcom/openbank/libs/iso20022/SecuritiesHolding;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/SecuritiesHolding;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Lcom/openbank/libs/domain/portfolio/PortfolioQuantityBasis;Ljava/math/BigDecimal;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/SecuritiesHolding;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCfi ()Ljava/lang/String;
+	public final fun getHoldingValue ()Ljava/math/BigDecimal;
+	public final fun getHoldingValueCurrency ()Ljava/lang/String;
+	public final fun getIsin ()Ljava/lang/String;
+	public final fun getQuantity ()Ljava/math/BigDecimal;
+	public final fun getQuantityType ()Lcom/openbank/libs/domain/portfolio/PortfolioQuantityBasis;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/SecuritiesHoldingsStatement {
+	public fun <init> (Ljava/lang/String;Ljava/time/LocalDate;Ljava/lang/String;Ljava/util/List;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/time/LocalDate;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Ljava/time/LocalDate;Ljava/lang/String;Ljava/util/List;)Lcom/openbank/libs/iso20022/SecuritiesHoldingsStatement;
+	public static synthetic fun copy$default (Lcom/openbank/libs/iso20022/SecuritiesHoldingsStatement;Ljava/lang/String;Ljava/time/LocalDate;Ljava/lang/String;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/iso20022/SecuritiesHoldingsStatement;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHoldings ()Ljava/util/List;
+	public final fun getSafekeepingAccount ()Ljava/lang/String;
+	public final fun getStatementDate ()Ljava/time/LocalDate;
+	public final fun getStatementId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/iso20022/Semt002ParseException : java/lang/IllegalArgumentException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
+public final class com/openbank/libs/iso20022/Semt002Reader {
+	public static final field Companion Lcom/openbank/libs/iso20022/Semt002Reader$Companion;
+	public static final field SCHEMA Ljava/lang/String;
+	public fun <init> ()V
+	public final fun read (Ljava/lang/String;)Lcom/openbank/libs/iso20022/SecuritiesHoldingsStatement;
+	public final fun read ([B)Lcom/openbank/libs/iso20022/SecuritiesHoldingsStatement;
+}
+
+public final class com/openbank/libs/iso20022/Semt002Reader$Companion {
+}
+
 public final class com/openbank/libs/iso20022/SettlementMethod : java/lang/Enum {
 	public static final field CLRG Lcom/openbank/libs/iso20022/SettlementMethod;
 	public static final field COVE Lcom/openbank/libs/iso20022/SettlementMethod;

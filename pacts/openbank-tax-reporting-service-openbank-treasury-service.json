@@ -1,0 +1,244 @@
+{
+  "consumer": {
+    "name": "openbank-tax-reporting-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the pension company's portfolio with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/treasury/portfolio/period-end",
+        "query": {
+          "date": [
+            "2026-12-31"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "GET the pension company's portfolio when a safekeeping account has no year-end statement",
+      "providerStates": [
+        {
+          "name": "one or more safekeeping accounts has no portfolio snapshot for 2026-12-31"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/treasury/portfolio/period-end",
+        "query": {
+          "date": [
+            "2026-12-31"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "error": "PORTFOLIO_SNAPSHOT_MISSING"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 409
+      }
+    },
+    {
+      "description": "GET the pension company's portfolio at the 2026 year end",
+      "providerStates": [
+        {
+          "name": "the pension company holds investment positions at 2026-12-31"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/treasury/portfolio/period-end",
+        "query": {
+          "date": [
+            "2026-12-31"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "asOf": "2026-12-31",
+          "currency": "CZK",
+          "entity": "company",
+          "positions": [
+            {
+              "instrumentClass": "GOVERNMENT_BOND",
+              "isin": "CZ0001005037",
+              "quantity": "1000",
+              "quantityBasis": "FACE_AMOUNT",
+              "valuation": "1012345.67",
+              "valuationCurrency": "CZK"
+            }
+          ],
+          "sourceStatements": [
+            {
+              "safekeepingAccount": "PSCO-OWN-0001",
+              "statementId": "CUST-PS-20261231",
+              "statementUuid": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "version": 1
+            },
+            {
+              "safekeepingAccount": "PSCO-OWN-0002",
+              "statementId": "CUST-PS-20261231",
+              "statementUuid": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "version": 1
+            }
+          ]
+        },
+        "generators": {
+          "body": {
+            "$.sourceStatements[0].statementUuid": {
+              "type": "Uuid"
+            },
+            "$.sourceStatements[1].statementUuid": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.positions": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.positions[*].instrumentClass": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.positions[*].isin": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.positions[*].quantity": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "-?[0-9]+(\\.[0-9]+)?"
+                }
+              ]
+            },
+            "$.positions[*].quantityBasis": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.positions[*].valuation": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "-?[0-9]+(\\.[0-9]+)?"
+                }
+              ]
+            },
+            "$.positions[*].valuationCurrency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceStatements[0].statementUuid": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.sourceStatements[0].version": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.sourceStatements[1].statementUuid": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.sourceStatements[1].version": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-treasury-service"
+  }
+}
