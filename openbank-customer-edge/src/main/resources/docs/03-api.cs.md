@@ -36,7 +36,7 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 
 | Metoda & cesta | Scope | Poznámky |
 |---|---|---|
-| `GET /accounts` | `accounts:read` | vypsat účty volajícího |
+| `GET /accounts` | `accounts:read` | vypsat účty volajícího; volitelný query parametr `cursor` (beze změny předán account-service). Účty sdílené s volajícím (AKTIVNÍ delegace s právem čtení) se přidají do `data` jen na první stránce (bez `cursor`), mají `sharedWithMe: true` a zvyšují `pagination.totalCount`; jsou mimo kurzorové stránkování |
 | `GET /accounts/{accountId}` | `accounts:read` | 403 pokud není vlastník |
 | `GET /balances/{accountId}` | `accounts:read` | 403 pokud není vlastník |
 | `GET, PUT /balances/{accountId}/{currency}/low-balance-alert` | `accounts:read` / `accounts:write` | Jen vlastník; PUT nastaví `enabled`, `threshold`, `rearmMargin`; GET je 404 do nastavení. Odesílání je ve výchozím stavu vypnuté a používá jen zprávu v aplikaci. |
