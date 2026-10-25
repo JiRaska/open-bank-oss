@@ -75,3 +75,8 @@ See [06 — Compliance](./06-compliance.md) for the lawful-basis and erasure ana
 ## Bank-own transfer rail status (ADR-0344 phase 1b)
 
 audit-service also reads `openbank.swift.institution-transfers`, swift-service's status of each bank-own transfer. It is money-path: each status is a transfer the rail executed. Rows are attributed to `swift-service` through the shared `TopicProducers` table, and the audit KafkaUser holds Read on the topic (`kafka-audit-mtls.yaml`).
+
+
+## Treasury payment releases (ADR-0344 phase 1b)
+
+audit-service also reads `openbank.treasury.payments`, treasury's payment release instructions (`treasury.payment.released.v1`). It is money-path: each release is a transfer the rail executes. Rows are attributed to `treasury-service` through the shared `TopicProducers` table, and the audit KafkaUser holds Read on the topic (`kafka-audit-mtls.yaml`).

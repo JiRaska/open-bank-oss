@@ -328,6 +328,14 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # components/treasury/kafka-topic.yaml -- ADR-0344 contract 9.1 bank-own payment releases.
+      # Money-path: each release is a transfer the rail executes, so the audit trail must see it.
+      - resource:
+          type: topic
+          name: openbank.treasury.payments
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       - resource:
           type: group
           name: audit-service

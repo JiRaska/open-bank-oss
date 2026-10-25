@@ -30,3 +30,11 @@ Noha zaúčtování nově nese `accountingClass` + `LedgerRole` (jistina, naběh
 - **`deal_cash_flows.fixing_source`, `fixing_sha256`, `fixed_at`** (V20) zaznamenávají původ zafixované sazby. Zapisuje je jen repozitář fixingů, hlídaným UPDATE.
 - Hodinový běh fixingů (`openbank.treasury.fixing.enabled`, ve výchozím stavu zapnutý) zafixuje splatné pohyblivé toky a publikuje `treasury.cashflow.fixed.v1`.
 - IRS a FRA lze nově navrhnout, podat a zafixovat. Vypořádat je půjde až s maticí účtovacích pravidel (fáze 2).
+
+## Platby a kanál mezibankovních převodů (ADR-0344, fáze 1b)
+
+- **`treasury_payments`, `treasury_payment_flows`** (V21) drží platby na vlastní účet a FIXED toky, které každá platba hradí. Tok patří nejvýše jedné platbě; vazbu zapisuje jen hlídaný UPDATE, nikdy uložení celého řádku toku. V22 přidává převodní kanál a BIC zprostředkovatele. V23 drží idempotenční klíč platby jedinečný jen mezi nezrušenými platbami, takže zrušenou platbu lze navrhnout znovu.
+- Denní běh návrhů (`openbank.treasury.payments.enabled`, ve výchozím stavu zapnutý) navrhne platby pro FIXED toky splatné do `cut-off-window-days` (2) dnů, započtené podle nettingové dohody a adresované podle SSI platné k datu valuty. Uvolnit je smí jen `ROLE_TREASURY_PAYMENT_RELEASER`, a nikdy autor podmínek započteného obchodu.
+- Uvolnění zapíše `treasury.payment.released.v1` do `openbank.treasury.payments` v téže transakci. swift-service z něj sestaví pacs.009 a odpoví na `openbank.swift.institution-transfers`; treasury pak platbu posune na SENT, SETTLED nebo FAILED. Stav, který nelze použít, skončí v `openbank.dlq.treasury.institution-transfer-status-in`.
+- Zrušení nebo storno obchodu se odmítne, dokud je některá jeho platba uvolněná (409 PAYMENT_RELEASED); jinak ve stejné transakci stáhne jeho platby ve stavu PROPOSED.
+- **Rollback:** V21 až V23 jsou aditivní. Tabulky lze odstranit jen dokud neexistuje žádná platba; příkazy jsou v hlavičce každé migrace.

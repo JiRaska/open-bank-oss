@@ -22,6 +22,28 @@ import java.util.UUID
 /** Raised when a command names a deal that does not exist. Mapped to 404. */
 class DealNotFoundException(dealId: UUID) : NoSuchElementException("deal $dealId not found")
 
+/**
+ * The counterparty headroom a limit-consuming write was vetted against: the limit (or the senior
+ * override's bound) less the deal's own amount. A deal booked meanwhile that eats into it refuses the
+ * write (422 LIMIT_BREACHED) instead of committing a breach.
+ */
+data class ExposureGuard(val counterpartyId: String, val currency: String, val maxOthers: java.math.BigDecimal) {
+    companion object {
+        /**
+         * The guard of a limit-consuming write, from the SAME figures [com.openbank.treasury.domain.model.LimitCheck]
+         * used: the line is (counterparty, the deal's LIMIT currency — CZK for an FX spot), and the
+         * others may consume at most the limit (or a senior override's bound) less the deal's own
+         * LIMIT amount. Every write that consumes a line builds it here, so all of them are
+         * serialised on one key and measured by one query.
+         */
+        fun of(check: com.openbank.treasury.domain.model.LimitCheck, coversUpTo: java.math.BigDecimal? = null) =
+            ExposureGuard(check.counterpartyId, check.currency, (coversUpTo ?: check.limit) - check.dealAmount)
+    }
+}
+
+/** The counterparty exposure grew past the vetted headroom between the vetting and the lock (422 LIMIT_BREACHED). */
+class LimitLineBreachedException(message: String) : RuntimeException(message)
+
 /** Raised when a deal names a counterparty not in the master. Mapped to 400 via IllegalArgumentException. */
 class UnknownCounterpartyException(id: String) : IllegalArgumentException("unknown counterparty '$id'")
 
@@ -59,6 +81,20 @@ interface DealRepository {
         schedule: ScheduleWrite? = null,
         /** Further outbox events of the same change (e.g. treasury.cashflow.generated). */
         extraEvents: List<DealEvent> = emptyList(),
+        /**
+         * ADR-0344 D6: the change ends the deal's payable life (cancel, reverse). In the SAME
+         * transaction, under a lock on the deal row (the row a payment release locks too): refuse
+         * (DealHasReleasedPaymentException, 409) if any of its payments is released, else withdraw its
+         * PROPOSED payments and free their flows. Commits or rolls back with the deal change.
+         */
+        withdrawPayments: Boolean = false,
+        /**
+         * A limit-consuming write (submit, approve): in the SAME transaction, after locking the deal
+         * row, take the (counterparty, limit currency) line lock and re-measure the others' exposure;
+         * past [ExposureGuard.maxOthers] it refuses (LimitLineBreachedException, 422) instead of
+         * committing a joint breach.
+         */
+        limitGuard: ExposureGuard? = null,
     ): Deal
 
     /** The command previously recorded under [key], if any. */

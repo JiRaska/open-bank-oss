@@ -75,3 +75,8 @@ Viz [06 — Compliance](./06-compliance.md) pro analýzu právního základu a v
 ## Stav vlastních převodů banky (ADR-0344, fáze 1b)
 
 audit-service čte také `openbank.swift.institution-transfers`, stav každého vlastního převodu banky ze swift-service. Je to money-path: každý stav popisuje převod, který kanál provedl. Záznamy se přiřazují `swift-service` přes sdílenou tabulku `TopicProducers` a KafkaUser auditu má na topik oprávnění Read (`kafka-audit-mtls.yaml`).
+
+
+## Uvolněné platby treasury (ADR-0344, fáze 1b)
+
+audit-service čte také `openbank.treasury.payments`, pokyny treasury k uvolnění plateb (`treasury.payment.released.v1`). Je to money-path: každé uvolnění je převod, který kanál provede. Záznamy se přiřazují `treasury-service` přes sdílenou tabulku `TopicProducers` a KafkaUser auditu má na topik oprávnění Read (`kafka-audit-mtls.yaml`).
