@@ -62,12 +62,18 @@ class BillingCycleService(
      * single account's failure (logged) so one bad account never blocks the rest of the batch —
      * mirrors `InterestService.accrueAll`'s per-account isolation intent.
      */
-    suspend fun runCycle(cycleId: String, accountIds: List<String>, currency: String): Int {
+    suspend fun runCycle(cycleId: String, accountIds: List<String>, currency: String): Int =
+        runCycleWithOutcome(cycleId, accountIds, currency).processed
+
+    /** [runCycle], also counting the accounts that failed — a day-close input (ADR-0342). */
+    suspend fun runCycleWithOutcome(cycleId: String, accountIds: List<String>, currency: String): CycleOutcome {
         var processed = 0
+        var failed = 0
         for (accountId in accountIds) {
             runCatching { assessAndPost(cycleId, accountId, currency) }
                 .onSuccess { processed++ }
                 .onFailure { ex ->
+                    failed++
                     log.errorf(
                         ex,
                         "billing cycle %s account %s currency %s failed — continuing with the rest of the batch",
@@ -77,6 +83,9 @@ class BillingCycleService(
                     )
                 }
         }
-        return processed
+        return CycleOutcome(processed = processed, failed = failed)
     }
+
+    /** Accounts assessed and accounts whose assessment threw, for one batch. */
+    data class CycleOutcome(val processed: Int, val failed: Int)
 }
