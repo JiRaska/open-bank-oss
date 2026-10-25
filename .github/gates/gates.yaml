@@ -6651,7 +6651,9 @@ gates:
       a direct push to main) — reddens every PR until it is declared in a reviewed commit.
       Re-examine when the repo gains an org owner or a GitHub App that legitimately needs one.
     review_after: "2027-02-20"
-    selftest: python3 .github/scripts/check-ruleset-bypass-actors.py --self-test
+    selftest: |
+      python3 .github/scripts/check-ruleset-bypass-actors.py --self-test
+      python3 .github/scripts/test-ruleset-bypass-evidence.py
     selftest_expect: pass
     min_subjects: 1   # exactly 1 bypass actor today (2026-08-20)
     run: |
