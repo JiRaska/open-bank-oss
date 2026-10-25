@@ -4,6 +4,10 @@
 OpenBank connects banking domains, shared libraries, Product Studio, test evidence, observability, customer and business relationships, a customer app and governed AI tooling. Bank as Code means a service reports its API contract, version and health at runtime. Documentation as Code keeps service-owned docs with releases and generates decision indexes and runbooks from source. Compliance as Code ties per-service governance declarations to checks against the code where verification is possible. The public sandbox uses demo data. The code and its documented limits are the source of truth; a repository module list is not a live deployment report.
 
 ## Start here
+- [Bank as Code](https://open-bank.tech/#bank-as-code): Eight disciplines connecting explicit rules, reviewable changes and evidence for people and AI.
+- [Product as Code](https://open-bank.tech/product-as-code.html): Interactive savings illustration and a proposed product change journey.
+- [Controls and evidence](https://open-bank.tech/controls-as-code.html): Compliance, AML and fraud examples with links to their source.
+- [AI as Code](https://open-bank.tech/ai-as-code.html): Illustrative policy decisions and audit outcomes based on MCP tests.
 - [Overview](https://open-bank.tech/): Customer experience, connected ecosystem, Product Studio, AI/MCP overview and iOS TestFlight signup.
 - [Platform](https://open-bank.tech/platform.html): Code-derived module inventory grouped by banking capability, with source and API links.
 - [Labs](https://open-bank.tech/labs.html): Shared Kotlin banking kernel and QRlessPay phone-to-phone payment descriptor SDK.
