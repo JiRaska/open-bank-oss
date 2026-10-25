@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.finance.cashflow.FixingSource
 import com.openbank.treasury.application.port.out.DealEvent
+import com.openbank.treasury.application.port.out.DealNotLiveForFixingException
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.FixingFlowRepository
 import com.openbank.treasury.application.port.out.MarketDataRepository
@@ -189,8 +190,13 @@ class FixingService(
                     fixedAt = at,
                 )
             }
-            flows.applyFixing(dealId, fixed, event(deal, index, date, observation, fixed))
-            count += fixed.size
+            try {
+                flows.applyFixing(dealId, fixed, event(deal, index, date, observation, fixed))
+                count += fixed.size
+            } catch (_: DealNotLiveForFixingException) {
+                // Terminated since dueOn read it: refused under the deal lock (and counted there).
+                // Not a failure — a dead deal has nothing left to fix.
+            }
         }
         return count
     }
