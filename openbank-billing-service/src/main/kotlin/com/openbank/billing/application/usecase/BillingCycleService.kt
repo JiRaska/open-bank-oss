@@ -72,12 +72,22 @@ class BillingCycleService(
         accountIds: List<String>,
         currency: String,
         scheduledCadence: String? = null,
-    ): Int {
+    ): Int = runCycleWithOutcome(cycleId, accountIds, currency, scheduledCadence).processed
+
+    /** [runCycle], also counting the accounts that failed — a day-close input (ADR-0342). */
+    suspend fun runCycleWithOutcome(
+        cycleId: String,
+        accountIds: List<String>,
+        currency: String,
+        scheduledCadence: String? = null,
+    ): CycleOutcome {
         var processed = 0
+        var failed = 0
         for (accountId in accountIds) {
             runCatching { assessAndPost(cycleId, accountId, currency, scheduledCadence) }
                 .onSuccess { processed++ }
                 .onFailure { ex ->
+                    failed++
                     log.errorf(
                         ex,
                         "billing cycle %s account %s currency %s failed — continuing with the rest of the batch",
@@ -87,6 +97,9 @@ class BillingCycleService(
                     )
                 }
         }
-        return processed
+        return CycleOutcome(processed = processed, failed = failed)
     }
+
+    /** Accounts assessed and accounts whose assessment threw, for one batch. */
+    data class CycleOutcome(val processed: Int, val failed: Int)
 }

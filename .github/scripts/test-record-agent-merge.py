@@ -427,7 +427,8 @@ class WorkflowWiringTest(unittest.TestCase):
     def test_workflow_is_thin_and_pins_actions_by_sha(self):
         workflow = yaml.safe_load(
             (Path(__file__).parents[1] / 'workflows/record-agent-merge.yml').read_text())
-        self.assertEqual(workflow['permissions'], {'contents': 'read'})
+        self.assertEqual(workflow['permissions'], {
+            'contents': 'read', 'pull-requests': 'read', 'actions': 'read', 'statuses': 'read'})
         # PyYAML 1.1 parses the bare key `on:` as boolean True.
         events = workflow.get('on', workflow.get(True))
         self.assertEqual(events['pull_request']['types'], ['closed'])
@@ -448,8 +449,19 @@ class WorkflowWiringTest(unittest.TestCase):
         self.assertIn('grant_type=client_credentials', runs[mint_index])
         self.assertIn('protocol/openid-connect/token', runs[mint_index])
         # The minted token reaches the script via --token-file, never via env/argv.
-        record_step = record['steps'][-1]
-        self.assertIn('record-agent-merge.py --token-file', record_step['run'])
+        record_step = next(step for step in record['steps'] if '--verify-record' in step.get('run', ''))
+        self.assertIn('record-agent-merge.py --verify-record --token-file', record_step['run'])
+        self.assertIn('--pr "$pr" --verify-record', record_step['run'])
+        self.assertEqual(checkout['with']['ref'], 'main')
+        self.assertFalse(checkout['with']['persist-credentials'])
+        self.assertIn("github.actor == github.repository_owner", record['if'])
+        self.assertIn("github.triggering_actor == github.repository_owner", record['if'])
+        self.assertIn("github.run_attempt == 1", record['if'])
+        self.assertIn("github.ref == 'refs/heads/main'", record['if'])
+        self.assertIn('prs', events['workflow_dispatch']['inputs'])
+        cleanup = record['steps'][-1]
+        self.assertEqual(cleanup['if'], 'always()')
+        self.assertIn('rm -f -- "$TOKEN_FILE"', cleanup['run'])
         env = workflow['env']
         self.assertIn('vars.AGENT_SERVICE_URL', env['AGENT_SERVICE_URL'])
         self.assertIn('vars.AGENT_MERGE_RECORDER_ISSUER', env['AGENT_MERGE_RECORDER_ISSUER'])
@@ -469,12 +481,13 @@ class WorkflowWiringTest(unittest.TestCase):
         raise_issue = workflow['jobs']['raise-issue']
         self.assertEqual(raise_issue['permissions']['issues'], 'write')
         self.assertIn('failure()', raise_issue['if'])
-        self.assertIn('gh issue create', yaml.safe_dump(raise_issue))
+        failure_script = raise_issue['steps'][0]['run']
+        self.assertIn('gh issue create', failure_script)
         self.assertEqual(raise_issue['env']['GH_REPO'], '${{ github.repository }}')
-        self.assertIn('gh issue comment', yaml.safe_dump(raise_issue))
+        self.assertIn('gh issue comment', failure_script)
         self.assertNotIn('close-issue', workflow['jobs'])
         self.assertNotIn('gh issue close', yaml.safe_dump(workflow['jobs']))
-        self.assertIn('backfilled and its merge record verified', yaml.safe_dump(raise_issue))
+        self.assertIn('backfilled and its merge record verified', failure_script)
 
 
 

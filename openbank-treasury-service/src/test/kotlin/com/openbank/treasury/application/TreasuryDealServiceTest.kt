@@ -33,6 +33,7 @@ import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.QuoteUnavailableException
 import com.openbank.treasury.domain.model.Side
+import com.openbank.treasury.infrastructure.LegWireJackson
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -43,6 +44,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 
+@Suppress("LargeClass") // one service, every lifecycle path
 class TreasuryDealServiceTest {
 
     private val monday = DealFixtures.MONDAY
@@ -58,7 +60,7 @@ class TreasuryDealServiceTest {
         override suspend fun findById(id: String) = all.find { it.id == id }
         override suspend fun list() = all
     }
-    private val mapper = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
+    private val mapper = LegWireJackson.register(ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule()))
     private var fxMid: FxMidRatePort = FxMidRatePort.NONE
     private var tolerance: FxRateTolerance = FxRateTolerance.DISABLED
     private var confirmationRequired = true
@@ -533,8 +535,11 @@ class TreasuryDealServiceTest {
 
     @Test
     fun `an FX spot drafted on a Friday values on the next Tuesday`(): Unit = runBlocking {
-        clock = Clock.fixed(DealFixtures.FRIDAY.atTime(9, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
-        assertThat(service.draft(fx(), DealFixtures.dealer).valueDate).isEqualTo(DealFixtures.FRIDAY.plusDays(4))
+        // The Friday a week after DealFixtures.FRIDAY: the Monday after FRIDAY itself is a CERTIS holiday
+        // (2026-09-28), which is exercised in FxSpotTest; this case is about the weekend alone.
+        val friday = DealFixtures.FRIDAY.plusDays(7)
+        clock = Clock.fixed(friday.atTime(9, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
+        assertThat(service.draft(fx(), DealFixtures.dealer).valueDate).isEqualTo(friday.plusDays(4))
     }
 
     @Test
@@ -595,6 +600,22 @@ class TreasuryDealServiceTest {
             assertThat(service.submit(off.id, DealFixtures.dealer).state).isEqualTo(DealState.PENDING_APPROVAL)
             fxMid = FxMidRatePort.NONE
             assertThat(service.draft(fx(), DealFixtures.dealer).fx!!.rateFlag).contains("mid unavailable")
+        }
+
+    @Test
+    fun `an edit cannot launder an off-market rate - edit and submit flag it exactly as a create would`(): Unit =
+        runBlocking {
+            tolerance = FxRateTolerance(true, BigDecimal("1.0"))
+            fxMid = FxMidRatePort { ccy, _ -> if (ccy == "EUR") BigDecimal("25.00") else null }
+            val fair = service.draft(fx(rate = "25.000000"), DealFixtures.dealer)
+            assertThat(fair.fx!!.rateFlag).isNull()
+            val edited = service.editDraft(fair.id, fx(rate = "27.500000"), DealFixtures.dealer)
+            val created = service.draft(fx(rate = "27.500000"), DealFixtures.dealer)
+            assertThat(edited.fx!!.rateFlag).isNotNull().isEqualTo(created.fx!!.rateFlag)
+            // Submit re-runs the same check: a flag can never be missing on the deal the approver sees.
+            val submitted = service.submit(edited.id, DealFixtures.dealer)
+            assertThat(submitted.fx!!.rateFlag).isEqualTo(created.fx!!.rateFlag)
+            assertThat(submitted.history.count { it.note?.startsWith("rate flagged:") == true }).isEqualTo(1)
         }
 
     // --- ADR-0315 D2: CONFIRMED ------------------------------------------------------------------

@@ -14,7 +14,7 @@ import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
-/** ADR-0352 phase 3: one queued legacy fee decision awaiting the shadow comparator (V10). */
+/** ADR-0352 phase 3: one queued legacy fee decision awaiting the shadow comparator (V11). */
 @Entity
 @Table(name = "billing_product_shadow_input")
 class ProductShadowInputEntity : PanacheEntityBase() {
@@ -89,7 +89,7 @@ class ProductShadowInputEntity : PanacheEntityBase() {
     var completedAt: Instant? = null
 }
 
-/** ADR-0352 §6: billing's immutable local copy of a pinned revision's product IR (V10). */
+/** ADR-0352 §6: billing's immutable local copy of a pinned revision's product IR (V11). */
 @Entity
 @Table(name = "billing_product_revision_ir")
 class ProductRevisionIrEntity : PanacheEntityBase() {

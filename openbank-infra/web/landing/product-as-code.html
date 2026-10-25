@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Product as Code | OpenBank</title>
+<meta name="description" content="Explore Product as Code through an interactive savings example. Connect explicit product terms, calculations, scenarios and human review in OpenBank Labs.">
+<meta name="theme-color" content="#f8f6f1">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="OpenBank">
+<meta property="og:url" content="https://open-bank.tech/product-as-code.html">
+<meta property="og:title" content="Product as Code | OpenBank">
+<meta property="og:description" content="Explore Product as Code through an interactive savings example. Connect explicit product terms, calculations, scenarios and human review in OpenBank Labs.">
+<meta property="og:image" content="https://open-bank.tech/assets/explorers-lipa.webp">
+<meta property="og:image:width" content="1536">
+<meta property="og:image:height" content="1024">
+<meta property="og:image:alt" content="OpenBank lion, lioness and AI companion">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/lipa-icon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico?v=lipa-20261024" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/lipa-icon-180.png">
+<link rel="canonical" href="https://open-bank.tech/product-as-code.html">
+<script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "url": "https://open-bank.tech/product-as-code.html",
+  "name": "Product as Code | OpenBank",
+  "description": "Explore Product as Code through an interactive savings example. Connect explicit product terms, calculations, scenarios and human review in OpenBank Labs.",
+  "inLanguage": "en",
+  "isPartOf": {
+    "@type": "WebSite",
+    "url": "https://open-bank.tech/",
+    "name": "OpenBank"
+  }
+}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=lipa-20261024">
+<link rel="stylesheet" href="bank-as-code.css?v=20261025">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="nav wrap">
+<a class="brand brand-lipa" href="index.html" aria-label="OpenBank home">
+<video class="brand-film" muted="" playsinline="" preload="none" poster="assets/openbank-lipa-final.png" width="960" height="540" aria-hidden="true">
+<source src="assets/openbank-lipa.mp4" type="video/mp4">
+<img src="assets/openbank-lipa-final.png" alt="">
+</video></a>
+<nav aria-label="Main navigation">
+<a class="nav-labs" href="labs.html">Labs <img src="assets/labs-flask.svg" width="15" height="19" alt=""></a>
+<a href="platform.html">Platform</a>
+<a href="index.html#app">App</a>
+<a href="index.html#agents">Agents</a>
+<a href="index.html#join">Community</a>
+</nav>
+<a class="sandbox-cta" href="index.html#sandbox">Explore the sandbox ↗</a>
+</header>
+<main id="main" class="bac">
+<nav class="ob-topic-nav ob-bound" aria-label="Bank as Code stories"><a href="index.html#bank-as-code">← Bank as Code</a><a href="product-as-code.html" aria-current="page">Product as Code</a><a href="controls-as-code.html">Controls &amp; evidence</a><a href="ai-as-code.html">AI as Code</a>
+</nav>
+<section class="ob-bound">
+<div class="ob-article-head">
+<div class="ob-eyebrow">01 / Product as Code</div>
+<h1>One rate change.<br><em>A bigger story.</em>
+</h1>
+<p class="ob-lede">A banking product is a set of promises. Make those promises explicit enough for people and software to explore together.</p>
+</div>
+<div class="ob-lab">
+<div class="ob-dark-head"><span>PRODUCT LAB / INTERACTIVE ILLUSTRATION</span><span>Based on SAV-FIXED</span>
+</div>
+<div class="ob-lab-grid">
+<div class="ob-editor">
+<div class="ob-file">savings-fixed.json <span>ILLUSTRATIVE SUMMARY</span>
+</div>
+<pre class="ob-code">{
+  <span class="ob-key">"productCode"</span>: <span class="ob-string">"SAV-FIXED"</span>,
+  <span class="ob-key">"currency"</span>: <span class="ob-string">"EUR"</span>,
+  <span class="ob-key">"baseRate"</span>: <span class="ob-number" id="ob-v2-code-rate">0.0250</span>,
+  <span class="ob-key">"bonusRate"</span>: <span class="ob-number">0.0100</span>,
+  <span class="ob-key">"conditions"</span>: [
+    <span class="ob-string">"no withdrawals in 30 days"</span>,
+    <span class="ob-string">"balance at least EUR 1000"</span>
+  ]
+}</pre>
+<div class="ob-editor-note">A readable summary of the sample definition. Explore the source for its complete structure and rules.</div>
+</div>
+<div class="ob-live"><small>FROM DEFINITION TO OUTCOME</small>
+<h3>Change a number.<br>See what it means.</h3><label class="ob-rate" for="ob-v2-rate"><span>Base annual rate</span><output id="ob-v2-rate-label">2.50%</output></label><input id="ob-v2-rate" type="range" min="0" max="5" step=".25" value="2.5" aria-label="Base annual interest rate"><label class="ob-checkbox"><input type="checkbox" id="ob-v2-bonus" checked=""><span>No withdrawals in the past 30 days.<br>The €10,000 balance meets the minimum.</span></label>
+<div aria-live="polite"><small>ILLUSTRATIVE ANNUAL GROSS INTEREST</small>
+<div class="ob-amount" id="ob-v2-total">€350.00</div>
+<div class="ob-breakdown"><span id="ob-v2-base">Base €250.00</span><span id="ob-v2-bonus-amount">Bonus €100.00</span>
+</div>
+<div class="ob-interest-bar" aria-hidden="true"><span id="ob-v2-base-bar" style="width:41.67%"></span><span id="ob-v2-bonus-bar" style="width:16.67%"></span>
+</div>
+</div>
+</div>
+</div>
+<div class="ob-lab-note"><span>Simple annual illustration on €10,000. Constant balance and conditions. Before fees, tax and compounding.</span><a href="https://github.com/JiRaska/open-bank-oss/blob/main/openbank-libs-domain/src/test/resources/product-ir/savings-fixed.json" target="_blank" rel="noopener">Read the real definition ↗</a>
+</div>
+</div>
+</section>
+<section class="ob-section ob-bound">
+<div class="ob-section-head">
+<div>
+<div class="ob-eyebrow">The next connection</div>
+<h2>The number is the start.<br><em>The review is the story.</em>
+</h2>
+</div>
+<p>A concept for bringing product simulation, checks and human approval into one shared change journey.</p>
+</div>
+<div class="ob-architecture">
+<div class="ob-dark-head"><span>PROPOSED PRODUCT CHANGE JOURNEY</span>
+<button type="button" class="ob-button" id="ob-play-product" hidden="">Trace the change ▷</button>
+</div>
+<div class="ob-process" id="ob-product-flow">
+<div class="ob-step" data-active="true"><small>01 / DEFINITION</small>
+<h3>Propose.</h3>
+<p>Make the new terms explicit.</p>
+</div>
+<div class="ob-step"><small>02 / SCENARIOS</small>
+<h3>Simulate.</h3>
+<p>Explore eligible and ineligible cases.</p>
+</div>
+<div class="ob-step"><small>03 / EVIDENCE</small>
+<h3>Compare.</h3>
+<p>Bring results into the review.</p>
+</div>
+<div class="ob-step"><small>04 / DECISION</small>
+<h3>Review.</h3>
+<p>A person examines the proposal.</p>
+</div>
+</div>
+<div class="ob-process-caption"><span id="ob-product-status" aria-live="polite">The proposed rate starts in a versioned definition.</span><strong>A shared language for product teams and developers.</strong>
+</div>
+</div>
+<div class="ob-two-columns">
+<div>
+<h3>For the banker.</h3>
+<p>Explore the terms, the conditions and the customer outcome in one place. Ask better questions before a change reaches a customer.</p>
+</div>
+<div>
+<h3>For the builder.</h3>
+<p>Start with typed definitions and an interpreter. Connect the same product rules to simulations, tests and review.</p><a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/adr/0352-product-as-code-typed-ir-pure-interpreter-git-native-catalog.md" target="_blank" rel="noopener">Explore the Product as Code architecture ↗</a>
+</div>
+</div>
+<div class="ob-next">
+<p>Every product change raises another question: what is the evidence?</p><a href="controls-as-code.html" class="ob-button">Explore controls &amp; evidence →</a>
+</div>
+</section>
+</main>
+<footer class="footer wrap"><a class="brand" href="index.html"><img class="brand-lockup" src="assets/lipa-lockup-light.svg" width="190" height="36" alt="OpenBank"></a>
+<div>
+<p>An open banking reference implementation. Built to be explored.</p>
+<p class="fine">Early-stage software · not a licensed bank · not production-ready. Demo data only.</p>
+<p class="fine">Platform: Apache-2.0. AI agent licensing: AGPL-3.0-only + commercial. <a href="https://github.com/JiRaska/open-bank-oss#license">License details ↗</a>
+</p>
+<p class="fine">© 2026 OpenBank contributors · <a href="classic.html">Previous website</a> · <a href="https://github.com/JiRaska/open-bank-oss/blob/main/TRADEMARKS.md">Independent project / trademark notice</a>
+</p>
+</div>
+</footer>
+<script src="brand.js">
+</script>
+<script src="bank-as-code.js?v=20261025" defer>
+</script>
+</body>
+</html>

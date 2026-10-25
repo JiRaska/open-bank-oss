@@ -242,6 +242,59 @@ test_batch1_identity_rules_do_not_cross_admit if {
 		with data.rules as rules_mock
 }
 
+# --- ledger.close.participate: day-close participation (ADR-0342 D2, #13167) ---
+
+participate(p, participant) := {"principal": p, "action": "ledger.close.participate", "resource": participant}
+
+test_each_participant_account_may_report_its_own_participant if {
+	rest.allow.allow with input as participate(interest_m2m, "interest") with data.rules as rules_mock
+	rest.allow.allow with input as participate(lending_m2m, "lending") with data.rules as rules_mock
+	"service-close-participation" in rest.allowed_reasons with input as participate(lending_m2m, "lending")
+		with data.rules as rules_mock
+}
+
+# Remove the `input.resource == participant` line and this goes red: an account reports for its
+# own participant only.
+test_a_participant_account_may_not_report_for_another_participant if {
+	not rest.allow.allow with input as participate(interest_m2m, "lending") with data.rules as rules_mock
+	not rest.allow.allow with input as participate(lending_m2m, "interest") with data.rules as rules_mock
+	not rest.allow.allow with input as participate(lending_m2m, "billing") with data.rules as rules_mock
+}
+
+# Nobody else reaches the action: not the shared client, not another ROLE_API account, not staff.
+test_no_other_principal_may_participate if {
+	every p in [services_m2m, other_role_api_sa, clearing_m2m, operator, edge] {
+		every participant in {"interest", "lending", "billing"} {
+			not rest.allow.allow with input as participate(p, participant) with data.rules as rules_mock
+		}
+	}
+}
+
+# --- #13709: billing-service's own identity reports participation and NOTHING else ---
+
+billing_m2m := {"service_account": true, "client_id": "openbank-billing", "type": "HUMAN", "id": "service-account-openbank-billing", "roles": ["ROLE_API"]}
+
+test_billing_may_report_its_own_participant if {
+	rest.allow.allow with input as participate(billing_m2m, "billing") with data.rules as rules_mock
+	"service-close-participation" in rest.allowed_reasons with input as participate(billing_m2m, "billing")
+		with data.rules as rules_mock
+}
+
+test_billing_may_not_report_for_another_participant if {
+	every participant in {"interest", "lending"} {
+		not rest.allow.allow with input as participate(billing_m2m, participant) with data.rules as rules_mock
+	}
+}
+
+# Billing's own identity must not post, reverse or read journals: the participation map is its
+# whole ledger grant. Add billing to any journal rule and this goes red.
+test_billing_has_no_journal_grant if {
+	every action in {"ledger.create", "ledger.reverse", "ledger.read", "ledger.list", "ledger.approve", "ledger.trigger", "ledger.replay", "ledger.close.draft"} {
+		not rest.allow.allow with input as {"principal": billing_m2m, "action": action, "resource": "billing"}
+			with data.rules as rules_mock
+	}
+}
+
 # --- #10486 batch 2: transaction-service and settlement-service own identities (ROLE_API only) ---
 
 transaction_m2m := {"service_account": true, "client_id": "openbank-transaction", "type": "HUMAN", "id": "service-account-openbank-transaction", "roles": ["ROLE_API"]}

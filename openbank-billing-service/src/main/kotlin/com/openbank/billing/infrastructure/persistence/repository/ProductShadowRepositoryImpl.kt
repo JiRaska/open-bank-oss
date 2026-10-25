@@ -84,7 +84,7 @@ internal object ProductShadowRows {
 }
 
 /**
- * The shadow queue over `billing_product_shadow_input` (V10). [claim] locks due rows with
+ * The shadow queue over `billing_product_shadow_input` (V11). [claim] locks due rows with
  * `SKIP LOCKED`, so two billing pods never compare one decision twice; a claim older than [lease]
  * is offered again (its pod died mid-batch). Retries back off linearly by [backoff] per attempt.
  */
@@ -204,7 +204,7 @@ class ProductShadowQueueRepositoryImpl(private val sf: Mutiny.SessionFactory, pr
     }
 }
 
-/** Billing's immutable local IR copies (`billing_product_revision_ir`, V10). Insert-if-absent, never updated. */
+/** Billing's immutable local IR copies (`billing_product_revision_ir`, V11). Insert-if-absent, never updated. */
 @ApplicationScoped
 class RevisionIrCopyRepositoryImpl(private val sf: Mutiny.SessionFactory, private val clock: Clock) :
     RevisionIrCopyPort {

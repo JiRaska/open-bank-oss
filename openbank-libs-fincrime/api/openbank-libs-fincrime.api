@@ -1,0 +1,89 @@
+public final class com/openbank/libs/fincrime/AmlCaseSeverity : java/lang/Enum {
+	public static final field CRITICAL Lcom/openbank/libs/fincrime/AmlCaseSeverity;
+	public static final field Companion Lcom/openbank/libs/fincrime/AmlCaseSeverity$Companion;
+	public static final field HIGH Lcom/openbank/libs/fincrime/AmlCaseSeverity;
+	public static final field LOW Lcom/openbank/libs/fincrime/AmlCaseSeverity;
+	public static final field MEDIUM Lcom/openbank/libs/fincrime/AmlCaseSeverity;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/AmlCaseSeverity;
+	public static fun values ()[Lcom/openbank/libs/fincrime/AmlCaseSeverity;
+}
+
+public final class com/openbank/libs/fincrime/AmlCaseSeverity$Companion {
+	public final fun fromWire (Ljava/lang/String;)Lcom/openbank/libs/fincrime/AmlCaseSeverity;
+}
+
+public final class com/openbank/libs/fincrime/FraudVerdict : java/lang/Enum {
+	public static final field ALLOW Lcom/openbank/libs/fincrime/FraudVerdict;
+	public static final field CHALLENGE Lcom/openbank/libs/fincrime/FraudVerdict;
+	public static final field Companion Lcom/openbank/libs/fincrime/FraudVerdict$Companion;
+	public static final field DECLINE Lcom/openbank/libs/fincrime/FraudVerdict;
+	public static final field REVIEW Lcom/openbank/libs/fincrime/FraudVerdict;
+	public static final field UNKNOWN Lcom/openbank/libs/fincrime/FraudVerdict;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/FraudVerdict;
+	public static fun values ()[Lcom/openbank/libs/fincrime/FraudVerdict;
+}
+
+public final class com/openbank/libs/fincrime/FraudVerdict$Companion {
+	public final fun fromWire (Ljava/lang/String;)Lcom/openbank/libs/fincrime/FraudVerdict;
+}
+
+public final class com/openbank/libs/fincrime/ScreeningDecision : java/lang/Enum {
+	public static final field BLOCK Lcom/openbank/libs/fincrime/ScreeningDecision;
+	public static final field CLEAR Lcom/openbank/libs/fincrime/ScreeningDecision;
+	public static final field REVIEW Lcom/openbank/libs/fincrime/ScreeningDecision;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/ScreeningDecision;
+	public static fun values ()[Lcom/openbank/libs/fincrime/ScreeningDecision;
+}
+
+public final class com/openbank/libs/fincrime/ScreeningMatchStatus : java/lang/Enum {
+	public static final field CLEAR Lcom/openbank/libs/fincrime/ScreeningMatchStatus;
+	public static final field Companion Lcom/openbank/libs/fincrime/ScreeningMatchStatus$Companion;
+	public static final field ESCALATED Lcom/openbank/libs/fincrime/ScreeningMatchStatus;
+	public static final field HIT Lcom/openbank/libs/fincrime/ScreeningMatchStatus;
+	public static final field POTENTIAL_HIT Lcom/openbank/libs/fincrime/ScreeningMatchStatus;
+	public static final field WHITELISTED Lcom/openbank/libs/fincrime/ScreeningMatchStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/ScreeningMatchStatus;
+	public static fun values ()[Lcom/openbank/libs/fincrime/ScreeningMatchStatus;
+}
+
+public final class com/openbank/libs/fincrime/ScreeningMatchStatus$Companion {
+	public final fun fromWire (Ljava/lang/String;)Lcom/openbank/libs/fincrime/ScreeningMatchStatus;
+}
+
+public final class com/openbank/libs/fincrime/ScreeningPolicy {
+	public static final field INSTANCE Lcom/openbank/libs/fincrime/ScreeningPolicy;
+	public static final field POTENTIAL_HIT_BLOCK_THRESHOLD D
+	public final fun decide (Ljava/util/List;)Lcom/openbank/libs/fincrime/ScreeningDecision;
+}
+
+public final class com/openbank/libs/fincrime/ScreeningResult {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/fincrime/ScreeningRole;Lcom/openbank/libs/fincrime/ScreeningMatchStatus;DLjava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/fincrime/ScreeningRole;
+	public final fun component3 ()Lcom/openbank/libs/fincrime/ScreeningMatchStatus;
+	public final fun component4 ()D
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/fincrime/ScreeningRole;Lcom/openbank/libs/fincrime/ScreeningMatchStatus;DLjava/lang/String;)Lcom/openbank/libs/fincrime/ScreeningResult;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/ScreeningResult;Ljava/lang/String;Lcom/openbank/libs/fincrime/ScreeningRole;Lcom/openbank/libs/fincrime/ScreeningMatchStatus;DLjava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/ScreeningResult;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMatchedEntity ()Ljava/lang/String;
+	public final fun getRole ()Lcom/openbank/libs/fincrime/ScreeningRole;
+	public final fun getScore ()D
+	public final fun getStatus ()Lcom/openbank/libs/fincrime/ScreeningMatchStatus;
+	public final fun getSubject ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/ScreeningRole : java/lang/Enum {
+	public static final field CREDITOR Lcom/openbank/libs/fincrime/ScreeningRole;
+	public static final field DEBTOR Lcom/openbank/libs/fincrime/ScreeningRole;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/ScreeningRole;
+	public static fun values ()[Lcom/openbank/libs/fincrime/ScreeningRole;
+}
+

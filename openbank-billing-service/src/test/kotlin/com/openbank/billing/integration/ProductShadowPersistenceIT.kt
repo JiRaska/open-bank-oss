@@ -30,7 +30,7 @@ import java.util.UUID
 import javax.sql.DataSource
 
 /**
- * ADR-0352 phase 3 persistence against real Postgres (V10): an assessment commits its shadow input in
+ * ADR-0352 phase 3 persistence against real Postgres (V11): an assessment commits its shadow input in
  * the SAME transaction, the queue claims it once (SKIP LOCKED), a completed input is never offered
  * again, and a local IR copy is insert-once and immutable in the database.
  */
