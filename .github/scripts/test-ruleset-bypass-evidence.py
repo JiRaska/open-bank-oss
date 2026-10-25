@@ -23,12 +23,13 @@ class EvidenceCollectorTest(unittest.TestCase):
         self.assertEqual(workflow['permissions'], {})
         job, = workflow['jobs'].values()
         self.assertEqual(job['runs-on'], 'ubuntu-latest')
+        self.assertEqual(job['environment'], 'ruleset-evidence')
         steps = job['steps']
         self.assertEqual(len(steps), 4)
         self.assertTrue(steps[0]['uses'].startswith('actions/create-github-app-token@'))
         self.assertEqual(steps[0]['with'], {
-            'app-id': '${{ secrets.GITOPS_APP_ID }}',
-            'private-key': '${{ secrets.GITOPS_APP_PRIVATE_KEY }}',
+            'app-id': '${{ secrets.RULESET_EVIDENCE_APP_ID }}',
+            'private-key': '${{ secrets.RULESET_EVIDENCE_APP_PRIVATE_KEY }}',
             'owner': '${{ github.repository_owner }}',
             'repositories': '${{ github.event.repository.name }}',
             'permission-administration': 'write',

@@ -220,6 +220,9 @@ allowed_reasons contains "service-lending-ledger-post" if {
 close_participant_accounts := {
 	"service-account-openbank-interest": "interest",
 	"service-account-openbank-lending": "lending",
+	# billing holds NO ledger.create on its own identity: its journals ride the shared
+	# openbank-services principal. This is its only ledger grant (#13709 review).
+	"service-account-openbank-billing": "billing",
 }
 
 allowed_reasons contains "service-close-participation" if {

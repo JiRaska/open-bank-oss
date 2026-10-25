@@ -22,11 +22,13 @@ class ProducerIsolationTests(unittest.TestCase):
         create = next(step for step in self.steps if step.get('id') == 'gitops_pr')
         template = create['with']['branch']
         def branch(run_id):
-            return template.replace('${{ github.sha }}', 'a' * 40).replace('${{ github.run_id }}', str(run_id))
+            return template.replace('${{ github.sha }}', 'b' * 40).replace('${{ needs.changes.outputs.source_commit }}', 'a' * 40).replace('${{ github.run_id }}', str(run_id))
         self.assertNotEqual(branch(101), branch(102))
         self.assertNotIn('github.run_attempt', template)  # retry retains producer identity
         self.assertEqual(branch(101), 'chore/gitops-auto-deploy-' + 'a' * 40 + '-run101')
         self.assertTrue(branch(101).startswith('chore/gitops-auto-deploy-'))
+        self.assertNotIn('b' * 40, branch(101))  # workflow identity is not the promoted source
+        self.assertNotIn('${{', branch(101))
 
     def test_gate_stops_after_a_failed_decision_suite(self):
         gates = yaml.safe_load((ROOT / '.github/gates/gates.yaml').read_text())
