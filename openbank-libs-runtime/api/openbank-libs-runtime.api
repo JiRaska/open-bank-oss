@@ -1554,6 +1554,36 @@ public abstract interface class com/openbank/libs/productrevision/SignedRevision
 	public abstract fun fetch (Ljava/lang/String;)Lcom/openbank/libs/productrevision/SignedRevisionCopy;
 }
 
+public final class com/openbank/libs/productrevision/shadow/ProductShadowRecorder {
+	public static final field COMPARED Ljava/lang/String;
+	public static final field Companion Lcom/openbank/libs/productrevision/shadow/ProductShadowRecorder$Companion;
+	public static final field DIVERGED Ljava/lang/String;
+	public static final field INPUTS Ljava/lang/String;
+	public static final field NOT_COMPARABLE Ljava/lang/String;
+	public fun <init> (Lio/micrometer/core/instrument/MeterRegistry;Ljava/lang/String;)V
+	public final fun compared (Ljava/lang/String;Ljava/lang/String;Z)V
+	public final fun inputQueued ()V
+	public final fun notComparable (Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;)V
+}
+
+public final class com/openbank/libs/productrevision/shadow/ProductShadowRecorder$Companion {
+}
+
+public final class com/openbank/libs/productrevision/shadow/ShadowNotComparable : java/lang/Enum {
+	public static final field INPUT_UNKNOWN Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
+	public static final field IR_EVALUATION_FAILED Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
+	public static final field NO_IR Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
+	public static final field REVISION_UNAVAILABLE Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
+	public static final field RULE_UNMAPPED Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
+	public static final field VERIFICATION_DISABLED Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
+	public static final field VERIFICATION_FAILED Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
+	public static final field VERIFIER_UNAVAILABLE Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getTag ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
+	public static fun values ()[Lcom/openbank/libs/productrevision/shadow/ShadowNotComparable;
+}
+
 public final class com/openbank/libs/resilience/KeyedCall {
 	public static final field INSTANCE Lcom/openbank/libs/resilience/KeyedCall;
 	public final fun classify (ZLjakarta/ws/rs/ProcessingException;)Ljava/lang/RuntimeException;
