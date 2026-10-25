@@ -69,3 +69,23 @@ a přehrání nedoručených poplatků v jiné měně než CZK popisuje
 řádek. Samotnou konfigurací se vrátit nelze: nejdřív nastavte `OPENBANK_BILLING_LEDGER_POST_BY_CLASS=false` a znovu nasaďte Billing,
 teprve potom vraťte ledger. Pokud se ledger vrátí jako první, každé zaúčtování selže, dokud se Billing
 znovu nenasadí.
+
+## Účast na uzávěrce dne (ADR-0342, #13167)
+
+Billing hlásí každý dokončený účetní den (pražský čas) do ledger-service jako účastník `billing`
+(`BillingCloseParticipationScheduler`, každou hodinu v :50; zpětné okno 3 dny) pod vlastní identitou
+(`m2m`, Keycloak `openbank-billing`); ledger to autorizuje jako `ledger.close.participate` jen pro `billing`.
+
+- Cyklus není splatný nebo je sweep vypnutý: SKIPPED s důvodem.
+- Splatný cyklus bez záznamu běhu, nebo poplatek cyklu stále PENDING: zatím nic, ledger den drží.
+- Cyklus proběhl a všechny poplatky jsou zaúčtované: RAN.
+- Selhané účty, přerušený sweep nebo poplatek ve stavu FAILED: REFUSED s pevnou kategorií.
+
+**Zmeškaný cyklus.** `BillingCycleScheduler.catchUp` (každých 15 min, poprvé 2 min po startu) spustí
+sweep pro den splatnosti, pokud cron v tomto měsíci už proběhl a žádný běh cyklu není zaznamenán;
+idempotentně podle cycle id a nikdy souběžně s běžícím sweepem.
+
+**Poplatek odmítnutý do uzavřeného dne.** `409 ACCOUNTING_DAY_CLOSED` označí poplatek FAILED a zvýší
+`openbank_billing_fee_post_closed_day_refusals_total`; spustí se alert `BillingFeeRefusedIntoClosedDay`.
+Náprava: runbook `0033-billing-fee-refused-into-closed-day.md` (přefakturace pod novým klíčem se
+čtyřma očima, záznam v `billing_fee_rebill`).
