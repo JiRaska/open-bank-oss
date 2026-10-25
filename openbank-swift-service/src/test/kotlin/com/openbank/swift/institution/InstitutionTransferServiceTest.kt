@@ -113,6 +113,7 @@ class InstitutionTransferServiceTest {
         var calls = 0
         var queries = 0
         var timeoutAfterAccept = false
+        var beforeTimeout: (suspend (InstitutionTransfer) -> Unit)? = null
         var queryUnavailable = false
         var queryAnswer: SchemeStatus? = null
         val taken = linkedMapOf<String, InstitutionTransferSubmission>()
@@ -122,7 +123,10 @@ class InstitutionTransferServiceTest {
             calls++
             identities += transfer.messageId to transfer.messageCreatedAt
             val answer = taken.getOrPut(transfer.uetr) { next() }
-            if (timeoutAfterAccept) throw SchemeGatewayUnavailableException(RuntimeException("read timeout"))
+            if (timeoutAfterAccept) {
+                beforeTimeout?.invoke(transfer)
+                throw SchemeGatewayUnavailableException(RuntimeException("read timeout"))
+            }
             return answer
         }
         override suspend fun queryInstitutionTransferStatus(transfer: InstitutionTransfer): SchemeStatus {
@@ -322,6 +326,62 @@ class InstitutionTransferServiceTest {
             runBlocking { service.onReleased(parsed(clash)) }
         }.isInstanceOf(InstitutionTransferRefusedException::class.java)
         assertThat(repo.rows).hasSize(1)
+    }
+
+    @Test
+    fun `a malformed replay identifier never enters operational logs`(): Unit = runBlocking {
+        val original = release()
+        service.onReleased(parsed(original))
+        val records = mutableListOf<java.util.logging.LogRecord>()
+        val logger = java.util.logging.Logger.getLogger(InstitutionTransferService::class.java.name)
+        val handler = object : java.util.logging.Handler() {
+            override fun publish(record: java.util.logging.LogRecord) {
+                records += record
+            }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        logger.addHandler(handler)
+        try {
+            assertThatThrownBy {
+                runBlocking {
+                    service.onReleased(parsed(original + ("paymentId" to "PRIVATE_SENTINEL\nforged-record")))
+                }
+            }.isInstanceOf(InstitutionTransferRefusedException::class.java)
+        } finally {
+            logger.removeHandler(handler)
+        }
+        assertThat(records).isNotEmpty()
+        val emitted = records.joinToString { record ->
+            record.message + record.parameters?.joinToString().orEmpty() + record.thrown?.stackTraceToString().orEmpty()
+        }
+        assertThat(emitted).doesNotContain("PRIVATE_SENTINEL", "forged-record")
+        assertThat(repo.rows).hasSize(1)
+        assertThat(statuses()).containsExactly("ACCEPTED", "SENT", "SETTLED")
+    }
+
+    @Test
+    fun `a stale timeout never downgrades a newer transfer decision or resend claim`(): Unit = runBlocking {
+        gateway.timeoutAfterAccept = true
+        for (newerState in listOf(
+            InstitutionTransferStatus.SENT,
+            InstitutionTransferStatus.SETTLED,
+            InstitutionTransferStatus.REJECTED,
+            InstitutionTransferStatus.MANUAL_RECONCILIATION,
+            InstitutionTransferStatus.SUBMITTING,
+        )) {
+            val original = release()
+            var winner: InstitutionTransfer? = null
+            var winnerOutboxSize = 0
+            gateway.beforeTimeout = { pending ->
+                winner = repo.saveWithOutbox(pending.copy(status = newerState, resendTaken = true), emptyList())
+                winnerOutboxSize = repo.outbox.size
+            }
+            assertThatThrownBy { runBlocking { service.onReleased(parsed(original)) } }
+                .isInstanceOf(SchemeGatewayUnavailableException::class.java)
+            assertThat(repo.findByPaymentId(UUID.fromString(original["paymentId"] as String))).isEqualTo(winner)
+            assertThat(repo.outbox).hasSize(winnerOutboxSize)
+        }
     }
 
     @Test

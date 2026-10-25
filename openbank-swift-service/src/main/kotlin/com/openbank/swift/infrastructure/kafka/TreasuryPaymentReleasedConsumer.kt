@@ -9,12 +9,14 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.swift.application.usecase.InstitutionTransferRefusedException
 import com.openbank.swift.application.usecase.InstitutionTransferService
+import com.openbank.swift.domain.institution.InstitutionTransfer
 import com.openbank.swift.domain.institution.ReleasedPayment
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.future.await
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.jboss.logging.Logger
+import java.util.UUID
 
 /**
  * Consumes `treasury.payment.released.v1` from `openbank.treasury.payments` (contract 9.1) on the
@@ -38,7 +40,7 @@ class TreasuryPaymentReleasedConsumer(
     private val log = Logger.getLogger(TreasuryPaymentReleasedConsumer::class.java)
 
     /**
-     * Acks only after [handle] returns; nacks on ANY failure, logged with its cause, so the
+     * Acks only after [handle] returns; nacks on ANY failure, logged by exception type without payload-bearing causes, so the
      * connector's failure-strategy (dead-letter-queue) parks the record. Explicit rather than
      * left to the framework's exception-to-nack mapping so the log names why a record was parked.
      */
@@ -48,7 +50,10 @@ class TreasuryPaymentReleasedConsumer(
         try {
             handle(message.payload)
         } catch (e: Exception) {
-            log.warnf(e, "treasury.payment.released.v1 not processed; nacking for the dead-letter queue")
+            log.warnf(
+                "treasury.payment.released.v1 not processed (%s); nacking for the dead-letter queue",
+                e.javaClass.simpleName,
+            )
             message.nack(e).await()
             return
         }
@@ -65,12 +70,38 @@ class TreasuryPaymentReleasedConsumer(
             throw InstitutionTransferRefusedException("payload is not a JSON object")
         }
         val release = parse(node)
-        EventRetry.withRetry(
-            log,
-            "institution transfer",
-            release.paymentId,
-            isRetryable = EventRetry.RETRY_UNLESS_DETERMINISTIC,
-        ) { service.onReleased(release) }
+        // EventRetry logs its key and failure message/stack. Neither the unvalidated wire id nor
+        // a dependency exception (which may echo SQL/XML values) belongs in operational logs.
+        val logKey = release.paymentId?.let {
+            runCatching { UUID.fromString(it) }.getOrNull()?.takeIf { id ->
+                id.toString() ==
+                    it
+            }
+        }
+        try {
+            EventRetry.withRetry(
+                log,
+                "institution transfer",
+                logKey,
+                isRetryable = { failure ->
+                    EventRetry.RETRY_UNLESS_DETERMINISTIC((failure as SafeRetryFailure).original)
+                },
+            ) {
+                retryLogView(release)
+            }
+        } catch (failure: SafeRetryFailure) {
+            // Preserve the original retry/nack contract; only the helper's logging view is redacted.
+            throw failure.original
+        }
+    }
+
+    // Type-agnostic only to redact the retry helper's logging view; its original exception
+    // classifier, attempt budget and eventual exception identity are preserved.
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun retryLogView(release: ReleasedPayment): InstitutionTransfer = try {
+        service.onReleased(release)
+    } catch (failure: Exception) {
+        throw SafeRetryFailure(failure)
     }
 
     companion object {
@@ -112,3 +143,6 @@ class TreasuryPaymentReleasedConsumer(
         }
     }
 }
+
+/** Carries the original privately, without making its message or cause part of a logged stack. */
+private class SafeRetryFailure(val original: Exception) : RuntimeException(original.javaClass.simpleName)
