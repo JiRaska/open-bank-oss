@@ -60,6 +60,14 @@ nad stejnou ceremonií nahlas kolidují (422) místo tichého přepsání.
 
 ## Perzistence
 
+Repository používají Hibernate Reactive. JDBC datasource zůstává dostupný pro startovní migrace Flyway,
+zatímco `quarkus.hibernate-orm.blocking=false` zabraňuje spuštění nepotřebné blokující Hibernate factory.
+Přístup pro migrace je tím oddělený od vytváření reaktivních sessions. Kvůli tomuto oddělení nevypínejte
+JDBC datasource ani Hibernate Reactive.
+
+`DocumentPersistenceModeProviderVerificationTest` ověřuje nepřítomnost blokující factory, shodné
+reaktivní a JDBC čtení z migrované databáze a HTTP 401 při chybějící M2M identitě.
+
 Vlastní databáze `openbank_documents`, `generation: none`, Flyway V1..V3. Pouze outbox entita rozšiřuje
 `PanacheOutboxEntity` (Hibernate sekvence `document_outbox_seq`, vytvořená ve V3 — hlídá
 `HibernateSequenceGuardTest`); ostatní entity používají aplikačně přidělená UUID/String id.
