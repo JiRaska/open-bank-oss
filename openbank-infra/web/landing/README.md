@@ -33,6 +33,10 @@ Open `http://127.0.0.1:8766`. Check the homepage, TestFlight form, demo dialogs,
   in the provenance manifest. Original PNGs are copied byte-for-byte, without image edits
   or manual branding replacement. These are not physical-device/customer screenshots.
   Actual clock and animation frames are recorded, without a reproducibility claim.
+  Both HOME references include a query key derived from the PNG SHA-256, so a returning
+  browser requests the new image instead of reusing the still-fresh previous URL.
+  The deploy script separately revalidates HTML and invalidates the CDN; CDN invalidation
+  does not clear a visitor's browser cache.
 - `assets/lipa-{mark,lockup-light,lockup-dark,icon}.svg`: approved vector exports from
   the app's `design-system/brand/lipa`. The icon PNGs and root `favicon.ico` derive from
   that same master. Do not redraw the symbol or typeset a substitute wordmark.

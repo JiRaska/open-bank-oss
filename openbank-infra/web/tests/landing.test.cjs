@@ -252,7 +252,7 @@ test('all entry pages use current brand assets, including archive and social met
     assert.ok(fs.existsSync(path.join(site, share.pathname)));
   }
   const d = new JSDOM(read('index.html')).window.document;
-  assert.equal(d.querySelector('.phone-stage img').getAttribute('src'), 'assets/app-iphone-20261024.png');
+  assert.equal(d.querySelector('.phone-stage img').getAttribute('src').split('?')[0], 'assets/app-iphone-20261024.png');
   assert.match(d.querySelector('.phone-figure figcaption').textContent, /Actual app render.*synthetic demo data.*iOS Simulator/);
 });
 
@@ -294,4 +294,18 @@ test('brand provenance rejects omissions, duplicates, unexpected assets, missing
     /must cover exactly the PR inventory/);
   assert.throws(() => assertBrandProvenance(complete, () => { throw new Error('Missing asset'); }), /Missing asset/);
   assert.throws(() => assertBrandProvenance(complete, () => Buffer.from('changed bytes')), /Unreviewed brand asset change/);
+});
+
+// A fresh HTML response cannot invalidate a still-fresh browser cache entry at the old image URL.
+test('app preview URL changes with the recorded image content hash for cached visitors', () => {
+  const asset = JSON.parse(read('assets/lipa-provenance.json')).assets
+    .find(asset => asset.file === 'app-iphone-20261024.png');
+  const digest = require('node:crypto').createHash('sha256')
+    .update(fs.readFileSync(path.join(site, 'assets', asset.file))).digest('hex');
+  assert.equal(asset.sha256, digest);
+  const expected = `assets/${asset.file}?v=${digest.slice(0, 12)}`;
+  for (const page of ['index.html', 'classic.html']) {
+    const document = new JSDOM(read(page)).window.document;
+    assert.equal(document.querySelector('img[src*="app-iphone-20261024.png"]').getAttribute('src'), expected, page);
+  }
 });
