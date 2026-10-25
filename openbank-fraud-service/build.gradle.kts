@@ -30,6 +30,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    // ADR-0353: the financial-crime published language, declared once for producers and rails.
+    implementation(project(":openbank-libs-fincrime"))
     implementation(project(":openbank-libs-runtime"))
     // In-process ONNX Runtime serving (ADR-0139 phase-1b, OnnxFraudModel). Fraud-service-only for
     // now (single ML consumer) — kept out of the shared version catalog on purpose, same rationale

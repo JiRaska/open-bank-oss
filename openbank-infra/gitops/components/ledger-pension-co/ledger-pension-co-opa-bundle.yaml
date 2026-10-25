@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger-pension-co
   annotations:
-    openbank.tech/policy-checksum: "c8a882100619e3de"
+    openbank.tech/policy-checksum: "bc7f9c2c254879e1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1017,6 +1017,9 @@ data:
     close_participant_accounts := {
     	"service-account-openbank-interest": "interest",
     	"service-account-openbank-lending": "lending",
+    	# billing holds NO ledger.create on its own identity: its journals ride the shared
+    	# openbank-services principal. This is its only ledger grant (#13709 review).
+    	"service-account-openbank-billing": "billing",
     }
 
     allowed_reasons contains "service-close-participation" if {
