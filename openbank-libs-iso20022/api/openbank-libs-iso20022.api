@@ -532,14 +532,3 @@ public final class com/openbank/libs/iso20022/SettlementMethod : java/lang/Enum 
 	public static fun values ()[Lcom/openbank/libs/iso20022/SettlementMethod;
 }
 
-public final class com/openbank/libs/iso20022/SettlementRail : java/lang/Enum {
-	public static final field CERTIS Lcom/openbank/libs/iso20022/SettlementRail;
-	public static final field SEPA Lcom/openbank/libs/iso20022/SettlementRail;
-	public static final field SWIFT Lcom/openbank/libs/iso20022/SettlementRail;
-	public static final field TARGET2 Lcom/openbank/libs/iso20022/SettlementRail;
-	public static fun getEntries ()Lkotlin/enums/EnumEntries;
-	public final fun getInstitutionRail ()Lcom/openbank/libs/iso20022/InstitutionTransferRail;
-	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/iso20022/SettlementRail;
-	public static fun values ()[Lcom/openbank/libs/iso20022/SettlementRail;
-}
-

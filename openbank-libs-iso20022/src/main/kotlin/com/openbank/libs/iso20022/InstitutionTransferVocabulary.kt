@@ -44,26 +44,6 @@ enum class InstitutionTransferRail {
 }
 
 /**
- * How a counterparty's standing settlement instruction (SSI) says it is paid. A different concept
- * from [InstitutionTransferRail]: an SSI may name SEPA, the customer-scheme credit transfer, which is
- * never a bank-own rail — a bank-own payment to a SEPA SSI travels TARGET2 ([institutionRail]).
- */
-enum class SettlementRail {
-    CERTIS,
-    SEPA,
-    TARGET2,
-    SWIFT,
-    ;
-
-    val institutionRail: InstitutionTransferRail
-        get() = when (this) {
-            CERTIS -> InstitutionTransferRail.CERTIS
-            SEPA, TARGET2 -> InstitutionTransferRail.TARGET2
-            SWIFT -> InstitutionTransferRail.SWIFT
-        }
-}
-
-/**
  * Lifecycle of a bank-own credit transfer on its rail. Only [ANNOUNCED] statuses are published
  * (contract 9.2) and may reach a consumer; the others are the rail's internal states. ACCEPTED:
  * validated and stored, not yet on the wire. SENT: the scheme took it. SETTLED: the scheme
