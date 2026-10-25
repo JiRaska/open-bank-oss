@@ -39,6 +39,11 @@ dependencies {
     // rather than a per-service restatement of it (#3914).
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // E2E: WireMock stands in for ALL five downstream trust boundaries (account, party,
+    // transaction, balance, document) plus both OIDC token endpoints over real HTTP — the close
+    // fan-out and the snapshot-purity proof (render-after-close dials nothing) both need a real
+    // wire and a real request journal.
+    testImplementation(libs.wiremock.standalone)
     // StatementMissingParamStatusIT (#3624): the missing-parameter defect lives in JAX-RS parameter
     // injection, so it is only observable over real HTTP — a unit test calling the handler supplies
     // the very argument the framework does not.
