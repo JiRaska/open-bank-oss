@@ -46,6 +46,18 @@ no external network connection in sandbox. Sandbox `maskedPan` is synthetic (no 
 All mutations require `Idempotency-Key` or `X-Operator-Id` header; resource-level
 `@Authorize` enforces OPA policy (ADR-0034, advisory→enforce).
 
+### Customer-facing masked card reads
+
+The verified customer-edge machine identity may list cards by party and read a card by ID.
+The edge derives the party from the authenticated customer and checks card ownership or a
+valid delegation before disclosing a card. A caller-supplied party is not accepted by the
+customer list route. The resource guard and OPA policy both bind the allow-list entry to
+the verified client; an unrelated client using the edge's display name remains denied.
+These grants do not add write permissions or change the separate holder-only, SCA-bound
+secure-details path. Tests cover allowed reads, a spoofed client, unrelated service
+accounts, and denial of writes. Rollback restores the previous named-caller sets and
+regenerates the policy bundle; no stored data changes.
+
 ## 4. STRIDE
 
 | Threat | Vector | Mitigation |
