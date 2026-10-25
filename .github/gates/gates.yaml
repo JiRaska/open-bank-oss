@@ -7133,6 +7133,21 @@ gates:
     run: |
       python3 .github/scripts/check-product-ir-purity.py --root .
 
+  - id: product-revision-pinned
+    name: "product-bearing services persist the published catalog revision at contract opening (ADR-0341, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "ADR-0341 D1: a contract's terms come only from the revision it was opened under, so a service that creates a product-bearing aggregate without persisting a pin has no answer to 'what were this contract's terms'. Structural and decidable: migration column, entity @Column, creation path binds the pin; the list is derived from catalog product reference columns so a new product-bearing service cannot stay unlisted."
+    review_after: "2026-12-31"
+    verified: "2026-10-25 — account pinned, lending and card-issuance pending, 3 services excluded with reasons. In a scratch copy of the real tree each of: deleting `productRevisionPin = pin` from AccountService.openAccount, renaming the entity's @Column, and removing V33 turned it red (--enforce exit 1); restoring each turned it green. --self-test 15 cases"
+    budget_seconds: 10
+    min_subjects: 2  # 3 services under product_bearing_services.services at introduction (2026-10-25)
+    selftest: python3 .github/scripts/check-product-revision-pinned.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-product-revision-pinned.py"]
+    run: |
+      python3 .github/scripts/check-product-revision-pinned.py --root .
+
 
   - id: dr-restore-orchestration
     name: "DR restore transport, result validation and owned cleanup"
