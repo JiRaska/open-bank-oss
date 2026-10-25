@@ -172,6 +172,17 @@ public abstract class com/openbank/libs/testing/mtls/ProductionListenerProfile :
 	public fun testResources ()Ljava/util/List;
 }
 
+public abstract class com/openbank/libs/testing/oidc/M2mOidcClientIdentityWiringConformance {
+	protected fun assertNamedClientExtras (Ljava/util/Map;)V
+	protected abstract fun getClientId ()Ljava/lang/String;
+	protected abstract fun getNamedClients ()Ljava/util/List;
+	protected final fun getOidcClientName ()Ljava/lang/String;
+	protected final fun namedClientConfig ()Ljava/util/Map;
+	public final fun the default client stays the shared one until the remaining edges migrate ()V
+	public final fun the migrated rest-clients select the named oidc-client and not the default one ()V
+	public final fun the named oidc-client authenticates as its own client with its own secret ()V
+}
+
 public abstract class com/openbank/libs/testing/outbox/OutboxDispatchConformanceIT {
 	public fun <init> ()V
 	public final fun dispatch publishes pending rows with a stable per-aggregate key plus CloudEvents headers, marks SENT ()V
