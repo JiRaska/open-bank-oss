@@ -138,7 +138,7 @@ class BillingCycleScheduler {
                     cycleId,
                     accountIds.size,
                 )
-                val processed = billingCycleService.runCycle(cycleId, accountIds, currency)
+                val processed = billingCycleService.runCycle(cycleId, accountIds, currency, "MONTHLY")
                 log.infof(
                     "[billing-cycle-scheduler] Billing cycle %s done: %d account(s) processed",
                     cycleId,
@@ -165,7 +165,7 @@ class BillingCycleScheduler {
             do {
                 val page = accountDiscovery.activeAccounts(discoveryPageSize, cursor)
                 if (page.accountIds.isNotEmpty()) {
-                    processed += billingCycleService.runCycle(cycleId, page.accountIds, currency)
+                    processed += billingCycleService.runCycle(cycleId, page.accountIds, currency, "MONTHLY")
                     pages++
                 }
                 cursor = page.nextCursor
