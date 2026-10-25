@@ -548,6 +548,7 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
+      actions: read   # exact-SHA main-push build artifact; no PR artifacts are accepted
     timeout-minutes: 120
     env:
       # This line, not gradle.properties, is what sizes the daemon for this job (#9832). A
@@ -635,6 +636,16 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
+      - name: Restore verified context build when available
+        id: context_build
+        if: contains(fromJSON(needs.changes.outputs.services), 'openbank-context-service')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/service-build-artifact.py restore \
+            --repo "$GITHUB_REPOSITORY" --service openbank-context-service \
+            --sha "$GITHUB_SHA" --destination "$GITHUB_WORKSPACE"
+
       - name: Build fast-jars (parallel)
         id: build
         # analytics-sink selects its AnalyticsSink binding with @IfBuildProperty, which Quarkus
@@ -649,6 +660,7 @@ jobs:
           # reach it). Without this the image ships the @Default InMemoryNonceStore, and the PoP
           # replay guard silently weakens to per-pod once replicas > 1 (issue #4728).
           AGENT_SVID_NONCE_STORE: redis
+          CONTEXT_BUILD_RESTORED: ${{ steps.context_build.outputs.restored }}
         run: |
           set -euo pipefail
           SERVICES='${{ needs.changes.outputs.services }}'
@@ -668,6 +680,10 @@ jobs:
           TASKS=()
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) continue ;; esac
+            if [ "$svc" = openbank-context-service ] && [ "$CONTEXT_BUILD_RESTORED" = true ]; then
+              echo "Using verified exact-source context fast-jar and SBOM."
+              continue
+            fi
             # cyclonedxBom alongside quarkusBuild so every service's image gets its
             # CycloneDX SBOM baked in (served live at /q/openbank/sbom by libs
             # SbomResource). Fleet-wide via this central loop — no per-service
