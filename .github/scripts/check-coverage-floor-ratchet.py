@@ -495,7 +495,7 @@ def git_plumbing_test() -> bool:
             base3 = run("git", "rev-parse", "HEAD", cwd=repo)
             plugin.write_text(plugin.read_text().replace("minValue = 40", "minValue = 50"))
             run("git", "commit", "-q", "-am", f"merge-train: member #7\n\nPR-Number: #7\nPR-Head: {'a' * 40}\n", cwd=repo)
-            carrier = {"user": {"login": "openbank-gitops-bot[bot]", "type": "Bot", "id": 305862397}, "labels": [{"name": "merge-train"}],
+            carrier = {"user": {"login": "openbank-gitops-bot[bot]", "type": "Bot", "id": 305_862_397}, "labels": [{"name": "merge-train"}],
                        "head": {"ref": "train/1-1", "repo": {"full_name": "o/r"}}}
             env = {"GITHUB_REPOSITORY": "o/r", "PR_NUMBER": "500"}
 

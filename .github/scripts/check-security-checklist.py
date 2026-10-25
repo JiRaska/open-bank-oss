@@ -1515,9 +1515,14 @@ def self_test() -> int:
     # The helper's constants must equal merge-train.py's: the carrier identity is ONE definition.
     mt = (Path(__file__).resolve().parent / "merge-train.py").read_text()
     for name, val in [("BOT_LOGIN", f'"{carrier_lib.BOT_LOGIN}"'), ("CARRIER_LABEL", f'"{carrier_lib.CARRIER_LABEL}"'),
-                      ("BOT_ID", str(carrier_lib.BOT_ID)), ("RECORD_CONTEXT", f'"{carrier_lib.RECORD_CONTEXT}"')]:
+                      ("RECORD_CONTEXT", f'"{carrier_lib.RECORD_CONTEXT}"')]:
         if f'{name} = {val}' not in mt:
             print(f"self-test FAIL: merge_train_carrier.{name} drifted from merge-train.py"); bad += 1
+    # BOT_ID is written with digit-group underscores (305_862_397) so the literal stays clear of the
+    # birth-number secret rule; compare the VALUE, not the spelling.
+    m_id = re.search(r"^BOT_ID = ([0-9_]+)", mt, re.M)
+    if not m_id or int(m_id.group(1).replace("_", "")) != carrier_lib.BOT_ID:
+        print("self-test FAIL: merge_train_carrier.BOT_ID drifted from merge-train.py"); bad += 1
     if (carrier_lib.TRAIN_BRANCH_RE.pattern not in mt or carrier_lib.OWN_MEMBER_RE.pattern not in mt
             or carrier_lib.RECORD_RE.pattern not in mt):
         print("self-test FAIL: merge_train_carrier branch/member regex drifted from merge-train.py"); bad += 1

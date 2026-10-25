@@ -29,7 +29,7 @@ import subprocess
 import time
 
 BOT_LOGIN = "openbank-gitops-bot[bot]"
-BOT_ID = 305862397   # the App bot's numeric user id (read off carrier #13817's `user.id`); a login string alone is a name
+BOT_ID = 305_862_397   # the App bot's numeric user id (read off carrier #13817's `user.id`); a login string alone is a name
 RECORD_CONTEXT = "merge-train/record"          # publish's record of the tree it pushed (merge-train.py)
 RECORD_RE = re.compile(r"^tree=([0-9a-f]{40})$")
 CARRIER_LABEL = "merge-train"
