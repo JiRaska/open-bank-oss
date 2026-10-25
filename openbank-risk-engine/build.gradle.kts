@@ -42,6 +42,7 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    testImplementation(libs.wiremock.standalone)
     // Consumer-driven contract for lending's loan-book read (ADR-0314 D4); the pact is replayed by
     // lending's @PactFolder provider test.
     testImplementation(libs.pact.consumer)

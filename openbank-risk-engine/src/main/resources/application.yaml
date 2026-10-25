@@ -877,7 +877,10 @@ authz:
       enabled: false
     oidc:
       enabled: false
-    oidc-client:
-      enabled: false
+    # oidc-client stays ENABLED in %test: `enabled` is build-time fixed, so disabling it here
+    # makes it impossible for a @TestProfile (the E2E suite's RiskDownstreamWireMockResource) to
+    # point the token endpoint at a stub — the profile override fails with "build time property
+    # cannot be changed at runtime". The ITs stub the ports at the CDI level so the REST clients
+    # never leave the process; same shape as vop-service.
   authz:
     enforce: "false"
