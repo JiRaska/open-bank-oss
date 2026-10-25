@@ -676,7 +676,7 @@ def batch_cap(train_cands: list[Member], sizes: dict[int, int | None], default: 
     """How many members this train may APPLY: the smallest `bisect size N` on ANY candidate in the
     default window, else the default. It used to be read off the OLDEST candidate only, and halving
     posts the status on the carrier's MEMBERS — measured 2026-10-25 (#13801..#13817): the oldest
-    candidate #13697 was dropped by every build (its squash is a no-op on main), so it never rode a
+    candidate #13697 was dropped before joining those carriers, so it never rode a
     carrier, never got a status, and the cap stayed 8 while the five halved members carried
     `bisect size 2` through six carriers. A newly armed older PR (#13710) defeated it the same way."""
     window = train_cands[:max(1, default)]
@@ -3368,8 +3368,8 @@ def self_test() -> int:
             reset()
 
             # #13400 follow-up, the REAL 2026-10-25 sequence (#13801..#13817): the OLDEST candidate is
-            # dropped by every build (its squash is a no-op on main — #13697), so it never rides a carrier
-            # and never receives the halving status. The cap used to be read off it alone: the halved
+            # dropped before joining a carrier (modelled here by a no-op squash), so it never receives
+            # the halving status. The cap used to be read off it alone: the halved
             # members were rebuilt into a full-size carrier again, six times in five hours.
             gh.g("checkout", "-q", "-f", "main")
             gh.g("merge", "-q", "--squash", "p1")

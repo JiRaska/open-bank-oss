@@ -101,7 +101,6 @@ Usage:  check-security-checklist.py --body-file <file> [--base origin/main]
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import subprocess
@@ -682,50 +681,63 @@ def run(root: Path, body: str, base: str, enforce: bool,
     return 0
 
 
-CARRIER_NOTE = ("security-checklist: verified merge-train carrier — PASS; carrier: members judged on their own "
-                "heads. Every member qualified only with ALL required contexts green on its OWN head "
-                "(merge-train.py qualifies()), this gate among them, and settle merges each member at exactly "
-                "that head, so the members' own checks are what GitHub enforces. The carrier's bot body is "
-                "not an attestation and is not read; no member body is fetched.")
+def run_carrier(root: Path, base: str, enforce: bool, member_body: Callable[[int], str | None],
+                head: str = "HEAD") -> int:
+    """A verified merge-train carrier (ADR-0343): the attestation lives on the MEMBERS. Each member's
+    own live body is judged by the same rule against that member's own diff — its train commit, which
+    is exactly the member's change as applied in this train. The carrier's own (bot) body is never
+    read and never written. The single regeneration commit is not a member's diff: it is bounded to
+    DERIVED_OUTPUTS and proven by main's derived-freshness gates on this exact tree."""
+    try:
+        members = carrier_lib.carrier_members(base, head)
+    except carrier_lib.CarrierUnavailable as exc:
+        carrier_lib.not_evaluated("security-checklist", f"carrier members could not be read ({exc})")
+        return 1 if enforce else 0
+    except carrier_lib.CarrierError as exc:
+        print(f"::error::security-checklist: verified merge-train carrier, but its members cannot be "
+              f"derived from its commits ({exc}) — fail closed")
+        return 1 if enforce else 0
+    print(f"security-checklist: merge-train carrier — judging {len(members)} member(s) on their own "
+          f"bodies and diffs: {', '.join(f'#{n}' for n, _ in members)}")
+    # An unreadable body is not an empty one. Judging it as empty used to blame a member for an API
+    # outage; now, when a member's diff actually NEEDS its body (a human box to answer), the carrier is
+    # NOT EVALUATED — red, so nothing merges unjudged, and inconclusive to the train, so nobody is
+    # blamed. A member whose diff the checklist answers mechanically never needs its body at all.
+    class _Unread(Exception):
+        pass
 
-
-def identify(env, fetch_pr) -> tuple[str, dict | None, int]:
-    """("carrier" | "ordinary" | "unavailable", the PR object, live API reads made).
-
-    The identification is merge_train_carrier.is_verified_carrier — App author typed Bot, an exact
-    `train/<run>-<attempt>` branch in THIS repo, the `merge-train` label — the train's own definition,
-    never a branch-name prefix a contributor can push. It is answered from the pull_request EVENT
-    payload GitHub wrote for this run, so a carrier costs ZERO API calls. Only a PR whose event already
-    LOOKS like a train head but does not verify (the carrier is labelled after it is opened, so the
-    `opened` payload has no label yet) reads the live PR once; if that read fails, nobody may judge it."""
-    repo, number = env.get("GITHUB_REPOSITORY", ""), env.get("PR_NUMBER", "")
-    event: dict | None = None
-    path = env.get("GITHUB_EVENT_PATH", "")
-    if path:
+    def need(n: int) -> Callable[[], str | None]:
+        def read() -> str | None:
+            b = member_body(n)
+            if b is None:
+                raise _Unread(n)
+            return b
+        return read
+    lacking: list[int] = []
+    for n, commit in members:
+        print(f"security-checklist: --- member #{n} (train commit {commit[:12]}) ---")
         try:
-            got = (json.loads(Path(path).read_text(encoding="utf-8")) or {}).get("pull_request")
-        except (OSError, ValueError, AttributeError):
-            got = None
-        if isinstance(got, dict) and str(got.get("number", "")) == number:
-            event = got
-    if carrier_lib.is_verified_carrier(event, repo):
-        return "carrier", event, 0
-    ref = str(((event or {}).get("head") or {}).get("ref") or env.get("GITHUB_HEAD_REF", ""))
-    if not carrier_lib.TRAIN_BRANCH_RE.fullmatch(ref):
-        return "ordinary", event, 0
-    live = fetch_pr(repo, number) if (repo and number.isdigit()) else None
-    if live is None:
-        return "unavailable", None, 1
-    return ("carrier" if carrier_lib.is_verified_carrier(live, repo) else "ordinary"), live, 1
+            rc = run(root, "", f"{commit}^", enforce=True, live_body=need(n), head=commit)
+        except _Unread:
+            carrier_lib.not_evaluated("security-checklist", f"member #{n} needs its body and it is unreadable")
+            return 1 if enforce else 0
+        if rc != 0:
+            lacking.append(n)
+    if lacking:
+        print("::error::merge-train carrier: these member PR(s) touch money-path code and their OWN body "
+              "lacks the required Security checklist ticks: " + ", ".join(f"#{n}" for n in lacking)
+              + ". Tick the checklist on that member PR (not on the carrier) and re-run this check.")
+        return 1 if enforce else 0
+    print("security-checklist: every member of the carrier passes on its own body")
+    return 0
 
 
 def judge(root: Path, body: str, base: str, enforce: bool, live_body: Callable[[], str | None] | None,
-          pr: dict | None, repo: str) -> int:
-    """Dispatch: a VERIFIED carrier passes on its members' own heads; everything else (a spoofed
-    `train/…` included) is judged as an ordinary PR on its own body, fail closed."""
+          pr: dict | None, repo: str, member_body: Callable[[int], str | None]) -> int:
+    """Dispatch: a VERIFIED carrier is judged by its members; everything else (a spoofed `train/…`
+    included) is judged as an ordinary PR on its own body."""
     if carrier_lib.is_verified_carrier(pr, repo):
-        print(CARRIER_NOTE)
-        return 0
+        return run_carrier(root, base, enforce, member_body)
     if pr is not None and str((pr.get("head") or {}).get("ref") or "").startswith("train/"):
         print("security-checklist: head is train/… but the PR is not a verified merge-train carrier "
               "(author, label or branch) — judged as an ordinary PR")
@@ -1200,9 +1212,9 @@ def self_test() -> int:
         if run_coverage(root) == 0:
             print("self-test FAIL (k3): uncovered PAN field not caught"); bad += 1
 
-    # ── merge-train carriers (ADR-0343): members are judged on their OWN heads ─────────────────
-    # Negative cases first: a spoofed carrier (a faked `train/` branch above all) is an ordinary PR and
-    # fails on its own body; only then does a verified carrier PASS — with no member read at all.
+    # ── merge-train carriers (ADR-0343): the attestation lives on the members ──────────────────
+    # Negative cases first: a spoofed carrier is an ordinary PR; one unticked member fails and is
+    # named; only then the all-ticked carrier passes and a non-money-path carrier is unaffected.
     carrier_body = "<!-- merge-train -->\nMerge-train carrier (ADR-0343): CI on this head verifies one train."
     repo = "o/r"
 
@@ -1252,87 +1264,55 @@ def self_test() -> int:
             try:
                 os.chdir(root)
                 with contextlib.redirect_stdout(out):
-                    rc = inner() if inner else judge(root, carrier_body, "base", True, lambda: carrier_body, pr, repo)
+                    rc = inner() if inner else judge(root, carrier_body, "base", True, lambda: carrier_body, pr, repo,
+                               lambda n: (reads.append(n), bodies.get(n))[1])
             finally:
                 os.chdir(cwd)
             return rc, out.getvalue(), reads
 
     money = {1: [f"{svc}/src/main/kotlin/Money.kt"], 2: [f"{svc}/src/main/kotlin/Ledger.kt"]}
-    # NEGATIVE first: every spoof of the carrier identity — a faked `train/` branch from a non-App
-    # author above all — is an ordinary PR, judged on its own (bot-looking) body and FAILS.
-    for label, pr in [("faked train/ branch, non-App author", carrier_pr(user={"login": "mallory", "type": "User"})),
+    all_ticked = {1: ticked, 2: ticked}
+    for label, pr in [("wrong author", carrier_pr(user={"login": "mallory", "type": "User"})),
                       ("bot-looking login typed User", carrier_pr(user={"login": carrier_lib.BOT_LOGIN, "type": "User"})),
                       ("wrong branch", carrier_pr(head={"ref": "train/x", "repo": {"full_name": repo}})),
                       ("fork head", carrier_pr(head={"ref": "train/123-1", "repo": {"full_name": "evil/r"}})),
                       ("missing label", carrier_pr(labels=[])),
                       ("unreadable PR", None)]:
-        rc, out, _ = carrier_fixture(money, {}, pr)
-        if rc == 0 or CARRIER_NOTE in out:
-            print(f"self-test FAIL (carrier-spoof): {label} was trusted as a carrier (rc={rc})"); bad += 1
-    rc, out, _ = carrier_fixture(money, {}, carrier_pr())
-    if rc != 0 or CARRIER_NOTE not in out or "members judged on their own heads" not in out:
-        print("self-test FAIL (carrier-pass): a verified money-path carrier did not PASS with the "
-              "members-on-their-own-heads note:\n" + out[-600:]); bad += 1
-
-    # End to end through main(), counting every live read: the event payload names the PR.
-    def gate_main_with(event_pr: dict | None, live: dict | None, head_ref: str = "") -> tuple[int, str, int]:
-        reads = [0]
-
-        def fake_pr(*_a, **_k):
-            reads[0] += 1
-            return live
-
-        def no_bodies(*_a, **_k):
-            reads[0] += 1000          # a member-body read on this gate's path is itself a failure
-            return None
-        with _tf.TemporaryDirectory() as td:
-            ev = Path(td) / "event.json"
-            ev.write_text(json.dumps({"pull_request": event_pr} if event_pr is not None else {}), encoding="utf-8")
-            fake_bin = Path(td) / "bin"
-            fake_bin.mkdir()
-            log = Path(td) / "gh-calls"
-            (fake_bin / "gh").write_text(f"#!/bin/sh\necho x >> '{log}'\necho ''\n")
-            (fake_bin / "gh").chmod(0o755)
-            keys = ("GITHUB_REPOSITORY", "PR_NUMBER", "GITHUB_HEAD_REF", "GITHUB_EVENT_PATH", "PATH",
-                    carrier_lib.CACHE_DIR_ENV)
-            saved_env = {k: os.environ.get(k) for k in keys}
-            os.environ.update({"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500", "GITHUB_HEAD_REF": head_ref,
-                               "GITHUB_EVENT_PATH": str(ev), "PATH": f"{fake_bin}:{saved_env['PATH'] or ''}"})
-            os.environ.pop(carrier_lib.CACHE_DIR_ENV, None)
-            saved = (carrier_lib.gh_pr, carrier_lib.gh_member_bodies, sys.argv)
-            carrier_lib.gh_pr, carrier_lib.gh_member_bodies = fake_pr, no_bodies
-            sys.argv = ["x", "--live-body", "--body", carrier_body, "--base", "base", "--enforce"]
-            try:
-                rc, out, _ = carrier_fixture(money, {}, None, inner=main)
-            finally:
-                carrier_lib.gh_pr, carrier_lib.gh_member_bodies, sys.argv = saved
-                for k, v in saved_env.items():
-                    if v is None:
-                        os.environ.pop(k, None)
-                    else:
-                        os.environ[k] = v
-            calls = reads[0] + (len(log.read_text().splitlines()) if log.exists() else 0)
-            return rc, out, calls
-    real = {**carrier_pr(), "number": 500}
-    spoof = {**carrier_pr(user={"login": "mallory", "type": "User"}), "number": 500}
-    rc, out, calls = gate_main_with(spoof, spoof, "train/123-1")
-    if rc == 0 or CARRIER_NOTE in out:
-        print(f"self-test FAIL (main-spoof): a faked train/ branch from a non-App author passed (rc={rc}):\n{out[-500:]}"); bad += 1
-    rc, out, calls = gate_main_with(real, None, "train/123-1")
-    if rc != 0 or CARRIER_NOTE not in out or calls != 0:
-        print(f"self-test FAIL (main-carrier-no-api): a real carrier made {calls} API call(s) / rc={rc}, "
-              f"want PASS with zero:\n{out[-500:]}"); bad += 1
-    unlabelled = {**real, "labels": []}      # the `opened` payload predates the label
-    rc, out, calls = gate_main_with(unlabelled, real, "train/123-1")
-    if rc != 0 or CARRIER_NOTE not in out or calls != 1:
-        print(f"self-test FAIL (main-carrier-opened-payload): rc={rc} calls={calls}, want PASS after ONE live read"); bad += 1
-    rc, out, calls = gate_main_with(unlabelled, None, "train/123-1")
-    if rc == 0 or carrier_lib.NOT_EVALUATED_LINE not in out:
-        print(f"self-test FAIL (main-train-head-unreadable): rc={rc}, want 1 + NOT EVALUATED:\n{out[-500:]}"); bad += 1
-    rc, out, calls = gate_main_with({**real, "head": {"ref": "feature/x", "repo": {"full_name": repo}},
-                                     "user": {"login": "someone", "type": "User"}}, None)
-    if rc == 0 or CARRIER_NOTE in out:
-        print(f"self-test FAIL (main-ordinary): an ordinary money-path PR with an unticked body passed (rc={rc})"); bad += 1
+        rc, out, reads = carrier_fixture(money, all_ticked, pr)
+        if rc == 0 or reads:
+            print(f"self-test FAIL (carrier-spoof): {label} was trusted as a carrier (rc={rc}, member reads={reads})"); bad += 1
+    rc, out, _ = carrier_fixture(money, {1: ticked, 2: tpl}, carrier_pr())
+    named = [ln for ln in out.splitlines() if "lacks the required" in ln]
+    if rc == 0 or len(named) != 1 or "#2" not in named[0] or "#1" in named[0]:
+        print("self-test FAIL (carrier-member-unticked): carrier with member #2 unticked passed or did not name #2"); bad += 1
+    rc, out, _ = carrier_fixture(money, {1: ticked}, carrier_pr())
+    if rc == 0 or carrier_lib.NOT_EVALUATED_LINE not in out or "lacks the required" in out:
+        print("self-test FAIL (carrier-member-unreadable): an unreadable member body passed, or was judged "
+              "as a finding instead of NOT EVALUATED:\n" + out[-600:]); bad += 1
+    rc, out, _ = carrier_fixture(money, all_ticked, carrier_pr(), extra_commit=True)
+    if rc == 0:
+        print("self-test FAIL (carrier-foreign-commit): a carrier with a non-train commit passed"); bad += 1
+    rc, out, _ = carrier_fixture(money, all_ticked, carrier_pr())
+    if rc != 0:
+        print("self-test FAIL (carrier-all-ticked): carrier whose members are all ticked failed:\n" + out[-800:]); bad += 1
+    later_declaration = (
+        f"money_path_services:\n  - {svc}\n"
+        f"security_sensitive_paths:\n  {svc}:\n"
+        "    auth_crypto_payment: []\n"
+        "    pii: [src/main/kotlin/Excluded.kt]\n"
+        "    cardholder: []\n"
+    )
+    rc, out, _ = carrier_fixture(
+        {1: [f"{svc}/src/main/kotlin/Business.kt"], 2: []},
+        {1: "", 2: ticked}, carrier_pr(),
+        rules_by_member={2: later_declaration})
+    named = [ln for ln in out.splitlines() if "lacks the required" in ln]
+    if rc == 0 or len(named) != 1 or "#1" not in named[0]:
+        print("self-test FAIL (carrier-member-governance-snapshot): a later member's new declaration "
+              "classified an earlier production-code member:\n" + out[-1000:]); bad += 1
+    rc, out, reads = carrier_fixture({1: ["docs/readme.txt"], 2: ["other-service/src/main/kotlin/X.kt"]}, {}, carrier_pr())
+    if rc != 0:
+        print("self-test FAIL (carrier-non-money-path): non-money-path carrier failed:\n" + out[-800:]); bad += 1
     # pr_body_with_members (api-contract's per-service section): union only for a verified carrier.
     got: dict[str, str] = {}
 
@@ -1393,6 +1373,31 @@ def self_test() -> int:
         # Not shallow: no fetch is attempted at all, which is the point (no network when not needed).
     except carrier_lib.CarrierUnavailable:
         print("self-test FAIL (deepen-not-needed): a non-shallow checkout tried to fetch"); bad += 1
+    # The gate end to end: unreadable PR on a train head, and a timed-out member read, are NOT
+    # EVALUATED (exit 1 + the verdict line), never exit 0.
+    for label, fetch_pr, fetch_bodies in [
+            ("PR object unreadable on a train/ head", lambda *_a, **_k: None, counting_bodies),
+            ("member bodies timed out", lambda *_a, **_k: carrier_pr(), lambda *_a, **_k: None)]:
+        def gate_main(fetch_pr=fetch_pr, fetch_bodies=fetch_bodies) -> int:
+            saved_env = {k: os.environ.get(k) for k in ("GITHUB_REPOSITORY", "PR_NUMBER", "GITHUB_HEAD_REF", carrier_lib.CACHE_DIR_ENV)}
+            os.environ.update({"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500", "GITHUB_HEAD_REF": "train/123-1"})
+            os.environ.pop(carrier_lib.CACHE_DIR_ENV, None)
+            saved = (carrier_lib.gh_pr, carrier_lib.gh_member_bodies, sys.argv)
+            carrier_lib.gh_pr, carrier_lib.gh_member_bodies = fetch_pr, fetch_bodies
+            sys.argv = ["x", "--live-body", "--body", carrier_body, "--base", "base", "--enforce"]
+            try:
+                return main()
+            finally:
+                carrier_lib.gh_pr, carrier_lib.gh_member_bodies, sys.argv = saved
+                for k, v in saved_env.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+        rc, out, _ = carrier_fixture(money, {}, carrier_pr(), inner=gate_main)
+        if rc == 0 or carrier_lib.NOT_EVALUATED_LINE not in out or "lacks the required" in out:
+            print(f"self-test FAIL (not-evaluated: {label}): rc={rc}, want 1 + NOT EVALUATED:\n{out[-600:]}"); bad += 1
+
     # The helper's constants must equal merge-train.py's: the carrier identity is ONE definition.
     mt = (Path(__file__).resolve().parent / "merge-train.py").read_text()
     for name, val in [("BOT_LOGIN", carrier_lib.BOT_LOGIN), ("CARRIER_LABEL", carrier_lib.CARRIER_LABEL)]:
@@ -1462,15 +1467,20 @@ def main() -> int:
         return result.stdout.strip()
 
     repo = os.environ.get("GITHUB_REPOSITORY", "")
-    pr: dict | None = None
-    if args.live_body:
-        kind, pr, _reads = identify(os.environ, carrier_lib.gh_pr)
-        if kind == "unavailable":
-            carrier_lib.not_evaluated("security-checklist", "a train/… head whose PR object is unreadable — "
-                                      "cannot tell a carrier from a spoof")
-            return 1 if args.enforce else 0
+    # One resolution per JOB, shared with every other gate that asks (merge_train_carrier.resolve):
+    # the live PR object, the member chain and every member body, under one deadline.
+    res = carrier_lib.resolve(args.base) if args.live_body else carrier_lib.Resolution("none")
+    if res.kind == "unavailable":
+        carrier_lib.not_evaluated("security-checklist", res.reason)
+        return 1 if args.enforce else 0
+    pr = res.pr
+    member_bodies = {n: b for n, _, b in res.members}
+
+    def member_body(n: int) -> str | None:
+        return member_bodies.get(n)
+
     return judge(Path(args.root), body, args.base, args.enforce,
-                 fetch_live_body if args.live_body else None, pr, repo)
+                 fetch_live_body if args.live_body else None, pr, repo, member_body)
 
 
 if __name__ == "__main__":
