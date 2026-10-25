@@ -167,7 +167,7 @@ class CashFlowRepositoryImpl(
             ) {
                 throw com.openbank.treasury.domain.cashflow.FlowAlreadyInPaymentException(flow.flowId)
             }
-            if (row.state != flow.state.name || row.paymentId != flow.paymentId) {
+            if (row.state != flow.state.name || row.fixedAt != flow.fixedAt || row.paymentId != flow.paymentId) {
                 throw CashFlowConflictException(
                     "flow ${flow.flowId} changed since it was read (now ${row.state}); reload and retry",
                 )

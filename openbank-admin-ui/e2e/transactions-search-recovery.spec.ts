@@ -96,7 +96,15 @@ test.describe('Transaction ledger search recovery', () => {
     await expect(clear).toHaveCount(0)
 
     await page.locator('html').evaluate(element => element.classList.add('dark'))
-    const background = await page.locator('.ui-empty-state').evaluate(element => getComputedStyle(element).backgroundImage)
+    const resetState = page.getByRole('status')
+    await expect(resetState).toHaveCount(1)
+    await expect(resetState).toContainText('Find a transaction using the details you have')
+    await expect(page.getByText('No transactions have been recorded yet', { exact: true })).toHaveCount(0)
+    const resetCard = page.getByRole('main').locator('.ui-empty-state')
+      .filter({ hasText: 'Find a transaction using the details you have' })
+    await expect(resetCard).toHaveCount(1)
+    await expect(resetCard).toBeVisible()
+    const background = await resetCard.evaluate(element => getComputedStyle(element).backgroundImage)
     expect(background).not.toBe('none')
   })
 

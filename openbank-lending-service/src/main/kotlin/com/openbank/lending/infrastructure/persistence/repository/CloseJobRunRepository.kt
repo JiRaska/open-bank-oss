@@ -134,7 +134,10 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : LendingClos
                 "ON CONFLICT (business_date, job) DO UPDATE SET " +
                 "items_processed = lending_close_job_run.items_processed + EXCLUDED.items_processed, " +
                 "journals_posted = lending_close_job_run.journals_posted + EXCLUDED.journals_posted, " +
-                "refused = EXCLUDED.refused, refusal_reason = EXCLUDED.refusal_reason, " +
+                "refused = CASE WHEN lending_close_job_run.unreconciled THEN " +
+                "GREATEST(EXCLUDED.refused, 1) ELSE EXCLUDED.refused END," +
+                "refusal_reason = CASE WHEN lending_close_job_run.unreconciled THEN 'accrual " +
+                "evidence requires reconciliation' ELSE EXCLUDED.refusal_reason END," +
                 "completed_at = EXCLUDED.completed_at, running = FALSE"
 
         // Only journals_posted moves; refused, refusal_reason, running and completed_at are left alone.
@@ -144,8 +147,16 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : LendingClos
                 "journals_posted = lending_close_job_run.journals_posted + EXCLUDED.journals_posted"
 
         const val SELECT_SQL =
-            "SELECT business_date, job, items_processed, journals_posted, refused, refusal_reason, completed_at " +
-                "FROM lending_close_job_run WHERE business_date BETWEEN ?1 AND ?2 " +
+            "SELECT business_date, job, items_processed, journals_posted, " +
+                "CASE WHEN unreconciled OR (job='accrual' AND EXISTS (SELECT 1 FROM lending_accrual_progress p " +
+                "WHERE p.completed_at IS NULL AND (p.business_date=r.business_date OR " +
+                "p.requested_date=r.business_date)))" +
+                "THEN GREATEST(refused,1) ELSE refused END, " +
+                "CASE WHEN unreconciled OR (job='accrual' AND EXISTS (SELECT 1 FROM lending_accrual_progress p " +
+                "WHERE p.completed_at IS NULL AND (p.business_date=r.business_date OR " +
+                "p.requested_date=r.business_date)))" +
+                "THEN 'accrual evidence requires reconciliation' ELSE refusal_reason END, completed_at " +
+                "FROM lending_close_job_run r WHERE business_date BETWEEN ?1 AND ?2 " +
                 "AND NOT running AND completed_at IS NOT NULL ORDER BY business_date, job"
 
         const val IN_FLIGHT_SQL =

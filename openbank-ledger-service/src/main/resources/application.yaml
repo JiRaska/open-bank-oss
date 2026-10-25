@@ -191,7 +191,8 @@ openbank:
           principal: service-account-openbank-lending
         # #13167: billing's monthly cycle (BillingCloseParticipationScheduler), reported on its OWN
         # identity - Keycloak client openbank-billing (ledger_rest_ext.rego:
-        # service-billing-ledger-post) - not the shared openbank-services principal its journals use.
+        # close_participant_accounts, its only ledger grant) - not the shared openbank-services
+        # principal its journals use.
         billing:
           principal: service-account-openbank-billing
     # Period-granular lock (ADR-0096 D1). Modes: off | shadow | enforce. Same staged rollout and

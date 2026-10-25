@@ -131,6 +131,9 @@ class LendingService @Inject constructor(
     ProvisioningUseCase,
     RunProvisioningCycleUseCase {
 
+    @Inject
+    lateinit var accrualProgress: com.openbank.lending.application.port.out.AccrualProgressPort
+
     private val log = Logger.getLogger(LendingService::class.java)
 
     private val machine = OriginationStateMachine()
@@ -1188,7 +1191,7 @@ class LendingService @Inject constructor(
                     if (deadline != null && !clock.instant().isBefore(deadline)) {
                         Uni.createFrom().nullItem<LoanInstallment>()
                     } else {
-                        accrueOne(installment).map<LoanInstallment?> { it }
+                        accrueOne(installment, asOf).map<LoanInstallment?> { it }
                     }
                 }
                 .collect().asList()
@@ -1203,46 +1206,32 @@ class LendingService @Inject constructor(
                 }
         }
 
-    private fun accrueOne(installment: LoanInstallment): Uni<LoanInstallment> {
-        // A zero-interest row (e.g. a pure-principal or bullet leg) has nothing to recognize: flag it so
-        // the pass does not revisit it, but emit no ledger posting. Build the mark-only Uni lazily in this
-        // branch — constructing it eagerly would invoke the repository even on the interest-bearing path.
-        val accruedAt = OffsetDateTime.now(clock)
-        if (!installment.interest.isPositive()) {
-            return installments.markAccrued(installment.id, accruedAt).map { installment }
-        }
-        return ledger.post(
-            LedgerPosting(
-                "loan:${installment.loanId.value}:inst:${installment.number}:accrual",
-                installment.loanId.value,
-                installment.interest,
-                PostingKind.INTEREST_ACCRUAL,
-                // ADR-0342: dated in the CURRENT Prague accounting day, the one the ledger still has
-                // OPEN, never the UTC date (which lags by one around midnight) nor the as-of day a
-                // catch-up works for: a day past cutoff answers 409 ACCOUNTING_DAY_CLOSED under the
-                // day lock, so interest a late pass recognises for D is booked in the open day.
-                accountingDate = AccountingClock.bank(clock).today(),
-            ),
-        )
-            .flatMap { installments.markAccrued(installment.id, accruedAt) }
-            .flatMap {
-                events.emit(
-                    LendingOutboxMessage(
-                        aggregateId = installment.loanId.value,
-                        eventType = "loan.interest_accrued",
-                        // #3914: occurredAt is `accruedAt`, the very instant stamped on the installment by
-                        // markAccrued above — the recognition event itself, not the emit.
-                        // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
-                        payload = """{"aggregateType":"LOAN","aggregateId":"${installment.loanId.value}",""" +
-                            """"loanId":"${installment.loanId.value}","installment":${installment.number},""" +
-                            """"interest":"${installment.interest}","dueDate":"${installment.dueDate}",""" +
-                            """"occurredAt":"${accruedAt.toInstant()}",""" +
-                            """"sourceService":"lending"}""",
+    private fun accrueOne(installment: LoanInstallment, asOf: LocalDate): Uni<LoanInstallment> =
+        accrualProgress.begin(installment, asOf) {
+            if (!installment.interest.isPositive()) {
+                null
+            } else {
+                ledger.prepareAccrual(
+                    LedgerPosting(
+                        "loan:${installment.loanId.value}:inst:${installment.number}:accrual",
+                        installment.loanId.value,
+                        installment.interest,
+                        PostingKind.INTEREST_ACCRUAL,
+                        accountingDate = AccountingClock.bank(clock).today(),
                     ),
                 )
             }
-            .map { installment }
-    }
+        }.flatMap { intent ->
+            if (intent.completed) {
+                Uni.createFrom().item(installment)
+            } else if (intent.posting == null) {
+                accrualProgress.complete(intent, null, OffsetDateTime.now(clock)).replaceWith(installment)
+            } else {
+                ledger.postPreparedAccrual(intent.posting).flatMap { receipt ->
+                    accrualProgress.complete(intent, receipt, OffsetDateTime.now(clock))
+                }.replaceWith(installment)
+            }
+        }
 
     // --- Write-off (collections terminal step, IFRS 9 Stage 3 → derecognition) -----------------------
 

@@ -21,6 +21,8 @@ class RecordingCloseJobRuns : CloseJobRunPort {
     val inFlight = linkedMapOf<Pair<LocalDate, String>, Instant>()
 
     /** Journals added to a row that had not completed yet (mirrors the SQL insert with no completed_at). */
+    val pendingItems = linkedMapOf<Pair<LocalDate, String>, Int>()
+
     val pendingJournals = linkedMapOf<Pair<LocalDate, String>, Int>()
 
     /** Every (day, job) ever marked started, in order — what a pass worked as of. */
@@ -50,12 +52,13 @@ class RecordingCloseJobRuns : CloseJobRunPort {
         val key = run.businessDate to run.job
         if (key == crashOnRecord) return Uni.createFrom().failure(IllegalStateException("pod died"))
         val carried = pendingJournals.remove(key) ?: 0
+        val carriedItems = pendingItems.remove(key) ?: 0
         val prior = runs[key]
         runs[key] = if (prior == null) {
-            run.copy(journalsPosted = run.journalsPosted + carried)
+            run.copy(itemsProcessed = run.itemsProcessed + carriedItems, journalsPosted = run.journalsPosted + carried)
         } else {
             run.copy(
-                itemsProcessed = prior.itemsProcessed + run.itemsProcessed,
+                itemsProcessed = prior.itemsProcessed + run.itemsProcessed + carriedItems,
                 journalsPosted = prior.journalsPosted + run.journalsPosted,
             )
         }
