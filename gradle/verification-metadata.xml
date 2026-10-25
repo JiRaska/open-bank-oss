@@ -27563,50 +27563,80 @@
          <artifact name="micrometer-registry-prometheus-1.17.1.pom">
             <sha256 value="6134ca2d9b9f7f3c015e7f38843f8b81c63cfeabb6f45c0c25ece1a95b5e6f5f" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="micrometer-registry-prometheus-1.17.1.jar">
+            <sha256 value="ac24d43f123e103828a23a86f092a8709d87d309ad3212e798305654e951a8ce" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-agroal-deployment" version="3.40.1.1">
          <artifact name="quarkus-agroal-deployment-3.40.1.1.pom">
             <sha256 value="1263737c9c92458750861daad0cf933b38a16ad3d35e72b155ccf94ce7855851" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-agroal-deployment-3.40.1.1.jar">
+            <sha256 value="e185269e58839de53d783938b9f9a9b50855ac52a52ed9e3c9f0bb620da71042" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-agroal-dev" version="3.40.1.1">
          <artifact name="quarkus-agroal-dev-3.40.1.1.pom">
             <sha256 value="5ac700ffaadf31a862b8a52762e9ad93cb0399c8c2253536bde4e886b5352c07" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-agroal-dev-3.40.1.1.jar">
+            <sha256 value="806d6a1f9639fe51dda47f15acbca3ca7836b5acb15da12d83b2624b19466891" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-agroal-spi" version="3.40.1.1">
          <artifact name="quarkus-agroal-spi-3.40.1.1.pom">
             <sha256 value="ef0cfbdb717eb391ff76249fa95d1049f72d2e8ecf49a88a95a41c19d9bd9635" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-agroal-spi-3.40.1.1.jar">
+            <sha256 value="e1b31dc0ca4e1cbdf12d8baf1d6c793fdbdfaa732cca0c42335f2659f8f05184" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-arc-deployment" version="3.40.1.1">
          <artifact name="quarkus-arc-deployment-3.40.1.1.pom">
             <sha256 value="48ff27a965d4c46e5dbbc81fd50c2abab0d5874ace4d8e05b67a0683c6a4e896" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-arc-deployment-3.40.1.1.jar">
+            <sha256 value="19507624c35951a9953c9b1587a570298fc5eecbedffa052cb581fccc0ceba53" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-arc-dev" version="3.40.1.1">
          <artifact name="quarkus-arc-dev-3.40.1.1.pom">
             <sha256 value="fdf52263d764da78d327801dde22ffc0a2a02dd2d4641b42687e46355e27616a" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-arc-dev-3.40.1.1.jar">
+            <sha256 value="5fa68e54df3d981fe0eb899af0c731c32c9ef8eb731e10280ef214968c1ebe40" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-arc-test-supplement" version="3.40.1.1">
          <artifact name="quarkus-arc-test-supplement-3.40.1.1.pom">
             <sha256 value="84c52cd8cf56588869cc30f873d180d57024d0779959ea4a8d0bc79674b655f6" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-arc-test-supplement-3.40.1.1.jar">
+            <sha256 value="35b8fca595b465be815aff78f420587492a7868a0facbf15e25ea86d7d9803ac" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-arc-test-supplement-decorator" version="3.40.1.1">
          <artifact name="quarkus-arc-test-supplement-decorator-3.40.1.1.pom">
             <sha256 value="3717fa9bff758d54a0bb3cc80cefd66b2bc0ad5da9766eec1bf57b44a6f0bb73" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-arc-test-supplement-decorator-3.40.1.1.jar">
+            <sha256 value="84cad8d752a0adf55c4311857f1d5ff6aecb11e184029d833257326a80c5da92" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-assistant-deployment-spi" version="3.40.1.1">
          <artifact name="quarkus-assistant-deployment-spi-3.40.1.1.pom">
             <sha256 value="e2cf43b16b8b689564e34ebb1b89045ea0f9ab5295ba240827c8a20444dbe963" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-assistant-deployment-spi-3.40.1.1.jar">
+            <sha256 value="365bff30b2be8bf181bfb3f3cac73e94a014a0b7eaeb0565411bb9b2198e7c56" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-assistant-dev" version="3.40.1.1">
          <artifact name="quarkus-assistant-dev-3.40.1.1.pom">
             <sha256 value="e0d0989639c8a2b4f5d8d4f784d1a38a99567ff82008e2cae922d3b16c5f4234" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-assistant-dev-3.40.1.1.jar">
+            <sha256 value="cf9302315182c722db86812863e8d82fde6273945afe42e682afab495f4d7a80" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-assistant-parent" version="3.40.1.1">
@@ -27618,60 +27648,96 @@
          <artifact name="quarkus-caffeine-deployment-3.40.1.1.pom">
             <sha256 value="bb659c0f6b91fbafc9d1e46c61e56bfbe804a415488c5d547de8bbb95b5d4a19" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-caffeine-deployment-3.40.1.1.jar">
+            <sha256 value="b4d5d1aa960f7c66e97fa4e8d1ba7bbddf2a4560ae0613942815619fa1cf3c67" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-config-yaml-deployment" version="3.40.1.1">
          <artifact name="quarkus-config-yaml-deployment-3.40.1.1.pom">
             <sha256 value="89500098e7d996aa13ab2cb1e6726d46b1a88fb1b1e274232e9debb481dbabd4" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-config-yaml-deployment-3.40.1.1.jar">
+            <sha256 value="99093259b971ab403422c6f7514a09bef6513db6da3222fa799082102f1e0898" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-credentials-deployment" version="3.40.1.1">
          <artifact name="quarkus-credentials-deployment-3.40.1.1.pom">
             <sha256 value="2d9cbada14a5ba26adcc33c4fba1032b7733e32ea40a84cfe6398385e8a71d96" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-credentials-deployment-3.40.1.1.jar">
+            <sha256 value="1224fb82682ae3013cf3aaf28c273f70fbd32adde5d3610c7f7071942e1b95d0" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-datasource-deployment" version="3.40.1.1">
          <artifact name="quarkus-datasource-deployment-3.40.1.1.pom">
             <sha256 value="e61cf289a9a4e2be2be329990e9d45912645fe6f3f478fd2472a02f0c3befc96" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-datasource-deployment-3.40.1.1.jar">
+            <sha256 value="9c4605effff7931018a02ac55746544748c32d25c4cc63bf44d844c0d5c8b7da" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-datasource-deployment-spi" version="3.40.1.1">
          <artifact name="quarkus-datasource-deployment-spi-3.40.1.1.pom">
             <sha256 value="658f6b13b6c5d251d3cc555a79c50f29582978ce379981f70c4aeccc9866c1cb" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-datasource-deployment-spi-3.40.1.1.jar">
+            <sha256 value="6b862b68115bf2a6bbd1daa1128d93318196e683b3214fe4f79a4db53eda223e" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-datasource-dev" version="3.40.1.1">
          <artifact name="quarkus-datasource-dev-3.40.1.1.pom">
             <sha256 value="357d45a3a71744b9d19ca291eb69d258df253e937a52301c6c6d2fda0998d44e" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-datasource-dev-3.40.1.1.jar">
+            <sha256 value="7b78a992d17b16612aa802bb235583942988e63d870ea82e83a3b85239c71317" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-devservices-common" version="3.40.1.1">
          <artifact name="quarkus-devservices-common-3.40.1.1.pom">
             <sha256 value="f097f951147814dd2fef584224d454f9f40668c3183883f8e7df330f5c1f8425" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-devservices-common-3.40.1.1.jar">
+            <sha256 value="e74e740d32f806762c85100922f156dd3bb2e9fa47ec9fa0aab9918bd266902b" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-devservices-deployment" version="3.40.1.1">
          <artifact name="quarkus-devservices-deployment-3.40.1.1.pom">
             <sha256 value="bb5cc0525080e05065b2434b167caeb230a58b3393f267198642ece6e9fdf450" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-devservices-deployment-3.40.1.1.jar">
+            <sha256 value="f5be27f0b2998b0c45c8250e2de6a31eec83c04c764c87ba781b3a573c9932dc" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-devservices-keycloak" version="3.40.1.1">
          <artifact name="quarkus-devservices-keycloak-3.40.1.1.pom">
             <sha256 value="3f0c461ae18510361a0f4797a7d4ad5206369ba2bbe3afc8109ae711cb7c6613" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-devservices-keycloak-3.40.1.1.jar">
+            <sha256 value="afc540892ea5244e0b6cd49f201499aec14daba57afee856923f6405d4fe2b0e" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-devservices-oidc" version="3.40.1.1">
          <artifact name="quarkus-devservices-oidc-3.40.1.1.pom">
             <sha256 value="db1157059e4884bc2544238d7c251b0435dfe1562dc1b7fe5eb08e8df6c61b7f" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-devservices-oidc-3.40.1.1.jar">
+            <sha256 value="ff3a326abac0da373190173abcb23937ddab4dbaf6624670a58e74038b3dd03b" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-devservices-postgresql" version="3.40.1.1">
          <artifact name="quarkus-devservices-postgresql-3.40.1.1.pom">
             <sha256 value="4d0d7550ccceb6acc6d5d6d83392dd811810e485c8b83316f8890470850a3d2f" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-devservices-postgresql-3.40.1.1.jar">
+            <sha256 value="28b8dd3b586c92f72667329f1cd283e44bc12b223e73a24c4c2bb4103b2d1610" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-devui-deployment-spi" version="3.40.1.1">
          <artifact name="quarkus-devui-deployment-spi-3.40.1.1.pom">
             <sha256 value="fcd4168d816e06d2cfa2290d3eef3241a49ef7434630a6b2e793d02befc32192" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-devui-deployment-spi-3.40.1.1.jar">
+            <sha256 value="251a69bf3caf9f39492df7e50b52f7381872ee2ccc1da8a0708c08249f373397" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-devui-parent" version="3.40.1.1">
@@ -27683,10 +27749,16 @@
          <artifact name="quarkus-flyway-deployment-3.40.1.1.pom">
             <sha256 value="16f11139c9072ab1c49cfb999d09aa80b4d17151a50a986843347a74c47d5f43" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-flyway-deployment-3.40.1.1.jar">
+            <sha256 value="2b30ea5b600975ec0b28d9926871a9393a7fdb390f974b4a71872a86e769a4ce" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-flyway-dev" version="3.40.1.1">
          <artifact name="quarkus-flyway-dev-3.40.1.1.pom">
             <sha256 value="9e5a5aba0cdcd3f0e6a6206cae686f144801dd3f125e23ad3d4f74b230c0aa75" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-flyway-dev-3.40.1.1.jar">
+            <sha256 value="7341673d294bf30654fc58e8c4411e1a9b944c8258829362e5a43b5b0b287e33" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-flyway-postgresql" version="3.40.1.1">
@@ -27701,6 +27773,9 @@
          <artifact name="quarkus-flyway-postgresql-deployment-3.40.1.1.pom">
             <sha256 value="4584636c6dfbbc7b7fb4cec151b09247dcf96a380673566d546108bda690742a" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-flyway-postgresql-deployment-3.40.1.1.jar">
+            <sha256 value="399807e9202b618b7d8eee0002cd12f3a508c16e9e1f9fea06d3374ede330d7d" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-flyway-postgresql-parent" version="3.40.1.1">
          <artifact name="quarkus-flyway-postgresql-parent-3.40.1.1.pom">
@@ -27711,35 +27786,56 @@
          <artifact name="quarkus-hibernate-orm-deployment-3.40.1.1.pom">
             <sha256 value="9b6dd48dd2e585076ffda4c7393410ce3977e7ba52865706b12dc70cb83d21be" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-hibernate-orm-deployment-3.40.1.1.jar">
+            <sha256 value="7bef2abfb7760b3a494d219b51aa17651bc80301bc7692d1ef26c39e08b6e3b4" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-hibernate-orm-deployment-spi" version="3.40.1.1">
          <artifact name="quarkus-hibernate-orm-deployment-spi-3.40.1.1.pom">
             <sha256 value="039716114381919f74fa2e03cae3a6a4f92f3030ebd5a34c7d91d2b7f49db961" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-hibernate-orm-deployment-spi-3.40.1.1.jar">
+            <sha256 value="8f3f76c606adb74e627c82a8b86931ad7565aac3b66f2420ad74410d88d1e94b" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-hibernate-orm-dev" version="3.40.1.1">
          <artifact name="quarkus-hibernate-orm-dev-3.40.1.1.pom">
             <sha256 value="bfac71d4b688a9959cca1e9d1675ed2b3539f6a9be1ee02a931c1ff32d5ddc3d" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-hibernate-orm-dev-3.40.1.1.jar">
+            <sha256 value="7d87887630d6117380cc0c300fbb2fc01e0b60ec6c302ee89bcedaa705f100f1" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-hibernate-reactive-deployment" version="3.40.1.1">
          <artifact name="quarkus-hibernate-reactive-deployment-3.40.1.1.pom">
             <sha256 value="eabd1bb89ba44c9bbac02c7ccb3b58f9a9a03a8ccdd6330281c2332727697c71" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-hibernate-reactive-deployment-3.40.1.1.jar">
+            <sha256 value="0ab69f6273d48f28611c5ad9589cf3e2b2ef16a3ca0bb64e2af0a114324ee8c7" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-hibernate-reactive-panache-common-deployment" version="3.40.1.1">
          <artifact name="quarkus-hibernate-reactive-panache-common-deployment-3.40.1.1.pom">
             <sha256 value="ee60b646c5ebd5d805c30bbba21fe4a5d2af1bb1f8c7d27b803f8d5452d07492" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-hibernate-reactive-panache-common-deployment-3.40.1.1.jar">
+            <sha256 value="327b3e78a2bdf604688c88479685d68ad1cc73e3ceb63563f6cdda92aab38921" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-hibernate-reactive-panache-deployment" version="3.40.1.1">
          <artifact name="quarkus-hibernate-reactive-panache-deployment-3.40.1.1.pom">
             <sha256 value="f15d8bfd0a950aac345aafbb63b99f678da995f04643b1fac3a7079db8330a2f" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-hibernate-reactive-panache-deployment-3.40.1.1.jar">
+            <sha256 value="cb515fcd3400aae2ebf2d17c402cf94f3f24e6637ab8094c9d40bd206054569a" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-hibernate-reactive-panache-kotlin-deployment" version="3.40.1.1">
          <artifact name="quarkus-hibernate-reactive-panache-kotlin-deployment-3.40.1.1.pom">
             <sha256 value="8157a70613b3b6d797be11b571c6f6f32b2cf685e48339b15086e71e3eea52e5" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-hibernate-reactive-panache-kotlin-deployment-3.40.1.1.jar">
+            <sha256 value="8cea883d6c49b4ed2eadac0bd8a174bb9124a5643dd9e0753b4ff66cbe257a16" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-http-parent" version="3.40.1.1">
@@ -27751,15 +27847,24 @@
          <artifact name="quarkus-jackson-deployment-3.40.1.1.pom">
             <sha256 value="5375df549a4a2268ccf4c3fb1022894126297317bf6405924693dfa4dc188b58" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-jackson-deployment-3.40.1.1.jar">
+            <sha256 value="d4e9d6f554cb61be4433711498a94b0f73ed41a1b3c466aed84b8cabd7680e9f" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-jackson-spi" version="3.40.1.1">
          <artifact name="quarkus-jackson-spi-3.40.1.1.pom">
             <sha256 value="94b136a373afffd9440492f47aa20df208a7d9ac3639d3073284b7e65e353312" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-jackson-spi-3.40.1.1.jar">
+            <sha256 value="659f6cabeefecb810840496837b86a05e2ce8fb2674fe9eb86d047a435de79e4" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-jaxrs-spi-deployment" version="3.40.1.1">
          <artifact name="quarkus-jaxrs-spi-deployment-3.40.1.1.pom">
             <sha256 value="9e33dc34bd03e1a89d692a54087edd35c282bc6c6bd50e45faf32241872b251d" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-jaxrs-spi-deployment-3.40.1.1.jar">
+            <sha256 value="e38d71d4403a229fd539395ec520c180c135a8f3b1c2d3b85bb605e2dab71adb" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-jaxrs-spi-parent" version="3.40.1.1">
@@ -27771,10 +27876,16 @@
          <artifact name="quarkus-jdbc-postgresql-deployment-3.40.1.1.pom">
             <sha256 value="14a1ecc4bf685fcd9c219856674d5928dca6a114bb3480365d6795924cb375a3" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-jdbc-postgresql-deployment-3.40.1.1.jar">
+            <sha256 value="f3fab2140e994dc76b226ecc8466eaf4ac2dc4461ee95195ce5b8cb52d40c6d2" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-jsonp-deployment" version="3.40.1.1">
          <artifact name="quarkus-jsonp-deployment-3.40.1.1.pom">
             <sha256 value="450cd6b60d38982fa1f7f8da78594cf017b85a01eb03ba656777d2f1524b0647" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-jsonp-deployment-3.40.1.1.jar">
+            <sha256 value="7c266db845f3adee405fd4efbec922780e1e1c2f9c9312d8ef98e84a6e2fcf48" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-junit" version="3.40.1.1">
@@ -27810,15 +27921,24 @@
          <artifact name="quarkus-kafka-client-deployment-3.40.1.1.pom">
             <sha256 value="7800f339701bea1b5c09116b4bfb5e44277def64762b55c4b838062b48366bb2" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-kafka-client-deployment-3.40.1.1.jar">
+            <sha256 value="3ffc77d3f0dea36e2c4dcf9fa24be9e5ba0223c1754ece38b9c83ce645564429" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-kafka-client-dev" version="3.40.1.1">
          <artifact name="quarkus-kafka-client-dev-3.40.1.1.pom">
             <sha256 value="35acd417d96d02c83c03a423d839e579f42349ea17d3fe4712387f886ec8c473" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-kafka-client-dev-3.40.1.1.jar">
+            <sha256 value="3d5034bd9b10b483e7056585bd18609f79781ab10809844a37aa9ee06df4f5ff" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-kotlin-deployment" version="3.40.1.1">
          <artifact name="quarkus-kotlin-deployment-3.40.1.1.pom">
             <sha256 value="e8b91c18daa53cc1226d340b4ae36f03dc9d21829f32b92504d40010bfb0d411" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-kotlin-deployment-3.40.1.1.jar">
+            <sha256 value="850a4734aa285265c4b86de88df964e57f03861126984124798486aea5bffa7f" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-kubernetes-parent" version="3.40.1.1">
@@ -27835,110 +27955,176 @@
          <artifact name="quarkus-kubernetes-service-binding-spi-3.40.1.1.pom">
             <sha256 value="17f74ade017994db0dddc2a10500537d1b8d674f1d6571e1e173157b5f73dc6c" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-kubernetes-service-binding-spi-3.40.1.1.jar">
+            <sha256 value="53993a7e63b6eaf7fd1430f13e844e16cc8acce91d1dd25f5dd47b7f64709072" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-kubernetes-spi" version="3.40.1.1">
          <artifact name="quarkus-kubernetes-spi-3.40.1.1.pom">
             <sha256 value="69db22963e933972b8a0d43692d019e57e85919b67192ad9e7353971397358e6" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-kubernetes-spi-3.40.1.1.jar">
+            <sha256 value="2980eb4bb823cb02e2b18beab70f1baccfac567bfc0368cc4cdcdecb3ef99b70" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-logging-json-deployment" version="3.40.1.1">
          <artifact name="quarkus-logging-json-deployment-3.40.1.1.pom">
             <sha256 value="b327791819e07d61c6b98e67bac5871fa3aeaee678420e060ceb1e3762c7952b" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-logging-json-deployment-3.40.1.1.jar">
+            <sha256 value="3e6ecb6474987efd148df86e89b517b4ff1a221dddff1e052551bb90700114ff" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-messaging-deployment" version="3.40.1.1">
          <artifact name="quarkus-messaging-deployment-3.40.1.1.pom">
             <sha256 value="2ecf1bc27cc095ff8c3106bdc6dbb2d3f126a7417b8f9e56afad5f80ff9d11dc" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-messaging-deployment-3.40.1.1.jar">
+            <sha256 value="162e8d1338446b96d089f123c6e300e3946eec2cd139a8b620eaa2eb605c2dae" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-messaging-dev" version="3.40.1.1">
          <artifact name="quarkus-messaging-dev-3.40.1.1.pom">
             <sha256 value="3de09f79a3addfd20501282aa732a0a507aaac50facbe4d9c9738484e8aed184" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-messaging-dev-3.40.1.1.jar">
+            <sha256 value="47e2b766329d6895af9ff64a8e7663d0136bdc74eb1f4d21cd9e4979bbacf55e" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-messaging-kafka-deployment" version="3.40.1.1">
          <artifact name="quarkus-messaging-kafka-deployment-3.40.1.1.pom">
             <sha256 value="18989d1580b49b69757c3e7aca1d8c67ceaa92048436d50c9a8b5e7b61b5856f" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-messaging-kafka-deployment-3.40.1.1.jar">
+            <sha256 value="ea59f7090c7f50490502362e9afd12072f03d2806ab6b6ef35cc789b6814134c" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-micrometer-deployment" version="3.40.1.1">
          <artifact name="quarkus-micrometer-deployment-3.40.1.1.pom">
             <sha256 value="415b0ce0793a053eb193eb7be511139767fe612968af487375aadb1caad3a62d" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-micrometer-deployment-3.40.1.1.jar">
+            <sha256 value="bea9b7ddeb544670fbfd0f81e7436a13bcb67aa3d36c89ba9afca45dd9eb8751" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-micrometer-registry-prometheus-deployment" version="3.40.1.1">
          <artifact name="quarkus-micrometer-registry-prometheus-deployment-3.40.1.1.pom">
             <sha256 value="0f74aa864afac6360375eba1f71d00c79612a745d5e0cfac5fb860f073f2952f" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-micrometer-registry-prometheus-deployment-3.40.1.1.jar">
+            <sha256 value="372a03a0c363ce563ef2fd6cfc05e81e9985d466f205116b63ce70b8728dca28" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-mutiny-deployment" version="3.40.1.1">
          <artifact name="quarkus-mutiny-deployment-3.40.1.1.pom">
             <sha256 value="5bf0aa2757f7e2fb9a03af1a353d2896d7b4cc2b8f127e842bc5ca50825d368b" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-mutiny-deployment-3.40.1.1.jar">
+            <sha256 value="51f0fc1644ddc777a500ed1f3d8f2b0eb0ceb599b9d5c8d3d27a8407f10ab56d" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-mutiny-reactive-streams-operators-deployment" version="3.40.1.1">
          <artifact name="quarkus-mutiny-reactive-streams-operators-deployment-3.40.1.1.pom">
             <sha256 value="282c27ebd51426403926e822fdc0e6aea76954ee0276f91e2782746ae8f72973" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-mutiny-reactive-streams-operators-deployment-3.40.1.1.jar">
+            <sha256 value="a9cc6d8d5a9d191eca315feb210f6784e1d20c7978158cdc8423180759edcd6f" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-narayana-jta-deployment" version="3.40.1.1">
          <artifact name="quarkus-narayana-jta-deployment-3.40.1.1.pom">
             <sha256 value="e88a08757ad18e9269d0e414e3216aa330f6ef773233cb2468d8390159915f2b" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-narayana-jta-deployment-3.40.1.1.jar">
+            <sha256 value="d83693cb08bf57090aa34c03752ed3b4dd7d2ff0b29ea969ad77dfb2d534368c" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-netty-deployment" version="3.40.1.1">
          <artifact name="quarkus-netty-deployment-3.40.1.1.pom">
             <sha256 value="dc0f01138e8980e50c6103ce427c7e0cc6a0c945f464fa38cd017d7229a3cf4c" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-netty-deployment-3.40.1.1.jar">
+            <sha256 value="ca08890e1772f2c4c50eb68706f47e8d1489884d234c912c0f6ae5d97610157a" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-oidc-common-deployment" version="3.40.1.1">
          <artifact name="quarkus-oidc-common-deployment-3.40.1.1.pom">
             <sha256 value="fa671879cebe3bfe7b89c9b3c9756399eca3b403f419c2fe6d87ede45c5b0f0e" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-oidc-common-deployment-3.40.1.1.jar">
+            <sha256 value="53090c056cec614662b1e487f1d6e24529fa77c6bc18dfb4c655d9691ef26b20" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-oidc-deployment" version="3.40.1.1">
          <artifact name="quarkus-oidc-deployment-3.40.1.1.pom">
             <sha256 value="b8313d669ce8fd6828e3d622596b2d1cf10b8e8c8e7d08b116abff1f3b9ca95b" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-oidc-deployment-3.40.1.1.jar">
+            <sha256 value="d0ea6e28df17b7a6901f300c4f6af8999071c4122c342a57709dba18fe0eecaa" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-oidc-dev" version="3.40.1.1">
          <artifact name="quarkus-oidc-dev-3.40.1.1.pom">
             <sha256 value="a948bc9d7df370b0ac940ecda7e1a30e5f6f88be3d626000a08e0368279bdc99" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-oidc-dev-3.40.1.1.jar">
+            <sha256 value="bea2e0abc525d8226fcad7fa2f15ec5e0c4a80e856ff5358963fd16f7ca989e4" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-panache-common-deployment" version="3.40.1.1">
          <artifact name="quarkus-panache-common-deployment-3.40.1.1.pom">
             <sha256 value="444528d5d32e44def3dbed10273eba723282cdce1904298d9daf4ceb1c447066" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-panache-common-deployment-3.40.1.1.jar">
+            <sha256 value="2844eb2a4efd30d2b17e5e849fffe8a062025a6de943d9a55f5e05299cb8b2e5" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-panache-hibernate-common-deployment" version="3.40.1.1">
          <artifact name="quarkus-panache-hibernate-common-deployment-3.40.1.1.pom">
             <sha256 value="fc7b7d086496264378d21c28431509dec9b80e4f875be84797e6701b1b3a3c66" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-panache-hibernate-common-deployment-3.40.1.1.jar">
+            <sha256 value="9cf28c3a339be906d6ca2269846ca6f8b154ed21affe87239db6a292cf8658e9" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-proxy-registry-deployment" version="3.40.1.1">
          <artifact name="quarkus-proxy-registry-deployment-3.40.1.1.pom">
             <sha256 value="714f2aa9f4ab75361270e73d8d365111fbd208fcb505c61646d4edc9b2699b9e" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-proxy-registry-deployment-3.40.1.1.jar">
+            <sha256 value="f0008e58b1670a2082bdbeff268c00feac85f3b59960ccf6820f682da9a46b96" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-reactive-datasource-deployment" version="3.40.1.1">
          <artifact name="quarkus-reactive-datasource-deployment-3.40.1.1.pom">
             <sha256 value="d7cbba258b02361b00aec6b9471e0571d459735c29cedd1c50a85629aa2d5b4c" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-reactive-datasource-deployment-3.40.1.1.jar">
+            <sha256 value="de64ae93132b24c8492adc26d16f4b92276d852b435693f885ebb33049b85b92" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-reactive-datasource-spi" version="3.40.1.1">
          <artifact name="quarkus-reactive-datasource-spi-3.40.1.1.pom">
             <sha256 value="42d4e025f7827a144f79971a1d24ee04b2bb18b5db7d63050c60c0164fa2f475" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-reactive-datasource-spi-3.40.1.1.jar">
+            <sha256 value="82d0af5244077f58409c93aaeea8a936d51efdefc74c728c720e8d7b96c06946" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-reactive-pg-client-deployment" version="3.40.1.1">
          <artifact name="quarkus-reactive-pg-client-deployment-3.40.1.1.pom">
             <sha256 value="5c5ec19c351974b9b9587a04ecf52a16d7ac1388dfd5949617e8077963d19435" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-reactive-pg-client-deployment-3.40.1.1.jar">
+            <sha256 value="8850e0451ad492da6741b7d340b9f8ae025770592005ff58d67aada27d0035c2" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-reactive-transactions-deployment" version="3.40.1.1">
          <artifact name="quarkus-reactive-transactions-deployment-3.40.1.1.pom">
             <sha256 value="cf6e7c8a063bbcef070816f43effddff0eb8ae0043a601060d665dc5afc0ed7f" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-reactive-transactions-deployment-3.40.1.1.jar">
+            <sha256 value="8bace4d4c91e936452ad68f08deda04023061d9290fe5a1740c0f4590d4fe303" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-redis-client" version="3.40.1.1">
@@ -27963,65 +28149,104 @@
          <artifact name="quarkus-rest-client-config-deployment-3.40.1.1.pom">
             <sha256 value="a4b085484104b5211483feb82623987974dd0e71d6fed16d3123cdde8f77ddca" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-rest-client-config-deployment-3.40.1.1.jar">
+            <sha256 value="b73ed3ed917e0b8981bbae7bbc91834882bff0397170cbe9cb8b4581a24bbd0d" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-rest-client-deployment" version="3.40.1.1">
          <artifact name="quarkus-rest-client-deployment-3.40.1.1.pom">
             <sha256 value="5d19f36b51760b4f5b34054170356f4842152dff86532390e7f8d215de483346" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-rest-client-deployment-3.40.1.1.jar">
+            <sha256 value="8450309b767c6d3ae3b84fc3f5ba9f47af5f754c3bfa465994dcfed51053b14b" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-rest-client-jackson-deployment" version="3.40.1.1">
          <artifact name="quarkus-rest-client-jackson-deployment-3.40.1.1.pom">
             <sha256 value="52b0404621732e606fa8f9559eaaf89add3fd57db15a587465a00b327b1c1b53" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-rest-client-jackson-deployment-3.40.1.1.jar">
+            <sha256 value="ebf1bf45807ae66d663579d33f90559844336b34cabe69a3cfb8b305aec7cda4" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-rest-client-jaxrs-deployment" version="3.40.1.1">
          <artifact name="quarkus-rest-client-jaxrs-deployment-3.40.1.1.pom">
             <sha256 value="7740cf15f40e989fd58d59b9348a9479a078598d56b7de65a1968ff29c720440" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-rest-client-jaxrs-deployment-3.40.1.1.jar">
+            <sha256 value="dd15d3a3276b0995c4a9991dd31cdfa26be5b411c1ff381af6689ae1b2004a8a" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-rest-client-spi-deployment" version="3.40.1.1">
          <artifact name="quarkus-rest-client-spi-deployment-3.40.1.1.pom">
             <sha256 value="211ee322f66637058352eb74d0b50b270371bb927147d8ad315d8e4086aadd30" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-rest-client-spi-deployment-3.40.1.1.jar">
+            <sha256 value="2f89c770dd6a1fbba95cbbab86675fe8d5e2cad0ed5057eb984165d09d7da01f" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-rest-common-deployment" version="3.40.1.1">
          <artifact name="quarkus-rest-common-deployment-3.40.1.1.pom">
             <sha256 value="5b8aa826dd6eb462adce52e6b93e47bc650a9203e30b66308ac4817ab36372bb" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-rest-common-deployment-3.40.1.1.jar">
+            <sha256 value="e467b4300a142e119e41dec343e1cac7d8d00f686700100f307e80dcb22c6233" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-rest-deployment" version="3.40.1.1">
          <artifact name="quarkus-rest-deployment-3.40.1.1.pom">
             <sha256 value="ee68d800f7b7d69b68b56a3732179197cab7befa2659db32681f36f7c5ad17ef" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-rest-deployment-3.40.1.1.jar">
+            <sha256 value="eb07a76a217e42976e77f744335338de1047abbd59a2ffd24cefc8f055e1e58b" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-rest-dev" version="3.40.1.1">
          <artifact name="quarkus-rest-dev-3.40.1.1.pom">
             <sha256 value="dc7906eb20996f0a52f238b66e876b0a598db661bc517972961cb23fce2029a2" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-rest-dev-3.40.1.1.jar">
+            <sha256 value="2641fc7bd70d057bdb34b7f4144c2cfc419594a3cf8cfd231b373c4ee1624b98" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-rest-jackson-common-deployment" version="3.40.1.1">
          <artifact name="quarkus-rest-jackson-common-deployment-3.40.1.1.pom">
             <sha256 value="a210dd1da5370ede5df39aaac9c3180e6d7f537d180c92bae56da807f90c1877" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-rest-jackson-common-deployment-3.40.1.1.jar">
+            <sha256 value="cca788543318298659cf65b0a3d02394424ece25b9cb0a6fd1d1b81fb76ece9f" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-rest-jackson-deployment" version="3.40.1.1">
          <artifact name="quarkus-rest-jackson-deployment-3.40.1.1.pom">
             <sha256 value="3c90723c86e1efc4d4d677fa597fbd033f8b1546afc9240b4f9b4ddca7efe15c" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-rest-jackson-deployment-3.40.1.1.jar">
+            <sha256 value="b097edd891a5df0e110bbcb04d045ec889ba0feba2c0e9455aa941831f4ebf46" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-rest-kotlin-deployment" version="3.40.1.1">
          <artifact name="quarkus-rest-kotlin-deployment-3.40.1.1.pom">
             <sha256 value="94b400a3f8651e1414f018451e6e6943fc2dc65ba5356d06a64a521becb9e61c" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-rest-kotlin-deployment-3.40.1.1.jar">
+            <sha256 value="4ca3e808c113320bbadf77c239cf2153e9ceddd882fb38537a44855fbd28d066" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-rest-server-spi-deployment" version="3.40.1.1">
          <artifact name="quarkus-rest-server-spi-deployment-3.40.1.1.pom">
             <sha256 value="cdb3b3b46f9f822ef847306337da726b058593f7fc103dec5adf73eca4affe48" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-rest-server-spi-deployment-3.40.1.1.jar">
+            <sha256 value="0a4fd7e4718b161f7baa6fe7da6ea76630f9662ce5c20c7cb905630a26266131" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-rest-spi-deployment" version="3.40.1.1">
          <artifact name="quarkus-rest-spi-deployment-3.40.1.1.pom">
             <sha256 value="3df0114feaa5f268e395500b7b597202194d2d00729fc8f397dbe26ac27147e6" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-rest-spi-deployment-3.40.1.1.jar">
+            <sha256 value="fa50ceedaf99d7d3f99557d9e678651784e6f81df7b1ee59c8b1e4e0e9d90823" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-resteasy-common-parent" version="3.40.1.1">
@@ -28033,6 +28258,9 @@
          <artifact name="quarkus-resteasy-common-spi-3.40.1.1.pom">
             <sha256 value="8dd86a70e8e4cbadbdbe6e4488cf17970907480ddf841b61f25ed5873b6e5d97" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-resteasy-common-spi-3.40.1.1.jar">
+            <sha256 value="79c73045a0be3233fc438d6cb2ead0f261bc44f352fb44ddfa9c117d06b0e203" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-resteasy-server-common-parent" version="3.40.1.1">
          <artifact name="quarkus-resteasy-server-common-parent-3.40.1.1.pom">
@@ -28043,60 +28271,96 @@
          <artifact name="quarkus-resteasy-server-common-spi-3.40.1.1.pom">
             <sha256 value="bfa94e835e7b99a7ad643e68b8c08e32ee2b11c5503e23397b2c778dd8ce2390" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-resteasy-server-common-spi-3.40.1.1.jar">
+            <sha256 value="a77c78275f393ca844e0b4f6d4e44b78f57b4fb7df71b6087ac77fd2d5c355d6" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-scheduler-deployment" version="3.40.1.1">
          <artifact name="quarkus-scheduler-deployment-3.40.1.1.pom">
             <sha256 value="db385c6949f7651f2706ea1e0b180b6410ab29692970dd2cfa93a57f51f3b589" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-scheduler-deployment-3.40.1.1.jar">
+            <sha256 value="270314c430c21c41e86d90010ebd4d54fd1489e87018a973b3b8a923432d44b5" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-scheduler-dev" version="3.40.1.1">
          <artifact name="quarkus-scheduler-dev-3.40.1.1.pom">
             <sha256 value="be99f157f11354387370a442ef2de92d200e2ae34e12061307da5a7cdfd046b3" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-scheduler-dev-3.40.1.1.jar">
+            <sha256 value="c7edb1c94a1633fbae9e7bf40eaab53b619cb91e6e123b00941dac26b331fa79" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-security-deployment" version="3.40.1.1">
          <artifact name="quarkus-security-deployment-3.40.1.1.pom">
             <sha256 value="a5f990997be69ec109b51b78004d665981aec0199d1259b1afae6e8048ae30df" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-security-deployment-3.40.1.1.jar">
+            <sha256 value="0ba7937c9a59fb6a3d10181984dc3272f1fce7525faa814b9a510670c230637d" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-security-spi" version="3.40.1.1">
          <artifact name="quarkus-security-spi-3.40.1.1.pom">
             <sha256 value="049e3b41d8eee68c48bdab9dc1237d5301a1bb27a91d0626d0df34262b02c511" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-security-spi-3.40.1.1.jar">
+            <sha256 value="76f6d9b14fd886021688bccec8ae236b8ff89f08198816c3bb35fe1e83d7e12c" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-smallrye-context-propagation-deployment" version="3.40.1.1">
          <artifact name="quarkus-smallrye-context-propagation-deployment-3.40.1.1.pom">
             <sha256 value="6b43c53f4650568c1cdd21dbd6c40a06c91441fbf4327a332b50f0f94c61f7ba" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-smallrye-context-propagation-deployment-3.40.1.1.jar">
+            <sha256 value="a513e7f9162a63f4abfcda85478874c060283a9878385aa1e4f2371dadfad0a6" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-smallrye-context-propagation-spi" version="3.40.1.1">
          <artifact name="quarkus-smallrye-context-propagation-spi-3.40.1.1.pom">
             <sha256 value="6e96b44ba582edb6ad4e4a81c9852c1f2a44952c4cc6673dec43f6c210e5fb89" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-smallrye-context-propagation-spi-3.40.1.1.jar">
+            <sha256 value="85e5e720f8e9a66b81cfbc4bf8c0215e78b13beac142e7a88b776db44f12b3d9" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-smallrye-health-deployment" version="3.40.1.1">
          <artifact name="quarkus-smallrye-health-deployment-3.40.1.1.pom">
             <sha256 value="c262f80d46d97cec503ed86bd72b2fb7b720edae9b8b8126bd085e0062f73866" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-smallrye-health-deployment-3.40.1.1.jar">
+            <sha256 value="bb257be80787bb2b127023c03768242c3a965f291995664cf6ce8f6fde6bfacd" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-smallrye-health-dev" version="3.40.1.1">
          <artifact name="quarkus-smallrye-health-dev-3.40.1.1.pom">
             <sha256 value="6622892b97abeaa9be2c0a1b20191cbe5798852d86f30d215ee49916f03f2ccc" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-smallrye-health-dev-3.40.1.1.jar">
+            <sha256 value="6ff5cccd4fda6085897af7024a0069dac644a8b325610370503a69d834cb50ea" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-smallrye-health-spi" version="3.40.1.1">
          <artifact name="quarkus-smallrye-health-spi-3.40.1.1.pom">
             <sha256 value="5296556f6d3b0ed9ff32bff63e73012dddc52a2e8026e3dc1b397d6724ad3851" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-smallrye-health-spi-3.40.1.1.jar">
+            <sha256 value="7adc1bd21e99c69027cecdc83e9fea4d785e0b7befb73d730ecb2982de2ffebf" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-smallrye-jwt-build-deployment" version="3.40.1.1">
          <artifact name="quarkus-smallrye-jwt-build-deployment-3.40.1.1.pom">
             <sha256 value="c685ebe2a6ae0e92b311977754860b5adec65c4d83e49c03532cb1ba943dd311" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-smallrye-jwt-build-deployment-3.40.1.1.jar">
+            <sha256 value="6b9f68efa263129bdd31eae190e9168d788b74546a7409c44ff8d728fb12cac9" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-smallrye-openapi-common-deployment" version="3.40.1.1">
          <artifact name="quarkus-smallrye-openapi-common-deployment-3.40.1.1.pom">
             <sha256 value="98862df51e839091d72deab7baad19b0b218206e821b0af82dd82054ed9ff12f" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-smallrye-openapi-common-deployment-3.40.1.1.jar">
+            <sha256 value="65591b21d13a02d5e911bc32b299dd974e9ca36faeb66d08ba1b0440343cfe3e" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-smallrye-openapi-common-parent" version="3.40.1.1">
@@ -28108,20 +28372,32 @@
          <artifact name="quarkus-smallrye-openapi-deployment-3.40.1.1.pom">
             <sha256 value="84d9a82e1c07dc3359175166af27608fda995a875c56f0e0a55675c60433e839" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-smallrye-openapi-deployment-3.40.1.1.jar">
+            <sha256 value="45790b88bbc4fef86f5218edee6b82861de6fcde95e3102350b177eb95d1528c" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-smallrye-openapi-dev" version="3.40.1.1">
          <artifact name="quarkus-smallrye-openapi-dev-3.40.1.1.pom">
             <sha256 value="da0d598d2682caaa86d3afa4ed67ef652260caf5c93feb125271424742a9d960" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-smallrye-openapi-dev-3.40.1.1.jar">
+            <sha256 value="fe22c45bfcb2e80cd7534e8d6190cda054ddbe4a7b86b29c321a1a0238249eea" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-smallrye-openapi-spi" version="3.40.1.1">
          <artifact name="quarkus-smallrye-openapi-spi-3.40.1.1.pom">
             <sha256 value="13e177423d2a829e519d73d1d792913f8feea7431743bfb20cd783a39480ea0e" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-smallrye-openapi-spi-3.40.1.1.jar">
+            <sha256 value="1067011797a57e8e458c945f4c17ef20944f97b4fcfb824e3e4d5ecc567fac47" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-swagger-ui-deployment" version="3.40.1.1">
          <artifact name="quarkus-swagger-ui-deployment-3.40.1.1.pom">
             <sha256 value="1fe2fd33414068871b4fa96274e3b467368c775f41c25bbe971f361252bf1622" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-swagger-ui-deployment-3.40.1.1.jar">
+            <sha256 value="b5dff3cd320f2a9f6461b57d24c3094c3f62f9ad1c94ccda010cb3ca7e93d3a4" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-test-common" version="3.40.1.1">
@@ -28149,65 +28425,104 @@
          <artifact name="quarkus-tls-registry-deployment-3.40.1.1.pom">
             <sha256 value="551dae42d73530ce70b06889891ffbebc87117a8565d3ca655b1109a699402be" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-tls-registry-deployment-3.40.1.1.jar">
+            <sha256 value="19e1b86a711f586df787cb14e6ff6423b9a357e7238e879a76e26a6b014d935d" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-tls-registry-deployment-spi" version="3.40.1.1">
          <artifact name="quarkus-tls-registry-deployment-spi-3.40.1.1.pom">
             <sha256 value="ec44cfe06f2a7f3777bfd8cbb21cded8468f60a78b088141d6734f3dd45a5a97" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-tls-registry-deployment-spi-3.40.1.1.jar">
+            <sha256 value="47518e35846680b455ab2014a584a26fadc1ef971e178ac4346456f27d602bd5" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-undertow-spi" version="3.40.1.1">
          <artifact name="quarkus-undertow-spi-3.40.1.1.pom">
             <sha256 value="55887a9f674e5ef70337ab1c7ae07345169a209144bc7ac9ff7db9ca848cb436" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-undertow-spi-3.40.1.1.jar">
+            <sha256 value="8e338e8ebece67bcba6a09148caeca1fbd4118dfa805169ac2e69045704a5de4" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-vertx-deployment" version="3.40.1.1">
          <artifact name="quarkus-vertx-deployment-3.40.1.1.pom">
             <sha256 value="5668237a05ce62e790e86afe3364f1c2a854a8f9b7233115770615450f55a8df" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-vertx-deployment-3.40.1.1.jar">
+            <sha256 value="e95defa831bd82168b1d6d03eafcb2a07dd912dd40343bf6b9e653a4e72b8d84" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-vertx-deployment-spi" version="3.40.1.1">
          <artifact name="quarkus-vertx-deployment-spi-3.40.1.1.pom">
             <sha256 value="076c2cbeef3e07fabe6e3ebb75e8253a1c294aaf7435a17c9793e90a48d8daaa" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-vertx-deployment-spi-3.40.1.1.jar">
+            <sha256 value="0f04426e29cbb1978198078489137461c8c09cc61fbf3cf108fcb26c441b0f18" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-vertx-http-deployment" version="3.40.1.1">
          <artifact name="quarkus-vertx-http-deployment-3.40.1.1.pom">
             <sha256 value="8852c1b10073c2d8dcef4d66479b1ea81419995d37c5a619323c9e5b239ef85c" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-vertx-http-deployment-3.40.1.1.jar">
+            <sha256 value="079aa08b3f880242cb368d42960953ba603b48245ebe042a785923337f884270" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-vertx-http-deployment-spi" version="3.40.1.1">
          <artifact name="quarkus-vertx-http-deployment-spi-3.40.1.1.pom">
             <sha256 value="92c9aeabb0c7101eb37d872bb970b22fd56f261ffaab1ad3597c845d19341a45" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-vertx-http-deployment-spi-3.40.1.1.jar">
+            <sha256 value="5ee2f90f274b8076f413f0794d39627a5cd5e6ae2dc3a5afe71250f999aab9fe" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-vertx-kotlin-deployment" version="3.40.1.1">
          <artifact name="quarkus-vertx-kotlin-deployment-3.40.1.1.pom">
             <sha256 value="63286c440230b03d0fe8cb345c9cfec98084d0a34367917ad5effb1c23916197" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-vertx-kotlin-deployment-3.40.1.1.jar">
+            <sha256 value="f7d20cb8bb00805cde4b06eecd3c90e262183517465096a92803bfa165c745c2" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus" name="quarkus-virtual-threads-deployment" version="3.40.1.1">
          <artifact name="quarkus-virtual-threads-deployment-3.40.1.1.pom">
             <sha256 value="83e1c3c5210ed292dd2ff02923da28f127bf7bc3f0602fce79efd31caa71046b" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="quarkus-virtual-threads-deployment-3.40.1.1.jar">
+            <sha256 value="d21d89782533a97541d6c4b772c59fa95fb08d6d10f2e77d9780828212a96688" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus.arc" name="arc-processor" version="3.40.1.1">
          <artifact name="arc-processor-3.40.1.1.pom">
             <sha256 value="41eb971e3a05efa31a9d437fd38052a8dc1fc3f3af8df56e8c19db9c16e04795" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="arc-processor-3.40.1.1.jar">
+            <sha256 value="c70a57e37af5b9b7fdbd89115dbc34ca6f22712d4435c0dc00d066cccf2fb2b9" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.quarkus.resteasy.reactive" name="resteasy-reactive-client-processor" version="3.40.1.1">
          <artifact name="resteasy-reactive-client-processor-3.40.1.1.pom">
             <sha256 value="9fdafcfcfc982e46cc3e6619368d52725b4d8d03a48a914b3d922a63fb9faf70" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="resteasy-reactive-client-processor-3.40.1.1.jar">
+            <sha256 value="e255b5e629a63215bc7c233a35627e4d8e1b0830b1e1e1581155950dbb139898" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus.resteasy.reactive" name="resteasy-reactive-common-processor" version="3.40.1.1">
          <artifact name="resteasy-reactive-common-processor-3.40.1.1.pom">
             <sha256 value="4c867c135892fc537316fd70c74cf95eb5e2cdd361e0078d250e791ea5cd3802" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="resteasy-reactive-common-processor-3.40.1.1.jar">
+            <sha256 value="f4fe10b6e1b46a1680e3eb82e6be23d592088193ae4f89b1e2c61d67d0a03bd0" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.quarkus.resteasy.reactive" name="resteasy-reactive-processor" version="3.40.1.1">
          <artifact name="resteasy-reactive-processor-3.40.1.1.pom">
             <sha256 value="b28228f1fe42b014164f5c4b693e6e47c96f2d92a3aef9a3ea475e94a190c5ae" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="resteasy-reactive-processor-3.40.1.1.jar">
+            <sha256 value="60ffc3bea5d2360b2e33b6d91db4232d3ed88f73d916275a3a9c810887378c7c" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.rest-assured" name="json-path" version="6.0.1">
@@ -28264,15 +28579,24 @@
          <artifact name="smallrye-open-api-jaxrs-4.3.5.pom">
             <sha256 value="4072594abfe9ff944496f540fc2f195261d41e1d87fa2285ade10955e191bee7" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="smallrye-open-api-jaxrs-4.3.5.jar">
+            <sha256 value="e58aa27dc9866415d5399d740f4617ffc4540b2d777c990b338e602dd494357b" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.smallrye" name="smallrye-open-api-spring" version="4.3.5">
          <artifact name="smallrye-open-api-spring-4.3.5.pom">
             <sha256 value="773bf89877392553a8a9fd88fbec88e50157b86fe68955df108f85756acaf120" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="smallrye-open-api-spring-4.3.5.jar">
+            <sha256 value="af56e5ca948140c605f98fd670c02597d8a59dff6b14ab70945b81240821a344" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.smallrye" name="smallrye-open-api-ui" version="4.3.5">
          <artifact name="smallrye-open-api-ui-4.3.5.pom">
             <sha256 value="09fa47fde58cfff5da2a6bcbe8ddc32bafbe46846c2d12ddd1d57f9135bad2f0" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="smallrye-open-api-ui-4.3.5.jar">
+            <sha256 value="3c3a2277e7a10247b58ddc602591239ef12a058841b86b39bcd29ae490aa8bb7" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.smallrye" name="smallrye-open-api-ui-parent" version="4.3.5">
@@ -28283,6 +28607,9 @@
       <component group="io.smallrye" name="smallrye-open-api-vertx" version="4.3.5">
          <artifact name="smallrye-open-api-vertx-4.3.5.pom">
             <sha256 value="b7587f412ee073547038948431e3fc06690e77b8d627565574ad1a13707d876a" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="smallrye-open-api-vertx-4.3.5.jar">
+            <sha256 value="2a951c1e63f5dfd7c0b657adc4f7aead1ab4abfa80a3ea1f76c7c58eb6da2ec4" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="io.smallrye.common" name="smallrye-common-classloader" version="2.17.1">
@@ -28326,6 +28653,9 @@
          <artifact name="vertx-http-proxy-4.5.35.pom">
             <sha256 value="0ff179d01aa64517eea7623000fde48413410ace0ad5ab3bd7b6f4fdefce3d2a" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="vertx-http-proxy-4.5.35.jar">
+            <sha256 value="d4933f7bf9147130e1dc8c854afcfd0ba3df6760e2c0021e27a14fda0458bc91" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="io.vertx" name="vertx-redis-client" version="4.5.34">
          <artifact name="vertx-redis-client-4.5.34.jar">
@@ -28339,10 +28669,16 @@
          <artifact name="hibernate-assistant-7.4.9.Final.module">
             <sha256 value="53b19c35c152b1def001a94ad221215738799fdfb3338ba8707413f8126595ff" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="hibernate-assistant-7.4.9.Final.jar">
+            <sha256 value="811d1d67bcd40feaae56c09dac0d2e4202fc0b6d62b49a9458022fe78b108222" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="org.jetbrains.kotlin" name="kotlin-compiler" version="2.4.10">
          <artifact name="kotlin-compiler-2.4.10.pom">
             <sha256 value="3a3bf4c9c3684159890e881b2df4d8ee79d9fc1046364ca400a28077ccea2e20" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="kotlin-compiler-2.4.10.jar">
+            <sha256 value="db12b1af0db0e10eeedfc15d5dac0316604e5c556321f60e3bcd73075a66f0a3" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
       <component group="org.jspecify" name="jspecify" version="1.0.1">
@@ -28357,10 +28693,21 @@
          <artifact name="keycloak-client-common-synced-26.0.12.pom">
             <sha256 value="6c7c9f06b2f592848d0a36bfe6d41d29ebfdff911610eaf79b8fe80479401ba9" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
+         <artifact name="keycloak-client-common-synced-26.0.12.jar">
+            <sha256 value="2d6e28bdeabbd0f5c26f6fd80cb87cd31fc0a50a711d23e7bdf851021e49d73c" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
       </component>
       <component group="org.keycloak" name="keycloak-client-parent" version="26.0.12">
          <artifact name="keycloak-client-parent-26.0.12.pom">
             <sha256 value="18434eee1cb712642167dca2710222746c5b1cc74d06d7e030c0174fcf2d7d58" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+      </component>
+      <component group="io.quarkus.platform" name="quarkus-bom-quarkus-platform-descriptor" version="3.40.1.1">
+         <artifact name="quarkus-bom-quarkus-platform-descriptor-3.40.1.1-3.40.1.1.json">
+            <sha256 value="2eb1cbd30016955d42b2c4285c7ca1a7356d5e29d513bfb4367fa39d5b05a903" origin="Upgrade artifact from Gradle dependency cache"/>
+         </artifact>
+         <artifact name="quarkus-bom-quarkus-platform-descriptor-3.40.1.1.pom">
+            <sha256 value="01ebc87b842164b5c16ca1d5bcac8acc5e4d2810d923b3d6fca6c9bbcdcb97a7" origin="Upgrade artifact from Gradle dependency cache"/>
          </artifact>
       </component>
    </components>
