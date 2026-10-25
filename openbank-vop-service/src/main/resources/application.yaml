@@ -127,8 +127,12 @@ quarkus:
       enabled: false
     oidc:
       enabled: false
-    oidc-client:
-      enabled: false
+    # NOTE: oidc-client stays ENABLED in %test. `enabled` is a build-time-fixed property, so a
+    # %test override of false makes it impossible for a @TestProfile (the E2E suite's
+    # VopDownstreamWireMockResource) to point the token endpoint at a stub — the profile override
+    # fails with "build time property cannot be changed at runtime". The client only dials out on
+    # the first downstream call, and tests that never call account-service/party-service never
+    # mint; same shape as settlement-service.
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"

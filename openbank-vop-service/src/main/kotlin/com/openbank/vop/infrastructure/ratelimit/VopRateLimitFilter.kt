@@ -8,15 +8,13 @@ import com.openbank.vop.application.port.out.VopMetricsPort
 import com.openbank.vop.application.port.out.VopRateLimitOutcome
 import io.quarkus.logging.Log
 import io.quarkus.security.identity.SecurityIdentity
-import io.smallrye.common.annotation.Blocking
-import jakarta.annotation.Priority
+import io.smallrye.mutiny.Uni
 import jakarta.inject.Inject
 import jakarta.ws.rs.Priorities
 import jakarta.ws.rs.container.ContainerRequestContext
-import jakarta.ws.rs.container.ContainerRequestFilter
 import jakarta.ws.rs.core.Response
-import jakarta.ws.rs.ext.Provider
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.resteasy.reactive.server.ServerRequestFilter
 
 /**
  * Runs just after [Priorities.AUTHORIZATION]: late enough that authentication has produced a
@@ -45,16 +43,13 @@ private const val VOP_RATE_LIMIT_PRIORITY = Priorities.AUTHORIZATION + 10
  * would mean a Valkey outage silently removes the only enumeration control, which is a real
  * security hole traded for no payment-availability gain.
  *
- * Runs at [Priorities.AUTHORIZATION] + 10 — after authentication, so there is a principal to key
- * on, and after the OPA `@Authorize` decision, so an unauthorized caller cannot consume another
- * caller's window.
- *
- * [Blocking] is required: [VopRateLimiter] uses the blocking Valkey client.
+ * **Reactive, not `@Blocking`.** A `ContainerRequestFilter` runs on the Vert.x event loop and
+ * `@Blocking` on it is silently ignored — measured: the blocking Valkey call threw
+ * `IllegalStateException` on every request and the fail-closed catch below answered 429 to the
+ * entire service, permanently (see [VopRateLimiter]). `@ServerRequestFilter` returning
+ * `Uni<Response?>` is the non-blocking form, so the limiter round-trip stays on the event loop.
  */
-@Provider
-@Priority(VOP_RATE_LIMIT_PRIORITY)
-@Blocking
-class VopRateLimitFilter : ContainerRequestFilter {
+class VopRateLimitFilter {
 
     @Inject
     lateinit var rateLimiter: VopRateLimiter
@@ -71,10 +66,12 @@ class VopRateLimitFilter : ContainerRequestFilter {
     @ConfigProperty(name = "openbank.vop.rate-limit.enabled", defaultValue = "true")
     var enabled: Boolean = true
 
-    override fun filter(ctx: ContainerRequestContext) {
-        if (!enabled) return
+    /** Emits null to continue the chain, or a 429 [Response] to abort — never blocks a thread. */
+    @ServerRequestFilter(priority = VOP_RATE_LIMIT_PRIORITY)
+    fun checkLimit(ctx: ContainerRequestContext): Uni<Response?> {
+        if (!enabled) return Uni.createFrom().nullItem()
         // Management/health endpoints carry no principal and are not an oracle.
-        if (ctx.uriInfo.path.startsWith("/q/")) return
+        if (ctx.uriInfo.path.startsWith("/q/")) return Uni.createFrom().nullItem()
 
         // .principal.name (preferred_username) — the same identity format the evidence row and the
         // OPA decision use, so a per-requester anomaly review can join them.
@@ -83,27 +80,12 @@ class VopRateLimitFilter : ContainerRequestFilter {
             // No principal: the endpoint requires a role, so this is a request that will be
             // rejected anyway. Let the security layer produce the 401/403 rather than masking it
             // as a 429.
-            return
+            return Uni.createFrom().nullItem()
         }
 
-        val outcome = failClosedOnStoreError(requesterId)
-        metrics.rateLimitDecision(outcome)
-
-        if (outcome != VopRateLimitOutcome.ALLOWED) {
-            ctx.abortWith(
-                Response.status(HTTP_TOO_MANY_REQUESTS)
-                    .header("X-RateLimit-Limit", limitPerMinute)
-                    .header("X-RateLimit-Window", "60s")
-                    .header("Retry-After", RETRY_AFTER_SECONDS)
-                    .entity(
-                        mapOf(
-                            "code" to "RATE_LIMIT_EXCEEDED",
-                            "message" to "Too many verification requests. Limit: $limitPerMinute/min.",
-                        ),
-                    )
-                    .build(),
-            )
-        }
+        return failClosedOnStoreError(requesterId)
+            .invoke { outcome -> metrics.rateLimitDecision(outcome) }
+            .map { outcome -> if (outcome == VopRateLimitOutcome.ALLOWED) null else tooManyRequests() }
     }
 
     /**
@@ -117,18 +99,32 @@ class VopRateLimitFilter : ContainerRequestFilter {
      * rejected because Valkey is down. Both produce a 429 and are indistinguishable on the wire.
      */
     @Suppress("TooGenericExceptionCaught")
-    private fun failClosedOnStoreError(requesterId: String): VopRateLimitOutcome = try {
-        if (rateLimiter.isAllowed(requesterId, limitPerMinute)) {
-            VopRateLimitOutcome.ALLOWED
-        } else {
-            VopRateLimitOutcome.THROTTLED
-        }
-    } catch (e: Exception) {
-        // Fail closed — see the class doc. A 429 degrades to `no_data` at the caller; it does not
-        // block the payment.
-        Log.errorf(e, "VoP rate-limit store unavailable; rejecting requester=%s (fail-closed)", requesterId)
-        VopRateLimitOutcome.STORE_UNAVAILABLE
-    }
+    private fun failClosedOnStoreError(requesterId: String): Uni<VopRateLimitOutcome> =
+        rateLimiter.isAllowed(requesterId, limitPerMinute)
+            .map { allowed -> if (allowed) VopRateLimitOutcome.ALLOWED else VopRateLimitOutcome.THROTTLED }
+            .onFailure().recoverWithItem { failure ->
+                // Fail closed — see the class doc. A 429 degrades to `no_data` at the caller; it
+                // does not block the payment. The recovery comes AFTER the boolean mapping so a
+                // store failure is reported as STORE_UNAVAILABLE, not collapsed into THROTTLED.
+                Log.errorf(
+                    failure,
+                    "VoP rate-limit store unavailable; rejecting requester=%s (fail-closed)",
+                    requesterId,
+                )
+                VopRateLimitOutcome.STORE_UNAVAILABLE
+            }
+
+    private fun tooManyRequests(): Response = Response.status(HTTP_TOO_MANY_REQUESTS)
+        .header("X-RateLimit-Limit", limitPerMinute)
+        .header("X-RateLimit-Window", "60s")
+        .header("Retry-After", RETRY_AFTER_SECONDS)
+        .entity(
+            mapOf(
+                "code" to "RATE_LIMIT_EXCEEDED",
+                "message" to "Too many verification requests. Limit: $limitPerMinute/min.",
+            ),
+        )
+        .build()
 
     companion object {
         /**

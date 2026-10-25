@@ -4,7 +4,10 @@
 
 package com.openbank.vop.infrastructure.ratelimit
 
-import io.quarkus.redis.datasource.RedisDataSource
+import io.quarkus.redis.datasource.ReactiveRedisDataSource
+import io.quarkus.redis.datasource.keys.ReactiveKeyCommands
+import io.quarkus.redis.datasource.value.ReactiveValueCommands
+import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.Duration
@@ -25,28 +28,47 @@ import java.time.Instant
  * counter would give an attacker `limit × replicas` and would reset on every pod roll. The
  * shared window is what makes the limit mean anything.
  *
+ * **Reactive, not blocking — a measured fix, not a style choice.** The blocking
+ * `RedisDataSource` answered 429 to EVERY request in this service's real boots: request filters
+ * run on the Vert.x event loop, `@Blocking` on a `ContainerRequestFilter` is silently ignored,
+ * and the blocking `INCR` threw `IllegalStateException: The current thread cannot be blocked` on
+ * the very first call. The filter's fail-closed catch then turned that into a permanent
+ * `store_unavailable` rejection — the enumeration control was never actually checking anyone.
+ * The E2E suite (`VopVerificationE2E`) pinned it: every verify answered 429. The reactive
+ * datasource keeps the whole filter chain on the event loop.
+ *
  * Note the shared-state cost this accepts: the platform audit flags Valkey as a money-path single
  * point (idempotency store). See [VopRateLimitFilter] for why an outage is nonetheless safe here.
  */
 @ApplicationScoped
-class VopRateLimiter(redis: RedisDataSource, private val clock: Clock) {
+class VopRateLimiter(redis: ReactiveRedisDataSource, private val clock: Clock) {
 
-    private val values = redis.value(String::class.java)
-    private val keys = redis.key(String::class.java)
+    private val values: ReactiveValueCommands<String, String> = redis.value(String::class.java)
+    private val keys: ReactiveKeyCommands<String> = redis.key(String::class.java)
 
     /**
      * Returns true if [requesterId] is under the limit for the current minute window. Increments
      * the counter — each call consumes one slot.
      *
-     * Throws whatever the Valkey client throws when the store is unreachable; the caller decides
-     * the failure semantics rather than this class silently choosing one.
+     * A Valkey failure surfaces as a FAILED Uni, not a swallowed default: the caller decides the
+     * failure semantics (fail closed) rather than this class silently choosing one.
      */
-    fun isAllowed(requesterId: String, limitPerMinute: Int): Boolean {
+    fun isAllowed(requesterId: String, limitPerMinute: Int): Uni<Boolean> {
+        val key = bucketKey(requesterId)
+        return values.incr(key).flatMap { count ->
+            val underLimit = count <= limitPerMinute
+            if (count == 1L) {
+                // First touch of a fresh window arms its TTL; the answer rides along either way.
+                keys.expire(key, WINDOW_TTL).map { underLimit }
+            } else {
+                Uni.createFrom().item(underLimit)
+            }
+        }
+    }
+
+    private fun bucketKey(requesterId: String): String {
         val bucket = Instant.now(clock).epochSecond / WINDOW_SECONDS
-        val key = "vop:rate-limit:$requesterId:$bucket"
-        val count = values.incr(key)
-        if (count == 1L) keys.expire(key, WINDOW_TTL)
-        return count <= limitPerMinute
+        return "vop:rate-limit:$requesterId:$bucket"
     }
 
     companion object {

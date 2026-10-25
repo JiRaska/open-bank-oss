@@ -35,7 +35,13 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // @TestSecurity principals for the E2E role-boundary journeys.
+    testImplementation(libs.quarkus.test.security)
     testImplementation(project(":openbank-libs-testing"))
+    // E2E: WireMock stands in for BOTH ADR-0171 §4 name-resolution hops (account-service,
+    // party-service) plus the OIDC token endpoint over real HTTP — the REST clients, their
+    // @Retry/@CircuitBreaker annotations and the 404-vs-5xx distinction all cross a real wire.
+    testImplementation(libs.wiremock.standalone)
     // Consumer-driven contract test (ADR-0063, issue #2255 dimension C3): vop is a real consumer of
     // party-service's GET /api/v1/parties/{id} — hop 2 of the ADR-0171 §4 name resolution.
     testImplementation(libs.pact.consumer)

@@ -10,11 +10,10 @@ import com.openbank.vop.infrastructure.ratelimit.VopRateLimiter
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.slot
 import io.mockk.verify
 import io.quarkus.security.identity.SecurityIdentity
+import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.container.ContainerRequestContext
-import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.UriInfo
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -37,6 +36,8 @@ class VopRateLimitFilterTest {
         this.enabled = enabled
     }
 
+    private fun allow(allowed: Boolean): Uni<Boolean> = Uni.createFrom().item(allowed)
+
     private fun context(path: String = "api/v1/vop/verify"): ContainerRequestContext {
         val uriInfo = mockk<UriInfo> { every { this@mockk.path } returns path }
         return mockk(relaxed = true) { every { this@mockk.uriInfo } returns uriInfo }
@@ -49,10 +50,10 @@ class VopRateLimitFilterTest {
     @Test
     fun `a requester under the limit passes through untouched`() {
         principal("operator-jana")
-        every { limiter.isAllowed("operator-jana", 60) } returns true
+        every { limiter.isAllowed("operator-jana", 60) } returns allow(true)
         val ctx = context()
 
-        filter().filter(ctx)
+        filter().checkLimit(ctx).await().indefinitely()
 
         verify(exactly = 0) { ctx.abortWith(any()) }
     }
@@ -60,16 +61,16 @@ class VopRateLimitFilterTest {
     @Test
     fun `a requester over the limit gets 429 with backoff headers`() {
         principal("enumerator")
-        every { limiter.isAllowed("enumerator", 60) } returns false
-        val ctx = context()
-        val response = slot<Response>()
+        every { limiter.isAllowed("enumerator", 60) } returns allow(false)
 
-        filter().filter(ctx)
+        val response = filter().checkLimit(context()).await().indefinitely()
 
-        verify { ctx.abortWith(capture(response)) }
-        assertThat(response.captured.status).isEqualTo(429)
-        assertThat(response.captured.getHeaderString("Retry-After")).isEqualTo("60")
-        assertThat(response.captured.getHeaderString("X-RateLimit-Limit")).isEqualTo("60")
+        // @ServerRequestFilter aborts by RETURNING the Response; the filter never calls
+        // abortWith itself.
+        assertThat(response).isNotNull()
+        assertThat(response!!.status).isEqualTo(429)
+        assertThat(response.getHeaderString("Retry-After")).isEqualTo("60")
+        assertThat(response.getHeaderString("X-RateLimit-Limit")).isEqualTo("60")
     }
 
     @Test
@@ -80,14 +81,13 @@ class VopRateLimitFilterTest {
         // payment-availability gain. If someone "fixes" this to fail open for consistency with
         // the service's own fail-open rule, this test is what should stop them.
         principal("someone")
-        every { limiter.isAllowed(any(), any()) } throws RuntimeException("valkey unreachable")
-        val ctx = context()
-        val response = slot<Response>()
+        every { limiter.isAllowed(any(), any()) } returns
+            Uni.createFrom().failure(RuntimeException("valkey unreachable"))
 
-        filter().filter(ctx)
+        val response = filter().checkLimit(context()).await().indefinitely()
 
-        verify { ctx.abortWith(capture(response)) }
-        assertThat(response.captured.status).isEqualTo(429)
+        assertThat(response).isNotNull()
+        assertThat(response!!.status).isEqualTo(429)
     }
 
     @Test
@@ -95,7 +95,7 @@ class VopRateLimitFilterTest {
         principal(null)
         val ctx = context()
 
-        filter().filter(ctx)
+        filter().checkLimit(ctx).await().indefinitely()
 
         verify(exactly = 0) { ctx.abortWith(any()) }
         // Never consume a window slot for a request that has no identity to attribute it to.
@@ -106,7 +106,7 @@ class VopRateLimitFilterTest {
     fun `management endpoints are not rate limited`() {
         val ctx = context(path = "/q/health/ready")
 
-        filter().filter(ctx)
+        filter().checkLimit(ctx).await().indefinitely()
 
         verify(exactly = 0) { limiter.isAllowed(any(), any()) }
     }
@@ -115,7 +115,7 @@ class VopRateLimitFilterTest {
     fun `the limit can be disabled for local development`() {
         val ctx = context()
 
-        filter(enabled = false).filter(ctx)
+        filter(enabled = false).checkLimit(ctx).await().indefinitely()
 
         verify(exactly = 0) { limiter.isAllowed(any(), any()) }
         verify(exactly = 0) { ctx.abortWith(any()) }
@@ -128,13 +128,16 @@ class VopRateLimitFilterTest {
         // because Valkey is down. Collapsing them into one counter would hide a fleet-wide outage
         // inside what looks like healthy enumeration defence.
         principal("enumerator")
-        every { limiter.isAllowed("enumerator", 60) } returns true andThen false andThenThrows
-            RuntimeException("valkey unreachable")
+        every { limiter.isAllowed("enumerator", 60) } returnsMany listOf(
+            allow(true),
+            allow(false),
+            Uni.createFrom().failure(RuntimeException("valkey unreachable")),
+        )
         val f = filter()
 
-        f.filter(context())
-        f.filter(context())
-        f.filter(context())
+        f.checkLimit(context()).await().indefinitely()
+        f.checkLimit(context()).await().indefinitely()
+        f.checkLimit(context()).await().indefinitely()
 
         assertThat(decisions("allowed")).isEqualTo(1.0)
         assertThat(decisions("throttled")).isEqualTo(1.0)
@@ -147,8 +150,8 @@ class VopRateLimitFilterTest {
         // as `allowed` either — that would dilute the very ratio the limit is tuned from.
         principal(null)
 
-        filter().filter(context())
-        filter().filter(context(path = "/q/health/ready"))
+        filter().checkLimit(context()).await().indefinitely()
+        filter().checkLimit(context(path = "/q/health/ready")).await().indefinitely()
 
         assertThat(registry.find("openbank.vop.rate_limit.decisions").counters()).isEmpty()
     }
