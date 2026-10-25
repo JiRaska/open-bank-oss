@@ -7,6 +7,7 @@ flowchart LR
   Service[Quarkus služba] --> Runtime[openbank-libs-runtime]
   Runtime --> Domain[openbank-libs-domain]
   Finance[openbank-libs-finance] --> Domain
+  Fincrime[openbank-libs-fincrime]
   Legacy[openbank-libs kompatibilitní zastřešení] --> Runtime
   Legacy --> Domain
   Runtime --> DocsResource[DocsResource /q/openbank/docs]

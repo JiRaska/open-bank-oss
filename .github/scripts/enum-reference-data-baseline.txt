@@ -30,7 +30,6 @@ duplicate openbank-engagement-service EngagementEventType  # #13441
 duplicate openbank-engagement-service SurfaceSlot  # #13441
 duplicate openbank-finops-agent RunTrigger  # #13441
 duplicate openbank-flaky-test-hunter FindingStatus  # #13441
-duplicate openbank-fraud-service FraudVerdict  # #13439
 duplicate openbank-fx-service AmlCaseRiskLevel  # #13435
 duplicate openbank-fx-service FraudVerdict  # #13439
 duplicate openbank-fx-service ScreeningDecision  # #13439
@@ -45,6 +44,9 @@ duplicate openbank-ledger-service AccountingRole  # #13441
 duplicate openbank-lending-service LoanRateIndex  # #13434
 duplicate openbank-libs-domain ProposalState  # #13441
 duplicate openbank-libs-domain WaiveOperator  # #13441
+duplicate openbank-libs-fincrime FraudVerdict  # #13439
+duplicate openbank-libs-fincrime ScreeningDecision  # #13439
+duplicate openbank-libs-fincrime ScreeningMatchStatus  # #13439
 duplicate openbank-libs-iso20022 InstitutionTransferRail  # #13647
 duplicate openbank-libs-lending CreditProductKind  # #13441
 duplicate openbank-libs-lending PolicyOperator  # #13441
@@ -58,7 +60,6 @@ duplicate openbank-party-service PartyType  # #13441
 duplicate openbank-product-catalog CardNetwork  # #13438
 duplicate openbank-release-steward FindingStatus  # #13441
 duplicate openbank-risk-engine CurveIndex  # #13434
-duplicate openbank-sanctions-service SanctionsCheckStatus  # #13439
 duplicate openbank-sepa-instant AmlCaseRiskLevel  # #13435
 duplicate openbank-sepa-instant FraudVerdict  # #13439
 duplicate openbank-sepa-instant ScreeningDecision  # #13439

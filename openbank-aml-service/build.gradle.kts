@@ -27,6 +27,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    // ADR-0353: the financial-crime published language, declared once for producers and rails.
+    implementation(project(":openbank-libs-fincrime"))
     implementation(project(":openbank-libs-runtime"))
     implementation(libs.quarkus.scheduler)
     // #3413: account -> party lookup for the resolution sweep (sweep-only; never on the

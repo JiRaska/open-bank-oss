@@ -29,6 +29,9 @@ import subprocess
 import time
 
 BOT_LOGIN = "openbank-gitops-bot[bot]"
+BOT_ID = 305_862_397   # the App bot's numeric user id (read off carrier #13817's `user.id`); a login string alone is a name
+RECORD_CONTEXT = "merge-train/record"          # publish's record of the tree it pushed (merge-train.py)
+RECORD_RE = re.compile(r"^tree=([0-9a-f]{40})$")
 CARRIER_LABEL = "merge-train"
 TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 OWN_MEMBER_RE = re.compile(r"^merge-train: member #([0-9]+)\n\nPR-Number: #\1\nPR-Head: ([0-9a-f]{40})\n$")
@@ -59,7 +62,7 @@ def is_verified_carrier(pr: dict | None, repo: str) -> bool:
     user = pr.get("user") or {}
     head = pr.get("head") or {}
     labels = {(lb or {}).get("name") for lb in pr.get("labels") or []}
-    return (user.get("login") == BOT_LOGIN and user.get("type") == "Bot"
+    return (user.get("login") == BOT_LOGIN and user.get("type") == "Bot" and user.get("id") == BOT_ID
             and TRAIN_BRANCH_RE.fullmatch(head.get("ref") or "") is not None
             and ((head.get("repo") or {}).get("full_name") == repo)
             and CARRIER_LABEL in labels)
@@ -107,7 +110,8 @@ def deepen_for_chain(base: str, head: str = "HEAD", cwd: str | None = None, time
         error = (r.stderr or "").strip()
         # Other gates fetch concurrently in this checkout. Only this specific Git contention is
         # transient here; never unlink a writer's lock or retry authentication/transport failures.
-        if not re.search(r"Unable to create ['\"][^'\"]*[/\\]shallow\.lock['\"]: File exists\.", error):
+        if not re.search(r"Unable to create ['\"][^'\"]*[/\\]shallow\.lock['\"]: File exists\.|"
+                         r"shallow file has changed since we read it", error):
             raise CarrierUnavailable(f"deepening the carrier chain failed: {error[:160]}")
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -187,6 +191,29 @@ def gh_member_bodies(repo: str, numbers: list[int], timeout: float = 10) -> dict
         if isinstance(node, dict):
             out[n] = node.get("body") or ""
     return out
+
+
+def gh_record_tree(repo: str, sha: str, timeout: float = 10) -> str | None:
+    """The tree in the App's LATEST `merge-train/record` status on exactly `sha`: "" when the App
+    recorded none (a human push lands on a new sha, which publish never recorded), None when the
+    statuses could not be read. Statuses by any other creator are ignored."""
+    if not REPO_RE.fullmatch(repo or "") or not re.fullmatch(r"[0-9a-f]{40}", sha or ""):
+        return None
+    try:
+        r = subprocess.run(["gh", "api", f"repos/{repo}/commits/{sha}/statuses?per_page=100"],
+                           capture_output=True, text=True, check=True, timeout=max(1.0, timeout))
+        data = json.loads(r.stdout)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError):
+        return None
+    if not isinstance(data, list):
+        return None
+    mine = [st for st in data if isinstance(st, dict) and st.get("context") == RECORD_CONTEXT
+            and (st.get("creator") or {}).get("login") == BOT_LOGIN and (st.get("creator") or {}).get("id") == BOT_ID]
+    if not mine:
+        return ""
+    newest = max(mine, key=lambda st: st.get("id") or 0)
+    m = RECORD_RE.fullmatch(newest.get("description") or "") if newest.get("state") == "success" else None
+    return m.group(1) if m else ""
 
 
 class Resolution:

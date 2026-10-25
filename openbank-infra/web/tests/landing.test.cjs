@@ -192,7 +192,7 @@ function brandBrowser({ reduced = false, rejectPlayback = false } = {}) {
   return { dom, film, calls, media };
 }
 
-test('new logo is confined to the header on current pages; artwork and footer marks remain', () => {
+test('current pages share the canonical identity and retain the header-only animation', () => {
   for (const page of ['index.html', 'platform.html', 'labs.html']) {
     const dom = new JSDOM(read(page)), d = dom.window.document;
     assert.equal(d.querySelectorAll('.brand-film').length, 1);
@@ -205,10 +205,10 @@ test('new logo is confined to the header on current pages; artwork and footer ma
     assert.equal(film.hasAttribute('muted'), true);
     assert.equal(film.hasAttribute('playsinline'), true);
     assert.ok(fs.existsSync(path.join(site, film.getAttribute('poster'))));
-    assert.equal(d.querySelector('footer .brand img').getAttribute('src'), 'assets/ob-mark-complete.svg');
+    assert.equal(d.querySelector('footer .brand img').getAttribute('src'), 'assets/lipa-lockup-light.svg');
     assert.equal(d.querySelectorAll('script[src="brand.js"]').length, 1);
     if (page === 'index.html') {
-      assert.equal(d.querySelector('.hero-art img').getAttribute('src'), 'assets/explorers-hero.webp');
+      assert.equal(d.querySelector('.hero-art img').getAttribute('src'), 'assets/explorers-lipa.webp');
       assert.equal(d.querySelector('.crew').getAttribute('src'), 'assets/agent-crew.webp');
     }
     dom.window.close();
@@ -236,4 +236,76 @@ test('blocked autoplay falls back to the completed-logo poster', async () => {
   await tick();
   assert.deepEqual(calls, { play: 1, pause: 0, load: 1 });
   dom.window.close();
+});
+
+// Cover every entry page: favicon/share images and embedded art are part of a brand release.
+test('all entry pages use current brand assets, including archive and social metadata', () => {
+  const legacy = /(?:ob-mark-complete\.svg|openbank-logo\.png|explorers-hero\.webp|openbank-labs-kernel\.jpg|app-screen(?:-current)?\.png)/;
+  for (const page of ['index.html', 'platform.html', 'labs.html', 'classic.html']) {
+    const html = read(page), d = new JSDOM(html).window.document;
+    assert.doesNotMatch(html, legacy, page);
+    assert.ok(d.querySelector('link[rel="icon"][type="image/svg+xml"]'));
+    assert.ok(d.querySelector('link[rel="icon"][sizes="32x32"]'));
+    assert.equal(d.querySelector('link[rel="apple-touch-icon"]').getAttribute('href'), 'assets/lipa-icon-180.png');
+    const share = new URL(d.querySelector('meta[property="og:image"]').content);
+    assert.equal(share.origin, 'https://open-bank.tech');
+    assert.ok(fs.existsSync(path.join(site, share.pathname)));
+  }
+  const d = new JSDOM(read('index.html')).window.document;
+  assert.equal(d.querySelector('.phone-stage img').getAttribute('src').split('?')[0], 'assets/app-iphone-20261024.png');
+  assert.match(d.querySelector('.phone-figure figcaption').textContent, /Actual app render.*synthetic demo data.*iOS Simulator/);
+});
+
+// Exactly the branded files added by #13754, excluding the manifest itself.
+// Unchanged header-film/crew/control-room assets are outside this PR's provenance scope.
+const brandedAssetInventory = [
+  '../favicon.ico', 'app-cards-lipa.png', 'app-iphone-20261024.png',
+  'explorers-lipa.webp', 'labs-kernel-lipa.webp',
+  'lipa-icon-180.png', 'lipa-icon-192.png', 'lipa-icon-32.png', 'lipa-icon-512.png',
+  'lipa-icon.svg', 'lipa-lockup-dark.svg', 'lipa-lockup-light.svg', 'lipa-mark.svg',
+].sort();
+
+function assertBrandProvenance(assets, readAsset = file => fs.readFileSync(path.join(site, 'assets', file))) {
+  const names = assets.map(asset => asset.file);
+  assert.equal(new Set(names).size, names.length, 'Duplicate provenance file');
+  assert.deepEqual([...names].sort(), brandedAssetInventory, 'Brand provenance must cover exactly the PR inventory');
+  for (const asset of assets) {
+    assert.match(asset.sha256, /^[a-f0-9]{64}$/, `Invalid SHA-256: ${asset.file}`);
+    const actual = require('node:crypto').createHash('sha256').update(readAsset(asset.file)).digest('hex');
+    assert.equal(actual, asset.sha256, `Unreviewed brand asset change: ${asset.file}`);
+  }
+}
+
+test('brand provenance covers every proposed asset and root favicon exactly once with matching bytes', () => {
+  assertBrandProvenance(JSON.parse(read('assets/lipa-provenance.json')).assets);
+});
+
+test('brand provenance rejects omissions, duplicates, unexpected assets, missing files and changed bytes', () => {
+  // Synthetic validator fixture, not a claim of approved provenance for missing records.
+  const complete = brandedAssetInventory.map(file => ({ file, sha256: require('node:crypto')
+    .createHash('sha256').update(fs.readFileSync(path.join(site, 'assets', file))).digest('hex') }));
+  assert.doesNotThrow(() => assertBrandProvenance(complete));
+  for (const omitted of brandedAssetInventory) {
+    assert.throws(() => assertBrandProvenance(complete.filter(asset => asset.file !== omitted)),
+      /must cover exactly the PR inventory/, `Omission must fail: ${omitted}`);
+  }
+  assert.throws(() => assertBrandProvenance([...complete, complete[0]]), /Duplicate provenance file/);
+  assert.throws(() => assertBrandProvenance([...complete, { file: 'unreviewed.png', sha256: '0'.repeat(64) }]),
+    /must cover exactly the PR inventory/);
+  assert.throws(() => assertBrandProvenance(complete, () => { throw new Error('Missing asset'); }), /Missing asset/);
+  assert.throws(() => assertBrandProvenance(complete, () => Buffer.from('changed bytes')), /Unreviewed brand asset change/);
+});
+
+// A fresh HTML response cannot invalidate a still-fresh browser cache entry at the old image URL.
+test('app preview URL changes with the recorded image content hash for cached visitors', () => {
+  const asset = JSON.parse(read('assets/lipa-provenance.json')).assets
+    .find(asset => asset.file === 'app-iphone-20261024.png');
+  const digest = require('node:crypto').createHash('sha256')
+    .update(fs.readFileSync(path.join(site, 'assets', asset.file))).digest('hex');
+  assert.equal(asset.sha256, digest);
+  const expected = `assets/${asset.file}?v=${digest.slice(0, 12)}`;
+  for (const page of ['index.html', 'classic.html']) {
+    const document = new JSDOM(read(page)).window.document;
+    assert.equal(document.querySelector('img[src*="app-iphone-20261024.png"]').getAttribute('src'), expected, page);
+  }
 });
