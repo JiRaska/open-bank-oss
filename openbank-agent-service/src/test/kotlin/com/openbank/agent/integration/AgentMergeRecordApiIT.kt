@@ -5,8 +5,13 @@
 
 package com.openbank.agent.integration
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.agent.application.port.`in`.MergeRecordCommand
 import com.openbank.agent.application.port.`in`.RecordMergeUseCase
+import com.openbank.agent.domain.mergerecord.MergeActorType
+import com.openbank.agent.domain.mergerecord.MergeAuthorization
+import com.openbank.agent.domain.mergerecord.MergeAuthorizationKind
+import com.openbank.agent.domain.mergerecord.MergeAuthorizationScope
 import com.openbank.agent.infrastructure.audit.AgentAuditOutbox
 import com.openbank.agent.it.PostgresTestResource
 import io.mockk.every
@@ -48,6 +53,40 @@ class AgentMergeRecordApiIT {
 
     @Inject
     lateinit var recordMerge: RecordMergeUseCase
+
+    @Inject
+    lateinit var objectMapper: ObjectMapper
+
+    private fun appAuthorization() = MergeAuthorization(
+        approvedBy = "fixture-owner",
+        approvedById = 1234,
+        approvedAt = Instant.parse("2026-10-01T11:59:00Z"),
+        evidenceUrl = "https://github.com/JiRaska/open-bank-oss/actions/runs/4321",
+        statusId = 5678,
+        workflowRunId = 4321,
+    )
+
+    private fun appBody(prNumber: Long): Map<String, Any> = ingestBody(prNumber = prNumber) + mapOf(
+        "mergedBy" to "openbank-gitops-bot[bot]",
+        "mergedByType" to "GITHUB_APP",
+        "mergedById" to 9876,
+        "headSha" to "a".repeat(40),
+        "mergeCommitSha" to "b".repeat(40),
+        "authorization" to appAuthorization(),
+    )
+
+    private fun legacyAuthorization(prNumber: Long) = MergeAuthorization(
+        approvedBy = "fixture-owner",
+        approvedById = 1234,
+        approvedAt = Instant.parse("2026-10-01T11:59:00Z"),
+        evidenceUrl = "https://github.com/JiRaska/open-bank-oss/pull/$prNumber",
+        kind = MergeAuthorizationKind.LEGACY_PR_AUTO_MERGE,
+        scope = MergeAuthorizationScope.PR,
+        pullRequestNodeId = "PR_fixture",
+        mergeEventNodeId = "ME_fixture",
+        mergeEventAt = Instant.parse("2026-10-01T12:00:01Z"),
+        observedAt = Instant.parse("2026-10-24T12:00:00Z"),
+    )
 
     private fun mergeCommand(agentId: String = "fixture-agent", prNumber: Long) = MergeRecordCommand(
         agentId = agentId,
@@ -150,6 +189,8 @@ class AgentMergeRecordApiIT {
         assertThat(retry.record.agentId).isEqualTo(command.agentId)
         assertThat(retry.record.mergedBy).isEqualTo(command.mergedBy)
         assertThat(retry.record.title).isEqualTo(command.title)
+        assertThat(retry.record.mergedByType).isEqualTo(command.mergedByType)
+        assertThat(retry.record.authorization).isEqualTo(command.authorization)
         assertMergeCount(command.prNumber, 1)
         assertThat(auditCountFor(command.prNumber)).isEqualTo(1)
     }
@@ -171,7 +212,14 @@ class AgentMergeRecordApiIT {
     }
 
     private fun assertRuntimeFailureRollback(attempts: Map<Long, Int>) {
-        val original = mergeCommand(prNumber = 9005)
+        val original = mergeCommand(prNumber = 9005).copy(
+            mergedBy = "openbank-gitops-bot[bot]",
+            mergedByType = MergeActorType.GITHUB_APP,
+            mergedById = 9876,
+            headSha = "a".repeat(40),
+            mergeCommitSha = "b".repeat(40),
+            authorization = appAuthorization(),
+        )
         assertFailureRollsBackThenRetry(original, IllegalStateException::class.java, "injected post-enqueue failure")
         assertThat(attempts[9005L]).isEqualTo(2)
         dataSource.connection.use { c ->
@@ -225,13 +273,21 @@ class AgentMergeRecordApiIT {
     fun `ingest persists a row and enqueues exactly one audit event`() {
         given()
             .contentType("application/json")
-            .body(ingestBody())
+            .body(
+                ingestBody() + mapOf(
+                    "authorization" to null,
+                    "mergedById" to null,
+                    "headSha" to null,
+                    "mergeCommitSha" to null,
+                ),
+            )
             .`when`().post("/api/v1/agent-merge-records")
             .then()
             .statusCode(200)
             .body("agentId", `is`("flaky-test-hunter"))
             .body("prNumber", `is`(9001))
             .body("mergedBy", `is`("octo-reviewer"))
+            .body("mergedByType", `is`("HUMAN"))
             .body("source", `is`("github-actions"))
             .body("inserted", `is`(true))
 
@@ -335,6 +391,10 @@ class AgentMergeRecordApiIT {
     @Test
     @TestSecurity(user = "admin", roles = ["ROLE_ADMIN"])
     fun `ingest with ROLE_ADMIN but without ROLE_MERGE_RECORDER is rejected`() {
+        given().get("/api/v1/agent-merge-records/capabilities").then().statusCode(403)
+        given().get("/api/v1/agent-merge-records/9030").then().statusCode(403)
+        given().contentType("application/json").body(appBody(9007))
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(403)
         // Least-privilege guard (ADR-0031 phase 3 hardening): an interactive bank
         // administrator must NOT be able to write merge evidence — only the dedicated
         // ROLE_MERGE_RECORDER carried by the CI recorder client may.
@@ -355,6 +415,184 @@ class AgentMergeRecordApiIT {
     }
 
     @Test
+    @TestSecurity(user = "pipeline", roles = ["ROLE_MERGE_RECORDER"])
+    fun `App executor and human authorization persist separately and conflicting retries fail closed`() {
+        given().get("/api/v1/agent-merge-records/capabilities").then().statusCode(200)
+            .body("evidenceSchemaVersion", `is`(2))
+        given().get("/api/v1/agent-merge-records/9030").then().statusCode(404)
+        val body = appBody(9030)
+        given().contentType("application/json").body(body)
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(200)
+            .body("mergedBy", `is`("openbank-gitops-bot[bot]"))
+            .body("mergedByType", `is`("GITHUB_APP"))
+            .body("authorization.approvedBy", `is`("fixture-owner"))
+            .body("headSha", `is`("a".repeat(40)))
+            .body("inserted", `is`(true))
+        given().contentType("application/json").body(body + ("title" to "redelivered title"))
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(200)
+            .body("inserted", `is`(false))
+        val conflicts = listOf(
+            body + ("headSha" to "c".repeat(40)),
+            body + ("mergeCommitSha" to "d".repeat(40)),
+            body + ("mergedById" to 9999),
+            body + ("authorization" to appAuthorization().copy(statusId = 9999)),
+        )
+        conflicts.forEach {
+            given().contentType("application/json").body(it)
+                .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(409)
+        }
+        given().contentType("application/json").body(ingestBody(prNumber = 9030))
+            .`when`().post("/api/v1/agent-merge-records").then().statusCode(409)
+        given().get("/api/v1/agent-merge-records/9030").then().statusCode(200)
+            .body("mergedBy", `is`("openbank-gitops-bot[bot]"))
+            .body("authorization.approvedBy", `is`("fixture-owner"))
+            .body("headSha", `is`("a".repeat(40)))
+        assertMergeCount(9030, 1)
+        assertThat(auditCountFor(9030)).isEqualTo(1)
+        dataSource.connection.use { c ->
+            c.prepareStatement(
+                "SELECT payload FROM agent_audit_outbox WHERE payload::jsonb ->> 'pr_number' = '9030'",
+            ).use { ps ->
+                ps.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    val payload = objectMapper.readTree(rs.getString(1))
+                    assertThat(payload.path("actorId").asText()).isEqualTo("openbank-gitops-bot[bot]")
+                    assertThat(payload.path("actorType").asText()).isEqualTo("SERVICE")
+                    assertThat(payload.path("authorization").path("approvedBy").asText()).isEqualTo("fixture-owner")
+                    assertThat(payload.path("head_sha").asText()).isEqualTo("a".repeat(40))
+                }
+            }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "pipeline", roles = ["ROLE_MERGE_RECORDER"])
+    fun `invalid or missing App provenance and bot masquerading as human are rejected without writes`() {
+        val body = appBody(9031)
+        val authorization = objectMapper.convertValue(appAuthorization(), Map::class.java)
+        val forgedUrl = "https://example.invalid/actions/runs/4321"
+        val invalid = listOf(
+            body - "authorization", body - "headSha", body - "mergeCommitSha", body - "mergedById",
+            body - "mergedByType", body + ("mergedByType" to "HUMAN"),
+            body + ("mergedById" to 0), body + ("headSha" to "a".repeat(39)),
+            body + ("mergeCommitSha" to "B".repeat(40)),
+            body + ("mergedBy" to "untrusted[bot]"),
+            body + ("authorization" to appAuthorization().copy(approvedAt = Instant.parse("2026-10-01T12:01:00Z"))),
+            body + ("authorization" to (authorization + ("approvedBy" to "some[bot]"))),
+            body + ("authorization" to (authorization + ("approvedById" to 0))),
+            body + ("authorization" to (authorization + ("statusId" to -1))),
+            body + ("authorization" to (authorization + ("workflowRunId" to 0))),
+            body + ("authorization" to (authorization + ("evidenceUrl" to forgedUrl))),
+            body + ("authorization" to (authorization + ("workflowRunId" to 4322))),
+            ingestBody(prNumber = 9031, mergedBy = "openbank-gitops-bot[bot]"),
+            ingestBody(prNumber = 9031) + ("authorization" to appAuthorization()),
+        )
+        invalid.forEach {
+            given().contentType("application/json").body(it)
+                .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(400)
+            assertMergeCount(9031, 0)
+            assertThat(auditCountFor(9031)).isZero()
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "pipeline", roles = ["ROLE_MERGE_RECORDER"])
+    fun `legacy App reconstruction remains PR scoped and refresh retries preserve original observation`() {
+        val authorization = legacyAuthorization(9032)
+        val body = appBody(9032) + ("authorization" to authorization)
+        given().contentType("application/json").body(body)
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(200)
+            .body("mergedByType", `is`("GITHUB_APP"))
+            .body("authorization.kind", `is`("LEGACY_PR_AUTO_MERGE"))
+            .body("authorization.scope", `is`("PR"))
+        given().contentType("application/json")
+            .body(body + ("authorization" to authorization.copy(observedAt = Instant.parse("2026-10-24T12:01:00Z"))))
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(200)
+            .body("inserted", `is`(false))
+        val stored = given().get("/api/v1/agent-merge-records/9032").then().statusCode(200).extract().asString()
+        val storedProof = objectMapper.readTree(stored).path("authorization")
+        assertThat(Instant.parse(storedProof.path("observedAt").asText())).isEqualTo(authorization.observedAt)
+        assertThat(storedProof.path("scope").asText()).isEqualTo("PR")
+        given().contentType("application/json")
+            .body(body + ("authorization" to authorization.copy(mergeEventNodeId = "ME_other")))
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(409)
+        assertThat(auditCountFor(9032)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "pipeline", roles = ["ROLE_MERGE_RECORDER"])
+    fun `legacy reconstruction cannot authorize current merges or claim exact-head scope`() {
+        val proof = objectMapper.convertValue(legacyAuthorization(9033), Map::class.java)
+        val body = appBody(9033) + ("authorization" to proof)
+        val wrongPrUrl = "https://github.com/JiRaska/open-bank-oss/pull/9034"
+        val invalid = listOf(
+            body + ("mergedAt" to "2026-10-23T19:42:18Z"),
+            body + ("authorization" to (proof + ("scope" to "HEAD"))),
+            body + ("authorization" to (proof + ("statusId" to 1))),
+            body + ("authorization" to (proof + ("observedAt" to "2026-10-01T11:59:00Z"))),
+            body + ("authorization" to (proof + ("observedAt" to "9999-01-01T00:00:00Z"))),
+            body + ("authorization" to (proof + ("observedAt" to "2026-10-01T12:00:00Z"))),
+            body + ("authorization" to (proof + ("mergeEventAt" to "2026-10-01T11:58:00Z"))),
+            body + ("authorization" to (proof + ("pullRequestNodeId" to ""))),
+            body + ("authorization" to (proof + ("mergeEventNodeId" to ""))),
+            body + ("authorization" to (proof + ("evidenceUrl" to wrongPrUrl))),
+        )
+        invalid.forEach {
+            given().contentType("application/json").body(it)
+                .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(400)
+            assertMergeCount(9033, 0)
+            assertThat(auditCountFor(9033)).isZero()
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "pipeline", roles = ["ROLE_MERGE_RECORDER"])
+    fun `nanosecond App evidence normalizes to database precision before replay comparison`() {
+        val body = appBody(9034) + mapOf(
+            "mergedAt" to "2026-10-01T12:00:00.123456789Z",
+            "authorization" to appAuthorization().copy(
+                approvedAt = Instant.parse("2026-10-01T11:59:00.123456789Z"),
+            ),
+        )
+        given().contentType("application/json").body(body)
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(200)
+            .body("inserted", `is`(true))
+        given().contentType("application/json").body(body)
+            .`when`().post("/api/v1/agent-merge-records/app").then().statusCode(200)
+            .body("inserted", `is`(false))
+        val stored = given().get("/api/v1/agent-merge-records/9034").then().statusCode(200).extract().asString()
+        val evidence = objectMapper.readTree(stored)
+        assertThat(Instant.parse(evidence.path("mergedAt").asText()))
+            .isEqualTo(Instant.parse("2026-10-01T12:00:00.123456Z"))
+        assertThat(Instant.parse(evidence.path("authorization").path("approvedAt").asText()))
+            .isEqualTo(Instant.parse("2026-10-01T11:59:00.123456Z"))
+        assertThat(auditCountFor(9034)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "pipeline", roles = ["ROLE_MERGE_RECORDER"])
+    fun `legacy human input ignores unknown fields without interpreting them as App authorization`() {
+        val legacy = ingestBody(prNumber = 9036) + mapOf(
+            "mergedByType" to "GITHUB_APP",
+            "mergedById" to -1,
+            "authorization" to "ignored legacy extension",
+            "headSha" to "not-a-sha",
+        )
+        val response = given().contentType("application/json").body(legacy)
+            .`when`().post("/api/v1/agent-merge-records").then().statusCode(200).extract().asString()
+        val record = objectMapper.readTree(response)
+        assertThat(record.path("mergedBy").asText()).isEqualTo("octo-reviewer")
+        assertThat(record.path("mergedByType").asText()).isEqualTo("HUMAN")
+        assertThat(record.path("authorization").isNull).isTrue()
+        assertThat(record.path("headSha").isNull).isTrue()
+        assertThat(auditCountFor(9036)).isEqualTo(1)
+        given().contentType("application/json").body(appBody(9037))
+            .`when`().post("/api/v1/agent-merge-records").then().statusCode(400)
+        assertMergeCount(9037, 0)
+        assertThat(auditCountFor(9037)).isZero()
+    }
+
+    @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
     fun `GET filters by agentId`() {
         recordMerge.record(mergeCommand(agentId = "merge-filter-a", prNumber = 9010))
@@ -372,10 +610,10 @@ class AgentMergeRecordApiIT {
     @Test
     @TestSecurity(user = "compliance", roles = ["ROLE_COMPLIANCE"])
     fun `GET is open to compliance`() {
-        recordMerge.record(mergeCommand(prNumber = 9020))
+        recordMerge.record(mergeCommand(agentId = "compliance-fixture", prNumber = 9020))
 
         given()
-            .`when`().get("/api/v1/agent-merge-records")
+            .`when`().get("/api/v1/agent-merge-records?agentId=compliance-fixture")
             .then()
             .statusCode(200)
             .body("size()", `is`(1))

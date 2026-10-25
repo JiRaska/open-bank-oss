@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.28.1...risk-engine-v0.29.0) (2026-10-24)
+
+
+### Features
+
+* **treasury:** reference data and the cash-flow ledger for the five existing products (ADR-0344 phase 0) ([#13614](https://github.com/JiRaska/open-bank-oss/issues/13614)) ([42eec93](https://github.com/JiRaska/open-bank-oss/commit/42eec93ad9ee5c85728242d9b559515037391274))
+
 ## [0.28.1](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.28.0...risk-engine-v0.28.1) (2026-10-22)
 
 

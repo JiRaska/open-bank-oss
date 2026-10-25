@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.12.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.11.0...admin-ui-v3.12.0) (2026-10-24)
+
+
+### Features
+
+* **treasury:** reference data and the cash-flow ledger for the five existing products (ADR-0344 phase 0) ([#13614](https://github.com/JiRaska/open-bank-oss/issues/13614)) ([42eec93](https://github.com/JiRaska/open-bank-oss/commit/42eec93ad9ee5c85728242d9b559515037391274))
+
+
+### Bug Fixes
+
+* **admin-ui:** Camera QR page describes the domain-verified link, not the bare scheme ([#13737](https://github.com/JiRaska/open-bank-oss/issues/13737)) ([4a84a1c](https://github.com/JiRaska/open-bank-oss/commit/4a84a1c77e8da18e73ef20cbc87d5b7573116b4b))
+* **agent-service:** preserve merge actors and authorization evidence ([#13764](https://github.com/JiRaska/open-bank-oss/issues/13764)) ([5715671](https://github.com/JiRaska/open-bank-oss/commit/571567125e6762da9edd6c5d6adabac9848e6720))
+
 ## [3.11.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.3...admin-ui-v3.11.0) (2026-10-23)
 
 
