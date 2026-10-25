@@ -181,13 +181,9 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
     'openbank-sepa-payment|6. Change log|settleProcessingPayment':
         'no such function in the tree',
-    'openbank-settlement-service|T1|workflowRunId':
-        'settlement idempotency-key defect #6037, reported from the T1 table row (the original entry)',
     'openbank-settlement-service|T1|activityId':
         'settlement idempotency-key defect #6037, reported from the T1 table row (the original entry)',
     'openbank-settlement-service|T — Tampering|activityId':
-        'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
-    'openbank-settlement-service|T — Tampering|workflowRunId':
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
     'openbank-settlement-service|Residual risks|OpaActivityInterceptor':
         '#6055 — a control that was never built; deliberately left failing by the gate that found it',
@@ -196,8 +192,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
     'openbank-settlement-service|Residual risks|legacySettle':
         'settlement #6037 family; no such function in the tree',
     'openbank-settlement-service|Change log|activityId':
-        'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
-    'openbank-settlement-service|Change log|workflowRunId':
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
     'openbank-transaction-service|5. Residual risks / assumptions|PaymentSagaOrchestrator':
         'retired for Temporal (ADR-0120 Phase 5); survives only in KDoc that says it was removed',

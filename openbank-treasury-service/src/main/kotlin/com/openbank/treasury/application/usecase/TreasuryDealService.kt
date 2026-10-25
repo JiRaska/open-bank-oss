@@ -98,9 +98,10 @@ class TreasuryDealService(
 
     override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, DRAFT, null)?.let { return it } }
-        // ADR-0344 phase 0 delivers the cash-flow ledger for the five pre-existing products only; a
-        // leg-described product books once its phase lands its posting rules (400, never a 500 later).
-        require(command.product.legacy) { NOT_DELIVERED.format(command.product) }
+        // ADR-0344 delivery phases: a product is drafted only once its phase has landed (400, never a
+        // 500 later). A delivered leg-described product still settles only through the posting-rule
+        // matrix (phase 2), which settle and mature check.
+        require(command.product in ProductType.DELIVERED) { NOT_DELIVERED.format(command.product) }
         counterparties.findById(command.counterpartyId) ?: throw UnknownCounterpartyException(command.counterpartyId)
         val now = clock.instant()
         val today = bankToday()

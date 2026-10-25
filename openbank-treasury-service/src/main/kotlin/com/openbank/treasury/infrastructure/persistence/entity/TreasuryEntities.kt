@@ -45,7 +45,7 @@ class CounterpartyEntity : PanacheEntity() {
 @Entity
 @Table(name = "deals")
 class DealEntity : PanacheEntity() {
-    /** Optimistic lock (V20): a stale copy of the deal row fails at flush instead of overwriting it. */
+    /** Optimistic lock (V21): a stale copy of the deal row fails at flush instead of overwriting it. */
     @jakarta.persistence.Version
     @Column(name = "row_version", nullable = false)
     var rowVersion: Long = 0

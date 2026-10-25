@@ -230,6 +230,10 @@ export default function TransactionsPage() {
 
   function clearSearchCriteria() {
     clearFilters()
+    // A filtered result cannot describe the ledger after its criteria have been cleared.
+    setResult(null)
+    setResultQueryKey(null)
+    setFailure(null)
     setAccountId(''); setAccountLabel(''); setClient(null); setClientAccounts(null); setAccountsFailed(false); setIbanHint(null)
   }
 

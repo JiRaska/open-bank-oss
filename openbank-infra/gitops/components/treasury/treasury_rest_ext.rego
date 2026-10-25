@@ -24,6 +24,9 @@
 #   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
 #   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
 #   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
+#   treasury.fixing.read, treasury.marketdata.read — treasury staff (ADR-0344 D5)
+#   treasury.marketdata.import, treasury.fixing.manual, treasury.fixing.run — ROLE_TREASURY_BACK_OFFICE
+#   treasury.marketdata.approve               — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
 #                                               balance; it is still back-office evidence, #10896)
 #
@@ -81,6 +84,9 @@ allowed_reasons contains "treasury-staff-read" if {
 		"treasury.reference.read",
 		"treasury.cashflow.read",
 		"treasury.calendar.read",
+		# ADR-0344 D5: fixings and market data (factor history, quality, batches).
+		"treasury.fixing.read",
+		"treasury.marketdata.read",
 	}
 }
 
@@ -213,4 +219,20 @@ allowed_reasons contains "treasury-schedule-preview" if {
 	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_BACK_OFFICE"}
 	role in input.principal.roles
 	input.action == "treasury.deal.preview"
+}
+
+# ADR-0344 D5: back office imports observations, proposes manual fixings and runs the fixing pass;
+# an approver (a different human, checked in the domain and the database) activates them. No role
+# both writes and activates market data; machines and AI agents get nothing from this file.
+allowed_reasons contains "treasury-back-office-market-data" if {
+	treasury_staff
+	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
+	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run"}
+}
+
+allowed_reasons contains "treasury-approver-market-data" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
+	role in input.principal.roles
+	input.action == "treasury.marketdata.approve"
 }

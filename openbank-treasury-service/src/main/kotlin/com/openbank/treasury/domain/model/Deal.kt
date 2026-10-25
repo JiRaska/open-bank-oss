@@ -61,6 +61,15 @@ enum class ProductType(
 
     /** ADR-0344 D2: the products whose legs the client must send (no flat-field derivation). */
     val legsRequired: Boolean get() = !legacy
+
+    companion object {
+        /**
+         * ADR-0344 delivery phases: the products a dealer may draft today. Phase 0 delivered the five
+         * legacy products, phase 1a adds IRS and FRA (cash flows and fixings; they settle once the
+         * posting-rule matrix lands). Mirrored by the parity gate's REQUIRED_PRODUCTS.
+         */
+        val DELIVERED: Set<ProductType> = entries.filter { it.legacy }.toSet() + setOf(IRS, FRA)
+    }
 }
 
 /** The bank's side of an FX spot deal, on the FOREIGN currency: BUY = the bank buys it and pays CZK. */
