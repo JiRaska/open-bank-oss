@@ -1,16 +1,40 @@
 {
-  "identity": "Approved L\u00edpa vector identity, 2026-10-13; client release build 180",
+  "identity": "Approved Lípa vector identity, 2026-10-13; client release build 180",
   "source_repository": "https://github.com/JiRaska/openbank-app",
   "vector_source": "design-system/brand/lipa",
   "app_preview": {
-    "source": "Owner-supplied iPhone screenshot, 2026-10-24",
-    "treatment": "Original PNG copied byte-for-byte; no generated or edited UI",
+    "source": "Authentic HomeScreen and CardsScreen rendered by the app with existing synthetic demo fixtures; no customer login or live account data.",
+    "source_commit": "d81735d112c7ae005246de45e6d5d056e9ab1a0a",
+    "capture_fixture_manifest_sha256": "8e10966c88921b7c9276ae36fb75e34a192485c02a3b84b6582283d240e7ea71",
+    "synthetic_source_inventory_sha256": "2eeb681c3eebce3178c034455b609a7ac0ae6d1c6631e98b76e7ca7deba2e506",
+    "data_origin": "Existing FakeCustomerApi, FakeCardsApi and other screen APIs; empty process-local preferences and stores. Screen bodies unchanged.",
+    "render": "iOS Simulator, iPhone 16, iOS 26.5",
+    "locale": "en_US",
+    "theme": "light",
     "width": 1179,
-    "height": 2556
+    "height": 2556,
+    "treatment": "Original Simulator PNGs copied byte-for-byte. No crop, photo editing or manual branding replacement.",
+    "timing": "Actual system clock and capture instants; animation frame not pinned. No byte-identical reproducibility claim.",
+    "images": [
+      {
+        "file": "app-iphone-20261024.png",
+        "screen": "HOME",
+        "captured_at": "2026-10-25T04:46:03.733110+00:00",
+        "settling": "Eight seconds after launch.",
+        "sha256": "1ef9a5e77a97945117374cf38422ef4974a2fd62cdca88c7865e3dfc657e616b"
+      },
+      {
+        "file": "app-cards-lipa.png",
+        "screen": "CARDS",
+        "captured_at": "2026-10-25T04:46:47.726150+00:00",
+        "settling": "Same app after transient Simulator system notification settled naturally.",
+        "sha256": "92d8e2bf98ca47279a881f199060ff31ed238e1472154e6d838ed60099623b14"
+      }
+    ]
   },
   "illustration_edit": {
     "method": "Built-in imagegen; original scene and text preserved, brand patches replaced using the approved mark",
-    "prompt": "Replace every old OpenBank emblem with the approved L\u00edpa mark. Preserve characters, poses, composition, lighting and all diagram text. Change branding only."
+    "prompt": "Replace every old OpenBank emblem with the approved Lípa mark. Preserve characters, poses, composition, lighting and all diagram text. Change branding only."
   },
   "assets": [
     {
@@ -55,7 +79,16 @@
     },
     {
       "file": "app-iphone-20261024.png",
-      "sha256": "8e069b87dbfb68f889954356e629967fa3e6e898632732893c998e1c9669faa6"
+      "sha256": "1ef9a5e77a97945117374cf38422ef4974a2fd62cdca88c7865e3dfc657e616b"
+    },
+    {
+      "file": "app-cards-lipa.png",
+      "sha256": "92d8e2bf98ca47279a881f199060ff31ed238e1472154e6d838ed60099623b14"
+    },
+    {
+      "file": "../favicon.ico",
+      "sha256": "38d3c74304fefa63c1a26c2b8c33142b2509c033a1218acbb2f2449adf668438",
+      "source": "Root favicon derived from the approved Lipa icon master, as documented for this branding change."
     }
   ]
 }

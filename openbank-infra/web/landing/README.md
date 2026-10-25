@@ -26,9 +26,13 @@ Open `http://127.0.0.1:8766`. Check the homepage, TestFlight form, demo dialogs,
   opening the sandbox instructions from Labs.
 - `classic.html`, `classic.css`: previous homepage, visibly historical and excluded from indexing.
   Old links to `platform.html` now reach the current platform page.
-- `assets/app-iphone-20261024.png`: the owner's actual iPhone screenshot supplied on
-  24 October 2026, copied byte-for-byte with no image edits. It shows the home screen
-  and replaces the earlier Compose test render. The capture date is explicit.
+- `assets/app-iphone-20261024.png` and `assets/app-cards-lipa.png`: authentic app HOME
+  and CARDS screens rendered with existing synthetic demo data in an iPhone 16 / iOS 26.5
+  Simulator on 25 October 2026, in English/light mode. The historical HOME filename is
+  retained; actual capture instants, source/fixture hashes and image hashes are recorded
+  in the provenance manifest. Original PNGs are copied byte-for-byte, without image edits
+  or manual branding replacement. These are not physical-device/customer screenshots.
+  Actual clock and animation frames are recorded, without a reproducibility claim.
 - `assets/lipa-{mark,lockup-light,lockup-dark,icon}.svg`: approved vector exports from
   the app's `design-system/brand/lipa`. The icon PNGs and root `favicon.ico` derive from
   that same master. Do not redraw the symbol or typeset a substitute wordmark.

@@ -253,10 +253,45 @@ test('all entry pages use current brand assets, including archive and social met
   }
   const d = new JSDOM(read('index.html')).window.document;
   assert.equal(d.querySelector('.phone-stage img').getAttribute('src'), 'assets/app-iphone-20261024.png');
-  assert.match(d.querySelector('.phone-figure figcaption').textContent, /Actual iPhone screenshot/);
-  const provenance = JSON.parse(read('assets/lipa-provenance.json'));
-  for (const asset of provenance.assets) {
-    const actual = require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(site, 'assets', asset.file))).digest('hex');
+  assert.match(d.querySelector('.phone-figure figcaption').textContent, /Actual app render.*synthetic demo data.*iOS Simulator/);
+});
+
+// Exactly the branded files added by #13754, excluding the manifest itself.
+// Unchanged header-film/crew/control-room assets are outside this PR's provenance scope.
+const brandedAssetInventory = [
+  '../favicon.ico', 'app-cards-lipa.png', 'app-iphone-20261024.png',
+  'explorers-lipa.webp', 'labs-kernel-lipa.webp',
+  'lipa-icon-180.png', 'lipa-icon-192.png', 'lipa-icon-32.png', 'lipa-icon-512.png',
+  'lipa-icon.svg', 'lipa-lockup-dark.svg', 'lipa-lockup-light.svg', 'lipa-mark.svg',
+].sort();
+
+function assertBrandProvenance(assets, readAsset = file => fs.readFileSync(path.join(site, 'assets', file))) {
+  const names = assets.map(asset => asset.file);
+  assert.equal(new Set(names).size, names.length, 'Duplicate provenance file');
+  assert.deepEqual([...names].sort(), brandedAssetInventory, 'Brand provenance must cover exactly the PR inventory');
+  for (const asset of assets) {
+    assert.match(asset.sha256, /^[a-f0-9]{64}$/, `Invalid SHA-256: ${asset.file}`);
+    const actual = require('node:crypto').createHash('sha256').update(readAsset(asset.file)).digest('hex');
     assert.equal(actual, asset.sha256, `Unreviewed brand asset change: ${asset.file}`);
   }
+}
+
+test('brand provenance covers every proposed asset and root favicon exactly once with matching bytes', () => {
+  assertBrandProvenance(JSON.parse(read('assets/lipa-provenance.json')).assets);
+});
+
+test('brand provenance rejects omissions, duplicates, unexpected assets, missing files and changed bytes', () => {
+  // Synthetic validator fixture, not a claim of approved provenance for missing records.
+  const complete = brandedAssetInventory.map(file => ({ file, sha256: require('node:crypto')
+    .createHash('sha256').update(fs.readFileSync(path.join(site, 'assets', file))).digest('hex') }));
+  assert.doesNotThrow(() => assertBrandProvenance(complete));
+  for (const omitted of brandedAssetInventory) {
+    assert.throws(() => assertBrandProvenance(complete.filter(asset => asset.file !== omitted)),
+      /must cover exactly the PR inventory/, `Omission must fail: ${omitted}`);
+  }
+  assert.throws(() => assertBrandProvenance([...complete, complete[0]]), /Duplicate provenance file/);
+  assert.throws(() => assertBrandProvenance([...complete, { file: 'unreviewed.png', sha256: '0'.repeat(64) }]),
+    /must cover exactly the PR inventory/);
+  assert.throws(() => assertBrandProvenance(complete, () => { throw new Error('Missing asset'); }), /Missing asset/);
+  assert.throws(() => assertBrandProvenance(complete, () => Buffer.from('changed bytes')), /Unreviewed brand asset change/);
 });
