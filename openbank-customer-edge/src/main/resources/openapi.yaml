@@ -52,7 +52,7 @@ info:
   # 1.81.0 -> 1.82.0 (#12259): additive company-scoped business payment batch draft routes.
   # 1.82.0 -> 1.83.0: additive configured pension provider and explicit unconfigured-provider 503 responses.
   # 1.83.0 -> 1.84.0: additive low-balance-alert endpoint and schemas (ADR-0333).
-  version: 1.84.0
+  version: 1.85.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2098,8 +2098,15 @@ paths:
       tags: [Accounts]
       summary: List the authenticated customer's accounts
       operationId: listAccounts
+      description: |
+        Accounts shared WITH the caller (active delegation grants with read capability) are appended
+        to `data`, marked `sharedWithMe: true`, on the FIRST page only (no `cursor`), and raise
+        `pagination.totalCount` accordingly. They sit outside cursor pagination; cursors are
+        account-service's own and are forwarded unchanged.
       security:
         - customerOidc: [accounts:read]
+      parameters:
+        - {name: cursor, in: query, required: false, schema: {type: string}}
       responses:
         '200':
           description: Account list

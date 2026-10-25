@@ -280,4 +280,15 @@ class DelegatedReadTest {
 
         assertThat(body.path("data")).hasSize(1)
     }
+
+    @Test
+    fun `the cursor is forwarded upstream URL-encoded`() {
+        val grantee = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok(page()).build()
+
+        resourceFor(upstream, grantee).listAccounts("a b+c")
+
+        verify { upstream.get("http://account/api/v1/accounts?partyId=$grantee&cursor=a+b%2Bc", any()) }
+    }
 }
