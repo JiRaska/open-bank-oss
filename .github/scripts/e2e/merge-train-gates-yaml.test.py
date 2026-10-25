@@ -5,8 +5,9 @@
 Builds a throwaway repository whose gates.yaml declares a privileged (freshness) gate, commits
 each weakening shape the issue names on its own branch, derives the member's file list with
 merge-train.py's own execution-free `changed_paths`, and requires `qualifies()` to refuse it and
-`strict_lane_state()` to take it. The control is an unrelated gate's check script, which still
-rides a train. Re-adding `.github/gates/gates.yaml` to GATE_CODE_GLOBS makes every shape fail.
+`strict_lane_state()` to take it. An unrelated gate entry also takes the strict lane under the
+conservative policy; its check script still rides a train. Re-adding `.github/gates/gates.yaml`
+to GATE_CODE_GLOBS makes every declaration-routing assertion fail.
 """
 
 from __future__ import annotations
@@ -84,6 +85,10 @@ def main() -> int:
         sh(root, "commit", "-qm", "base")
         git = mt.Git(str(root))
         cases = [(name, {GATES: text}, False) for name, text in SHAPES.items()]
+        # The issue's first alternative intentionally routes ALL declaration edits strictly,
+        # including a valid unrelated entry. Preserve its existing script-positive control too.
+        cases.append(("unrelated gate's entry (strict control)",
+                      {GATES: BASE.replace("    mode: advisory\n", "    mode: enforced\n")}, False))
         cases.append(("unrelated gate's check script (control)", {".github/scripts/check-unrelated.py": "print(2)\n"}, True))
         for i, (name, edits, want_train) in enumerate(cases):
             sh(root, "checkout", "-q", "-b", f"m{i}", "main")
