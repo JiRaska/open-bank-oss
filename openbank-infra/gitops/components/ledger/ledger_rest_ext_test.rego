@@ -270,6 +270,31 @@ test_no_other_principal_may_participate if {
 	}
 }
 
+# --- #13709: billing-service's own identity reports participation and NOTHING else ---
+
+billing_m2m := {"service_account": true, "client_id": "openbank-billing", "type": "HUMAN", "id": "service-account-openbank-billing", "roles": ["ROLE_API"]}
+
+test_billing_may_report_its_own_participant if {
+	rest.allow.allow with input as participate(billing_m2m, "billing") with data.rules as rules_mock
+	"service-close-participation" in rest.allowed_reasons with input as participate(billing_m2m, "billing")
+		with data.rules as rules_mock
+}
+
+test_billing_may_not_report_for_another_participant if {
+	every participant in {"interest", "lending"} {
+		not rest.allow.allow with input as participate(billing_m2m, participant) with data.rules as rules_mock
+	}
+}
+
+# Billing's own identity must not post, reverse or read journals: the participation map is its
+# whole ledger grant. Add billing to any journal rule and this goes red.
+test_billing_has_no_journal_grant if {
+	every action in {"ledger.create", "ledger.reverse", "ledger.read", "ledger.list", "ledger.approve", "ledger.trigger", "ledger.replay", "ledger.close.draft"} {
+		not rest.allow.allow with input as {"principal": billing_m2m, "action": action, "resource": "billing"}
+			with data.rules as rules_mock
+	}
+}
+
 # --- #10486 batch 2: transaction-service and settlement-service own identities (ROLE_API only) ---
 
 transaction_m2m := {"service_account": true, "client_id": "openbank-transaction", "type": "HUMAN", "id": "service-account-openbank-transaction", "roles": ["ROLE_API"]}

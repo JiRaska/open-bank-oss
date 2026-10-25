@@ -119,9 +119,9 @@ jobs:
         \ \\\n  --enforce\n"
     - name: Generate Kover XML report
       continue-on-error: true
-      run: timeout --kill-after=10s 600s ./gradlew --no-daemon --configure-on-demand :${{ inputs.service }}:koverXmlReport
-        --exclude-task :${{ inputs.service }}:test --exclude-task :${{ inputs.service }}:providerPactTest --exclude-task :${{
-        inputs.service }}:quarkusIntTest --exclude-task :${{ inputs.service }}:testNative --build-cache --console=plain -Dquarkus.smallrye-openapi.store-schema-directory=build/openapi-generated
+      env:
+        SERVICE: ${{ inputs.service }}
+      run: timeout --kill-after=10s 600s bash -e "$SERVICE_CI_HELPERS/render-coverage-report.sh"
     - name: Build Test Intelligence run envelope
       if: always()
       continue-on-error: true
