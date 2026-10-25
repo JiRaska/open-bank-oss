@@ -96,7 +96,7 @@ class FraudScoringAdapter(@RestClient private val client: FraudScoreClient, priv
      * OpenAPI enum constrains the wire today, but that is a property of the schema, and a caller
      * that one day enforces the verdict would be relying on this mapper.
      */
-    private fun mapVerdict(remote: String?): FraudVerdict = FraudVerdict.fromWire(remote)
+    private fun mapVerdict(remote: String?): FraudVerdict = FraudVerdict.fromWire(remote?.takeIf { it == it.trim() })
 
     companion object {
         /**

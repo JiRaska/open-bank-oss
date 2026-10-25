@@ -55,7 +55,8 @@ class SanctionsScreeningAdapter(@RestClient private val client: SanctionsService
             }
 
     /** Unknown / null statuses are ESCALATED, never silently CLEAR (shared parser, ADR-0353 D5). */
-    private fun mapStatus(remote: String?): ScreeningMatchStatus = ScreeningMatchStatus.fromWire(remote)
+    private fun mapStatus(remote: String?): ScreeningMatchStatus =
+        ScreeningMatchStatus.fromWire(remote?.takeIf { it == it.trim() })
 
     private companion object {
         // Sanctions matching is name-based; entityType is informational. See ADR-0032 scope note.
