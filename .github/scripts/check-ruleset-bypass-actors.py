@@ -65,7 +65,7 @@ CI consumes a same-run artifact from ruleset-bypass-evidence.yml, which runs fro
 main on workflow_run without checking out or executing PR code. GitHub requires
 write access to a ruleset to include bypass_actors: that collector mints a token
 for this repository only, with Administration:write and implicit Metadata:read.
-It performs GET requests and revokes the token at job end. The PR workflow gets
+It GETs configuration and must revoke its token before publishing. The PR workflow gets
 only data, using Actions:read to verify artifact provenance. Missing evidence or
 missing App permission blocks validation without a PAT fallback.
 See https://docs.github.com/en/rest/repos/rules#get-a-repository-ruleset.

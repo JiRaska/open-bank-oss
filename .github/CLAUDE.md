@@ -460,8 +460,8 @@
   `ruleset-bypass-evidence.yml` listens for CI `workflow_run: in_progress` (including
   reruns). It has no checkout, cache, PR artifact input or shell execution. It mints an
   installation token for this repository with only `Administration:write` and implicit
-  `Metadata:read`, performs GETs, publishes data and revokes the token in the action post
-  step. This is the minimum access GitHub documents for the field; it is not a bypass
+  `Metadata:read`, performs GETs, revokes its own token and only then publishes data. A revocation failure
+  blocks publication; cleanup runs even when the read fails. This is the minimum access GitHub documents for the field; it is not a bypass
   grant. Missing installation permission fails minting; there is no PAT fallback.
 - **CI receives data using only `Actions:read`.** It verifies producer workflow id/path,
   `workflow_run` event and successful completion before downloading the artifact. Both
@@ -475,7 +475,8 @@
   owner must review that access separately; do not expand an existing App blindly, since
   other workflows may mint tokens with all its installed permissions. No required check
   or review may be bypassed to bootstrap this path. Revert the consumer before removing
-  the collector; missing evidence must continue to fail closed.
+  the collector; missing evidence must continue to fail closed. Rerun the whole CI
+  workflow to collect fresh attempt-bound evidence, rather than only its failed jobs.
 - **The bypass history endpoint is a separate control.**
   `merged-past-red-check-watch.yml` reads `rulesets/rule-suites` after a merge; its existing
   credential is not a substitute for the narrowly scoped configuration reader. Detection

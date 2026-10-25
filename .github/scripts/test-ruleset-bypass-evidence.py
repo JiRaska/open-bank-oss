@@ -24,7 +24,7 @@ class EvidenceCollectorTest(unittest.TestCase):
         job, = workflow['jobs'].values()
         self.assertEqual(job['runs-on'], 'ubuntu-latest')
         steps = job['steps']
-        self.assertEqual(len(steps), 3)
+        self.assertEqual(len(steps), 4)
         self.assertTrue(steps[0]['uses'].startswith('actions/create-github-app-token@'))
         self.assertEqual(steps[0]['with'], {
             'app-id': '${{ secrets.GITOPS_APP_ID }}',
@@ -32,11 +32,18 @@ class EvidenceCollectorTest(unittest.TestCase):
             'owner': '${{ github.repository_owner }}',
             'repositories': '${{ github.event.repository.name }}',
             'permission-administration': 'write',
+            'skip-token-revoke': True,
         })
         self.assertTrue(steps[1]['uses'].startswith('actions/github-script@'))
         self.assertEqual(steps[1]['with']['github-token'], '${{ steps.token.outputs.token }}')
-        self.assertTrue(steps[2]['uses'].startswith('actions/upload-artifact@'))
-        self.assertEqual(steps[2]['with']['path'], '${{ runner.temp }}/snapshot.json')
+        self.assertTrue(steps[2]['uses'].startswith('actions/github-script@'))
+        self.assertEqual(steps[2]['if'], "always() && steps.token.outcome == 'success'")
+        self.assertEqual(steps[2]['with']['github-token'], '${{ steps.token.outputs.token }}')
+        self.assertEqual(steps[2]['with']['script'].strip(),
+                         "await github.request('DELETE /installation/token', {request: {timeout: 15000}});")
+        self.assertTrue(steps[3]['uses'].startswith('actions/upload-artifact@'))
+        self.assertEqual(steps[3]['with']['path'], '${{ runner.temp }}/snapshot.json')
+        self.assertNotIn('if', steps[3])  # publish only if read AND revocation succeeded
         for step in steps:
             self.assertNotIn('run', step)
             self.assertNotIn('continue-on-error', step)
@@ -75,6 +82,28 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
     snapshot: fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, 'utf8')) : null}));
 })();
 '''
+        revoke = job['steps'][2]['with']['script']
+        for denied in (False, True):
+            harness_revoke = r'''
+const input = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const calls = [];
+const github = {request: async route => {
+  calls.push(route);
+  if (input.denied) throw new Error('Revocation failed');
+}};
+const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+(async () => {
+  let error = null;
+  try {await new AsyncFunction('github', input.script)(github);} catch (e) {error = e.message;}
+  console.log(JSON.stringify({error, calls}));
+})();
+'''
+            result = subprocess.run(['node', '-e', harness_revoke], input=json.dumps({'script': revoke, 'denied': denied}),
+                                    text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = json.loads(result.stdout)
+            self.assertEqual(output['calls'], ['DELETE /installation/token'])
+            self.assertEqual(output['error'] is not None, denied)
         active = {'id': 1, 'enforcement': 'active', 'target': 'branch'}
         cases = [
             ('empty', [active], {'1': {'bypass_actors': []}}, False, False),
