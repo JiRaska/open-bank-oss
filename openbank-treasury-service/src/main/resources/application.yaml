@@ -156,6 +156,11 @@ openbank:
       # account. Flip to true only after the ledger carrying migration V32 is live; then delete the
       # LegacyGlChart shim. A reversal always names the original posting's account either way.
       post-by-class: ${OPENBANK_TREASURY_LEDGER_POST_BY_CLASS:false}
+    fixing:
+      # ADR-0344 D5: the hourly fixing pass for the accounting day (re-runs are harmless). It fixes
+      # only from ACTIVE (four-eyes approved) observations that pass the quality gate; a blocked
+      # index-date opens a fixing case and fixes nothing.
+      enabled: ${OPENBANK_TREASURY_FIXING_ENABLED:true}
     confirmation:
       # ADR-0315 D2: a deal settles only once CONFIRMED (counterparty confirmation received). The
       # simulated market confirms every BOOKED deal first, so the sandbox lifecycle is unchanged.
