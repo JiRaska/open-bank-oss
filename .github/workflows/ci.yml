@@ -401,9 +401,85 @@ jobs:
   # one gets slow. Adding a group here without one in the manifest fails loudly: run-gates.py
   # refuses a selection that matches no gates rather than reporting a green about no work.
   # ---------------------------------------------------------------------------
+  ruleset-evidence:
+    name: Receive trusted ruleset evidence
+    needs: agent-admission
+    if: needs.agent-admission.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+    outputs:
+      snapshot: ${{ steps.read.outputs.snapshot }}
+    steps:
+      # This job holds only GITHUB_TOKEN with Actions:read. The privileged producer
+      # runs separately from main; neither App key nor installation token enters CI.
+      - name: Locate successful evidence from the trusted collector
+        id: locate
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const path = '.github/workflows/ruleset-bypass-evidence.yml';
+            const {data: workflow} = await github.rest.actions.getWorkflow({
+              ...context.repo, workflow_id: 'ruleset-bypass-evidence.yml'
+            });
+            const name = `ruleset-bypass-${process.env.GITHUB_RUN_ID}-a${process.env.GITHUB_RUN_ATTEMPT}`;
+            const deadline = Date.now() + 8 * 60 * 1000;
+            while (Date.now() < deadline) {
+              const {data} = await github.rest.actions.listArtifactsForRepo({
+                ...context.repo, name, per_page: 100, request: {timeout: 15000}
+              });
+              for (const artifact of data.artifacts) {
+                if (artifact.name !== name || artifact.expired || !artifact.workflow_run) continue;
+                const {data: run} = await github.rest.actions.getWorkflowRun({
+                  ...context.repo, run_id: artifact.workflow_run.id, request: {timeout: 15000}
+                });
+                if (run.workflow_id !== workflow.id || run.path !== path ||
+                    run.event !== 'workflow_run' || run.status !== 'completed' ||
+                    run.conclusion !== 'success') continue;
+                core.setOutput('artifact-id', String(artifact.id));
+                core.setOutput('run-id', String(run.id));
+                core.setOutput('run-attempt', String(run.run_attempt));
+                return;
+              }
+              await new Promise(resolve => setTimeout(resolve, 5000));
+            }
+            throw new Error('No trusted ruleset evidence for this CI attempt; NOT_EVALUATED');
+      - name: Download data from the verified collector run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.locate.outputs.run-id }}
+          artifact-ids: ${{ steps.locate.outputs.artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/ruleset-evidence
+      - name: Bind evidence to this CI attempt and its producer
+        id: read
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SOURCE_RUN_ID: ${{ steps.locate.outputs.run-id }}
+          SOURCE_RUN_ATTEMPT: ${{ steps.locate.outputs.run-attempt }}
+        with:
+          script: |
+            const fs = require('fs');
+            const file = `${process.env.RUNNER_TEMP}/ruleset-evidence/snapshot.json`;
+            if (fs.statSync(file).size > 256 * 1024) throw new Error('Oversized ruleset evidence');
+            const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const expected = {
+              version: 1, repository: `${context.repo.owner}/${context.repo.repo}`,
+              run_id: process.env.GITHUB_RUN_ID, run_attempt: process.env.GITHUB_RUN_ATTEMPT,
+              source_run_id: process.env.SOURCE_RUN_ID,
+              source_run_attempt: process.env.SOURCE_RUN_ATTEMPT
+            };
+            for (const [key, value] of Object.entries(expected)) {
+              if (snapshot[key] !== value) throw new Error(`Evidence binding mismatch: ${key}`);
+            }
+            core.setOutput('snapshot', JSON.stringify(snapshot));
+
   gates:
     name: gates (${{ matrix.slug }})
-    needs: agent-admission
+    needs: [agent-admission, ruleset-evidence]
     if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -453,6 +529,7 @@ jobs:
       # An id, not a credential: check-deploy-holds.py (gate deploy-hold-image-pins) accepts a
       # `merge-train` context pinned to this App in place of strict up-to-date (ADR-0343).
       GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
+      RULESET_BYPASS_SNAPSHOT: ${{ needs.ruleset-evidence.outputs.snapshot }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -635,7 +712,7 @@ jobs:
   # in-repo fix the ruleset can't ship itself.
   validate:
     name: Validate manifests
-    needs: [agent-admission, gates, ui]
+    needs: [agent-admission, ruleset-evidence, gates, ui]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -647,6 +724,14 @@ jobs:
         run: |
           if [ "$RESULT" != 'success' ] || [ "$PROCEED" != 'true' ]; then
             echo "::error::Agent PR admission refused or failed ($RESULT, proceed=$PROCEED)."
+            exit 1
+          fi
+      - name: Verify ruleset evidence was collected
+        env:
+          RESULT: ${{ needs.ruleset-evidence.result }}
+        run: |
+          if [ "$RESULT" != 'success' ]; then
+            echo "::error::Ruleset configuration was not read ($RESULT). Refusing to report success."
             exit 1
           fi
       - name: Verify no gate shard failed

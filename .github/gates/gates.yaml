@@ -6654,6 +6654,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-ruleset-bypass-actors.py --self-test
       python3 .github/scripts/test-ruleset-bypass-verdict.py
+      python3 .github/scripts/test-ruleset-bypass-evidence.py
     selftest_expect: pass
     min_subjects: 1   # readable active rulesets covering main; their actor lists may be empty
     run: |

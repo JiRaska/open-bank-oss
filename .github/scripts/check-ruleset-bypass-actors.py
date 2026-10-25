@@ -61,6 +61,15 @@ Note the contrast with the runtime watch, which needs a CLASSIC PAT: `rulesets/r
 bypass CONFIG) is public. Different endpoint, different answer — which is why the config
 half can be a PR-blocking gate and the log half cannot.
 
+CI consumes a same-run artifact from ruleset-bypass-evidence.yml, which runs from
+main on workflow_run without checking out or executing PR code. GitHub requires
+write access to a ruleset to include bypass_actors: that collector mints a token
+for this repository only, with Administration:write and implicit Metadata:read.
+It performs GET requests and revokes the token at job end. The PR workflow gets
+only data, using Actions:read to verify artifact provenance. Missing evidence or
+missing App permission blocks validation without a PAT fallback.
+See https://docs.github.com/en/rest/repos/rules#get-a-repository-ruleset.
+
 Usage:  check-ruleset-bypass-actors.py [--enforce] [--repo OWNER/REPO]
         check-ruleset-bypass-actors.py --self-test
 """
@@ -157,7 +166,42 @@ def gh_api(path: str) -> list | dict:
         raise RuntimeError(f"gh api {path} returned non-JSON: {exc}") from exc
 
 
-def live_bypass_actors(repo: str) -> tuple[list[tuple[int, str, str]], int]:
+def snapshot_reader(repo: str):
+    """Consume same-run evidence; only local CLI calls read the API directly.
+
+    CI verifies artifact provenance in a separate Actions:read job. The collector
+    runs from main and keeps its privileged App credential outside PR execution.
+    """
+    raw = os.environ.get("RULESET_BYPASS_SNAPSHOT")
+    if raw is None and os.environ.get("GITHUB_ACTIONS") != "true":
+        return gh_api
+    try:
+        snapshot = json.loads(raw or "")
+        expected = {"version": 1, "repository": repo, "run_id": os.environ.get("GITHUB_RUN_ID"),
+                    "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT")}
+        if (not isinstance(snapshot, dict) or
+                any(value is None or snapshot.get(key) != value for key, value in expected.items())):
+            raise ValueError("snapshot does not match this repository, run and attempt")
+        summaries, details = snapshot["summaries"], snapshot["details"]
+        if (not isinstance(summaries, list) or not isinstance(details, dict) or
+                any(not isinstance(rule, dict) for rule in summaries)):
+            raise ValueError("malformed ruleset snapshot")
+    except (ValueError, KeyError, TypeError) as exc:
+        raise Unreadable(f"CI ruleset evidence is missing or invalid: {exc}") from exc
+
+    def read(path: str):
+        if path == f"repos/{repo}/rulesets":
+            return summaries
+        rule_id = path.removeprefix(f"repos/{repo}/rulesets/")
+        detail = details.get(rule_id)
+        if not isinstance(detail, dict):
+            raise Unreadable(f"CI ruleset evidence has no readable detail for ruleset {rule_id}")
+        return detail
+
+    return read
+
+
+def live_bypass_actors(repo: str, fetch=None) -> tuple[list[tuple[int, str, str]], int]:
     """Return actors and the number of readable ACTIVE branch rulesets covering main.
 
     `enforcement` must be `active`: an `evaluate`-mode ruleset is a dry run whose bypass
@@ -165,12 +209,13 @@ def live_bypass_actors(repo: str) -> tuple[list[tuple[int, str, str]], int]:
     about who can bypass protection ON MAIN, and pinning unrelated rulesets would make the
     declaration churn for changes that cannot affect it.
     """
+    fetch = fetch or gh_api
     out: list[tuple[int, str, str]] = []
     checked_rulesets = 0
-    for summary in gh_api(f"repos/{repo}/rulesets"):
+    for summary in fetch(f"repos/{repo}/rulesets"):
         if summary.get("enforcement") != "active" or summary.get("target") != "branch":
             continue
-        detail = gh_api(f"repos/{repo}/rulesets/{summary['id']}")
+        detail = fetch(f"repos/{repo}/rulesets/{summary['id']}")
         include = detail.get("conditions", {}).get("ref_name", {}).get("include", [])
         if TARGET_REF not in include and "~DEFAULT_BRANCH" not in include and "~ALL" not in include:
             continue
@@ -222,12 +267,16 @@ def _fmt(a: tuple[int, str, str]) -> str:
 
 def _run_main(argv: list[str]) -> int:
     """Run main() with a synthetic argv, so the self-test can assert EXIT CODES, not just types."""
+    saved_env = {key: os.environ.pop(key, None) for key in ("RULESET_BYPASS_SNAPSHOT", "GITHUB_ACTIONS")}
     saved = sys.argv
     sys.argv = ["check-ruleset-bypass-actors.py", *argv]
     try:
         return main()
     finally:
         sys.argv = saved
+        for key, value in saved_env.items():
+            if value is not None:
+                os.environ[key] = value
 
 
 def _capture(fn) -> tuple[int, str]:
@@ -482,7 +531,7 @@ def main() -> int:
         return self_test()
 
     try:
-        live, checked_rulesets = live_bypass_actors(args.repo)
+        live, checked_rulesets = live_bypass_actors(args.repo, snapshot_reader(args.repo))
     except RuntimeError as exc:
         # Missing permission, unavailable API and malformed responses all mean that no
         # comparison was completed. Use the runner's existing machine-readable contract
