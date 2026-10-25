@@ -134,7 +134,12 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 
 `PUT /api/v1/ledger/accounting-days/{date}/participants/{participant}` se autorizuje vlastní akcí
 `ledger.close.participate`, nikdy `ledger.create`. `ledger_rest_ext.rego: close_participant_accounts`
-přiřazuje každému strojovému účtu JEDINÉHO účastníka, za kterého smí hlásit (interest, lending); use
+přiřazuje každému strojovému účtu JEDINÉHO účastníka, za kterého smí hlásit (interest, lending, billing); use
 case pak ověří volajícího proti `openbank.ledger.close.participants.<name>.principal`. Přidání
 účastníka jsou tedy tři úpravy: `rules.yaml: close_participants`, mapa v `application.yaml` ledgeru a
-položka v rego mapě (pak přegenerovat bundly). Deklarovaní účastníci: interest, lending. Režim: `shadow`.
+položka v rego mapě (pak přegenerovat bundly). Deklarovaní účastníci: interest, lending, billing. Režim: `shadow`.
+
+Billing se připojuje jako účastník uzávěrky pro svůj měsíční cyklus. Hlásí na vlastní identitě,
+klientovi Keycloak `openbank-billing` (`service-account-openbank-billing`), nikoli pod sdíleným
+principalem `openbank-services`, kterým účtuje své žurnály. Vymezený grant `ledger.close.participate`
+pro `participants/billing` je jediným ledger grantem tohoto účtu; vlastní `ledger.create` nemá.
