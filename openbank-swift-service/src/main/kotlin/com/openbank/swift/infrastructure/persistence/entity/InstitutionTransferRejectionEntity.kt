@@ -12,7 +12,7 @@ import jakarta.persistence.Table
 import java.time.Instant
 import java.util.UUID
 
-/** `swift_institution_transfer_rejections` (V12): one row per refused release's payment id. */
+/** `swift_institution_transfer_rejections` (V13): one row per refused release's payment id. */
 @Entity
 @Table(name = "swift_institution_transfer_rejections")
 class InstitutionTransferRejectionEntity {
