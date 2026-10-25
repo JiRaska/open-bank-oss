@@ -1731,6 +1731,7 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             checks = own_workflow_checks(checks, extra, changed_paths(git, f"{base}...{sha}") if ok else None)
         failing, pending, inconclusive = classify_carrier(
             checks, carrier_contexts(train_required, extra, checks))
+        gate_inconclusive = False   # inconclusive because a GATE overran its budget / was not evaluated
         main_extra = [c for c in failing if c in extra and c in main_red]
         failing = [c for c in failing if c not in main_extra]   # red on main too: never a culprit
         if main_extra and not failing:
@@ -1751,6 +1752,23 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             if only_inconclusive:
                 log(f"carrier #{carrier}: {', '.join(failing)} red only for inconclusive gates ({why}) — inconclusive")
                 failing, inconclusive = [], sorted(set(inconclusive) | set(failing))
+                gate_inconclusive = True
+        if not failing and pending and gate_inconclusive:
+            # Early no-verdict close (#13400): the gate shard's job has COMPLETED and the runner's own
+            # --json says every failed gate overran a budget or was not evaluated. Nothing still running
+            # can turn that red into a culprit or a merge (a required context is red), so waiting ~1 h for
+            # the rest of CI only delays the same close. Only when the batch can be halved: a single
+            # member keeps today's wait-then-rerun-once path, since closing early could only rebuild it.
+            halved = halve_without_verdict(gh, git, branch, sha)
+            if halved:
+                log(f"::warning::carrier #{carrier}: gate verdict inconclusive while {len(pending)} context(s) still "
+                    f"run — closed now with no verdict, next batch halved, nobody blamed")
+                summary["inconclusive"].append(carrier)
+                summary["bisected"].append(halved)
+                gh.close_carrier(carrier)
+                if TRAIN_BRANCH_RE.fullmatch(branch):
+                    Pusher(git, branch, gh.remote).delete()
+                continue
         if not failing and pending:
             summary["in_flight"] = True
             carrier_in_flight = True
@@ -1768,6 +1786,11 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
                 continue
             log(f"::warning::carrier #{carrier}: still inconclusive ({', '.join(inconclusive)}) — closed with no verdict")
             summary["inconclusive"].append(carrier)
+            if gate_inconclusive:
+                halved = halve_without_verdict(gh, git, branch, sha)
+                if halved:
+                    log(f"carrier #{carrier}: gate verdict scales with the train — next batch halved, nobody blamed")
+                    summary["bisected"].append(halved)
             gh.close_carrier(carrier)
             if TRAIN_BRANCH_RE.fullmatch(branch):
                 Pusher(git, branch, gh.remote).delete()
@@ -1875,6 +1898,27 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
         summary["fast"].append(m.number)
     stale_red_refresh(gh, git, base, red, shadow, summary)
     return summary
+
+
+def halve_without_verdict(gh, git, branch: str, sha: str) -> list[int]:
+    """A carrier closed with NO verdict because a gate overran its budget or was not evaluated
+    (#13400): halve the next batch (the ordinary `bisect size N` status) WITHOUT blaming anyone.
+    Measured 2026-10-24: security-checklist-money-path judges every member's body in turn, so its time
+    grows with the train; the same five members were rebuilt into four carriers (#13768 #13783 #13786
+    #13791, ~4.5 h of CI) and each overran the same 20 s budget — rebuilding the identical batch is a
+    livelock, a smaller one converges. The status only caps the next batch size: it is no verdict, the
+    smaller carrier still needs every required context green, and a single member is never halved.
+    Anything unreadable (branch moved, not our own chain) halves nothing — today's behaviour."""
+    if git("fetch", "-q", "origin", f"+refs/heads/{branch}:refs/merge-train/settle", check=False).returncode != 0:
+        return []
+    if git("rev-parse", "refs/merge-train/settle", check=False).stdout.strip() != sha:
+        return []
+    chain = parse_own_chain(git, sha)
+    if chain is None or len(chain[1]) < 2:
+        return []
+    for _n, head in chain[1]:
+        gh.post_status(head, "pending", f"bisect size {len(chain[1]) // 2}")
+    return [n for n, _ in chain[1]]
 
 
 def settle_view(gh, git, repo: str, required: list[str]):
@@ -2692,12 +2736,13 @@ def _synthetic_origin(root: str) -> None:
 
 def self_test() -> int:
     fails: list[str] = []
+    last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
     ran: list[str] = []
 
     def check(label: str, cond: bool, detail: str = "") -> None:
         ran.append(label)
         if not cond:
-            fails.append(f"{label}: {detail}")
+            fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
 
     # ---- qualifies -----------------------------------------------------------------------
     req = ["all-green", "Gitleaks", STATUS_CONTEXT]
@@ -3257,6 +3302,101 @@ def self_test() -> int:
             check("budget control: a red shard with no gate-results artifact is still a culprit",
                   s["culprits"] == [1] and gh.reruns == [], str(s))
             gh.carrier_override = {}
+            reset()
+
+            # #13400 livelock (2026-10-24): a gate whose time grows with the train overran its budget on
+            # four carriers of the SAME five members. A multi-member carrier closed with no verdict for a
+            # GATE reason halves the next batch — bisect statuses, no culprit, no failure on anyone.
+            def bisect_of(n):
+                return bisect_size(gh.app_statuses(gh.prs[n]["head"]["sha"]))
+
+            open_only("p1", "p2", "p4")
+            tick()
+            gh.carrier_override = {"gates (data)": "failure", "Validate manifests": "failure"}
+            gh.gate_records = {"data": [{"id": "security-checklist-money-path", "status": "failed", "failure_kind": "budget"}]}
+            settle_once()                       # the one rerun
+            s = settle_once()                   # still budget-red: closed with no verdict
+            check("budget livelock: a multi-member carrier closed for a gate budget halves the next batch",
+                  s["inconclusive"] and s["culprits"] == [] and s["bisected"] == [[1, 2, 4]]
+                  and [bisect_of(n) for n in (1, 2, 4)] == [1, 1, 1] and not open_carriers()
+                  and not gh.comments and all(mt_status(n)[0] != "failure" for n in (1, 2, 4)),
+                  f"{s} sizes={[bisect_of(n) for n in (1, 2, 4)]} comments={gh.comments}")
+            gh.carrier_override, gh.gate_records = {}, {}
+            _, st = tick()
+            newest = max(gh.carriers.values(), key=lambda c: c["number"]) if gh.carriers else None
+            check("budget livelock: the rebuilt carrier carries the halved batch, not the same five again",
+                  st == "published" and newest is not None and newest["state"] == "open"
+                  and len((parse_own_chain(gh.g, newest["head"]["sha"]) or ("", []))[1]) == 1,
+                  f"st={st} newest={newest}")
+            drain()
+            check("budget livelock: once green, every member still merges through verified carriers",
+                  sorted(gh.merged) == [1, 2, 4], str(gh.merged))
+            gh.reruns.clear()
+            reset()
+
+            # EARLY close (#13400): the inconclusive gate verdict is known minutes into CI; the rest of CI
+            # (~1 h on 2026-10-24) cannot change it. Closed now, halved, nobody blamed, no rerun.
+            open_only("p1", "p2", "p4")
+            tick()
+            gh.carrier_override = {"gates (data)": "failure", "Validate manifests": "failure", "derived": None}
+            gh.gate_records = {"data": [{"id": "security-checklist-money-path", "status": "failed", "failure_kind": "budget"}]}
+            s = settle_once()
+            check("early close: an inconclusive gate shard with other CI still running closes now and halves",
+                  s["inconclusive"] and s["bisected"] == [[1, 2, 4]] and s["culprits"] == [] and gh.reruns == []
+                  and not open_carriers() and [bisect_of(n) for n in (1, 2, 4)] == [1, 1, 1]
+                  and all(mt_status(n)[0] != "failure" for n in (1, 2, 4)) and not gh.comments,
+                  f"{s} reruns={gh.reruns} sizes={[bisect_of(n) for n in (1, 2, 4)]}")
+            gh.carrier_override, gh.gate_records = {}, {}
+            reset()
+
+            # A gate shard still RUNNING (pending) says nothing yet: the carrier stays in flight, untouched.
+            open_only("p1", "p2", "p4")
+            tick()
+            gh.carrier_override = {"gates (data)": None, "Validate manifests": None, "derived": None}
+            gh.gate_records = {"data": [{"id": "security-checklist-money-path", "status": "failed", "failure_kind": "budget"}]}
+            s = settle_once()
+            check("early close: a pending gate shard does nothing - in flight, no close, no halving",
+                  s["in_flight"] and len(open_carriers()) == 1 and not s["inconclusive"] and s["bisected"] == []
+                  and [bisect_of(n) for n in (1, 2, 4)] == [None] * 3, f"{s}")
+            gh.carrier_override, gh.gate_records = {}, {}
+            reset()
+
+            # A REAL (content) gate FAIL with other CI running is NOT closed as no-verdict: it takes the
+            # culprit/bisect path, which already acts on the first red required context (unchanged here).
+            open_only("p1", "p2", "p4")
+            tick()
+            gh.carrier_override = {"gates (data)": "failure", "Validate manifests": "failure", "derived": None}
+            gh.gate_records = {"data": [{"id": "x", "status": "failed", "failure_kind": "content"}]}
+            s = settle_once()
+            check("early close: a real gate FAIL with CI running is never an inconclusive close",
+                  not s["inconclusive"] and s["culprits"] == [] and gh.reruns == []
+                  and s["bisected"] == [[1, 2, 4]], f"{s}")
+            gh.carrier_override, gh.gate_records = {}, {}
+            reset()
+
+            # Single member: early close cannot change the batch, so the wait-then-rerun-once path stays.
+            open_only("p1")
+            tick()
+            gh.carrier_override = {"gates (data)": "failure", "Validate manifests": "failure", "derived": None}
+            gh.gate_records = {"data": [{"id": "security-checklist-money-path", "status": "failed", "failure_kind": "budget"}]}
+            s = settle_once()
+            check("early close: a single-member carrier keeps waiting (in flight, open)",
+                  s["in_flight"] and len(open_carriers()) == 1 and not s["inconclusive"], f"{s}")
+            gh.carrier_override, gh.gate_records = {}, {}
+            gh.reruns.clear()
+            reset()
+
+            # Control: a carrier closed with no verdict only for CANCELLED jobs (transient) is not halved.
+            open_only("p1", "p2", "p4")
+            tick()
+            gh.carrier_override = {"gates (data)": "cancelled"}
+            settle_once()
+            s = settle_once()
+            check("budget livelock control: a cancelled-only no-verdict close leaves the batch size alone",
+                  s["inconclusive"] and s["bisected"] == [] and [bisect_of(n) for n in (1, 2, 4)] == [None] * 3,
+                  f"{s} sizes={[bisect_of(n) for n in (1, 2, 4)]}")
+            gh.carrier_override = {}
+            gh.reruns.clear()
             reset()
 
             # A legacy (pre-fix) culprit mark is re-evaluated: the member rides again and merges when green.
@@ -4064,6 +4204,7 @@ def self_test() -> int:
                 ct = int(gh.g("show", "-s", "--format=%ct", head).stdout.strip())
                 if last_activity_ago_s is not None:
                     gh.activity[head] = ct + offset_s - last_activity_ago_s
+                last_reservation.update(ct=ct, now=ct + offset_s, activity=gh.activity.get(head))
                 time.time = lambda: ct + offset_s
                 try:
                     return settle_now()
@@ -4097,6 +4238,16 @@ def self_test() -> int:
             check("reservation: a head committed in the future times out even with live CI activity",
                   34 in s["fast"] and s.get("timed_out") == [35], str(s))
             reset()
+            # The pin is live: a fresh fixture head carries exactly the pinned instant, so the default
+            # clock sees it as age 0 whatever the suite's real duration. If git ignored the pinned date
+            # (or a read bypassed it) the head would be stale or future-dated and every holder would
+            # time out. `open_only` cuts the heads, so measure one.
+            open_only("pW", "pF")
+            ct_pin = int(gh.g("show", "-s", "--format=%ct", gh.prs[35]["head"]["sha"]).stdout.strip())
+            check("clock pin: a fixture head is stamped with the pinned instant (age 0 on the default clock)",
+                  ct_pin == int(time.time()), f"head ct={ct_pin} time.time={time.time():.0f}")
+            reset()
+
             # GREEN IS DONE, NOT STALLED: #13608 went green ~05:50Z, nothing ran after it, and the next tick
             # read the silence as a stall and released a mergeable holder to the back of the queue.
             # (e) green, last check activity 20 min ago: merged this tick, not released.

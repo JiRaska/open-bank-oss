@@ -75,6 +75,19 @@ data class MergeRecordCommand(
                 }
                 requireNotNull(authorization) { "authorization is required for a GitHub App merge" }
                 require(!authorization.approvedAt.isAfter(mergedAt)) { "authorization must precede the merge" }
+                if (authorization.kind == MergeAuthorizationKind.POLICY_PR_AUTO_MERGE) {
+                    require(!headBranch.startsWith("codex/")) { "codex branches require exact-head authorization" }
+                    require(authorization.evidenceUrl == "https://github.com/JiRaska/open-bank-oss/pull/$prNumber") {
+                        "policy evidenceUrl must identify this PR"
+                    }
+                    require(!requireNotNull(authorization.observedAt).isBefore(mergedAt)) {
+                        "policy evidence cannot be observed before the merge"
+                    }
+                    require(
+                        java.time.Duration.between(mergedAt, authorization.mergeEventAt).abs() <=
+                            MERGE_EVENT_TOLERANCE,
+                    ) { "policy merge event must match the canonical merge time" }
+                }
                 if (authorization.kind == MergeAuthorizationKind.LEGACY_PR_AUTO_MERGE) {
                     require(!mergedAt.isAfter(Instant.parse("2026-10-23T19:42:17Z"))) {
                         "legacy PR-scoped evidence is restricted to merges before exact-head approval governance"
@@ -88,5 +101,8 @@ data class MergeRecordCommand(
                 }
             }
         }
+    }
+    private companion object {
+        val MERGE_EVENT_TOLERANCE: java.time.Duration = java.time.Duration.ofSeconds(60)
     }
 }

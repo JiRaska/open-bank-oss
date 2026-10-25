@@ -714,3 +714,21 @@ set) apply equally to the new `ledger.approval.decide` action.
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
 
 - **2026-10-22** — **Per-currency fee-income accounts (#13226).** Migration `V34` adds leaf INCOME accounts 4004 (EUR), 4005 (USD), 4006 (GBP) with stable ids `a0..<code>`, following the chart's existing one-account-per-currency families (2100-2103, 4010-4013, 1990-1993), and maps `FEE_INCOME_ACCOUNT`/`FEE_INCOME` to them by code. Fee income is booked in the fee's original currency; FX revaluation of those balances is out of scope. **STRIDE-T:** the map stays migration-only data (no runtime write path); V34 aborts unless `FEE_INCOME_ACCOUNT` is mapped in exactly the currencies `CUSTOMER_DEPOSIT_DEMAND` is (derived, today CZK/EUR/USD/GBP) and every map row's currency equals its account's, so it cannot ship a row that only ever 422s; an unmapped currency (e.g. CHF) is still a 422, never a default. `AccountingClassGlMapIT` pins the golden table (39 rows), resolves each new triple, and posts a real EUR fee journal by class against Postgres, asserting it lands balanced on 2101/4004 in EUR. No new endpoint, OPA action or grant. Rollback: in V34's header (only while no journal line references 4004-4006).
+- **2026-10-23** — **`lending` declared as a day-close participant (#13167, ADR-0342 D2).**
+  `openbank.ledger.close.participants.lending.principal = service-account-openbank-lending`, matching
+  `rules.yaml: close_participants` (`check-close-participants.py`). **The participation PUT now has
+  its own action, `ledger.close.participate`** (review of #13708): `CloseParticipationResource`
+  authorizes as it instead of `ledger.create`, and `ledger_rest_ext.rego: service-close-participation`
+  grants it per account for that account's ONE participant (`input.resource` is the path's
+  participant): interest -> `interest`, lending -> `lending`. No staff role, no shared client and no
+  other ROLE_API account reaches it (rego tests; removing the resource binding turns one red), so a
+  participant never needs a journal-create grant to report, and a journal poster cannot report for a
+  participant it is not. Measured with `opa eval` against the regenerated bundle: lending/interest
+  allowed for their own name, denied for each other's and for the shared client. Interest keeps
+  `ledger.create` for its journals; its reports now ride the new action. The ledger-pension-co bundle
+  embeds the same ext (its participants mode is `off`).
+  **STRIDE-S:** a `lending` report from any other principal is 403. **STRIDE-D:** under `enforce` a
+  lending outage would hold every day in CUTOFF until it reports or an operator waives; the mode stays
+  `shadow` (counting `would_hold`) and flipping it remains an owner step. `DayCloseParticipantsIT` now
+  has every non-interest declared participant report RAN, read from the live config, so its interest
+  scenarios cannot turn vacuous as participants are added. Rollback: remove the entry.
