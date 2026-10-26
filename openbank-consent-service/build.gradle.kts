@@ -39,6 +39,9 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Real-broker wire E2E (ConsentEventsWireE2E): Redpanda stands in for the fleet broker so the
+    // outbox relay's consent-events-out channel runs over smallrye-kafka, not the in-memory connector.
+    testImplementation(libs.testcontainers.redpanda)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Consumer-driven contract test against sca-service getChallenge (ADR-0063 P2 Batch B).
     testImplementation(libs.pact.consumer)
