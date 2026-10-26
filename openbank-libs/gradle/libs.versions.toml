@@ -2,6 +2,8 @@
 kotlin = "2.4.10"
 quarkus = "3.40.1.1"
 quarkus-plugin = "3.40.1.1"
+# Transaction pilot only; other workers retain 1.25.1 until their versioned rollout.
+temporal = "1.40.0"
 coroutines = "1.8.1"
 # 2.22.3 (Dependabot #158-#160; was 2.22.1 per #75): 2.22.0/2.22.1 carry GHSAs fixed by 2.22.2 — same
 # patch series Quarkus 3.37.2's BOM resolves jackson-databind/jackson-core to
@@ -71,6 +73,10 @@ pdfbox = "3.0.3"
 bouncycastle = "1.86"
 
 [libraries]
+temporal-sdk = { module = "io.temporal:temporal-sdk", version.ref = "temporal" }
+temporal-testing = { module = "io.temporal:temporal-testing", version.ref = "temporal" }
+# Quarkus platform aligns this with the service gRPC family.
+grpc-inprocess = { module = "io.grpc:grpc-inprocess" }
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
 kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "kotlin" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }

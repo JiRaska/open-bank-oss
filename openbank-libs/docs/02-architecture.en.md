@@ -50,3 +50,12 @@ Shared libraries and services use Quarkus **3.40.1.1 LTS** from the same catalog
 ## Outbox trace context
 
 `PanacheOutboxEntityTraced` (libs-runtime) extends the v2 outbox entity with a nullable `trace_context` column holding the W3C `traceparent` captured by `TraceparentCapture` when the row is written. `OutboxEntry.traceparent` carries it to the dispatcher and `OutboxKafkaHeaders` emits it as the `traceparent` Kafka header. It is opt-in per service together with an `ALTER TABLE ... ADD COLUMN trace_context TEXT` migration; the v1 and v2 bases are unchanged because a mapped column a table lacks fails every SELECT.
+
+
+### Temporal worker pilot
+
+The version catalog exposes Temporal SDK/testing 1.40.0 for transaction-service's
+versioned worker pilot (ADR-0355). `openbank-libs-temporal` retains its compile-only
+1.25.1 contract, and other services retain their existing SDK version. This is not
+a fleet-wide runtime upgrade. Original histories gate forward replay; new histories
+must not be assumed readable by the old SDK.
