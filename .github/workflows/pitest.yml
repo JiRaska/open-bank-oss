@@ -40,6 +40,9 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # Advisory mutation work shares hosted capacity with required PR checks.
+      # Keep every module, but bound its simultaneous runner demand.
+      max-parallel: 2
       matrix:
         service:
           - openbank-ledger-service

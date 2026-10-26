@@ -28,9 +28,13 @@ deploy_holds:
       reason: "The consolidated deployment proposes an analytics-sink image that is not covered by an existing durable hold"
       release_condition: "The owner approves the exact image and rollout window after registry publication, provenance and signature, vulnerability scan, applicable contracts, and sandbox runtime capability are verified; remove this hold only in a separately reviewed change."
     openbank-transaction-service:
-      issue: "#13231"
-      reason: "V22 requires an owner-controlled maintenance rollout before card ledger posting re-drive."
-      release_condition: "The maintenance owner approves the exact target image and deployment window, the writer and retry barrier is active, and duplicate-key reconciliation, bounded lock wait and rollback plans are accepted."
+      all_of:
+      - issue: "#13231"
+        reason: "V22 requires an owner-controlled maintenance rollout before card ledger posting re-drive."
+        release_condition: "The maintenance owner approves the exact target image and deployment window, the writer and retry barrier is active, and duplicate-key reconciliation, bounded lock wait and rollback plans are accepted."
+      - issue: "#13888"
+        reason: "Temporal SDK 1.40 requires retained versioned workers and an API-only rollout; the existing mixed worker image substitution is unsafe."
+        release_condition: "Retain the original immutable SDK 1.25 worker, verify old-history migration and versioned workflow/activity pollers on the deployed server, prepare API replicas with their worker disabled, and approve routing rollback with both worker versions retained. Remove only this condition in a separately reviewed change after recording environment evidence."
     openbank-card-processing-service:
       issue: "#13231"
       reason: "Automatic ledger posting re-drive must wait for verified provider-wide idempotency protection."
@@ -51,9 +55,6 @@ deploy_holds:
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-balance-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
@@ -197,9 +198,6 @@ deploy_holds:
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-sepa-instant:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
@@ -867,6 +865,8 @@ change_requirements:
     consumer_allowlist:
       - topic: "openbank.oversight-triggers"
         reason: "agent-service's OversightEventConsumer (ADR-0031 D9 phase 2, channel disabled by default via AGENT_OVERSIGHT_KAFKA_ENABLED) is built; its producers (aml-service, sanctions-service, per the KafkaTopic comment) are not. The 30-minute scheduler sweep covers the gap meanwhile. TRACKING (2026-10-17, #13168): #13179."
+      - topic: "openbank.treasury.payments"
+        reason: "ADR-0344 split of #13413: swift-service's TreasuryPaymentReleasedConsumer and audit-service's subscription land first (bank-own transfer rail slice); the treasury-service producer arrives with the market-and-payments slice, which MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-10-23, #13698): #13698."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
@@ -1315,6 +1315,9 @@ close_participants:
     lending:                                # #13167: accrual + provisioning passes
       service: openbank-lending-service
       principal: service-account-openbank-lending
+    billing:                                # #13167: monthly billing cycle + its fee postings
+      service: openbank-billing-service
+      principal: service-account-openbank-billing
 
 money_path_services:
   - openbank-ledger-service
@@ -3867,18 +3870,23 @@ authz:
     # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
     # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
     # service's own *_rest_ext.rego with `not principal_is_machine` (the verified input.principal.service_account flag).
-    # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
-    # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+    # The risk-engine curve-set list reuses `.read` (resource ""). The snapshot LIST and the
+    # per-snapshot VALUATION carry their own actions (risk.snapshot.list, risk.valuation.read,
+    # ADR-0344 D8) so a named machine can be granted exactly those two paths and nothing else. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
     # here on purpose: every treasury action, the reads included, is granted in
     # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
     # treasury depends on this matrix.
     ROLE_RISK:
       grant:
         - risk.snapshot.read
+        - risk.snapshot.list
+        - risk.valuation.read
         - risk.curve-set.read
     ROLE_FINANCE:
       grant:
         - risk.snapshot.read
+        - risk.snapshot.list
+        - risk.valuation.read
         - risk.curve-set.read
 
 # PROMOTED TO A TOP-LEVEL KEY (2026-08-07). rest.rego reads this as
@@ -4660,6 +4668,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/com/openbank/billing/infrastructure/adapter/LegacyRevisionBridge.kt"
       - "src/main/kotlin/com/openbank/billing/infrastructure/client/BillingRestClients.kt"
+      - "src/main/kotlin/com/openbank/billing/infrastructure/client/LedgerCloseParticipationClient.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"

@@ -13,8 +13,10 @@ const site = path.join(root, 'openbank-infra/web/landing');
 const read = name => fs.readFileSync(path.join(site, name), 'utf8');
 const formHtml = text => text.match(/<form class="tf-form"[\s\S]*?<\/form>/)[0].replace(/data-theme="(?:light|dark)"/, 'data-theme="THEME"');
 
-function browser() {
-  const dom = new JSDOM(read('index.html'), { url: 'https://open-bank.tech/', runScripts: 'outside-only' });
+function browser(page = 'index.html', language = 'en-US') {
+  const dom = new JSDOM(read(page), { url: 'https://open-bank.tech/', runScripts: 'outside-only' });
+  Object.defineProperty(dom.window.navigator, 'language', { value: language });
+  Object.defineProperty(dom.window.navigator, 'languages', { value: [language] });
   dom.window.IntersectionObserver = class { observe() {} unobserve() {} };
   dom.window.matchMedia = () => ({ matches: true });
   dom.window.fetch = () => { throw new Error('Unmocked network request'); };
@@ -22,6 +24,17 @@ function browser() {
   return dom;
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('English forms force English CAPTCHA even in a Czech browser and refresh cached loaders', () => {
+  for (const page of ['index.html', 'classic.html']) {
+    const dom = browser(page, 'cs-CZ'), d = dom.window.document;
+    const captcha = new URL(d.querySelector('script[src*="js.hcaptcha.com"]').src);
+    assert.equal(captcha.searchParams.get('hl'), 'en', page);
+    assert.equal(captcha.searchParams.get('recaptchacompat'), 'off', page);
+    assert.ok(new URL(d.querySelector('script[src^="main.js"]').src).searchParams.get('v'), page);
+    dom.window.close();
+  }
+});
 
 test('TestFlight form contract and privacy dialog are unchanged except the widget theme', () => {
   assert.equal(formHtml(read('index.html')), formHtml(read('classic.html')));
@@ -96,8 +109,8 @@ for (const mode of ['server', 'network']) test(`signup ${mode} failure permits r
   dom.window.close();
 });
 
-test('every local link, fragment and image resolves on all four pages', () => {
-  for (const page of ['index.html', 'platform.html', 'labs.html', 'classic.html']) {
+test('every local link, fragment and image resolves on all entry pages', () => {
+  for (const page of ['index.html', 'platform.html', 'labs.html', 'classic.html', 'product-as-code.html', 'controls-as-code.html', 'ai-as-code.html']) {
     const d = new JSDOM(read(page)).window.document;
     const ids = [...d.querySelectorAll('[id]')].map(el => el.id);
     assert.equal(new Set(ids).size, ids.length, `${page}: duplicate IDs`);
@@ -147,7 +160,7 @@ test('catalog search finds treasury, handles no results and restores the full in
 
 
 test('indexable pages expose unique canonical metadata and matching structured data', () => {
-  const pages = ['index.html', 'platform.html', 'labs.html'];
+  const pages = ['index.html', 'platform.html', 'labs.html', 'product-as-code.html', 'controls-as-code.html', 'ai-as-code.html'];
   const urls = pages.map(page => page === 'index.html' ? 'https://open-bank.tech/' : `https://open-bank.tech/${page}`);
   const titles = new Set();
   for (const [index, page] of pages.entries()) {
@@ -193,7 +206,7 @@ function brandBrowser({ reduced = false, rejectPlayback = false } = {}) {
 }
 
 test('current pages share the canonical identity and retain the header-only animation', () => {
-  for (const page of ['index.html', 'platform.html', 'labs.html']) {
+  for (const page of ['index.html', 'platform.html', 'labs.html', 'product-as-code.html', 'controls-as-code.html', 'ai-as-code.html']) {
     const dom = new JSDOM(read(page)), d = dom.window.document;
     assert.equal(d.querySelectorAll('.brand-film').length, 1);
     assert.ok(d.querySelector('link[rel="stylesheet"][href^="styles.css?v="]'), 'returning visitors must receive the header sizing styles');
@@ -241,7 +254,7 @@ test('blocked autoplay falls back to the completed-logo poster', async () => {
 // Cover every entry page: favicon/share images and embedded art are part of a brand release.
 test('all entry pages use current brand assets, including archive and social metadata', () => {
   const legacy = /(?:ob-mark-complete\.svg|openbank-logo\.png|explorers-hero\.webp|openbank-labs-kernel\.jpg|app-screen(?:-current)?\.png)/;
-  for (const page of ['index.html', 'platform.html', 'labs.html', 'classic.html']) {
+  for (const page of ['index.html', 'platform.html', 'labs.html', 'classic.html', 'product-as-code.html', 'controls-as-code.html', 'ai-as-code.html']) {
     const html = read(page), d = new JSDOM(html).window.document;
     assert.doesNotMatch(html, legacy, page);
     assert.ok(d.querySelector('link[rel="icon"][type="image/svg+xml"]'));

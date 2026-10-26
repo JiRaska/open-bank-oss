@@ -1,0 +1,70 @@
+# PromQL unit tests for BillingFeeRefusedIntoClosedDay (prometheus-rules-billing.yaml, #13167).
+#
+# Run via openbank-infra/tests/promtool/run.sh, which unwraps `.spec` out of the SHIPPED PrometheusRule CR.
+#
+# The rule watches a fee the ledger refused into a closed accounting day: it is FAILED, never charged, and
+# nothing re-posts it on its own. Each firing case is paired with a quiet one: an expression that read the
+# raw counter instead of its increase would fire forever after one historic refusal, and one keyed to a
+# label would miss a refusal counted by another pod.
+evaluation_interval: 1m
+rule_files:
+  - prometheus-rules-billing.yaml
+
+tests:
+  # 1. A refusal fires.
+  - interval: 1m
+    input_series:
+      - series: 'openbank_billing_fee_post_closed_day_refusals_total{instance="billing-0"}'
+        values: "0x30 1x30"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: BillingFeeRefusedIntoClosedDay
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: billing
+            exp_annotations:
+              subject_period: 1d
+              summary: "billing-service had a fee charge refused into a closed accounting day (fee not charged)"
+              description: "The ledger answered a fee posting with 409 ACCOUNTING_DAY_CLOSED. The fee is FAILED and will not post on its own; the cycle's day is reported REFUSED and holds the ledger's close. Recover by re-billing the fee into the next open day under a new, recorded key with four-eyes approval (runbook 0033), then let the reporter re-send the day. Refs #13167."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0033-billing-fee-refused-into-closed-day.md"
+
+  # 2. A refusal on a second pod fires too (the sum is over all labels).
+  - interval: 1m
+    input_series:
+      - series: 'openbank_billing_fee_post_closed_day_refusals_total{instance="billing-0"}'
+        values: "0x60"
+      - series: 'openbank_billing_fee_post_closed_day_refusals_total{instance="billing-1"}'
+        values: "0x30 2x30"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: BillingFeeRefusedIntoClosedDay
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: billing
+            exp_annotations:
+              subject_period: 1d
+              summary: "billing-service had a fee charge refused into a closed accounting day (fee not charged)"
+              description: "The ledger answered a fee posting with 409 ACCOUNTING_DAY_CLOSED. The fee is FAILED and will not post on its own; the cycle's day is reported REFUSED and holds the ledger's close. Recover by re-billing the fee into the next open day under a new, recorded key with four-eyes approval (runbook 0033), then let the reporter re-send the day. Refs #13167."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0033-billing-fee-refused-into-closed-day.md"
+
+  # 3. A flat counter (no refusal) never fires.
+  - interval: 1m
+    input_series:
+      - series: 'openbank_billing_fee_post_closed_day_refusals_total{instance="billing-0"}'
+        values: "0x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: BillingFeeRefusedIntoClosedDay
+        exp_alerts: []
+
+  # 4. An old refusal stops firing once the 6h window has passed it (raw-counter expressions would not).
+  - interval: 1m
+    input_series:
+      - series: 'openbank_billing_fee_post_closed_day_refusals_total{instance="billing-0"}'
+        values: "0x10 3x500"
+    alert_rule_test:
+      - eval_time: 8h
+        alertname: BillingFeeRefusedIntoClosedDay
+        exp_alerts: []
