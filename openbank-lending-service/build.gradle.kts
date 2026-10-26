@@ -45,6 +45,10 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // LendingEventsWireE2E: the real smallrye-kafka producer of `lending-events-out` runs
+    // against an isolated Redpanda broker (LendingOutboxWriteIT stops at the outbox table or the
+    // in-memory sink; this suite reads the topic back over the wire).
+    testImplementation(libs.testcontainers.redpanda)
     testImplementation(project(":openbank-libs-testing"))
     // Consumer-driven contract test against ledger-service postJournal (ADR-0063 P2 Batch B).
     testImplementation(libs.pact.consumer)
