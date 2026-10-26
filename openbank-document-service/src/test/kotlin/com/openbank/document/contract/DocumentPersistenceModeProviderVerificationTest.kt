@@ -7,6 +7,7 @@ package com.openbank.document.contract
 import io.agroal.api.AgroalDataSource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
@@ -20,8 +21,8 @@ import org.junit.jupiter.api.Test
 
 /** Runs in both the build and provider lanes: JDBC migrations must not enable blocking Hibernate. */
 @QuarkusTest
+@TestProfile(DocumentProviderProfile::class)
 @QuarkusTestResource(com.openbank.document.it.PostgresRedisTestResource::class)
-@QuarkusTestResource(PdfRendererStubResource::class, restrictToAnnotatedClass = true)
 class DocumentPersistenceModeProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port")
     lateinit var testPort: String
