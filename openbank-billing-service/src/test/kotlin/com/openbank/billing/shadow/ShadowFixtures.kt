@@ -6,6 +6,9 @@ package com.openbank.billing.shadow
 
 import com.openbank.billing.domain.ProductShadowInput
 import com.openbank.billing.domain.ShadowLegacyFee
+import com.openbank.billing.domain.ShadowRevisionIdentity
+import com.openbank.libs.product.ir.ProductIrParser
+import com.openbank.libs.productrevision.RevisionIdentity
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -19,12 +22,29 @@ object ShadowFixtures {
 
     const val SECRET = "test-only-ir-signing-secret-not-for-production"
 
+    fun identity(revisionId: String, json: String = IR): ShadowRevisionIdentity {
+        val ir = ProductIrParser.parse(json)
+        return ShadowRevisionIdentity(ir.productCode, revisionId, 7, ir.irVersion, ir.revisionHash)
+    }
+
+    fun pin(revisionId: String, json: String = IR): RevisionIdentity {
+        val identity = identity(revisionId, json)
+        return RevisionIdentity(
+            identity.productCode,
+            UUID.fromString(identity.revisionId),
+            identity.revisionNumber,
+            identity.irVersion,
+            identity.revisionHash,
+        )
+    }
+
     fun input(balance: String?, legacy: List<ShadowLegacyFee>, revisionId: String = UUID.randomUUID().toString()) =
         ProductShadowInput(
             cycleId = "2026-10",
             accountId = "acc-1",
             currency = "EUR",
             productRevisionId = revisionId,
+            expectedRevision = identity(revisionId),
             balance = balance?.let(::BigDecimal),
             monthlyTurnover = null,
             aggregatePocketBalance = null,

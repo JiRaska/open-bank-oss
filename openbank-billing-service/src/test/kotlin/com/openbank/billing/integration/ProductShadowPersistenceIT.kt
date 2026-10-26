@@ -120,6 +120,7 @@ class ProductShadowPersistenceIT {
             assertThat(claimed).hasSize(1)
             val input = claimed.single().input!!
             assertThat(input.productRevisionId).isEqualTo(revisionId)
+            assertThat(input.expectedRevision).isEqualTo(ShadowFixtures.identity(revisionId))
             assertThat(input.balance).isEqualByComparingTo("500.00")
             assertThat(input.evaluatedAt).isEqualTo(java.time.Instant.parse("2026-10-20T12:00:00Z"))
             assertThat(input.evaluationZone).isEqualTo("Z")
@@ -297,5 +298,63 @@ class ProductShadowPersistenceIT {
         // Released: now exactly one claim gets it.
         assertThat(queue.claim(1000).count { it.input?.accountId == accountId }).isEqualTo(1)
         assertThat(queue.claim(1000).map { it.input?.accountId }).doesNotContain(accountId)
+    }
+
+    @Test
+    fun `legacy identity stays unknown and real database round trips an independent complete identity`(): Unit =
+        onVertxContext {
+            val revisionId = UUID.randomUUID().toString()
+            val first = StoredRevisionIr(
+                revisionId,
+                true,
+                ShadowFixtures.identity(revisionId).revisionHash,
+                ShadowFixtures.IR,
+                IrSignature("k", "hmac-sha256", "c2ln"),
+            )
+            copies.store(first)
+            assertThat(copies.find(revisionId)!!.identity).isNull()
+            dataSource.connection.use { c ->
+                val failure = runCatching {
+                    c.prepareStatement(
+                        "UPDATE billing_product_revision_ir SET actual_revision_identity = ?, ir_json = ? WHERE revision_id = ?::uuid",
+                    ).use { statement ->
+                        statement.setString(
+                            1,
+                            "{\"revisionId\":\"$revisionId\",\"revisionHash\":\"${first.revisionHash}\"}",
+                        )
+                        statement.setString(2, "{}")
+                        statement.setString(3, revisionId)
+                        statement.executeUpdate()
+                    }
+                }.exceptionOrNull()
+                assertThat(failure).hasMessageContaining("immutable")
+            }
+            assertThat(copies.find(revisionId)).isEqualTo(first)
+            val complete = first.copy(identity = ShadowFixtures.identity(revisionId))
+            assertThat(copies.store(complete)).isEqualTo(complete)
+            assertThat(copies.find(revisionId)).isEqualTo(complete)
+            val conflicting = complete.copy(identity = complete.identity!!.copy(revisionNumber = 999))
+            assertThat(copies.store(conflicting)).isEqualTo(complete)
+            dataSource.connection.use { c ->
+                val failure = runCatching {
+                    c.createStatement().use { st ->
+                        st.executeUpdate(
+                            "UPDATE billing_product_revision_ir SET actual_revision_identity = NULL WHERE revision_id = '$revisionId'",
+                        )
+                    }
+                }.exceptionOrNull()
+                assertThat(failure).hasMessageContaining("immutable")
+            }
+        }
+
+    @Test
+    fun `a pre-migration queue input has unknown identity after the real database round trip`(): Unit = onVertxContext {
+        val accountId = "legacy-pin-${UUID.randomUUID()}"
+        val assessment = assessment(accountId, UUID.randomUUID().toString(), withShadow = true)
+        assessments.persistWithPostingIntent(
+            assessment.copy(shadowInput = assessment.shadowInput!!.copy(expectedRevision = null)),
+        )
+        val input = queue.claim(1000).single { it.input?.accountId == accountId }.input!!
+        assertThat(input.expectedRevision).isNull()
     }
 }

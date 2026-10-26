@@ -7,6 +7,15 @@ package com.openbank.billing.domain
 import java.math.BigDecimal
 import java.time.Instant
 
+/** Authoritative catalog identity frozen with the assessment, independently of the worker copy. */
+data class ShadowRevisionIdentity(
+    val productCode: String,
+    val revisionId: String,
+    val revisionNumber: Long,
+    val irVersion: Int,
+    val revisionHash: String,
+)
+
 /** One fee as the legacy path decided it: what the shadow comparator holds the product IR to. */
 data class ShadowLegacyFee(val feeId: String, val chargedAmount: BigDecimal, val waived: Boolean)
 
@@ -34,4 +43,6 @@ data class ProductShadowInput(
     val scheduledCadence: String? = null,
     /** Actual fired IR tag, when supplied by a schedule-aware caller; never guessed from cadence. */
     val scheduledTrigger: String? = null,
+    /** Unknown on historical inputs; never reconstructed from the later worker copy. */
+    val expectedRevision: ShadowRevisionIdentity? = null,
 )
