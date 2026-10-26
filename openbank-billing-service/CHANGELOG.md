@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.3...billing-service-v0.17.0) (2026-10-26)
+
+
+### Features
+
+* **billing:** day-close participant — report the monthly cycle and its fee postings (ADR-0342) ([#13709](https://github.com/JiRaska/open-bank-oss/issues/13709)) ([3290e47](https://github.com/JiRaska/open-bank-oss/commit/3290e47c6af59538d1ccc4da355630bb67343a48))
+* **billing:** product-IR shadow comparator, shadow mode only (ADR-0352 phase 3) ([#13741](https://github.com/JiRaska/open-bank-oss/issues/13741)) ([2947705](https://github.com/JiRaska/open-bank-oss/commit/2947705e724626ea6811a43fc66d40780cdcc8f7))
+
 ## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.2...billing-service-v0.16.3) (2026-10-23)
 
 
