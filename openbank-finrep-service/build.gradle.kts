@@ -23,6 +23,9 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
+    // E2E suite: stands in for ledger-service, risk-engine and the OIDC token endpoint over real
+    // HTTP so the real REST clients and their OIDC filters cross a wire (see e2e/).
+    testImplementation(libs.wiremock.standalone)
     // Consumer-driven contract test for the ledger trial-balance call (ADR-0063, git-pact).
     // Consumer side only — finrep is not a Pact provider for anyone, so no libs.pact.provider.
     testImplementation(libs.pact.consumer)
