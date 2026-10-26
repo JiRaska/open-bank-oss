@@ -1124,11 +1124,39 @@ API_BACKOFF_CAP_S = 60.0
 API_RETRY_BUDGET_S = 300.0
 _api_slept = [0.0]
 # Quota (#13400): one tick read the same check-runs of a sha up to three times (checks, ci_activity,
-# extra_checks) and the ruleset twice (required, merge_guard). Those GETs are memoised for the rest
-# of the process, as is the open-PR list (read three times per tick), and EVERY write clears the memo,
-# so a read after the App's own status, merge or update-branch is always live. Never memoised: the main
-# ref and a single PR (`pulls/<n>`) — the live re-reads a merge is pinned against.
+# extra_checks) and the open-PR list three times. Those GETs are memoised ONLY inside planning_reads()
+# (settle's view of main and the armed PRs, build's batch plan), and EVERY write clears the memo.
+# Cache safety (#13988 review): a memoised read is never a write's verdict. Outside planning_reads()
+# nothing is memoised (publish plans fresh, extra-gate runs included), and the writes that act on a
+# verdict re-read it live inside deciding(), where the memo neither serves nor stores: GitHub.merge
+# re-reads the ruleset guard and the head's required contexts, and a `merge-train` success status
+# re-reads the head's required contexts — in the GitHub class itself, so no call site can skip it.
+# Never memoised anywhere: the main ref and a single PR (`pulls/<n>`).
 _GET_MEMO: dict[str, bytes] = {}
+_MEMO_SCOPE = [0]    # > 0 inside planning_reads()
+_DECIDING = [0]      # > 0 inside deciding(): verdict reads bypass the memo entirely
+
+
+@contextlib.contextmanager
+def planning_reads():
+    """Reads that only classify and plan: memoised (until the next write)."""
+    _MEMO_SCOPE[0] += 1
+    try:
+        yield
+    finally:
+        _MEMO_SCOPE[0] -= 1
+        if not _MEMO_SCOPE[0]:
+            _GET_MEMO.clear()
+
+
+@contextlib.contextmanager
+def deciding():
+    """Reads a write is about to act on: always live, never memoised, whatever scope encloses them."""
+    _DECIDING[0] += 1
+    try:
+        yield
+    finally:
+        _DECIDING[0] -= 1
 GET_MEMO_RE = re.compile(r"^/repos/[^/]+/[^/]+/(?:commits/[0-9a-f]{40}/(?:check-runs|status|statuses)"
                          r"|rules/branches/[^/?]+|actions/runs\?head_sha=[0-9a-f]{40}|pulls\?state=open&base=[^&]+)(?:[?&].*)?$")
 
@@ -1184,7 +1212,8 @@ def api_retry_delay(method: str, code: int | None, headers, attempt: int) -> flo
 
 def api(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
     data = json.dumps(body).encode() if body is not None else None
-    memo = method == "GET" and GET_MEMO_RE.match(path) is not None
+    memo = (method == "GET" and _MEMO_SCOPE[0] > 0 and not _DECIDING[0]
+            and GET_MEMO_RE.match(path) is not None)
     if method != "GET":
         _GET_MEMO.clear()
     elif memo and path in _GET_MEMO:
@@ -1398,9 +1427,32 @@ class GitHub:
                 out.setdefault(st["context"], (st["state"], st.get("description") or ""))
         return out
 
+    def unverified(self, sha: str, guard: bool) -> str | None:
+        """Why a write acting on `sha`'s verdict must NOT happen, re-read live (deciding): the ruleset —
+        and, when `guard`, the merge guard on it — and every required context but `merge-train` itself
+        must be green on the exact head NOW. None = verified."""
+        with deciding():
+            code, rules = api("GET", f"/repos/{self.repo}/rules/branches/{self.branch}")
+            if code != 200 or not isinstance(rules, list):
+                return f"cannot re-read the ruleset ({code})"
+            if guard:
+                why = ruleset_guard(rules, os.environ.get("GITOPS_APP_ID", ""))
+                if why:
+                    return f"merge guard: {why}"
+            required = sorted({c["context"] for r in rules if r.get("type") == "required_status_checks"
+                               for c in r["parameters"]["required_status_checks"]})
+            checks = self.checks(sha)
+        bad = [c for c in required if c != STATUS_CONTEXT and checks.get(c) != "success"]
+        return f"required context(s) not green on the head now: {', '.join(bad)}" if bad else None
+
     def post_status(self, sha: str, state: str, description: str, context: str = STATUS_CONTEXT) -> None:
         if not SHA_RE.fullmatch(sha):
             raise SystemExit(f"::error::refusing a status on non-sha {sha!r}")
+        if state == "success" and context == STATUS_CONTEXT:
+            why = self.unverified(sha, guard=False)
+            if why:
+                log(f"::warning::no merge-train success on {sha[:12]}: {why}")
+                return
         code, data = api("POST", f"/repos/{self.repo}/statuses/{sha}",
                          {"state": state, "context": context, "description": description[:140], "target_url": self.run_url})
         if code != 201:
@@ -1417,6 +1469,10 @@ class GitHub:
         if not owner_approval_valid(n, pr["head"]["ref"], None):
             if not pr.get("auto_merge") or not owner_approval_valid(n, pr["head"]["ref"], self.app_statuses(head)):
                 return None
+        why = self.unverified(head, guard=True)   # live, last thing before the write (cache safety)
+        if why:
+            log(f"::warning::#{n} not merged: {why}")
+            return None
         code, data = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/merge", {"merge_method": "squash", "sha": head})
         return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
 
@@ -1704,7 +1760,8 @@ def live_base(gh, git) -> str:
 # --------------------------------------------------------------------------- the three modes
 def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_size: int) -> list[int]:
     base = live_base(gh, git)
-    _fast, batch, sizes = plan_batch(gh, git, repo, base, batch_size)
+    with planning_reads():           # build writes nothing to GitHub; publish re-plans live
+        _fast, batch, sizes = plan_batch(gh, git, repo, base, batch_size)
     builder.sizes, builder.default_size = sizes, batch_size
     capped = sorted({sizes[m.number] for m in batch if sizes.get(m.number)})
     if capped:
@@ -2105,7 +2162,13 @@ def halve_without_verdict(gh, git, branch: str, sha: str) -> list[int]:
 
 
 def settle_view(gh, git, repo: str, required: list[str]):
-    """Live main and every armed PR judged against it: (base, regen_text, strict, red, cands, apps)."""
+    """Live main and every armed PR judged against it: (base, regen_text, strict, red, cands, apps).
+    Planning only, so its reads are memoised; every write acts on a live re-read (deciding)."""
+    with planning_reads():
+        return _settle_view(gh, git, repo, required)
+
+
+def _settle_view(gh, git, repo: str, required: list[str]):
     base = live_base(gh, git)
     regen_text = main_regen_text(git, base)
     strict: list = []
@@ -2896,6 +2959,7 @@ class HttpFixture:
 
     def __init__(self, fake, faults=None):
         self.fake, self.faults, self.calls = fake, [list(f) for f in (faults or [])], []
+        self.after: list[list] = []   # [predicate(method, path), action(), times]: state drifting mid-tick
 
     def sync_refs(self):
         for n, p in self.fake.prs.items():
@@ -2923,6 +2987,10 @@ class HttpFixture:
         rest = u.path.split("/", 4)[4]
         body = json.loads(req.data) if req.data else None
         code, out = self.route(method, rest, u.query, body, page)
+        for a in self.after:
+            if a[2] != 0 and a[0](method, path):
+                a[2] -= 1
+                a[1]()
         if code >= 400:
             raise urllib.error.HTTPError(req.full_url, code, "no", email.message.Message(), io.BytesIO(b"{}"))
         raw = json.dumps(out).encode()
@@ -2947,7 +3015,7 @@ class HttpFixture:
         m = re.fullmatch(r"commits/([0-9a-f]{40})/(check-runs|status|statuses)", rest)
         if method == "GET" and rest.startswith("rules/branches/"):
             return 200, [{"type": "required_status_checks", "parameters": {
-                "strict_required_status_checks_policy": False,
+                "strict_required_status_checks_policy": fk.rs_strict,
                 "required_status_checks": [{"context": c, "integration_id": 4242 if c == STATUS_CONTEXT else None}
                                            for c in SYN_REQUIRED]}}]
         if method == "GET" and rest == "git/ref/heads/main":
@@ -5551,9 +5619,64 @@ def self_test() -> int:
                 dup = sorted({c for c in steady if c[0] == "GET" and steady.count(c) > 1})
                 upd = [c for c in steady if c[1].endswith("/update-branch")]
                 log(f"api: settle calls per tick on the fixture: {[len(t) for t in per_tick]}")
-                check("api: a steady-state tick re-asks no refused update-branch and repeats no memoisable GET",
-                      not upd and not [c for c in dup if GET_MEMO_RE.match(c[1])],
+                # The planning reads (a sha's check-runs/statuses/workflow runs) are read once per tick;
+                # the ruleset and the open-PR list are re-read live outside planning (cache safety).
+                check("api: a steady-state tick re-asks no refused update-branch and repeats no planning read",
+                      not upd and not [c for c in dup if "/commits/" in c[1] or "/actions/runs" in c[1]],
                       f"per_tick={[len(t) for t in per_tick]} update={upd} dup={dup[:6]}")
+                reset()
+
+                # CACHE SAFETY (#13988 review): planning reads may be memoised, a write's verdict never.
+                # Each case drifts state AFTER the tick's planning read and BEFORE its write.
+                def drift_after_first(fx, pred, action):
+                    fx.after.append([pred, action, 1])
+
+                def head_runs(sha):
+                    return lambda m, p: m == "GET" and f"/commits/{sha}/check-runs" in p
+
+                # (g) a strict head green when planned turns red before its merge: no merge.
+                open_only("pW")
+                fx, real = with_http()
+                hw = gh.prs[35]["head"]["sha"]
+                drift_after_first(fx, head_runs(hw), lambda: gh.head_checks.__setitem__(hw, {"gates (data)": "failure"}))
+                try:
+                    mode_settle(real, Git(clone("settle")), "o/r", False)
+                    ok, detail = 35 not in gh.merged, f"merged={gh.merged}"
+                except BaseException as exc:
+                    ok, detail = False, f"{type(exc).__name__}: {exc}"
+                check("cache safety: a check-run green at planning and red at merge time means no merge", ok, detail)
+                gh.head_checks.clear()
+                reset()
+
+                # (h) a fast-lane candidate whose required context is revoked between plan and the
+                # status post: no `merge-train` success is posted on it.
+                open_only("pF")
+                fx, real = with_http()
+                hf = gh.prs[34]["head"]["sha"]
+                drift_after_first(fx, head_runs(hf), lambda: gh.head_checks.__setitem__(hf, {"Validate manifests": "failure"}))
+                try:
+                    mode_settle(real, Git(clone("settle")), "o/r", False)
+                    st = gh.app_statuses(hf).get(STATUS_CONTEXT, ("", ""))
+                    ok, detail = st[0] != "success", f"{st}"
+                except BaseException as exc:
+                    ok, detail = False, f"{type(exc).__name__}: {exc}"
+                check("cache safety: a status revoked between plan and status-post means no success status", ok, detail)
+                gh.head_checks.clear()
+                reset()
+
+                # (i) the ruleset turns strict up-to-date back on between the guard's read and the merge.
+                open_only("pW")
+                fx, real = with_http()
+                drift_after_first(fx, lambda m, p: m == "GET" and "/rules/branches/" in p,
+                                  lambda: setattr(gh, "rs_strict", True))
+                try:
+                    mode_settle(real, Git(clone("settle")), "o/r", False)
+                    ok, detail = 35 not in gh.merged, f"merged={gh.merged}"
+                except BaseException as exc:
+                    ok, detail = False, f"{type(exc).__name__}: {exc}"
+                finally:
+                    gh.rs_strict = False
+                check("cache safety: a ruleset change between plan and merge means the guard refuses", ok, detail)
                 reset()
             finally:
                 urllib.request.urlopen, globals()["_api_sleep"] = saved_http[0], saved_http[1]
