@@ -29,6 +29,17 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
 }
 
+// Gradle's default test-JVM heap is 512m. Loyalty now boots THREE Quarkus profiles in one forked
+// JVM alongside Testcontainers (the default IT profile plus the referral-consumer real-broker E2E
+// profile), and the run died with `OutOfMemoryError: Java heap space` inside the fork — surfacing
+// as "Test process encountered an unexpected problem" with the last-started IT named as the
+// failure, which is the misleading part. Same per-module override as account/lending/
+// product-catalog (ADR-0250 Phase 2 era); deliberately not a fleet default for the reasons
+// recorded in account-service's build.gradle.kts.
+tasks.withType<Test> {
+    maxHeapSize = "2g"
+}
+
 kover {
     reports {
         verify {
