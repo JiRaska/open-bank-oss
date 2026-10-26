@@ -63,6 +63,16 @@ class OpenApiWireContractIT {
                 Response.ok(body).build()
             }
         }
+        // listAccounts reads the caller's page through getToService (authority + path + query kept
+        // separate), so route it by PATH like the plain get above; cursor/partyId are query values.
+        every { upstream.getToService(any(), any(), any(), any()) } answers {
+            val body = routes[secondArg<String>()]
+            if (body == null) {
+                Response.status(404).entity("""{"error":"not found"}""").build()
+            } else {
+                Response.ok(body).build()
+            }
+        }
         QuarkusMock.installMockForType(upstream, UpstreamClient::class.java)
     }
 
