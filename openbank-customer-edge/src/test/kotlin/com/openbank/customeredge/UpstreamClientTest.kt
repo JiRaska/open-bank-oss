@@ -10,6 +10,8 @@ import com.sun.net.httpserver.HttpServer
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.net.InetSocketAddress
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -197,6 +199,67 @@ class UpstreamClientTest {
     }
 
     @Test
+    fun `getToService preserves opaque cursor bytes and isolates query delimiters from authority`() {
+        val cursors = listOf(
+            "a b+c/%2F%25",
+            "https://untrusted.invalid/a?partyId=other&cursor=x#fragment",
+            "//untrusted.invalid/@target?x=y",
+            "{template}\r\nX-Other: value",
+            "příliš+žluťoučký",
+        )
+        withServer { client, baseUrl, requests ->
+            for (cursor in cursors) {
+                val response = client.getToService(
+                    baseUrl,
+                    "/api/v1/accounts",
+                    linkedMapOf("partyId" to "party-9", "cursor" to cursor),
+                    "party-9",
+                )
+                assertThat(response.status).isEqualTo(200)
+                val request = requests.last()
+                assertThat(request.path).isEqualTo("/api/v1/accounts")
+                assertThat(request.headers["x-customer-party-id"]).isEqualTo("party-9")
+                val query = request.rawQuery!!.split('&').associate {
+                    val pair = it.split('=', limit = 2)
+                    URLDecoder.decode(pair[0], StandardCharsets.UTF_8) to
+                        URLDecoder.decode(pair[1], StandardCharsets.UTF_8)
+                }
+                assertThat(query).containsExactlyInAnyOrderEntriesOf(mapOf("partyId" to "party-9", "cursor" to cursor))
+            }
+            assertThat(requests).hasSize(cursors.size)
+        }
+    }
+
+    @Test
+    fun `getToService refuses untrusted authorities and host-bearing paths before token acquisition`() {
+        withServer { client, baseUrl, requests ->
+            for ((base, path) in listOf(
+                "http://untrusted.invalid" to "/api/v1/accounts",
+                "$baseUrl@untrusted.invalid" to "/api/v1/accounts",
+                baseUrl to "//untrusted.invalid/accounts",
+                baseUrl to "/accounts?partyId=other",
+            )) {
+                assertThat(client.getToService(base, path, mapOf("cursor" to "opaque"), "party-9").status)
+                    .isEqualTo(502)
+            }
+            assertThat(requests).isEmpty()
+            assertThat(tokenHits.get()).isZero()
+        }
+    }
+
+    @Test
+    fun `getToService returns redirects without following their Location`() {
+        withServer(
+            responseStatus = 302,
+            responseHeaders = mapOf("Location" to "http://untrusted.invalid/accounts"),
+        ) { client, baseUrl, requests ->
+            assertThat(client.getToService(baseUrl, "/api/v1/accounts", mapOf("cursor" to "opaque"), "party-9").status)
+                .isEqualTo(302)
+            assertThat(requests).hasSize(1)
+        }
+    }
+
+    @Test
     fun `postToService keeps the path under the allowed service authority`() {
         withServer { client, baseUrl, requests ->
             val response = client.postToService(
@@ -299,7 +362,13 @@ class UpstreamClientTest {
 
     // --- test harness ------------------------------------------------------------------
 
-    data class CapturedRequest(val method: String, val path: String, val headers: Map<String, String>, val body: String)
+    data class CapturedRequest(
+        val method: String,
+        val path: String,
+        val headers: Map<String, String>,
+        val body: String,
+        val rawQuery: String?,
+    )
 
     private val tokenHits = AtomicInteger(0)
 
@@ -313,6 +382,7 @@ class UpstreamClientTest {
         docBytes: ByteArray? = null,
         docContentType: String = "application/json",
         responseHeaders: Map<String, String> = emptyMap(),
+        responseStatus: Int = 200,
         tokenDelayMs: Long = 0,
         serviceDelayMs: Long = 0,
         requestTimeoutMs: Long = 2000,
@@ -338,11 +408,12 @@ class UpstreamClientTest {
                     path = exchange.requestURI.path,
                     headers = exchange.requestHeaders.entries.associate { (k, v) -> k.lowercase() to v.first() },
                     body = exchange.requestBody.readBytes().toString(Charsets.UTF_8),
+                    rawQuery = exchange.requestURI.rawQuery,
                 ),
             )
             if (serviceDelayMs > 0) Thread.sleep(serviceDelayMs)
             responseHeaders.forEach { (name, value) -> exchange.responseHeaders.add(name, value) }
-            respond(exchange, 200, "application/json", "{}".toByteArray(Charsets.UTF_8))
+            respond(exchange, responseStatus, "application/json", "{}".toByteArray(Charsets.UTF_8))
         }
         server.start()
         try {
