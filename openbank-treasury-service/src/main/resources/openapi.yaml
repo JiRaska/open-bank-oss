@@ -1223,7 +1223,6 @@ paths:
         '404': { description: No such filter for the caller }
 
   /api/v1/treasury/calendar:
-  /api/v1/treasury/calendar:
     get:
       tags: [Treasury]
       operationId: getEventCalendar

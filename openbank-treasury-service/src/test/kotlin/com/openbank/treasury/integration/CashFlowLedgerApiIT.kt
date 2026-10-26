@@ -14,8 +14,10 @@ import io.restassured.RestAssured.given
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
+import org.hamcrest.Matchers.contains
 import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.everyItem
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.hasSize
 import org.hamcrest.Matchers.nullValue
@@ -428,6 +430,16 @@ class CashFlowLedgerApiIT {
             "/deals/$matrixDeal/cash-flows/$paid/overrides",
             """{"paymentDate":"${today.plusDays(1)}","reason":"too late"}""",
         ).then().statusCode(409).body("error", equalTo("FLOW_NOT_OVERRIDABLE"))
+    }
+
+    @Test
+    @Order(16)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `16 - the day-completion record lists every step, an unrecorded one PENDING`() {
+        given().`when`().get("/api/v1/treasury/day-completion/2001-01-02").then().statusCode(200)
+            .body("date", equalTo("2001-01-02"))
+            .body("steps.step", contains("FIXINGS", "ACCRUALS", "PAYMENTS", "REVALUATION", "CORRECTIONS", "MATURITIES"))
+            .body("steps.status", everyItem(equalTo("PENDING")))
     }
 
     private fun count(sql: String, id: String): Int = jdbc { c ->

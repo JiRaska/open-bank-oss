@@ -30,4 +30,11 @@ A posting leg now carries `accountingClass` + `LedgerRole` (principal, accrued i
 - **`observation_batches`, `index_observations`, `fixing_cases`** (V20) hold index observations. A batch is PENDING until a different human approves it, and only ACTIVE observations are used. The quality gate checks MISSING, STALE and SUSPICIOUS before any fixing; a failure opens a case and fixes nothing.
 - **`deal_cash_flows.fixing_source`, `fixing_sha256`, `fixed_at`** (V20) record where a fixed rate came from. Only the fixing repository writes them, with a guarded UPDATE.
 - The hourly fixing pass (`openbank.treasury.fixing.enabled`, default on) fixes due floating flows and publishes `treasury.cashflow.fixed.v1`.
-- IRS and FRA are now drafted, submitted and fixed. They settle only once the posting-rule matrix lands (phase 2).
+- IRS and FRA are drafted, submitted and fixed; since phase 2 they also settle (below).
+
+## Posting matrix, credit exposure and day completion (ADR-0344 phase 2)
+
+- Every product is now drafted. The leg-described products settle, accrue, pay and mature through `PostingMatrix` (served at `GET /posting-rules`); journal keys are `treasury:<dealId>:<event>:<flowId|date>`, and `deal_journals` accepts the matrix events (V28). A flow with no matching rule is refused.
+- Every product with counterparty credit risk consumes its line through `CreditExposure`: derivatives count |notional| × the `derivative-conversion-factor` for their product and residual maturity, a reverse repo the cash lent less the `collateral-haircut` collateral, a repo the collateral delivered less the cash received. A missing record is a 422 (`CONVERSION_FACTOR_MISSING` / `COLLATERAL_HAIRCUT_MISSING`), never zero. The figure is stored as `limit_deal_amount` and the locked line query sums it. V27 seeds synthetic factors and a default haircut, all `verified = false`.
+- **`treasury_day_completion`** (V29) holds the last outcome of each step per bank day. The accrual and fixing runs record theirs; `GET /day-completion/{date}` lists every step, an unrecorded one PENDING. A ledger `409 ACCOUNTING_DAY_CLOSED` is recorded as REFUSED.
+- **`position_closes`, `deal_filters`** (V26): close-of-day position snapshots (back office, idempotency key required) and each user's saved blotter filters.
