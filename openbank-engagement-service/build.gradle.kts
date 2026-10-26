@@ -37,6 +37,15 @@ dependencies {
     testImplementation(libs.wiremock.standalone)
 }
 
+// Gradle's default test-JVM heap is 512m. Engagement now boots the default IT profile (with its
+// Kafka devservices) AND the real-broker E2E profile (Postgres + Redpanda containers) in one
+// forked JVM, and the run died with `OutOfMemoryError: Java heap space` — surfacing as
+// "Test process encountered an unexpected problem" with the executor exiting non-zero. Same
+// per-module override as account/lending/product-catalog/loyalty.
+tasks.withType<Test> {
+    maxHeapSize = "2g"
+}
+
 // Coverage is ratchet-only (never lower). Without this block koverVerify has no rule to check,
 // so the module's coverage was measured by nobody — and the production-readiness collector
 // scores C2 off the presence of a ratchet, not off a number, which is the honest signal: a
