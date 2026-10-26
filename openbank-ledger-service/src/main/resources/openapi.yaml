@@ -16,8 +16,11 @@ info:
   # which relaxes the request and breaks no caller.
   # 1.27.0 -> 1.28.0 (ADR-0342): additive. Day-close participants: GET/PUT
   # /ledger/accounting-days/{businessDate}/participants[/{participant}] and PUT .../{participant}/waiver.
-  # 1.29.0: additive raw journal snapshot reads and optional unverified caller-origin evidence.
-  version: 1.29.0
+  # 1.28.0 -> 1.29.0 (ADR-0344 D7): additive. The accounting role enum gains the treasury instrument
+  # roles (premium/discount, fair value, revaluation reserve, realised/unrealised result, memo, memo
+  # contra) that migration V35 maps for the posting-rule matrix classes.
+  # 1.29.0 -> 1.30.0: additive raw journal snapshot reads and optional unverified caller-origin evidence.
+  version: 1.30.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -509,7 +512,7 @@ paths:
       operationId: resolveAccountingClass
       parameters:
         - { name: accountingClass, in: query, required: true, schema: { type: string } }
-        - { name: role, in: query, required: true, schema: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME] } }
+        - { name: role, in: query, required: true, schema: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, PREMIUM_DISCOUNT, FAIR_VALUE, REVALUATION_RESERVE, REALISED_GAIN, REALISED_LOSS, UNREALISED_GAIN, UNREALISED_LOSS, MEMO, MEMO_CONTRA] } }
         - { name: currency, in: query, required: true, schema: { type: string } }
       responses:
         '200':
@@ -1940,7 +1943,9 @@ components:
       required: [accountingClass, role, currencyCode, glAccountId, glCode]
       properties:
         accountingClass: { type: string }
-        role: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME] }
+        # x-extensible-enum, not enum: roles GROW as products are mapped (ADR-0341/ADR-0344), so a
+        # client must tolerate an unknown role in a response. Requests keep the closed enum.
+        role: { type: string, x-extensible-enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, PREMIUM_DISCOUNT, FAIR_VALUE, REVALUATION_RESERVE, REALISED_GAIN, REALISED_LOSS, UNREALISED_GAIN, UNREALISED_LOSS, MEMO, MEMO_CONTRA] }
         currencyCode: { type: string }
         glAccountId: { type: string, format: uuid }
         glCode: { type: string }
@@ -1964,7 +1969,7 @@ components:
         accountingRole:
           type: string
           nullable: true
-          enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME]
+          enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, PREMIUM_DISCOUNT, FAIR_VALUE, REVALUATION_RESERVE, REALISED_GAIN, REALISED_LOSS, UNREALISED_GAIN, UNREALISED_LOSS, MEMO, MEMO_CONTRA]
         side:
           type: string
           enum: [DEBIT, CREDIT]

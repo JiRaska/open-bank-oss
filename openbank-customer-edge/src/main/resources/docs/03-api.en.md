@@ -40,9 +40,9 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 
 | Method & path | Scope | Notes |
 |---|---|---|
-| `GET /accounts` | `accounts:read` | list the caller's accounts |
+| `GET /accounts` | `accounts:read` | list the caller's accounts; optional `cursor` query parameter (forwarded unchanged to account-service). Accounts shared with the caller (ACTIVE delegation grants with read capability) are appended to `data` on the first page only (no `cursor`), marked `sharedWithMe: true`, and raise `pagination.totalCount`; they sit outside cursor pagination |
 | `GET /accounts/{accountId}` | `accounts:read` | 403 if not owner |
-| `GET /balances/{accountId}` | `accounts:read` | 403 if not owner |
+| `GET /balances/{accountId}` | `accounts:read` | 403 if not owner; answers `{"balances": [...]}`, one entry per currency (not a bare array) |
 | `GET, PUT /balances/{accountId}/{currency}/low-balance-alert` | `accounts:read` / `accounts:write` | Owner only; PUT sets `enabled`, `threshold`, `rearmMargin`; GET is 404 until configured. Delivery is default-off and inbox-only. |
 | `GET /transactions?accountId=&limit=&cursor=` | `accounts:read` | ownership-enforced; `cursor` URL-encoded |
 | `GET /statements/{accountId}` | `accounts:read` | period-close list |
