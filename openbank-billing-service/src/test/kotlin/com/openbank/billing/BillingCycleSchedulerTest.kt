@@ -123,7 +123,9 @@ class BillingCycleSchedulerTest {
         coVerify(exactly = 1) {
             cycleService.runCycleWithOutcome("2026-07", listOf("acc-1", "acc-2"), "CZK", "MONTHLY")
         }
-        coVerify(exactly = 1) { cycleService.runCycleWithOutcome("2026-07", listOf("acc-3"), "CZK", "MONTHLY") }
+        coVerify(exactly = 1) {
+            cycleService.runCycleWithOutcome("2026-07", listOf("acc-3"), "CZK", "MONTHLY")
+        }
     }
 
     @Test
@@ -135,7 +137,9 @@ class BillingCycleSchedulerTest {
 
         discoveryScheduler(cycleService, discovery, csv = Optional.of("acc-9")).runSweep()
 
-        coVerify(exactly = 1) { cycleService.runCycleWithOutcome("2026-07", listOf("acc-9"), "CZK", "MONTHLY") }
+        coVerify(exactly = 1) {
+            cycleService.runCycleWithOutcome("2026-07", listOf("acc-9"), "CZK", "MONTHLY")
+        }
         coVerify(exactly = 0) { discovery.activeAccounts(any(), any()) }
     }
 
