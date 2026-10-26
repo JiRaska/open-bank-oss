@@ -20,6 +20,10 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
     // ListenerAuthParity kit (#12511): production listener shape over real TLS.
     testImplementation(project(":openbank-libs-testing"))
+    // E2E suite: stands in for the OPA sidecar so the REAL OpaSidecarPolicyDecisionPoint HTTP
+    // client is what gets tested (the contract TestPolicyDecisionPoint alternative is excluded
+    // on purpose) — see e2e/.
+    testImplementation(libs.wiremock.standalone)
     // Ap2ApiContractTest drives the real endpoint and compares the wire JSON against the committed
     // openapi.yaml, which it PARSES rather than greps. jackson-dataformat-yaml carries no version:
     // it is managed by the enforcedPlatform(quarkus.bom) above (testImplementation extends
