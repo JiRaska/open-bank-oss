@@ -215,7 +215,14 @@ data class LoanInstallment(
 )
 
 /** Outcome of one scheduled interest-accrual pass over the live book (servicing posting loop). */
-data class AccrualOutcome(val asOf: LocalDate, val installmentsAccrued: Int)
+data class AccrualOutcome(
+    val asOf: LocalDate,
+    val installmentsAccrued: Int,
+    /** Journals booked: installments with positive interest (a zero-interest row is only flagged). */
+    val journalsPosted: Int = 0,
+    /** True when the batch cap stopped the pass with installments still due as of [asOf]. */
+    val truncated: Boolean = false,
+)
 
 /**
  * Security registered against a loan. Four-eyes gated (ADR-0028 follow-up, issue #621): [registeredBy]

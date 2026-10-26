@@ -36,5 +36,9 @@ no money. It stands in for the real CSM behind the rail's `SchemeGatewayPort` (t
 - When D3 wires the rail's `SchemeGatewayPort` to this simulator, the **rail** side (which holds
   posting authority via the Temporal settlement workflow) carries its own money-path threat model;
   this document covers the counterparty stub only.
+- The inbound `pacs.008` may carry `PmtTpInf` (`SvcLvl/Cd`, `LclInstrm/Cd`; #13663). The shared XSD
+  admits it and the reader exposes it (`ReceivedCreditTransfer.isInstant`), but the decision engine does
+  not branch on it: the simulator settles an SCT and an SCT Inst identically. Malformed or over-long
+  codes are rejected as `FF01` by the XSD, like any other invalid field.
 - Swapping the simulator for a real test-sandbox or licensed gateway is a **new** trust boundary
   (real external network) and requires a fresh threat model before it ships.

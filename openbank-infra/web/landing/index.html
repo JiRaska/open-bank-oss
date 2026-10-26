@@ -11,12 +11,14 @@
 <meta property="og:url" content="https://open-bank.tech/" />
 <meta property="og:title" content="OpenBank | Open-source banking ecosystem &amp; reference platform" />
 <meta property="og:description" content="Explore OpenBank: an open-source Bank as Code ecosystem with Documentation as Code, Compliance as Code, Product Studio and governed AI/MCP tools." />
-<meta property="og:image" content="https://open-bank.tech/assets/explorers-hero.webp" />
+<meta property="og:image" content="https://open-bank.tech/assets/explorers-lipa.webp" />
 <meta property="og:image:width" content="1536" />
 <meta property="og:image:height" content="1024" />
 <meta property="og:image:alt" content="OpenBank lion, lioness and bot" />
 <meta name="twitter:card" content="summary_large_image" />
-<link rel="icon" href="assets/ob-mark-complete.svg" type="image/svg+xml" />
+<link rel="icon" href="assets/lipa-icon.svg" type="image/svg+xml" />
+<link rel="icon" href="favicon.ico?v=lipa-20261024" sizes="32x32" />
+<link rel="apple-touch-icon" href="assets/lipa-icon-180.png" />
 <link rel="canonical" href="https://open-bank.tech/" />
 <script type="application/ld+json">
 {
@@ -62,7 +64,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=lipa-20261023" />
+<link rel="stylesheet" href="styles.css?v=lipa-20261024" />
+<link rel="stylesheet" href="bank-as-code.css?v=20261025" />
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -101,7 +104,7 @@
 <p class="hero-note" id="sandbox">Public sandbox · Reference implementation</p>
 </div>
 <div class="hero-art">
-<img src="assets/explorers-hero.webp" width="1536" height="1024" fetchpriority="high" alt="OpenBank’s lion and lioness explore together, with their little bot beside them." />
+<img src="assets/explorers-lipa.webp" width="1536" height="1024" fetchpriority="high" alt="OpenBank’s lion and lioness explore together, with their little bot beside them." />
 </div>
 </section>
 <section class="labs-teaser" id="labs">
@@ -113,10 +116,224 @@
 <a class="btn btn-labs" href="labs.html">Step inside Labs →</a>
 </div>
 <a class="labs-teaser-art" href="labs.html" aria-label="Explore OpenBank Labs">
-<img src="assets/openbank-labs-kernel.jpg" width="1223" height="1285" alt="OpenBank Labs illustration: a lioness scientist and bot beside the shared banking kernel." loading="lazy" />
+<img src="assets/labs-kernel-lipa.webp" width="1223" height="1286" alt="OpenBank Labs illustration: a lioness scientist and bot beside the shared banking kernel." loading="lazy" />
 </a>
 </div>
 </section>
+<!-- Bank as Code: product, evidence and AI stories. -->
+<div class="bac" id="bac">
+<section class="ob-bank-intro ob-bound" id="bank-as-code">
+<div class="ob-section-head">
+<div>
+<div class="ob-eyebrow">Bank as Code</div>
+<h2>Built for AI.<br><em>Made for people.</em>
+</h2>
+</div>
+<p>A shared banking foundation for an AI future. Explicit rules, reviewable changes and traceable evidence, with people in control.</p>
+</div>
+<nav class="ob-topic-nav" aria-label="Explore Bank as Code"><a href="#ob-disciplines-v2">Explore all eight disciplines ↓</a><a href="product-as-code.html">Product as Code ↗</a><a href="controls-as-code.html">Controls &amp; evidence ↗</a><a href="ai-as-code.html">AI as Code ↗</a>
+</nav>
+</section>
+<div class="ob-principles ob-bound">
+<div><span class="ob-symbol" aria-hidden="true">{ }</span>Rules people and AI can read.</div>
+<div><span class="ob-symbol" aria-hidden="true">↗</span>Changes people can challenge.</div>
+<div><span class="ob-symbol" aria-hidden="true">✓</span>Evidence auditors can examine.</div>
+</div>
+<section class="ob-section ob-bound">
+<div class="ob-section-head">
+<div>
+<div class="ob-eyebrow">The power is in the connections</div>
+<h2>Follow a change.<br><em>See the whole story.</em>
+</h2>
+</div>
+<p>A banking decision travels through products, systems and teams. Bank as Code makes those connections part of the design.</p>
+</div>
+<div class="ob-architecture">
+<div class="ob-dark-head"><span>CHANGE JOURNEY / INTERACTIVE CONCEPT</span>
+<button type="button" class="ob-button" id="ob-play-home" hidden="">Play the journey ▷</button>
+</div>
+<div class="ob-process" id="ob-home-flow">
+<div class="ob-step" data-active="true"><small>01 / DEFINE</small>
+<h3>One intention.</h3>
+<p>A product rule becomes explicit.</p>
+</div>
+<div class="ob-step"><small>02 / EXPLORE</small>
+<h3>Visible impact.</h3>
+<p>Scenarios reveal consequences.</p>
+</div>
+<div class="ob-step"><small>03 / REVIEW</small>
+<h3>Human judgement.</h3>
+<p>People examine the change.</p>
+</div>
+<div class="ob-step"><small>04 / TRACE</small>
+<h3>A connected record.</h3>
+<p>Decisions stay with their context.</p>
+</div>
+</div>
+<div class="ob-process-caption"><span id="ob-home-status" aria-live="polite">Start with a clearly defined product change.</span><strong>For AI to work with. For people to govern.</strong>
+</div>
+</div>
+</section>
+<section class="ob-bound" id="ob-disciplines-v2">
+<div class="ob-section-head">
+<div>
+<div class="ob-eyebrow">Eight disciplines. One direction.</div>
+<h2>The bank is the system.<br><em>Code connects the pieces.</em>
+</h2>
+</div>
+<p>Explore the project through working examples and the experiences we’re building next.</p>
+</div>
+<div class="ob-discipline-grid">
+<article class="ob-discipline">
+<div class="ob-mini-art" aria-label="Infrastructure definition to environment"><span>.tf</span><b>→</b>
+<div class="ob-stack"><span>origin</span><span>delivery</span>
+</div>
+</div>
+<div class="ob-discipline-body">
+<h3>Infrastructure as Code</h3>
+<p>Give the environment a blueprint.</p>
+<details>
+<summary>Explore the example</summary>
+<div class="ob-detail">This website’s infrastructure is defined in code: its origin, delivery layer and access controls.<a href="https://github.com/JiRaska/open-bank-oss/tree/main/openbank-infra/aws/modules" target="_blank" rel="noopener">Open the blueprint ↗</a>
+</div>
+</details>
+</div>
+</article>
+<article class="ob-discipline">
+<div class="ob-mini-art" aria-label="Documentation and version linked to a service"><span>docs</span><b>↔</b><span>version</span>
+</div>
+<div class="ob-discipline-body">
+<h3>Documentation as Code</h3>
+<p>Keep the explanation with the software.</p>
+<details>
+<summary>Explore the example</summary>
+<div class="ob-detail">Services can publish bundled documentation with their version and source revision. A shared reference for people and AI.<a href="https://github.com/JiRaska/open-bank-oss/blob/main/openbank-libs-runtime/src/main/kotlin/com/openbank/libs/docs/DocsResource.kt" target="_blank" rel="noopener">Explore Docs as Service ↗</a>
+</div>
+</details>
+</div>
+</article>
+<article class="ob-discipline">
+<div class="ob-mini-art" aria-label="Requirement, check and evidence"><span>rule</span><b>→</b><span>check</span>
+</div>
+<div class="ob-discipline-body">
+<h3>Compliance as Code</h3>
+<p>Connect a requirement to its evidence.</p>
+<details>
+<summary>Explore the example</summary>
+<div class="ob-detail">Governance checks challenge service declarations against implementation. The foundation for a connected evidence trail.<a href="https://github.com/JiRaska/open-bank-oss/blob/main/openbank-admin-ui/src/test/generate-governance.test.ts" target="_blank" rel="noopener">Examine the checks ↗</a>
+</div>
+</details>
+</div>
+</article>
+<article class="ob-discipline">
+<div class="ob-mini-art" aria-label="Product definition to calculated outcome"><span>2.50%</span><b>→</b><span>€</span>
+</div>
+<div class="ob-discipline-body">
+<h3>Product as Code</h3>
+<p>Make the terms executable.</p>
+<details>
+<summary>Explore the example</summary>
+<div class="ob-detail">Our savings sample expresses interest, bonus conditions and fees. An interpreter gives the definition behaviour.<a href="https://github.com/JiRaska/open-bank-oss/blob/main/openbank-libs-domain/src/test/resources/product-ir/savings-fixed.json" target="_blank" rel="noopener">Read the product definition ↗</a>
+</div>
+</details>
+</div>
+</article>
+<article class="ob-discipline">
+<div class="ob-mini-art" aria-label="Signal becomes a case with a decision"><span>signal</span><b>→</b><span>case</span>
+</div>
+<div class="ob-discipline-body">
+<h3>AML as Code</h3>
+<p>Keep decisions in context.</p>
+<details>
+<summary>Explore the example</summary>
+<div class="ob-detail">The AML case model records decisions and requires a reason for blocking. Relationship investigation extends the story.<a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/adr/0304-fraud-and-aml-relationship-investigation.md" target="_blank" rel="noopener">Explore the investigation design ↗</a>
+</div>
+</details>
+</div>
+</article>
+<article class="ob-discipline">
+<div class="ob-mini-art" aria-label="Proposer and reviewer are separate"><span>maker</span><b>≠</b><span>checker</span>
+</div>
+<div class="ob-discipline-body">
+<h3>Fraud as Code</h3>
+<p>Give every rule change a history.</p>
+<details>
+<summary>Explore the example</summary>
+<div class="ob-detail">Threshold proposals have versions and effective dates. The proposer cannot approve their own change.<a href="https://github.com/JiRaska/open-bank-oss/blob/main/openbank-fraud-service/src/test/kotlin/com/openbank/fraud/application/usecase/FraudThresholdActivationServiceTest.kt" target="_blank" rel="noopener">Inspect the approval tests ↗</a>
+</div>
+</details>
+</div>
+</article>
+<article class="ob-discipline">
+<div class="ob-mini-art" aria-label="Agent access depends on policy"><span>agent</span><b>→</b><span>policy</span>
+</div>
+<div class="ob-discipline-body">
+<h3>AI as Code</h3>
+<p>Give AI a role and clear boundaries.</p>
+<details>
+<summary>Explore the example</summary>
+<div class="ob-detail">MCP tools pass through policy checks. Tests exercise permitted and denied calls, including their audit records.<a href="https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/test/kotlin/com/openbank/mcp/McpEndpointTest.kt" target="_blank" rel="noopener">Explore tool access tests ↗</a>
+</div>
+</details>
+</div>
+</article>
+<article class="ob-discipline">
+<div class="ob-mini-art" aria-label="People, code and AI share a foundation"><span>people</span><b>↔</b><span>AI</span>
+</div>
+<div class="ob-discipline-body">
+<h3>Bank as Code</h3>
+<p>Make the connections visible.</p>
+<details>
+<summary>Explore the example</summary>
+<div class="ob-detail">A product change connects definitions, simulations, controls and human review. This is the experience we’re building toward.<a href="https://github.com/JiRaska/open-bank-oss" target="_blank" rel="noopener">Explore the open project ↗</a>
+</div>
+</details>
+</div>
+</article>
+</div>
+</section>
+<section class="ob-section ob-bound">
+<div class="ob-section-head">
+<div>
+<div class="ob-eyebrow">Inside the idea</div>
+<h2>Less abstract.<br><em>More “show me”.</em>
+</h2>
+</div>
+<p>Three stories. Three ways to explore what Bank as Code can make possible.</p>
+</div>
+<div class="ob-story-grid">
+<a href="product-as-code.html" class="ob-story">
+<div class="ob-story-art" aria-hidden="true">
+<div><small>interest.base</small><br><strong>2.50%</strong>
+</div><span>→</span>
+<div class="ob-code-cube">{ € }</div>
+</div>
+<div class="ob-story-copy"><small>PRODUCT AS CODE</small>
+<h3>One rate change.<br>A bigger story.</h3>
+<p>From a product definition to a customer outcome.</p><span>Explore the product story ↗</span>
+</div></a>
+<a href="controls-as-code.html" class="ob-story">
+<div class="ob-story-art" aria-hidden="true">
+<div class="ob-check-stack"><span>01 requirement</span><span>02 control</span><span>03 evidence</span>
+</div>
+</div>
+<div class="ob-story-copy"><small>CONTROLS &amp; EVIDENCE</small>
+<h3>Show the rule.<br>Follow the evidence.</h3>
+<p>Make a control understandable and its review traceable.</p><span>Explore the control story ↗</span>
+</div></a>
+<a href="ai-as-code.html" class="ob-story">
+<div class="ob-story-art" aria-hidden="true">
+<div class="ob-code-cube">AI</div><span>→</span>
+<div class="ob-check-stack"><span>allow ✓</span><span>deny ×</span>
+</div>
+</div>
+<div class="ob-story-copy"><small>AI AS CODE</small>
+<h3>More capability.<br>Clear authority.</h3>
+<p>See how a tool request meets a policy boundary.</p><span>Explore the AI story ↗</span>
+</div></a>
+</div>
+</section>
+</div>
 <section class="intro wrap" id="framework">
 <div class="section-heading">
 <p class="eyebrow">Choose your way in</p>
@@ -150,21 +367,6 @@
 <p class="eyebrow">The bank as one system</p>
 <h2>One bank.<br /><span>Every connection counts.</span></h2>
 <p>OpenBank is an open-source banking ecosystem for the work inside a bank and the relationships it serves outside. Explore the domains together, follow the evidence behind them and see how a shared core keeps the experience coherent.</p>
-</div>
-<div class="bank-as-code" id="bank-as-code">
-<div class="bank-as-code-intro">
-<p class="eyebrow">Bank as Code</p>
-<h3>The bank explains itself.</h3>
-<p>A running service exposes its own API contract, version and health. Its documentation travels with its release, so teams can inspect what is deployed and trace it back to the code.</p>
-<a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/adr/0019-docs-as-service.md">See docs-as-service in the source →</a>
-</div>
-<div class="bank-as-code-proof">
-<div><span>01 / SERVICE</span><strong>Self-describing services</strong><p>Live endpoints report the deployed version, API contract and health.</p></div>
-<div><span>02 / DOCUMENTATION</span><strong>Documentation as Code</strong><p>Service-owned docs ship with the release; generated decisions and runbooks are checked for drift.</p></div>
-<div><span>03 / GOVERNANCE</span><strong>Compliance as Code</strong><p>Each service declares ownership, lineage and retention. CI cross-checks claims that the code can verify.</p></div>
-<div><span>04 / EVIDENCE</span><strong>Ready to examine</strong><p>Link a change to its contract, tests and operational signals, giving reviewers a path from a claim to its evidence.</p></div>
-</div>
-<p class="bank-as-code-note">The public catalog is a code-derived snapshot, not a live deployment report. Running-service endpoints and operational views show current state.</p>
 </div>
 <div class="ecosystem-grid">
 <article class="ecosystem-card ecosystem-bank">
@@ -203,15 +405,15 @@
 <div class="wrap app-grid">
 <figure class="phone-figure">
 <div class="phone-stage">
-<img src="assets/app-screen-current.png" width="1179" height="2556" alt="Actual OpenBank app screenshot: CZK account with three currencies, Send, Request, Cards, Savings, payday forecast and the bot assistant." loading="lazy" />
+<img src="assets/app-iphone-20261024.png?v=1ef9a5e77a97" width="1179" height="2556" alt="Authentic OpenBank app home screen rendered on iOS Simulator with synthetic balances, quick actions and assistant." loading="lazy" />
 </div>
-<figcaption>Actual app screenshot · sandbox data<br />The app evolves; this is a recorded view.</figcaption>
+<figcaption>Actual app render · synthetic demo data · iOS Simulator · 25 October 2026<br />Home screen rendered by the current app source.</figcaption>
 </figure>
 <div class="app-copy">
 <p class="eyebrow">The customer app</p>
 <h2>Your money.<br />Your way in.</h2>
 <p class="lede">A familiar app with a curious little bot. Explore balances, currency pockets and everyday banking on the same open core.</p>
-<p>Kotlin Multiplatform and Compose connect the iOS and Android experience. The screenshot is from the app itself, with its real controls and visual language.</p>
+<p>Kotlin Multiplatform and Compose connect the iOS and Android experience. The screenshot shows the app running on an iPhone, with its real home screen and the Lípa identity.</p>
 <div class="app-cta-card" id="testflight">
 <span class="tf-tag">iOS TestFlight beta</span>
 <h3>Take OpenBank for a spin.</h3>
@@ -316,7 +518,7 @@
 </main>
 <footer class="footer wrap">
 <a class="brand" href="index.html">
-<img src="assets/ob-mark-complete.svg" width="48" height="34" alt="" />OpenBank</a>
+<img class="brand-lockup" src="assets/lipa-lockup-light.svg" width="190" height="36" alt="OpenBank" /></a>
 <div>
 <p>An open banking reference implementation. Built to be explored.</p>
 <p class="fine">Early-stage software · not a licensed bank · not production-ready. Demo data only.</p>
@@ -376,8 +578,9 @@
     </div>
   </dialog>
 
-<script src="main.js">
+<script src="main.js?v=captcha-en-20261025">
 </script>
 <script src="brand.js"></script>
+<script src="bank-as-code.js?v=20261025" defer></script>
 </body>
 </html>

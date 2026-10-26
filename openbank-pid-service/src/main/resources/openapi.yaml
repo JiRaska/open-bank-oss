@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: PID Service API (Party Identity)
-  version: 1.17.0
+  version: 1.18.0
   description: Party identity data management — create, update, KYC linking, BankID/ROB sync, identity resolution and four-eyes verification cases (ADR-0072).
   license:
     name: Apache-2.0
@@ -1031,6 +1031,10 @@ components:
         amlRiskScore:
           type: string
           enum: [LOW, MEDIUM, HIGH, UNACCEPTABLE]
+          deprecated: true
+          description: >-
+            Deprecated (ADR-0353): not a customer risk rating. The canonical rating is
+            kyc-service's riskLevel. Optional; when absent the stored value is left unchanged.
         pepFlag:
           type: boolean
         sanctionsFlag:

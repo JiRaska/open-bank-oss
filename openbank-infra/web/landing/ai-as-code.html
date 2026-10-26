@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI as Code | OpenBank</title>
+<meta name="description" content="Explore AI as Code through an interactive policy scenario. Define agent authority, inspect tool access and follow allowed and denied requests to audit evidence.">
+<meta name="theme-color" content="#f8f6f1">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="OpenBank">
+<meta property="og:url" content="https://open-bank.tech/ai-as-code.html">
+<meta property="og:title" content="AI as Code | OpenBank">
+<meta property="og:description" content="Explore AI as Code through an interactive policy scenario. Define agent authority, inspect tool access and follow allowed and denied requests to audit evidence.">
+<meta property="og:image" content="https://open-bank.tech/assets/explorers-lipa.webp">
+<meta property="og:image:width" content="1536">
+<meta property="og:image:height" content="1024">
+<meta property="og:image:alt" content="OpenBank lion, lioness and AI companion">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/lipa-icon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico?v=lipa-20261024" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/lipa-icon-180.png">
+<link rel="canonical" href="https://open-bank.tech/ai-as-code.html">
+<script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "url": "https://open-bank.tech/ai-as-code.html",
+  "name": "AI as Code | OpenBank",
+  "description": "Explore AI as Code through an interactive policy scenario. Define agent authority, inspect tool access and follow allowed and denied requests to audit evidence.",
+  "inLanguage": "en",
+  "isPartOf": {
+    "@type": "WebSite",
+    "url": "https://open-bank.tech/",
+    "name": "OpenBank"
+  }
+}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=lipa-20261024">
+<link rel="stylesheet" href="bank-as-code.css?v=20261025">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="nav wrap">
+<a class="brand brand-lipa" href="index.html" aria-label="OpenBank home">
+<video class="brand-film" muted="" playsinline="" preload="none" poster="assets/openbank-lipa-final.png" width="960" height="540" aria-hidden="true">
+<source src="assets/openbank-lipa.mp4" type="video/mp4">
+<img src="assets/openbank-lipa-final.png" alt="">
+</video></a>
+<nav aria-label="Main navigation">
+<a class="nav-labs" href="labs.html">Labs <img src="assets/labs-flask.svg" width="15" height="19" alt=""></a>
+<a href="platform.html">Platform</a>
+<a href="index.html#app">App</a>
+<a href="index.html#agents">Agents</a>
+<a href="index.html#join">Community</a>
+</nav>
+<a class="sandbox-cta" href="index.html#sandbox">Explore the sandbox ↗</a>
+</header>
+<main id="main" class="bac">
+<nav class="ob-topic-nav ob-bound" aria-label="Bank as Code stories"><a href="index.html#bank-as-code">← Bank as Code</a><a href="product-as-code.html">Product as Code</a><a href="controls-as-code.html">Controls &amp; evidence</a><a href="ai-as-code.html" aria-current="page">AI as Code</a>
+</nav>
+<section class="ob-bound">
+<div class="ob-article-head">
+<div class="ob-eyebrow">03 / AI as Code</div>
+<h1>More capability.<br><em>Clear authority.</em>
+</h1>
+<p class="ob-lede">Give AI useful work and an explicit boundary. Define the role, check the tools and leave a record people can inspect.</p>
+</div>
+<div class="ob-switches" aria-label="Agent request scenarios">
+<button type="button" data-request="allowed" aria-pressed="true">Permitted tool request</button>
+<button type="button" data-request="denied" aria-pressed="false">Request outside policy</button>
+</div>
+<div class="ob-lab">
+<div class="ob-dark-head"><span>AGENT AUTHORITY / INTERACTIVE CONCEPT</span><span>Policy before execution</span>
+</div>
+<div class="ob-ai-scene">
+<div class="ob-ai-flow" id="ob-ai-flow">
+<div class="ob-ai-box"><span class="ob-symbol" aria-hidden="true">AI</span>
+<h3>An agent asks.</h3>
+<p id="ob-ai-request">request: permitted_tool</p>
+</div>
+<div class="ob-ai-arrow" aria-hidden="true">→</div>
+<div class="ob-ai-box ob-gate"><span class="ob-symbol" aria-hidden="true">✓</span>
+<h3>Policy decides.</h3>
+<p>role + capability + context</p>
+</div>
+<div class="ob-ai-arrow" id="ob-ai-arrow" aria-hidden="true">→</div>
+<div class="ob-ai-box" id="ob-ai-outcome"><span class="ob-symbol" aria-hidden="true">{ }</span>
+<h3 id="ob-ai-outcome-title">The tool can run.</h3>
+<p id="ob-ai-outcome-detail">execution stays within authority</p>
+</div>
+</div>
+<div class="ob-ai-log">
+<div class="ob-ai-log-head"><span>ILLUSTRATIVE AUDIT VIEW</span><span id="ob-ai-log-tag">READY TO EXPLORE</span>
+</div>
+<pre id="ob-ai-log-text">request  →  policy evaluation
+outcome  →  execution or denial
+evidence →  an inspectable audit record</pre>
+</div>
+<div class="ob-ai-result">
+<p id="ob-ai-status" aria-live="polite">Select a scenario and follow the request.</p>
+<button type="button" class="ob-button ob-primary" id="ob-play-ai" hidden="">Run the scenario ▷</button>
+</div>
+</div>
+<div class="ob-lab-note"><span>A conceptual view of policy checks and audit outcomes. Based on the project’s MCP endpoint tests.</span><a href="https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/test/kotlin/com/openbank/mcp/McpEndpointTest.kt" target="_blank" rel="noopener">Explore the real tests ↗</a>
+</div>
+</div>
+</section>
+<section class="ob-section ob-bound">
+<div class="ob-section-head">
+<div>
+<div class="ob-eyebrow">Designed for an AI future</div>
+<h2>Let AI contribute.<br><em>Keep people in control.</em>
+</h2>
+</div>
+<p>The ambition is a banking foundation that AI can work with and people can understand, challenge and govern.</p>
+</div>
+<div class="ob-two-columns">
+<div>
+<h3>A role you can define.</h3>
+<p>Version instructions, describe responsibilities and evaluate behaviour. Make authority part of the design as capabilities grow.</p>
+</div>
+<div>
+<h3>A boundary you can inspect.</h3>
+<p>Policy checks determine tool access. Audit records help people understand permitted and denied requests.</p><a href="https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/kotlin/com/openbank/mcp/application/PolicyFilteredToolCatalog.kt" target="_blank" rel="noopener">Inspect the tool policy catalogue ↗</a>
+</div>
+</div>
+<div class="ob-next">
+<p>The innovation is in the connections. Help us build them.</p><a href="index.html#bank-as-code" class="ob-button">Back to Bank as Code →</a>
+</div>
+</section>
+</main>
+<footer class="footer wrap"><a class="brand" href="index.html"><img class="brand-lockup" src="assets/lipa-lockup-light.svg" width="190" height="36" alt="OpenBank"></a>
+<div>
+<p>An open banking reference implementation. Built to be explored.</p>
+<p class="fine">Early-stage software · not a licensed bank · not production-ready. Demo data only.</p>
+<p class="fine">Platform: Apache-2.0. AI agent licensing: AGPL-3.0-only + commercial. <a href="https://github.com/JiRaska/open-bank-oss#license">License details ↗</a>
+</p>
+<p class="fine">© 2026 OpenBank contributors · <a href="classic.html">Previous website</a> · <a href="https://github.com/JiRaska/open-bank-oss/blob/main/TRADEMARKS.md">Independent project / trademark notice</a>
+</p>
+</div>
+</footer>
+<script src="brand.js">
+</script>
+<script src="bank-as-code.js?v=20261025" defer>
+</script>
+</body>
+</html>

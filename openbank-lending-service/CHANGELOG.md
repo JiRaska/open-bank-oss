@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.43.2...lending-service-v0.44.0) (2026-10-26)
+
+
+### Features
+
+* **lending:** day-close participant — report accrual and provisioning per accounting day (ADR-0342) ([#13708](https://github.com/JiRaska/open-bank-oss/issues/13708)) ([bde7d38](https://github.com/JiRaska/open-bank-oss/commit/bde7d3842a8e2272b0d2ce15ea726b7927a5645b))
+
 ## [0.43.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.43.1...lending-service-v0.43.2) (2026-10-21)
 
 
