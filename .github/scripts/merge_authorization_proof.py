@@ -10,6 +10,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from merge_pr_policy import premerge_policy_context
+
 API = "https://api.github.com"
 BOT = "openbank-gitops-bot[bot]"
 CONTEXT = "merge-train/owner-approval"
@@ -125,7 +127,8 @@ def app_authorization(pull, repo, github):
     for field in ("number", "merge_commit_sha", "merged_at", "html_url"):
         if canonical.get(field) != pull.get(field):
             raise ValueError("event differs from canonical merged PR")
-    if (canonical.get("head") or {}).get("sha") != (pull.get("head") or {}).get("sha"):
+    if any((canonical.get("head") or {}).get(field) != (pull.get("head") or {}).get(field)
+           for field in ("sha", "ref")):
         raise ValueError("event head differs from canonical merged PR")
     metadata = github.get(f"/repos/{repo}")
     if not isinstance(metadata, dict):
@@ -167,7 +170,18 @@ def app_authorization(pull, repo, github):
                 "headSha": head["sha"], "mergeCommitSha": canonical["merge_commit_sha"],
                 "authorization": authorization,
             }
-        raise ValueError("no exact-head human authorization before merge")
+        # codex remains SHA-scoped. Other branches need independently observed owner
+        # intent AND an immutable supported pre-merge prefix rule, never current-main policy.
+        if not isinstance(head.get("ref"), str) or head["ref"].startswith("codex/"):
+            raise ValueError("no exact-head human authorization before merge")
+        policy = premerge_policy_context(canonical, repo, github, CONTEXT)
+        authorization = pr_request_observation(canonical, repo, owner, github)
+        authorization.update(kind="POLICY_PR_AUTO_MERGE", **policy)
+        return {
+            "mergedByType": "GITHUB_APP", "mergedById": merger["id"],
+            "headSha": head["sha"], "mergeCommitSha": canonical["merge_commit_sha"],
+            "policyAuthorization": authorization,
+        }
     decision = max(relevant, key=lambda item: (instant(item["created_at"]), item.get("id", 0)))
     if (not positive(decision.get("id")) or decision.get("state") != "success"
             or decision.get("description") != f"owner-approved PR #{number}"):
@@ -236,6 +250,11 @@ def legacy_authorization(pull, repo, owner, github):
     """Reconstruct observed historical PR-scoped intent. This does not certify SHA approval."""
     if instant(pull["merged_at"]) > instant(LEGACY_CUTOFF):
         raise ValueError("legacy reconstruction is unavailable after the policy cutoff")
+    return pr_request_observation(pull, repo, owner, github)
+
+
+def pr_request_observation(pull, repo, owner, github):
+    """Observe the owner request and matching App merge without claiming SHA approval."""
     cursor, snapshot, nodes, seen = None, None, [], set()
     for _ in range(100):
         data = github.graphql(LEGACY_QUERY, {

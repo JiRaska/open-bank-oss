@@ -76,6 +76,35 @@ private DNS zone.
 
 ## 2. STRIDE
 
+### Workload identity pilot (ADR-0177)
+
+The additional boundary is Kubernetes ServiceAccount issuer → Keycloak → service
+bearer token. The stock OIDC provider is hidden on browser login pages. The pilot
+uses native JWT Authorization Grant followed by standard RFC 8693 token exchange,
+with an explicitly provisioned workload user holding only `ROLE_API`.
+
+- **Spoofing / confused deputy:** validate the issuer's JWKS signature with `RS256`,
+  require the sole audience `keycloak`, an enabled federation link and a client
+  explicitly allowed to use that issuer. Unknown subjects must not be provisioned
+  as a side effect of authentication. Validate wrong audience using a genuinely
+  signed assertion; corrupting a JWT proves only signature checking.
+- **Replay:** projected ServiceAccount assertions are reusable bearer credentials
+  during kubelet rotation. Keep them inside the pod, enforce assertion age and
+  expiration, cap the issued token by assertion expiration and request no refresh
+  token. Theft during that bounded window remains a risk. Offline JWKS validation
+  does not provide immediate pod-deletion revocation; issued tokens expire naturally.
+- **Elevation of privilege:** preserve the workload user and `ROLE_API` through
+  standard exchange. Do not add operator/admin roles or enable legacy external
+  exchange to make a failed test pass. OPA still authorizes individual actions.
+- **Availability / rollback:** existing client credentials remain the fallback;
+  the service consumer is a later flag-gated rollout. Revert the pilot client's
+  JWT grant attributes to disable the new path without deleting the IdP or users.
+
+Evidence: `openbank-infra/e2e/keycloak_workload_identity_test.py` exercises a real
+throwaway Keycloak with synthetic signatures: both positive stages, unknown
+identity, unauthorized client, wrong/multiple audiences, expiry, signature failure,
+browser-provider hiding and the unchanged client-credentials fallback.
+
 ### Spoofing
 
 - **T-S1 — agent-identity forgery (privilege selection).** The `/mcp` surface authenticates the
@@ -164,11 +193,19 @@ private DNS zone.
   and the fact that the recorder's own writes land in the same hash-chained trail they extend, where
   a forgery would collide with GitHub's own merge history on dispute) and the workflow is observable
   (fail-closed, tracking issue on failure). A stolen recorder credential still cannot write anything
-  else: the role is restricted to merge evidence. **Authorization provenance:** new App merges
+  else: the role is restricted to merge evidence. **Authorization provenance:** App merges under the `codex/` exclusion
   require the latest trusted premerge decision on the exact head, a successful main owner workflow
   and successful writer job; revocation, foreign identity, missing evidence and API errors fail
   closed. Bounded historical reconstruction is explicitly PR-scoped, with actual request and
   immutable merged-event references; it never certifies SHA approval or historical compliance.
+  Later non-codex PR-scoped intent uses a separate `POLICY_PR_AUTO_MERGE` proof: the
+  canonical merge's first-parent policy blob must be explicitly reviewed and digest-verified,
+  its recognized prefix rule must allow the branch, and the complete owner-request/merge-event
+  timeline must match. Unknown policy source, mixed proof families, and exact-head revocation
+  fail closed. Policy context does not attest executed workflow source or full historical
+  compliance. The additive `/app-policy` endpoint and optional `policyAuthorization` response
+  preserve the old closed wire enum; the backend rejects codex downgrades and policy-SHA retry
+  conflicts. The producer requires the dedicated capability flag before new-proof writes.
   The producer verifies backend schema capability before writing and independently reads committed
   evidence back. Timestamp bounds reject future observations; retries preserve the original
   historical observation. HTTP/Postgres/outbox regressions cover these properties in

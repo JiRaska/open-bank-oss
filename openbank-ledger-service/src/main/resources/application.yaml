@@ -184,6 +184,17 @@ openbank:
       participants:
         interest:
           principal: service-account-openbank-interest
+        # #13167: lending's accrual and provisioning passes (LendingCloseParticipationScheduler),
+        # reported on its own identity - the Keycloak client openbank-lending its LedgerRestClient
+        # already posts journals with (ledger_rest_ext.rego: service-lending-ledger-post).
+        lending:
+          principal: service-account-openbank-lending
+        # #13167: billing's monthly cycle (BillingCloseParticipationScheduler), reported on its OWN
+        # identity - Keycloak client openbank-billing (ledger_rest_ext.rego:
+        # close_participant_accounts, its only ledger grant) - not the shared openbank-services
+        # principal its journals use.
+        billing:
+          principal: service-account-openbank-billing
     # Period-granular lock (ADR-0096 D1). Modes: off | shadow | enforce. Same staged rollout and
     # the same reason as the day lock above — it ships in SHADOW and refuses nothing until the
     # counter openbank_ledger_period_lock_decisions_total{outcome="would_refuse"} reads zero (or

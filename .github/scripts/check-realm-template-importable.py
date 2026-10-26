@@ -75,6 +75,14 @@
 #         is the step-up flow disappearing, i.e. MFA silently gone after a rebuild. The boot test
 #         cannot see it; only this rule can.
 #
+#     R11 a `scopeMappings` entry that does not grant every realm role the template declares, or
+#         that names a client the template does not declare. Every client sets
+#         `fullScopeAllowed: false`, so its token carries ONLY the roles mapped to it; a role added
+#         to `roles.realm` later but not appended to each entry silently vanishes from that
+#         client's tokens after a cold-start import. Nothing errors: the import is clean, the role
+#         exists, the user holds it, and `@RolesAllowed` answers 403. This happened within a week
+#         of the rule being written down in prose (ROLE_MARKETING, ROLE_MERGE_RECORDER).
+#
 #   Measured on the pre-fix templates: 12 findings, covering R1 (×5), R2, R3 (×2), R7, R8 and R9.
 #   Each was independently confirmed against the real container — the customers realm needed all
 #   four import-blockers removed before `Realm 'openbank-customers' imported` appeared.
@@ -265,6 +273,22 @@ def check_realm(name, realm):
                         f"template does not declare (R10)."
                     )
 
+    role_names = {r.get("name") for r in ((realm.get("roles") or {}).get("realm") or [])}
+    client_ids = {c.get("clientId") for c in clients}
+    for m in realm.get("scopeMappings", []) or []:
+        cid = m.get("client")
+        if cid not in client_ids:
+            findings.append(
+                f"[{name}] scopeMappings names client `{cid}`, which the template does not "
+                f"declare (R11)."
+            )
+        missing = sorted(role_names - set(m.get("roles") or []))
+        if missing:
+            findings.append(
+                f"[{name}] scopeMappings for `{cid}` omits realm role(s) {missing} (R11) — with "
+                f"fullScopeAllowed=false the client's tokens silently lose them after a rebuild."
+            )
+
     return findings, (len(clients), len(users))
 
 
@@ -440,6 +464,25 @@ def self_test():
     f, _ = check_realm("t", d)
     cases.append(("R10 dangling sub-flow flagged", any("R10" in x and "sub-flow" in x for x in f), f))
 
+    # R11, both directions.
+    sm = _clean()
+    sm["roles"] = {"realm": [{"name": "A"}, {"name": "B"}]}
+    sm["scopeMappings"] = [{"client": "conf", "roles": ["A", "B"]}]
+    f, _ = check_realm("t", sm)
+    cases.append(("R11 complete scope mapping passes", f == [], f))
+    d = copy.deepcopy(sm)
+    d["roles"]["realm"].append({"name": "C"})
+    f, _ = check_realm("t", d)
+    cases.append(("R11 role added without extending the mapping flagged", any("(R11)" in x and "'C'" in x for x in f), f))
+    d = copy.deepcopy(sm)
+    d["scopeMappings"].append({"client": "ghost", "roles": ["A", "B"]})
+    f, _ = check_realm("t", d)
+    cases.append(("R11 mapping for an undeclared client flagged", any("(R11)" in x and "ghost" in x for x in f), f))
+    d = copy.deepcopy(sm)
+    d["scopeMappings"] = []
+    f, _ = check_realm("t", d)
+    cases.append(("R11 a client with no entry is NOT flagged (deliberately role-less clients)", f == [], f))
+
     bad = 0
     for label, passed, detail in cases:
         print(f"  {'PASS' if passed else 'FAIL'}  {label}")
@@ -467,7 +510,7 @@ def main():
     findings, n_clients, n_users = run(paths)
     print(
         f"realm-template-importable: compared {len(paths)} template(s), "
-        f"{n_clients} client(s), {n_users} user(s) against 9 rules."
+        f"{n_clients} client(s), {n_users} user(s) against 11 rules."
     )
     for p in paths:
         print(f"  - {p}")
