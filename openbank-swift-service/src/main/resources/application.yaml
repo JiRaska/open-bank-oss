@@ -127,9 +127,9 @@ quarkus:
     management:
       enabled: false
   # The re-drive sweep would race the booking-clock ITs that hold messages SENT on purpose;
-  # SwiftSettlementRedriveIT drives the re-drive directly instead. The institution-transfer
-  # resolution sweeper is off under test too; InstitutionTransferSweeperIT turns the REAL
-  # scheduler on with a 1s cadence in its own @TestProfile.
+  # SwiftSettlementRedriveIT drives the re-drive directly instead. The resolution sweeper is off
+  # under test too; InstitutionTransferSweeperIT turns the REAL scheduler on with a 1s cadence in
+  # its own @TestProfile.
   openbank:
     swift:
       settlement-redrive:

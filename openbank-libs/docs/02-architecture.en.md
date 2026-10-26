@@ -27,6 +27,8 @@ The service owns its documentation files at `src/main/resources/docs/`. The comm
 
 The root build uses Gradle subprojects. Service modules generally declare `implementation(project(":openbank-libs-runtime"))`, while older consumers can use the umbrella. The authoritative dependency versions are in `openbank-libs/gradle/libs.versions.toml`; Gradle conventions are in `build-logic/src/main/kotlin/`. Each service's release version is its own `version.txt`.
 
+Shared libraries and services use Quarkus **3.40.1.1 LTS** from the same catalog. Framework dependencies in runtime, testing and Temporal adapters retain their existing dependency scopes; the domain kernel remains framework-free. Shared Micrometer APIs use the platform's **1.17.1** version. Security overrides must preserve or exceed the platform's patched versions. See the [upgrade and rollback runbook](../../docs/runbooks/quarkus-lts-upgrade.md) for compatibility checks and promotion criteria.
+
 ## Four-eyes: approval summaries
 
 `AuthorizeInterceptor` (`openbank-libs-runtime`, ADR-0155) parks an operation OPA flags `four_eyes_required`, answers 202 with an `approvalId`, and binds the approval to a fingerprint of the exact request (endpoint + arguments, #11675). It also stores a human-readable `summary` for the checker.
@@ -57,3 +59,11 @@ The root build uses Gradle subprojects. Service modules generally declare `imple
 - The pacs.009 builder and reader validate against the bundled `pacs.009.001.08` XSD.
 
 The shared `TopicProducers` table in `openbank-libs-domain` attributes `openbank.swift.institution-transfers` to swift-service, which is how audit-service labels the rows it reads from that topic.
+
+### Temporal worker pilot
+
+The version catalog exposes Temporal SDK/testing 1.40.0 for transaction-service's
+versioned worker pilot (ADR-0355). `openbank-libs-temporal` retains its compile-only
+1.25.1 contract, and other services retain their existing SDK version. This is not
+a fleet-wide runtime upgrade. Original histories gate forward replay; new histories
+must not be assumed readable by the old SDK.

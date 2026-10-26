@@ -18,6 +18,18 @@ class InstitutionTransferVocabularyTest {
     }
 
     @Test
+    fun `an SSI rail maps to the bank-own rail it travels on, SEPA on TARGET2`() {
+        assertThat(SettlementRail.entries.associateWith { it.institutionRail }).containsExactlyEntriesOf(
+            mapOf(
+                SettlementRail.CERTIS to InstitutionTransferRail.CERTIS,
+                SettlementRail.SEPA to InstitutionTransferRail.TARGET2,
+                SettlementRail.TARGET2 to InstitutionTransferRail.TARGET2,
+                SettlementRail.SWIFT to InstitutionTransferRail.SWIFT,
+            ),
+        )
+    }
+
+    @Test
     fun `only the contract 9_2 statuses are announced`() {
         assertThat(InstitutionTransferStatus.entries.filter { it.announced }).containsExactly(
             InstitutionTransferStatus.ACCEPTED,

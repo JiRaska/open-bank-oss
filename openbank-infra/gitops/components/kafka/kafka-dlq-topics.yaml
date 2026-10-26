@@ -919,7 +919,6 @@ spec:
   config:
     retention.ms: 2592000000
     cleanup.policy: delete
-
 ---
 # openbank-swift-service :: channel `treasury-payments-in` (bank-own transfer releases, contract 9.3)
 # A record here is a treasury payment release the rail refused or could not process. A refused one
