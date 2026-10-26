@@ -8,8 +8,12 @@ import com.openbank.billing.domain.ProductShadowInput
 import com.openbank.libs.productrevision.IrSignature
 import java.util.UUID
 
-/** A queued legacy decision, claimed by one comparator run. [attempts] counts earlier retries. */
-data class QueuedShadowInput(val id: UUID, val input: ProductShadowInput, val attempts: Int)
+/**
+ * A queued legacy decision, claimed by one comparator run. [attempts] counts earlier retries. [input] is
+ * null when the stored row could not be mapped back to a [ProductShadowInput]: the row is still handed
+ * to the comparator, so it is completed instead of being re-claimed (and starving the queue) forever.
+ */
+data class QueuedShadowInput(val id: UUID, val input: ProductShadowInput?, val attempts: Int)
 
 /**
  * The local outbox of legacy decisions awaiting comparison (ADR-0352 §6). Rows are written in the
@@ -20,8 +24,12 @@ interface ProductShadowQueuePort {
     /** Claims up to [limit] inputs that are due; a claim not completed within the lease is re-offered. */
     suspend fun claim(limit: Int): List<QueuedShadowInput>
 
-    /** Terminal: the input was compared or definitively could not be. [outcome] is recorded for audit. */
-    suspend fun complete(id: UUID, outcome: String)
+    /**
+     * Terminal: the input was compared or definitively could not be. [outcome] is recorded for audit.
+     * [compared] is true only when the IR actually re-decided the input; only then are the frozen account
+     * facts erased. A not-comparable input keeps them, so it can still be compared once the cause is fixed.
+     */
+    suspend fun complete(id: UUID, outcome: String, compared: Boolean)
 
     /** Transient failure: offered again after a back-off. */
     suspend fun retryLater(id: UUID, outcome: String)
@@ -49,11 +57,20 @@ interface RevisionIrCopyPort {
     suspend fun store(copy: StoredRevisionIr): StoredRevisionIr
 }
 
+/**
+ * The catalog answered with a revision other than the one asked for. Never stored, never retried: the
+ * copy would be filed under an id it does not belong to.
+ */
+class CatalogRevisionMismatchException(message: String) : RuntimeException(message)
+
 /** The catalog could not answer (transport, HTTP status or an unreadable body); the input is retried. */
 class CatalogRevisionUnavailableException(message: String, cause: Throwable) : RuntimeException(message, cause)
 
 /** Reads a revision's IR and signature from product-catalog. Called only by the comparator, never on the posting path. */
 interface CatalogRevisionIrPort {
-    /** Throws [CatalogRevisionUnavailableException] when the catalog cannot answer. */
+    /**
+     * Throws [CatalogRevisionUnavailableException] when the catalog cannot answer, and
+     * [CatalogRevisionMismatchException] when the body names a different revision than [revisionId].
+     */
     suspend fun fetch(revisionId: String): StoredRevisionIr
 }

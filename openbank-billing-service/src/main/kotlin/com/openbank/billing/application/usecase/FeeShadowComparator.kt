@@ -29,7 +29,7 @@ import java.time.ZoneOffset
 
 /** The outcome of holding one legacy fee decision against the product IR. */
 sealed interface FeeShadowResult {
-    /** The fee was re-decided by the IR rule [ruleId]; [diverged] when charge/waive or amount differ. */
+    /** The fee was re-decided by the IR rule [ruleId]; [diverged] when the charged amounts differ (a waiver is zero). */
     data class Compared(
         val feeId: String,
         val ruleId: String,
@@ -103,10 +103,11 @@ class FeeShadowComparator(
                 val chargingIds = candidates.map { it.ruleId }.toSet()
                 val posts = out.filterIsInstance<Instruction.Post>().filter { it.ruleId in chargingIds }
                 val irCharged = customerDebits(posts, rule.ruleId)
-                val irWaived = irCharged.signum() == 0
-                val diverged = irWaived != legacy.waived ||
-                    (!irWaived && irCharged.compareTo(legacy.chargedAmount) != 0)
-                FeeShadowResult.Compared(legacy.feeId, fee.ruleId, diverged, legacy.chargedAmount, irCharged)
+                // The charged amounts decide: a waived legacy fee charged nothing, and a legacy fee of
+                // zero that was not flagged waived charged nothing too; it agrees with an IR waiver.
+                val legacyCharged = if (legacy.waived) BigDecimal.ZERO else legacy.chargedAmount
+                val diverged = irCharged.compareTo(legacyCharged) != 0
+                FeeShadowResult.Compared(legacy.feeId, fee.ruleId, diverged, legacyCharged, irCharged)
             }
         }
         return results + irOnly

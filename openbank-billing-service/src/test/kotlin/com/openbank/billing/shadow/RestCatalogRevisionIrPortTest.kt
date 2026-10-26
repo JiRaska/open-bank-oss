@@ -4,6 +4,7 @@
 
 package com.openbank.billing.shadow
 
+import com.openbank.billing.application.port.out.CatalogRevisionMismatchException
 import com.openbank.billing.application.port.out.CatalogRevisionUnavailableException
 import com.openbank.billing.infrastructure.adapter.RestCatalogRevisionIrPort
 import com.openbank.billing.infrastructure.client.ProductCatalogRestClient
@@ -62,4 +63,15 @@ class RestCatalogRevisionIrPortTest {
             assertThatThrownBy { runBlocking { RestCatalogRevisionIrPort(garbled).fetch("r1") } }
                 .isInstanceOf(CatalogRevisionUnavailableException::class.java)
         }
+
+    @Test
+    fun `a body naming another revision, or none, is refused before anything is stored`() {
+        for (body in listOf(
+            """{"id":"other","content":{"behaviour":${ShadowFixtures.IR}}}""",
+            """{"content":{"behaviour":${ShadowFixtures.IR}}}""",
+            """{"id":"other","content":{"attributes":{}}}""",
+        )) {
+            assertThatThrownBy { port.parse("r1", body) }.isInstanceOf(CatalogRevisionMismatchException::class.java)
+        }
+    }
 }

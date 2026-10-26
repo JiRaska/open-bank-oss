@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test
 import java.net.InetSocketAddress
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -86,14 +87,14 @@ class UpstreamClientTest {
 
     @Test
     fun `cold token acquisition shares bounded get deadline with the party request`() {
-        withServer(tokenDelayMs = 200, serviceDelayMs = 400) { client, baseUrl, requests ->
+        withServer(tokenDelayMs = 800, serviceDelayMs = 1600, requestTimeoutMs = 8000) { client, baseUrl, requests ->
             val started = System.nanoTime()
-            val response = client.get("$baseUrl/notifications", "party-9", 500)
+            val response = client.get("$baseUrl/notifications", "party-9", 2000)
             val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
             assertThat(response.status).isEqualTo(502)
-            assertThat(elapsedMs).isLessThan(1_000)
+            assertThat(elapsedMs).isLessThan(2_500)
             assertThat(tokenHits.get()).isEqualTo(1)
-            assertThat(requests.any { it.path == "/notifications" }).isTrue()
+            assertThat(requests.count { it.path == "/notifications" }).isEqualTo(1)
         }
     }
 
@@ -101,16 +102,18 @@ class UpstreamClientTest {
     fun `expired token refresh cannot restart bounded get deadline`() {
         withServer(
             tokenResponse = """{"access_token":"test-token","expires_in":0}""",
-            tokenDelayMs = 200,
-            serviceDelayMs = 400,
-        ) { client, baseUrl, _ ->
+            tokenDelayMs = 800,
+            serviceDelayMs = 1600,
+            requestTimeoutMs = 8000,
+        ) { client, baseUrl, requests ->
             assertThat(client.get("$baseUrl/notifications", "party-9").status).isEqualTo(200)
             val started = System.nanoTime()
-            val response = client.get("$baseUrl/notifications", "party-9", 500)
+            val response = client.get("$baseUrl/notifications", "party-9", 2000)
             val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
             assertThat(response.status).isEqualTo(502)
-            assertThat(elapsedMs).isLessThan(1_000)
+            assertThat(elapsedMs).isLessThan(2_500)
             assertThat(tokenHits.get()).isEqualTo(2)
+            assertThat(requests.count { it.path == "/notifications" }).isEqualTo(2)
         }
     }
 
@@ -382,10 +385,11 @@ class UpstreamClientTest {
         responseStatus: Int = 200,
         tokenDelayMs: Long = 0,
         serviceDelayMs: Long = 0,
+        requestTimeoutMs: Long = 2000,
         block: (UpstreamClient, String, List<CapturedRequest>) -> Unit,
     ) {
         tokenHits.set(0)
-        val requests = mutableListOf<CapturedRequest>()
+        val requests = CopyOnWriteArrayList<CapturedRequest>()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/realms/openbank/protocol/openid-connect/token") { exchange ->
             tokenHits.incrementAndGet()
@@ -398,17 +402,15 @@ class UpstreamClientTest {
             }
         }
         server.createContext("/") { exchange ->
-            synchronized(requests) {
-                requests.add(
-                    CapturedRequest(
-                        method = exchange.requestMethod,
-                        path = exchange.requestURI.path,
-                        headers = exchange.requestHeaders.entries.associate { (k, v) -> k.lowercase() to v.first() },
-                        body = exchange.requestBody.readBytes().toString(Charsets.UTF_8),
-                        rawQuery = exchange.requestURI.rawQuery,
-                    ),
-                )
-            }
+            requests.add(
+                CapturedRequest(
+                    method = exchange.requestMethod,
+                    path = exchange.requestURI.path,
+                    headers = exchange.requestHeaders.entries.associate { (k, v) -> k.lowercase() to v.first() },
+                    body = exchange.requestBody.readBytes().toString(Charsets.UTF_8),
+                    rawQuery = exchange.requestURI.rawQuery,
+                ),
+            )
             if (serviceDelayMs > 0) Thread.sleep(serviceDelayMs)
             responseHeaders.forEach { (name, value) -> exchange.responseHeaders.add(name, value) }
             respond(exchange, responseStatus, "application/json", "{}".toByteArray(Charsets.UTF_8))
@@ -423,7 +425,7 @@ class UpstreamClientTest {
                 clientSecret = "test-secret"
                 tlsTrustCertificateFile = java.util.Optional.empty()
                 connectTimeoutMs = 2000
-                requestTimeoutMs = 2000
+                this.requestTimeoutMs = requestTimeoutMs
             }
             block(client, baseUrl, requests)
         } finally {
