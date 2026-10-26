@@ -141,6 +141,15 @@ allOpen {
 tasks.test {
     useJUnitPlatform { if (!project.hasProperty("withDocker")) excludeTags("integration") }
     systemProperty("java.util.logging.manager", "org.jboss.logmanager.LogManager")
+    // Ephemeral Quarkus test ports — this module does not apply openbank.quarkus-service, so the
+    // convention plugin's pinning never reaches it. Without these, ANY concurrent build on this
+    // host that also boots a Quarkus test collides on the shared fixed ports (8081/8444/9001) and
+    // this module's @QuarkusTest classes die with QuarkusBindException — measured 2026-10-26 when
+    // the real-broker bronze E2E and a sibling module's suite killed each other exactly so.
+    // Enforced for every Quarkus-test module by the `quarkus-test-ports-ephemeral` gate.
+    systemProperty("quarkus.http.test-port", "0")
+    systemProperty("quarkus.http.test-ssl-port", "0")
+    systemProperty("quarkus.management.test-port", "0")
 }
 
 tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
