@@ -29603,5 +29603,42 @@
             <sha256 value="7af9ce8a09581211557e6cc8e2909bd80666b34e922a28587c773096c1022093" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
          </artifact>
       </component>
+      <component group="io.quarkus" name="quarkus-junit-component" version="3.40.1.1">
+         <artifact name="quarkus-junit-component-3.40.1.1.jar">
+            <sha256 value="b2c7f174fb56ef892df9a042710997d65081ffc4a3447d5ccc9fc0816bc558d4" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+         <artifact name="quarkus-junit-component-3.40.1.1.pom">
+            <sha256 value="0b59706373faa278d7429c433a81a03634b50609136c8debbdcd16d36d4304fa" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+      </component>
+      <component group="io.quarkus" name="quarkus-load-shedding" version="3.40.1.1">
+         <artifact name="quarkus-load-shedding-3.40.1.1.jar">
+            <sha256 value="2eb25a78c69f6dd409c7f51947588266b9c19ea1f422d6016d5acd3766995037" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+         <artifact name="quarkus-load-shedding-3.40.1.1.pom">
+            <sha256 value="307158ca3399b18f0d5483476ee6c87b8b471aaf027d8ca42f01ac04729192f7" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+      </component>
+      <component group="io.quarkus" name="quarkus-load-shedding-deployment" version="3.40.1.1">
+         <artifact name="quarkus-load-shedding-deployment-3.40.1.1.jar">
+            <sha256 value="9cda8a20ce8d23afafe2aef654464719d0cf6cfdf320b51be3935cb42f791fd8" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+         <artifact name="quarkus-load-shedding-deployment-3.40.1.1.pom">
+            <sha256 value="0d11f7edfa084f616d3e5fc76b86c225ee7263cd490bbd9ef03c0bb8c7838a0f" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+      </component>
+      <component group="io.quarkus" name="quarkus-load-shedding-parent" version="3.40.1.1">
+         <artifact name="quarkus-load-shedding-parent-3.40.1.1.pom">
+            <sha256 value="e7df9dacb94b8f6b4fb42f3ddd36e1f6956698ccee65b6e418d3f57a2173ba52" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+      </component>
+      <component group="org.mockito" name="mockito-core" version="5.21.0">
+         <artifact name="mockito-core-5.21.0.jar">
+            <sha256 value="03db23de742cbca42aa3d6127fdace560fac37b036d931870801f84c288bd286" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+         <artifact name="mockito-core-5.21.0.pom">
+            <sha256 value="0221b31f96df01a158c645371aad81b2d3f5bee0f589ca0d0c2eaa6e8da092f3" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+      </component>
    </components>
 </verification-metadata>
