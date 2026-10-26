@@ -68,6 +68,13 @@ dependencies {
     // Same version pin as openbank-ledger-service/openbank-balance-service's own property
     // suites and openbank-libs-domain's MoneyPropertyTest — kept a direct GAV like theirs.
     api("io.kotest:kotest-property:5.9.1")
+    // OpenApiWireValidator (#13210): `implementation`, NOT `api` — the validator and YAML parser are
+    // not part of this module's public API, so they reach no consumer's compile classpath. Same
+    // validator and yaml exclusion as libs-domain; snakeyaml-engine 2.7 is the pinned parser.
+    implementation("com.networknt:json-schema-validator:1.5.9") {
+        exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
+    }
+    implementation("org.snakeyaml:snakeyaml-engine:2.7")
     // quarkus-vertx: VertxContextSupport (reactive Panache needs a Vert.x duplicated context).
     // quarkus-messaging-kafka: OutgoingKafkaRecordMetadata (kafka-api), for reading the produced
     // record's key/headers back out of the in-memory connector's sink.
@@ -125,8 +132,12 @@ dependencies {
     // SecurityIdentity for ApprovalEndpointConformance; services supply it at test runtime.
     compileOnly("io.quarkus.security:quarkus-security")
     compileOnly("io.smallrye.config:smallrye-config-source-yaml")
+    // @Produces / @Singleton on TraceContractRecorder; every consuming service has the CDI API.
+    compileOnly("io.quarkus:quarkus-arc")
     testImplementation(enforcedPlatform(libs.quarkus.bom))
     testImplementation("io.smallrye.config:smallrye-config-source-yaml")
+    testImplementation(libs.quarkus.junit5)
+    testImplementation("io.quarkus:quarkus-arc")
 
     testImplementation(libs.mockk)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

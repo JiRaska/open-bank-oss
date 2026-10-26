@@ -42,7 +42,12 @@ class BillingCycleService(
     // shared helper: CodeQL's log-injection sanitizer check is a local syntactic match on the
     // replace() call at the sink itself, not an interprocedural summary, so a wrapper function
     // is an opaque call to it and leaves the alert open (confirmed against this exact file).
-    suspend fun assessAndPost(cycleId: String, accountId: String, currency: String): BillingAssessment {
+    suspend fun assessAndPost(
+        cycleId: String,
+        accountId: String,
+        currency: String,
+        scheduledCadence: String? = null,
+    ): BillingAssessment {
         repository.findExisting(cycleId, accountId, currency)?.let {
             log.debugf(
                 "billing cycle %s account %s currency %s already assessed — returning existing (idempotent replay)",
@@ -52,7 +57,7 @@ class BillingCycleService(
             )
             return it
         }
-        val assessment = feeAssessmentService.assess(cycleId, accountId, currency)
+        val assessment = feeAssessmentService.assess(cycleId, accountId, currency, scheduledCadence)
         return repository.persistWithPostingIntent(assessment)
     }
 
@@ -62,15 +67,24 @@ class BillingCycleService(
      * single account's failure (logged) so one bad account never blocks the rest of the batch —
      * mirrors `InterestService.accrueAll`'s per-account isolation intent.
      */
-    suspend fun runCycle(cycleId: String, accountIds: List<String>, currency: String): Int =
-        runCycleWithOutcome(cycleId, accountIds, currency).processed
+    suspend fun runCycle(
+        cycleId: String,
+        accountIds: List<String>,
+        currency: String,
+        scheduledCadence: String? = null,
+    ): Int = runCycleWithOutcome(cycleId, accountIds, currency, scheduledCadence).processed
 
     /** [runCycle], also counting the accounts that failed — a day-close input (ADR-0342). */
-    suspend fun runCycleWithOutcome(cycleId: String, accountIds: List<String>, currency: String): CycleOutcome {
+    suspend fun runCycleWithOutcome(
+        cycleId: String,
+        accountIds: List<String>,
+        currency: String,
+        scheduledCadence: String? = null,
+    ): CycleOutcome {
         var processed = 0
         var failed = 0
         for (accountId in accountIds) {
-            runCatching { assessAndPost(cycleId, accountId, currency) }
+            runCatching { assessAndPost(cycleId, accountId, currency, scheduledCadence) }
                 .onSuccess { processed++ }
                 .onFailure { ex ->
                     failed++

@@ -7,6 +7,7 @@ import json
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("collect-admin-ui-test-evidence.py")
@@ -192,6 +193,168 @@ class ArchiveTests(unittest.TestCase):
             zipped.writestr(info, json.dumps(ENVELOPE))
         with self.assertRaisesRegex(COLLECTOR.CollectionError, "symlink"):
             self.payload(output.getvalue())
+
+
+class AggregateSeedTests(unittest.TestCase):
+    def setUp(self):
+        self.report = {"schemaVersion": 1, "collectedAt": "2026-10-19T12:00:00Z", "components": [], "totals": {},
+                       **{field: [{"retained": field}] for field in COLLECTOR.SEEDED_LIST_FIELDS},
+                       "clientExperiences": [{"id": "mobile"}], "syntheticJourneys": [{"id": "journey"}],
+                       "contracts": [{"provider": "example"}]}
+        self.run = RUN | {"path": ".github/workflows/admin-ui-deploy.yml", "event": "workflow_run",
+                          "conclusion": "success", "run_started_at": "2026-10-19T11:00:00Z",
+                          "updated_at": "2026-10-19T13:00:00Z"}
+        self.artifact = {"id": 456, "name": COLLECTOR.SEED_ALIAS, "expired": False,
+                         "created_at": "2026-10-19T12:10:00Z",
+                         "workflow_run": {"id": 123, "head_sha": SHA, "head_branch": "main"}}
+        self.provenance = {"schemaVersion": 1, "runId": 123, "attempt": 2, "sourceSha": "b" * 40,
+                           "workflowSha": SHA}
+        self.calls = []
+
+    def body(self, **extra):
+        return archive({"test-intelligence.json": json.dumps(self.report).encode(),
+                        "seed-provenance.json": json.dumps(self.provenance).encode(), **extra})
+
+    def response(self, url, token):
+        self.calls.append(url)
+        if "/actions/artifacts?" in url:
+            return {"total_count": 1, "artifacts": [self.artifact]}
+        if url.endswith("/actions/runs/123"):
+            return self.run
+        raise AssertionError(f"unexpected legacy or additional lookup: {url}")
+
+    def read(self, body=None, response=None):
+        with patch.object(COLLECTOR, "api_json", side_effect=response or self.response), \
+             patch.object(COLLECTOR, "api_bytes", return_value=self.body() if body is None else body) as download:
+            result = COLLECTOR.latest_aggregate("org/repo", "fixture-token")
+        return result, download.call_count
+
+    def test_constant_request_path_preserves_every_ancillary_field(self):
+        result, downloads = self.read()
+        self.assertEqual(result, self.report)
+        self.assertEqual(len(self.calls), 2)  # exact-name inventory plus one trusted run
+        self.assertEqual(downloads, 1)
+        self.assertIn("name=admin-ui-test-intelligence-seed", self.calls[0])
+
+    def test_wrong_workflow_fork_unsuccessful_and_attempt_mismatch_fail_closed(self):
+        original = dict(self.run)
+        for changed in [{"path": ".github/workflows/other.yml"}, {"head_repository": {"full_name": "fork/repo"}},
+                        {"conclusion": "failure"}, {"status": "in_progress"}, {"run_attempt": 3},
+                        {"head_sha": "c" * 40}, {"event": "pull_request"}]:
+            self.run = original | changed
+            with self.subTest(changed=changed), self.assertRaises(COLLECTOR.CollectionError):
+                self.read()
+        self.run = original
+
+    def test_ambiguous_incomplete_and_malformed_inventory_never_falls_back(self):
+        for listing in [{"total_count": 2, "artifacts": [self.artifact]},
+                        {"total_count": 2, "artifacts": [self.artifact, self.artifact | {"id": 457}]},
+                        {"total_count": 0, "artifacts": None},
+                        {"total_count": 1, "artifacts": [self.artifact | {"name": "wrong"}]}]:
+            with self.subTest(listing=listing), self.assertRaises(COLLECTOR.CollectionError):
+                self.read(response=lambda _url, _token, listing=listing: listing)
+
+    def test_timestamp_and_sidecar_errors(self):
+        original = dict(self.provenance)
+        for changed in [{"sourceSha": "short"}, {"workflowSha": "c" * 40}, {"runId": 999}, {"attempt": 1}]:
+            self.provenance = original | changed
+            with self.subTest(changed=changed), self.assertRaises(COLLECTOR.CollectionError):
+                self.read()
+        self.provenance = original
+        for collected in [None, "2026-10-19T10:00:00Z", "2026-10-19T12:11:00Z", "2026-10-19T12:00:00"]:
+            self.report["collectedAt"] = collected
+            with self.subTest(collected=collected), self.assertRaises(COLLECTOR.CollectionError):
+                self.read()
+
+    def test_archive_errors_and_missing_sidecar(self):
+        for body in [b"corrupt", archive({"test-intelligence.json": json.dumps(self.report).encode()}),
+                     self.body(**{"../escape": b"bad"}), self.body(**{"unexpected": b"bad"})]:
+            with self.subTest(body=body[:20]), self.assertRaises(COLLECTOR.CollectionError):
+                self.read(body=body)
+
+    def test_alias_absence_preserves_legacy_lookup(self):
+        def response(url, token):
+            self.calls.append(url)
+            if "/actions/artifacts?" in url:
+                return {"total_count": 0, "artifacts": []}
+            if "/workflows/admin-ui-deploy.yml/runs?" in url:
+                return {"workflow_runs": [self.run]}
+            if url.endswith("/actions/runs/123"):
+                return self.run
+            if "/runs/123/artifacts?" in url:
+                return {"artifacts": [self.artifact | {"name": "test-intelligence-snapshot-123-2"}]}
+            raise AssertionError(url)
+        result, count = self.read(body=archive({"test-intelligence.json": json.dumps(self.report).encode()}), response=response)
+        self.assertEqual(result, self.report)
+        self.assertEqual(count, 1)
+        self.assertEqual(len(self.calls), 4)
+
+    def test_all_expired_aliases_fall_back_to_validated_retained_snapshot(self):
+        self.artifact["expired"] = True
+        older = self.artifact | {"id": 455, "workflow_run": {"id": 122, "head_sha": SHA, "head_branch": "main"}}
+
+        def response(url, token):
+            self.calls.append(url)
+            if "/actions/artifacts?" in url:
+                return {"total_count": 2, "artifacts": [self.artifact, older]}
+            if "/workflows/admin-ui-deploy.yml/runs?" in url:
+                return {"workflow_runs": [self.run]}
+            if url.endswith("/actions/runs/123"):
+                return self.run
+            if "/runs/123/artifacts?" in url:
+                return {"artifacts": [self.artifact | {"id": 500, "name": "test-intelligence-snapshot-123-2", "expired": False}]}
+            raise AssertionError(url)
+
+        body = archive({"test-intelligence.json": json.dumps(self.report).encode()})
+        result, downloads = self.read(body=body, response=response)
+        self.assertEqual(result, self.report)
+        self.assertEqual(result["collectedAt"], "2026-10-19T12:00:00Z")
+        self.assertEqual(downloads, 1)
+        self.assertEqual(len(self.calls), 4)
+        self.assertFalse(any(url.endswith("/actions/runs/122") for url in self.calls))
+        # Fallback still verifies the legacy producer; expiration is not trust.
+        self.run["head_repository"] = {"full_name": "fork/repo"}
+        result, downloads = self.read(body=body, response=response)
+        self.assertIsNone(result)
+        self.assertEqual(downloads, 0)
+
+    def test_missing_or_nonboolean_expiration_never_authorizes_fallback(self):
+        for value in (None, 0, 1, "true", "false", [], {}):
+            artifact = self.artifact | {"expired": value}
+            with self.subTest(value=value), self.assertRaises(COLLECTOR.CollectionError):
+                self.read(response=lambda _url, _token, artifact=artifact: {"total_count": 1, "artifacts": [artifact]})
+        missing = {key: value for key, value in self.artifact.items() if key != "expired"}
+        with self.assertRaises(COLLECTOR.CollectionError):
+            self.read(response=lambda _url, _token: {"total_count": 1, "artifacts": [missing]})
+
+    def test_expiration_does_not_hide_malformed_or_ambiguous_inventory(self):
+        expired = self.artifact | {"expired": True}
+        for listing in ({"total_count": 2, "artifacts": [expired]},
+                        {"total_count": 2, "artifacts": [expired, expired | {"id": 457}]},
+                        {"total_count": 1, "artifacts": [expired | {"workflow_run": {}}]},
+                        {"total_count": 1, "artifacts": [expired | {"workflow_run": {"id": 123, "head_branch": "main", "head_sha": "short"}}]},
+                        {"total_count": 1, "artifacts": [expired | {"workflow_run": {"id": 123, "head_branch": "feature", "head_sha": SHA}}]},
+                        {"total_count": 1, "artifacts": [expired | {"name": "wrong"}]}):
+            with self.subTest(listing=listing), self.assertRaises(COLLECTOR.CollectionError):
+                self.read(response=lambda _url, _token, listing=listing: listing)
+
+    def test_unexpired_invalid_identity_with_expired_sibling_never_falls_back(self):
+        expired = self.artifact | {"id": 455, "expired": True,
+                                   "workflow_run": {"id": 122, "head_sha": SHA, "head_branch": "main"}}
+        self.artifact["workflow_run"]["head_sha"] = "b" * 40
+        original = self.response
+
+        def response(url, token):
+            if "/actions/artifacts?" in url:
+                return {"total_count": 2, "artifacts": [self.artifact, expired]}
+            return original(url, token)
+
+        with self.assertRaisesRegex(COLLECTOR.CollectionError, "identity mismatch"):
+            self.read(response=response)
+
+    def test_api_errors_never_mean_absence(self):
+        with self.assertRaises(COLLECTOR.CollectionError):
+            self.read(response=lambda _url, _token: (_ for _ in ()).throw(COLLECTOR.CollectionError("unavailable")))
 
 
 class CollectionTests(unittest.TestCase):
