@@ -189,18 +189,18 @@ class BillingCloseParticipationTest {
         // 2026-06-30T22:30Z is 00:30 on 2026-07-01 in Prague: the UTC date is still June.
         val pastMidnight = Clock.fixed(Instant.parse("2026-06-30T22:30:00Z"), ZoneOffset.UTC)
         val svc = mockk<BillingCycleService>()
-        coEvery { svc.runCycleWithOutcome(any(), any(), any()) } returns CycleOutcome(1, 0)
+        coEvery { svc.runCycleWithOutcome(any(), any(), any(), any()) } returns CycleOutcome(1, 0)
 
         sweep(pastMidnight, "acc-1", svc = svc).runSweep()
 
-        coVerify(exactly = 1) { svc.runCycleWithOutcome("2026-07", listOf("acc-1"), "CZK") }
+        coVerify(exactly = 1) { svc.runCycleWithOutcome("2026-07", listOf("acc-1"), "CZK", "MONTHLY") }
         assertThat(runs.rows.keys).containsExactly(cycleDay to BillingCloseJobs.CYCLE)
     }
 
     @Test
     fun `failed accounts are recorded as a refusal with a fixed category`(): Unit = runBlocking {
         val svc = mockk<BillingCycleService>()
-        coEvery { svc.runCycleWithOutcome(any(), any(), any()) } returns CycleOutcome(processed = 1, failed = 2)
+        coEvery { svc.runCycleWithOutcome(any(), any(), any(), any()) } returns CycleOutcome(processed = 1, failed = 2)
 
         sweep(Clock.fixed(Instant.parse("2026-07-01T01:00:00Z"), ZoneOffset.UTC), "a,b,c", svc = svc).runSweep()
 
@@ -216,7 +216,7 @@ class BillingCloseParticipationTest {
         val discovery = mockk<BillableAccountDiscoveryPort>()
         coEvery { discovery.activeAccounts(2, null) } returns BillableAccountsPage(listOf("a", "b"), nextCursor = "c1")
         coEvery { discovery.activeAccounts(2, "c1") } throws IllegalStateException("account-service unreachable")
-        coEvery { svc.runCycleWithOutcome(any(), any(), any()) } returns CycleOutcome(2, 0)
+        coEvery { svc.runCycleWithOutcome(any(), any(), any(), any()) } returns CycleOutcome(2, 0)
 
         sweep(Clock.fixed(Instant.parse("2026-07-01T01:00:00Z"), ZoneOffset.UTC), null, discovery, svc).runSweep()
 
@@ -235,12 +235,12 @@ class BillingCloseParticipationTest {
     fun `a cycle missed on the 1st is caught up on the 2nd and filed under the due day`(): Unit = runBlocking {
         // 2026-07-02T08:00Z: the 03:00 Prague firing on 1 July has passed and no run is recorded.
         val svc = mockk<BillingCycleService>()
-        coEvery { svc.runCycleWithOutcome(any(), any(), any()) } returns CycleOutcome(1, 0)
+        coEvery { svc.runCycleWithOutcome(any(), any(), any(), any()) } returns CycleOutcome(1, 0)
         val s = catchUpScheduler(Clock.fixed(Instant.parse("2026-07-02T08:00:00Z"), ZoneOffset.UTC), svc)
 
         s.catchUp()
 
-        coVerify(exactly = 1) { svc.runCycleWithOutcome("2026-07", listOf("acc-1"), "CZK") }
+        coVerify(exactly = 1) { svc.runCycleWithOutcome("2026-07", listOf("acc-1"), "CZK", "MONTHLY") }
         assertThat(runs.rows.keys).containsExactly(cycleDay to BillingCloseJobs.CYCLE)
     }
 
@@ -252,7 +252,7 @@ class BillingCloseParticipationTest {
 
         s.catchUp()
 
-        coVerify(exactly = 0) { svc.runCycleWithOutcome(any(), any(), any()) }
+        coVerify(exactly = 0) { svc.runCycleWithOutcome(any(), any(), any(), any()) }
     }
 
     @Test
@@ -263,6 +263,6 @@ class BillingCloseParticipationTest {
 
         assertThat(s.missedDueDay()).isNull()
         s.catchUp()
-        coVerify(exactly = 0) { svc.runCycleWithOutcome(any(), any(), any()) }
+        coVerify(exactly = 0) { svc.runCycleWithOutcome(any(), any(), any(), any()) }
     }
 }

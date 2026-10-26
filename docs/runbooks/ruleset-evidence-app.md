@@ -24,8 +24,8 @@ own token before publishing data. No ruleset bypass role is needed or permitted.
    This is a credential boundary, not a manual approval on every CI run. Inspect
    the actual branch rules, not just the environment's existence. `workflow_run`
    executes on the default branch; ordinary PR refs do not match this environment.
-4. Copy the numeric **App ID** (not Client ID). Generate a private key under
-   **Private keys**. Store these only as **environment secrets** in
+4. Copy the numeric **App ID** (not Client ID). In the App sidebar, open **Credentials → Key pairs → New key** to download
+   a private key. Store these only as **environment secrets** in
    [ruleset-evidence settings](https://github.com/JiRaska/open-bank-oss/settings/environments):
    - `RULESET_EVIDENCE_APP_ID`: the numeric App ID.
    - `RULESET_EVIDENCE_APP_PRIVATE_KEY`: the entire downloaded PEM, including header,
