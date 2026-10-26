@@ -30,10 +30,10 @@ agents; 0224 MCP authority; 0244/0271 collaboration; 0258 bounded schemas; 0268 
 quality. None defines this pack lifecycle. Proposed 0348–0351 cover model-assisted triage,
 not strategy ownership. Product packs are a reusable pattern, not a fraud schema.
 
-At audit base `ad6142433d30ab7ec36dab1852942d97d22488e5`, the enum ratchet scans
-729 Kotlin enums and reports 101 baselined findings. It checks numeric names and copies,
-not whether a single-owner enum is appropriate. PR #13766 (ADR-0353) and #13770 separately
-introduce shared financial-crime vocabulary. Their deduplication is a compatibility step;
+At review base `c2d5d7db65c81a77cf3628c81c994cabcd6b5efd` (2026-10-26), the enum ratchet
+scans 747 Kotlin enums and reports 105 baselined findings. It checks numeric names and copies,
+not whether a single-owner enum is appropriate. PR #13770 merged ADR-0353 and the shared
+financial-crime vocabulary; #13766 closed without a separate merge. Deduplication is a compatibility step;
 it does not make risk taxonomies or the hard-coded screening threshold configurable.
 The [audit and delivery map](../design/financial-crime-as-code-roadmap.md) records scope,
 existing issue owners and measurement limits.
@@ -72,7 +72,7 @@ alternatives. The kernel understands bounded operators, not named business categ
 Regulatory reference data also needs source/version/effective-date provenance.
 
 Existing enum APIs, persisted values, UI parsers and events remain compatibility contracts
-until migrated individually. Shared AmlCaseSeverity in PR #13770 is a compatibility type,
+until migrated individually. Shared AmlCaseSeverity, delivered by PR #13770, is a compatibility type,
 not the future configurable scale. Never send a new data code to an old strict consumer:
 use a versioned adapter or reject the unsupported revision, never silently map to LOW/OTHER.
 
@@ -124,16 +124,17 @@ Before admitting traffic, prove consistent request routing/pinning across two re
 
 ### 5. Reuse libraries and governance
 
-Follow 0317/0346 and the concurrent ADR-0353 vocabulary work. Use openbank-libs-fincrime
+Follow 0317/0346 and the ADR-0353 vocabulary already on main. Use openbank-libs-fincrime
 for justified shared framework-free financial-crime contracts/evaluator primitives with
 separate fraud/AML semantics. No duplicate libs-fraud/libs-aml modules merely mirroring
 services. Adapters and ownership stay in services; further extraction needs consumer,
 licensing and fanout evidence. No business vocabulary returns to the platform core.
 
 Reuse Money, feature ports, ObjectStorePort, canonical JSON, Proposal, DecisionRecord,
-outbox and governed MCP/LLM infrastructure. Typed model contracts use the proposed com.openbank.libs.inference.typed package,
-initially beside com.openbank.libs.llm in libs-domain and later moved with ADR-0317
-phase 2 (#11056); no ML-contracts package is claimed to exist today. Never reuse lending's
+outbox and governed MCP/LLM infrastructure. Typed model contracts use the proposed com.openbank.libs.ml.typed package,
+initially beside existing com.openbank.libs.domain.feature contracts in libs-domain. Move
+it with those contracts to openbank-libs-analytics in ADR-0317 phase 2 (#11056), not to
+libs-agent. The typed package is new; no existing typed-ML package is claimed. Never reuse lending's
 com.openbank.libs.decision namespace. Agent code stays on ADR-0197's
 AGPL side; Apache services/libs cannot depend backwards on it. No tenant dimension is
 added to the single-bank ADR-0152 deployment.
@@ -254,4 +255,4 @@ activation, rollback, real-DB atomicity and historical replay. A grep alone is i
 - #13775, #13776, #13777, #13778 — missing implementation slices
 - #10236, #12750, #12922, #1035, #4403, #3000, #3737, #5839 — existing owners
 - #13434, #13435, #13436, #13438, #13439, #13440, #13441, #11604, #13448 — existing follow-ups
-- PR #13766 / #13770 — concurrent vocabulary work, not merged-delivery evidence
+- PR #13770 — merged ADR-0353 and shared compatibility types; #13766 closed without merge

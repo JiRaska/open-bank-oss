@@ -54,10 +54,12 @@ treats calibration as something to measure here, not something to assume.
 We will introduce **typed-decision models** as a third inference class, governed as follows.
 
 **D1 — One port, framework-free.** `openbank-libs-domain` gains
-`com.openbank.libs.inference.typed.TypedDecisionPort` initially beside
-`com.openbank.libs.llm` in `openbank-libs-domain` (the package is new, not existing).
-The `decision` namespace belongs to lending under ADR-0317. The contract moves with the AI-plane contracts to `openbank-libs-agent` in
-ADR-0317 phase 2 (#11056); it does not justify a second module by itself:
+`com.openbank.libs.ml.typed.TypedDecisionPort` beside existing
+`com.openbank.libs.domain.feature` contracts (the typed package is new).
+The `decision` namespace belongs to lending under ADR-0317. The contract moves with the
+feature contracts to `openbank-libs-analytics` in ADR-0317 phase 2 (#11056), not to
+`openbank-libs-agent`; it does not justify a second module by itself. Apache consumers
+must not acquire an AGPL dependency through this port:
 
 ```kotlin
 interface TypedDecisionPort {
@@ -94,9 +96,12 @@ four-eyes (the ADR-0155 approval flow). Three bands:
 | Band | Condition | Effect |
 |---|---|---|
 | `AUTO` | approved `mode = AUTO`, `autoEnabled = true`, valid calibration, and `probability ≥ autoAcceptAt` | the decision is applied |
-| `HUMAN_REVIEW` | between | a person decides; the model's value is shown as a suggestion |
+| `HUMAN_REVIEW` | `probability ≥ reviewBelow` and AUTO is not authorized or its threshold is not met | a person decides; the model's value is shown as a suggestion |
 | `ABSTAIN` | below `reviewBelow`, or `Abstained` | handled as if no model existed |
 
+Policy thresholds must be finite and satisfy `0 ≤ reviewBelow ≤ autoAcceptAt ≤ 1`;
+invalid policy abstains. The bands describe live handling only: SHADOW records evidence
+without applying a decision or changing a work queue.
 A use case starts in `SHADOW` with `autoEnabled = false`; `SUGGEST` may show proposals only.
 A probability of 1.0 is reachable, so a threshold of 1.0 does **not** disable AUTO. Enabling AUTO
 requires D7 evidence and independent approval bound to the model/schema/policy hashes. Missing
@@ -148,8 +153,8 @@ entry under ADR-0174 only when one is contracted.
 - **Train an in-process ONNX classifier per use case (ADR-0139).** Best on residency, latency and
   provenance. Rejected *as the starting point*: each use case first needs a labelled set the bank
   does not yet have (complaint categories are assigned by hand today and not exported as training
-  data). Kept as the **exit path** (ADR-0174 §5): the shadow period of D7 produces exactly the
-  labelled set an in-process model needs.
+  data). Kept as the **exit path** (ADR-0174 §5): the shadow period of D7 can collect inputs, but only independently reviewed,
+  mature outcomes with provenance become labels. Model suggestions are not ground truth.
 - **Keep these decisions manual.** Fully explainable and zero new dependency. Rejected as the
   ceiling, because the volume of the queues it would serve grows with the bank, not the team. Kept
   as the `ABSTAIN` path, which is what the platform does whenever no model answers.
@@ -164,7 +169,8 @@ entry under ADR-0174 only when one is contracted.
   precision is a number on a committed eval, not an impression.
 - One port means the provider, an LLM adapter or an in-house ONNX model are swappable per use case,
   which is both the DORA exit position and the AGPL/Apache seam ADR-0174 §4 already relies on.
-- The shadow period produces labelled data as a side effect, which makes the ONNX exit cheaper.
+- Shadow observations paired with independently reviewed outcomes can support the ONNX exit;
+  prediction logs alone are not a labelled training set.
 
 **Negative**
 - A new third-party and transfer surface. For any class-1 use case it is unusable outside the sandbox
@@ -190,7 +196,7 @@ entry under ADR-0174 only when one is contracted.
 # the port exists, framework-free
 git grep -l 'interface TypedDecisionPort' -- 'openbank-libs-domain/src/main/kotlin/**'   # expect 1 file
 # DecisionClass carries TRIAGE
-git grep -n 'enum class DecisionClass' -- 'openbank-libs-domain/**' | grep -c TRIAGE      # expect 1
+git grep -l 'TRIAGE' -- '*/src/main/**/DecisionRecord.kt' | wc -l                       # expect 1; then run the TRIAGE serialization contract test
 # the residency gate covers typed-decision endpoints and the threshold gate exists
 grep -nE 'id: (model-residency-claims|typed-decision-thresholds)' .github/gates/gates.yaml # expect 2 lines
 ```
