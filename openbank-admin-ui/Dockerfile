@@ -18,7 +18,7 @@
 # Stage 1a: Collect docs trees into a single bundle/ directory.
 # Lightweight alpine, no node, just shell + cp.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS docs-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS docs-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -42,7 +42,7 @@ RUN set -e; \
 # Re-uses the root .dockerignore exception added for SBOM coverage:
 #   !openbank-*/build/reports/bom.json
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS sbom-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS sbom-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -69,7 +69,7 @@ RUN set -e; \
 # catalog work for ALL services regardless of deploy state, with no external
 # GitHub dependency. Mirrors the docs/sbom collectors above.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS openapi-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS openapi-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -98,7 +98,7 @@ RUN set -e; \
 # Communication Studio: openbank-libs/ is .dockerignore'd out of the runtime fs, so without this
 # copy /communication renders "registry not available" in the image while looking correct in local
 # dev, where the repo tree is one level up.
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS governance-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS governance-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -120,7 +120,7 @@ RUN set -e; \
 # (read-only) at /docs/flags (ADR-0067). Mirrors the collectors above; the loader
 # (src/lib/governance/flags.ts) parses the ConfigMap YAML + embedded flags.json.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS flags-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS flags-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -144,7 +144,7 @@ RUN set -e; \
 # Release notes are derived from these same files. Re-uses the root .dockerignore
 # exception (!openbank-*/CHANGELOG.md). Mirrors the docs/sbom/openapi collectors.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS changelog-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS changelog-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -180,7 +180,7 @@ RUN set -e; \
 # Staged as its own collector rather than widening the build COPY: the image context stays the
 # admin-ui directory plus explicitly named bundles, which is what every other input here does.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS origination-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS origination-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -200,7 +200,7 @@ RUN set -e; \
 # (substrate tofu, finops EKS lifecycle table, and the GitOps YAML for image/chart pins), staged at
 # their repo-relative paths. Only these are copied; the rest of openbank-infra stays out of the image.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS platform-versions-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS platform-versions-collector
 COPY . /repo
 RUN set -e; \
     mkdir -p /pv-src/openbank-infra/aws/envs/sandbox-substrate /pv-src/openbank-infra/aws/finops; \
