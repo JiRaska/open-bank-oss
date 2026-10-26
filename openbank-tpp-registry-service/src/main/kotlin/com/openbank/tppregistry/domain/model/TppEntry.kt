@@ -14,34 +14,34 @@ import java.util.UUID
  */
 data class TppEntry(
     val id: UUID,
-    val tppId: String,              // EBA/CNB unique identifier (e.g. "CZ-CNB-123456")
+    val tppId: String, // EBA/CNB unique identifier (e.g. "CZ-CNB-123456")
     val name: String,
-    val countryCode: String,        // ISO 3166-1 alpha-2
-    val nca: String,                // National Competent Authority (e.g. "CNB", "BaFin")
+    val countryCode: String, // ISO 3166-1 alpha-2
+    val nca: String, // National Competent Authority (e.g. "CNB", "BaFin")
     val roles: Set<TppRole>,
     val status: TppStatus,
-    val qwacSubjectDn: String?,     // eIDAS QWAC certificate Subject DN
-    val qsealSubjectDn: String?,    // eIDAS QSeal certificate Subject DN
+    val qwacSubjectDn: String?, // eIDAS QWAC certificate Subject DN
+    val qsealSubjectDn: String?, // eIDAS QSeal certificate Subject DN
     val qwacExpiresAt: LocalDate?,
     val qsealExpiresAt: LocalDate?,
     val registeredAt: OffsetDateTime,
     val updatedAt: OffsetDateTime,
     val blacklistedAt: OffsetDateTime?,
-    val blacklistReason: String?
+    val blacklistReason: String?,
 )
 
 enum class TppRole {
-    AISP,   // Account Information Service Provider (PSD2 Art. 67)
-    PISP,   // Payment Initiation Service Provider (PSD2 Art. 66)
-    PIISP,  // Payment Instrument Issuer Service Provider
-    ASPSP   // Account Servicing Payment Service Provider (us)
+    AISP, // Account Information Service Provider (PSD2 Art. 67)
+    PISP, // Payment Initiation Service Provider (PSD2 Art. 66)
+    PIISP, // Payment Instrument Issuer Service Provider
+    ASPSP, // Account Servicing Payment Service Provider (us)
 }
 
 enum class TppStatus {
     ACTIVE,
     SUSPENDED,
     REVOKED,
-    BLACKLISTED
+    BLACKLISTED,
 }
 
 /**
@@ -51,7 +51,7 @@ data class TppAuthorizationResult(
     val tppId: String,
     val authorized: Boolean,
     val roles: Set<TppRole>,
-    val reason: String?
+    val reason: String?,
 )
 
 /**
@@ -61,5 +61,5 @@ data class EbaRegisterSyncState(
     val lastSyncAt: OffsetDateTime?,
     val lastSuccessAt: OffsetDateTime?,
     val totalEntries: Int,
-    val errorMessage: String?
+    val errorMessage: String?,
 )

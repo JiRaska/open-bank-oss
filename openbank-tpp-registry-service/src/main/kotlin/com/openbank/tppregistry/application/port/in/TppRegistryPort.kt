@@ -5,7 +5,6 @@
 package com.openbank.tppregistry.application.port.`in`
 
 import com.openbank.tppregistry.domain.model.*
-import java.util.UUID
 
 data class CheckTppAuthorizationQuery(val tppId: String, val requiredRole: TppRole)
 

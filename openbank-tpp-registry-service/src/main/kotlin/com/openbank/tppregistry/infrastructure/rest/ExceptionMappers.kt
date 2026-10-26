@@ -4,8 +4,8 @@
 
 package com.openbank.tppregistry.infrastructure.rest
 
-import com.openbank.tppregistry.application.usecase.TppAlreadyExistsException
 import com.openbank.tppregistry.application.usecase.EbaSyncUnavailableException
+import com.openbank.tppregistry.application.usecase.TppAlreadyExistsException
 import com.openbank.tppregistry.application.usecase.TppNotFoundException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -31,6 +31,10 @@ class TppAlreadyExistsMapper : ExceptionMapper<TppAlreadyExistsException> {
 
 @Provider
 class EbaSyncUnavailableMapper : ExceptionMapper<EbaSyncUnavailableException> {
-    override fun toResponse(e: EbaSyncUnavailableException): Response =
-        Response.status(503).entity(mapOf("error" to "SERVICE_UNAVAILABLE", "message" to "EBA sync is temporarily unavailable")).build()
+    override fun toResponse(e: EbaSyncUnavailableException): Response = Response.status(503).entity(
+        mapOf(
+            "error" to "SERVICE_UNAVAILABLE",
+            "message" to "EBA sync is temporarily unavailable",
+        ),
+    ).build()
 }

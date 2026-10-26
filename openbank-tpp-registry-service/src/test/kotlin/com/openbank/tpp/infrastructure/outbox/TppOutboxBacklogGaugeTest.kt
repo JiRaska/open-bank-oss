@@ -3,8 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.tpp.infrastructure.outbox
 
-import com.openbank.tpp.application.port.out.TppOutboxRepository
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.tpp.application.port.out.TppOutboxRepository
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
