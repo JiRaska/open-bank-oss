@@ -7,6 +7,7 @@ flowchart LR
   Service[Quarkus service] --> Runtime[openbank-libs-runtime]
   Runtime --> Domain[openbank-libs-domain]
   Finance[openbank-libs-finance] --> Domain
+  Fincrime[openbank-libs-fincrime]
   Legacy[openbank-libs compatibility umbrella] --> Runtime
   Legacy --> Domain
   Runtime --> DocsResource[DocsResource /q/openbank/docs]
@@ -25,6 +26,8 @@ The service owns its documentation files at `src/main/resources/docs/`. The comm
 ## Build and compatibility
 
 The root build uses Gradle subprojects. Service modules generally declare `implementation(project(":openbank-libs-runtime"))`, while older consumers can use the umbrella. The authoritative dependency versions are in `openbank-libs/gradle/libs.versions.toml`; Gradle conventions are in `build-logic/src/main/kotlin/`. Each service's release version is its own `version.txt`.
+
+Shared libraries and services use Quarkus **3.40.1.1 LTS** from the same catalog. Framework dependencies in runtime, testing and Temporal adapters retain their existing dependency scopes; the domain kernel remains framework-free. Shared Micrometer APIs use the platform's **1.17.1** version. Security overrides must preserve or exceed the platform's patched versions. See the [upgrade and rollback runbook](../../docs/runbooks/quarkus-lts-upgrade.md) for compatibility checks and promotion criteria.
 
 ## Four-eyes: approval summaries
 

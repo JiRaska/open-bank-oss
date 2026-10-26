@@ -42,6 +42,14 @@ interface MarketDataRepository {
 /** A flow due for fixing with what the fixing needs to know about its deal. */
 data class DueFlow(val flow: CashFlow, val index: String, val dealVersion: Int)
 
+/**
+ * The deal of a due flow was terminated between the read that found the flow due and the locked
+ * write that would fix it: nothing is written. A refusal, not a failure — the next run no longer
+ * sees the flow as due.
+ */
+class DealNotLiveForFixingException(val dealId: UUID, val state: String) :
+    IllegalStateException("deal $dealId is $state: a fixing is no longer applied to it")
+
 interface FixingFlowRepository {
     /** Latest-schedule PROJECTED floating flows with fixing date [date], of live ACTUAL deals. */
     suspend fun dueOn(date: LocalDate): List<CashFlow>
@@ -51,7 +59,8 @@ interface FixingFlowRepository {
 
     /**
      * Store [flows] (each still PROJECTED, row locked — a concurrent fixing is refused) and the
-     * outbox [event] in ONE transaction.
+     * outbox [event] in ONE transaction. Throws [DealNotLiveForFixingException] when, under the
+     * deal row lock, the deal is no longer live (terminated after [dueOn] read it).
      */
     suspend fun applyFixing(dealId: UUID, flows: List<CashFlow>, event: DealEvent)
 }

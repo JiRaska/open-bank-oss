@@ -140,8 +140,13 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 
 `PUT /api/v1/ledger/accounting-days/{date}/participants/{participant}` authorizes as its own action,
 `ledger.close.participate`, never `ledger.create`. `ledger_rest_ext.rego: close_participant_accounts`
-maps each machine account to the ONE participant it may report for (interest, lending); the use case
+maps each machine account to the ONE participant it may report for (interest, lending, billing); the use case
 then checks the verified caller against `openbank.ledger.close.participants.<name>.principal`. Adding a
 participant is therefore three edits that `check-close-participants.py` keeps in step: `rules.yaml:
 close_participants`, the ledger `application.yaml` map, and the rego map entry (then regenerate the
-bundles). Declared participants today: interest, lending. Mode: `shadow`.
+bundles). Declared participants today: interest, lending, billing. Mode: `shadow`.
+
+Billing joins as a close participant for its monthly cycle. It reports on its own identity, the
+Keycloak client `openbank-billing` (`service-account-openbank-billing`), not on the shared
+`openbank-services` principal its journals post with. The scoped `ledger.close.participate` grant for
+`participants/billing` is that account's only ledger grant; it holds no `ledger.create` of its own.

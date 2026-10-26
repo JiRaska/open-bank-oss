@@ -159,16 +159,19 @@ class CashFlowRepositoryImpl(
 
     /**
      * The flow row is locked too: an override applies only to the flow as it stands. Under that lock
-     * (and a share lock on the deal row, which every deal transition updates) [OverrideEligibility]
+     * (and a share lock on the deal row, taken FIRST, which every deal transition updates) [OverrideEligibility]
      * is evaluated again on the STORED state — deal state, flow state, payment link and any
      * PAYMENT/AMORTISATION journal recorded for the flow — so a flow that moved on between the
      * approver's read and this write is refused (409 FLOW_NOT_OVERRIDABLE), never overwritten.
      */
     private fun applyFlow(flow: CashFlow): Uni<Void> =
-        flowRepo.find("flowId", flow.flowId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { row ->
-            checkNotNull(row) { "flow ${flow.flowId} disappeared" }
-            deals.find("dealId", row.dealId).withLock(LockModeType.PESSIMISTIC_READ).firstResult().flatMap { deal ->
-                checkNotNull(deal) { "deal ${row.dealId} disappeared" }
+        // Lock order deal -> flow, the same order applyFixing takes (deal FOR UPDATE, then its flows),
+        // so an override approval racing a fixing of the same deal waits instead of deadlocking.
+        deals.find("dealId", flow.dealId).withLock(LockModeType.PESSIMISTIC_READ).firstResult().flatMap { deal ->
+            checkNotNull(deal) { "deal ${flow.dealId} disappeared" }
+            flowRepo.find("flowId", flow.flowId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { row ->
+                checkNotNull(row) { "flow ${flow.flowId} disappeared" }
+                check(row.dealId == flow.dealId) { "flow ${flow.flowId} does not belong to deal ${flow.dealId}" }
                 postedUnderLock(row.dealId, flow.flowId).map { posted ->
                     OverrideEligibility(DealState.valueOf(deal.state), posted).require(row.toDomain())
                     // The override was computed from the flow as read; if anything moved the row's
