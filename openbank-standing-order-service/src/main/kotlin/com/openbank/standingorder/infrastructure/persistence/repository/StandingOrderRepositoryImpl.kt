@@ -88,6 +88,7 @@ class StandingOrderRepositoryImpl :
         nextExecutionDate = order.nextExecutionDate
         lastExecutionDate = order.lastExecutionDate
         executionCount = order.executionCount
+        failureCount = order.failureCount
         updatedAt = order.updatedAt
     }
 }
