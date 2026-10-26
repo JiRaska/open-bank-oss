@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.0...sanctions-service-v0.18.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **fraud:** share the financial-crime vocabulary in openbank-libs-fincrime ([#13770](https://github.com/JiRaska/open-bank-oss/issues/13770)) ([bc45331](https://github.com/JiRaska/open-bank-oss/commit/bc4533123a2d8b52ba0b5e3bdfefaa91a712d6f2))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.17.0...sanctions-service-v0.18.0) (2026-10-18)
 
 
