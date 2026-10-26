@@ -44,6 +44,9 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // Downstream WireMock for the E2E suite: ARES + party-service + document-service + the OIDC
+    // token endpoint over real HTTP once the module's CDI stub alternatives are excluded.
+    testImplementation(libs.wiremock.standalone)
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
 }

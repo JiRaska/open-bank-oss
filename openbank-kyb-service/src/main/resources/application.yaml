@@ -282,8 +282,12 @@ authz:
       enabled: false
     oidc:
       enabled: false
-    oidc-client:
-      enabled: false
+    # oidc-client stays ENABLED in %test: `enabled` is build-time fixed, so disabling it here
+    # makes it impossible for the E2E suite's KybE2EWireMockResource to point the token endpoint
+    # at a stub — the override fails with "build time property cannot be changed at runtime".
+    # The ITs stub the ports at the CDI level so the REST clients never leave the process; only
+    # the E2E suite (which excludes those stubs on purpose) dials the WireMock token endpoint.
+    # Same shape as vop-service and risk-engine.
   authz:
     enforce: "false"
   openbank:
