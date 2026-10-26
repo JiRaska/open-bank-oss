@@ -355,3 +355,12 @@ for a unique unconditional ON_OPEN schedule registration of the same cadence, wi
 opening Reject or duplicate producer. This does not establish that the IR's own calendar fired.
 Opening predicates are not reconstructed from today's balances; unsupported registrations and
 historical facts stay unknown. These guards cannot change a legacy fee or grant posting authority.
+
+Billing's shadow worker accepts only a full revision identity frozen with the original assessment
+from its authoritative immutable catalog terms response. The worker's later copy is a separate
+input, never the source of the expected pin. Missing historical identity stays unknown; malformed
+optional metadata cannot suppress or alter a legacy charge. For copies carrying IR, signature and all five identity fields are verified before insertion
+or one-time NULL identity metadata enrichment. V13 permits
+only that metadata transition with every pre-existing immutable field unchanged; it still rejects
+identity overwrite, IR/hash/signature mutation and deletion. No bare-hash signature fallback,
+revision-number default, posting authority or deployment activation is introduced.

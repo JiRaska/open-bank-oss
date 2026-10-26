@@ -60,6 +60,13 @@ class RestCatalogRevisionIrPort(@RestClient private val catalog: ProductCatalogR
             hasIr = true,
             revisionHash = sig?.get("revisionHash")?.asText(),
             irJson = mapper.writeValueAsString(behaviour),
+            identity = RevisionIdentityMetadata.parse(
+                revisionId,
+                root.get("number"),
+                behaviour,
+                sig,
+                root.path("state").asText(),
+            ),
             signature = sig?.let {
                 IrSignature(it.path("keyId").asText(), it.path("algorithm").asText(), it.path("signature").asText())
             },
