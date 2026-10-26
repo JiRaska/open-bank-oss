@@ -13,6 +13,8 @@ permissions: {}
 jobs:
   collect:
     name: Read ruleset bypass configuration
+    # Environment credentials are restricted to the main branch by repository policy.
+    environment: ruleset-evidence
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -20,13 +22,14 @@ jobs:
         id: token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.GITOPS_APP_ID }}
-          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.RULESET_EVIDENCE_APP_ID }}
+          private-key: ${{ secrets.RULESET_EVIDENCE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           # GitHub only includes bypass_actors for a ruleset writer. Metadata:read
           # is implicit. No contents/status/check/PR permission or bypass is granted.
-          # Installation must already allow this; never fall back to a broad PAT.
+          # Dedicated installation only; never reuse the shared GitOps App or a PAT.
+          # Setup: docs/runbooks/ruleset-evidence-app.md.
           permission-administration: write
           # The action's default post hook only warns if revocation fails. The
           # explicit always-run step below must succeed before publishing evidence.

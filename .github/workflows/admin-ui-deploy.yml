@@ -1139,6 +1139,32 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Prepare directly discoverable evidence seed
+        if: steps.build_admission.outputs.proceed == 'true'
+        env:
+          SOURCE_SHA: ${{ needs.deploy-source.outputs.source_sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, shutil
+          destination = pathlib.Path(os.environ['RUNNER_TEMP']) / 'test-intelligence-seed'
+          destination.mkdir()
+          shutil.copyfile('openbank-admin-ui/test-intelligence.json', destination / 'test-intelligence.json')
+          provenance = {'schemaVersion': 1, 'runId': int(os.environ['GITHUB_RUN_ID']),
+                        'attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+                        'sourceSha': os.environ['SOURCE_SHA'], 'workflowSha': os.environ['GITHUB_SHA']}
+          (destination / 'seed-provenance.json').write_text(json.dumps(provenance) + '\n')
+          PY
+
+      - name: Retain directly discoverable evidence seed
+        if: steps.build_admission.outputs.proceed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: admin-ui-test-intelligence-seed
+          overwrite: true  # reruns replace only this run's alias; immutable snapshots stay retained
+          path: ${{ runner.temp }}/test-intelligence-seed/
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Rewrite GitOps image tag
         if: steps.build_admission.outputs.proceed == 'true'
         id: rewrite

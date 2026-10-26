@@ -7,6 +7,7 @@ package com.openbank.treasury.infrastructure.marketdata
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.treasury.application.port.out.CashFlowConflictException
 import com.openbank.treasury.application.port.out.DealEvent
+import com.openbank.treasury.application.port.out.DealNotLiveForFixingException
 import com.openbank.treasury.application.port.out.FixingFlowRepository
 import com.openbank.treasury.application.port.out.MarketDataRepository
 import com.openbank.treasury.application.port.out.ObservationConflictException
@@ -25,6 +26,7 @@ import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.infrastructure.cashflow.DealLookupPanacheRepository
 import com.openbank.treasury.infrastructure.cashflow.toDomain
 import com.openbank.treasury.infrastructure.persistence.repository.CashFlowPanacheRepository
+import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntity
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase
@@ -342,6 +344,7 @@ class FixingFlowRepositoryImpl(
     private val deals: DealLookupPanacheRepository,
     private val outbox: TreasuryOutboxRepository,
     private val clock: Clock,
+    private val meterRegistry: MeterRegistry,
 ) : FixingFlowRepository {
 
     override suspend fun dueOn(date: LocalDate): List<CashFlow> = latest(
@@ -373,11 +376,19 @@ class FixingFlowRepositoryImpl(
         Panache.withTransaction {
             // ADR-0344 D7: lock the deal row (the row a correction approval locks) and refuse a fixing
             // of a schedule a correction has superseded meanwhile; the next run fixes the new one.
+            // dueOn checked the deal was live WITHOUT a lock, so re-check it here, under the lock: a deal
+            // terminated in between must not gain a fixing (or a cashflow.fixed event).
             Panache.getSession().flatMap { session ->
-                session.createNativeQuery<Any>("select schedule_version from deals where deal_id = :d for update")
-                    .setParameter("d", dealId).singleResult
-            }.map { current ->
-                flows.firstOrNull { it.scheduleVersion != (current as Number).toInt() }?.let {
+                session.createNativeQuery<Array<Any>>(
+                    "select schedule_version, state from deals where deal_id = :d for update",
+                ).setParameter("d", dealId).singleResult
+            }.map { row ->
+                val state = row[1] as String
+                if (state in DEAD_STATES) {
+                    meterRegistry.counter(FIXING_METRIC, "outcome", "deal_not_live").increment()
+                    throw DealNotLiveForFixingException(dealId, state)
+                }
+                flows.firstOrNull { it.scheduleVersion != (row[0] as Number).toInt() }?.let {
                     throw CashFlowConflictException(
                         "deal $dealId was re-scheduled (correction) while flow ${it.flowId} was being fixed",
                     )
@@ -421,6 +432,7 @@ class FixingFlowRepositoryImpl(
     private companion object {
         val DEAD_STATES = setOf("CANCELLED", "REVERSED", "DRAFT")
         const val MAX_FLOWS = 10_000
+        const val FIXING_METRIC = "openbank.treasury.fixings"
     }
 }
 
