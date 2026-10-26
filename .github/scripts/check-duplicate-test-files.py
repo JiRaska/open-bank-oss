@@ -40,10 +40,6 @@ PACKAGE_LINE = re.compile(rb"(?m)^package .*$")
 # basename -> the most modules that may carry an identical copy. Debt recorded 2026-10-23 (#13169).
 BASELINE: dict[str, int] = {
     "MockAuthzProducer.kt": 3,
-    # Removed by the TraceContract consolidation (libs-testing `trace` package); the PR that lands
-    # it deletes these two lines, because a shrunk entry fails.
-    "TraceContractRecorder.kt": 20,
-    "TraceContractProfile.kt": 11,
 }
 
 

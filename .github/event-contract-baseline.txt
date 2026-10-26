@@ -31,6 +31,5 @@ openbank-sepa-instant:openbank.sepa.instant.events
 openbank-sepa-payment:openbank.sepa.payment.events
 openbank-standing-order-service:openbank.standing-orders.order.event
 openbank-statement-service:openbank.statement.event
-openbank-swift-service:openbank.payments.swift.event
 openbank-tpp-registry-service:openbank.tpp.registry.event
 openbank-transaction-service:openbank.transactions.transaction.initiated

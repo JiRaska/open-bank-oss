@@ -104,12 +104,20 @@ interface ProductCatalogRestClient {
 
 /** The subset of a catalog `ProductRevision` billing reads (`GET /api/v2/revisions/{id}`). */
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class RevisionDto(val id: String, val state: String, val content: RevisionContentDto = RevisionContentDto())
+data class RevisionDto(
+    val id: String,
+    val state: String,
+    val content: RevisionContentDto = RevisionContentDto(),
+    // Raw nodes keep malformed optional shadow metadata from breaking legacy fee decoding.
+    val number: com.fasterxml.jackson.databind.JsonNode? = null,
+    val irSignature: com.fasterxml.jackson.databind.JsonNode? = null,
+)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class RevisionContentDto(
     val attributes: Map<String, Any?> = emptyMap(),
     val prices: List<PriceComponentDto> = emptyList(),
+    val behaviour: com.fasterxml.jackson.databind.JsonNode? = null,
 )
 
 /** One price component; [value] is an exact decimal STRING in v2, never a binary float. */

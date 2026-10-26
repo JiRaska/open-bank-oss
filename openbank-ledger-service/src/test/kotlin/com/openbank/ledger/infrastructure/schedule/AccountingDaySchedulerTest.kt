@@ -38,6 +38,9 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.logging.Handler
+import java.util.logging.LogRecord
+import java.util.logging.Logger as JulLogger
 
 /**
  * Behaviour of the accounting-day reconciler (ADR-0207 increment 2) against a fixed clock.
@@ -247,6 +250,32 @@ class AccountingDaySchedulerTest {
         scheduler.reconcile()
 
         coVerify(exactly = 0) { useCase.transition(any()) }
+    }
+
+    @Test
+    fun `a CR LF in a participant name cannot forge a log line in the completeness warning`(): Unit = runBlocking {
+        participantsMode = CloseParticipantsConfig.MODE_SHADOW
+        val yesterday = yesterdayEligibleForTieOut()
+        coEvery { participation.completeness(yesterday) } returns
+            CloseCompleteness(yesterday, expected = setOf("interest\r\nFORGED level=ERROR"), reported = emptyMap())
+        val lines = mutableListOf<String>()
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                lines += record.message
+            }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        val jul = JulLogger.getLogger(AccountingDayScheduler::class.java.name)
+        jul.addHandler(handler)
+        try {
+            scheduler.reconcile()
+        } finally {
+            jul.removeHandler(handler)
+        }
+        val rendered = lines.joinToString("\n")
+        assertThat(rendered).contains("interest__FORGED level=ERROR")
+        assertThat(rendered).doesNotContain("\r").doesNotContain("\nFORGED")
     }
 
     @Test

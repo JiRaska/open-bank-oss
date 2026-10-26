@@ -63,6 +63,16 @@ class OpenApiWireContractIT {
                 Response.ok(body).build()
             }
         }
+        // listAccounts reads the caller's page through getToService (authority + path + query kept
+        // separate), so route it by PATH like the plain get above; cursor/partyId are query values.
+        every { upstream.getToService(any(), any(), any(), any()) } answers {
+            val body = routes[secondArg<String>()]
+            if (body == null) {
+                Response.status(404).entity("""{"error":"not found"}""").build()
+            } else {
+                Response.ok(body).build()
+            }
+        }
         QuarkusMock.installMockForType(upstream, UpstreamClient::class.java)
     }
 
@@ -100,6 +110,33 @@ class OpenApiWireContractIT {
         assertThat(data.size()).isEqualTo(1)
         assertThat(data[0].has("closedAt")).isTrue()
         assertThat(data[0].path("closedAt").isNull).isTrue()
+    }
+
+    @Test
+    fun `GET accounts with a delegated account still validates and carries the shared row`() {
+        val shared = "88888888-8888-4888-8888-888888888888"
+        routes["/api/v1/accounts"] =
+            """{"data":[{"id":"$WIRE_ACCOUNT_ID","accountNumber":"CZ6508000000192000145399",
+                "accountType":"CURRENT","partyId":"$WIRE_PARTY_ID","productId":"$WIRE_PRODUCT_ID",
+                "currencyCode":"CZK","status":"ACTIVE","openedAt":"2024-01-01T00:00:00Z","closedAt":null}],
+                "pagination":{"limit":20,"hasNextPage":false,"totalCount":1}}"""
+        routes["/api/v1/delegations/grantee/$WIRE_PARTY_ID"] =
+            """[{"status":"ACTIVE","resourceType":"ACCOUNT","resourceId":"$shared",
+                "capabilities":["ACCOUNT_READ_BALANCES"]}]"""
+        routes["/api/v1/accounts/$shared"] =
+            """{"id":"$shared","accountNumber":"CZ6508000000192000145400","accountType":"CURRENT",
+                "partyId":"99999999-9999-4999-8999-999999999999","productId":"$WIRE_PRODUCT_ID",
+                "currencyCode":"CZK","status":"ACTIVE","openedAt":"2024-01-01T00:00:00Z","closedAt":null}"""
+
+        val body = RestAssured.given().get("/customer/v1/accounts")
+            .then().statusCode(200).extract().asString()
+
+        assertConforms(body, "/accounts")
+        val tree = mapper.readTree(body)
+        assertThat(tree.path("data").size()).isEqualTo(2)
+        assertThat(tree.path("data")[1].path("id").asText()).isEqualTo(shared)
+        assertThat(tree.path("data")[1].path("sharedWithMe").asBoolean()).isTrue()
+        assertThat(tree.path("pagination").path("totalCount").asInt()).isEqualTo(2)
     }
 
     @Test
