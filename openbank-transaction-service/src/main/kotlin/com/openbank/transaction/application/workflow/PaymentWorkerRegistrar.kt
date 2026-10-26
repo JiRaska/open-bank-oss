@@ -8,10 +8,12 @@ import com.openbank.libs.temporal.TemporalConfig
 import io.quarkus.runtime.StartupEvent
 import io.temporal.client.WorkflowClient
 import io.temporal.worker.WorkerFactory
+import jakarta.annotation.PreDestroy
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.util.concurrent.TimeUnit
 
 /**
  * Registers the Temporal payment worker at boot (ADR-0120 Phase 5: always-on after saga retirement).
@@ -21,11 +23,13 @@ class PaymentWorkerRegistrar(
     private val temporalConfig: TemporalConfig,
     private val workflowClient: WorkflowClient,
     private val activities: PaymentActivitiesImpl,
+    private val versioning: PaymentWorkerVersioningConfig,
     @ConfigProperty(name = "openbank.transaction.worker.enabled", defaultValue = "true")
     private val workerEnabled: Boolean,
 ) {
 
     private val log = Logger.getLogger(PaymentWorkerRegistrar::class.java)
+    private var workerFactory: WorkerFactory? = null
 
     @Suppress("UnusedParameter")
     fun onStart(@Observes event: StartupEvent) {
@@ -40,11 +44,33 @@ class PaymentWorkerRegistrar(
             return
         }
         log.infof("Registering Temporal payment worker on task queue '%s'", temporalConfig.taskQueue())
+        val options = paymentWorkerOptions(versioning)
         val factory = WorkerFactory.newInstance(workflowClient)
-        val worker = factory.newWorker(temporalConfig.taskQueue())
+        workerFactory = factory
+        val worker = factory.newWorker(temporalConfig.taskQueue(), options)
         worker.registerWorkflowImplementationTypes(PaymentWorkflowImpl::class.java)
         worker.registerActivitiesImplementations(activities)
         factory.start()
         log.infof("Temporal payment worker started on task queue '%s'", temporalConfig.taskQueue())
+    }
+
+    @PreDestroy
+    fun stop() {
+        val factory = workerFactory ?: return
+        factory.shutdown()
+        try {
+            factory.awaitTermination(SHUTDOWN_SECONDS, TimeUnit.SECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } finally {
+            if (!factory.isTerminated) {
+                log.warn("Payment worker graceful shutdown timed out; unfinished tasks remain retryable in Temporal")
+                factory.shutdownNow()
+            }
+        }
+    }
+
+    private companion object {
+        const val SHUTDOWN_SECONDS = 30L
     }
 }

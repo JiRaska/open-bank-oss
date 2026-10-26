@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.4](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.3...customer-edge-v1.4.4) (2026-10-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** list delegated accounts in the account-service page shape ([#13881](https://github.com/JiRaska/open-bank-oss/issues/13881)) ([c9dbd16](https://github.com/JiRaska/open-bank-oss/commit/c9dbd16083be4151087cabab9f51e7b3f9a8ac5b))
+
+## [1.4.3](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.2...customer-edge-v1.4.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** document the balances wire as {balances: [...]} and pin the spec to it ([#13710](https://github.com/JiRaska/open-bank-oss/issues/13710)) ([28515d1](https://github.com/JiRaska/open-bank-oss/commit/28515d16e7d3df5aed9884337c0a79593f219bc7))
+
 ## [1.4.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.1...customer-edge-v1.4.2) (2026-10-21)
 
 

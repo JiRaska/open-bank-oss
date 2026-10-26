@@ -669,3 +669,25 @@ claim backfill. Retain claims through archival and application rollback. Disabli
 triggers or removing the registry requires separate approval and full write/retry
 quiescence. The existing reversal pre-action status update is outside this initiation
 race fix and is not an all-endpoint exactly-once guarantee.
+
+## Retained Temporal worker versions (ADR-0355)
+
+A mixed unversioned SDK rollout can hand a new history to an old worker that cannot
+interpret its SDK flags. Require versioned polling with an immutable identity before
+starting a new payment worker, preserve original-history replay, and retain previous
+workers independently of HTTP rollout completion. Payment executions are PINNED;
+routing rollback affects new starts and does not authorize moving incompatible
+histories or resetting completed financial effects.
+
+Retained workers inherit the reviewed environment pod template and existing secret
+references. They use distinct selectors, receive no API Service traffic, and admit
+only management traffic from observability. Schedulers and outbox dispatch/retention
+are disabled; API replicas remain responsible for dispatching committed outbox rows.
+The renderer writes no credentials and applies no resources. Environment-specific
+output stays private. Verify egress permissions, workload identity, policy mounts,
+management scraping and pollers before activating routing.
+
+Residual risk: manually deleting a retained image/Deployment can strand pinned
+executions. Require server-side drainage evidence before retirement, retain artifacts
+for recovery, and keep changes under the existing two-review money-path process.
+No new payment command, retry policy, API contract or schema is introduced.

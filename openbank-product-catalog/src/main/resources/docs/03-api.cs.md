@@ -141,8 +141,11 @@ vkladu a sankce za předčasný výběr). IR validuje při každém zápisu draf
 
 Publikace revize s IR je samostatná akce čtyř očí, `catalog.publish-ir`:
 `POST /api/v2/offerings/{offeringId}/revisions/{revisionId}/publish-ir` IR zvaliduje, spočítá
-jeho kanonický `revisionHash`, získá podpis publikační cesty přesně nad tímto hashem a uloží
-oddělený podpis k revizi ve stejné transakci. Čtení jedné revize (`GET /api/v2/revisions/{id}`,
+jeho kanonický `revisionHash`, získá podpis publikační cesty nad obálkou identity revize a uloží
+oddělený podpis k revizi ve stejné transakci. Obálka je kanonický JSON polí `productCode`,
+`revisionId`, `revisionNumber`, `irVersion` a `revisionHash` s doménovým štítkem
+`openbank.product-revision-signature.v1`, takže podpis jednoho produktu nebo jedné revize nikdy
+neprojde pod připnutím jiné, ani když dvě revize nesou shodné IR. Čtení jedné revize (`GET /api/v2/revisions/{id}`,
 `GET /api/v2/products/{offeringId}`) ho vrací jako `irSignature` (`revisionHash`, `keyId`,
 `algorithm`, `signature`, `signedAt`), stejně jako každý seznam revizí; `null` znamená nepodepsáno. Běžný `publish` revizi s `behaviour`
 odmítne (409) a `publish-ir` odmítne revizi bez něj, takže revize s IR nikdy není publikována bez
@@ -153,5 +156,8 @@ vrací 409 a nic se nepodepisuje), `openbao` (OpenBao Transit `sign` na vyhrazen
 nasazovaná podoba) nebo `hmac` (adaptér se sdíleným tajemstvím přijímaný jen v režimech dev a
 test; produkční start s ním odmítne nastartovat). `publish-ir` smí volat jen ověřený člověk;
 služba to kontroluje sama, nezávisle na rozhodnutí OPA. Konzument podpis ověřuje vlastním loaderem
-připnuté revize před vyhodnocením; katalog je publikační autorita, nikdy závislost na účtovací
+připnuté revize před vyhodnocením: připíná všech pět polí obálky a jakýkoli nesoulad, chybějící
+kopie nebo neplatný podpis selže uzavřeně (žádné vyhodnocení, žádné účtování), každý jako vlastní
+`outcome` metriky `openbank_product_revision_load_total` (`identity_mismatch` pro podvrženou
+revizi); katalog je publikační autorita, nikdy závislost na účtovací
 cestě. Verze kontraktu API je 2.9.0; změna je aditivní.
