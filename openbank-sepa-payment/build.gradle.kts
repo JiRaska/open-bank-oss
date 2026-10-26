@@ -40,6 +40,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.redpanda)
     testImplementation(project(":openbank-libs-testing"))
     // ADR-0104 D3 cross-service IT: stub the clearing simulator over real HTTP so the scheme
     // gateway adapter's REST-client / XML / oidc-client wiring is exercised, not mocked.
@@ -70,6 +71,16 @@ kover {
             }
         }
     }
+}
+
+// The real-broker wire suite (SepaPaymentEventsWireE2E) boots Quarkus with real Postgres +
+// Valkey + Redpanda in the same fork as the other integration tests (plus the Temporal test
+// server suites); the default heap died with `OutOfMemoryError: Java heap space` inside the
+// fork — surfacing as "Test process encountered an unexpected problem" with the last-started IT
+// named as the failure, which is the misleading part. Same per-module override as
+// loyalty/engagement/referral (two Quarkus boots in one fork).
+tasks.withType<Test> {
+    maxHeapSize = "2g"
 }
 
 // Pact: write generated consumer contracts to pacts/ and forward broker config for provider
