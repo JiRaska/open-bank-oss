@@ -1,4 +1,7 @@
 quarkus:
+  # Experimental adaptive overload control; activate only in the measured pilot profile.
+  load-shedding:
+    enabled: false
   application:
     name: openbank-customer-edge
 
@@ -284,3 +287,25 @@ authz:
   openbank:
     upstream:
       tls-configuration-name: upstream
+
+
+"%load-shedding-pilot":
+  quarkus:
+    # 3.40.1.1 emits Connection: close on overload, invalid in HTTP/2.
+    # Keep this experimental listener on HTTP/1.1 until upstream fixes that path.
+    http:
+      http2: false
+    config:
+      profile:
+        parent: prod
+    load-shedding:
+      enabled: true
+      initial-limit: 100
+      max-limit: 200
+      priority:
+        enabled: false
+  openbank:
+    rate-limit:
+      # Replace only the inherited fixed global concurrency cap during this experiment.
+      # The independent customer identity quota remains enabled and unchanged.
+      enabled: false
