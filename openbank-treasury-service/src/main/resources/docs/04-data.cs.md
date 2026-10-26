@@ -30,4 +30,11 @@ Noha zaúčtování nově nese `accountingClass` + `LedgerRole` (jistina, naběh
 - **`observation_batches`, `index_observations`, `fixing_cases`** (V20) drží pozorování indexů. Dávka je PENDING, dokud ji neschválí jiný člověk, a použijí se jen ACTIVE pozorování. Kontrola kvality ověří MISSING, STALE a SUSPICIOUS ještě před fixingem; selhání otevře případ a nic nezafixuje.
 - **`deal_cash_flows.fixing_source`, `fixing_sha256`, `fixed_at`** (V20) zaznamenávají původ zafixované sazby. Zapisuje je jen repozitář fixingů, hlídaným UPDATE.
 - Hodinový běh fixingů (`openbank.treasury.fixing.enabled`, ve výchozím stavu zapnutý) zafixuje splatné pohyblivé toky a publikuje `treasury.cashflow.fixed.v1`.
-- IRS a FRA lze nově navrhnout, podat a zafixovat. Vypořádat je půjde až s maticí účtovacích pravidel (fáze 2).
+- IRS a FRA lze navrhnout, podat a zafixovat; od fáze 2 se i vypořádají (níže).
+
+## Matice účtování, úvěrová expozice a dokončení dne (ADR-0344, fáze 2)
+
+- Navrhnout lze nově všechny produkty. Produkty popsané nohami se vypořádají, časově rozliší, zaplatí a dospějí přes `PostingMatrix` (`GET /posting-rules`); klíče deníků jsou `treasury:<dealId>:<event>:<flowId|date>` a `deal_journals` přijímá události matice (V28). Tok bez odpovídajícího pravidla je odmítnut.
+- Každý produkt s úvěrovým rizikem protistrany čerpá linku přes `CreditExposure`: deriváty |nominál| × `derivative-conversion-factor` podle produktu a zbytkové splatnosti, reverzní repo poskytnutou hotovost minus zajištění po `collateral-haircut`, repo dodané zajištění minus přijatou hotovost. Chybějící záznam je 422 (`CONVERSION_FACTOR_MISSING` / `COLLATERAL_HAIRCUT_MISSING`), nikdy nula. Hodnota se ukládá do `limit_deal_amount` a zamčený dotaz na linku ji sčítá. V27 zakládá syntetické faktory a výchozí haircut, vše `verified = false`.
+- **`treasury_day_completion`** (V29) drží poslední výsledek každého kroku za bankovní den. Zapisují ho běhy časového rozlišení a fixingů; `GET /day-completion/{date}` vypíše všechny kroky, nezaznamenaný jako PENDING. Odpověď ledgeru `409 ACCOUNTING_DAY_CLOSED` se zapíše jako REFUSED.
+- **`position_closes`, `deal_filters`** (V26): snímky pozic na konci dne (back office, povinný idempotency klíč) a uložené filtry blotteru každého uživatele.

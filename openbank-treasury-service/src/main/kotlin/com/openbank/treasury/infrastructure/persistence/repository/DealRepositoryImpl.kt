@@ -239,14 +239,13 @@ class DealRepositoryImpl(
     private fun lockedRow(
         dealId: UUID,
         limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
-    ): Uni<DealEntity?> =
-        find("dealId", dealId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
-            .flatMap { locked ->
-                limitGuard?.let { g ->
-                    Panache.getSession().flatMap { exposureUnderLock(it, dealId, g) }.map { locked }
-                }
-                    ?: Uni.createFrom().item(locked)
+    ): Uni<DealEntity?> = find("dealId", dealId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
+        .flatMap { locked ->
+            limitGuard?.let { g ->
+                Panache.getSession().flatMap { exposureUnderLock(it, dealId, g) }.map { locked }
             }
+                ?: Uni.createFrom().item(locked)
+        }
 
     /** One `deal_versions` row per terms version; the schedule columns follow the latest generation. */
     private fun versionRow(deal: Deal, actor: String): Uni<Void> =
