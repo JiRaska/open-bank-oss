@@ -59,6 +59,15 @@ dependencies {
     testImplementation(project(":openbank-libs-testing"))
 }
 
+// Two real-broker E2E suites (CampaignIncentiveOutcomeE2E, CampaignConversionsE2E) boot Quarkus
+// with real Postgres + Redpanda in the same fork as the other integration tests; with both
+// profiles in one fork the default heap died with `Java heap space` / java.lang.instrument
+// assertion failures surfacing mid-suite ("can't create byte array"), taking the neighbouring
+// ITs down with it. Same per-module override as loyalty/engagement/referral.
+tasks.withType<Test> {
+    maxHeapSize = "2g"
+}
+
 // Coverage is ratchet-only (never lower). Without this block koverVerify has no rule to check,
 // so the module's coverage was measured by nobody — and the production-readiness collector
 // scores C2 off the presence of a ratchet, not off a number, which is the honest signal: a
