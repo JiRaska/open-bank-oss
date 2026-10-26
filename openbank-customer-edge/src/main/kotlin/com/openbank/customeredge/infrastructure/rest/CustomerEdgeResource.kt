@@ -279,9 +279,12 @@ class CustomerEdgeResource(
     fun listAccounts(@QueryParam("cursor") cursor: String?): Response {
         val customer = customer()
         val firstPage = cursor.isNullOrBlank()
-        val cursorQuery = if (firstPage) "" else "&cursor=${URLEncoder.encode(cursor, StandardCharsets.UTF_8)}"
-        val own = upstream.get(
-            "$accountServiceUrl/api/v1/accounts?partyId=${customer.partyId}$cursorQuery",
+        val query = linkedMapOf("partyId" to customer.partyId.toString())
+        if (!firstPage) query["cursor"] = requireNotNull(cursor)
+        val own = upstream.getToService(
+            accountServiceUrl,
+            "/api/v1/accounts",
+            query,
             customer.partyId.toString(),
         )
         // Accounts shared WITH the caller belong in the list — without this a grantee accepts a

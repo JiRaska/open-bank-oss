@@ -156,7 +156,9 @@ class DelegatedReadTest {
         val mine = UUID.randomUUID()
         val theirs = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
+        every {
+            upstream.getToService("http://account", "/api/v1/accounts", mapOf("partyId" to grantee.toString()), any())
+        } returns
             Response.ok(page("""{"id":"$mine","partyId":"$grantee"}""")).build()
         every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
             """
@@ -184,7 +186,9 @@ class DelegatedReadTest {
         val mine = UUID.randomUUID()
         val theirs = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
+        every {
+            upstream.getToService("http://account", "/api/v1/accounts", mapOf("partyId" to grantee.toString()), any())
+        } returns
             Response.ok(page("""{"id":"$mine","partyId":"$grantee"}""")).build()
         every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
             """
@@ -204,7 +208,9 @@ class DelegatedReadTest {
         val grantee = UUID.randomUUID()
         val mine = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
+        every {
+            upstream.getToService("http://account", "/api/v1/accounts", mapOf("partyId" to grantee.toString()), any())
+        } returns
             Response.ok(page("""{"id":"$mine","partyId":"$grantee"}""")).build()
         every { upstream.get(match { it.contains("/delegations/grantee/") }, any()) } throws
             RuntimeException("connection refused")
@@ -220,7 +226,9 @@ class DelegatedReadTest {
         val grantee = UUID.randomUUID()
         val theirs = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
+        every {
+            upstream.getToService("http://account", "/api/v1/accounts", mapOf("partyId" to grantee.toString()), any())
+        } returns
             Response.ok(page("""{"id":"$theirs","partyId":"$grantee"}""")).build()
         every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
             """[{"status":"ACTIVE","resourceType":"ACCOUNT","resourceId":"$theirs","capabilities":["ACCOUNT_READ_BALANCES"]}]""",
@@ -234,7 +242,9 @@ class DelegatedReadTest {
 
     private fun sharedSetup(grantee: UUID, theirs: UUID, body: String): UpstreamClient {
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
+        every {
+            upstream.getToService("http://account", "/api/v1/accounts", mapOf("partyId" to grantee.toString()), any())
+        } returns
             Response.ok(page("""{"id":"${UUID.randomUUID()}","partyId":"$grantee"}""")).build()
         every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
             """[{"status":"ACTIVE","resourceType":"ACCOUNT","resourceId":"$theirs","capabilities":["ACCOUNT_READ_BALANCES"]}]""",
@@ -248,7 +258,14 @@ class DelegatedReadTest {
         val grantee = UUID.randomUUID()
         val theirs = UUID.randomUUID()
         val upstream = sharedSetup(grantee, theirs, """{"id":"$theirs","partyId":"${UUID.randomUUID()}"}""")
-        every { upstream.get(match { it.contains("accounts?partyId=$grantee&cursor=abc") }, any()) } returns
+        every {
+            upstream.getToService(
+                "http://account",
+                "/api/v1/accounts",
+                mapOf("partyId" to grantee.toString(), "cursor" to "abc"),
+                any(),
+            )
+        } returns
             Response.ok(page("""{"id":"${UUID.randomUUID()}","partyId":"$grantee"}""")).build()
 
         val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts("abc").entity.toString())
@@ -282,13 +299,45 @@ class DelegatedReadTest {
     }
 
     @Test
-    fun `the cursor is forwarded upstream URL-encoded`() {
+    fun `the cursor is passed separately from the selected profile and authority`() {
         val grantee = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get(any(), any()) } returns Response.ok(page()).build()
+        every { upstream.getToService(any(), any(), any(), any()) } returns Response.ok(page()).build()
 
         resourceFor(upstream, grantee).listAccounts("a b+c")
 
-        verify { upstream.get("http://account/api/v1/accounts?partyId=$grantee&cursor=a+b%2Bc", any()) }
+        verify {
+            upstream.getToService(
+                "http://account",
+                "/api/v1/accounts",
+                mapOf("partyId" to grantee.toString(), "cursor" to "a b+c"),
+                grantee.toString(),
+            )
+        }
+    }
+
+    @Test
+    fun `cursor pages use the verified active profile in both query and party header`() {
+        val human = UUID.randomUUID()
+        val company = UUID.randomUUID()
+        for (profile in listOf(human, company)) {
+            val upstream = mockk<UpstreamClient>()
+            every { upstream.getToService(any(), any(), any(), any()) } returns Response.ok(page()).build()
+            val resource = resourceFor(upstream, human).apply {
+                actingForResolver = mockk {
+                    every { resolve(human, null) } returns profile
+                }
+            }
+            resource.listAccounts("opaque&partyId=$human")
+            verify(exactly = 1) {
+                upstream.getToService(
+                    "http://account",
+                    "/api/v1/accounts",
+                    mapOf("partyId" to profile.toString(), "cursor" to "opaque&partyId=$human"),
+                    profile.toString(),
+                )
+            }
+            verify(exactly = 0) { upstream.get(any(), any()) }
+        }
     }
 }
