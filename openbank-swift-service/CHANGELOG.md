@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.4...swift-service-v0.14.0) (2026-10-26)
+
+
+### Features
+
+* **swift:** bank-own institution transfers over the clearing rails ([#13904](https://github.com/JiRaska/open-bank-oss/issues/13904)) ([71a4532](https://github.com/JiRaska/open-bank-oss/commit/71a4532011239330fd12f6387777b5f2a6657864))
+
 ## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.3...swift-service-v0.13.4) (2026-10-24)
 
 
