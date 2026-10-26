@@ -42,7 +42,7 @@ class CredentialIssuerServiceTest {
     )
 
     private fun statusList(key: EudiIssuerKey) =
-        StatusListService(key, mapper, InMemoryStatusListStore(), listId = "1", ttlSeconds = 3600, clock = testClock)
+        StatusListService(key, mapper, InMemoryStatusListStore(), listId = "1", ttlSeconds = 3600)
 
     private fun service(withKey: Boolean = true, status: StatusListService? = null): CredentialIssuerService {
         val key = eudiKey(withKey)
@@ -123,7 +123,7 @@ class CredentialIssuerServiceTest {
     fun `the signed status list token carries the bits=1 status_list claim`(): Unit = runBlocking {
         val status = statusList(eudiKey())
         status.revoke(status.allocate())
-        val token = status.statusListToken()
+        val token = status.statusListToken(Instant.now())
         val payloadJson = String(org.jose4j.base64url.Base64Url.decode(token.split(".")[1]), Charsets.UTF_8)
         val node = mapper.readTree(payloadJson)
         assertThat(node["status_list"]["bits"].asInt()).isEqualTo(1)

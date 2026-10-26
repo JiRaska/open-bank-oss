@@ -39,7 +39,7 @@ class StatusListServiceTest {
     )
 
     private fun service(withKey: Boolean = true, listId: String = "1", ttlSeconds: Long = 3600) =
-        StatusListService(eudiKey(withKey), mapper, InMemoryStatusListStore(), listId, ttlSeconds, testClock)
+        StatusListService(eudiKey(withKey), mapper, InMemoryStatusListStore(), listId, ttlSeconds)
 
     @Test
     fun `enabled mirrors whether an issuer signing key is configured`() {
@@ -93,7 +93,7 @@ class StatusListServiceTest {
     @Test
     fun `statusListToken is a JWS signed by the issuer key with typ statuslist+jwt`(): Unit = runBlocking {
         val svc = service()
-        val token = svc.statusListToken()
+        val token = svc.statusListToken(testClock.instant())
 
         val header = mapper.readTree(
             String(
@@ -113,7 +113,7 @@ class StatusListServiceTest {
     @Test
     fun `statusListToken carries iat and exp derived from the clock and ttl`(): Unit = runBlocking {
         val svc = service(ttlSeconds = 120)
-        val token = svc.statusListToken()
+        val token = svc.statusListToken(testClock.instant())
         val payload = mapper.readTree(
             String(org.jose4j.base64url.Base64Url.decode(token.split(".")[1]), Charsets.UTF_8),
         )

@@ -9,7 +9,6 @@ import com.openbank.pid.application.port.out.CredentialStatusPort
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jose4j.base64url.Base64Url
-import java.time.Clock
 import java.time.Instant
 import java.util.BitSet
 import java.util.zip.Deflater
@@ -41,7 +40,6 @@ class StatusListService(
     private val listId: String,
     @ConfigProperty(name = "openbank.pid.eudi.issuer.status-list-ttl-seconds", defaultValue = "3600")
     private val ttlSeconds: Long,
-    private val clock: Clock,
 ) : CredentialStatusPort {
 
     val enabled: Boolean get() = issuerKey.enabled
@@ -65,8 +63,16 @@ class StatusListService(
     /** [CredentialStatusPort]: only OUR list resolves here; a foreign status-list uri is not-revoked. */
     override suspend fun isRevoked(uri: String, index: Long): Boolean = uri == statusListUri && isRevoked(index)
 
-    /** The signed Status List Token (JWS) a relying party fetches to check revocation. */
-    suspend fun statusListToken(now: Instant = Instant.now(clock)): String {
+    /**
+     * The signed Status List Token (JWS) a relying party fetches to check revocation.
+     *
+     * No default parameter here, deliberately: a Kotlin default argument compiles to a static
+     * `$default` helper that reads the instance's fields DIRECTLY, and CDI hands callers a client
+     * PROXY whose fields are all null — `Instant.now(clock)` then NPEs on the public route
+     * (measured: `GET status-lists/1` answered 500 on a real boot; the unit tests never saw it
+     * because they construct the class directly and call the real instance).
+     */
+    suspend fun statusListToken(now: Instant): String {
         val packed = packRevokedBits(store.revokedIndices())
         val lst = Base64Url.encode(deflate(packed))
         val payload = objectMapper.createObjectNode().apply {

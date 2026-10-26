@@ -188,7 +188,7 @@ class EudiCredentialIssuerResource(
         if (!statusList.enabled || id != statusList.id) {
             return Response.status(Response.Status.NOT_FOUND).entity("""{"error":"unknown status list"}""").build()
         }
-        return Response.ok(statusList.statusListToken())
+        return Response.ok(statusList.statusListToken(Instant.now(clock)))
             .header("Cache-Control", "public, max-age=${statusList.cacheTtlSeconds}")
             .build()
     }

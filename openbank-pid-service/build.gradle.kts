@@ -53,6 +53,9 @@ dependencies {
     // delegation-service's eligibility lookup (issue #2991). pid-service is a provider only, so
     // there is no pact-consumer dependency here.
     testImplementation(libs.pact.provider)
+    // PidEudiE2E: WireMock stands in for the eIDAS Trusted List endpoint behind the SSRF-safe
+    // SafeHttpClient egress path (ADR-0320 P1), serving anchor-signed and deliberately tampered lists.
+    testImplementation(libs.wiremock.standalone)
 }
 
 // Pact: forward broker config to the forked test JVM (issue #2991). pid-service publishes no
