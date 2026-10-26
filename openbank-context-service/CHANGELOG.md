@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.4](https://github.com/JiRaska/open-bank-oss/compare/context-service-v0.4.3...context-service-v0.4.4) (2026-10-26)
+
+
+### Bug Fixes
+
+* **context:** preserve verified caller identity at custom policy boundary ([#12949](https://github.com/JiRaska/open-bank-oss/issues/12949)) ([1d2da1f](https://github.com/JiRaska/open-bank-oss/commit/1d2da1fe6d53ef3c7d434cb22fc14211017fbaa7))
+
 ## [0.4.3](https://github.com/JiRaska/open-bank-oss/compare/context-service-v0.4.2...context-service-v0.4.3) (2026-10-14)
 
 

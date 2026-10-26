@@ -11,12 +11,14 @@ import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.TraceparentCapture
 import com.openbank.libs.testing.trace.RecordingSpanExporter
+import com.openbank.libs.testing.trace.TraceContractProfile
+import io.opentelemetry.api.OpenTelemetry
 import io.opentelemetry.api.trace.Span
+import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
@@ -37,6 +39,7 @@ import org.eclipse.microprofile.reactive.messaging.spi.Connector
 import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * The outbox used to cut the trace: the request wrote the event, the dispatcher (a scheduler
@@ -63,9 +66,8 @@ import java.util.UUID
 class DocumentOutboxTracePropagationIT {
 
     // Literals only: a profile loads in a different classloader from the test class.
-    class TracedDispatchProfile : QuarkusTestProfile {
-        override fun getConfigOverrides(): Map<String, String> = mapOf(
-            "quarkus.otel.sdk.disabled" to "false",
+    class TracedDispatchProfile : TraceContractProfile() {
+        override fun extraConfigOverrides(): Map<String, String> = mapOf(
             "openbank.outbox.dispatch-enabled" to "true",
         )
     }
@@ -77,6 +79,9 @@ class DocumentOutboxTracePropagationIT {
 
         override fun stop() = InMemoryConnector.clear()
     }
+
+    @Inject
+    lateinit var openTelemetry: OpenTelemetry
 
     @Inject
     lateinit var exporter: RecordingSpanExporter
@@ -113,6 +118,10 @@ class DocumentOutboxTracePropagationIT {
         } Then {
             statusCode(200)
         }
+        // Flush every configured processor: delayed exports must not hide duplicate capture routes.
+        assertThat(openTelemetry).isInstanceOf(OpenTelemetrySdk::class.java)
+        val flushed = (openTelemetry as OpenTelemetrySdk).sdkTracerProvider.forceFlush().join(10, TimeUnit.SECONDS)
+        assertThat(flushed.isSuccess).describedAs("all configured trace processors flushed").isTrue()
         val requestTraceId = exporter.spans()
             .single { it.name == "POST /api/v1/documents/onboarding-agreement" }
             .spanContext.traceId
