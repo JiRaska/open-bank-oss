@@ -10,9 +10,14 @@ const pages = ['pay/v1.html', 'pay/v1/9998.html', 'pay/v1/9999.html'];
 const site = path.resolve(__dirname, '../landing');
 const source = page => fs.readFileSync(path.join(site, page), 'utf8');
 
-function render(page, search, observeUnknownWrites = false) {
-  const scripts = [...source(page).matchAll(/<script>([\s\S]*?)<\/script>/g)];
+function extractScript(html, page) {
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)];
   assert.equal(scripts.length, 1, `${page}: expected the single served script`);
+  return scripts[0][1];
+}
+
+function render(page, search, observeUnknownWrites = false) {
+  const script = extractScript(source(page), page);
   const elements = new Map(['amt', 'rn', 'acc', 'msg', 'pay'].map(id => [id, {
     textContent: '', hidden: true,
     set innerHTML(value) { throw new Error('Payment fields must remain text'); },
@@ -32,7 +37,7 @@ function render(page, search, observeUnknownWrites = false) {
       set(value) { globalThis.unexpectedWrites++; }, configurable: true
     });
   `, context);
-  vm.runInContext(scripts[0][1], context, { timeout: 1000, filename: page });
+  vm.runInContext(script, context, { timeout: 1000, filename: page });
   return {
     visible: !elements.get('pay').hidden,
     text: Object.fromEntries(['amt', 'rn', 'acc', 'msg'].map(id => [id, elements.get(id).textContent])),
@@ -41,6 +46,15 @@ function render(page, search, observeUnknownWrites = false) {
 }
 
 const query = spayd => `?${encodeURIComponent(spayd)}`;
+
+test('script extraction respects HTML tag case and requires exactly one script', () => {
+  for (const [open, close] of [['script', 'script'], ['SCRIPT', 'SCRIPT'], ['ScRiPt', 'sCrIpT']]) {
+    assert.equal(extractScript(`<${open}>const value = 1;</${close}>`, 'fixture'), 'const value = 1;');
+  }
+  assert.throws(() => extractScript('<p>No script</p>', 'fixture'), /expected the single served script/);
+  assert.throws(() => extractScript('<script>first()</script><SCRIPT>second()</SCRIPT>', 'fixture'),
+    /expected the single served script/);
+});
 
 test('all three fallback payment pages remain byte-identical', () => {
   for (const page of pages.slice(1)) assert.equal(source(page), source(pages[0]), page);
