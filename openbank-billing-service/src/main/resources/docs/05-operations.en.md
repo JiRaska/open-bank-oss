@@ -71,6 +71,16 @@ every line. There is no rollback by configuration alone: set `OPENBANK_BILLING_L
 and only then roll the ledger back. Rolling the ledger back first fails every posting until Billing is
 redeployed.
 
+## Product-IR shadow comparator (ADR-0352 phase 3)
+
+Billing still decides every fee the legacy way; the shadow only measures. `openbank.billing.product-ir.decision-mode` is `shadow` (default and the only accepted value); `ir`, the ADR-0352 §9 switch, is refused at boot until it is built. `ProductShadowScheduler` runs every `openbank.billing.product-shadow.every` (default 5 minutes, on by default) and re-decides committed assessments with the product IR of the account's pinned revision. It reads the IR and its signature from product-catalog once per revision and keeps a local immutable copy; the posting path never calls the catalog for it.
+
+Signature verification is `openbank.billing.product-shadow.verification.mode`: `disabled` (default; nothing is compared and every IR-bearing input counts as `verification_disabled`), `openbao` (Transit `verify` on key `product-ir-publish`; billing's role must hold `verify` only) or `hmac` (dev and test only; a production launch with it refuses to boot).
+
+Every IR `Post` is checked for money conservation before it is compared; an unbalanced one, or an evaluation the interpreter refuses, counts as `ir_evaluation_failed` and is never compared. Metrics: `openbank_product_shadow_inputs_total`, `openbank_product_shadow_compared_total{product,rule_id}`, `openbank_product_shadow_diverged_total{product,rule_id}` and `openbank_product_shadow_not_comparable_total{reason}`, all with `consumer="billing"`. Alerts: `ProductShadowStalled` (queued, none processed in 6 hours), `ProductShadowComparedNothing` (IR revisions met, none compared in 24 hours) and `ProductShadowDiverged`. Inputs that are all `no_ir` alert on nothing: those products are not migrated yet. Billing may switch to the IR only after divergence has been zero across a full cadence of every fee rule (ADR-0352 §9), behind a flag that does not exist yet.
+
+A missing balance is never substituted for a measured zero when a scheduled trigger depends on balance. Such a fee records `input_unknown` in the not-comparable counter and `INPUT_UNKNOWN` as the queue outcome, without increasing compared or divergence counters. Fees whose trigger does not need balance remain comparable.
+
 ## Day-close participation (ADR-0342, #13167)
 
 Billing reports each completed Prague accounting day to ledger-service as participant `billing`
@@ -94,13 +104,3 @@ idempotent by cycle id and never overlaps a running sweep.
 increments `openbank_billing_fee_post_closed_day_refusals_total`. Alert `BillingFeeRefusedIntoClosedDay`
 fires. Recover with runbook `0033-billing-fee-refused-into-closed-day.md` (four-eyes re-bill under a new
 key recorded in `billing_fee_rebill`).
-
-## Product-IR shadow comparator (ADR-0352 phase 3)
-
-Billing still decides every fee the legacy way; the shadow only measures. `openbank.billing.product-ir.decision-mode` is `shadow` (default and the only accepted value); `ir`, the ADR-0352 §9 switch, is refused at boot until it is built. `ProductShadowScheduler` runs every `openbank.billing.product-shadow.every` (default 5 minutes, on by default) and re-decides committed assessments with the product IR of the account's pinned revision. It reads the IR and its signature from product-catalog once per revision and keeps a local immutable copy; the posting path never calls the catalog for it.
-
-Signature verification is `openbank.billing.product-shadow.verification.mode`: `disabled` (default; nothing is compared and every IR-bearing input counts as `verification_disabled`), `openbao` (Transit `verify` on key `product-ir-publish`; billing's role must hold `verify` only) or `hmac` (dev and test only; a production launch with it refuses to boot).
-
-Every IR `Post` is checked for money conservation before it is compared; an unbalanced one, or an evaluation the interpreter refuses, counts as `ir_evaluation_failed` and is never compared. Metrics: `openbank_product_shadow_inputs_total`, `openbank_product_shadow_compared_total{product,rule_id}`, `openbank_product_shadow_diverged_total{product,rule_id}` and `openbank_product_shadow_not_comparable_total{reason}`, all with `consumer="billing"`. Alerts: `ProductShadowStalled` (queued, none processed in 6 hours), `ProductShadowComparedNothing` (IR revisions met, none compared in 24 hours) and `ProductShadowDiverged`. Inputs that are all `no_ir` alert on nothing: those products are not migrated yet. Billing may switch to the IR only after divergence has been zero across a full cadence of every fee rule (ADR-0352 §9), behind a flag that does not exist yet.
-
-A missing balance is never substituted for a measured zero when a scheduled trigger depends on balance. Such a fee records `input_unknown` in the not-comparable counter and `INPUT_UNKNOWN` as the queue outcome, without increasing compared or divergence counters. Fees whose trigger does not need balance remain comparable.

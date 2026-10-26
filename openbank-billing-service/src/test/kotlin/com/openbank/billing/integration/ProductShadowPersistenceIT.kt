@@ -116,9 +116,9 @@ class ProductShadowPersistenceIT {
                     ),
                 ),
             )
-            val claimed = queue.claim(1000).filter { it.input.accountId == accountId }
+            val claimed = queue.claim(1000).filter { it.input?.accountId == accountId }
             assertThat(claimed).hasSize(1)
-            val input = claimed.single().input
+            val input = claimed.single().input!!
             assertThat(input.productRevisionId).isEqualTo(revisionId)
             assertThat(input.balance).isEqualByComparingTo("500.00")
             assertThat(input.evaluatedAt).isEqualTo(java.time.Instant.parse("2026-10-20T12:00:00Z"))
@@ -128,10 +128,10 @@ class ProductShadowPersistenceIT {
             assertThat(input.scheduledTrigger).isEqualTo("FEE_MAINT")
             assertThat(input.legacyFees.single().chargedAmount).isEqualByComparingTo("4.90")
             // Claimed: a second run within the lease does not see it again.
-            assertThat(queue.claim(1000).map { it.input.accountId }).doesNotContain(accountId)
+            assertThat(queue.claim(1000).map { it.input?.accountId }).doesNotContain(accountId)
 
-            queue.complete(claimed.single().id, "AGREED")
-            assertThat(queue.claim(1000).map { it.input.accountId }).doesNotContain(accountId)
+            queue.complete(claimed.single().id, "AGREED", compared = true)
+            assertThat(queue.claim(1000).map { it.input?.accountId }).doesNotContain(accountId)
             dataSource.connection.use { c ->
                 c.prepareStatement(
                     "SELECT status, outcome, balance, segment, evaluated_at, evaluation_zone, opened_at, scheduled_cadence, scheduled_trigger FROM billing_product_shadow_input WHERE account_id = ?",
@@ -154,16 +154,16 @@ class ProductShadowPersistenceIT {
     fun `an assessment without a shadow input queues nothing`(): Unit = onVertxContext {
         val accountId = "acc-noshadow-${UUID.randomUUID()}"
         assessments.persistWithPostingIntent(assessment(accountId, UUID.randomUUID().toString(), withShadow = false))
-        assertThat(queue.claim(1000).map { it.input.accountId }).doesNotContain(accountId)
+        assertThat(queue.claim(1000).map { it.input?.accountId }).doesNotContain(accountId)
     }
 
     @Test
     fun `a retried input comes back only after its back-off`(): Unit = onVertxContext {
         val accountId = "acc-retry-${UUID.randomUUID()}"
         assessments.persistWithPostingIntent(assessment(accountId, UUID.randomUUID().toString(), withShadow = true))
-        val claimed = queue.claim(1000).single { it.input.accountId == accountId }
+        val claimed = queue.claim(1000).single { it.input?.accountId == accountId }
         queue.retryLater(claimed.id, "REVISION_UNAVAILABLE")
-        assertThat(queue.claim(1000).map { it.input.accountId }).doesNotContain(accountId)
+        assertThat(queue.claim(1000).map { it.input?.accountId }).doesNotContain(accountId)
     }
 
     @Test
@@ -199,7 +199,7 @@ class ProductShadowPersistenceIT {
         val value = assessment(accountId, UUID.randomUUID().toString(), withShadow = true)
         val unmappable = value.copy(shadowInput = value.shadowInput!!.copy(productRevisionId = "not-a-uuid"))
         assessments.persistWithPostingIntent(unmappable)
-        assertThat(queue.claim(1000).map { it.input.accountId }).doesNotContain(accountId)
+        assertThat(queue.claim(1000).map { it.input?.accountId }).doesNotContain(accountId)
         dataSource.connection.use { c ->
             c.prepareStatement("SELECT count(*) FROM billing_cycle_assessment WHERE account_id = ?").use { st ->
                 st.setString(1, accountId)
@@ -233,5 +233,69 @@ class ProductShadowPersistenceIT {
                 }
             }
         }
+    }
+
+    @Test
+    fun `a not-comparable completion keeps the frozen facts so the input can still be compared`(): Unit =
+        onVertxContext {
+            val accountId = "acc-shadow-keep-${UUID.randomUUID()}"
+            assessments.persistWithPostingIntent(assessment(accountId, UUID.randomUUID().toString(), withShadow = true))
+            val claimed = queue.claim(1000).single { it.input?.accountId == accountId }
+            queue.complete(claimed.id, "VERIFICATION_DISABLED", compared = false)
+            dataSource.connection.use { c ->
+                c.prepareStatement(
+                    "SELECT status, balance, evaluated_at FROM billing_product_shadow_input WHERE account_id = ?",
+                ).use { st ->
+                    st.setString(1, accountId)
+                    st.executeQuery().use { rs ->
+                        assertThat(rs.next()).isTrue()
+                        assertThat(rs.getString(1)).isEqualTo("DONE")
+                        assertThat(rs.getBigDecimal(2)).isEqualByComparingTo("500.00")
+                        assertThat(rs.getObject(3)).isNotNull()
+                    }
+                }
+            }
+        }
+
+    @Test
+    fun `a stored row that cannot be mapped is still claimed, with no input, instead of blocking the queue`(): Unit =
+        onVertxContext {
+            val accountId = "acc-shadow-corrupt-${UUID.randomUUID()}"
+            assessments.persistWithPostingIntent(assessment(accountId, UUID.randomUUID().toString(), withShadow = true))
+            val id = dataSource.connection.use { c ->
+                c.prepareStatement(
+                    "UPDATE billing_product_shadow_input SET legacy_fees = '[{\"feeId\":1}]' " +
+                        "WHERE account_id = ? RETURNING id",
+                ).use { st ->
+                    st.setString(1, accountId)
+                    st.executeQuery().use { rs ->
+                        assertThat(rs.next()).isTrue()
+                        rs.getObject(1, UUID::class.java)
+                    }
+                }
+            }
+            val claimed = queue.claim(1000).single { it.id == id }
+            assertThat(claimed.input).isNull()
+        }
+
+    @Test
+    fun `a row locked by another session is skipped, never waited on or claimed twice`(): Unit = onVertxContext {
+        val accountId = "acc-shadow-locked-${UUID.randomUUID()}"
+        assessments.persistWithPostingIntent(assessment(accountId, UUID.randomUUID().toString(), withShadow = true))
+        dataSource.connection.use { other ->
+            other.autoCommit = false
+            other.prepareStatement(
+                "SELECT id FROM billing_product_shadow_input WHERE account_id = ? FOR UPDATE",
+            ).use { st ->
+                st.setString(1, accountId)
+                st.executeQuery().use { rs -> assertThat(rs.next()).isTrue() }
+            }
+            // The second session's claim returns at once, without the row the first session holds.
+            assertThat(queue.claim(1000).map { it.input?.accountId }).doesNotContain(accountId)
+            other.rollback()
+        }
+        // Released: now exactly one claim gets it.
+        assertThat(queue.claim(1000).count { it.input?.accountId == accountId }).isEqualTo(1)
+        assertThat(queue.claim(1000).map { it.input?.accountId }).doesNotContain(accountId)
     }
 }

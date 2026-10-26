@@ -55,7 +55,7 @@ Stávající implementace `GET /api/v1/parties/by-external-id` aktuálně čte q
 }
 ```
 
-Při vytvoření služba nastaví `status=ACTIVE`, `kycLevel=BASIC`, `amlRiskScore=LOW`, otevře případ `PID_VERIFICATION` (`status=OPEN`) a vyšle `PartyCreated`, `case.created`, `RelationshipAdded`.
+Při vytvoření služba nastaví `status=ACTIVE`, `kycLevel=BASIC`, bez `amlRiskScore` (zastaralé, ADR-0353 — rizikový rating klienta vede kyc-service), otevře případ `PID_VERIFICATION` (`status=OPEN`) a vyšle `PartyCreated`, `case.created`, `RelationshipAdded`.
 
 ### `PartyResponse` (vracen všude)
 
@@ -64,7 +64,7 @@ Vnořený objekt s `id`, `partyType`, `status`, `externalIds[]`, `coreAttributes
 ### `UpdateKycRequest` (PUT /kyc)
 
 ```json
-{ "kycLevel": "ENHANCED", "amlRiskScore": "MEDIUM", "pepFlag": false, "sanctionsFlag": false }
+{ "kycLevel": "ENHANCED", "pepFlag": false, "sanctionsFlag": false }
 ```
 
 ### `TransitionCaseRequest` (PATCH /case)
