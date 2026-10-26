@@ -239,7 +239,11 @@ describe('GET /api/test-intelligence under load', () => {
     expect(tags.size).toBe(1)
     const body = await responses[0].json()
     expect(body.components[0].running).toMatchObject({ runningCommit: 'abc1234', match: true, source: 'snapshot', storeStatus: 'disabled' })
-    expect(body.evidence.runningCommits).toEqual({ known: 1, matchingSnapshot: 1, fromStore: 0, fromEquivalentBuild: 0 })
+    expect(body.evidence).toMatchObject({
+      source: 'bundled',
+      dataset: { status: 'disabled' },
+      runningCommits: { known: 1, matchingSnapshot: 1, fromStore: 0, fromEquivalentBuild: 0, fromBundledFallback: 1, mismatchedEvidence: 0 },
+    })
   })
 
   it('revalidates an unchanged poll as a bodyless 304', async () => {

@@ -34,6 +34,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { ShortId } from '@/components/ui'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { RegulatoryPeriodPanel } from '@/components/closings/RegulatoryPeriodPanel'
+import { DayCloseParticipantsPanel } from '@/components/closings/DayCloseParticipantsPanel'
 import {
   parseCloseFailures, parseCloseRun, parseCloseRuns, parseReconciliationReport,
   type CloseFailure, type CloseRun, type ReconciliationReport,
@@ -381,6 +382,8 @@ function EodPanel() {
           />
         </div>
       </div>
+
+      <DayCloseParticipantsPanel />
     </div>
   )
 }

@@ -54,8 +54,6 @@ const BASELINE = new Set([
   'src/app/temporal/page.tsx',
   'src/lib/context/customerGraph.ts',
   'src/lib/finops/costGroups.ts',
-  'src/lib/governance/docs.ts',
-  'src/lib/governance/flags.ts',
   'src/lib/infra/probes.ts',
 ])
 

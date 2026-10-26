@@ -47,21 +47,33 @@ class StubTransactionServiceResource : QuarkusTestResourceLifecycleManager {
         val marker = MARKERS.firstOrNull { body.contains("\"$it\"") } ?: "stub-ok"
         counts.computeIfAbsent(marker) { AtomicInteger() }.incrementAndGet()
         when (marker) {
-            "stub-422" -> reply(ex, 422, """{"code":"INSUFFICIENT_FUNDS","message":"no"}""")
+            "stub-422" -> reply(
+                ex,
+                422,
+                """{"code":"INSUFFICIENT_FUNDS","message":"synthetic-private-provider-body"}""",
+            )
+
             "stub-503" -> reply(ex, 503, """{"message":"unavailable"}""")
+
             "stub-429" -> reply(ex, 429, """{"message":"slow down"}""")
+
             "stub-403" -> reply(ex, 403, """{"message":"forbidden"}""")
+
             "stub-409" -> reply(ex, 409, """{"message":"conflict"}""")
+
             // No status line at all: the connection is cut after the request was read.
             "stub-drop" -> ex.close()
+
             // 2xx whose body carries a field the generated type does not know and omits every other one.
             "stub-extra" -> reply(
                 ex,
                 201,
                 """{"id":"00000000-0000-0000-0000-0000000000f1","status":"COMPLETED","aBrandNewField":{"x":[1,2]}}""",
             )
+
             // 2xx whose body cannot bind at all: `id` is a UUID in the contract.
             "stub-unbindable" -> reply(ex, 201, """{"id":"not-a-uuid","status":"COMPLETED"}""")
+
             else -> reply(ex, 201, """{"id":"00000000-0000-0000-0000-0000000000f2","status":"COMPLETED"}""")
         }
     }

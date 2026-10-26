@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.31.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.2...agent-service-v1.31.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **agent-service:** preserve PR-scoped owner intent under reviewed policy ([#13798](https://github.com/JiRaska/open-bank-oss/issues/13798)) ([e9a5401](https://github.com/JiRaska/open-bank-oss/commit/e9a540196e0aa6181194adf8f3181386357ddc57))
+
+## [1.31.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.1...agent-service-v1.31.2) (2026-10-24)
+
+
+### Bug Fixes
+
+* **agent-service:** preserve merge actors and authorization evidence ([#13764](https://github.com/JiRaska/open-bank-oss/issues/13764)) ([5715671](https://github.com/JiRaska/open-bank-oss/commit/571567125e6762da9edd6c5d6adabac9848e6720))
+
+## [1.31.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.0...agent-service-v1.31.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **agent:** enable sandbox catalog reviews through existing LiteLLM models ([#13390](https://github.com/JiRaska/open-bank-oss/issues/13390)) ([dc4ecc9](https://github.com/JiRaska/open-bank-oss/commit/dc4ecc9788d925b64230712a36b46e45f025f5ef))
+
 ## [1.31.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.30.1...agent-service-v1.31.0) (2026-10-19)
 
 

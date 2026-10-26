@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextResponse } from 'next/server'
+import nextPackage from 'next/package.json'
 
 // Exposes admin-ui build metadata stamped into the image at build time.
 // Source: ARG BUILD_VERSION / BUILD_GIT_SHA / BUILD_DATE from Dockerfile,
@@ -20,7 +21,7 @@ export async function GET() {
       gitSha: process.env.BUILD_GIT_SHA ?? process.env.NEXT_PUBLIC_BUILD_GIT_SHA ?? 'unknown',
       buildDate: process.env.BUILD_DATE ?? process.env.NEXT_PUBLIC_BUILD_DATE ?? 'unknown',
       node: process.versions.node,
-      next: '14.2.5',
+      next: nextPackage.version,
     },
     { headers: { 'Cache-Control': 'no-store' } },
   )

@@ -11,16 +11,20 @@ import com.openbank.cardprocessing.domain.model.PresentmentChannel
 import com.openbank.cardprocessing.infrastructure.client.CardClearingLedgerKey
 import com.openbank.cardprocessing.infrastructure.client.TransactionLedgerPostingAdapter
 import com.openbank.cardprocessing.infrastructure.client.TransactionServiceClient
+import com.openbank.cardprocessing.support.capturePostingLogs
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.smallrye.mutiny.Uni
+import jakarta.ws.rs.ProcessingException
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -197,7 +201,47 @@ class TransactionLedgerPostingAdapterTest {
         // Escaping would undo a clearing the acquirer has already asserted, so the exception is
         // caught deliberately — and turned into a distinct outcome rather than swallowed.
         assertThat(result.outcome).isEqualTo(PostingOutcome.FAILED)
-        assertThat(result.detail).contains("connection refused")
+        assertThat(result.detail).isEqualTo("POSTING_FAILED")
         Unit
+    }
+
+    @Test
+    fun `adapter failures do not log exception messages or causes`() {
+        val marker = "synthetic-private-adapter-message"
+        val causeMarker = "synthetic-private-adapter-cause"
+        val logs = capturePostingLogs {
+            listOf(
+                IllegalStateException(marker, IllegalArgumentException(causeMarker)) to PostingOutcome.FAILED,
+                ProcessingException(marker, IllegalArgumentException(causeMarker)) to PostingOutcome.UNKNOWN,
+            ).forEach { (failure, expectedOutcome) ->
+                every { client.initiateTransaction(any()) } returns Uni.createFrom().failure(failure)
+                val result = runBlocking {
+                    TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
+                        .postClearedSpend(authorization("CZK"), 1_000, "synthetic-private-key")
+                }
+                assertThat(result.outcome).isEqualTo(expectedOutcome)
+                assertThat(result.detail).doesNotContain(marker, causeMarker)
+            }
+        }
+        assertThat(logs).hasSize(2)
+        assertThat(logs.map { it.text }.joinToString()).doesNotContain(marker, causeMarker, "synthetic-private-key")
+        assertThat(logs.mapNotNull { it.thrown }).isEmpty()
+    }
+
+    @Test
+    fun `adapter cancellation propagates without reporting a failed booking`() {
+        val cancellation = CancellationException("cancelled")
+        every { client.initiateTransaction(any()) } returns Uni.createFrom().failure(cancellation)
+        val propagated = assertThrows<CancellationException> {
+            runBlocking {
+                TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
+                    .postClearedSpend(authorization("CZK"), 1_000, "clr-cancelled")
+            }
+        }
+        // Coroutine stack recovery may copy the exception at a suspension boundary. The original
+        // must remain in its causal chain; cap traversal so a malformed cyclic chain cannot hang.
+        assertThat(generateSequence<Throwable>(propagated) { it.cause }.take(16).any { it === cancellation })
+            .describedAs("the original cancellation propagates directly or through a recovered coroutine stack")
+            .isTrue()
     }
 }

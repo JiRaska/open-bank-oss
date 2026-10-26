@@ -128,13 +128,13 @@ data "aws_iam_policy_document" "test_evidence_bucket" {
     }
   }
 
-  # All evidence bodies remain write-once. Only the Gate Health selector may change;
+  # All evidence bodies remain write-once. Only the four named Admin UI selectors may change;
   # its separate rule below requires compare-and-swap (or conditional initial create).
   statement {
     sid           = "DenyOverwrite"
     effect        = "Deny"
     actions       = ["s3:PutObject"]
-    not_resources = ["${aws_s3_bucket.test_evidence.arn}/admin-ui/gate-health/current.json"]
+    not_resources = local.admin_ui_evidence_selectors
     principals {
       type        = "*"
       identifiers = ["*"]
@@ -147,10 +147,10 @@ data "aws_iam_policy_document" "test_evidence_bucket" {
   }
 
   statement {
-    sid       = "DenyUnconditionalGateHealthPointer"
+    sid       = "DenyUnconditionalAdminUiPointer"
     effect    = "Deny"
     actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.test_evidence.arn}/admin-ui/gate-health/current.json"]
+    resources = local.admin_ui_evidence_selectors
     principals {
       type        = "*"
       identifiers = ["*"]

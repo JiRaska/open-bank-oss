@@ -653,6 +653,7 @@ export default function SanctionsPage() {
               idle: t('sanctions-service spí (scale-to-zero), probouzí se…', 'sanctions-service idle (scaled to zero), waking…'),
               down: t('sanctions-service neodpovídá', 'sanctions-service is not responding'),
               checking: t('Zjišťuji stav služby…', 'Checking service…'),
+              unknown: t('Stav nasazení nelze ověřit', 'Deployment status is unknown'),
             }}
           />}
         />

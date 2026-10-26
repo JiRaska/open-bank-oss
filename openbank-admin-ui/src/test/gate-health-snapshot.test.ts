@@ -10,6 +10,7 @@ import {
   type GateHealthManifest,
   type GateHealthSnapshotData,
 } from '@/lib/evidence/gateHealthSnapshot'
+import { validateEvidenceManifest } from '@/lib/evidence/publishedSnapshot'
 
 const BASE = 'https://evidence.example/gate-health'
 const COLLECTED = '2026-10-19T10:00:00.000Z'
@@ -77,6 +78,15 @@ describe('Gate Health runtime snapshot reader', () => {
     expect(validateGateHealthSnapshotData(data(), now)).toBe(true)
     expect(validateGateHealthSnapshotData({ ...data(), available: false }, now)).toBe(false)
     expect(validateGateHealthSnapshotData(data({ gates: [{ ...data().gates[0], runsObserved: Number.NaN }] }), now)).toBe(false)
+  })
+
+  it('requires explicit timezone offsets on shared evidence manifest timestamps', () => {
+    const snapshot = data()
+    const good = manifest(snapshot)
+    expect(validateEvidenceManifest(good, Date.parse(COLLECTED))).toBe(true)
+    expect(validateEvidenceManifest({ ...good, collectedAt: '2026-10-19T10:00:00' }, Date.parse(COLLECTED))).toBe(false)
+    expect(validateEvidenceManifest({ ...good, expiresAt: '2026-10-20T10:00:00' }, Date.parse(COLLECTED))).toBe(false)
+    expect(validateEvidenceManifest({ ...good, expiresAt: '2026-10-20T10:00:00+02:00' }, Date.parse(COLLECTED))).toBe(true)
   })
 
   it('fetches a verified snapshot with no credentials and safe redirect behavior', async () => {

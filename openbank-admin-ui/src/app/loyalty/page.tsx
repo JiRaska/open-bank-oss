@@ -20,8 +20,7 @@ import styles from './loyalty.module.css'
 import {
   AI_RED_LINES, AI_ROLES, CONNECTIONS, LEGAL, PRINCIPLES, type Bilingual,
 } from '@/lib/loyalty/lipaContent'
-import type { LoyaltyCatalogueResponse, LoyaltyState } from '@/app/api/loyalty/route'
-import type { LoyaltyPartyResponse } from '@/app/api/loyalty/party/[partyId]/route'
+import type { LoyaltyCatalogueResponse, LoyaltyPartyResponse, LoyaltyState } from '@/lib/loyalty/contracts'
 import { parseLoyaltyCatalogue, parseLoyaltyParty } from '@/lib/loyalty/evidenceContract'
 
 const TABS = ['overview', 'catalogues', 'party', 'principles', 'finance', 'ai'] as const

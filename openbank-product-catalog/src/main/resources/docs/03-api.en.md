@@ -52,6 +52,13 @@ a strong numeric `If-Match`: missing is 428 and stale/concurrent is 412.
 
 ### Generic governed catalog (v2)
 
+The exact product-type schema can declare an `approvalPolicy` for revision approval.
+It exposes the required role codes, whether `effectiveFrom` is required, and required
+attributes; it does not expose the internal authority used to authorize the caller.
+Clients use the generic revision-approval endpoints for such schemas. The deprecated
+`pension-approvals` aliases remain available during the client transition and must
+not be removed until deployed consumers have moved to the generic endpoints.
+
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/v2/product-types` | List immutable trusted schemas |
@@ -62,7 +69,8 @@ a strong numeric `If-Match`: missing is 428 and stale/concurrent is 412.
 | POST | `/api/v2/offerings/{id}/revisions` | Author a DRAFT revision |
 | GET | `/api/v2/offerings/{id}/revisions` | List immutable revision history |
 | GET / PUT | `/api/v2/offerings/{id}/revisions/{revisionId}` | Read/update a draft; PUT requires `If-Match` |
-| POST | `/api/v2/offerings/{id}/revisions/{revisionId}/publish` | Four-eyes publish with reason and `If-Match` |
+| POST | `/api/v2/offerings/{id}/revisions/{revisionId}/publish` | Four-eyes publish with reason and `If-Match` (refuses a revision that carries product IR) |
+| POST | `/api/v2/offerings/{id}/revisions/{revisionId}/publish-ir` | Four-eyes publish of an IR-bearing revision: validates the IR, signs its canonical `revisionHash`, returns `irSignature` (ADR-0352) |
 | GET | `/api/v2/products/{offeringId}?effectiveAt=` | Resolve published effective content for one deterministic offering |
 | GET | `/api/v2/events?after=&limit=` | Poll ordered durable change envelopes with an opaque cursor |
 
@@ -144,3 +152,35 @@ validation uses 422 with ordered `{instancePath,schemaPath,keyword,message}` vio
 ## Published revision of a legacy product (ADR-0341)
 
 `GET /api/v2/legacy-products/{productId}/published-revision` resolves the published catalog revision of a v1 banking product from its v1 product id, for callers that still know a product only by an account's `productId`. An optional `effectiveAt` query parameter selects the instant; without it the revision effective now is returned. The caller pins the returned revision `id`, and later reads use the pin, not this lookup. It answers 404 when the product is unknown or none of its revisions is published yet. It needs the catalog read role. The API contract version is 2.5.0; the change is additive.
+
+## Product IR and the signed publish (ADR-0352)
+
+A revision's content may carry `behaviour`: the product's executable behaviour as a Product IR v1
+document (interest, bonus predicate over the account's event history, fees with waivers, term
+deposit maturity and early-withdrawal penalty). The IR is validated on every draft write by the
+shared parser in `openbank-libs-domain`; an invalid document never becomes a draft (400), and
+`behaviour` is covered by `contentHash` and `approvalDigest` like the rest of the content.
+
+Publishing an IR-bearing revision is its own four-eyes action, `catalog.publish-ir`:
+`POST /api/v2/offerings/{offeringId}/revisions/{revisionId}/publish-ir` validates the IR, computes
+its canonical `revisionHash`, obtains the publish-path signature over the revision identity
+envelope and stores the detached signature with the revision in the same transaction. The envelope
+is canonical JSON of `productCode`, `revisionId`, `revisionNumber`, `irVersion` and `revisionHash`
+under the domain tag `openbank.product-revision-signature.v1`, so a signature for one product or
+one revision can never verify under another's pin, even when two revisions carry identical IR. A single-revision read
+(`GET /api/v2/revisions/{id}`, `GET /api/v2/products/{offeringId}`) returns it as `irSignature`
+(`revisionHash`, `keyId`, `algorithm`, `signature`, `signedAt`), and so does every list of revisions; `null` means unsigned.
+The plain `publish` refuses a revision that carries `behaviour` (409), and `publish-ir` refuses one
+that does not, so an IR-bearing revision is never published unsigned. Maker and checker must
+differ, as for every publication.
+
+The signer is selected by `openbank.catalog.ir-signing.mode`: `disabled` (the default; `publish-ir`
+answers 409 and nothing is signed), `openbao` (OpenBao Transit `sign` on a dedicated key; the only
+deployment shape) or `hmac` (a shared-secret adapter accepted only in the dev and test launch modes;
+a production launch with it refuses to boot). Only a verified human may call `publish-ir`; the
+service checks this itself, independently of the OPA decision. A consumer verifies the signature with its own pinned-revision
+loader before evaluating a revision: it pins all five envelope fields, and any mismatch, missing
+copy or invalid signature fails closed (no evaluation, no posting), each counted as its own
+`outcome` of `openbank_product_revision_load_total` (`identity_mismatch` for a substituted
+revision); the catalog is a publication authority, never a dependency on
+the posting path. The API contract version is 2.9.0; the change is additive.

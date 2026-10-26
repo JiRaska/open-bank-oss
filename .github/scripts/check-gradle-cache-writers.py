@@ -136,6 +136,11 @@ DECLARED: dict[str, tuple[str, str]] = {
         "self-hosted, cache-disabled leg (ARC NAT egress, ~$200/mo) moved to the new "
         "`contract` job below.",
     ),
+    "_service-ci-pr.yml::build": (
+        "read-only",
+        ("Generated exact PR projection of the canonical service build job. Its hosted "
+         "cache consumer retains cache-read-only true; no additional writer is admitted."),
+    ),
     "_service-ci.yml::contract": (
         "disabled",
         "ADR-0250 Phase 2: the self-hosted half of the pre-split `build` job (ARC NAT "
@@ -147,6 +152,11 @@ DECLARED: dict[str, tuple[str, str]] = {
         "here shows up.",
     ),
     "api-fuzz.yml::fuzz": ("read-only", "Consumer; restores fleet-lint's home."),
+    "libs-quality.yml::compatibility": (
+        "read-only",
+        "Library ABI, coverage and recovery proofs consume fleet-lint's Gradle home. "
+        "The dedicated library job must never publish another cache entry or become a writer.",
+    ),
     "api-fuzz-authenticated.yml::fuzz-authenticated": (
         "read-only",
         "Consumer; restores fleet-lint's home.",

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-18T17:46:27.014604+00:00",
+  "generatedAt": "2026-10-23T09:37:33.301487+00:00",
   "netpol": {
     "available": true,
     "covered": 72,
@@ -9,9 +9,9 @@
   },
   "freshness": {
     "available": true,
-    "fleetScore": 64,
-    "scoredModules": 11,
-    "unknownModules": 16
+    "fleetScore": 81,
+    "scoredModules": 16,
+    "unknownModules": 11
   },
   "credentials": {
     "available": true,
@@ -23,14 +23,8 @@
     "overdueFound": false
   },
   "fuzz": {
-    "available": true,
-    "inScope": 32,
-    "tested": 31,
-    "coveragePct": 97,
-    "totalExercised": 5,
-    "excludedCount": 0,
-    "run": "https://github.com/JiRaska/open-bank-oss/actions/runs/39097390122",
-    "runDate": "2026-10-18"
+    "available": false,
+    "reason": "fuzz artifact fetch failed: HTTP 403"
   },
   "threatModels": {
     "available": true,
@@ -38,7 +32,7 @@
     "withModel": 28,
     "missing": [],
     "staleCount": 0,
-    "oldestDays": 21
+    "oldestDays": 1
   },
   "mttr": {
     "available": true,

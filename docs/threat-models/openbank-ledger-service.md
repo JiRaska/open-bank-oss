@@ -248,6 +248,38 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-10-17** — **Day-close participants (ADR-0342, #13167).** New inbound surface
+  `/api/v1/ledger/accounting-days/{date}/participants`: `PUT …/{participant}` (product service
+  reports RAN / SKIPPED / REFUSED for a day), `PUT …/{participant}/waiver` (operator), `GET` (read
+  roles). New table `ledger_close_participation` (V33, append-only history). `AccountingDayScheduler`
+  now also requires every declared participant to have reported before `CUTOFF → TIED_OUT`
+  (`openbank.ledger.close.participants-mode`, ships `shadow`). **STRIDE-S/E:** the PUT is admitted
+  under the existing `ledger.create` grant (no rego change), so any principal that may post journals
+  reaches it; the use case then requires the caller's VERIFIED service-account
+  (`ServiceAccountIdentity.verifiedPrincipalName`: `azp` bound to `preferred_username`) to equal the
+  principal declared for that participant — a different service-account, or a human token, is 403.
+  A participant cannot write `WAIVED`; waiving is `ROLE_OPERATOR` + `ledger.approve` and records the
+  operator's `sub`. **STRIDE-T/R:** reports are append-only rows with reporter and time; a report into
+  a `TIED_OUT`/`LOCKED` day is stored with `late=true` and never moves the day, so a late or replayed
+  report cannot reopen or rewrite a closed day. **STRIDE-D:** a participant that never reports holds
+  the day in CUTOFF under `enforce`, which the existing stuck-CUTOFF alert pages and the waiver
+  releases; in `shadow` (shipped default) nothing is held. **Information disclosure:** rows carry
+  counts, service names and bounded automatic failure categories. Operator identities and free-text waiver reasons are intentional audit personal data, not anonymous counts. The closed-day 409 body now also carries
+  `code: ACCOUNTING_DAY_CLOSED` (no new data). Rollback: revert the application while preserving additive V33 audit history; schema removal needs a separate reviewed retention/rollback plan.
+- **2026-10-19** — **Treasury instrument accounts, `V35` (ADR-0344 D7).** Also maps the matrix's accounting classes onto them in `accounting_class_gl_map` (78 rows, seeded by code as V32 does, with a count and currency check that fail the migration) and adds nine instrument roles to the closed role vocabulary (CHECK + `AccountingRole`, additive). 66 new leaf GL accounts (33 per
+  currency, EUR = CZK code + 1) for the treasury posting-rule matrix: securities by IFRS 9 category and
+  their premium/discount, accrued interest per product family, treasury loans, repo payable and reverse
+  repo receivable, derivative assets and liabilities at fair value, the FVOCI reserve (EQUITY), realised
+  and unrealised P&L, and memo pairs (an asset and a contra liability) for forward commitments and repo
+  collateral — the chart has no off-balance type, so a memo journal balances within its pair. Additive
+  only; fixed ids by the V29 convention; no API, role or policy change. **STRIDE-T:** posting still goes
+  only through `POST /api/v1/journals`, balanced per currency, and a line in the wrong currency is 422;
+  `TreasuryInstrumentAccountsPostingIT` posts to every new account in its currency and proves the wrong
+  currency is refused (and fails, naming the account, when a row is removed from the migration).
+  **Residual:** memo accounts appear in the trial balance as asset/liability pairs that always net to
+  zero; reporting that must exclude them filters codes 9xxx. Rollback: delete the rows while no
+  journal line references them.
+
 - **2026-10-17** — **The pension company's co-instance (`ledger-pension-co`) gets its own outbound
   identity (PR #13127).** Previously the deployment projected account-service's `OIDC_CLIENT_SECRET`,
   so its outbound calls authenticated as another service's client. It now authenticates as its own
@@ -266,7 +298,8 @@ set) apply equally to the new `ledger.approval.decide` action.
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `ledger_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The former service-local producer was removed; its replacement is
+  `OpaPolicyDecisionPointProducer` in libs-runtime;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -433,7 +466,8 @@ set) apply equally to the new `ledger.approval.decide` action.
   ledger-service's first-ever Redis dependency: new in-namespace `redis` Deployment/Service
   (`openbank-infra/gitops/components/ledger/redis.yaml`) plus a `redis-ingress-allow-list`
   NetworkPolicy, `QUARKUS_REDIS_HOSTS` wired on the Rollout, and `quarkus-redis-client` added to
-  the build. New `ApprovalConfig` (`RedisApprovalStore` producer) and `PATCH
+  the build. The Redis approval-store wiring (subsequently consolidated into libs-runtime
+  `RedisApprovalStoreProducer`, which supplies `RedisApprovalStore`) and `PATCH
   /api/v1/journals/approvals/{id}` checker-decide endpoint (`@RolesAllowed(Roles.OPERATOR,
   Roles.ADMIN)`, `@Authorize(action = "ledger.approval.decide")`); two new exception mappers
   (`SelfApprovalNotAllowedMapper` → 403, `InvalidApprovalStateMapper` → 409) appended to the
@@ -668,3 +702,43 @@ set) apply equally to the new `ledger.approval.decide` action.
   derives the switch list from source and fails if any is live. The chart of accounts is applied by a
   Flyway callback script mounted from a ConfigMap into this instance only, so no pension account reaches the
   bank's database. Rollback: delete the Argo app and its namespace; the bank's ledger is untouched.
+
+- **2026-10-17** — **The ledger owns the accountingClass -> GL account map; journal legs may name a class instead of an account (ADR-0341 D3).** Migration `V32` adds `accounting_class_gl_map` (class, role, currency -> GL account, unique per triple, role CHECK-closed), seeded from the same accounts the treasury and billing services used to name by literal code (looked up BY CODE, because `V29` may re-key `1001`; the migration aborts if any of the 35 rows cannot be seeded, and ALSO if any row's currency differs from its GL account's, because the ledger refuses such a line and the row could only ever answer 422; CZK fee legs resolve to the same 2100/4003 billing always posted, non-CZK fees debit their own control account 2101-2103 and have no fee-income row, since the chart has no non-CZK fee-income account -- and billing's old fixed CZK accounts never posted a non-CZK fee either). `POST /api/v1/journals` lines accept `accountingClass` + `accountingRole` as an alternative to `glAccountId`, resolved by `AccountingClassService` with the leg's own `currencyCode`; `GET /api/v1/accounting-classes[/resolve]` is the read side (reuses `ledger.read`, so no new OPA action or grant; openapi 1.26.0 -> 1.27.0, additive: `glAccountId` stops being required, which relaxes the request). **STRIDE-T (a product's money lands in the wrong account):** the map is DATA changed only by a reviewed migration on a money-path service (two approvals, this threat model) -- there is deliberately no runtime write path, so re-pointing a product's postings is no easier than editing the chart; a leg naming both an account and a class, or neither, is a 400, and an unmapped (class, role, currency) is a 422, never a default account (`AccountingClassGlMapIT`, `AccountingClassServiceTest`). **STRIDE-R:** resolution happens before the journal is built, so the stored line carries the resolved `glAccountId` exactly as a literal-id post would -- the journal, its idempotency key and its outbox events are byte-identical (`AccountingClassGlMapIT` posts both ways and compares). **Residual:** the vocabulary lives in three places that must agree (catalog pack enums, this table, the posters' constants); `AccountingClassGlMapIT` pins the table and treasury's `PostingJournalsUnchangedTest` pins the poster, but nothing yet pins the catalog enums to the table. Rollback: `DROP TABLE accounting_class_gl_map`; posters that send `glAccountId` are unaffected, posters that send a class need their previous release.
+
+- **2026-10-19** — Day-close participant enforcement is owned by `AccountingDayService`, for both scheduler and manual operator CUTOFF → TIED_OUT transitions. Callers cannot omit a required participant set; the existing repository day lock and atomic completeness check remain. Missing/REFUSED participants require a valid report or explicit WAIVED record with operator identity and mandatory reason. The default stays shadow; no enforcement activation is authorized. Pure service tests model the persistence contract; HTTP/DB test source uses a test security identity and does not establish JWT signature validation or live identity configuration.
+
+- **2026-10-19** — Automatic interest day-close report reasons and new aggregate warnings export only dates, counts and fixed categories, excluding raw exceptions and customer/account/product identifiers. Operator identity and a reasoned waiver remain retained audit personal data and require GDPR review. This does not anonymize older per-account logs or authorize enforcement activation.
+
+- **2026-10-19** — A day-close waiver checks the existing verified-person classifier even when OPA is advisory. Audit attribution requires a nonblank authenticated JWT subject, rejecting missing or unreadable subjects instead of using a display name. Report-service identity binding and existing GitOps enforcement remain unchanged. Pure guard tests do not prove HTTP RBAC, token signatures or live realm configuration; the OIDC HTTP regression must still run in native CI.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-22** — **Per-currency fee-income accounts (#13226).** Migration `V34` adds leaf INCOME accounts 4004 (EUR), 4005 (USD), 4006 (GBP) with stable ids `a0..<code>`, following the chart's existing one-account-per-currency families (2100-2103, 4010-4013, 1990-1993), and maps `FEE_INCOME_ACCOUNT`/`FEE_INCOME` to them by code. Fee income is booked in the fee's original currency; FX revaluation of those balances is out of scope. **STRIDE-T:** the map stays migration-only data (no runtime write path); V34 aborts unless `FEE_INCOME_ACCOUNT` is mapped in exactly the currencies `CUSTOMER_DEPOSIT_DEMAND` is (derived, today CZK/EUR/USD/GBP) and every map row's currency equals its account's, so it cannot ship a row that only ever 422s; an unmapped currency (e.g. CHF) is still a 422, never a default. `AccountingClassGlMapIT` pins the golden table (39 rows), resolves each new triple, and posts a real EUR fee journal by class against Postgres, asserting it lands balanced on 2101/4004 in EUR. No new endpoint, OPA action or grant. Rollback: in V34's header (only while no journal line references 4004-4006).
+- **2026-10-23** — **`lending` declared as a day-close participant (#13167, ADR-0342 D2).**
+  `openbank.ledger.close.participants.lending.principal = service-account-openbank-lending`, matching
+  `rules.yaml: close_participants` (`check-close-participants.py`). **The participation PUT now has
+  its own action, `ledger.close.participate`** (review of #13708): `CloseParticipationResource`
+  authorizes as it instead of `ledger.create`, and `ledger_rest_ext.rego: service-close-participation`
+  grants it per account for that account's ONE participant (`input.resource` is the path's
+  participant): interest -> `interest`, lending -> `lending`. No staff role, no shared client and no
+  other ROLE_API account reaches it (rego tests; removing the resource binding turns one red), so a
+  participant never needs a journal-create grant to report, and a journal poster cannot report for a
+  participant it is not. Measured with `opa eval` against the regenerated bundle: lending/interest
+  allowed for their own name, denied for each other's and for the shared client. Interest keeps
+  `ledger.create` for its journals; its reports now ride the new action. The ledger-pension-co bundle
+  embeds the same ext (its participants mode is `off`).
+  **STRIDE-S:** a `lending` report from any other principal is 403. **STRIDE-D:** under `enforce` a
+  lending outage would hold every day in CUTOFF until it reports or an operator waives; the mode stays
+  `shadow` (counting `would_hold`) and flipping it remains an owner step. `DayCloseParticipantsIT` now
+  has every non-interest declared participant report RAN, read from the live config, so its interest
+  scenarios cannot turn vacuous as participants are added. Rollback: remove the entry.
+- **2026-10-23** — **`billing` declared as a day-close participant (#13167, ADR-0342 D2), with its own grant.** `openbank.ledger.close.participants.billing.principal = service-account-openbank-billing`, matching `rules.yaml: close_participants`. Billing holds no `ledger.create` on its own identity (its journals ride the shared `openbank-services` principal), and gets none: it is one more entry in `close_participant_accounts`, so its identity may perform `ledger.close.participate` for the participant `billing` and NOTHING else (review of #13709 replaced an earlier generic `ledger.create` grant). **STRIDE-E:** `opa eval` on the regenerated bundle: billing allowed `ledger.close.participate` for `billing`; denied it for `lending`; denied `ledger.create` and `ledger.read`; the shared client denied participation. Rego tests cover every journal action and turn red if billing is mapped to another participant. **STRIDE-S:** a `billing` report from any other principal, the shared one included, is 403. The mode stays `shadow`. Rollback: remove the entry and the rule, then regenerate the bundles.
+
+### Raw history snapshot boundary (ADR-0352 preparation)
+
+- The additive snapshot endpoint reuses the existing ledger-list RBAC/PDP boundary; it grants no customer read, posting or reversal capability. Captures may contain account identifiers, amounts and authenticated submitter identifiers, so they are protected read-caches, not public metrics or product definitions.
+- Optional typed origin is explicitly an unverified assertion by the already-authorized writer. The ledger binds the submitter from its authenticated security context; request data cannot supply that identity. It does not authenticate economic EventKind, establish origin allowlists, or make classified history complete. Producer correlation/authority verification remains a separate dependency.
+- MVCC capture and stable immutable ordinals prevent newer postings, repeated first pages or partial page sets from being accepted as the captured whole. Consumers must check account/currency/window, entry count and full record digest; a missing source or interrupted response cannot prove an empty history.
+- Copied facts are linked to every opening/window source. Source erasure invalidates copies; detached sources make reads unavailable and the existing partition lifecycle purges the raw copies. No independent retention extension or legal-hold override is authorized. These controls require real concurrent PostgreSQL, source-deletion and partition-lifecycle tests before delivery; no local/hosted PASS is claimed by this note.
+- Snapshot capture and its idempotent result binding commit in the same PostgreSQL transaction. The binding frames the operation and authenticated caller/key scope, stores digests rather than the request or a financial response, and expires after the existing 86,400-second lifetime without replay renewal. Replays revalidate the retained source-linked manifest. Erasure clears its foreign-key reference and subsequent replay is 410, never a new capture under the unexpired key. An explicit EMPTY result stores only its original opaque identifier, observation instant and database-view metadata, so source erasure cannot be mistaken for an empty financial history. These digests and identifiers are not claimed to be anonymous.
+- Expired replay metadata is removed on access and by minute maintenance; physical cleanup can lag during an outage. This metadata has no independent financial response body in Redis. A contending or failed transaction rolls back both copied facts and replay binding; loss of the HTTP response after commit must replay the original result. Real HTTP/PostgreSQL erasure, contention, rollback and response-loss regressions must verify these claims before delivery.

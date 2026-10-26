@@ -90,7 +90,6 @@ com.openbank.domestic/
     ├── persistence/           repository impls, JPA entities, mappers
     ├── outbox/                DomesticPaymentOutboxDispatcher (scheduled, fault-tolerant)
     ├── kafka/                 KafkaDomesticPaymentEventPublisher
-    ├── approval/              ApprovalConfig (Redis-backed four-eyes workflow only)
     ├── client/               SanctionsServiceClient + adapter, AmlServiceClient + adapter
     └── authz/                AuthzProducer (OPA, ADR-0034)
 ```

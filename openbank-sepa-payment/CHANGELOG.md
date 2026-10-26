@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.19.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.19.2...sepa-payment-v0.19.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **sepa-payment:** send EPC PmtTpInf on pacs.008 for SCT and SCT Inst ([#13771](https://github.com/JiRaska/open-bank-oss/issues/13771)) ([f7ce734](https://github.com/JiRaska/open-bank-oss/commit/f7ce73471d1c7d26ab266b33f974e02607c1afc3))
+
+## [0.19.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.19.1...sepa-payment-v0.19.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **sepa-payment:** alert on unsettled bookings and re-drive held settlement ([#13662](https://github.com/JiRaska/open-bank-oss/issues/13662)) ([bbc2b48](https://github.com/JiRaska/open-bank-oss/commit/bbc2b489726cd02d885cd0ed4452c814a17d1b1a))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.19.0...sepa-payment-v0.19.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **sepa-payment:** book via the generated transaction client and bind the answer to the request ([#13620](https://github.com/JiRaska/open-bank-oss/issues/13620)) ([41ec9b7](https://github.com/JiRaska/open-bank-oss/commit/41ec9b72349e91e093ef0bfeec02c894bab3e75c))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.18.1...sepa-payment-v0.19.0) (2026-10-16)
 
 

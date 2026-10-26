@@ -3,17 +3,18 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // ---------------------------------------------------------------------------
-// Business Process Diagrams (BPMN 2.0). Now manifest-driven: this server
-// component loads + validates every src/content/bpmn/<slug>.yaml (a malformed or
-// drifted manifest fails `next build` — the CI gate) and hands them to the
-// client BpmnView. Adding/changing a process = editing a YAML manifest, not this
-// page (ADR-0019 / ADR-0029; supersedes the old hardcoded-in-page array).
+// Business Process Diagrams (BPMN 2.0). Prefer the independently published,
+// schema-validated source manifests and fall back to the image-baked files with
+// visible stale provenance. Adding/changing a process = editing a YAML source
+// manifest, not this page (ADR-0019 / ADR-0029).
 // ---------------------------------------------------------------------------
 
-import { loadAllBpmnProcesses } from '@/lib/docs/bpmn/load'
+import { loadBpmnContent } from '@/lib/docs/bpmn/load'
 import { BpmnView } from '@/components/docs/BpmnView'
 
-export default function BpmnPage() {
-  const processes = loadAllBpmnProcesses()
-  return <BpmnView processes={processes} />
+export const dynamic = 'force-dynamic'
+
+export default async function BpmnPage() {
+  const { processes, contentSource } = await loadBpmnContent()
+  return <BpmnView processes={processes} contentSource={contentSource} />
 }

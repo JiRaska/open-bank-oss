@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
+import { createHash } from 'node:crypto'
 
 const dirs: string[] = []
 afterEach(() => {
@@ -10,6 +11,8 @@ afterEach(() => {
   delete process.env.PROMETHEUS_URL
   delete process.env.TEMPO_URL
   delete process.env.OPENBANK_TEST_INTELLIGENCE_STALE_AFTER_DAYS
+    delete process.env.OPENBANK_EVIDENCE_STORE_URL
+    delete process.env.OPENBANK_TEST_INTELLIGENCE_SNAPSHOT_URL
   vi.unstubAllGlobals()
   dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true }))
 })
@@ -85,6 +88,56 @@ describe('GET /api/test-intelligence', () => {
     const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.components).toEqual([])
     expect(body.warnings[0]).toMatch(/not bundled/i)
+  })
+
+  it('serves a validated independently published snapshot and its provenance', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-published-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    const local = { schemaVersion: 1, collectedAt: new Date().toISOString(), components: [], contracts: [], mutations: [], performance: [], performanceHistory: [], syntheticJourneys: [], clientExperiences: [], history: [], runHistory: [], testCases: [], totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [] }
+    writeFileSync(file, JSON.stringify(local))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    const collectedAt = new Date().toISOString()
+    const snapshot = {
+      ...local, collectedAt,
+      components: [{ component: 'openbank-ledger-service', released: true, moneyPath: true, evidence: [], coverage: { state: 'not-run', observedAt: null, source: null, lines: { covered: 0, missed: 0, percentage: null }, branches: { covered: 0, missed: 0, percentage: null } }, testInfrastructure: { declared: [], observed: [] } }],
+      totals: { ...local.totals, components: 1, moneyPathComponents: 1, missingEvidence: 1 },
+    }
+    const bytes = JSON.stringify(snapshot)
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    const sourceSha = 'a'.repeat(40)
+    const base = 'https://snapshot.example/admin-ui/test-intelligence'
+    const snapshotKey = `snapshots/123-1-${sha256}.json`
+    process.env.OPENBANK_TEST_INTELLIGENCE_SNAPSHOT_URL = base
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).endsWith('/current.json')
+      ? Response.json({ schemaVersion: 1, snapshot: snapshotKey, sha256, sourceSha, runId: 123, runAttempt: 1, collectedAt, expiresAt: new Date(Date.now() + 86_400_000).toISOString(), complete: true })
+      : new Response(bytes, { status: 200, headers: { 'content-type': 'application/json' } })))
+
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
+
+    expect(body.components.map((item: { component: string }) => item.component)).toEqual(['openbank-ledger-service'])
+    expect(body.evidence).toMatchObject({
+      source: 'published-snapshot',
+      dataset: { status: 'ready', sourceSha, runId: 123, runAttempt: 1, snapshot: snapshotKey, sha256, collectedAt },
+    })
+  })
+
+  it('does not disguise a configured published-source outage with the bundled report', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-published-outage-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({ schemaVersion: 1, collectedAt: new Date().toISOString(), components: [{ component: 'openbank-ledger-service' }], contracts: [], mutations: [], performance: [], history: [], totals: { components: 1 }, warnings: [] }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.OPENBANK_TEST_INTELLIGENCE_SNAPSHOT_URL = 'https://outage.example/admin-ui/test-intelligence'
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unavailable')))
+
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
+
+    expect(body.components).toEqual([])
+    expect(body.evidence).toMatchObject({ source: 'unavailable', dataset: { status: 'unavailable' } })
+    expect(body.warnings.join(' ')).toMatch(/published Test Intelligence snapshot unavailable/i)
   })
 
   it('does not promote an unobserved contract declaration into runtime execution evidence', async () => {

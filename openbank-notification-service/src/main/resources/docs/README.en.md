@@ -26,3 +26,7 @@ This documentation is published directly by the service at the management endpoi
 - **Push:** FCM / APNs adapters may be disabled; a skipped adapter records `SUPPRESSED`, never provider acceptance. Lock-screen text stays generic.
 - **Idempotency:** a supplied deduplication key is enforced by the notifications table; replay of the same fact does not create a second inbox item.
 - **Auth:** Keycloak OIDC. Read APIs require `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API`; dispatch-control (break-glass) requires `ROLE_OPERATOR`/`ROLE_ADMIN` with four-eyes on resume.
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

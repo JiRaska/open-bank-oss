@@ -24,6 +24,21 @@ export function snapshotCommitOf(posture: ComponentTestPosture): string | null {
   return runs[0]?.run?.commit ?? null
 }
 
+function latestEvidenceAtOf(posture: ComponentTestPosture): string | null {
+  const timestamps = [...posture.evidence.map(item => item.observedAt), posture.coverage.observedAt]
+    .filter((value): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value)))
+  return timestamps.sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? null
+}
+
+function withRunningAge(running: RunningCommitObservation, posture: ComponentTestPosture, now: number): RunningCommitObservation {
+  const latestEvidenceAt = latestEvidenceAtOf(posture)
+  return {
+    ...running,
+    latestEvidenceAt,
+    latestEvidenceAgeSeconds: latestEvidenceAt ? Math.max(0, Math.floor((now - Date.parse(latestEvidenceAt)) / 1000)) : null,
+  }
+}
+
 export function sameCommit(a: string | null, b: string | null): boolean | null {
   if (!a || !b) return null
   return a.startsWith(b) || b.startsWith(a)
@@ -46,6 +61,7 @@ export async function overlayRunningEvidence(
   running: Map<string, RunningWorkload> | null,
   read: (component: string, commit: string) => Promise<CommitEvidenceResult>,
 ): Promise<TestIntelligenceReport> {
+  const now = Date.now()
   const components = await Promise.all(report.components.map(async (posture): Promise<ComponentTestPosture> => {
     const snapshotCommit = snapshotCommitOf(posture)
     const workload = running?.get(posture.component)
@@ -54,42 +70,78 @@ export async function overlayRunningEvidence(
       runningCommit, snapshotCommit, source: 'snapshot',
       match: sameCommit(runningCommit, snapshotCommit), storeStatus: workload ? 'disabled' : 'not-running',
     }
-    if (!runningCommit) return { ...posture, running: base }
+    if (!runningCommit) return { ...posture, running: withRunningAge(base, posture, now) }
     const result = await read(posture.component, runningCommit)
     if (result.status === 'hit') {
       return {
         ...result.posture,
         evidence: [...result.posture.evidence, ...crossSourceEvidence(posture)],
-        running: {
+        running: withRunningAge({
           ...base, source: 'running-commit', snapshotCommit: runningCommit, match: true, storeStatus: 'hit',
           evidenceCommit: result.posture.evidenceSource?.commit ?? runningCommit,
           equivalence: result.posture.evidenceSource?.equivalence ?? 'identical',
-        },
+        }, result.posture, now),
       }
     }
-    return { ...posture, running: { ...base, storeStatus: result.status } }
+    return { ...posture, running: withRunningAge({ ...base, storeStatus: result.status }, posture, now) }
   }))
   return { ...report, components }
 }
 
-export function buildEvidenceMeta(report: TestIntelligenceReport, runningKnown: boolean, servedAt: number, now = Date.now()): TestEvidenceMeta {
+export interface TestIntelligenceDatasetProvenance {
+  status: TestEvidenceMeta['dataset']['status']
+  sourceSha: string | null
+  runId: number | null
+  runAttempt: number | null
+  snapshot: string | null
+  sha256: string | null
+  collectedAt: string | null
+  expiresAt: string | null
+  pointerExpired: boolean | null
+  snapshotAgeMs: number | null
+  error?: string
+}
+
+export function buildEvidenceMeta(
+  report: TestIntelligenceReport,
+  runningKnown: boolean,
+  servedAt: number,
+  dataset: TestIntelligenceDatasetProvenance = {
+    status: 'disabled', sourceSha: null, runId: null, runAttempt: null, snapshot: null,
+    sha256: null, collectedAt: null, expiresAt: null, pointerExpired: null, snapshotAgeMs: null,
+  },
+  now = Date.now(),
+): TestEvidenceMeta {
   const t = Date.parse(report.collectedAt ?? '')
   // epoch-0 is the route's "nothing bundled" sentinel, not a real timestamp
   const known = Number.isFinite(t) && t > 0
   const ageMs = known ? Math.max(0, now - t) : null
   const observations = report.components.map(c => c.running).filter((r): r is RunningCommitObservation => Boolean(r))
   const fromStore = observations.filter(r => r.source === 'running-commit').length
+  const aggregateSource = dataset.status === 'ready' || dataset.status === 'stale'
+    ? 'published-snapshot' as const
+    : dataset.status === 'unavailable' ? 'unavailable' as const : 'bundled' as const
+  const source = fromStore > 0 && aggregateSource !== 'unavailable' ? 'mixed' as const : aggregateSource
   return {
-    source: fromStore > 0 ? 'running-commit' : 'bundled',
+    source,
     asOf: known ? new Date(t).toISOString() : null,
     ageSeconds: ageMs === null ? null : Math.floor(ageMs / 1000),
-    stale: ageMs === null || ageMs > STALE_AFTER_MS,
+    stale: dataset.status === 'stale' || (dataset.status === 'disabled' && (ageMs === null || ageMs > STALE_AFTER_MS)),
     servedFrom: new Date(servedAt).toISOString(),
+    dataset: {
+      status: dataset.status, sourceSha: dataset.sourceSha, runId: dataset.runId, runAttempt: dataset.runAttempt,
+      snapshot: dataset.snapshot, sha256: dataset.sha256, collectedAt: dataset.collectedAt,
+      expiresAt: dataset.expiresAt, pointerExpired: dataset.pointerExpired,
+      snapshotAgeSeconds: dataset.snapshotAgeMs === null ? null : Math.floor(dataset.snapshotAgeMs / 1000),
+      ...(dataset.error ? { error: dataset.error } : {}),
+    },
     runningCommits: {
       known: runningKnown ? observations.filter(r => r.runningCommit).length : null,
       matchingSnapshot: observations.filter(r => r.match === true).length,
       fromStore,
       fromEquivalentBuild: observations.filter(r => r.source === 'running-commit' && r.equivalence === 'tree-equivalent').length,
+      fromBundledFallback: observations.filter(r => r.runningCommit && r.storeStatus !== 'hit').length,
+      mismatchedEvidence: observations.filter(r => r.runningCommit && r.match !== true && r.storeStatus !== 'hit').length,
     },
   }
 }

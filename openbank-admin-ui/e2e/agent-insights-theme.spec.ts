@@ -28,7 +28,7 @@ for (const theme of ['light', 'dark'] as const) {
       }),
     }))
     await page.route('**/api/devops/insights', route => route.fulfill({
-      contentType: 'application/json', body: JSON.stringify({ findings: [finding] }),
+      contentType: 'application/json', body: JSON.stringify({ available: true, findings: [finding] }),
     }))
 
     await page.goto('/devops', { waitUntil: 'domcontentloaded' })
@@ -36,6 +36,7 @@ for (const theme of ['light', 'dark'] as const) {
     const status = workspace.getByText('FUTURE_STATE')
     await expect(status).toBeVisible()
     await expect(status).toHaveCSS('color', theme === 'dark' ? 'rgb(203, 213, 225)' : 'rgb(71, 85, 105)')
+    await expect(workspace.getByRole('button', { name: /Approve|Reject|Schválit|Odmítnout/ })).toHaveCount(0)
     await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /^(?!.*dark)/)
     await page.waitForTimeout(400)
     const scan = await new AxeBuilder({ page }).include('[aria-label="DevOps findings workspace"]').withRules(['color-contrast']).analyze()

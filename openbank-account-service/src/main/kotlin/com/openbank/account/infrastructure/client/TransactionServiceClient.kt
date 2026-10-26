@@ -5,16 +5,16 @@
 package com.openbank.account.infrastructure.client
 
 import com.openbank.account.application.port.out.WelcomeBonusPort
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.TransactionHttpException
+import com.openbank.clients.transaction.api.TransactionsApi
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
-import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.Consumes
-import jakarta.ws.rs.POST
-import jakarta.ws.rs.Path
-import jakarta.ws.rs.Produces
-import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -24,7 +24,8 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * Minimal typed client for transaction-service's payment-initiation endpoint. `POST
+ * Typed client for transaction-service's payment-initiation endpoint, GENERATED from its own
+ * `openapi.yaml` (`openbank-client-transaction`, ADR-0319). `POST
  * /api/v1/transactions` is `@RolesAllowed(API, OPERATOR)`, so the call carries an M2M bearer via
  * the named oidc-client `m2m`: account-service's OWN Keycloak client `openbank-account` (ROLE_API
  * only), which transaction-service's OPA grants `transaction.create` by identity (#10486).
@@ -34,46 +35,43 @@ import java.util.UUID
 // #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
 // `openbank-account` (ROLE_API only) - never the shared `openbank-services` default client.
 @OidcClientFilter("m2m")
-@Path("/api/v1/transactions")
-@Produces(MediaType.APPLICATION_JSON)
-@Consumes(MediaType.APPLICATION_JSON)
-interface TransactionServiceRestClient {
-
-    @POST
-    fun initiate(request: InitiateTransactionBody): Uni<TransactionAck>
-}
-
-data class InitiateTransactionBody(
-    val idempotencyKey: String,
-    val type: String,
-    val sourceAccountId: UUID? = null,
-    val targetAccountId: UUID? = null,
-    val amount: BigDecimal,
-    val currencyCode: String,
-    val description: String,
-    val valueDate: String,
-)
-
-data class TransactionAck(val id: UUID, val status: String)
+interface TransactionServiceRestClient : TransactionsApi
 
 @ApplicationScoped
 class TransactionServiceClient(@RestClient private val client: TransactionServiceRestClient, private val clock: Clock) :
     WelcomeBonusPort {
 
+    private val transactions = TransactionClient(client)
+
     // Incoming credit with no source account: transaction-service posts the deposit journal and
     // credits the beneficiary pocket. idempotencyKey is derived from the account so the saga's
     // own idempotency guard makes a repeated grant a no-op.
     override suspend fun grantWelcomeBonus(accountId: UUID, amount: BigDecimal, currency: String) {
-        client.initiate(
-            InitiateTransactionBody(
-                idempotencyKey = "welcome-bonus-$accountId",
-                type = "CREDIT",
-                targetAccountId = accountId,
-                amount = amount,
-                currencyCode = currency,
-                description = "Vítací bonus za založení účtu",
-                valueDate = LocalDate.now(clock).toString(),
-            ),
-        ).awaitSuspending()
+        val request = InitiateTransactionRequest(
+            idempotencyKey = "welcome-bonus-$accountId",
+            type = "CREDIT",
+            targetAccountId = accountId,
+            amount = amount,
+            currencyCode = currency,
+            description = "Vítací bonus za založení účtu",
+            valueDate = LocalDate.now(clock),
+        )
+        // A refusal must keep failing the grant, exactly as the client's own exception did before the
+        // facade turned 409/400/422 into outcomes. initiate() returns HttpSuccess only for a readable COMPLETED
+        // transaction; any other 2xx is thrown as TransactionCompletionUncertainException (retry, same key).
+        when (val outcome = transactions.initiate(request).awaitSuspending()) {
+            is TransactionCallOutcome.HttpSuccess -> {
+                // The former non-null TransactionAck.id rejected a response without a booking id.
+                if (outcome.body?.id == null) throw TransactionCompletionUncertainException(outcome.status)
+            }
+
+            TransactionCallOutcome.Conflict -> throw TransactionHttpException(HTTP_CONFLICT)
+
+            is TransactionCallOutcome.Rejected -> throw TransactionHttpException(outcome.status)
+        }
+    }
+
+    private companion object {
+        const val HTTP_CONFLICT = 409
     }
 }

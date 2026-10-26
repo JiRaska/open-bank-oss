@@ -7,7 +7,7 @@
 #   3. Bakes a linux/arm64 Docker image and pushes it to ECR with the tag
 #      `sandbox-<short-SHA>` — matching the convention used by build-push-service.sh.
 #   4. Rewrites the image: line in each service's gitops manifest.
-#   5. Opens a PR (`chore/gitops-auto-deploy-<sha>`) and enables auto-merge, so the
+#   5. Opens a PR (`chore/gitops-auto-deploy-<sha>-run<id>`) and enables auto-merge, so the
 #      manifest update lands on main as soon as CI is green.
 #
 # The PR is opened by a bot identity, which satisfies the issue-hygiene exemption (bot PR →
@@ -27,6 +27,12 @@
 name: Auto deploy
 
 on:
+  # Inactive pilot. Completed runs do no work unless an operator
+  # separately enables CONTEXT_BUILD_HANDOFF_ENABLED after reviewing activation.
+  workflow_run:
+    workflows: ["Services CI"]
+    branches: [main]
+    types: [completed]
   push:
     branches: [main]
     paths:
@@ -49,6 +55,8 @@ on:
       - "openbank-libs-runtime/build.gradle.kts"
       - "openbank-libs-lending/build.gradle.kts"
       - "openbank-libs-iso20022/build.gradle.kts"
+      - "openbank-libs-finance/build.gradle.kts"
+      - "openbank-libs-fincrime/build.gradle.kts"
       - "build-logic/**"
       # Release-please bumps version.txt, yet a release-only commit touches nothing
       # under src/main/**. That left the new version with no image built, causing
@@ -112,6 +120,13 @@ on:
         type: boolean
         required: false
         default: false
+      reconcile_services:
+        description: >-
+          Optional space-separated list of up to three services to filter the reconcile to.
+          Only valid with reconcile=true on main. Each must have a GitOps pin and be stale by
+          the normal build-input equivalence check; Pact and image-freshness gates still apply.
+        required: false
+        default: ""
       bootstrap_image_only:
         description: >-
           Build, sign and attest exactly one service image that has no GitOps manifest yet.
@@ -146,6 +161,16 @@ jobs:
   # ── 1. Detect which service modules actually changed ─────────────────────────
   changes:
     name: Detect changed services
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (vars.CONTEXT_BUILD_HANDOFF_ENABLED == 'true' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.status == 'completed' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.repository.full_name == github.repository &&
+       github.event.workflow_run.path == '.github/workflows/services-ci.yml')
     runs-on: ubuntu-latest  # pure git; hosted-first (public repo, free)
     permissions:
       contents: write
@@ -153,6 +178,7 @@ jobs:
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
     timeout-minutes: 5
     outputs:
+      source_commit: ${{ steps.source.outputs.sha }}
       services: ${{ steps.detect.outputs.services }}
       any: ${{ steps.detect.outputs.any }}
       # A BOUNDED stand-in for `services`, for use in a concurrency group. See the step that
@@ -160,9 +186,27 @@ jobs:
       # silently discarded three whole-fleet builds (#3082).
       services_key: ${{ steps.key.outputs.services_key }}
     steps:
+      # Bootstrap only from GitHub's trusted workflow revision, never payload code.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate context producer before source checkout
+        id: source
+        run: |
+          set -euo pipefail
+          source_commit="$GITHUB_SHA"
+          if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
+            cp .github/scripts/context-deploy-handoff.py "$RUNNER_TEMP/context-deploy-handoff.py"
+            source_commit="$(python3 "$RUNNER_TEMP/context-deploy-handoff.py" source)"
+            git fetch --no-tags origin main
+            git cat-file -e "${source_commit}^{commit}"
+            git merge-base --is-ancestor "$source_commit" origin/main
+            git checkout --detach "$source_commit"
+          fi
+          printf 'sha=%s\n' "$source_commit" >> "$GITHUB_OUTPUT"
 
       - name: Install reconcile hold parser
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true')
@@ -173,8 +217,12 @@ jobs:
 
       - id: detect
         env:
+          CONTEXT_BUILD_HANDOFF_ENABLED: ${{ vars.CONTEXT_BUILD_HANDOFF_ENABLED }}
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
+          INPUT_RECONCILE_SERVICES: ${{ github.event.inputs.reconcile_services }}
+          INPUT_RECONCILE: ${{ github.event.inputs.reconcile }}
+          INPUT_BOOTSTRAP_IMAGE_ONLY: ${{ github.event.inputs.bootstrap_image_only }}
           INPUT_SERVICES: ${{ github.event.inputs.services }}
         run: |
           set -euo pipefail
@@ -247,17 +295,26 @@ jobs:
             # Scheduled and on-demand reconcile must use the hold on LIVE main.
             # Filter before the probe's oldest-first cap and before any build work.
             git fetch -q origin '+refs/heads/main:refs/remotes/origin/main' || return 1
+            if [ -n "${INPUT_RECONCILE_SERVICES:-}" ]; then
+              if [ "${GITHUB_REF:-}" != "refs/heads/main" ]; then
+                echo "::error::targeted reconcile is available only from refs/heads/main" >&2
+                return 1
+              fi
+              if [ "$(git rev-parse HEAD)" != "$(git rev-parse refs/remotes/origin/main)" ]; then
+                echo "::error::targeted reconcile requires this run's source SHA to be current main" >&2
+                return 1
+              fi
+            fi
             local held
             held="$("${RUNNER_TEMP}/deploy-hold-venv/bin/python" \
               .github/scripts/check-deploy-holds.py --root . --list-holds --rules-ref origin/main)" || return 1
-            RECONCILE_SERVICES="$ALL_SERVICES" RECONCILE_HOLDS="$held" \
+            RECONCILE_SERVICES="$ALL_SERVICES" \
+              RECONCILE_TARGETS="${INPUT_RECONCILE_SERVICES:-}" \
+              RECONCILE_HOLDS="$held" \
               bash .github/scripts/auto-deploy-reconcile-lag.sh
           }
 
-          # Which files changed in this push (compare to the parent commit). We compute this
-          # early because the workflow_dispatch guard below also needs to know which services
-          # changed in the current HEAD, so an operator cannot accidentally request services
-          # from an unrelated commit that has no pact versions in the broker (#3318, #3454).
+          # Parent diff also bounds manual dispatch to eligible services (#3318, #3454).
           CHANGED_FILES="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null)"
 
           # Shared paths that affect every service. Governance catalogs
@@ -307,6 +364,7 @@ jobs:
           # commit leaves the contract gate with no pact version for this SHA and produces the
           # wasted runs / NOT_ASKED failures behind #3318 / #3454.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            bash .github/scripts/validate-auto-deploy-reconcile-inputs.sh
             if [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ]; then
               if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
                 echo "::error::bootstrap_image_only and reconcile are mutually exclusive"
@@ -318,8 +376,8 @@ jobs:
                 exit 1
               fi
               svc="$REQUESTED"
-              if ! grep -qxF "$svc" <<< "${ALL_SERVICES// /$'\n'}" || [ ! -f "$svc/Dockerfile" ]; then
-                echo "::error::bootstrap target must be a known service with a committed Dockerfile"
+              if ! grep -qxF "$svc" <<< "${ALL_SERVICES// /$'\n'}" || [ ! -d "$svc" ]; then
+                echo "::error::bootstrap target must be a known service directory"
                 exit 1
               fi
               if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
@@ -337,7 +395,11 @@ jobs:
             if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
               SERVICES_JSON="$(reconcile_candidates)"
               if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
-                echo "Reconcile: every deployable service is up to date."
+                if [ -n "${INPUT_RECONCILE_SERVICES:-}" ]; then
+                  echo "Reconcile: no requested service has an eligible stale GitOps image pin (up to date or held)."
+                else
+                  echo "Reconcile: every deployable service is up to date."
+                fi
                 echo "services=[]" >> "$GITHUB_OUTPUT"
                 echo "any=false" >> "$GITHUB_OUTPUT"
                 exit 0
@@ -460,6 +522,18 @@ jobs:
           fi
 
           SERVICES_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
+          # Disabled pilot preserves push selection.
+          case "$GITHUB_EVENT_NAME:$CONTEXT_BUILD_HANDOFF_ENABLED" in workflow_run:*|push:true)
+            HANDOFF_HELPER=.github/scripts/context-deploy-handoff.py
+            [ "$GITHUB_EVENT_NAME" != workflow_run ] || HANDOFF_HELPER="$RUNNER_TEMP/context-deploy-handoff.py"
+            SERVICES_JSON="$(printf '%s' "$SERVICES_JSON" | python3 "$HANDOFF_HELPER" select --event "$GITHUB_EVENT_NAME")"
+            ;;
+          esac
+          if [ "$SERVICES_JSON" = '[]' ]; then
+            echo 'services=[]' >> "$GITHUB_OUTPUT"
+            echo 'any=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           echo "Services to deploy: $SERVICES_JSON"
           echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
@@ -519,8 +593,10 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
+      actions: read   # exact-SHA main-push build artifact; no PR artifacts are accepted
     timeout-minutes: 120
     env:
+      SOURCE_COMMIT: ${{ needs.changes.outputs.source_commit }}
       # This line, not gradle.properties, is what sizes the daemon for this job (#9832). A
       # `-Dorg.gradle.jvmargs` in GRADLE_OPTS takes precedence over the file, so editing
       # `gradle.properties` — the obvious place, and the one the issue named first — changes
@@ -560,6 +636,19 @@ jobs:
       cve_blocked_services: ${{ steps.scan.outputs.cve_blocked }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.changes.outputs.source_commit }}
+
+      # Requires the separately reviewed optional ARTIFACT_SOURCE_SHA support in
+      # build-slsa-provenance.py. Fail before obtaining credentials or pushing images
+      # if an older producer checkout cannot distinguish source from workflow SHA.
+      - name: Verify handoff provenance before any image side effect
+        if: github.event_name == 'workflow_run'
+        run: |
+          set -euo pipefail
+          ARTIFACT_SOURCE_SHA="$SOURCE_COMMIT" python3 openbank-infra/scripts/lib/build-slsa-provenance.py |
+            jq -e --arg source "$SOURCE_COMMIT" --arg workflow "${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}" \
+              '.materials[0].digest.sha1 == $source and .invocation.configSource.digest.sha1 == $workflow' >/dev/null
 
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
@@ -606,6 +695,16 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
+      - name: Restore verified context build when available
+        id: context_build
+        if: contains(fromJSON(needs.changes.outputs.services), 'openbank-context-service')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/service-build-artifact.py restore \
+            --repo "$GITHUB_REPOSITORY" --service openbank-context-service \
+            --sha "$SOURCE_COMMIT" --destination "$GITHUB_WORKSPACE"
+
       - name: Build fast-jars (parallel)
         id: build
         # analytics-sink selects its AnalyticsSink binding with @IfBuildProperty, which Quarkus
@@ -620,10 +719,11 @@ jobs:
           # reach it). Without this the image ships the @Default InMemoryNonceStore, and the PoP
           # replay guard silently weakens to per-pod once replicas > 1 (issue #4728).
           AGENT_SVID_NONCE_STORE: redis
+          CONTEXT_BUILD_RESTORED: ${{ steps.context_build.outputs.restored }}
         run: |
           set -euo pipefail
           SERVICES='${{ needs.changes.outputs.services }}'
-          SHA="${GITHUB_SHA::8}"
+          SHA="${SOURCE_COMMIT::8}"
           TAG="sandbox-${SHA}"
           FAILED=0
 
@@ -639,6 +739,10 @@ jobs:
           TASKS=()
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) continue ;; esac
+            if [ "$svc" = openbank-context-service ] && [ "$CONTEXT_BUILD_RESTORED" = true ]; then
+              echo "Using verified exact-source context fast-jar and SBOM."
+              continue
+            fi
             # cyclonedxBom alongside quarkusBuild so every service's image gets its
             # CycloneDX SBOM baked in (served live at /q/openbank/sbom by libs
             # SbomResource). Fleet-wide via this central loop — no per-service
@@ -687,8 +791,8 @@ jobs:
               { echo "[${svc}] quarkus-run.jar not found — skip push"; return 0; }
 
             local port
-            port="$(grep -oE 'EXPOSE[[:space:]]+[0-9]+' "${svc}/Dockerfile" 2>/dev/null \
-              | grep -oE '[0-9]+' | head -1 || echo "8080")"
+            # One source for the port: quarkus.http.port (service-port.py header).
+            port="$(python3 "${GITHUB_WORKSPACE}/.github/scripts/service-port.py" "${svc}")"
 
             local image="${ECR_REGISTRY}/${svc}:${TAG}"
             local ctx; ctx="$(mktemp -d)"
@@ -956,7 +1060,7 @@ jobs:
             # verify policy's verdict overwrite the others per image) and returns once Kyverno
             # scopes verdicts per policy, so an image built without provenance today is the
             # redeploy worklist on that day. 12 such images existed when it was removed.
-            if ! cosign_attest_slsa_provenance "$image"; then
+            if ! ARTIFACT_SOURCE_SHA="$SOURCE_COMMIT" cosign_attest_slsa_provenance "$image"; then
               echo "::error::[${svc}] SLSA provenance attestation failed"
               rc=1; continue
             fi
@@ -1066,6 +1170,7 @@ jobs:
       # (issue #1348).
       gate_ran: ${{ steps.check.outputs.gate_ran }}
     env:
+      SOURCE_COMMIT: ${{ needs.changes.outputs.source_commit }}
       PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
       PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
       PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
@@ -1078,7 +1183,14 @@ jobs:
       # block. Check out so rules.yaml is present and the money-path naming works.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
+          persist-credentials: false
+      - name: Keep reviewed contract driver and select verified source
+        run: |
+          set -euo pipefail
+          cp .github/scripts/can-i-deploy-gate.sh "$RUNNER_TEMP/can-i-deploy-gate.sh"
+          git checkout --detach "$SOURCE_COMMIT"
 
       # The pact CLI runs natively on the ARC runner pod (which resolves the broker's
       # cluster DNS); the pact-cli docker image would run in dind and could not. The
@@ -1108,12 +1220,12 @@ jobs:
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
         id: check
-        if: ${{ vars.PACT_BROKER_URL != '' }}
+        if: ${{ vars.PACT_BROKER_URL != '' || github.event_name == 'workflow_run' }}
         run: |
           # Extracted to .github/scripts/can-i-deploy-gate.sh (#4086). It sat at 18955 chars
           # against a 19000 ceiling whose breach makes the WHOLE workflow unparseable, so the
           # next comment anyone added here would have taken every contributor's deploy down.
-          bash .github/scripts/can-i-deploy-gate.sh
+          bash "$RUNNER_TEMP/can-i-deploy-gate.sh"
 
   # ── 3. Update gitops manifests + open auto-merge PR ──────────────────────────
   gitops-pr:
@@ -1159,6 +1271,9 @@ jobs:
       github.event.inputs.bootstrap_image_only != 'true' &&
       needs.build-push.result == 'success' &&
       needs.can-i-deploy.result != 'cancelled' &&
+      (github.event_name != 'workflow_run' ||
+       (needs.can-i-deploy.result == 'success' && needs.can-i-deploy.outputs.gate_ran == 'true' &&
+        needs.can-i-deploy.outputs.deployable != '' && needs.can-i-deploy.outputs.deployable != '[]')) &&
       needs.build-push.outputs.deployable_services != '[]'
     runs-on: ubuntu-latest  # manifest rewrite + PR only; hosted-first (public repo, free)
     permissions:
@@ -1167,6 +1282,7 @@ jobs:
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
     timeout-minutes: 10
     env:
+      SOURCE_COMMIT: ${{ needs.changes.outputs.source_commit }}
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
       # Services can-i-deploy confirmed deployable, as a JSON array. Empty/unset (can-i-deploy
       # skipped entirely — no PACT_BROKER_URL) means "no filter, process everything", matching
@@ -1187,6 +1303,7 @@ jobs:
       # ("Duplicate header: Authorization" → git 400) and the gitops PR never opens.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.changes.outputs.source_commit }}
           persist-credentials: false
 
       - name: Install deploy-hold parser
@@ -1216,10 +1333,11 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          RECONCILE_TARGETS: ${{ github.event.inputs.reconcile_services }}
         run: |
           set -euo pipefail
           # Recompute against LIVE main (#3194). Same exposure admin-ui-deploy.yml has: the
-          # checkout holds github.sha, the build takes minutes, and create-pull-request branches
+          # checkout holds the verified source SHA, the build takes minutes, and create-pull-request branches
           # from that HEAD. If another deploy merges in the window, both sides have rewritten the
           # same image: line and the PR is born CONFLICTED — which means no refs/pull/<n>/merge
           # and therefore NO workflow run at all. Not skipped, absent. It renders as "waiting",
@@ -1295,7 +1413,9 @@ jobs:
           # then land as ONE commit on main instead of one each. A pin is carried only while main
           # still holds the tag that PR replaced, so a service main has moved since is never
           # rewound; this run's own pins always win. An ARMED PR is left alone (already landing).
-          if [ -n "${GH_TOKEN:-}" ]; then
+          # An explicitly bounded recovery keeps only its requested service pins.
+          # Routine producers retain train aggregation and all existing hold checks.
+          if [ -n "${GH_TOKEN:-}" ] && [ -z "${RECONCILE_TARGETS:-}" ]; then
             OWN_IMAGES="$(echo "$IMAGE_TAGS" | jq -r --arg r "$ECR_REGISTRY" 'keys[] | "\($r)/\(.)"' | tr '\n' ' ')"
             # Re-read the live hold after the main reset. Filtering this run's tags alone
             # is insufficient: an older unarmed PR may contain a held image pin.
@@ -1402,12 +1522,14 @@ jobs:
           # create-pull-request targets that stale ref and includes every intervening main
           # commit in the deploy PR instead of only the rewritten GitOps manifests.
           base: main
-          branch: chore/gitops-auto-deploy-${{ github.sha }}
+          # Independent producers at the same source must never rewrite one another.
+          # A rerun retains its run ID and updates only its own candidate.
+          branch: chore/gitops-auto-deploy-${{ needs.changes.outputs.source_commit }}-run${{ github.run_id }}
           delete-branch: true
-          commit-message: "chore(gitops): auto-deploy sandbox-${{ github.sha && github.sha || '' }}"
-          title: "chore(gitops): auto-deploy services @ ${{ github.sha }}"
+          commit-message: "chore(gitops): auto-deploy sandbox-${{ needs.changes.outputs.source_commit }}"
+          title: "chore(gitops): auto-deploy services @ ${{ needs.changes.outputs.source_commit }}"
           body: |
-            Automated gitops image-tag update triggered by commit ${{ github.sha }}.
+            Automated gitops image-tag update triggered by commit ${{ needs.changes.outputs.source_commit }}.
 
             **Built and scanned in this run:** ${{ needs.build-push.outputs.deployable_services }}
 
@@ -1415,7 +1537,7 @@ jobs:
 
             **Pending image pins carried from earlier PRs:** ${{ steps.rewrite.outputs.carried_prs }}
 
-            Images built in this run use the short SHA of the triggering commit. Carried pins
+            Images built in this run use the short SHA of the verified source commit. Carried pins
             retain their own build tags. The Files changed tab is the proposed deployment set;
             ArgoCD syncs after merge.
 
@@ -1519,7 +1641,7 @@ jobs:
         env:
           CHANGED_SERVICES: ${{ needs.changes.outputs.services }}
           GITOPS_PR_RESULT: ${{ needs.gitops-pr.result }}
-          RUN_SHA: ${{ github.sha }}
+          RUN_SHA: ${{ needs.changes.outputs.source_commit }}
         run: |
           set -uo pipefail
           if [ "$GITOPS_PR_RESULT" = "success" ]; then

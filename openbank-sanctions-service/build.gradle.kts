@@ -24,6 +24,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    // ADR-0353: the financial-crime published language, declared once for producers and rails.
+    implementation(project(":openbank-libs-fincrime"))
     implementation(project(":openbank-libs-runtime"))
     testImplementation(libs.mockk)
     // AuditEventTime — the ONE copy of the rule openbank-audit-service's AuditConsumer applies to

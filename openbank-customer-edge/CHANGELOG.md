@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.4.4](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.3...customer-edge-v1.4.4) (2026-10-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** list delegated accounts in the account-service page shape ([#13881](https://github.com/JiRaska/open-bank-oss/issues/13881)) ([c9dbd16](https://github.com/JiRaska/open-bank-oss/commit/c9dbd16083be4151087cabab9f51e7b3f9a8ac5b))
+
+## [1.4.3](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.2...customer-edge-v1.4.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** document the balances wire as {balances: [...]} and pin the spec to it ([#13710](https://github.com/JiRaska/open-bank-oss/issues/13710)) ([28515d1](https://github.com/JiRaska/open-bank-oss/commit/28515d16e7d3df5aed9884337c0a79593f219bc7))
+
+## [1.4.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.1...customer-edge-v1.4.2) (2026-10-21)
+
+
+### Bug Fixes
+
+* **customer-edge:** prefix unprefixed metrics with openbank. and gate new ones ([#13193](https://github.com/JiRaska/open-bank-oss/issues/13193)) ([ca69f24](https://github.com/JiRaska/open-bank-oss/commit/ca69f2451fee91827db7fb179bde3b4244b0455c))
+
+## [1.4.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.0...customer-edge-v1.4.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **customer-edge:** scope the Pact provider stub to its own test class ([#13477](https://github.com/JiRaska/open-bank-oss/issues/13477)) ([140993e](https://github.com/JiRaska/open-bank-oss/commit/140993e36fcd92073fa0ea7034338a69caa81b35))
+
 ## [1.4.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.2...customer-edge-v1.4.0) (2026-10-17)
 
 

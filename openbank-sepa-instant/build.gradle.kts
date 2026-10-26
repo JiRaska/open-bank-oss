@@ -28,6 +28,8 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
+    implementation(project(":openbank-client-transaction"))
     implementation(libs.quarkus.scheduler)
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers)
@@ -42,6 +44,8 @@ dependencies {
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Consumer-driven contract for the transaction-service settlement call (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)
+    // Provider-side pact verification for the agent's read tools over this service's API.
+    testImplementation(libs.pact.provider)
 }
 
 kover {

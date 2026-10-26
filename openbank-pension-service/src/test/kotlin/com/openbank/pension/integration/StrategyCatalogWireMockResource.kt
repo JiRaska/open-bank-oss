@@ -72,7 +72,7 @@ class StrategyCatalogWireMockResource : QuarkusTestResourceLifecycleManager {
                     "state":"PUBLISHED","makerId":"maker","checkerId":"checker",
                     "reason":"reviewed composition","contentHash":"${"a".repeat(64)}",
                     "effectiveFrom":"2020-01-01T00:00:00Z","effectiveTo":null,
-                    "pensionApprovalDigest":"$approvalDigest",
+                    "approvalDigest":"$approvalDigest",
                     "content":{"attributes":{"productLine":"DIP","jurisdictionPackId":"CZ/DIP",
                     "fundStrategy":"$strategy","reviewStatus":"LEGAL_AND_COMMERCIAL_REVIEWED",
                     "instrumentClasses":[$classJson]}}}
@@ -85,7 +85,7 @@ class StrategyCatalogWireMockResource : QuarkusTestResourceLifecycleManager {
                     "approvedAt":"2020-01-01T00:00:00Z"}]
                 """.trimIndent()
                 server.stubFor(
-                    get(urlEqualTo("/api/v2/offerings/$id/revisions/$revisionId/pension-approvals"))
+                    get(urlEqualTo("/api/v2/offerings/$id/revisions/$revisionId/approvals"))
                         .willReturn(okJson(approvals)),
                 )
             }
@@ -104,7 +104,7 @@ class StrategyCatalogWireMockResource : QuarkusTestResourceLifecycleManager {
             val revisionId = UUID.nameUUIDFromBytes("${offeringId(1)}:7".toByteArray())
             server.verify(
                 getRequestedFor(
-                    urlEqualTo("/api/v2/offerings/${offeringId(1)}/revisions/$revisionId/pension-approvals"),
+                    urlEqualTo("/api/v2/offerings/${offeringId(1)}/revisions/$revisionId/approvals"),
                 ).withHeader("Authorization", equalTo("Bearer test-token")),
             )
         }
@@ -118,7 +118,7 @@ class StrategyCatalogWireMockResource : QuarkusTestResourceLifecycleManager {
             val id = offeringId(strategyIndex)
             val revisionId = UUID.nameUUIDFromBytes("$id:$revision".toByteArray())
             server.stubFor(
-                get(urlEqualTo("/api/v2/offerings/$id/revisions/$revisionId/pension-approvals"))
+                get(urlEqualTo("/api/v2/offerings/$id/revisions/$revisionId/approvals"))
                     .atPriority(1)
                     .willReturn(okJson(approvals)),
             )

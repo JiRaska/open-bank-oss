@@ -16,6 +16,7 @@ import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.core.UriBuilder
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.MDC
 import java.net.URI
@@ -290,22 +291,43 @@ class UpstreamClient {
 
     fun get(url: String, partyId: String? = null): Response = get(url, partyId, requestTimeoutMs)
 
+    /** GET with a fixed service authority and raw query values encoded independently of that authority. */
+    fun getToService(baseUrl: String, path: String, query: Map<String, String>, partyId: String?): Response = try {
+        val builder = UriBuilder.fromUri(structuredUri(baseUrl, path))
+        val values = linkedMapOf<String, Any>()
+        query.entries.forEachIndexed { index, (name, value) ->
+            val parameter = "query$index"
+            builder.queryParam(name, "{$parameter}")
+            values[parameter] = value
+        }
+        get(builder.buildFromMap(values), partyId, requestTimeoutMs)
+    } catch (e: Exception) {
+        // Query values may contain opaque paging tokens, so do not log them.
+        Log.error("upstream call to $baseUrl failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
     /** Cap a single call by the caller's remaining aggregate budget. */
     fun get(url: String, partyId: String?, timeoutMs: Long): Response = try {
+        get(validatedUri(url), partyId, timeoutMs)
+    } catch (e: Exception) {
+        Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
+    private fun get(uri: URI, partyId: String?, timeoutMs: Long): Response {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceIn(1, requestTimeoutMs))
         val request = upstreamRequest()
-            .uri(validatedUri(url))
+            .uri(uri)
             .header("Authorization", "Bearer ${serviceToken(deadline)}")
             .apply { if (partyId != null) header(PARTY_HEADER, partyId) }
             .header("Accept", "application/json")
             .timeout(Duration.ofMillis(remainingMillis(deadline)))
             .GET().build()
         val r = http.send(request, HttpResponse.BodyHandlers.ofString())
-        Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
-    } catch (e: Exception) {
-        Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
-        Response.status(502).entity("""{"error":"upstream unavailable"}""")
-            .type(MediaType.APPLICATION_JSON).build()
+        return Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
     }
 
     /**

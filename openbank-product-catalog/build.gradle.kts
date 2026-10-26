@@ -34,6 +34,7 @@ openApiGenerate {
             "apis" to "CatalogV2,CatalogEvents",
             "models" to listOf(
                 "EligibilityRule",
+                "IrSignature",
                 "EligibilityOperator",
                 "ApiError",
                 "CatalogEvent",
@@ -47,6 +48,8 @@ openApiGenerate {
                 "PriceComponent",
                 "ProductRevision",
                 "PublishRequest",
+                "RevisionApprovalPolicy",
+                "RevisionApprovalRole",
                 "RevisionRequest",
                 "RevisionContent",
                 "SchemaRef",
