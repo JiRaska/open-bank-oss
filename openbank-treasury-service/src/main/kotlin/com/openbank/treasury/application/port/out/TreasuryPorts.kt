@@ -55,6 +55,10 @@ interface DealRepository {
         journal: LedgerJournalRef? = null,
         event: DealEvent? = null,
         command: CommandKey? = null,
+        /** ADR-0344 D4: the schedule generated with this change, stored in the same transaction. */
+        schedule: ScheduleWrite? = null,
+        /** Further outbox events of the same change (e.g. treasury.cashflow.generated). */
+        extraEvents: List<DealEvent> = emptyList(),
     ): Deal
 
     /** The command previously recorded under [key], if any. */
