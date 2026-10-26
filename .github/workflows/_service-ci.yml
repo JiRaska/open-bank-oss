@@ -97,12 +97,14 @@ jobs:
   # the git-pact (@PactFolder) classes run unconditionally, same as before.
   build:
     name: ${{ inputs.service }} (build)
-    runs-on: ubuntu-latest
+    # The main-only context pilot produces the exact native platform used by deployment.
+    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 45
     # This job executes pull-request code.  Keep the OIDC token unavailable even though the
     # trusted contract job below needs it for the private ECR pull-through cache.
     permissions:
       contents: read
+      actions: read  # optional class-order hints from trusted main evidence
     env:
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
       # Force a UTF-8 locale so the JVM's sun.jnu.encoding (the *filename* charset,
@@ -231,10 +233,49 @@ jobs:
       #   openbank-interest-service/openbank-interest-service/build/openapi-generated/openapi.yaml
       # With the path corrected, that one service alone yields "2 request schema(s) compared,
       # 21 finding(s)". Keep this relative to the subproject.
+      - name: Prepare optional context test ordering
+        if: inputs.service == 'openbank-context-service' && inputs.ref == ''
+        timeout-minutes: 1
+        continue-on-error: true  # history is optional; a failed fetch keeps the full default suite
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/prepare-test-priority.py \
+            --repo "$GITHUB_REPOSITORY" --component openbank-context-service \
+            --out "$RUNNER_TEMP/context-test-priority.json"
+          echo "OPENBANK_TEST_PRIORITY_FILE=$RUNNER_TEMP/context-test-priority.json" >> "$GITHUB_ENV"
+
       - name: Build + test (:${{ inputs.service }})
         env:
           SERVICE: ${{ inputs.service }}
+          DEPLOY_ARTIFACT_PILOT: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' }}
         run: bash -e "$SERVICE_CI_HELPERS/build-test.sh"
+
+      - name: Package verified context deployment build
+        id: deploy_bundle
+        # Optional cache production runs AFTER the mandatory build/test/SBOM task graph.
+        # A failure here cannot hide a build failure; the consumer performs its normal build.
+        continue-on-error: true
+        if: inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == ''
+        env:
+          ANALYTICS_SINK_TYPE: clickhouse
+          AGENT_SVID_NONCE_STORE: redis
+        run: |
+          python3 .github/scripts/service-build-artifact.py pack \
+            --service openbank-context-service --sha "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --out "$RUNNER_TEMP/deploy-build"
+
+      - name: Retain verified context deployment build
+        if: steps.deploy_bundle.outcome == 'success'
+        continue-on-error: true  # upload availability is not a correctness gate
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: service-build-openbank-context-service-${{ github.sha }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/deploy-build/deploy-build.zip
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
       # A Docker Hub pull failure surfaces as NAMED TEST FAILURES, ~900 lines above the actual
       # cause, so the reader goes hunting for a test bug that is not there. Diagnostic only:

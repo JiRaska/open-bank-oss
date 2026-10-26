@@ -90,6 +90,16 @@ interface ProductCatalogRestClient {
     @GET
     @Path("/revisions/{id}")
     fun getRevision(@PathParam("id") revisionId: String): Uni<RevisionDto>
+
+    /**
+     * The same revision as raw JSON, for the product-IR shadow (ADR-0352 phase 3): its `behaviour` and
+     * `irSignature` are read by [com.openbank.billing.infrastructure.adapter.RestCatalogRevisionIrPort]
+     * with a BigDecimal-preserving mapper, because a JSON number in the IR must reach the canonical hash
+     * exactly as the catalog signed it. Never called on the posting path.
+     */
+    @GET
+    @Path("/revisions/{id}")
+    fun getRevisionJson(@PathParam("id") revisionId: String): Uni<String>
 }
 
 /** The subset of a catalog `ProductRevision` billing reads (`GET /api/v2/revisions/{id}`). */
