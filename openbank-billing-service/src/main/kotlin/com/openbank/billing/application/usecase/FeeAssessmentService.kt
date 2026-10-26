@@ -116,19 +116,20 @@ class FeeAssessmentService @jakarta.inject.Inject constructor(
             skipReason = null,
             assessedFees = assessed,
         )
-        return assessment.copy(shadowInput = shadowInput(assessment, billing, terms.revisionId, scheduledCadence))
+        return assessment.copy(shadowInput = shadowInput(assessment, billing, terms, scheduledCadence))
     }
 
     private fun shadowInput(
         assessment: BillingAssessment,
         billing: AccountBilling,
-        revisionId: String,
+        terms: com.openbank.billing.application.port.out.RevisionTerms,
         scheduledCadence: String?,
     ) = ProductShadowInput(
         cycleId = assessment.cycleId,
         accountId = assessment.accountId,
         currency = assessment.currency,
-        productRevisionId = revisionId,
+        productRevisionId = terms.revisionId,
+        expectedRevision = terms.shadowRevision,
         balance = billing.context.balance,
         monthlyTurnover = billing.context.monthlyTurnover,
         aggregatePocketBalance = billing.context.aggregatePocketBalance,
