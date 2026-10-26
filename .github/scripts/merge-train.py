@@ -1102,17 +1102,116 @@ def record_problem(record_desc: str | None, record_creator: str | None, sha_tree
 
 
 # --------------------------------------------------------------------------- GitHub
-def api(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
-    req = urllib.request.Request(API + path, method=method,
-                                 data=json.dumps(body).encode() if body is not None else None)
-    req.add_header("Accept", "application/vnd.github+json")
-    req.add_header("X-GitHub-Api-Version", "2022-11-28")
-    req.add_header("Authorization", f"Bearer {os.environ['GH_TOKEN']}")
+# Transient GitHub API failures (#13400). On 2026-10-26 one 503 in publish (16:33Z, a check-runs GET) and
+# one installation-quota 403 in build (16:39Z) each killed a tick's carrier, ~25 min of fast lane lost.
+# ONE policy, here, in the only helper every mode's API call goes through:
+# - retried with bounded exponential backoff: 502/503/504, a connection reset/refusal or timeout, and a
+#   SECONDARY rate limit (403/429 carrying Retry-After). Only for GET — a write whose response was lost
+#   may have been applied (a retried update-branch would answer 422 and read as a refusal), so a
+#   transient failure on a write aborts the tick instead;
+# - PRIMARY quota exhaustion (403/429 with x-ratelimit-remaining: 0) is never retried: the tick aborts at
+#   once, logging the reset time — waiting in-process could only burn runner minutes until it;
+# - everything else (401, 403 without a rate-limit signal, 404, 422, ...) is returned exactly as before,
+#   so every caller stays fail-closed on it.
+# An abort raises ApiAbort, which main() turns into a clean exit: no member is blamed, nothing is
+# bisected or halved, the batch stays armed for the next tick. Sleep is bounded per call
+# (API_RETRY_ATTEMPTS, API_BACKOFF_CAP_S) and per process (API_RETRY_BUDGET_S, 5 min against the
+# 30-45 min step timeouts in merge-train.yml).
+TRANSIENT_HTTP = frozenset({502, 503, 504})
+API_RETRY_ATTEMPTS = 5
+API_BACKOFF_BASE_S = 2.0
+API_BACKOFF_CAP_S = 60.0
+API_RETRY_BUDGET_S = 300.0
+_api_slept = [0.0]
+# Quota (#13400): one tick read the same check-runs of a sha up to three times (checks, ci_activity,
+# extra_checks) and the ruleset twice (required, merge_guard). Those GETs are memoised for the rest
+# of the process, as is the open-PR list (read three times per tick), and EVERY write clears the memo,
+# so a read after the App's own status, merge or update-branch is always live. Never memoised: the main
+# ref and a single PR (`pulls/<n>`) — the live re-reads a merge is pinned against.
+_GET_MEMO: dict[str, bytes] = {}
+GET_MEMO_RE = re.compile(r"^/repos/[^/]+/[^/]+/(?:commits/[0-9a-f]{40}/(?:check-runs|status|statuses)"
+                         r"|rules/branches/[^/?]+|actions/runs\?head_sha=[0-9a-f]{40}|pulls\?state=open&base=[^&]+)(?:[?&].*)?$")
+
+
+class ApiAbort(Exception):
+    """The GitHub API is unavailable for this tick (transient retries spent, or primary quota out).
+    Never a verdict about any PR: main() exits cleanly and the next tick starts over."""
+
+    def __init__(self, kind: str, detail: str, reset: int | None = None):
+        super().__init__(f"{kind}: {detail}")
+        self.kind, self.detail, self.reset = kind, detail, reset
+
+
+def _http_open(req, timeout):
+    """(status, body bytes, headers) for a 2xx/3xx; raises urllib errors otherwise. Replaced in self-test."""
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.status, r.read(), r.headers
+
+
+def _api_sleep(s: float) -> None:
+    time.sleep(s)
+
+
+def _header(headers, name: str) -> str:
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return r.status, json.loads(r.read() or b"null")
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode(errors="replace")[:300]
+        return (headers.get(name) if headers is not None else None) or ""
+    except AttributeError:
+        return ""
+
+
+def api_retry_delay(method: str, code: int | None, headers, attempt: int) -> float | None:
+    """Seconds to wait before retrying, or None when this failure is not retried. Raises ApiAbort for
+    primary quota exhaustion. `code` None = connection reset/refused or timeout (no response)."""
+    if code in (403, 429):
+        if _header(headers, "x-ratelimit-remaining") == "0":
+            reset = _header(headers, "x-ratelimit-reset")
+            when = (datetime.datetime.fromtimestamp(int(reset), datetime.timezone.utc).strftime("%H:%M:%SZ")
+                    if reset.isdigit() else "unknown")
+            raise ApiAbort("quota", f"primary rate limit exhausted, resets at {when}",
+                           int(reset) if reset.isdigit() else None)
+        retry_after = _header(headers, "retry-after")
+        if not retry_after.isdigit():
+            return None                       # auth/permission 403: fail closed, never retried
+        if method != "GET":
+            raise ApiAbort("secondary", f"secondary rate limit on a {method} (Retry-After {retry_after}s)")
+        return float(retry_after)
+    if code is not None and code not in TRANSIENT_HTTP:
+        return None
+    if method != "GET":
+        raise ApiAbort("transient", f"{method} failed with {code or 'no response'}; a write is never retried")
+    return min(API_BACKOFF_CAP_S, API_BACKOFF_BASE_S * (2 ** attempt))
+
+
+def api(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
+    data = json.dumps(body).encode() if body is not None else None
+    memo = method == "GET" and GET_MEMO_RE.match(path) is not None
+    if method != "GET":
+        _GET_MEMO.clear()
+    elif memo and path in _GET_MEMO:
+        return 200, json.loads(_GET_MEMO[path])
+    for attempt in range(API_RETRY_ATTEMPTS):
+        req = urllib.request.Request(API + path, method=method, data=data)
+        req.add_header("Accept", "application/vnd.github+json")
+        req.add_header("X-GitHub-Api-Version", "2022-11-28")
+        req.add_header("Authorization", f"Bearer {os.environ['GH_TOKEN']}")
+        try:
+            status, raw, _h = _http_open(req, 30)
+            if memo and status == 200:
+                _GET_MEMO[path] = raw or b"null"
+            return status, json.loads(raw or b"null")
+        except urllib.error.HTTPError as e:
+            code, headers, text = e.code, e.headers, e.read().decode(errors="replace")[:300]
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            code, headers, text = None, None, f"{type(e).__name__}: {e}"
+        delay = api_retry_delay(method, code, headers, attempt)
+        if delay is None:
+            return code, text                 # not transient: the caller decides, fail-closed as before
+        if attempt + 1 >= API_RETRY_ATTEMPTS or _api_slept[0] + delay > API_RETRY_BUDGET_S:
+            raise ApiAbort("transient", f"{method} {path} -> {code or 'no response'} after {attempt + 1} attempt(s)")
+        log(f"::notice::{method} {path} -> {code or 'no response'}: retry {attempt + 1} in {delay:.0f}s")
+        _api_sleep(delay)
+        _api_slept[0] += delay
+    raise ApiAbort("transient", f"{method} {path}: retries exhausted")   # unreachable: the loop returns or raises
 
 
 def get(path: str) -> object:
@@ -1486,6 +1585,7 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         view = pr_view(repo, p, files)
         view["special_paths"] = [x for c in entries if c.new_mode in SPECIAL_MODES for x in c.paths]
         app = gh.app_statuses(fetched)
+        view["app"] = app                    # strict_lane reads the notice from it, no second read
         checks = pinned_checks(gh, fetched, extra)
         ok, why = qualifies(view, member_required, checks, app, untrainable, extra=extra)
         log(f"#{n:>6} {'CANDIDATE' if ok else 'skip     '} {why}")
@@ -2269,7 +2369,7 @@ def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict
             if not at_base or at_base[1] != "failure":
                 why = f"{ctx} was not red on main at its base {mb[:12]} — its own defect"
                 break
-            at_tip = main_ci_result(gh, git, ctx, base)
+            at_tip = main_ci_result(gh, git, ctx, base, cache)   # one walk per tick, not one per PR
             if not at_tip or at_tip[1] not in OK_STATES:
                 why = f"{ctx} is not green on main yet — no point refreshing"
                 break
@@ -2408,7 +2508,19 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
             # conflicts, and the NEXT strict PR is served in this same tick. GitHub's update-branch would
             # only refuse it again: #13739 was re-requested on every tick for ~11 h (2026-10-26) while
             # the installation token ran out (403 at 16:39Z killed a deferral carrier's build).
+            told = (view.get("app") or {}).get(NOTICE_CONTEXT, ("", ""))[1]
+            if told.startswith(f"{REFUSED_PREFIX}{base[:12]}"):
+                # Quota (#13400): GitHub already refused THIS head over THIS main and nothing changed,
+                # so asking again can only be refused again. A new head or a moved main asks again.
+                log(f"#{n:>6} strict    behind main {base[:12]}: update-branch already refused for this head "
+                    f"over this main — not asked again, next strict PR served")
+                continue
             clash = conflict_paths(git, base, head)
+            if clash and NOTICE_CONTEXT in (view.get("app") or {}):
+                log(f"#{n:>6} strict    behind main {base[:12]}, conflicts with it on {len(clash)} path(s): "
+                    f"already told on this head — next strict PR served")
+                summary.setdefault("conflicts", []).append(n)
+                continue
             if clash:
                 log(f"#{n:>6} strict    behind main {base[:12]}, conflicts with it on {len(clash)} path(s): "
                     f"not updated, reservation released — next strict PR served")
@@ -2775,6 +2887,113 @@ class FakeGitHub:
         return n
 
     def close_carrier(self, n): self.carriers[n]["state"] = "closed"
+
+
+class HttpFixture:
+    """The GitHub REST API as `GitHub` sees it, served from a FakeGitHub: patched in place of
+    urllib.request.urlopen, so the REAL GitHub class, api() and its retry policy run. `faults` is a list
+    of [predicate(method, path), (code, headers) | "reset", times] — `times` None = every attempt."""
+
+    def __init__(self, fake, faults=None):
+        self.fake, self.faults, self.calls = fake, [list(f) for f in (faults or [])], []
+
+    def sync_refs(self):
+        for n, p in self.fake.prs.items():
+            if p["state"] == "open":
+                self.fake.g("update-ref", f"refs/pull/{n}/head", p["head"]["sha"])
+
+    def __call__(self, req, timeout=None):
+        import email.message
+        import urllib.parse
+        method, path = req.get_method(), req.full_url[len(API):]
+        self.calls.append((method, path))
+        for f in self.faults:
+            if f[2] != 0 and f[0](method, path):
+                if f[2] is not None:
+                    f[2] -= 1
+                if f[1] == "reset":
+                    raise ConnectionResetError("connection reset by peer")
+                code, hdrs = f[1]
+                h = email.message.Message()
+                for k, v in hdrs.items():
+                    h[k] = v
+                raise urllib.error.HTTPError(req.full_url, code, "fault", h, io.BytesIO(b'{"message": "fault"}'))
+        u = urllib.parse.urlsplit(path)
+        page = int(urllib.parse.parse_qs(u.query).get("page", ["1"])[0])
+        rest = u.path.split("/", 4)[4]
+        body = json.loads(req.data) if req.data else None
+        code, out = self.route(method, rest, u.query, body, page)
+        if code >= 400:
+            raise urllib.error.HTTPError(req.full_url, code, "no", email.message.Message(), io.BytesIO(b"{}"))
+        raw = json.dumps(out).encode()
+
+        class _R:
+            status, headers = code, {}
+
+            def read(self):
+                return raw
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        return _R()
+
+    def route(self, method, rest, query, body, page):
+        fk = self.fake
+        pg = (lambda items: items if page == 1 else [])
+        every = list(fk.prs.values()) + list(fk.carriers.values())
+        m = re.fullmatch(r"commits/([0-9a-f]{40})/(check-runs|status|statuses)", rest)
+        if method == "GET" and rest.startswith("rules/branches/"):
+            return 200, [{"type": "required_status_checks", "parameters": {
+                "strict_required_status_checks_policy": False,
+                "required_status_checks": [{"context": c, "integration_id": 4242 if c == STATUS_CONTEXT else None}
+                                           for c in SYN_REQUIRED]}}]
+        if method == "GET" and rest == "git/ref/heads/main":
+            return 200, {"object": {"sha": fk.main_sha()}}
+        if method == "GET" and rest == "pulls":
+            return 200, pg([{**p, "user": p.get("user") or {"login": "someone"}} for p in fk.open_prs()])
+        if method == "GET" and re.fullmatch(r"pulls/[0-9]+", rest):
+            n = int(rest.split("/")[1])
+            return 200, next(p for p in every if p["number"] == n)
+        if method == "GET" and m and m.group(2) == "check-runs":
+            ci = {c: v for c, v in fk.checks(m.group(1)).items() if c not in {x[0] for x in fk.statuses.get(m.group(1), [])}}
+            return 200, {"check_runs": pg([{"id": i + 1, "name": c, "status": "in_progress" if v is None else "completed",
+                                            "conclusion": v, "app": {"slug": "fixture"},
+                                            "started_at": "2026-01-01T00:00:00Z"} for i, (c, v) in enumerate(sorted(ci.items()))])}
+        if method == "GET" and m and m.group(2) == "status":
+            return 200, {"statuses": []}
+        if method == "GET" and m:
+            return 200, pg([{"id": i + 1, "context": c, "state": st, "description": d, "creator": {"login": who}}
+                            for i, (c, st, d, who) in enumerate(fk.statuses.get(m.group(1), []))])
+        if method == "GET" and rest == "actions/runs":
+            sha = re.search(r"head_sha=([0-9a-f]{40})", query).group(1)
+            return 200, {"workflow_runs": pg([{"head_sha": sha, "path": ".github/workflows/security.yml",
+                                               "status": "completed", "conclusion": "success"}])}
+        if method == "POST" and rest.startswith("statuses/"):
+            fk.post_status(rest.split("/")[1], body["state"], body["description"], context=body["context"])
+            return 201, {}
+        if method == "POST" and re.fullmatch(r"issues/[0-9]+/comments", rest):
+            fk.comment(int(rest.split("/")[1]), body["body"])
+            return 201, {}
+        if method == "POST" and re.fullmatch(r"issues/[0-9]+/labels", rest):
+            return 200, []
+        if method == "PUT" and rest.endswith("/update-branch"):
+            ok = fk.update_branch(int(rest.split("/")[1]), body["expected_head_sha"])
+            self.sync_refs()
+            return (202, {}) if ok else (422, {})
+        if method == "PUT" and rest.endswith("/merge"):
+            sha = fk.merge(int(rest.split("/")[1]), body["sha"])
+            return 200, {"merged": bool(sha), "sha": sha}
+        if method == "POST" and rest == "pulls":
+            n = fk.create_carrier(body["head"])
+            fk.carriers[n]["head"]["repo"] = {"full_name": "o/r"}
+            return 201, {"number": n}
+        if method == "PATCH" and re.fullmatch(r"pulls/[0-9]+", rest):
+            fk.close_carrier(int(rest.split("/")[1]))
+            return 200, {}
+        return 404, {}
 
 
 def _synthetic_origin(root: str) -> None:
@@ -5174,14 +5393,175 @@ def self_test() -> int:
                 del gh.update_branch
             head35 = gh.prs[35]["head"]["sha"]
             told = [t for n, t in gh.comments if n == 35 and t.startswith(REFUSED_COMMENT)]
-            check("notice: a refused update-branch is still retried every tick (decision unchanged)",
-                  refused == [35, 35, 35] and gh.merged == [], f"{refused} {gh.merged}")
+            # Quota (#13400): refused for THIS head over THIS main is not asked again until either moves.
+            check("notice: a refused update-branch is asked once per (head, main), not every tick",
+                  refused == [35] and gh.merged == [], f"{refused} {gh.merged}")
             check("notice: a refused update-branch is told ONCE per head (status + comment + marker)",
                   len(told) == 1 and mt_status(35)[1].startswith(REFUSED_PREFIX)
                   and len([x for x in gh.statuses.get(head35, []) if x[0] == STATUS_CONTEXT]) == 1
                   and NOTICE_CONTEXT in gh.app_statuses(head35), f"{gh.comments} {gh.statuses.get(head35)}")
             gh.updates.clear()
             reset()
+            # ---- GitHub API (#13400): transient failures never kill a tick's carrier; quota is not burnt ----
+            # The REAL GitHub class and api() over HttpFixture (urllib.request.urlopen patched). Rebuilt
+            # from 2026-10-26: publish died on a check-runs GET 503 at 16:33Z, build on the installation's
+            # primary quota (403) at 16:39Z — each a lost carrier and a red run, no member at fault.
+            reset()
+            gh.updates.clear()
+            saved_http = (urllib.request.urlopen, globals()["_api_sleep"], os.environ.get("GITOPS_APP_ID"))
+            slept: list[float] = []
+            os.environ["GITOPS_APP_ID"] = "4242"
+            globals()["_api_sleep"] = slept.append
+
+            def with_http(faults=None):
+                fx = HttpFixture(gh, faults)
+                fx.sync_refs()
+                urllib.request.urlopen = fx
+                _GET_MEMO.clear()
+                _api_slept[0] = 0.0
+                slept.clear()
+                real = GitHub("o/r", "main", "http://run")
+                real.remote = origin
+                return fx, real
+
+            def writes(fx):
+                return [c for c in fx.calls if c[0] != "GET"]
+
+            def check_runs_get(method, path):
+                return method == "GET" and "/check-runs" in path
+
+            def real_tick(real, fx):
+                """build -> publish with the real GitHub class, each guarded as main() guards it."""
+                counter[0] += 1
+                bdir = clone("build")
+                out = os.path.join(root, f"bundle-http-{counter[0]}")
+                b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",),
+                                 overlay_roots=(".github/scripts",))
+                rc_b = guard_api("build", lambda: (mode_build(real, Git(bdir), b, "o/r", out, 8), 0)[1])
+                fx.sync_refs()
+                got = []
+                rc_p = guard_api("publish", lambda: got.append(
+                    mode_publish(real, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)) or 0)
+                return rc_b, rc_p, (got[0] if got else None)
+
+            try:
+                # (a) a 503 on a check-runs GET, then success: retried with backoff, the carrier is published.
+                open_only("p1")
+                try:
+                    fx, real = with_http([[check_runs_get, (503, {}), 1]])
+                    rc_b, rc_p, st = real_tick(real, fx)
+                    ok = rc_b == 0 and rc_p == 0 and st == "published" and slept == [API_BACKOFF_BASE_S]
+                    detail = f"rc={rc_b},{rc_p} st={st} slept={slept}"
+                except BaseException as exc:          # the code before this change: SystemExit on the 503
+                    ok, detail = False, f"{type(exc).__name__}: {exc}"
+                check("api: a 503 then a success is retried with backoff and the carrier is published", ok, detail)
+                reset()
+
+                # (b) 503 on every attempt: the tick aborts cleanly, nobody blamed, nothing posted.
+                open_only("p1")
+                try:
+                    fx, real = with_http([[check_runs_get, (503, {}), None]])
+                    rc_b, rc_p, st = real_tick(real, fx)
+                    tries = len([c for c in fx.calls if check_runs_get(*c)])
+                    ok = (rc_b == 0 and rc_p == 0 and st is None and not writes(fx) and not gh.statuses
+                          and not gh.comments and not any(c["state"] == "open" for c in gh.carriers.values())
+                          and 2 <= tries <= 2 * API_RETRY_ATTEMPTS and sum(slept) <= API_RETRY_BUDGET_S)
+                    detail = f"rc={rc_b},{rc_p} st={st} tries={tries} writes={writes(fx)} statuses={gh.statuses}"
+                except BaseException as exc:
+                    ok, detail = False, f"{type(exc).__name__}: {exc}"
+                check("api: 503 on every attempt aborts the tick with no member fault (no status, comment, carrier)",
+                      ok, detail)
+                reset()
+
+                # (c) primary quota exhausted: ONE request, no retry, no bisect or halving, the reset time logged.
+                open_only("p1")
+                try:
+                    fx, real = with_http([[lambda m, p: m == "GET", (403, {"x-ratelimit-remaining": "0",
+                                                                           "x-ratelimit-reset": str(int(time.time()) + 3600)}), None]])
+                    err = None
+                    try:
+                        api("GET", "/repos/o/r/pulls?state=open&base=main")
+                    except ApiAbort as exc:
+                        err = exc
+                    n_after_one = len(fx.calls)
+                    rc_b, rc_p, st = real_tick(real, fx)
+                    ok = (err is not None and err.kind == "quota" and "01:00:00Z" in err.detail and n_after_one == 1
+                          and not slept and rc_b == 0 and rc_p == 0 and not writes(fx) and not gh.statuses)
+                    detail = f"err={err!r} calls={len(fx.calls)} slept={slept} rc={rc_b},{rc_p} statuses={gh.statuses}"
+                except BaseException as exc:
+                    ok, detail = False, f"{type(exc).__name__}: {exc}"
+                check("api: primary quota exhaustion aborts at once - no retry, no bisect, reset time logged", ok, detail)
+                reset()
+
+                # (d) auth errors are never retried and stay fail-closed: 401, and 403 without a rate-limit signal.
+                for code, hdrs in ((401, {}), (403, {}), (422, {})):
+                    try:
+                        fx, real = with_http([[lambda m, p: True, (code, hdrs), None]])
+                        got = api("GET", "/repos/o/r/pulls/1")
+                        try:
+                            get("/repos/o/r/pulls/1")
+                            closed = False
+                        except SystemExit:
+                            closed = True
+                        ok = got[0] == code and closed and len(fx.calls) == 2 and not slept
+                        detail = f"got={got[0]} closed={closed} calls={len(fx.calls)} slept={slept}"
+                    except BaseException as exc:
+                        ok, detail = False, f"{type(exc).__name__}: {exc}"
+                    check(f"api: a {code} is never retried and fails closed", ok, detail)
+
+                # (e) secondary rate limit with Retry-After and a connection reset are retried (GET only);
+                # a transient failure on a WRITE is never retried — it aborts the tick.
+                try:
+                    fx, real = with_http([[lambda m, p: True, (403, {"retry-after": "7"}), 1],
+                                          [lambda m, p: True, "reset", 1]])
+                    got = api("GET", "/repos/o/r/git/ref/heads/main")
+                    ok = got[0] == 200 and slept == [7.0, API_BACKOFF_BASE_S * 2] and len(fx.calls) == 3
+                    fx, real = with_http([[lambda m, p: m == "POST", (503, {}), None]])
+                    try:
+                        api("POST", f"/repos/o/r/statuses/{'a' * 40}", {"state": "success", "context": "x", "description": ""})
+                        ok = False
+                    except ApiAbort:
+                        ok = ok and len(fx.calls) == 1
+                    detail = f"slept={slept} calls={fx.calls}"
+                except BaseException as exc:
+                    ok, detail = False, f"{type(exc).__name__}: {exc}"
+                check("api: Retry-After and a reset are retried on a GET; a write is never retried", ok, detail)
+
+                # (f) quota: a steady-state settle tick asks nothing twice (#13739 shape: a strict PR whose
+                # update-branch is refused, next to an idle candidate). Counted on the fixture.
+                open_only("pW", "p1")
+                fx, real = with_http()
+                refuse = lambda n, head: False      # noqa: E731 — GitHub refuses, no conflict merge-tree sees
+                gh.update_branch = refuse
+                try:
+                    gh.g("checkout", "-q", "-f", "main")
+                    pathlib.Path(origin, "docs").mkdir(parents=True, exist_ok=True)
+                    pathlib.Path(origin, "docs/quota.md").write_text("main moves\n")
+                    gh.g("add", "-A")
+                    gh.g("commit", "-q", "-m", "main moves under the strict PR")
+                    per_tick = []
+                    for _ in range(3):
+                        before = len(fx.calls)
+                        _GET_MEMO.clear()
+                        mode_settle(real, Git(clone("settle")), "o/r", False)
+                        per_tick.append(fx.calls[before:])
+                finally:
+                    del gh.update_branch
+                steady = per_tick[-1]
+                dup = sorted({c for c in steady if c[0] == "GET" and steady.count(c) > 1})
+                upd = [c for c in steady if c[1].endswith("/update-branch")]
+                log(f"api: settle calls per tick on the fixture: {[len(t) for t in per_tick]}")
+                check("api: a steady-state tick re-asks no refused update-branch and repeats no memoisable GET",
+                      not upd and not [c for c in dup if GET_MEMO_RE.match(c[1])],
+                      f"per_tick={[len(t) for t in per_tick]} update={upd} dup={dup[:6]}")
+                reset()
+            finally:
+                urllib.request.urlopen, globals()["_api_sleep"] = saved_http[0], saved_http[1]
+                if saved_http[2] is None:
+                    os.environ.pop("GITOPS_APP_ID", None)
+                else:
+                    os.environ["GITOPS_APP_ID"] = saved_http[2]
+                _GET_MEMO.clear()
     finally:
         for k, v in saved.items():
             if v is None:
@@ -5224,6 +5604,34 @@ def main() -> int:
     if "GH_TOKEN" not in os.environ:
         ap.error("GH_TOKEN is required (read-only for build, the App token for publish/settle)")
     gh = GitHub(args.repo, args.branch, args.run_url)
+    return guard_api(args.mode, lambda: run_mode(gh, args, ap))
+
+
+def guard_api(mode: str, run) -> int:
+    """Run one mode; a GitHub API outage (ApiAbort) ends the tick cleanly instead of failing the job."""
+    try:
+        return run()
+    except ApiAbort as exc:
+        return api_abort_exit(mode, exc)
+
+
+def api_abort_exit(mode: str, exc: ApiAbort) -> int:
+    """A tick the API could not serve (#13400): a clean exit, never a verdict. Build reports no train
+    (publish is skipped, the batch stays armed), settle reports in flight (nothing is built over a
+    state it could not read), and no status, comment, bisect or halving is posted for any member."""
+    log(f"::warning::merge-train {mode}: GitHub API unavailable ({exc}) — tick aborted, no member fault, "
+        f"the batch is kept for the next tick")
+    if mode == "owner-approval":
+        return 1                              # an owner decision that was not recorded must fail visibly
+    if mode == "build":
+        write_output("has_train", "false")
+        write_output("has_drops", "false")
+    elif mode == "settle":
+        write_output("in_flight", "true")
+    return 0
+
+
+def run_mode(gh, args, ap) -> int:
     if args.mode == "owner-approval":
         mode_owner_approval(gh, args.pr, args.head, args.decision)
         return 0
