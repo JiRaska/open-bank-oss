@@ -69,6 +69,9 @@ dependencies {
 // Vert.x threads. Kover still instruments this Test task and the check lifecycle still requires it.
 tasks.named<Test>("test") {
     exclude("**/PaymentSessionStoreCrossReplicaTest.class")
+    // The suite boots many distinct @QuarkusTest applications in one JVM; at the default heap the
+    // executor died with OutOfMemoryError once DelegatedAccountsListIT added one more boot.
+    maxHeapSize = "2g"
 }
 
 val paymentSessionStoreCrossReplicaTest = tasks.register<Test>("paymentSessionStoreCrossReplicaTest") {

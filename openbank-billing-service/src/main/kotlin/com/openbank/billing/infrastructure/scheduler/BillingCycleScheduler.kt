@@ -251,7 +251,7 @@ class BillingCycleScheduler {
                     cycleId,
                     accountIds.size,
                 )
-                val outcome = billingCycleService.runCycleWithOutcome(cycleId, accountIds, currency)
+                val outcome = billingCycleService.runCycleWithOutcome(cycleId, accountIds, currency, "MONTHLY")
                 processedInSweep += outcome.processed
                 failedInSweep += outcome.failed
                 val processed = outcome.processed
@@ -311,7 +311,7 @@ class BillingCycleScheduler {
             do {
                 val page = accountDiscovery.activeAccounts(discoveryPageSize, cursor)
                 if (page.accountIds.isNotEmpty()) {
-                    val outcome = billingCycleService.runCycleWithOutcome(cycleId, page.accountIds, currency)
+                    val outcome = billingCycleService.runCycleWithOutcome(cycleId, page.accountIds, currency, "MONTHLY")
                     processed += outcome.processed
                     processedInSweep += outcome.processed
                     failedInSweep += outcome.failed

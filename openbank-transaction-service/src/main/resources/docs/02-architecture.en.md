@@ -184,3 +184,13 @@ sequenceDiagram
 ## Scheduled-job heartbeat
 
 The stuck-saga gauge refresh (every 30 s) registers the fleet workflow-liveness heartbeat `stuck-saga-gauge-refresh` (`DomainMetrics.registerWorkflowLiveness`, seeded at startup) and records a success only on its success path: a refresh that stops would freeze `openbank.transaction.sagas.stuck` at its last value, which reads as a healthy count; the heartbeat age is what exposes it. `WorkflowLivenessStale` alerts when the age exceeds twice the expected interval.
+
+## Temporal SDK compatibility
+
+Payment workers use Temporal Java SDK **1.40.0** with immutable Worker Deployment
+identities and PINNED workflow behavior (ADR-0355). Other Temporal services remain
+on SDK 1.25.1. The shared Kotlin converter and trace propagation are preserved.
+This changes deployment configuration: retained workers must be prepared before
+updating API replicas, which disable their in-process worker. See
+[the rollout guide](temporal-worker-versioning.en.md) and
+[replay compatibility](temporal-replay.en.md). SDK downgrade is not routing rollback.

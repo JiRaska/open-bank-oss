@@ -1775,6 +1775,31 @@ gates:
     run: |
       python3 .github/scripts/check-stateful-not-on-spot.py
 
+  - id: default-nodepool-budget-shape
+    name: "default NodePool disruption budgets stay pinned: <=1 node, windowed drift, freeze (#13726, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 20
+    rationale: >-
+      #13704 bounded the spot `default` NodePool (most CNPG pods) to one disrupted node at a time and
+      confined Drifted replacements to a daily window via a scheduled Drifted budget of 0 nodes,
+      beside the overnight freeze. Nothing enforced it, and stateful-not-on-spot covers only the
+      stateful pool. Every budget must allow at most one node (a "50%" entry is live the day the tight
+      one goes), a catch-all budget must exist, the Drifted-0 schedule must leave a window of at most
+      4h, and the freeze (scheduled, no reasons, 0 nodes) must remain. The HCL is brace-matched, as
+      in check-stateful-not-on-spot.py.
+    review_after: "2027-04-30"
+    verified: >-
+      2026-10-24 -- run on the branch: OK, 4 budgets. Self-test falsifies 7 mutations on the real
+      file (catch-all removed, catch-all raised to 50%, Drifted raised to 5, scheduled Drifted
+      budget removed, window widened to 12h, freeze removed, pool renamed) and a missing file.
+    min_subjects: 3   # 4 budget entries today (2026-10-24)
+    selftest_inputs: [".github/scripts/check-default-nodepool-budget.py"]
+    selftest: python3 .github/scripts/check-default-nodepool-budget.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-default-nodepool-budget.py
+
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
   # Rolling campaign-service into the sandbox hit five defects that each kill the pod or its
@@ -3156,6 +3181,7 @@ gates:
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
       python3 .github/scripts/test-merge-train-owner-approval.py
+      python3 .github/scripts/e2e/merge-train-gates-yaml.test.py
     selftest_expect: pass
     # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
     # every workflow, so a PR adding a carrier- or ruleset-judging check script must re-run it (#13750).
@@ -3616,7 +3642,7 @@ gates:
       capability preflight, committed read-back, canonical parent/tree/blob identity and
       PR timeline. Unknown policy source, codex downgrade and revoked intent fail closed.
     budget_seconds: 60
-    min_subjects: 26
+    min_subjects: 29
     rationale: >-
       PR intent under a reviewed pre-merge prefix rule is distinct from exact-head approval
       and from bounded legacy reconstruction. The original evidence gate retains its floor.
@@ -4274,7 +4300,10 @@ gates:
   - id: libs-annotations-implemented
     name: "openbank-libs annotations are implemented, and no doc names a phantom one (#4011, enforced)"
     group: kotlin
-    budget_seconds: 37
+    # 37 s -> 60 s (2026-10-20): the scan is linear in Kotlin sources under the libs and every
+    # service; ADR-0344 added a libs module and ~800 sources, and CI measured 37.2 s while a local
+    # run takes 17 s. Raised deliberately, not to hide a slowdown in the checker itself.
+    budget_seconds: 60
     mode: enforced
     selftest_inputs: [".github/scripts/check-libs-annotations-implemented.py"]
     selftest: |
@@ -5608,7 +5637,10 @@ gates:
     mode: enforced
     when: pull_request
     needs_base: required
-    budget_seconds: 20   # money-path only: bounded live GitHub read plus local diff
+    # 20 s -> 60 s (2026-10-24): on a merge-train carrier the gate judges every member on its own
+    # body and diff, one after another, so its time grows with the train. A five-member carrier
+    # measured 22.2 s and passed on content, yet the overrun made it inconclusive and held the train.
+    budget_seconds: 60   # one bounded live GitHub read plus local diff per member
     rationale: "The security checklist is the fleet's per-PR control and unticked boxes were free; on money-path code the six lines written for exactly that case must be answered, not carried."
     review_after: "2027-03-04"
     selftest: python3 .github/scripts/check-security-checklist.py --self-test

@@ -9,8 +9,8 @@ import com.openbank.fx.domain.screening.ScreeningResult
 import com.openbank.fx.domain.screening.ScreeningRole
 import com.openbank.fx.infrastructure.client.SanctionsScreeningAdapter
 import com.openbank.fx.it.PostgresRedisTestResource
-import com.openbank.fx.it.TraceContractProfile
 import com.openbank.libs.testing.trace.RecordingSpanExporter
+import com.openbank.libs.testing.trace.TraceContractProfile
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
