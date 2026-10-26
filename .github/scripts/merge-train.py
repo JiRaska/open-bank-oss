@@ -182,13 +182,19 @@ GITHUB_DIR = ".github/"
 GITHUB_TRAINABLE_SUFFIXES = (".md", ".txt")
 GITHUB_UNTRAINABLE_NAME_GLOBS = ("*requirements*",)
 # GATE CODE that rides a train (#13400) — an ALLOW-LIST, so an unknown `.github/` path stays strict.
-# A check script or gates.yaml is reviewed at arm time like any code, and the carrier's CI runs the
+# A check script is reviewed at arm time like any code, and the carrier's CI runs the
 # COMBINED head: the gate is judged together with the code it judges exactly as in the strict lane,
 # and bisect isolates a culprit. The one thing the strict lane gave that a train does not is that
 # "regeneration content is proven by MAIN's gates" — so a train carrying gate code never carries a
 # regeneration commit (TrainBuilder separates them; publish rejects the mix). Then the carrier tree
 # is only reviewed member diffs, the strict lane's trust exactly.
-GATE_CODE_GLOBS = (".github/scripts/check-*.py", ".github/scripts/check-*.sh", ".github/gates/gates.yaml")
+# gates.yaml is NOT gate code here (#13837): it DECLARES how every gate runs (run, selftest, mode,
+# when, budget_seconds), so one edit can retire a PRIVILEGED_GATE_CODE script without touching it.
+# Telling a privileged entry's edit from an ordinary one needs a YAML parse, and settle/publish run
+# under `python3 -I -S` (no site-packages, so no PyYAML; the stdlib has no YAML parser); a
+# hand-rolled parse of a document with anchors and duplicate-key hazards is a grep in disguise.
+# So every gates.yaml change takes the strict lane, judged by main's own gates.
+GATE_CODE_GLOBS = (".github/scripts/check-*.py", ".github/scripts/check-*.sh")
 # Check scripts that prove a DERIVED_OUTPUTS entry (ADR-0343 §Security): defence in depth on top of
 # the separation above.
 FRESHNESS_GATE_CODE = (".github/scripts/check-adr-registry.sh", ".github/scripts/check-eu-ai-act.sh")
@@ -2747,7 +2753,7 @@ def _synthetic_origin(root: str) -> None:
     pr("pW", {".github/workflows/w.yml": "on: push\n"})
     pr("pW2", {".github/scripts/two.py": "print(2)\n"})
     pr("pS", {".github/scripts/check-s.py": "print(1)\n"}, link=("docs-s-link", "/etc/passwd"))
-    # #13400: gate code (a check script, gates.yaml) rides a train; next to a member that needs
+    # #13400: gate code (a check script) rides a train; next to a member that needs
     # regeneration it must not share one (the regeneration is proven by main's gates only).
     pr("pK", {SYN_GATE_CODE: "print('k')\n"})
     pr("pM", {SYN_MAIN_GATE_CODE: "member\n"})   # modifies a check script main already has
@@ -2836,11 +2842,24 @@ def self_test() -> int:
     # #13400: reviewed gate code rides a train. The carrier's CI runs the COMBINED head, so a gate
     # change is judged together with the code it judges exactly as in the strict lane, and bisect
     # isolates a culprit; what it may never do is share a train with a regeneration commit.
-    for f in (".github/scripts/check-x.py", ".github/scripts/check-x.sh", ".github/gates/gates.yaml"):
+    for f in (".github/scripts/check-x.py", ".github/scripts/check-x.sh"):
         ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
         check(f"qualifies: a gate-code-only member ({f}) is a train CANDIDATE", ok and not U(f) and gate_code(f), why)
         sl = strict_lane_state({**base_pr, "files": [f]}, req, green, None, U, [], None, None)
         check(f"strict lane: a gate-code-only member ({f}) is NOT in the strict lane", sl[0] is None, str(sl))
+    # #13837: gates.yaml DECLARES the privileged gates' run/selftest/mode/when/budget, so no
+    # gates.yaml diff rides a train: each weakening shape is refused and lands in the strict lane.
+    for shape in ("run of check-adr-registry.sh pointed at a no-op", "mode flipped enforced -> advisory",
+                  "when narrowed to a path no PR touches", "privileged entry deleted", "budget_seconds changed"):
+        f = ".github/gates/gates.yaml"
+        ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
+        check(f"qualifies: gates.yaml ({shape}) is refused (strict lane)",
+              not ok and "manual lane" in why and U(f) and not gate_code(f), why)
+        check(f"strict lane: gates.yaml ({shape}) IS in the strict lane",
+              strict_lane_state({**base_pr, "files": [f]}, req, green, None, U, [], None, None)[0] == "green")
+    # ...while an unrelated (non-privileged) gate's CODE change still rides a train.
+    ok, why = qualifies({**base_pr, "files": [".github/scripts/check-unrelated.py"]}, req, green, None, U)
+    check("qualifies: an unrelated gate's check script still rides a train (#13837 control)", ok, why)
     for mix in ([".github/scripts/check-x.py", ".github/workflows/ci.yml"],
                 [".github/gates/gates.yaml", ".github/scripts/merge-train.py"],
                 [".github/scripts/check-x.py", ".github/unknown.json"]):
