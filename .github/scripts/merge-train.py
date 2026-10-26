@@ -163,6 +163,10 @@ CONFLICT_COMMENT = ("merge-train: this PR conflicts with main, so every train le
 REFUSED_COMMENT = ("merge-train: GitHub refused to update this branch with main (update-branch), so the strict "
                    "lane cannot serve it. Merge main into the branch and push; the new head is picked up on its "
                    "own. It stays armed.")
+STRICT_CONFLICT_COMMENT = ("merge-train: conflict — this strict-lane PR conflicts with main, so it cannot be "
+                           "update-branched and holds no reservation: the strict queue moves on without it. Merge "
+                           "main into the branch (or rebase), resolve the conflict and push; the new head is picked "
+                           "up on its own. It stays armed.")
 NOTICE_PATH_CAP = 20
 RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's inconclusive jobs were re-run once
 DEFER_CONTEXT = "merge-train/strict-deferral"   # App marker: this running strict head yielded once to a carrier
@@ -1947,6 +1951,21 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
         log(f"strict-lane #{holder} CI running, no deferral yet: a carrier may be built during it (bounded deferral)")
         summary["in_flight"] = False
         summary["deferral_window"] = holder
+    elif (holder is None and len(summary["updated"]) == 1 and not carrier_in_flight and not summary["strict"]
+            and train_waiting and not main_red and not any(is_carrier(p, repo) for p in gh.open_prs())
+            and update_opens_deferral(gh, git, strict, summary["updated"][0])):
+        # Overlap from the update tick (#13400): the update-branch just issued starts a reservation over
+        # THIS main, and its one deferral is still unused, so the carrier is built over the same main in
+        # this tick instead of the next one. Measured 2026-10-26 16:06-17:14Z: every update-branch tick
+        # reported in_flight and built nothing, so the fast lane lost one whole tick per reservation.
+        # Publish records the yield on the updated head (record_deferral: head contains the carrier's
+        # base, CI pending), which then inherits it through its first parent on any re-update — the same
+        # one-yield bound as above, so the strict PR is never pre-empted twice.
+        n = summary["updated"][0]
+        log(f"strict-lane #{n} update-branch requested over {base[:12]}, no deferral yet: a carrier may be built "
+            f"over the same main during its CI (bounded deferral)")
+        summary["in_flight"] = False
+        summary["deferral_window"] = n
     # Fast lane, from live data only — nothing here reads a stored classification. Held while main is
     # reserved for a strict-lane PR (or was just moved by one): GitHub auto-merge acts on this status,
     # and a merge now would put the reserved head behind main again.
@@ -2130,6 +2149,14 @@ def deferral_state(gh, git, strict: list, holder: int) -> str | None:
     if gh.app_statuses(head).get(DEFER_CONTEXT, ("", ""))[0] == "success":
         return "granted"
     return None if deferral_used(gh, git, head) else "open"
+
+
+def update_opens_deferral(gh, git, strict: list, n: int) -> bool:
+    """The strict PR `n` was update-branched this tick: may a carrier be built under its new head? Only
+    when the head it was updated FROM never yielded (deferral_used: that head or its first parent). The
+    new head's first parent is that head, so this is exactly deferral_state's "open" one tick early."""
+    view = next((v for _st, v in strict if v["number"] == n), None)
+    return view is not None and not deferral_used(gh, git, view["head_sha"])
 
 
 def record_deferral(gh, git, repo: str, base: str, carrier_branch: str) -> list[int]:
@@ -2357,7 +2384,13 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
             summary["in_flight"] = True
             updated = True  # one strict-lane PR in progress at a time: no other update while it runs
             continue
-        if state != "green":
+        # Pre-empted (#13400): a head that yielded to a carrier (DEFER_CONTEXT on it) and is now behind
+        # main because that carrier merged first. Its running CI can no longer merge anything, so it is
+        # re-updated now rather than after that worthless CI finishes — otherwise further carriers are
+        # built while it runs behind main and the one-yield bound does not hold.
+        preempted = (not current and state == "pending"
+                     and gh.app_statuses(head).get(DEFER_CONTEXT, ("", ""))[0] == "success")
+        if state != "green" and not preempted:
             continue
         if not current:
             if main_red and not fix:
@@ -2369,6 +2402,19 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
             if yield_why:
                 log(f"#{n:>6} strict    behind main, not updated: {yield_why} — next tick")
                 updated = True  # one log line: no younger strict PR is updated either
+                continue
+            # Conflict with main (#13400): decided locally by merge-tree, before any API call. A strict
+            # PR that cannot be merged with main holds nothing — it is skipped, told once per head that it
+            # conflicts, and the NEXT strict PR is served in this same tick. GitHub's update-branch would
+            # only refuse it again: #13739 was re-requested on every tick for ~11 h (2026-10-26) while
+            # the installation token ran out (403 at 16:39Z killed a deferral carrier's build).
+            clash = conflict_paths(git, base, head)
+            if clash:
+                log(f"#{n:>6} strict    behind main {base[:12]}, conflicts with it on {len(clash)} path(s): "
+                    f"not updated, reservation released — next strict PR served")
+                notice_once(gh, n, head, f"{CONFLICT_PREFIX}{base[:12]}: strict lane — merge main into the branch",
+                            notice_text(STRICT_CONFLICT_COMMENT, clash))
+                summary.setdefault("conflicts", []).append(n)
                 continue
             # A fix too: never merged untested against main. Its combined head must verify (fix_head_state).
             ok = gh.update_branch(n, head)
@@ -4332,8 +4378,12 @@ def self_test() -> int:
             running_reservation_and_green_candidate()
             tick()                                     # cycle 1: A's CI runs, carrier published
             s1 = settle_now()                          # the carrier is green: it pre-empts A once
-            gh.head_checks.clear()                     # A's CI finishes green, now behind main
-            settle_now()                               # update-branch -> B
+            if gh.updates != [35]:
+                # Only when A was not re-updated in the carrier's own tick: wait for A's CI, then update.
+                gh.head_checks.clear()                 # A's CI finishes green, now behind main
+                settle_now()                           # update-branch -> B
+            # Pre-empted (#13400, 2026-10-26): A yielded and fell behind main, so it is re-updated in the
+            # carrier's merge tick while its now-useless CI still runs. Either way, A -> B exactly once.
             b_head = gh.prs[35]["head"]["sha"]
             gh.head_checks[b_head] = {"gates (data)": None}   # cycle 2: B's CI runs
             open_only("p2")                            # another green candidate arrives
@@ -4344,6 +4394,95 @@ def self_test() -> int:
                   1 in s1["merged"] and gh.updates == [35] and st2 == "in-flight" and not deferral(b_head)
                   and 35 in s3["merged"] and 2 not in gh.merged,
                   f"s1={s1} st2={st2} s3={s3} merged={gh.merged} updates={gh.updates}")
+            gh.head_checks.clear()
+            gh.updates.clear()
+            reset()
+
+            # OVERLAP FROM THE UPDATE TICK (#13400), rebuilt from 2026-10-26 16:06-17:14Z: carrier #13939
+            # merged 5 at 16:06, and strict #13869 / #13903 / #13922 / #13934 were update-branched one
+            # per tick, each tick reporting in_flight and building nothing; carrier #13946 opened only at
+            # 17:14. Each case fails on the code before this change (the update tick built no carrier).
+            real_update = gh.update_branch
+
+            def update_then_run_ci(n, head):
+                ok = real_update(n, head)
+                if ok:
+                    gh.head_checks[gh.prs[n]["head"]["sha"]] = {"gates (data)": None}   # its CI starts
+                return ok
+
+            gh.update_branch = update_then_run_ci
+            try:
+                gh.updates.clear()
+                gh.g("checkout", "-q", "-f", "main")
+                pathlib.Path(origin, "docs").mkdir(parents=True, exist_ok=True)
+                pathlib.Path(origin, "docs/main-moved.md").write_text("carrier #13939 merged\n")
+                gh.g("add", "-A")
+                gh.g("commit", "-q", "-m", "main moves: the strict PR is now behind it")
+                open_only("pW", "p1")                    # a green strict PR behind main + a green candidate
+                pw_old = gh.prs[35]["head"]["sha"]
+                s, st = tick()
+                pw_b = gh.prs[35]["head"]["sha"]
+                carrier = next((c for c in gh.carriers.values() if c["state"] == "open"), None)
+                over_same_main = carrier is not None and gh.g(
+                    "merge-base", "--is-ancestor", gh.main_sha(), carrier["head"]["sha"], check=False).returncode == 0
+                check("overlap: the update-branch tick builds a carrier over the SAME main while the strict CI runs",
+                      gh.updates == [35] and pw_b != pw_old and st == "published" and over_same_main
+                      and deferral(pw_b) == "success" and gh.merged == [],
+                      f"{s} st={st} updates={gh.updates} defer={deferral(pw_b)!r} merged={gh.merged}")
+                # The carrier goes green while the strict head's CI still runs: green carrier first.
+                s = settle_now()
+                check("overlap: green carrier first - it merges past the running strict head",
+                      gh.merged == [1] and 35 not in gh.merged, f"{s} merged={gh.merged}")
+                # The strict PR, now behind, is re-updated (one more CI cycle) and yields no second time.
+                s = settle_now()
+                pw_c = gh.prs[35]["head"]["sha"]
+                open_only("p2")                          # inflow continues
+                s2, st2 = tick()
+                check("overlap: bounded yield - re-updated once, and no second carrier is built under it",
+                      gh.updates == [35, 35] and pw_c != pw_b and st2 == "in-flight"
+                      and not any(c["state"] == "open" for c in gh.carriers.values()),
+                      f"s={s} st2={st2} updates={gh.updates}")
+                gh.head_checks.clear()                   # its second CI cycle finishes green
+                s3 = settle_now()
+                check("overlap: ... so the strict PR merges after 2 CI cycles, before the next carrier",
+                      35 in s3["merged"] and 2 not in gh.merged, f"s3={s3} merged={gh.merged}")
+                gh.head_checks.clear()
+                gh.updates.clear()
+                reset()
+
+                # A strict PR that CONFLICTS with main (#13739, refused every tick for ~11 h on 2026-10-26)
+                # is never update-branched: decided locally, told once with a "conflict" notice, holds no
+                # reservation, and the next strict PR is served in the same tick.
+                gh.g("checkout", "-q", "-f", "main")
+                pathlib.Path(origin, ".github/workflows").mkdir(parents=True, exist_ok=True)
+                pathlib.Path(origin, ".github/workflows/w.yml").write_text("on: pull_request\n")
+                gh.g("add", "-A")
+                gh.g("commit", "-q", "-m", "main edits the workflow pW edits: pW conflicts with main")
+                open_only("pW", "pW2")
+                asked: list[int] = []
+
+                def update_or_refuse(n, head):
+                    asked.append(n)
+                    probe_m = gh.g("merge-tree", "--write-tree", "main", head, check=False)
+                    return False if probe_m.returncode == 1 else update_then_run_ci(n, head)
+
+                gh.update_branch = update_or_refuse
+                head35 = gh.prs[35]["head"]["sha"]
+                s = settle_now()
+                s2 = settle_now()
+                told = [t for n, t in gh.comments if n == 35 and t.startswith(STRICT_CONFLICT_COMMENT)]
+                st35 = gh.app_statuses(head35)
+                check("conflict: a conflicting strict PR is never update-branched; the next one is, same tick",
+                      35 not in asked and gh.updates == [36] and 35 in s.get("conflicts", []),
+                      f"asked={asked} updates={gh.updates} s={s}")
+                check("conflict: it holds no reservation - main is reserved for the next strict PR instead",
+                      s2["in_flight"] and 35 not in gh.merged and gh.updates == [36], f"s2={s2} updates={gh.updates}")
+                check("conflict: told ONCE per head - 'conflict' notice naming the path, marker set",
+                      len(told) == 1 and "`.github/workflows/w.yml`" in told[0]
+                      and st35.get(STATUS_CONTEXT, ("", ""))[1].startswith(CONFLICT_PREFIX)
+                      and NOTICE_CONTEXT in st35, f"{gh.comments} {st35}")
+            finally:
+                del gh.update_branch                     # back to FakeGitHub.update_branch
             gh.head_checks.clear()
             gh.updates.clear()
             reset()
@@ -4384,8 +4523,10 @@ def self_test() -> int:
             TRAIN_TURN_S = -1
             try:
                 s = settle_now()
+                # The update tick also opens pW2's one deferral, since p1 waits (overlap, 2026-10-26).
                 check("fairness: the train's turn is bounded — expired, the strict lane updates again",
-                      gh.updates == [36] and s["in_flight"], f"{s} updates={gh.updates}")
+                      gh.updates == [36] and (s["in_flight"] or s.get("deferral_window") == 36),
+                      f"{s} updates={gh.updates}")
             finally:
                 TRAIN_TURN_S = saved_turn
             gh.updates.clear()
