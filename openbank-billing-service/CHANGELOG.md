@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.0...billing-service-v0.17.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **billing:** harden the product-IR shadow against poison rows and false agreement ([#13765](https://github.com/JiRaska/open-bank-oss/issues/13765)) ([cc37724](https://github.com/JiRaska/open-bank-oss/commit/cc377246b1072f4ee5cfeff18025f5f067b455ac))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.3...billing-service-v0.17.0) (2026-10-26)
 
 
