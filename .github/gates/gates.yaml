@@ -3156,6 +3156,7 @@ gates:
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
       python3 .github/scripts/test-merge-train-owner-approval.py
+      python3 .github/scripts/e2e/merge-train-gates-yaml.test.py
     selftest_expect: pass
     # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
     # every workflow, so a PR adding a carrier- or ruleset-judging check script must re-run it (#13750).
@@ -6668,9 +6669,12 @@ gates:
       a direct push to main) — reddens every PR until it is declared in a reviewed commit.
       Re-examine when the repo gains an org owner or a GitHub App that legitimately needs one.
     review_after: "2027-02-20"
-    selftest: python3 .github/scripts/check-ruleset-bypass-actors.py --self-test
+    selftest: |
+      python3 .github/scripts/check-ruleset-bypass-actors.py --self-test
+      python3 .github/scripts/test-ruleset-bypass-verdict.py
+      python3 .github/scripts/test-ruleset-bypass-evidence.py
     selftest_expect: pass
-    min_subjects: 1   # exactly 1 bypass actor today (2026-08-20)
+    min_subjects: 1   # readable active rulesets covering main; their actor lists may be empty
     run: |
       python3 .github/scripts/check-ruleset-bypass-actors.py --enforce --repo "${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
 

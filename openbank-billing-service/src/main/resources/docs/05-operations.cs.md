@@ -69,3 +69,33 @@ a přehrání nedoručených poplatků v jiné měně než CZK popisuje
 řádek. Samotnou konfigurací se vrátit nelze: nejdřív nastavte `OPENBANK_BILLING_LEDGER_POST_BY_CLASS=false` a znovu nasaďte Billing,
 teprve potom vraťte ledger. Pokud se ledger vrátí jako první, každé zaúčtování selže, dokud se Billing
 znovu nenasadí.
+
+## Účast na uzávěrce dne (ADR-0342, #13167)
+
+Billing hlásí každý dokončený účetní den (pražský čas) do ledger-service jako účastník `billing`
+(`BillingCloseParticipationScheduler`, každou hodinu v :50; zpětné okno 3 dny) pod vlastní identitou
+(`m2m`, Keycloak `openbank-billing`); ledger to autorizuje jako `ledger.close.participate` jen pro `billing`.
+
+- Cyklus není splatný nebo je sweep vypnutý: SKIPPED s důvodem.
+- Splatný cyklus bez záznamu běhu, nebo poplatek cyklu stále PENDING: zatím nic, ledger den drží.
+- Cyklus proběhl a všechny poplatky jsou zaúčtované: RAN.
+- Selhané účty, přerušený sweep nebo poplatek ve stavu FAILED: REFUSED s pevnou kategorií.
+
+**Zmeškaný cyklus.** `BillingCycleScheduler.catchUp` (každých 15 min, poprvé 2 min po startu) spustí
+sweep pro den splatnosti, pokud cron v tomto měsíci už proběhl a žádný běh cyklu není zaznamenán;
+idempotentně podle cycle id a nikdy souběžně s běžícím sweepem.
+
+**Poplatek odmítnutý do uzavřeného dne.** `409 ACCOUNTING_DAY_CLOSED` označí poplatek FAILED a zvýší
+`openbank_billing_fee_post_closed_day_refusals_total`; spustí se alert `BillingFeeRefusedIntoClosedDay`.
+Náprava: runbook `0033-billing-fee-refused-into-closed-day.md` (přefakturace pod novým klíčem se
+čtyřma očima, záznam v `billing_fee_rebill`).
+
+## Shadow comparator produktového IR (ADR-0352 fáze 3)
+
+Billing dál rozhoduje každý poplatek postaru; shadow jen měří. `openbank.billing.product-ir.decision-mode` je `shadow` (výchozí a jediná přijímaná hodnota); `ir`, přepnutí podle ADR-0352 §9, služba odmítne při startu, dokud není postavené. `ProductShadowScheduler` běží každých `openbank.billing.product-shadow.every` (výchozí 5 minut, ve výchozím stavu zapnutý) a znovu rozhoduje uložená vyměření produktovým IR připnuté revize účtu. IR a jeho podpis čte z product-catalog jednou na revizi a drží si lokální neměnnou kopii; účtovací cesta katalog kvůli tomu nikdy nevolá.
+
+Ověření podpisu řídí `openbank.billing.product-shadow.verification.mode`: `disabled` (výchozí; nic se neporovná a každý vstup s IR se započte jako `verification_disabled`), `openbao` (Transit `verify` na klíči `product-ir-publish`; role billingu smí mít jen `verify`) nebo `hmac` (jen dev a test; produkční start s ním odmítne nastartovat).
+
+Každý IR `Post` se před porovnáním kontroluje na zachování peněz; nevyvážený, nebo vyhodnocení, které interpret odmítne, se počítá jako `ir_evaluation_failed` a nikdy se neporovná. Metriky: `openbank_product_shadow_inputs_total`, `openbank_product_shadow_compared_total{product,rule_id}`, `openbank_product_shadow_diverged_total{product,rule_id}` a `openbank_product_shadow_not_comparable_total{reason}`, všechny s `consumer="billing"`. Alerty: `ProductShadowStalled` (vstupy ve frontě, žádný zpracovaný za 6 hodin), `ProductShadowComparedNothing` (revize s IR, žádné porovnání za 24 hodin) a `ProductShadowDiverged`. Pokud jsou všechny vstupy `no_ir`, žádný alert nevznikne: takové produkty ještě nejsou převedené. Na IR smí billing přejít až po nulové divergenci za celou kadenci každého pravidla poplatku (ADR-0352 §9), za přepínačem, který zatím neexistuje.
+
+Chybějící zůstatek se při vyhodnocení plánovaného triggeru závislého na zůstatku nikdy nenahrazuje naměřenou nulou. Takový poplatek zaznamená `input_unknown` v čítači neporovnatelných vstupů a stav fronty `INPUT_UNKNOWN`, bez zvýšení čítačů porovnání či odchylek. Poplatky, jejichž trigger zůstatek nepotřebuje, zůstávají porovnatelné.

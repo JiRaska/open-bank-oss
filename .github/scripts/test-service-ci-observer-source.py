@@ -149,5 +149,85 @@ class ActiveObserverTest(unittest.TestCase):
         self.assertFalse(self.observed())
 
 
+
+class BoundedCoverageTest(unittest.TestCase):
+    setUp = ActiveObserverTest.setUp
+
+    def bounded(self):
+        return ecosystem.bounded_kover_report(yaml.safe_dump(self.document), self.root)
+
+    def prepare_report(self):
+        self.report = next(step for step in self.steps if step.get('name') == 'Generate Kover XML report')
+        self.report_helper = self.helper.with_name('render-coverage-report.sh')
+        self.report_body = (ROOT / '.github/scripts/service-ci-steps/render-coverage-report.sh').read_text()
+        self.report_helper.write_text(self.report_body)
+
+    def test_real_staged_helper_is_bounded(self):
+        self.prepare_report()
+        self.assertTrue(self.bounded())
+
+    def test_missing_or_changed_timeout_and_inexact_call_are_rejected(self):
+        self.prepare_report()
+        original = self.report['run']
+        for command in [original.replace('600s', '900s'), original.replace('--kill-after=10s ', ''),
+                        original.replace('timeout --kill-after=10s 600s ', ''),
+                        original + ' &', '# ' + original, original.replace('bash -e', 'bash'),
+                        original.replace('render-coverage-report', 'unused')]:
+            with self.subTest(command=command):
+                self.report['run'] = command
+                self.assertFalse(self.bounded())
+        self.report['run'] = original
+
+    def test_disabled_or_ambiguous_report_and_missing_binding_are_rejected(self):
+        self.prepare_report()
+        original = copy.deepcopy(self.report)
+        for change in [{'if': 'false'}, {'shell': 'python'}, {'env': {}}, {'continue-on-error': False}]:
+            with self.subTest(change=change):
+                self.report.update(change)
+                self.assertFalse(self.bounded())
+                self.report.clear()
+                self.report.update(original)
+        self.steps.append(copy.deepcopy(self.report))
+        self.assertFalse(self.bounded())
+
+    def test_untrusted_staging_is_rejected(self):
+        self.prepare_report()
+        self.stage['run'] = 'echo SERVICE_CI_HELPERS=untrusted >> "$GITHUB_ENV"'
+        self.assertFalse(self.bounded())
+
+    def test_heredoc_and_dead_report_text_cannot_attest_execution(self):
+        self.prepare_report()
+        command = './gradlew --no-daemon --configure-on-demand :$SERVICE:koverXmlReport'
+        for body in ["cat <<'UNUSED'\n" + command + '\nUNUSED\n', 'exit 0\n' + command + '\n']:
+            with self.subTest(body=body):
+                self.report_helper.write_text(body)
+                self.assertFalse(self.bounded())
+
+    def test_report_must_follow_trusted_stage_and_enforcing_build(self):
+        self.prepare_report()
+        self.steps.remove(self.report)
+        for before in [0, self.steps.index(self.stage), self.steps.index(self.build)]:
+            with self.subTest(before=before):
+                self.steps.insert(before, self.report)
+                self.assertFalse(self.bounded())
+                self.steps.remove(self.report)
+
+    def test_missing_symlinked_or_nonreport_helper_is_rejected(self):
+        self.prepare_report()
+        self.report_helper.unlink()
+        self.assertFalse(self.bounded())
+        outside = self.root / 'unused-good.sh'
+        outside.write_text(self.report_body)
+        self.report_helper.symlink_to(outside)
+        self.assertFalse(self.bounded())
+        self.report_helper.unlink()
+        for body in ['echo no-report', '# ' + self.report_body.replace('\n', '\n# '),
+                     self.report_body.replace('--no-daemon', ''),
+                     self.report_body.replace('koverXmlReport', 'koverXmlReportOther')]:
+            with self.subTest(body=body):
+                self.report_helper.write_text(body)
+                self.assertFalse(self.bounded())
+
+
 if __name__ == '__main__':
     unittest.main()

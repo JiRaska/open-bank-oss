@@ -46,7 +46,7 @@ def caller_block(modules):
                      '    name: ' + expression(selected + f" && 'build ({module})' || 'Not selected ({lane}, {module})'"),
                      '    needs: [' + ', '.join(dependencies) + ']',
                      '    if: ' + expression(condition),
-                     '    permissions:', '      contents: read', '      id-token: write',
+                     '    permissions:', '      contents: read', '      actions: read', '      id-token: write',
                      f'    uses: ./{CALLEES[lane]}',
                      '    with:', f'      service: {module}', '    secrets:',
                      '      PACT_BROKER_PASSWORD: ' + expression("(github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || ''"), '']

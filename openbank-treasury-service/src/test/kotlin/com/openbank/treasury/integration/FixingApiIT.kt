@@ -8,12 +8,14 @@ import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.domain.marketdata.IndexObservation
 import com.openbank.treasury.domain.marketdata.ObservationSource
 import com.openbank.treasury.it.PostgresTestResource
+import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.containsString
@@ -47,6 +49,9 @@ class FixingApiIT {
     /** Its own application (and Postgres): the reference data it activates must not leak into other ITs. */
     class OwnDatabase : QuarkusTestProfile
     private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
+
+    @Inject
+    lateinit var meterRegistry: MeterRegistry
 
     private fun post(path: String, body: String? = null, type: String = "application/json") = given()
         .contentType(type).header("Idempotency-Key", UUID.randomUUID().toString())
@@ -93,21 +98,7 @@ class FixingApiIT {
     @Order(3)
     @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
     fun `3 - a floating IRS is submitted and its first coupon has a fixing date`() {
-        val start = today.plusDays(20)
-        val end = start.plusYears(1)
-        val legs = """
-            [{"payReceive":"PAY","currency":"CZK","notional":10000000.00,"accrualStart":"$start","accrualEnd":"$end",
-              "accrualFrequency":"QUARTERLY","paymentFrequency":"QUARTERLY","dayCount":"ACT/360","rate":{"type":"FIXED","rate":4.0}},
-             {"payReceive":"RECEIVE","currency":"CZK","notional":10000000.00,"accrualStart":"$start","accrualEnd":"$end",
-              "accrualFrequency":"QUARTERLY","paymentFrequency":"QUARTERLY","dayCount":"ACT/360",
-              "rate":{"type":"FLOATING","index":"PRIBOR_3M","spread":0.10,"resetFrequency":"QUARTERLY"}}]
-        """.trimIndent()
-        irs = post(
-            "/deals",
-            """{"product":"IRS","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
-               "businessDayConvention":"MODIFIED_FOLLOWING","legs":$legs}""",
-        ).then().statusCode(201).extract().path("dealId")
-        post("/deals/$irs/submit").then().statusCode(200)
+        irs = submitIrs()
         fixingDate = jdbc { c ->
             c.prepareStatement(
                 "select min(fixing_date) from deal_cash_flows where deal_id = ? and state = 'PROJECTED'",
@@ -120,7 +111,26 @@ class FixingApiIT {
             }
         }
         // D5: in advance = accrual start minus the lag, never the payment date.
-        assertThat(fixingDate).isBefore(start.plusDays(1)).isAfter(start.minusDays(10))
+        assertThat(fixingDate).isBefore(today.plusDays(21)).isAfter(today.plusDays(10))
+    }
+
+    private fun submitIrs(): String {
+        val start = today.plusDays(20)
+        val end = start.plusYears(1)
+        val legs = """
+            [{"payReceive":"PAY","currency":"CZK","notional":10000000.00,"accrualStart":"$start","accrualEnd":"$end",
+              "accrualFrequency":"QUARTERLY","paymentFrequency":"QUARTERLY","dayCount":"ACT/360","rate":{"type":"FIXED","rate":4.0}},
+             {"payReceive":"RECEIVE","currency":"CZK","notional":10000000.00,"accrualStart":"$start","accrualEnd":"$end",
+              "accrualFrequency":"QUARTERLY","paymentFrequency":"QUARTERLY","dayCount":"ACT/360",
+              "rate":{"type":"FLOATING","index":"PRIBOR_3M","spread":0.10,"resetFrequency":"QUARTERLY"}}]
+        """.trimIndent()
+        val id: String = post(
+            "/deals",
+            """{"product":"IRS","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
+               "businessDayConvention":"MODIFIED_FOLLOWING","legs":$legs}""",
+        ).then().statusCode(201).extract().path("dealId")
+        post("/deals/$id/submit").then().statusCode(200)
+        return id
     }
 
     @Test
@@ -229,11 +239,52 @@ class FixingApiIT {
         post("/fixings/ESTR/$fixingDate/manual/$manual/approve").then().statusCode(403)
     }
 
-    private fun projected(): Int = jdbc { c ->
+    @Test
+    @Order(10)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_BACK_OFFICE"])
+    fun `10 - a deal terminated between the due read and the locked write is refused, counted, and left unfixed`() {
+        val late = submitIrs()
+        val due = projected(late)
+        assertThat(due).isGreaterThan(0)
+        val refused = { meterRegistry.counter("openbank.treasury.fixings", "outcome", "deal_not_live").count() }
+        val before = refused()
+        // dueOn has already read the deal as live when this runs; the locked write comes after it.
+        TerminateBeforeFixingRepository.armed = UUID.fromString(late) to {
+            jdbc { c ->
+                c.prepareStatement("update deals set state = 'CANCELLED' where deal_id = ?").use { ps ->
+                    ps.setObject(1, UUID.fromString(late))
+                    check(ps.executeUpdate() == 1)
+                }
+            }
+        }
+        try {
+            // A refusal, not a failure: the index still reports clean and nothing is fixed.
+            post("/fixings/run?date=$fixingDate").then().statusCode(200)
+                .body("fixedFlows", equalTo(0)).body("failures", equalTo(0))
+        } finally {
+            TerminateBeforeFixingRepository.armed = null
+        }
+        assertThat(projected(late)).isEqualTo(due)
+        assertThat(refused() - before).isEqualTo(1.0)
+        val events = jdbc { c ->
+            c.prepareStatement(
+                "select count(*) from treasury_outbox where aggregate_id = ? and event_type = 'treasury.cashflow.fixed.v1'",
+            ).use { ps ->
+                ps.setObject(1, UUID.fromString(late))
+                ps.executeQuery().use { rs ->
+                    rs.next()
+                    rs.getInt(1)
+                }
+            }
+        }
+        assertThat(events).isEqualTo(0)
+    }
+
+    private fun projected(deal: String = irs): Int = jdbc { c ->
         c.prepareStatement(
             "select count(*) from deal_cash_flows where deal_id = ? and fixing_date = ? and state = 'PROJECTED'",
         ).use { ps ->
-            ps.setObject(1, UUID.fromString(irs))
+            ps.setObject(1, UUID.fromString(deal))
             ps.setObject(2, fixingDate)
             ps.executeQuery().use { rs ->
                 rs.next()
