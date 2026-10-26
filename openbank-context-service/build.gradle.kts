@@ -22,6 +22,7 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.pact.provider)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    testImplementation(libs.wiremock.standalone)
     testImplementation(project(":openbank-libs-testing"))
 }
 
