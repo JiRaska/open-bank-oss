@@ -29,6 +29,15 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
 }
 
+// The real-broker E2E suite (ReferralBrokerE2E) boots Quarkus with real Postgres + Redpanda in
+// the same fork as the other integration tests; the default heap died with
+// `OutOfMemoryError: Java heap space` inside the fork — surfacing as "Test process encountered
+// an unexpected problem" with the last-started IT named as the failure, which is the misleading
+// part. Same per-module override as loyalty/engagement (two Quarkus boots in one fork).
+tasks.withType<Test> {
+    maxHeapSize = "2g"
+}
+
 kover {
     reports {
         verify {
