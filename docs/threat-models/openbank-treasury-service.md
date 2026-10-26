@@ -134,6 +134,28 @@ No service ingests the interbank indices yet. Observations therefore arrive as a
 
 Phase 1a also makes IRS and FRA draftable. Their cash flows are stored and fixed as above, but settle and mature still refuse them until the posting-rule matrix (phase 2), so nothing posts for them yet.
 
+## Posting-rule matrix (ADR-0344 D7)
+
+The eleven leg-described products (CASH, TREASURY_BILL, BILL_OF_EXCHANGE, BOND, LOAN, FX_FORWARD,
+FX_SWAP, FRA, IRS, REPO, REVERSE_REPO) post through `PostingMatrix` — versioned data, one row per
+`(product, event, IFRS 9 category, flow kind/direction)`, served at `GET /posting-rules` — from the
+deal's stored cash-flow ledger, never from flat fields. Keys `treasury:<dealId>:<event>:<flowId|date>`
+(one journal per settlement date, per accrual day, per paid flow, per maturity). Accounts are the
+ledger `V35` set (securities by IFRS 9 category, premium/discount, accrued interest per family,
+loans, repo/reverse-repo, derivative fair value, FVOCI reserve, realised/unrealised P&L, memo pairs
+for commitments and collateral). Derivatives are recognised on trade date as a commitment memo.
+**STRIDE-T (wrong account / unbalanced):** every row resolves through `PostingMatrix` to an accounting class the ledger maps (`LegacyGlChart` only as the pre-ADR-0341 rollout shim); a flow with
+no matching row is refused (`NoPostingRuleException`), never posted to a guess; a `JournalSpec` that
+does not balance per currency cannot be constructed (`PostingRulesTest`).
+**STRIDE-T (double posting):** a paid flow is recorded under its flow id and never posted again; a
+day's accrual under its date; the ledger deduplicates on the key; `CashFlowLedgerApiIT` drives a past
+IRS through settle → accrue → pay → mature over real HTTP and Postgres and counts six payment keys.
+**Residual:** a floating flow posts only once the fixing workflow (V20) has FIXED it; revaluation
+journals exist as rules and a pure function but nothing feeds them a valuation; a settled matrix deal
+cannot be reversed (refused) and has no other way back yet; the cash counter-account of a CASH
+movement (1690) is cleared by the other side's booking, not by treasury.
+
+
 ## STRIDE analysis
 
 | Threat | Control | Residual risk |
@@ -153,8 +175,9 @@ Phase 1a also makes IRS and FRA draftable. Their cash flows are stored and fixed
 
 1. No journal is posted for a deal that has not been BOOKED by a second human.
 2. A deal's approver is never its creator or submitter, and is always HUMAN (domain + DB CHECK).
-3. Every journal key is `treasury:<dealId>:<settled|matured|reversed>`; each is posted at most
-   once per deal in the ledger, however often it is retried.
+3. Every journal key is `treasury:<dealId>:<settled|matured|reversed>` (legacy, plus
+   `accrued:<date>`) or `treasury:<dealId>:<matrix event>:<flowId|date>` (ADR-0344 D7); each is
+   posted at most once per deal in the ledger, however often it is retried.
 4. Every posted journal balances per currency.
 
 ## Out of scope / follow-ups
@@ -186,3 +209,6 @@ minimum reserves (D8), and real market connectivity (D9).
 ### Company portfolio identity boundary
 
 The company instance repeats the exact named-client check for its tax-reporting exception and vetoes every other machine or unclassified caller, including renamed machines. The earlier service-account name veto remains for contradictory person markers. Existing portfolio-only actions, staff role checks and deployment holds remain unchanged; these source tests do not establish deployment or live policy input.
+- **2026-10-19** — **Posting matrix by accounting class (ADR-0344 D7, ADR-0341 D3).** Every posting-rule matrix line names an accounting class + role (a security line takes its book's IFRS 9 category class); the ledger resolves the GL account from its map (ledger V35), and treasury carries no GL code outside the `LegacyGlChart` rollout shim. Rollback: revert the application; the matrix journal events (V28) are additive.
+- **2026-10-19** — **One limit line, one lock, one query (ADR-0315 D4 hardening).** Submission and approval of a deal now take a transaction-scoped (counterparty, LIMIT currency) line lock — after locking the deal row, the same order everywhere — and re-measure the others' exposure with the same query `exposure()` answers with: the principal of ACTUAL asset deals in that currency plus, on the CZK line, the CZK counter-amount of unsettled FX spots. The guard is built in one place from `LimitCheck`'s own figures (`ExposureGuard.of`). **STRIDE-T/E:** a booking racing another booking on the same line cannot jointly breach; the loser is 422 `LIMIT_BREACHED` with nothing committed (`LimitLineRaceIT`: an FX spot and a CZK placement, 300 M each against a 500 M CZK line, submitted at the same instant → one FIT, one refused). **STRIDE-E (a product that bypasses the line):** every product that carries counterparty credit risk consumes the line, measured by one function (`CreditExposure`): principal for placements, loans and securities, the CZK leg for an FX spot, |notional| x the `derivative-conversion-factor` of the product and residual maturity for FX forwards, FX swaps, FRAs and IRS (FX derivatives on the CZK line), and for a reverse repo the cash lent less the haircut collateral (the stricter of the `collateral-haircut` record and the deal's own; unpriced collateral is no cover). A missing factor or haircut is a 422 `CONVERSION_FACTOR_MISSING` / `COLLATERAL_HAIRCUT_MISSING`, never zero exposure. The figure is stored with the deal's limit check and the line query sums the stored figures, so the pre-trade check and the locked re-check cannot measure a deal differently (`DerivativeCreditLineIT`). **Residual:** the V22 factors and haircut are synthetic seeds marked unverified until a person confirms them; a repo is measured as the collateral delivered in excess of the cash received. A submission that already breaches still goes to review (PENDING_APPROVAL) and is guarded at approval. Rollback: revert; no migration.
+- **2026-10-26** — **ADR-0344 phase 2: every product delivered, with its credit measure, and the day-completion record.** `ProductType.DELIVERED` widens to all sixteen products in the SAME change that makes each consume its counterparty line through `CreditExposure` and post through `PostingMatrix`; before it, IRS and FRA were draftable on `main` and consumed no line. **STRIDE-E (scope without limit):** `CreditExposureTest` and `DerivativeCreditLineIT` refuse a derivative or repo whose factor or haircut is missing, and the parity replay pins `REQUIRED_PRODUCTS` to `DELIVERED`, so a product cannot be delivered without fixtures. **Day completion** (`treasury_day_completion`, V29): the accrual and fixing runs record their step per bank day; `GET /day-completion/{date}` (`treasury.deal.read`) lists every step, an unrecorded one PENDING. A ledger `409 ACCOUNTING_DAY_CLOSED` is `AccountingDayClosedException` and the step reads REFUSED, any other failure FAILED (`LedgerPostingAdapterTest`). **STRIDE-R:** the record states the last outcome of each run; it decides nothing yet (the ADR-0342 participation report is a later slice). **Views** (V26): close-of-day position snapshots are written by `ROLE_TREASURY_BACK_OFFICE` only (`treasury.position.close`, rego `treasury-back-office-write`, a human, idempotency key required); saved blotter filters are per caller (`treasury.deal.read`) and change no deal. Rollback: revert the application; V26-V29 are additive (rollback notes in each file).
