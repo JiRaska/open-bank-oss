@@ -67,6 +67,24 @@ class JournalEntryEntity : PanacheEntityBase {
      */
     @Column(name = "synthetic", nullable = false)
     var synthetic: Boolean = false
+
+    @Column(name = "origin_kind")
+    var originKind: String? = null
+
+    @Column(name = "origin_record_id")
+    var originRecordId: UUID? = null
+
+    @Column(name = "origin_submitter")
+    var originSubmitter: String? = null
+
+    @Column(name = "origin_rail")
+    var originRail: String? = null
+
+    @Column(name = "origin_instruction_type")
+    var originInstructionType: String? = null
+
+    @Column(name = "origin_reversal_of_transaction_id")
+    var originReversalOfTransactionId: UUID? = null
 }
 
 data class JournalEntryEntityId(val id: UUID = UUID.randomUUID(), val entryDate: LocalDate = LocalDate.EPOCH) :

@@ -62,6 +62,8 @@ for (const theme of ['light', 'dark'] as const) {
 
     await page.goto('/docs/bcp')
     await expect(page.getByRole('heading', { level: 1, name: /Plán kontinuity provozu|Business Continuity Plan/ })).toBeVisible()
+    const main = page.getByRole('main')
+    await expect(main).toHaveCount(1)
     const themeButton = page.getByRole('button', { name: /Switch to the (light|dark) theme|Přepnout na (světlý|tmavý) motiv/ })
     const currentlyDark = await themeButton.getAttribute('aria-pressed') === 'true'
     if ((theme === 'dark') !== currentlyDark) {
@@ -74,10 +76,12 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(overallStatus.getByText('UNKNOWN', { exact: true })).toBeVisible()
     await expect(page.getByText(`${observedHealthyCount}/${catalogServiceCount} catalog services healthy`)).toBeVisible()
 
-    const complianceHealth = page.locator('.card').filter({ hasText: /Compliance service health/ })
+    const complianceHealth = main.locator('.card').filter({ hasText: /Compliance service health/ })
+    await expect(complianceHealth).toHaveCount(1)
     await expect(complianceHealth.getByText('HEALTHY', { exact: true })).toBeVisible()
     await expect(complianceHealth.getByText(/health probes only; this is not regulatory-control status/).first()).toBeVisible()
-    const paymentHealth = page.locator('.card').filter({ hasText: /Payment-path service health/ })
+    const paymentHealth = main.locator('.card').filter({ hasText: /Payment-path service health/ })
+    await expect(paymentHealth).toHaveCount(1)
     await expect(paymentHealth.getByText('UNVERIFIED', { exact: true })).toBeVisible()
     await expect(paymentHealth.getByText(/this page does not authorize transactions/)).toBeVisible()
     // The fixture intentionally observes only six workloads. Missing observations

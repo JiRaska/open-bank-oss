@@ -29,10 +29,11 @@
 #   SERVICES                 JSON array of changed service names        (required)
 #   IMAGE_TAGS/IMAGE_DIGESTS  maps produced by the exact build-push step
 #   EVENT_NAME               github.event_name                          (required)
+#   SOURCE_COMMIT            verified producer SHA (defaults to GITHUB_SHA)
 #   INPUT_CODEPLOY           github.event.inputs.codeploy, may be empty
 #   INPUT_CODEPLOY_PACT_VERSIONS
 #                            optional JSON object mapping a co-deployed service to an exact
-#                            Pact version that this gate proves equivalent to GITHUB_SHA
+#                            Pact version that this gate proves equivalent to SOURCE_COMMIT
 #   PACT_BROKER_URL/_USERNAME/_PASSWORD, PACT_STANDALONE_VERSION        (job env)
 #   RECONCILE_SOURCE_REQUIRED  true for schedule/reconcile dispatch; requires exact source proof
 #   GITHUB_OUTPUT            written for: gate_ran, deployable, and the rest below
@@ -50,6 +51,22 @@ set -uo pipefail
 # is exactly what made record-deployment record every changed service as deployed
 # when a flaky pact-CLI download killed the gate (issue #1348).
 echo "gate_ran=true" >> "$GITHUB_OUTPUT"
+# A workflow_run carries the orchestrating workflow's SHA in GITHUB_SHA. Use the
+# verified producer source explicitly; legacy push/manual/schedule callers keep it.
+SOURCE_COMMIT="${SOURCE_COMMIT:-${GITHUB_SHA:?}}"
+if ! [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+  echo '::error::Source commit must be a full SHA.'
+  exit 1
+fi
+# Handoff is already post-producer. Dispatch semantics refuse missing versions;
+# the per-service guard below also rejects inconclusive or absent evidence.
+SELECTOR_EVENT="${EVENT_NAME:?}"
+[ "$SELECTOR_EVENT" != workflow_run ] || SELECTOR_EVENT=workflow_dispatch
+if [ "$EVENT_NAME" = workflow_run ] && [ -z "${PACT_BROKER_URL:-}" ]; then
+  echo '::error::Completed-CI handoff requires a configured Pact broker.'
+  echo 'deployable=[]' >> "$GITHUB_OUTPUT"
+  exit 1
+fi
 SERVICES="${SERVICES:?}"
 reconcile_present='{}'
 block_class='{}'
@@ -330,7 +347,7 @@ if [ "${EVENT_NAME}" = "workflow_dispatch" ] \
         echo "deployable=[]" >> "$GITHUB_OUTPUT"
         exit 1
       fi
-      if ! bash .github/scripts/pact-version-tree-equivalent.sh "$svc" "$pact_version" "$GITHUB_SHA"; then
+      if ! bash .github/scripts/pact-version-tree-equivalent.sh "$svc" "$pact_version" "$SOURCE_COMMIT"; then
         echo "::error::codeploy_pact_versions entry for ${svc} is not byte-identical to the deploy ref in every build input"
         echo "deployable=[]" >> "$GITHUB_OUTPUT"
         exit 1
@@ -348,10 +365,10 @@ if [ "${EVENT_NAME}" = "workflow_dispatch" ] \
       if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
         vpresent="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$reconcile_present")"
       else
-        vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+        vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$SOURCE_COMMIT")"
       fi
       sel_line="$(PACT_VERSION_PRESENT="$vpresent" \
-        bash .github/scripts/resolve-codeploy-selector.sh "$svc" "$GITHUB_SHA")"
+        bash .github/scripts/resolve-codeploy-selector.sh "$svc" "$SOURCE_COMMIT")"
       read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
       if [ "${CID_SELECTOR[0]}" = "REFUSE" ]; then
         echo "::error::can-i-deploy co-deploy set cannot be asked safely for ${svc}: $(printf '%s' "$sel_line" | cut -f2)"
@@ -465,7 +482,7 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
     } >> "$GITHUB_STEP_SUMMARY"
     exit 1
   fi
-  if [ "$code" = "404" ]; then
+  if [ "$code" = "404" ] && [ "$EVENT_NAME" != workflow_run ]; then
     echo "  ✓ ${svc} has no contracts in the broker (not a Pacticipant) — deployable"
     deployable_list+=("$svc")
     continue
@@ -478,18 +495,26 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
   if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
     vpresent="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$reconcile_present")"
   else
-    vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+    vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$SOURCE_COMMIT")"
   fi
-  sel_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$GITHUB_EVENT_NAME" \
-    bash .github/scripts/resolve-can-i-deploy-selector.sh "$svc" "$GITHUB_SHA")"
+  sel_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$SELECTOR_EVENT" \
+    bash .github/scripts/resolve-can-i-deploy-selector.sh "$svc" "$SOURCE_COMMIT")"
   read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
+  if [ "$EVENT_NAME" = workflow_run ] &&
+     { [ "${#CID_SELECTOR[@]}" -ne 2 ] || [ "${CID_SELECTOR[0]:-}" != --version ] ||
+       ! [[ "${CID_SELECTOR[1]:-}" =~ ^[0-9a-f]{40}$ ]]; }; then
+    # Legacy dispatch may fall back to latest/main after an inconclusive probe.
+    # A completed-CI handoff requires exact or proven-equivalent source evidence.
+    sel_line=$'REFUSE\tcompleted-CI handoff has no exact or equivalent Pact version'
+    CID_SELECTOR=(REFUSE)
+  fi
   # REFUSE (#3318): a manual dispatch of a sha with no pact version. Skip THIS
   # service — aborting the batch is the #846 shape (#3445).
   if [ "${CID_SELECTOR[0]}" = "REFUSE" ]; then
     refuse_why="$(printf '%s' "$sel_line" | cut -f2)"
     # #3454: classify it too, from the SAME inputs the selector refused on — a
     # class-less record reads downstream as [UNKNOWN]. Empty stdin: no verdict exists.
-    r_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$GITHUB_EVENT_NAME" \
+    r_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$SELECTOR_EVENT" \
       bash .github/scripts/classify-can-i-deploy-block.sh "$svc" </dev/null)"
     cls="$(cut -f1 <<< "$r_line")"
     block_class="$(jq -cn --argjson old "$block_class" --arg svc "$svc" --arg cls "$cls" \

@@ -14,6 +14,7 @@ import com.openbank.pid.application.port.`in`.LinkCaseEvidenceCommand
 import com.openbank.pid.application.port.`in`.LinkExternalIdCommand
 import com.openbank.pid.application.port.`in`.TerminateRelationshipCommand
 import com.openbank.pid.application.port.`in`.TransitionPartyCaseCommand
+import com.openbank.pid.application.port.`in`.UpdateKycCommand
 import com.openbank.pid.application.port.out.EvidenceLinkPort
 import com.openbank.pid.application.port.out.PartyEventPublisher
 import com.openbank.pid.application.port.out.PartyRelationshipRepository
@@ -152,6 +153,44 @@ class PartyServiceTest {
 
         assertThatThrownBy { runBlocking { service.getById(id) } }
             .isInstanceOf(PartyNotFoundException::class.java)
+    }
+
+    @Test
+    fun `createParty asserts no risk rating (ADR-0353 D2)`(): Unit = runBlocking {
+        val partySlot = slot<Party>()
+        coEvery { partyRepository.existsByExternalId(ExternalIdType.BANKID_SUB, "sub-1") } returns false
+        coEvery { partyRepository.save(capture(partySlot)) } returns testParty()
+
+        service.createParty(createCommand())
+
+        assertThat(partySlot.captured.kycAttributes.amlRiskScore).isNull()
+    }
+
+    @Test
+    fun `updateKyc without the deprecated amlRiskScore leaves the stored value alone`(): Unit = runBlocking {
+        val party = testParty()
+        val updatedSlot = slot<Party>()
+        coEvery { partyRepository.findById(party.id) } returns party
+        coEvery { partyRepository.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+        coEvery { eventPublisher.publish(any()) } returns Unit
+
+        service.updateKyc(UpdateKycCommand(party.id, KycLevel.ENHANCED, pepFlag = false, sanctionsFlag = false))
+
+        assertThat(updatedSlot.captured.kycAttributes.amlRiskScore).isEqualTo(party.kycAttributes.amlRiskScore)
+        assertThat(updatedSlot.captured.kycAttributes.kycLevel).isEqualTo(KycLevel.ENHANCED)
+    }
+
+    @Test
+    fun `updateKyc with an explicit amlRiskScore still stores it`(): Unit = runBlocking {
+        val party = testParty()
+        val updatedSlot = slot<Party>()
+        coEvery { partyRepository.findById(party.id) } returns party
+        coEvery { partyRepository.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+        coEvery { eventPublisher.publish(any()) } returns Unit
+
+        service.updateKyc(UpdateKycCommand(party.id, KycLevel.ENHANCED, AmlRiskScore.HIGH, false, false))
+
+        assertThat(updatedSlot.captured.kycAttributes.amlRiskScore).isEqualTo(AmlRiskScore.HIGH)
     }
 
     @Test

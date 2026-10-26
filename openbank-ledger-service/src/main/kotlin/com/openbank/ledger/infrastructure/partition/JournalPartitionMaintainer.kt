@@ -13,6 +13,7 @@ import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -55,6 +56,11 @@ class JournalPartitionMaintainer(
     private val clusterLock: ClusterLock,
     private val domainMetrics: DomainMetrics,
 ) {
+
+    @Inject
+    internal lateinit var historySnapshots:
+        com.openbank.ledger.infrastructure.persistence.repository.JournalHistorySnapshots
+
     private var liveness: WorkflowLivenessRecorder? = null
 
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
@@ -91,6 +97,9 @@ class JournalPartitionMaintainer(
                         report.defaultPartitionRows,
                     )
                 }
+                // Also catches an operator-driven DETACH outside this scheduler. No separate TTL:
+                // these read-caches become unavailable with their recorded financial source facts.
+                historySnapshots.purgeUnavailableSources()
                 liveness?.recordSuccess()
             } catch (ex: Exception) {
                 // The scheduler must never crash; a failed pass is retried on the next tick.

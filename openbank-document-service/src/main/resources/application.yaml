@@ -26,6 +26,8 @@ quarkus:
     connect-retries: 10
     connect-retries-interval: 2S
   hibernate-orm:
+    # JDBC is for Flyway; repositories use only Hibernate Reactive. Do not bootstrap a second ORM factory.
+    blocking: false
     database:
       generation: none
     physical-naming-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
