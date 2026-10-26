@@ -72,6 +72,13 @@ tasks.withType<Test>().configureEach {
     maxHeapSize = "2g"
 }
 
+// Restricted provider resources restart Quarkus between verification classes. Keep each
+// class in its own worker so reactive session state cannot retain a closed factory from
+// the previous application. All provider classes and interactions still execute.
+tasks.named<Test>("providerPactTest") {
+    forkEvery = 1
+}
+
 // Pact rootDir + Pact Broker property forwarding centralised into
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
