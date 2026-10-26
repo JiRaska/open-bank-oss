@@ -188,7 +188,15 @@ class DealRepositoryImpl(
                 persisted
                     .flatMap { transitions.count("dealId", deal.id) }
                     .flatMap { stored -> appendTransitions(deal, stored.toInt()) }
-                    .flatMap { journal?.let { persistJournal(it) } ?: Uni.createFrom().voidItem() }
+                    // The service records a journal in its own transaction the moment the ledger
+                    // accepts it (#13882 review); here it is written only if that did not happen.
+                    .flatMap {
+                        journal?.let { j ->
+                            journals.count("idempotencyKey", j.idempotencyKey).flatMap { n ->
+                                if (n == 0L) persistJournal(j) else Uni.createFrom().voidItem()
+                            }
+                        } ?: Uni.createFrom().voidItem()
+                    }
                     .flatMap { command?.let { persistCommand(it) } ?: Uni.createFrom().voidItem() }
                     .flatMap { versionRow(deal, actor) }
                     .flatMap { schedule?.let { scheduleRows(it) } ?: Uni.createFrom().voidItem() }
@@ -295,6 +303,7 @@ class DealRepositoryImpl(
             idempotencyKey = ref.idempotencyKey
             journalId = ref.journalId
             postedAt = ref.postedAt
+            valueDate = ref.valueDate
             resolvedAccounts = ResolvedAccountsCodec.encode(ref.accounts)
         },
     ).replaceWithVoid()
@@ -407,19 +416,22 @@ class DealRepositoryImpl(
      * The ledger already deduplicated the journal; here the loser of the unique-key race only
      * confirms the winner's row exists instead of failing the pass.
      */
-    override suspend fun recordJournal(journal: LedgerJournalRef) {
+    override suspend fun recordJournal(journal: LedgerJournalRef): Boolean {
         val recorded = suspend {
             Panache.withSession { journals.find("idempotencyKey", journal.idempotencyKey).count() }.awaitSuspending() >
                 0
         }
-        if (recorded()) return
+        if (recorded()) return false
         try {
             Panache.withTransaction { persistJournal(journal) }.awaitSuspending()
         } catch (e: PersistenceException) {
             if (!recorded()) throw e
+            return false
         } catch (e: PgException) {
             if (!recorded()) throw e
+            return false
         }
+        return true
     }
 
     override suspend fun journals(dealId: UUID): List<LedgerJournalRef> = Panache.withSession {
@@ -432,6 +444,7 @@ class DealRepositoryImpl(
             it.journalId,
             it.postedAt,
             ResolvedAccountsCodec.decode(it.resolvedAccounts),
+            it.valueDate,
         )
     }
 

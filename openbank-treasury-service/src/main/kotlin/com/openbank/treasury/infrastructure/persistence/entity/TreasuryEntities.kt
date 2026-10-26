@@ -225,6 +225,10 @@ class DealJournalEntity : PanacheEntity() {
     @Column(name = "posted_at", nullable = false)
     lateinit var postedAt: Instant
 
+    /** The journal's value day (V21): the accounting day the day-close report counts it under. */
+    @Column(name = "value_date")
+    var valueDate: java.time.LocalDate? = null
+
     /** `class|role|currency|glAccountId` per line: the accounts the ledger resolved, for a later reversal. */
     @Column(name = "resolved_accounts", columnDefinition = "TEXT")
     var resolvedAccounts: String? = null
