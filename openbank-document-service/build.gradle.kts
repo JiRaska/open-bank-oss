@@ -58,6 +58,10 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // DocumentEventsWireE2E: the real smallrye-kafka producer of `document-events-out` runs
+    // against an isolated Redpanda broker (the in-memory connector suites stop at the JVM
+    // boundary; this one reads the topic back over the wire, traceparent included).
+    testImplementation(libs.testcontainers.redpanda)
 }
 
 // Pact: resolve the git-pact folder and forward broker config for provider verification
