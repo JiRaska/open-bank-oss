@@ -39,3 +39,6 @@ adds `openbank.treasury.payments` → `treasury-service` and
 `openbank.swift.institution-transfers` → `swift-service`. This table supplies
 producer attribution where an event does not provide its own source. A declared
 topic owner alone does not prove that an outbox dispatched or a consumer ran.
+swift-service and audit-service consume `openbank.treasury.payments` before its
+treasury producer exists, so the topic carries no records until then; the
+`event_consumer_liveness` allowlist entry for it (#13698) is removed with the producer.

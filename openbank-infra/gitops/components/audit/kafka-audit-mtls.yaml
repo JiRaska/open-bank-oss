@@ -204,6 +204,12 @@ spec:
         host: "*"
       - resource:
           type: topic
+          name: openbank.swift.institution-transfers
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.sepa.instant.events
           patternType: literal
         operations: [Read, Describe]
@@ -319,6 +325,14 @@ spec:
       - resource:
           type: topic
           name: openbank.treasury.deal.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # components/treasury/kafka-topic.yaml -- ADR-0344 contract 9.1 bank-own payment releases.
+      # Money-path: each release is a transfer the rail executes, so the audit trail must see it.
+      - resource:
+          type: topic
+          name: openbank.treasury.payments
           patternType: literal
         operations: [Read, Describe]
         host: "*"

@@ -16,7 +16,8 @@ enum class RejectReason(val code: String, val description: String) {
     AC04("AC04", "closed account"),
     AM05("AM05", "duplication"),
     RR04("RR04", "regulatory reason"),
-    FF01("FF01", "invalid pacs.008 (fails XSD validation)"),
+    AM03("AM03", "currency not processable on this clearing route"),
+    FF01("FF01", "invalid message (fails XSD validation)"),
 }
 
 /** The simulator's verdict on a credit transfer: a settlement ack or a reject with a reason. */
@@ -25,6 +26,9 @@ data class SchemeDecision(val status: PaymentStatus, val reason: RejectReason?) 
 
     companion object {
         val SETTLED = SchemeDecision(PaymentStatus.ACSC, null)
+
+        /** `ACSP`: accepted, settlement to follow (bank-own transfers on deferred settlement). */
+        val ACCEPTED_PENDING = SchemeDecision(PaymentStatus.ACSP, null)
 
         fun rejected(reason: RejectReason) = SchemeDecision(PaymentStatus.RJCT, reason)
     }
@@ -50,12 +54,22 @@ data class SchemeDecision(val status: PaymentStatus, val reason: RejectReason?) 
  * this engine entirely.
  */
 class SchemeDecisionEngine {
-    fun decide(transfer: ReceivedCreditTransfer): SchemeDecision = when (minorUnitRemainder(transfer.amount)) {
+    fun decide(transfer: ReceivedCreditTransfer): SchemeDecision = decide(transfer.amount)
+
+    /** The same deterministic verdict keyed off an amount alone — shared by pacs.008 and pacs.009. */
+    fun decide(amount: BigDecimal): SchemeDecision = when (minorUnitRemainder(amount)) {
         TRIGGER_CLOSED_ACCOUNT -> SchemeDecision.rejected(RejectReason.AC04)
         TRIGGER_DUPLICATION -> SchemeDecision.rejected(RejectReason.AM05)
         TRIGGER_REGULATORY -> SchemeDecision.rejected(RejectReason.RR04)
         else -> SchemeDecision.SETTLED
     }
+
+    /**
+     * Bank-own (pacs.009) transfers whose minor-unit remainder is 03 are accepted (`ACSP`) and
+     * settled asynchronously later, the deterministic synthetic case for deferred settlement.
+     * Not applied to pacs.008, whose verdict table above is unchanged.
+     */
+    fun defersSettlement(amount: BigDecimal): Boolean = minorUnitRemainder(amount) == TRIGGER_DEFERRED_SETTLEMENT
 
     private fun minorUnitRemainder(amount: BigDecimal): Int =
         amount.movePointRight(MINOR_UNIT_SCALE).toBigInteger().mod(HUNDRED).toInt()
@@ -68,5 +82,6 @@ class SchemeDecisionEngine {
         const val TRIGGER_CLOSED_ACCOUNT = 1
         const val TRIGGER_DUPLICATION = 2
         const val TRIGGER_REGULATORY = 4
+        const val TRIGGER_DEFERRED_SETTLEMENT = 3
     }
 }
