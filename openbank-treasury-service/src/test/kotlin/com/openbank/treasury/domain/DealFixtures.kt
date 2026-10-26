@@ -6,8 +6,12 @@ package com.openbank.treasury.domain
 
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
+import com.openbank.treasury.domain.model.CollateralHaircut
+import com.openbank.treasury.domain.model.ConversionFactor
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
+import com.openbank.treasury.domain.model.CreditExposure
+import com.openbank.treasury.domain.model.CreditTerms
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealCalendars
 import com.openbank.treasury.domain.model.FxSide
@@ -100,5 +104,24 @@ object DealFixtures {
         fxSide = side,
     )
 
-    fun withinLimit(deal: Deal) = LimitCheck.of(bankA, deal, BigDecimal.ZERO)
+    /** The V27 seed factors and haircut: what a deployment measures with until a person replaces them. */
+    val seededCreditTerms = CreditTerms(
+        factors = listOf(ProductType.IRS, ProductType.FRA).flatMap { p ->
+            listOf(
+                ConversionFactor(p, BigDecimal.ONE, BigDecimal("0.5")),
+                ConversionFactor(p, BigDecimal(5), BigDecimal("1.0")),
+                ConversionFactor(p, null, BigDecimal("1.5")),
+            )
+        } + listOf(ProductType.FX_FORWARD, ProductType.FX_SWAP).flatMap { p ->
+            listOf(
+                ConversionFactor(p, BigDecimal.ONE, BigDecimal("2.0")),
+                ConversionFactor(p, BigDecimal(5), BigDecimal("5.0")),
+                ConversionFactor(p, null, BigDecimal("7.5")),
+            )
+        },
+        haircuts = listOf(CollateralHaircut(CollateralHaircut.ANY, BigDecimal(10))),
+    )
+
+    fun withinLimit(deal: Deal) =
+        LimitCheck.of(bankA, deal, BigDecimal.ZERO, CreditExposure.of(deal, deal.tradeDate, seededCreditTerms))
 }
