@@ -239,7 +239,7 @@ class PanacheStyleVersionRepository :
                                         personaId,
                                         StyleVersionStatus.PUBLISHED.name,
                                         StyleVersionStatus.RETIRED.name,
-                                    ).firstResult<StyleVersionEntity>().map { latest ->
+                                    ).firstResult<StyleVersionEntity>().flatMap { latest ->
                                         val base = draft.basePublishedVersion
                                             ?: throw StyleVersionConflictException("draft has no known published base")
                                         if (base != (latest?.version ?: 0)) {
@@ -253,11 +253,20 @@ class PanacheStyleVersionRepository :
                                             decidedAt = decidedAt ?: at
                                             retiredAt = at
                                         }?.toDomain()
-                                        draft.status = StyleVersionStatus.PUBLISHED.name
-                                        draft.decidedBy = checker
-                                        draft.decidedAt = at
-                                        draft.publishedAt = at
-                                        StylePublication(draft.toDomain(), retired)
+                                        // Flush the retirement BEFORE marking the draft published. The
+                                        // partial unique index style_version_one_published_per_persona
+                                        // is checked per statement, and the order in which Hibernate
+                                        // flushes two dirty rows of the same entity within one
+                                        // transaction is not deterministic — when the publish lands
+                                        // first, the invariant 500s with a duplicate-key instead of
+                                        // retiring cleanly.
+                                        session.flush().map {
+                                            draft.status = StyleVersionStatus.PUBLISHED.name
+                                            draft.decidedBy = checker
+                                            draft.decidedAt = at
+                                            draft.publishedAt = at
+                                            StylePublication(draft.toDomain(), retired)
+                                        }
                                     }
                                 }
                             }
