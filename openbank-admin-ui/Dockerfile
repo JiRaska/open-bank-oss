@@ -210,7 +210,7 @@ RUN set -e; \
     find openbank-infra/gitops -name '*.yaml' | while read -r f; do mkdir -p "/pv-src/$(dirname "$f")"; cp "$f" "/pv-src/$f"; done; \
     test -s /pv-src/openbank-infra/gitops/components/kafka/kafka.yaml
 
-FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:725aeba2364a9b16beae49e180d83bd597dbd0b15c47f1f28875c290bfd255b9 AS deps
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS deps
 WORKDIR /app
 COPY openbank-admin-ui/package.json openbank-admin-ui/package-lock.json* ./
 # Resilient install: the registry/network can flake (ECONNRESET mid-download) and a bare
@@ -235,7 +235,7 @@ RUN npm config set fetch-retries 5 \
 # copy into the arm64 runtime stage. Running on the native arch avoids
 # QEMU overhead (~10× slower) and SIGILL crashes on x86 hosts.
 # ──────────────────────────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:725aeba2364a9b16beae49e180d83bd597dbd0b15c47f1f28875c290bfd255b9 AS build
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS build
 WORKDIR /app
 
 # BuildInfo — passed in via docker-compose build args, stamped into the bundle.
@@ -303,7 +303,7 @@ RUN echo "maps before prune: $(find .next/static -name '*.map' | wc -l)" \
 # ──────────────────────────────────────────────────────────────────────
 # Stage 4: Runtime image — minimal surface, non-root.
 # ──────────────────────────────────────────────────────────────────────
-FROM node:26-alpine@sha256:725aeba2364a9b16beae49e180d83bd597dbd0b15c47f1f28875c290bfd255b9 AS runtime
+FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
