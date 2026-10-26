@@ -1,0 +1,137 @@
+# Opt-in diagnostic projection; no verdict consumer. Refs #13888.
+# Separate identity cannot write existing fraud, transaction or Redis truth.
+# Pre-created internal topics avoid Create grants. Keep partitions aligned with the runtime.
+# Changelogs retain three days, covering the two-day dedup store plus Streams safety margin.
+# Repartition retention -1 is managed by Streams after consumption, not a diagnostic archive.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.fraud.shadow.velocity.v1
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: compact,delete
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank-fraud-shadow-velocity-v1-by-account-repartition
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: -1
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank-fraud-shadow-velocity-v1-event-identities-changelog
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 259200000
+    cleanup.policy: compact,delete
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank-fraud-shadow-velocity-v1-velocity-h1-changelog
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 259200000
+    cleanup.policy: compact,delete
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank-fraud-shadow-velocity-v1-velocity-h24-changelog
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 259200000
+    cleanup.policy: compact,delete
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: fraud-streams-shadow
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+    - resource:
+        type: topic
+        name: openbank.transactions.transaction.initiated
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: openbank.fraud.shadow.velocity.v1
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: openbank-fraud-shadow-velocity-v1-
+        patternType: prefix
+      operations:
+      - Read
+      - Write
+      - Describe
+      - DescribeConfigs
+      host: '*'
+    - resource:
+        type: topic
+        name: openbank-fraud-shadow-velocity-v1-by-account-repartition
+        patternType: literal
+      operations:
+      - Delete
+      host: '*'
+    - resource:
+        type: group
+        name: openbank-fraud-shadow-velocity-v1
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: transactionalId
+        name: openbank-fraud-shadow-velocity-v1-
+        patternType: prefix
+      operations:
+      - Write
+      - Describe
+      host: '*'
