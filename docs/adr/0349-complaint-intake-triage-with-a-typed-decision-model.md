@@ -40,8 +40,10 @@ We will add complaint intake triage to `openbank-dispute-service` as the first `
 consumer.
 
 **D1 — Two outputs, both closed.**
-- `ComplaintCategory`, the existing domain enum, reused as the output schema. The model cannot
-  invent a category the register does not know.
+- `ComplaintCategoryCode`, resolved against a pinned complaint-taxonomy schema. Initially its
+  allowed values exactly match the existing `ComplaintCategory` contract through an explicit
+  compatibility adapter. The taxonomy is versioned data, not a growing Kotlin enum. The model
+  cannot invent a category or bypass compatibility with the complaints register.
 - `HandlingPriority { STANDARD, EXPEDITE }`, new. `EXPEDITE` marks complaints that should not wait
   in the general queue: a claimed unauthorised payment, a stated vulnerability, an arbiter
   escalation (`channel = ARBITER` is `EXPEDITE` by rule, not by model).
@@ -67,8 +69,8 @@ the model is called, so a slow or abstaining model cannot delay it.
    `DecisionRecord` (ADR-0348 D6), invisible to operators. The operator's final category at close is
    the label.
 2. **Suggest.** The suggestion is shown in the admin-ui complaint view (`HUMAN_REVIEW` for every
-   answer, `autoAcceptAt = 1.0`).
-3. **Auto.** `autoAcceptAt` drops below 1.0 only after the calibration eval in D4 passes, through
+   answer, `mode = SUGGEST`, `autoEnabled = false`).
+3. **Auto.** `mode = AUTO` and `autoEnabled = true` are approved only after the calibration eval in D4 passes, through
    the four-eyes threshold change of ADR-0348 D3.
 
 **D4 — The AUTO band's bar.** On at least 500 labelled complaints from the shadow period: expected
@@ -115,8 +117,9 @@ and that is the only place a hosted non-EU adapter may run this use case.
 
 **Neutral**
 - `docs/threat-models/openbank-dispute-service.md` gains a row for the model input (the description
-  as a prompt-injection carrier: the output is a closed enum, so the worst case is a wrong category,
-  which D2 confines to `OTHER`/operator-keyed complaints).
+  as a prompt-injection carrier: schema validation bounds output shape but does not prevent manipulated routing or data
+  disclosure; test prompt injection, authorized retrieval, output handling and abstention.
+  D2 separately confines category writes to `OTHER`/operator-keyed complaints).
 - Gate: `typed-decision-thresholds` (ADR-0348) covers this use case; no service-specific gate.
 
 ### Delivery check
