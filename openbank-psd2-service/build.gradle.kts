@@ -45,6 +45,9 @@ dependencies {
     // Consumer-driven contract test (ADR-0063, issue #2255 dimension C3): psd2 is a real consumer of
     // tpp-registry's eIDAS licence gate, GET /api/v1/tpp-registry/check.
     testImplementation(libs.pact.consumer)
+    // Downstream WireMock for the E2E suite: tpp-registry + consent-service + the OIDC token
+    // endpoint over real HTTP once the module's @Mock registry fake is excluded.
+    testImplementation(libs.wiremock.standalone)
 }
 
 kover {
