@@ -37,6 +37,10 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // NotificationOutcomesWireE2E: the real consumer reads requests and the real outbox relay
+    // publishes outcomes over an isolated Redpanda broker (the in-memory suites stop at the sink;
+    // this one reads the topic back over the wire).
+    testImplementation(libs.testcontainers.redpanda)
 
     testImplementation(libs.pact.consumer)
     testImplementation(libs.wiremock.standalone)
