@@ -250,15 +250,20 @@ def stage_performance(repo_root, repo_slug, fetch_json, fetch_bytes, *, safe_arc
     if validate_envelope is None:
         validate_envelope = _load(repo_root, "extract-test-intelligence-envelope.py", "admin_ui_performance_envelope").validate
     result = {"payloads": {}, "sources": [], "warnings": []}
-    all_specs = {"perf-gate.yml": _gate_specs(selector),
-                 "perf-baseline.yml": _baseline_specs(repo_root, result["warnings"])}
-    for workflow, specs in all_specs.items():
+    sources = [
+        ("perf-gate.yml", "smoke", _gate_specs(selector)),
+        ("perf-baseline.yml", "baseline", _baseline_specs(repo_root, result["warnings"])),
+        ("perf-gate.yml", "security-abuse", [{"component": "openbank-security-abuse", "scenario_id": "security-abuse-smoke",
+            "artifact": "perf-reports-security-abuse", "job": "k6 security abuse (product-catalog, auth on)",
+            "summary": "security-abuse-summary.json", "envelope": "security-abuse-run.json"}]),
+    ]
+    for workflow, lane, specs in sources:
         pages = _pages(fetch_json, f"{API}/repos/{repo_slug}/actions/workflows/{workflow}/runs?branch=main&status=completed", "workflow_runs")
         for page in pages:
             for metadata in page["workflow_runs"]:
                 _trusted_run(metadata, repo_slug, workflow, selector)
         candidates = selector.ordered_runs(pages)
-        source = {"workflow": workflow, "run_id": None, "attempt": None, "scope": "absent",
+        source = {"workflow": workflow, "lane": lane, "run_id": None, "attempt": None, "scope": "absent",
                   "expected": [{"scenario_id": spec["scenario_id"], "component": spec["component"],
                                 **({"ambiguous": True} if spec.get("ambiguous") else {})} for spec in specs],
                   "selected": [], "missing": []}
@@ -268,7 +273,7 @@ def stage_performance(repo_root, repo_slug, fetch_json, fetch_bytes, *, safe_arc
             jobs_pages = _pages(fetch_json, f"{API}/repos/{repo_slug}/actions/runs/{run_id}/jobs?filter=latest", "jobs")
             jobs = [job for page in jobs_pages for job in page["jobs"]]
             start = _date(selector, metadata["run_started_at"])
-            if workflow == "perf-gate.yml":
+            if lane == "smoke":
                 log = ""
                 names = {job.get("name") for job in jobs if str(job.get("name", "")).startswith("k6 smoke (")}
                 expected_names = {name for _, name in selector.EXPECTED_GATE}

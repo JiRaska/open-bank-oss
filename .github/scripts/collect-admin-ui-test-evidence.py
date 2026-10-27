@@ -560,7 +560,9 @@ def performance_authority(core: dict, staging: dict, repo_slug: str) -> set[str]
             path = PurePosixPath(row.get("source", ""))
             component = path.parts[0] if path.parts and path.parts[0].startswith("openbank-") else None
             calculated = component + "-" + path.stem.removeprefix("openbank-") if component else path.stem
-            expected_component = None if identifier == "money-path-smoke" else entry["component"]
+            expected_component = None if (identifier, entry["component"]) in {
+                ("money-path-smoke", "openbank-money-path"), ("security-abuse-smoke", "openbank-security-abuse")
+            } else entry["component"]
             definition_path = ((len(path.parts) == 5 and path.parts[:4] == (component, "src", "test", "k6"))
                                if component else len(path.parts) == 3 and path.parts[:2] == ("perf", "k6"))
             if (calculated != identifier or component != expected_component

@@ -108,6 +108,8 @@ class PerformanceStageTests(unittest.TestCase):
     def artifact(self, metadata, component, *, identifier, baseline=None, state="passed", created=CREATED, attempt=None, observed=OBSERVED):
         if baseline == "common":
             name, summary_name, envelope_name = "k6-money-path-summary", "perf-summary.json", "perf-run.json"
+        elif baseline == "security":
+            name, summary_name, envelope_name = "perf-reports-security-abuse", "security-abuse-summary.json", "security-abuse-run.json"
         elif baseline:
             name = f"k6-{baseline}-read-baseline-summary"
             summary_name, envelope_name = f"{baseline}-summary.json", f"{baseline}-perf-run.json"
@@ -423,6 +425,62 @@ class PerformanceStageTests(unittest.TestCase):
         self.assertEqual(len(result["sources"][1]["missing"]), 1)
         self.assertFalse(result["payloads"])
         self.assertFalse(any("/runs/199/" in url for url in self.reads))
+
+    def security(self, metadata, state="not-run", identifier=7000):
+        self.jobs[metadata["id"]].append({"id": 777, "name": "k6 security abuse (product-catalog, auth on)",
+                                         "started_at": metadata["run_started_at"], "conclusion": "failure"})
+        self.artifact(metadata, "openbank-security-abuse", identifier=identifier, baseline="security", state=state)
+
+    def test_preboot_security_envelope_retains_actual_not_run_and_global_identity(self):
+        metadata = self.gate()
+        self.security(metadata)
+        actual = envelope(metadata, "openbank-security-abuse", "not-run")
+        actual["specializedEvidence"][0].update(source="perf-reports/security-abuse-summary.json", detail="performance summary absent")
+        self.archives[7000] = archive({"security-abuse-run.json": actual})
+        staged = self.collect()
+        source = staged["sources"][2]
+        self.assertEqual((source["run_id"], source["selected"][0]["state"]), (100, "not-run"))
+        key = "openbank-admin-ui/perf-artifacts/security-abuse-smoke-summary.json.run.json"
+        self.assertEqual(json.loads(staged["payloads"][key]), actual)
+        self.assertNotIn(key.removesuffix(".run.json"), staged["payloads"])
+        row = {"id": "security-abuse-smoke", "component": None, "source": "perf/k6/security-abuse-smoke.js",
+               "state": "not-run", "observedAt": OBSERVED, "detail": "performance summary absent", "run": actual["run"]}
+        core = {"performance": [row], "warnings": []}
+        authority = COLLECTOR.performance_authority(core, staged | {"sources": [source]}, REPO)
+        seed = {"schemaVersion": 1, "collectedAt": "2026-10-20T00:00:00Z", "performance": [
+            row | {"state": "passed", "metrics": {"requests": 999}, "observedAt": "2026-10-20T00:00:00Z"}]}
+        self.assertEqual(COLLECTOR.merge_ancillary(core, seed, authoritative_performance_ids=authority)["performance"], [row])
+
+    def test_security_latest_narrow_dispatch_missing_and_cancelled_never_borrow_old_pass(self):
+        old = self.gate(99)
+        self.security(old, "passed", 6999)
+        latest = self.gate(100)
+        latest["event"] = "workflow_dispatch"
+        self.jobs[100].pop()
+        self.logs[900] = "perf-gate: scope OVERRIDDEN by dispatch input (1 of 1 requested service(s))"
+        staged = self.collect()
+        self.assertEqual(staged["sources"][0]["run_id"], 99)
+        self.assertEqual(staged["sources"][2]["run_id"], 100)
+        self.assertTrue(staged["sources"][2]["missing"])
+        self.assertFalse(any("security-abuse" in path for path in staged["payloads"]))
+        self.security(latest)
+        staged = self.collect()
+        self.assertEqual(staged["sources"][2]["selected"][0]["state"], "not-run")
+        latest["conclusion"] = "cancelled"
+        self.artifacts[100] = [row for row in self.artifacts[100] if row["name"] != "perf-reports-security-abuse"]
+        staged = self.collect()
+        self.assertEqual(staged["sources"][2]["run_id"], 100)
+        self.assertTrue(staged["sources"][2]["missing"])
+
+    def test_security_raw_summary_uses_existing_threshold_validation(self):
+        metadata = self.gate()
+        self.security(metadata, "failed")
+        staged = self.collect()
+        self.assertEqual(staged["sources"][2]["selected"][0]["state"], "failed")
+        self.archives[7000] = archive({"security-abuse-run.json": envelope(metadata, "openbank-security-abuse", "failed"),
+                                       "security-abuse-summary.json": summary(False)})
+        with self.assertRaisesRegex(STAGE.StageError, "thresholds disagree"):
+            self.collect()
 
 
 if __name__ == "__main__":

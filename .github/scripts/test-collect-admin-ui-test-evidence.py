@@ -625,7 +625,7 @@ class CollectionTests(unittest.TestCase):
         relative = "openbank-admin-ui/perf-artifacts/read-summary.json.run.json"
         target = self.repo / relative
         for fail in (False, True):
-            def collector(command, cwd, check):
+            def collector(command, cwd, check, fail=fail):
                 self.assertEqual(target.read_bytes(), b"fixture")
                 if fail:
                     raise RuntimeError("collector failed")
