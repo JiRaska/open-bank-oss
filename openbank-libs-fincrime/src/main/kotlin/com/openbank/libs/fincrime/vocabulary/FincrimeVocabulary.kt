@@ -94,9 +94,10 @@ class FincrimeVocabulary private constructor(
             require(source.effectiveUntil == null || source.effectiveUntil > source.effectiveFrom) {
                 "effectiveUntil must be after effectiveFrom"
             }
-            require(source.entries.size in 1..MAX_ENTRIES) { "vocabulary must contain 1..$MAX_ENTRIES entries" }
-            // Copy before validation/hash: subsequent caller mutation cannot change the compiled revision.
-            val entries = source.entries.toList().sortedBy { it.code.value }
+            // Bound the copy itself, then validate the snapshot rather than the caller's mutable list.
+            val snapshot = source.entries.take(MAX_ENTRIES + 1)
+            require(snapshot.size in 1..MAX_ENTRIES) { "vocabulary must contain 1..$MAX_ENTRIES entries" }
+            val entries = snapshot.sortedBy { it.code.value }
             validateEntries(entries)
             val canonical = canonical(source, entries)
             return FincrimeVocabulary(
