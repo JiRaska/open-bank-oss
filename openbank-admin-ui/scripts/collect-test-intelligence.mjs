@@ -599,6 +599,19 @@ function platformCapabilities() {
   }
 }
 
+// A released backend component DECLARES wire end-to-end suites in source long before
+// any run retains executable evidence for them. The e2e control must exist from the
+// declaration, not from the first retained run — otherwise the matrix under-reports
+// exactly the suites that have never run, which is the gap the control exists to show.
+// The detection mirrors classifyJUnitEvidence: an `E2E` class-name suffix or an `e2e`
+// package/directory segment in the ordinary `src/test` tree.
+function declaredWireE2eSuites(component) {
+  const root = path.join(repo, component, 'src', 'test')
+  if (!fs.existsSync(root)) return false
+  return allFiles(root, file => /\.(kt|java)$/.test(file))
+    .some(file => /E2E\.(kt|java)$/.test(path.basename(file)) || file.split(path.sep).includes('e2e'))
+}
+
 function requiredControls(components, contracts, mutations, performance, synthetics, runVersionByComponent = new Map()) {
   const pactParticipants = new Set(contracts.flatMap(item => [item.consumer, item.provider]))
   const mutationParticipants = mutationComponents()
@@ -628,7 +641,11 @@ function requiredControls(components, contracts, mutations, performance, synthet
           source: component.coverage.source, observedAt: component.coverage.observedAt,
         })
       }
-      if (component.component === 'openbank-admin-ui') addEvidence(component, 'e2e', 'The operator UI requires its Playwright journey evidence.')
+      if (component.component === 'openbank-admin-ui') {
+        addEvidence(component, 'e2e', 'The operator UI requires its Playwright journey evidence.')
+      } else if (declaredWireE2eSuites(component.component)) {
+        addEvidence(component, 'e2e', 'The component declares wire end-to-end suites in src/test; retained executable evidence is required.')
+      }
       if (component.moneyPath || component.testInfrastructure.declared.length > 0) {
         addEvidence(component, 'integration', component.moneyPath
           ? 'Money-path components require integration evidence.'
@@ -1183,6 +1200,8 @@ if (args.includes('--self-test')) {
   assert(classifyJUnitEvidence('test', 'com.openbank.customer.OnboardingE2E', 'openbank-customer-edge'), 'e2e', 'named E2E suite')
   assert(classifyJUnitEvidence('test', 'com.openbank.UnitTest', 'openbank-service'), 'unit', 'ordinary suite')
   assert(classifyJUnitEvidence('test', 'com.openbank.simulation.DstSimulationTest', 'openbank-simulation'), 'simulation', 'simulation suite')
+  assert(declaredWireE2eSuites('openbank-fx-service'), true, 'fx wire E2E declaration detected')
+  assert(declaredWireE2eSuites('openbank-libs-domain'), false, 'plain lib has no wire E2E declaration')
   console.log('collect-test-intelligence self-test: classification evidence is preserved')
 } else {
   main().catch(error => { console.error(error); process.exit(1) })
