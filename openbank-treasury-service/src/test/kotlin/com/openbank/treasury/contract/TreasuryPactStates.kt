@@ -8,6 +8,7 @@ import com.openbank.treasury.application.port.`in`.PortfolioStatementUseCase
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.infrastructure.iso20022.Semt002Statements
+import com.openbank.treasury.portfolio.withSyntheticPortfolioIsins
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.vertx.core.Vertx
@@ -49,7 +50,8 @@ object TreasuryPactStates {
      * CFI classification, store). Idempotent, so replaying the state twice stores one version.
      */
     fun snapshotExists(vertx: Vertx, portfolio: PortfolioStatementUseCase) {
-        val xml = requireNotNull(TreasuryPactStates::class.java.getResource(FIXTURE)).readBytes()
+        val xml = requireNotNull(TreasuryPactStates::class.java.getResource(FIXTURE))
+            .readText().withSyntheticPortfolioIsins().toByteArray()
         val sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(xml))
         runOnVertxContext(vertx) {
             portfolio.upload(

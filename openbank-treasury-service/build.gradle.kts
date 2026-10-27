@@ -110,3 +110,10 @@ tasks.withType<Test> {
     // override, and the same reasoning, as account-service.
     maxHeapSize = "2g"
 }
+
+// Shared synthetic wire fixture is test-only; it is never packaged in the service runtime.
+sourceSets {
+    test {
+        resources.srcDir(rootProject.file("openbank-libs-domain/src/test/resources/portfolio-contract"))
+    }
+}

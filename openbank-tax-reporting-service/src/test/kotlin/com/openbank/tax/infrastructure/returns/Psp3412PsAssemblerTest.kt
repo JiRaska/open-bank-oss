@@ -120,6 +120,9 @@ class Psp3412PsAssemblerTest {
         refused(golden.copy(asOf = end.minusDays(1)), "as of 2026-12-30")
         refused(golden.copy(currency = "EUR"), "is in EUR")
         refused(golden.copy(positions = golden.positions + pos("CRYPTO", "XS0000000009", "1", "1")), "CRYPTO")
+        listOf("DEBT_SECURITY", "FUND_UNIT", "MONEY_MARKET_INSTRUMENT").forEach { unsupported ->
+            refused(golden.copy(positions = listOf(pos(unsupported, "CZ0001005037", "1", "1"))), unsupported)
+        }
         refused(golden.copy(positions = listOf(pos("EQUITY", "not-an-isin", "1", "1"))), "not an ISIN")
         refused(golden.copy(positions = listOf(pos("EQUITY", "US0378331005", "1", "1", "USD"))), "valued in USD")
         refused(golden.copy(positions = golden.positions + golden.positions.first()), "more than once")
@@ -142,6 +145,23 @@ class Psp3412PsAssemblerTest {
         val short = golden.copy(positions = listOf(pos("EQUITY", "CZ0008019106", "-10", "-100")))
         val d = Psp3412PsAssembler.assemble(short, end, "CZK").datapoints
         assertThat(definition.validate(d).map { it.ruleId }).contains("holdings-non-negative")
+    }
+
+    @Test
+    fun `the actual producer contract fixture decodes and assembles without class translation`() {
+        val mapper = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().findAndRegisterModules()
+        val body = requireNotNull(javaClass.getResource("/portfolio-reporting.json")) {
+            "shared reporting fixture missing"
+        }.readText()
+        val dto = mapper.readValue(body, TreasuryPortfolioDto::class.java)
+        val decoded = TreasuryCompanyPortfolio.decode(dto, "pension-co")
+        val report = Psp3412PsAssembler.assemble(decoded, end, "CZK")
+        assertThat(report.datapoints.getValue("holdings_carrying_value")).isEqualByComparingTo("18727500.00")
+        assertThat(report.datapoints.getValue("government_bond_valuation")).isEqualByComparingTo("9875000.00")
+        assertThat(report.datapoints.getValue("corporate_bond_valuation")).isEqualByComparingTo("5012500.00")
+        assertThat(report.datapoints.getValue("fund_units_valuation")).isEqualByComparingTo("2640000.00")
+        assertThat(definition.validate(report.datapoints)).isEmpty()
+        assertThat(report.sourceStatements).containsExactlyElementsOf(decoded.sourceStatements)
     }
 
     private fun validTreasuryWire() = TreasuryPortfolioDto(

@@ -31,14 +31,16 @@ class PortfolioStatementServiceTest {
     private val date = LocalDate.of(2026, 12, 31)
     private val actor = Actor("anna.approver", ActorType.HUMAN)
     private val classes = CfiClassMapping(
-        mapOf("DB" to "DEBT_SECURITY", "ES" to "EQUITY", "CI" to "FUND_UNIT", "CIOJ" to "UCITS_FUND_UNIT"),
+        mapOf("C" to "EQUITY", "ES" to "EQUITY", "CI" to "FUND_UNITS"),
+        // Synthetic fixture assignments, not assertions about real issuers.
+        mapOf("ZZ0000000016" to "GOVERNMENT_BOND", "ZZ0000000024" to "CORPORATE_BOND"),
     )
     private val repo = InMemoryPortfolioRepository()
     private val clock = Clock.fixed(Instant.parse("2027-01-05T09:00:00Z"), ZoneOffset.UTC)
     private val service = PortfolioStatementService(repo, "pension-co", listOf("PSCO-OWN-0001"), classes, clock)
 
     private fun fixture(name: String = "pension-co-2026-12-31.xml") =
-        requireNotNull(javaClass.getResource("/semt002/$name")).readBytes()
+        requireNotNull(javaClass.getResource("/semt002/$name")).readText().withSyntheticPortfolioIsins().toByteArray()
 
     private fun statement(name: String = "pension-co-2026-12-31.xml") = Semt002Statements.parse(fixture(name))
 
@@ -131,10 +133,10 @@ class PortfolioStatementServiceTest {
             },
         ).containsExactlyInAnyOrderEntriesOf(
             mapOf(
-                "CZ0001005037" to "DEBT_SECURITY",
-                "CZ0001006266" to "DEBT_SECURITY",
-                "IE00B4L5Y983" to "UCITS_FUND_UNIT",
-                "CZ0008008018" to "EQUITY",
+                "ZZ0000000016" to "GOVERNMENT_BOND",
+                "ZZ0000000024" to "CORPORATE_BOND",
+                "ZZ0000000040" to "FUND_UNITS",
+                "ZZ0000000032" to "EQUITY",
             ),
         )
         assertThat(service.periodEnd(date).sourceStatements.single().id).isEqualTo(stored.id)
@@ -145,12 +147,12 @@ class PortfolioStatementServiceTest {
     fun `an unmapped CFI refuses the WHOLE statement, names every gap, and stores nothing`(): Unit = runBlocking {
         val xml = String(fixture()).replace("ESVUFR", "RWSNCA").toByteArray()
         val s = Semt002Statements.parse(xml)
-        val unmapped = s.copy(holdings = s.holdings.map { if (it.isin == "CZ0001006266") it.copy(cfi = null) else it })
+        val unmapped = s.copy(holdings = s.holdings.map { if (it.isin == "ZZ0000000024") it.copy(cfi = null) else it })
 
         assertThatThrownBy { runBlocking { service.upload(unmapped, "sha-u", "ku", actor) } }
             .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("CZ0008008018 (CFI RWSNCA)")
-            .hasMessageContaining("CZ0001006266 (CFI not stated)")
+            .hasMessageContaining("ZZ0000000032 (CFI RWSNCA)")
+            .hasMessageContaining("ZZ0000000024 (CFI not stated)")
         assertThat(repo.rows).isEmpty()
         assertThatThrownBy { runBlocking { service.periodEnd(date) } }
             .isInstanceOf(PortfolioSnapshotMissingException::class.java)
@@ -162,7 +164,7 @@ class PortfolioStatementServiceTest {
             runBlocking { service.upload(statement("pension-co-2026-12-31-unmapped-cfi.xml"), "s", "k", actor) }
         }
             .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("IE00B4L5Y983 (CFI FFICSX)")
+            .hasMessageContaining("ZZ0000000040 (CFI FFICSX)")
     }
 
     @Test
@@ -218,9 +220,9 @@ class PortfolioStatementServiceTest {
         assertThat(trail.map { it.version }).containsExactly(1, 2)
         assertThat(trail.first().supersededBy).isEqualTo(corrected.id)
         assertThat(trail.first().supersededAt).isNotNull()
-        assertThat(trail.first().snapshot.positions.first { it.isin == "CZ0001005037" }.valuation)
+        assertThat(trail.first().snapshot.positions.first { it.isin == "ZZ0000000016" }.valuation)
             .isEqualByComparingTo("9875000.00")
-        assertThat(corrected.snapshot.positions.first { it.isin == "CZ0001005037" }.valuation)
+        assertThat(corrected.snapshot.positions.first { it.isin == "ZZ0000000016" }.valuation)
             .isEqualByComparingTo("9880000.00")
         // Re-uploading the ORIGINAL bytes now is a correction back, not a replay of version 1.
         assertThat(service.upload(statement(), "sha-a", "k3", actor).version).isEqualTo(3)
@@ -278,7 +280,7 @@ class PortfolioStatementServiceTest {
     @Test
     fun `a non-positive quantity, a negative valuation or an invalid ISIN is refused`() {
         fun one(h: CustodyHolding) = CustodyStatement("S", "PSCO-OWN-0001", date, listOf(h))
-        val ok = CustodyHolding("CZ0001005037", "DBFTFB", BigDecimal.ONE, BigDecimal.TEN, "CZK")
+        val ok = CustodyHolding("ZZ0000000016", "DBFTFB", BigDecimal.ONE, BigDecimal.TEN, "CZK")
         listOf(
             ok.copy(quantity = BigDecimal.ZERO),
             ok.copy(valuation = BigDecimal("-1")),
@@ -291,7 +293,7 @@ class PortfolioStatementServiceTest {
 
     @Test
     fun `ISIN check digits`() {
-        assertThat(listOf("CZ0001005037", "IE00B4L5Y983", "US0378331005").all(Isin::isValid)).isTrue()
+        assertThat(listOf("ZZ0000000016", "ZZ0000000040", "US0378331005").all(Isin::isValid)).isTrue()
         assertThat(listOf("CZ0001005038", "cz0001005037", "CZ000100503", "").none(Isin::isValid)).isTrue()
     }
 
@@ -309,6 +311,92 @@ class PortfolioStatementServiceTest {
         val tooFine = String(fixture()).replace("9875000.00", "9875000.00001")
         assertThatThrownBy { Semt002Statements.parse(tooFine.toByteArray()) }
             .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("decimal places")
+    }
+
+    @Test
+    fun `ambiguous debt without an explicit ISIN classification refuses the complete upload`() {
+        val noDebtMapping = PortfolioStatementService(
+            repo,
+            "pension-co",
+            listOf("PSCO-OWN-0001"),
+            CfiClassMapping(mapOf("ES" to "EQUITY", "CI" to "FUND_UNITS")),
+            clock,
+        )
+        assertThatThrownBy { runBlocking { noDebtMapping.upload(statement(), "sha", "missing-debt", actor) } }
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("ZZ0000000016")
+        assertThat(repo.rows).isEmpty()
+    }
+
+    @Test
+    fun `invalid and contradictory debt classifications fail closed`() {
+        listOf(
+            { CfiClassMapping(mapOf("DB" to "GOVERNMENT_BOND")) },
+            { CfiClassMapping(mapOf("ES" to "DEBT_SECURITY")) },
+            { CfiClassMapping(emptyMap(), mapOf("not-an-isin" to "GOVERNMENT_BOND")) },
+            { CfiClassMapping(emptyMap(), mapOf("ZZ0000000016" to "EQUITY")) },
+        ).forEach { invalid -> assertThatThrownBy { invalid() }.isInstanceOf(IllegalArgumentException::class.java) }
+        val contradiction = CfiClassMapping(
+            mapOf("ES" to "EQUITY"),
+            mapOf("ZZ0000000032" to "CORPORATE_BOND"),
+        )
+        assertThatThrownBy { contradiction.classify("pension-co", statement(), "CZK") }
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("not debt")
+    }
+
+    @Test
+    fun `unknown legacy class is retained as evidence but refuses reporting until correction`(): Unit = runBlocking {
+        val stored = service.upload(statement(), "legacy-sha", "legacy-class", actor)
+        val legacy = stored.copy(
+            snapshot = stored.snapshot.copy(
+                positions = stored.snapshot.positions.map { it.copy(instrumentClass = "DEBT_SECURITY") },
+            ),
+        )
+        repo.rows[0] = legacy
+        assertThatThrownBy { runBlocking { service.periodEnd(date) } }
+            .isInstanceOf(IllegalStateException::class.java).hasMessageContaining("source correction")
+        assertThat(service.upload(statement(), "legacy-sha", "legacy-replay", actor).id).isEqualTo(stored.id)
+        assertThat(service.versions(date).single().snapshot.positions.first().instrumentClass)
+            .isEqualTo("DEBT_SECURITY")
+        service.upload(statement("pension-co-2026-12-31-corrected.xml"), "fixed-sha", "fixed-class", actor)
+        assertThat(service.periodEnd(date).positions.first().instrumentClass).isEqualTo("GOVERNMENT_BOND")
+        assertThat(service.versions(date).first().snapshot.positions.first().instrumentClass).isEqualTo("DEBT_SECURITY")
+    }
+
+    @Test
+    fun `configuration changes preserve stored classes until an explicit source correction`(): Unit = runBlocking {
+        val original = service.upload(statement(), "sha-original", "original-class", actor)
+        val changedMapping = CfiClassMapping(
+            mapOf("ES" to "EQUITY", "CI" to "FUND_UNITS"),
+            mapOf("ZZ0000000016" to "CORPORATE_BOND", "ZZ0000000024" to "CORPORATE_BOND"),
+        )
+        val changedService = PortfolioStatementService(
+            repo,
+            "pension-co",
+            listOf("PSCO-OWN-0001"),
+            changedMapping,
+            clock,
+        )
+        val replay = changedService.upload(statement(), "sha-original", "new-alias", actor)
+        assertThat(replay.id).isEqualTo(original.id)
+        assertThat(replay.snapshot.positions.first().instrumentClass).isEqualTo("GOVERNMENT_BOND")
+        val corrected = changedService.upload(
+            statement("pension-co-2026-12-31-corrected.xml"),
+            "sha-corrected",
+            "corrected-class",
+            actor,
+        )
+        assertThat(corrected.version).isEqualTo(2)
+        assertThat(corrected.snapshot.positions.first().instrumentClass).isEqualTo("CORPORATE_BOND")
+        assertThat(changedService.versions(date).first().snapshot.positions.first().instrumentClass)
+            .isEqualTo("GOVERNMENT_BOND")
+    }
+
+    @Test
+    fun `the canonical money market class is explicit`() {
+        val mapping = CfiClassMapping(mapOf("DY" to "MONEY_MARKET"))
+        val source = statement().copy(holdings = listOf(statement().holdings.first().copy(cfi = "DYXXXX")))
+        assertThat(mapping.classify("pension-co", source, "CZK").positions.single().instrumentClass)
+            .isEqualTo("MONEY_MARKET")
     }
 
     /** Mirrors the store's contract: one CURRENT row per (entity, date), versions kept. */

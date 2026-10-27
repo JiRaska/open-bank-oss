@@ -5,6 +5,7 @@
 package com.openbank.tax.infrastructure.returns.pension
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.domain.portfolio.PortfolioReportingClass
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.tax.application.port.out.CompanyPortfolio
 import com.openbank.tax.application.port.out.CompanyPortfolioPort
@@ -237,14 +238,7 @@ data class Psp3412PsReport(
  */
 object Psp3412PsAssembler {
     /** LEGAL-REVIEW/TODO: platform classes, not ČNB codes. An unlisted class refuses the return. */
-    val INSTRUMENT_CLASSES = listOf(
-        "GOVERNMENT_BOND",
-        "CORPORATE_BOND",
-        "EQUITY",
-        "FUND_UNITS",
-        "MONEY_MARKET",
-        "DEPOSIT",
-    )
+    val INSTRUMENT_CLASSES = PortfolioReportingClass.entries.map { it.name }
 
     private val ISIN = Regex("[A-Z]{2}[A-Z0-9]{9}[0-9]")
 

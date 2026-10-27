@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.domain.model
 
+import com.openbank.libs.domain.portfolio.PortfolioReportingClass
 import java.math.BigDecimal
 import java.time.LocalDate
 
@@ -77,28 +78,50 @@ data class PortfolioSnapshot(
  * prefix wins. Never a guess — a CFI no prefix covers refuses the whole statement, because a
  * holding the return cannot classify is a holding the return would misreport.
  */
-class CfiClassMapping(prefixes: Map<String, String>) {
-    private val prefixes: List<Pair<String, String>> = prefixes
-        .map { (prefix, cls) -> prefix.trim().uppercase() to cls.trim() }
+class CfiClassMapping(prefixes: Map<String, String>, debtClassesByIsin: Map<String, String> = emptyMap()) {
+    private val prefixes: List<Pair<String, PortfolioReportingClass>> = prefixes
+        .map { (prefix, cls) -> prefix.trim().uppercase() to reportingClass(cls) }
         .onEach { (prefix, cls) ->
             require(prefix.matches(PREFIX)) { "CFI prefix '$prefix' must be 1-6 letters" }
-            require(cls.isNotEmpty()) { "CFI prefix '$prefix' maps to an empty class" }
+            require(!prefix.startsWith("DB") && prefix != "D") {
+                "debt CFI classification requires an explicit per-ISIN reporting class"
+            }
+            require(cls !in DEBT_CLASSES) { "government/corporate debt classification cannot come from a CFI prefix" }
         }
         .sortedByDescending { it.first.length }
 
-    fun classOf(cfi: String): String? = prefixes.firstOrNull { cfi.startsWith(it.first) }?.second
+    init {
+        require(this.prefixes.map { it.first }.distinct().size == this.prefixes.size) {
+            "portfolio CFI prefixes must be unique after normalization"
+        }
+    }
+
+    private val debtClasses = debtClassesByIsin.mapValues { (isin, cls) ->
+        require(Isin.isValid(isin)) { "portfolio debt classification key '$isin' is not a valid ISIN" }
+        reportingClass(cls).also {
+            require(it in DEBT_CLASSES) { "ISIN $isin must declare GOVERNMENT_BOND or CORPORATE_BOND" }
+        }
+    }
+
+    private fun classOf(holding: CustodyHolding): PortfolioReportingClass? {
+        val cfi = holding.cfi ?: return null
+        val debtClass = debtClasses[holding.isin]
+        if (cfi.startsWith("DB")) return debtClass
+        require(debtClass == null) { "ISIN ${holding.isin} has a debt classification but its CFI $cfi is not debt" }
+        return prefixes.firstOrNull { cfi.startsWith(it.first) }?.second
+    }
 
     /**
      * Classifies every holding, or refuses the statement naming EVERY holding that cannot be
      * classified (so one upload attempt shows the whole gap, not the first line of it).
      */
     fun classify(entity: String, statement: CustodyStatement, currency: String): PortfolioSnapshot {
-        val unmapped = statement.holdings.filter { h -> h.cfi?.let(::classOf) == null }
+        val unmapped = statement.holdings.filter { h -> classOf(h) == null }
         require(unmapped.isEmpty()) {
             "statement ${statement.statementId ?: statement.safekeepingAccount} for ${statement.statementDate} " +
                 "is refused: no instrument-class mapping for " +
                 unmapped.joinToString { "${it.isin} (CFI ${it.cfi ?: "not stated"})" } +
-                " — declare the CFI prefix in openbank.treasury.portfolio.cfi-classes"
+                " — declare the reporting class in openbank.treasury.portfolio.cfi-classes or debt-classes-by-isin"
         }
         return PortfolioSnapshot(
             entity = entity,
@@ -111,7 +134,7 @@ class CfiClassMapping(prefixes: Map<String, String>) {
                 PortfolioPosition(
                     h.isin,
                     cfi,
-                    requireNotNull(classOf(cfi)),
+                    requireNotNull(classOf(h)).name,
                     h.quantity,
                     h.valuation,
                     h.valuationCurrency,
@@ -123,6 +146,11 @@ class CfiClassMapping(prefixes: Map<String, String>) {
 
     private companion object {
         val PREFIX = Regex("[A-Z]{1,6}")
+        val DEBT_CLASSES = setOf(PortfolioReportingClass.GOVERNMENT_BOND, PortfolioReportingClass.CORPORATE_BOND)
+
+        fun reportingClass(raw: String): PortfolioReportingClass =
+            PortfolioReportingClass.entries.firstOrNull { it.name == raw.trim() }
+                ?: throw IllegalArgumentException("unknown portfolio reporting class '$raw'")
     }
 }
 

@@ -2299,6 +2299,18 @@ public final class com/openbank/libs/domain/portfolio/PortfolioQuantityBasis : j
 	public static fun values ()[Lcom/openbank/libs/domain/portfolio/PortfolioQuantityBasis;
 }
 
+public final class com/openbank/libs/domain/portfolio/PortfolioReportingClass : java/lang/Enum {
+	public static final field CORPORATE_BOND Lcom/openbank/libs/domain/portfolio/PortfolioReportingClass;
+	public static final field DEPOSIT Lcom/openbank/libs/domain/portfolio/PortfolioReportingClass;
+	public static final field EQUITY Lcom/openbank/libs/domain/portfolio/PortfolioReportingClass;
+	public static final field FUND_UNITS Lcom/openbank/libs/domain/portfolio/PortfolioReportingClass;
+	public static final field GOVERNMENT_BOND Lcom/openbank/libs/domain/portfolio/PortfolioReportingClass;
+	public static final field MONEY_MARKET Lcom/openbank/libs/domain/portfolio/PortfolioReportingClass;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/domain/portfolio/PortfolioReportingClass;
+	public static fun values ()[Lcom/openbank/libs/domain/portfolio/PortfolioReportingClass;
+}
+
 public final class com/openbank/libs/flags/DefaultsFeatureClient : com/openbank/libs/flags/FeatureClient {
 	public fun <init> ()V
 	public fun boolean (Ljava/lang/String;ZLcom/openbank/libs/flags/EvalContext;)Lcom/openbank/libs/flags/FlagEvaluation;

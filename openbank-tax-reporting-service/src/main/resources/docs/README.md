@@ -48,3 +48,12 @@ on any number.
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+### Custodian portfolio contract
+
+PSP 34-12 PS consumes the same closed `instrumentClass` reporting vocabulary as treasury:
+`GOVERNMENT_BOND`, `CORPORATE_BOND`, `EQUITY`, `FUND_UNITS`, `MONEY_MARKET`, `DEPOSIT`.
+Unknown classes refuse assembly. Treasury requires explicit portfolio-local ISIN classification
+for government/corporate debt; a CFI code alone is not issuer evidence. The contract fixture is
+checked against the producer's actual response serialization and the consumer's DTO/assembler.
+This does not establish official regulator taxonomy or deployment of the company instance.

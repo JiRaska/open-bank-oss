@@ -5,6 +5,7 @@
 package com.openbank.treasury.application.usecase
 
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.domain.portfolio.PortfolioReportingClass
 import com.openbank.treasury.application.port.`in`.PortfolioStatementUseCase
 import com.openbank.treasury.application.port.out.CompletePortfolio
 import com.openbank.treasury.application.port.out.DuplicatePortfolioStatementException
@@ -127,6 +128,9 @@ class PortfolioStatementService(
             it.snapshot.positions
         }.groupBy { it.isin }.toSortedMap().map { (isin, legs) ->
             val first = legs.first()
+            check(legs.all { leg -> PortfolioReportingClass.entries.any { it.name == leg.instrumentClass } }) {
+                "ISIN $isin has an unsupported stored reporting class; an explicit source correction is required"
+            }
             check(first.quantityBasis != null && legs.all { it.quantityBasis == first.quantityBasis }) {
                 "ISIN $isin has unknown or incompatible quantity basis across accounts; a source correction is required"
             }

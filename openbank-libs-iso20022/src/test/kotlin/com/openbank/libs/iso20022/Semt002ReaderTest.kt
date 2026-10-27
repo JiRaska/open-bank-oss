@@ -60,6 +60,53 @@ class Semt002ReaderTest {
     }
 
     @Test
+    fun `holding signs accept every XML boolean spelling and surrounding whitespace`() {
+        mapOf("true" to "9875000.00", "1" to "9875000.00", "false" to "-9875000.00", "0" to "-9875000.00")
+            .forEach { (sign, expected) ->
+                val xml = fixture.replaceFirst("<Sgn>true</Sgn>", "<Sgn> $sign </Sgn>")
+                assertThat(validator.validate(xml)).isEqualTo(Iso20022ValidationResult.Valid)
+                assertThat(reader.read(xml).holdings.first().holdingValue).isEqualByComparingTo(expected)
+            }
+    }
+
+    @Test
+    fun `an absent holding sign retains the positive default`() {
+        val xml = fixture.replaceFirst("<Sgn>true</Sgn>", "")
+        assertThat(reader.read(xml).holdings.first().holdingValue).isEqualByComparingTo("9875000.00")
+    }
+
+    @Test
+    fun `a present blank or invalid holding sign is refused`() {
+        listOf("", " ", "yes", "TRUE").forEach { sign ->
+            assertRefused(fixture.replaceFirst("<Sgn>true</Sgn>", "<Sgn>$sign</Sgn>"), "boolean")
+        }
+    }
+
+    @Test
+    fun `a negative holding amount is refused before applying either sign`() {
+        listOf("true", "false", "1", "0").forEach { sign ->
+            val xml = fixture.replaceFirst("<Amt Ccy=\"CZK\">9875000.00</Amt>", "<Amt Ccy=\"CZK\">-9875000.00</Amt>")
+                .replaceFirst("<Sgn>true</Sgn>", "<Sgn>$sign</Sgn>")
+            assertRefused(xml, "negative")
+        }
+    }
+
+    @Test
+    fun `numeric last-page indicators preserve single-page enforcement`() {
+        val complete = fixture.replace("<LastPgInd>true</LastPgInd>", "<LastPgInd> 1 </LastPgInd>")
+        assertThat(validator.validate(complete)).isEqualTo(Iso20022ValidationResult.Valid)
+        assertThat(reader.read(complete).holdings).hasSize(4)
+        assertRefused(fixture.replace("<LastPgInd>true</LastPgInd>", "<LastPgInd>0</LastPgInd>"), "page")
+    }
+
+    @Test
+    fun `a blank or invalid last-page indicator is refused`() {
+        listOf("", " ", "yes", "TRUE").forEach { last ->
+            assertRefused(fixture.replace("<LastPgInd>true</LastPgInd>", "<LastPgInd>$last</LastPgInd>"), "boolean")
+        }
+    }
+
+    @Test
     fun `DtTm contributes its date as written`() {
         val xml = fixture.replace("<Dt>2026-12-31</Dt>", "<DtTm>2026-12-31T23:30:00-05:00</DtTm>")
         assertThat(reader.read(xml).statementDate).isEqualTo(LocalDate.of(2026, 12, 31))

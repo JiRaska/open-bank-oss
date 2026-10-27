@@ -144,7 +144,8 @@
               "combine": "AND",
               "matchers": [
                 {
-                  "match": "type"
+                  "match": "regex",
+                  "regex": "^(GOVERNMENT_BOND|CORPORATE_BOND|EQUITY|FUND_UNITS|MONEY_MARKET|DEPOSIT)$"
                 }
               ]
             },

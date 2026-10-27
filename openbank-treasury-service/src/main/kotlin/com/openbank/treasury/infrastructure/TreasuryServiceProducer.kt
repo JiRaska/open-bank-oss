@@ -173,7 +173,7 @@ class TreasuryServiceProducer {
         statements = statements,
         entity = config.entity().orElse(null)?.takeIf { it.isNotBlank() },
         safekeepingAccounts = config.safekeepingAccounts().orElse(emptyList()),
-        classes = CfiClassMapping(config.cfiClasses()),
+        classes = CfiClassMapping(config.cfiClasses(), config.debtClassesByIsin()),
         clock = clock,
     )
 

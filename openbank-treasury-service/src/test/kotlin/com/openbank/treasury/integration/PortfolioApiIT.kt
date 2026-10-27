@@ -4,7 +4,10 @@
 
 package com.openbank.treasury.integration
 
+import com.fasterxml.jackson.databind.node.ObjectNode
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.treasury.it.PostgresTestResource
+import com.openbank.treasury.portfolio.withSyntheticPortfolioIsins
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -34,7 +37,7 @@ import java.util.concurrent.atomic.AtomicLong
 class PortfolioApiIT {
 
     private fun fixture(name: String, date: LocalDate): ByteArray =
-        requireNotNull(javaClass.getResource("/semt002/$name")).readText()
+        requireNotNull(javaClass.getResource("/semt002/$name")).readText().withSyntheticPortfolioIsins()
             .replace("2026-12-31", date.toString()).toByteArray()
 
     /** Each test owns its statement date, so tests do not depend on order or on each other. */
@@ -61,19 +64,37 @@ class PortfolioApiIT {
             .body("uploadedBy", equalTo("anna.approver"))
             .extract().path("id")
 
-        periodEnd(date).then().statusCode(200)
+        val wire = periodEnd(date).then().statusCode(200)
             .body("asOf", equalTo(date.toString()))
             .body("currency", equalTo("CZK"))
             .body("sourceStatements[0].statementUuid", equalTo(id))
             .body("positions", hasSize<Any>(4))
-            .body("positions.isin", contains("CZ0001005037", "CZ0001006266", "CZ0008008018", "IE00B4L5Y983"))
-            .body("positions[0].instrumentClass", equalTo("DEBT_SECURITY"))
+            .body("positions.isin", contains("ZZ0000000016", "ZZ0000000024", "ZZ0000000032", "ZZ0000000040"))
+            .body("positions[0].instrumentClass", equalTo("GOVERNMENT_BOND"))
             .body("positions[0].quantity", equalTo("10000000"))
             .body("positions[0].valuation", equalTo("9875000.0000"))
             .body("positions[0].valuationCurrency", equalTo("CZK"))
             .body("positions[2].instrumentClass", equalTo("EQUITY"))
-            .body("positions[3].instrumentClass", equalTo("FUND_UNIT"))
+            .body("positions[3].instrumentClass", equalTo("FUND_UNITS"))
+            .extract().asString()
+        assertReportingContract(wire, date, id)
         assertThat(rows("select count(*) from portfolio_holdings where statement_uuid = '$id'")).isEqualTo(4)
+    }
+
+    /** The same literal contract body is decoded by tax-reporting's actual DTO and assembler test. */
+    private fun assertReportingContract(wire: String, date: LocalDate, statementId: String) {
+        val mapper = jacksonObjectMapper()
+        val actual = mapper.readTree(wire)
+        val expected = mapper.readTree(
+            requireNotNull(javaClass.getResource("/portfolio-reporting.json")) {
+                "shared reporting fixture missing"
+            }.readText(),
+        ) as ObjectNode
+        // Each HTTP test owns a date and the production use case generates the UUID. Substitute
+        // only those two already-asserted values; retain every other real wire field unchanged.
+        expected.put("asOf", date.toString())
+        (expected.path("sourceStatements").single() as ObjectNode).put("statementUuid", statementId)
+        assertThat(actual).isEqualTo(expected)
     }
 
     @Test
@@ -99,7 +120,7 @@ class PortfolioApiIT {
     fun `NEGATIVE - an unmapped CFI is 400 and stores nothing, so the date stays 409`() {
         val date = freshDate()
         upload(fixture("pension-co-2026-12-31-unmapped-cfi.xml", date)).then().statusCode(400)
-            .body("message", containsString("IE00B4L5Y983 (CFI FFICSX)"))
+            .body("message", containsString("ZZ0000000040 (CFI FFICSX)"))
         periodEnd(date).then().statusCode(409)
         assertThat(rows("select count(*) from portfolio_statements where statement_date = '$date'")).isZero()
     }

@@ -1514,7 +1514,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: One or more configured accounts lacks a statement for that date
+          description: A configured account lacks a statement, or stored positions have unknown quantity dimensions or unsupported reporting classes requiring an explicit correction
           content:
             application/json:
               schema:
@@ -2650,7 +2650,8 @@ components:
       properties:
         instrumentClass:
           type: string
-          description: Mapped from the CFI by the configured prefix mapping (openbank.treasury.portfolio.cfi-classes)
+          enum: [GOVERNMENT_BOND, CORPORATE_BOND, EQUITY, FUND_UNITS, MONEY_MARKET, DEPOSIT]
+          description: Reporting-contract class; debt requires an explicit portfolio-local ISIN classification, other instruments use declared CFI prefixes
         isin: {type: string, pattern: '^[A-Z]{2}[A-Z0-9]{9}[0-9]$'}
         cfi: {type: string, pattern: '^[A-Z]{6}$'}
         quantity: {type: string, description: 'Quantity in quantityBasis, as stated (decimal string)'}

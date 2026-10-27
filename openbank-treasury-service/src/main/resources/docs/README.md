@@ -87,3 +87,24 @@ consistently across both services. Changing an identifier after ingestion does n
 immutable statements, register entries or stored returns: retain their evidence and reconcile
 the history before a coordinated change. This configuration change neither renames existing
 tax-reporting data nor provisions or deploys the company instance.
+
+### Portfolio reporting classes
+
+`instrumentClass` is the closed provider/consumer reporting vocabulary: `GOVERNMENT_BOND`,
+`CORPORATE_BOND`, `EQUITY`, `FUND_UNITS`, `MONEY_MARKET`, and `DEPOSIT`. It is not a universal
+security taxonomy or an assertion that the platform vocabulary is the regulator's official code list.
+CFI prefixes can declare non-debt classes. A `DB` debt holding requires an explicit, reviewed
+`openbank.treasury.portfolio.debt-classes-by-isin` entry identifying `GOVERNMENT_BOND` or
+`CORPORATE_BOND`; this map is empty by default. Neither CFI, country nor an ISIN prefix proves
+issuer classification. Missing classifications reject the complete upload, and a debt entry on
+an incompatible non-debt CFI also rejects it. Configuration values outside the reporting vocabulary
+are refused. Verify the actual issuer evidence before configuring real ISINs.
+
+The resolved class is stored with its statement version. A configuration change does not reclassify
+old evidence or identical-byte replays; a verified source correction creates a new version.
+Synthetic test assignments do not classify real-world issuers and do not authorize deployment.
+
+A historical class outside this contract is retained unchanged in storage and its version trail,
+but period-end reporting refuses it with 409 until an explicit source correction. It is never
+silently renamed or served as though it satisfied the closed response contract. Shared wire tests
+use checksum-valid `ZZ` test identifiers; their government/corporate assignments are synthetic.

@@ -236,13 +236,14 @@ openbank:
       # on that deployment (both deliberately absent here: no default entity exists).
       # Instrument class per CFI PREFIX (ISO 10962; longest prefix wins). A CFI no prefix covers
       # refuses the WHOLE statement at upload — a holding is never classified by guess.
+      # DB debt requires an explicit reviewed debt-classes-by-isin entry (empty by default).
+      # CFI alone cannot distinguish a government issuer from a corporate issuer.
       cfi-classes:
-        DB: DEBT_SECURITY
-        DY: MONEY_MARKET_INSTRUMENT
+        DY: MONEY_MARKET
         ES: EQUITY
         EP: EQUITY
-        CI: FUND_UNIT
-        CE: FUND_UNIT
+        CI: FUND_UNITS
+        CE: FUND_UNITS
     nostro-breaks:
       # Hourly sweep: re-reconcile statements of the last 31 days (a late ledger booking resolves
       # its break), then age every open break and alert once on those over the threshold.

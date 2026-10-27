@@ -21,4 +21,7 @@ interface PortfolioConfig {
     fun safekeepingAccounts(): Optional<List<String>>
 
     fun cfiClasses(): Map<String, String>
+
+    /** Reviewed portfolio-local debt classification; absent means ambiguous debt is refused. */
+    fun debtClassesByIsin(): Map<String, String>
 }

@@ -15,6 +15,7 @@ import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.libs.domain.portfolio.PortfolioReportingClass
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReportingPeriod
@@ -65,7 +66,7 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
                 o.stringValue("asOf", "2026-12-31")
                 o.stringType("currency", "CZK")
                 o.minArrayLike("positions", 1) { p ->
-                    p.stringType("instrumentClass", "GOVERNMENT_BOND")
+                    p.stringMatcher("instrumentClass", REPORTING_CLASSES, "GOVERNMENT_BOND")
                     p.stringType("isin", "CZ0001005037")
                     p.stringMatcher("quantity", DECIMAL, "1000")
                     p.stringMatcher("valuation", DECIMAL, "1012345.67")
@@ -183,6 +184,9 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
 
         /** LITERAL, retyped from the shared portfolio contract — never derived from the client. */
         const val EXPECTED_PATH = "/api/v1/treasury/portfolio/period-end"
+
+        private val REPORTING_CLASSES =
+            PortfolioReportingClass.entries.joinToString("|", "^(", ")$") { it.name }
 
         private const val DECIMAL = "-?[0-9]+(\\.[0-9]+)?"
 

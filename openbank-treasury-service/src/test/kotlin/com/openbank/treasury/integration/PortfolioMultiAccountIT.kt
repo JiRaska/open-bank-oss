@@ -5,6 +5,7 @@
 package com.openbank.treasury.integration
 
 import com.openbank.treasury.it.PostgresTestResource
+import com.openbank.treasury.portfolio.withSyntheticPortfolioIsins
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -43,7 +44,8 @@ class PortfolioMultiAccountIT {
     private fun xml(date: LocalDate, account: String, corrected: Boolean = false): String = requireNotNull(
         javaClass.getResource("/semt002/pension-co-2026-12-31${if (corrected) "-corrected" else ""}.xml"),
     )
-        .readText().replace("2026-12-31", date.toString()).replace("PSCO-OWN-0001", account)
+        .readText().withSyntheticPortfolioIsins()
+        .replace("2026-12-31", date.toString()).replace("PSCO-OWN-0001", account)
 
     private fun upload(body: String, key: String = UUID.randomUUID().toString()): Response = given()
         .contentType("application/xml").header("Idempotency-Key", key).body(body)
@@ -129,7 +131,7 @@ class PortfolioMultiAccountIT {
     fun `incompatible metadata for the same ISIN is refused rather than summed`() {
         val date = LocalDate.of(2030, 3, 31)
         upload(xml(date, "PSCO-OWN-0001")).then().statusCode(201)
-        upload(xml(date, "PSCO-OWN-0002").replace("DBFTFB", "ESVUFR")).then().statusCode(201)
+        upload(xml(date, "PSCO-OWN-0002").replace("ESVUFR", "ESXXXX")).then().statusCode(201)
         read(date).then().statusCode(409)
     }
 
@@ -242,6 +244,45 @@ class PortfolioMultiAccountIT {
             .body("positions[0].quantityBasis", equalTo("FACE_AMOUNT"))
             .body("positions[2].quantityBasis", equalTo("UNIT"))
             .body("sourceStatements", hasSize<Any>(2))
+    }
+
+    @Test
+    fun `legacy reporting classes refuse the wire contract without rewriting source evidence`() {
+        val date = LocalDate.of(2030, 11, 30)
+        val body = xml(date, "PSCO-OWN-0001")
+        val id = upload(body).then().statusCode(201).extract().path<String>("id")
+        upload(xml(date, "PSCO-OWN-0002")).then().statusCode(201)
+        val config = ConfigProvider.getConfig()
+        DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        ).use { connection ->
+            connection.prepareStatement(
+                "update portfolio_holdings set instrument_class = 'DEBT_SECURITY' where statement_uuid = ?",
+            )
+                .use { statement ->
+                    statement.setObject(1, UUID.fromString(id))
+                    assertThat(statement.executeUpdate()).isEqualTo(4)
+                }
+            read(date).then().statusCode(409).body("error", equalTo("INVALID_STATE"))
+            upload(body).then().statusCode(201).body("id", equalTo(id))
+            given().queryParam("date", date.toString()).get("/api/v1/treasury/portfolio/statements")
+                .then().statusCode(200).body("id", org.hamcrest.Matchers.hasItem(id))
+            connection.prepareStatement(
+                "select count(*) from portfolio_holdings where statement_uuid = ? " +
+                    "and instrument_class = 'DEBT_SECURITY'",
+            )
+                .use { statement ->
+                    statement.setObject(1, UUID.fromString(id))
+                    statement.executeQuery().use { rows ->
+                        rows.next()
+                        assertThat(rows.getInt(1)).isEqualTo(4)
+                    }
+                }
+            upload(xml(date, "PSCO-OWN-0001", corrected = true)).then().statusCode(201).body("version", equalTo(2))
+            read(date).then().statusCode(200).body("positions[0].instrumentClass", equalTo("GOVERNMENT_BOND"))
+        }
     }
 
     private fun lockPrior(connection: Connection, id: String) {

@@ -186,3 +186,13 @@ minimum reserves (D8), and real market connectivity (D9).
 ### Company portfolio identity boundary
 
 The company instance repeats the exact named-client check for its tax-reporting exception and vetoes every other machine or unclassified caller, including renamed machines. The earlier service-account name veto remains for contradictory person markers. Existing portfolio-only actions, staff role checks and deployment holds remain unchanged; these source tests do not establish deployment or live policy input.
+
+### Custodian reporting classification
+
+The portfolio provider and tax-reporting consumer share a closed reporting-contract vocabulary.
+Debt government/corporate classification requires an explicitly reviewed portfolio-local ISIN map;
+the default map is empty. Missing or contradictory classifications refuse the whole upload instead
+of inferring issuer identity from a broad CFI prefix. Stored statement classes are immutable across
+configuration changes; corrections create a new source version. Synthetic fixtures and contract
+verification do not approve real issuer classifications, activate a deployment, or certify the
+regulator's official taxonomy.

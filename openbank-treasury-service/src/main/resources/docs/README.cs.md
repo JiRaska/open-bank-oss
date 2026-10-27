@@ -83,3 +83,23 @@ period-end reporting unavailable until forward recovery is complete.
 ## Zapojení při buildu
 
 - **Bod rozhodování politik OPA.** `openbank.authz.opa-pdp-producer.enabled: true` zapne v libs-runtime `OpaPolicyDecisionPointProducer`, který dodá klienta OPA sidecaru podle `opa.url`, `opa.path` a `opa.timeout-ms` (výchozí 500 ms). Čte se při buildu.
+
+### Třídy pro vykazování portfolia
+
+`instrumentClass` je uzavřený smluvní slovník poskytovatele a konzumenta: `GOVERNMENT_BOND`,
+`CORPORATE_BOND`, `EQUITY`, `FUND_UNITS`, `MONEY_MARKET` a `DEPOSIT`. Nejde o obecnou taxonomii
+cenných papírů ani o potvrzení oficiálních kódů regulátora. Prefixy CFI mohou určit nedluhové třídy.
+Dluhový instrument s CFI `DB` vyžaduje výslovnou, schválenou položku
+`openbank.treasury.portfolio.debt-classes-by-isin` s hodnotou `GOVERNMENT_BOND` nebo
+`CORPORATE_BOND`; mapa je ve výchozím stavu prázdná. CFI, země ani prefix ISIN nedokládají typ
+emitenta. Chybějící klasifikace odmítne celý výpis. Dluhová klasifikace u nedluhového CFI nebo
+hodnota mimo smluvní slovník se rovněž odmítá. Před konfigurací skutečných ISIN ověřte doklady emitenta.
+
+Určená třída je uložena s verzí výpisu. Změna konfigurace nepřeklasifikuje staré důkazy ani opakované
+zaslání stejných bajtů; ověřená oprava zdroje vytvoří novou verzi. Testovací přiřazení nepotvrzují
+klasifikaci skutečných emitentů a nepovolují nasazení.
+
+Historická třída mimo tento slovník zůstává nezměněná v úložišti a historii verzí, ale vykazování
+ke konci období ji odmítne stavem 409 až do výslovné opravy zdroje. K přejmenování ani k vydávání
+neodpovídající odpovědi za platný uzavřený kontrakt nedochází. Sdílené testy používají syntetické
+identifikátory `ZZ` s platným kontrolním součtem; jejich klasifikace není tvrzením o skutečných emitentech.

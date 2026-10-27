@@ -77,8 +77,8 @@ class Semt002Reader {
         val report = root.child("SctiesBalCtdyRpt") ?: fail("missing SctiesBalCtdyRpt")
         report.child("Pgntn")?.let { pg ->
             val page = pg.child("PgNb")?.text()
-            val last = pg.child("LastPgInd")?.text()
-            if (page != "1" || last != "true") {
+            val last = pg.child("LastPgInd")?.xmlBoolean("Pgntn/LastPgInd") ?: fail("missing Pgntn/LastPgInd")
+            if (page != "1" || !last) {
                 fail("is page $page (last=$last) of a paginated report; upload the complete statement as one page")
             }
         }
@@ -109,13 +109,15 @@ class Semt002Reader {
         } ?: fail("BalForAcct[$n] ($isin) states no Unit, FaceAmt or AmtsdVal quantity")
         val holdingValue = bal.child("AcctBaseCcyAmts")?.child("HldgVal")
         val amount = holdingValue?.child("Amt")
-        val positive = holdingValue?.child("Sgn")?.text()?.let { it == "true" } ?: true
+        val magnitude = amount?.text()?.let { BigDecimal(it) }
+        if (magnitude?.signum() == -1) fail("BalForAcct[$n] ($isin) holding amount is negative")
+        val positive = holdingValue?.child("Sgn")?.xmlBoolean("BalForAcct[$n]/HldgVal/Sgn") ?: true
         return SecuritiesHolding(
             isin = isin,
             cfi = cfi,
             quantity = BigDecimal(quantityEl.text() ?: fail("BalForAcct[$n] ($isin) quantity is empty")),
             quantityType = type,
-            holdingValue = amount?.text()?.let { BigDecimal(it) }?.let { if (positive) it else it.negate() },
+            holdingValue = magnitude?.let { if (positive) it else it.negate() },
             holdingValueCurrency = amount?.getAttribute("Ccy")?.takeIf { it.isNotBlank() },
         )
     }
@@ -130,6 +132,12 @@ class Semt002Reader {
     }
 
     private fun fail(detail: String): Nothing = throw Semt002ParseException("semt.002 $detail")
+
+    private fun Element.xmlBoolean(field: String): Boolean = when (text()) {
+        "true", "1" -> true
+        "false", "0" -> false
+        else -> fail("$field is not an XML boolean")
+    }
 
     private fun Element.children(local: String): List<Element> {
         val nodes = childNodes
