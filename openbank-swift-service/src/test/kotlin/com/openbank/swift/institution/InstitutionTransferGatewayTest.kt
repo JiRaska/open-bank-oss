@@ -36,8 +36,12 @@ class InstitutionTransferGatewayTest {
     private val adapter = SchemeGatewayAdapter(client).also { it.self = it }
     private val validator = Iso20022Validator.forSchema(Pacs009Builder.SCHEMA_RESOURCE)
 
-    private fun pacs002(status: PaymentStatus, reason: String? = null) = Pacs002Builder().build(
-        PaymentStatusReport("SIM-STS-1", OffsetDateTime.now(ZoneOffset.UTC), "E2E", null, status, reason, null),
+    private fun pacs002(t: InstitutionTransfer, status: PaymentStatus, reason: String? = null) = Pacs002Builder().build(
+        PaymentStatusReport(
+            "SIM-STS-1", OffsetDateTime.now(ZoneOffset.UTC), "E2E", null, status, reason, null,
+            originalMessageId = t.messageId ?: InstitutionTransfer.messageIdFor(t),
+            originalMessageNameId = "pacs.009.001.08", originalUetr = t.uetr,
+        ),
     )
 
     @Test
@@ -51,9 +55,10 @@ class InstitutionTransferGatewayTest {
         for (rail in listOf("CERTIS", "TARGET2", "SWIFT")) {
             for ((sts, verdict) in expected) {
                 val body = slot<String>()
+                val t = transfer(release(rail))
                 every { client.submitInstitutionCreditTransfer(rail.lowercase(), capture(body)) } returns
-                    Uni.createFrom().item(pacs002(sts, if (sts == PaymentStatus.RJCT) "AM03" else null))
-                val out = adapter.submitInstitutionTransfer(transfer(release(rail)))
+                    Uni.createFrom().item(pacs002(t, sts, if (sts == PaymentStatus.RJCT) "AM03" else null))
+                val out = adapter.submitInstitutionTransfer(t)
                 assertThat(out.verdict).isEqualTo(verdict)
                 assertThat(out.reasonCode).isEqualTo(if (sts == PaymentStatus.RJCT) "AM03" else null)
                 assertThat(validator.validate(body.captured)).isEqualTo(Iso20022ValidationResult.Valid)
@@ -76,9 +81,11 @@ class InstitutionTransferGatewayTest {
     @Test
     fun `a message failing its own schema is never sent`() {
         // Bypasses validation on purpose: a BIC the XSD refuses, to prove the adapter checks before sending.
-        val broken = transfer().let { it.copy(creditor = it.creditor.copy(bic = "bad")) }
+        val broken = transfer().let { it.copy(creditor = it.creditor.copy(bic = "PRIVATE_SCHEMA_SENTINEL")) }
         assertThatThrownBy { runBlocking { adapter.submitInstitutionTransfer(broken) } }
             .isInstanceOf(NonConformingMessageException::class.java)
+            .hasMessage("non-conforming pacs.009 for payment ${broken.paymentId}")
+            .hasNoCause()
         verify(exactly = 0) { client.submitInstitutionCreditTransfer(any(), any()) }
     }
 
@@ -94,19 +101,23 @@ class InstitutionTransferGatewayTest {
 
     private fun submitted() = transfer().let { it.copy(messageId = InstitutionTransfer.messageIdFor(it)) }
 
-    private fun statusFor(t: InstitutionTransfer, uetr: String = t.uetr, msgId: String? = t.messageId) =
-        Pacs002Builder().build(
-            PaymentStatusReport(
-                "SIM-STS-1",
-                OffsetDateTime.now(ZoneOffset.UTC),
-                "E2E",
-                null,
-                PaymentStatus.ACSC,
-                originalMessageId = msgId,
-                originalMessageNameId = "pacs.009.001.08",
-                originalUetr = uetr,
-            ),
-        )
+    private fun statusFor(
+        t: InstitutionTransfer,
+        uetr: String = t.uetr,
+        msgId: String? = t.messageId,
+        status: PaymentStatus = PaymentStatus.ACSC,
+    ) = Pacs002Builder().build(
+        PaymentStatusReport(
+            "SIM-STS-1",
+            OffsetDateTime.now(ZoneOffset.UTC),
+            "E2E",
+            null,
+            status,
+            originalMessageId = msgId,
+            originalMessageNameId = "pacs.009.001.08",
+            originalUetr = uetr,
+        ),
+    )
 
     private fun notFound(body: String?): Uni<String> {
         val response = jakarta.ws.rs.core.Response.status(404).apply { body?.let { entity(it) } }.build()
@@ -133,6 +144,23 @@ class InstitutionTransferGatewayTest {
             assertThat(
                 adapter.queryInstitutionTransferStatus(t),
             ).isEqualTo(SchemeStatus.Ambiguous(SchemeStatus.MISMATCHED))
+        }
+    }
+
+    @Test
+    fun `submission refuses a status for another or absent message identity`(): Unit = runBlocking {
+        val t = submitted()
+        for (verdict in listOf(PaymentStatus.ACSC, PaymentStatus.RJCT)) {
+            for (xml in listOf(
+                statusFor(t, uetr = "00000000-0000-4000-8000-000000000000", status = verdict),
+                statusFor(t, msgId = "FI-OTHER", status = verdict),
+                statusFor(t, msgId = null, status = verdict),
+                pacs002(t, verdict).replace("<OrgnlUETR>${t.uetr}</OrgnlUETR>", ""),
+            )) {
+                every { client.submitInstitutionCreditTransfer(any(), any()) } returns Uni.createFrom().item(xml)
+                assertThatThrownBy { runBlocking { adapter.submitInstitutionTransfer(t) } }
+                    .isInstanceOf(SchemeGatewayUnavailableException::class.java)
+            }
         }
     }
 
@@ -175,7 +203,7 @@ class InstitutionTransferGatewayTest {
         val t = transfer().let { it.copy(messageId = InstitutionTransfer.messageIdFor(it), messageCreatedAt = created) }
         val body = slot<String>()
         every { client.submitInstitutionCreditTransfer(any(), capture(body)) } returns
-            Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
+            Uni.createFrom().item(pacs002(t, PaymentStatus.ACSC))
         adapter.submitInstitutionTransfer(t)
         assertThat(
             body.captured,
