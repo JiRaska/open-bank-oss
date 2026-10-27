@@ -51,6 +51,14 @@ Shared libraries and services use Quarkus **3.40.1.1 LTS** from the same catalog
 
 `PanacheOutboxEntityTraced` (libs-runtime) extends the v2 outbox entity with a nullable `trace_context` column holding the W3C `traceparent` captured by `TraceparentCapture` when the row is written. `OutboxEntry.traceparent` carries it to the dispatcher and `OutboxKafkaHeaders` emits it as the `traceparent` Kafka header. It is opt-in per service together with an `ALTER TABLE ... ADD COLUMN trace_context TEXT` migration; the v1 and v2 bases are unchanged because a mapped column a table lacks fails every SELECT.
 
+## Bank-own transfer rail vocabulary (ADR-0344 phase 1b)
+
+`openbank-libs-iso20022` holds the vocabulary of the bank-own institution-transfer rail, so swift-service and treasury name it the same way:
+- `InstitutionTransferRail` is CERTIS, TARGET2 or SWIFT, each with its currency and pacs.009 clearing system code.
+- `InstitutionTransferStatus` is the rail's lifecycle. Only ACCEPTED, SENT, SETTLED and REJECTED are published (contract 9.2).
+- The pacs.009 builder and reader validate against the bundled `pacs.009.001.08` XSD.
+
+The shared `TopicProducers` table in `openbank-libs-domain` attributes `openbank.swift.institution-transfers` to swift-service, which is how audit-service labels the rows it reads from that topic.
 
 ### Temporal worker pilot
 
