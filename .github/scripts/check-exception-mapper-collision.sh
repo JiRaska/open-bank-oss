@@ -44,7 +44,8 @@ if [ "${1:-}" = "--self-test" ]; then
   expect() { local label="$1" root="$2" want="$3" sub="${4:-}" out rc
     out=$(bash "$0" "$root" 2>&1); rc=$?
     if [ "$rc" -ne "$want" ]; then echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
-    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+    # Match the captured literal directly: grep -q may close the pipe before printf finishes.
+    elif [ -n "$sub" ] && [[ "$out" != *"$sub"* ]]; then
       echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1)); fi; }
   K() { echo "$1/openbank-x/src/main/kotlin/M.kt"; }
 
@@ -62,6 +63,12 @@ if [ "${1:-}" = "--self-test" ]; then
   expect "a local mapper for DomainException is FLAGGED" "$f" 1 "collides non-deterministically"
   g="$td/domainsub"; put "$(K "$g")" 'class M : ExceptionMapper<WidgetDomainException> {\n}\n'
   expect "a type merely ENDING in DomainException is clean" "$g" 0 "none collide"
+  # A long real diagnostic must not make the assertion's writer fail with SIGPIPE.
+  h="$td/verbose"; mkdir -p "$(dirname "$(K "$h")")"
+  for ((i=0; i<4096; i++)); do
+    printf 'class M%s : ExceptionMapper<IllegalStateException> {\n}\n' "$i"
+  done > "$(K "$h")"
+  expect "a long collision report retains its matching reason" "$h" 1 "collides non-deterministically"
   # PROSE: the comment explaining the ban names the very type it bans.
   d="$td/comment"; # The comment must carry the FULL signature `: ExceptionMapper<...>`, or the pattern never
   # matches it and the comment filter is never exercised — a fixture that cannot reach the
@@ -73,7 +80,7 @@ if [ "${1:-}" = "--self-test" ]; then
   expect "an empty tree reports 0 checked" "$e" 0 "0 "
 
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: ExceptionMapper collision guard is falsifiable (7 cases)"
+  echo "self-test ok: ExceptionMapper collision guard is falsifiable (8 cases)"
   exit 0
 fi
 root="${1:-.}"
