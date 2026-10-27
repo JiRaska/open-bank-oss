@@ -16,10 +16,13 @@ import com.openbank.sanctions.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
+import java.util.UUID
+import javax.sql.DataSource
 
 /**
  * Provider-side Pact verification for sanctions-service — its FIRST contract coverage of any kind
@@ -79,6 +82,9 @@ class SanctionsPactProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
 
+    @Inject
+    lateinit var dataSource: DataSource
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -127,5 +133,32 @@ class SanctionsPactProviderVerificationTest {
     @State("the sanctions lists are seeded with the boot-time OFAC/EU/UN/PEP entries")
     fun stateSeededSanctionsEntriesExist() {
         // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * State: "a sanctions check exists for the pact agent probe".
+     *
+     * Seeded by [AgentSanctionsPactSeed] via direct JDBC — the agent-service consumer's READ pact
+     * (`AgentSanctionsReadPactConsumerTest`) needs a persisted `SanctionsCheck` row, and this
+     * service's repositories are reactive, so a `@State` callback cannot persist one (the
+     * HR000068 trap documented above). Direct JDBC against `sanctions_checks` is the same escape
+     * hatch ledger's `NostroPactSeed` uses. The row is `POTENTIAL_HIT` so the same seed satisfies
+     * `GET /sanctions/pending`'s status filter.
+     */
+    @State("a sanctions check exists for the pact agent probe")
+    fun statePactAgentCheckExists() = AgentSanctionsPactSeed.seedPactCheck(dataSource)
+
+    /**
+     * State: "no sanctions check exists with the requested id".
+     *
+     * No seeding: the pact-pinned UUID (`6e6e6e6e-…`) is never inserted by any state, so the fresh
+     * container already satisfies it — the agent consumer's 404 fail-closed leg for
+     * `sanctions_get_check`.
+     */
+    @State("no sanctions check exists with the requested id")
+    fun statePactAgentUnknownCheckNotFound() {
+        // Assert the negative provider state before Pact replays its own 404 interaction.
+        val missingId = UUID.fromString("6e6e6e6e-6e6e-4e6e-8e6e-6e6e6e6e6e6e")
+        io.restassured.RestAssured.given().get("/api/v1/sanctions/$missingId").then().statusCode(404)
     }
 }

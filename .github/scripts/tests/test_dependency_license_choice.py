@@ -3,11 +3,14 @@ import copy
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import unittest
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
+
+import yaml
 
 SCRIPT = Path(__file__).resolve().parents[1] / "dependency_license_choice.py"
 SPEC = importlib.util.spec_from_file_location("dependency_license_choice", SCRIPT)
@@ -80,6 +83,29 @@ class LicenseChoiceTests(unittest.TestCase):
             with self.subTest(value=value), patch.dict(os.environ, {**env, "RETRY_NAMES": value}):
                 with self.assertRaises(ValueError):
                     choice.retry_changes()
+
+    def test_skipped_retry_outputs_are_valid_json_but_cannot_confirm_a_license_choice(self):
+        workflow = SCRIPT.parents[1] / "workflows" / "dependency-review.yml"
+        steps = yaml.safe_load(workflow.read_text())["jobs"]["dependency-review"]["steps"]
+        verify = next(step for step in steps
+                      if step.get("name") == "Verify the choice against the actual retry comparison")
+        self.assertEqual(verify["if"], "${{ success() && steps.license-choice.outputs.packages != '' }}")
+        projected = {}
+        for field, name in choice.RETRY_FIELDS.items():
+            expression = verify["env"][name]
+            match = re.fullmatch(
+                r"\$\{\{ toJSON\(fromJSON\(steps\.review-retry\.outputs\.dependency-changes"
+                r" \|\| '([^']+)'\)\.\*\." + re.escape(field) + r"\) \}\}", expression)
+            self.assertIsNotNone(match, expression)
+            # GitHub supplies an empty string for a skipped step's absent output.
+            rows = json.loads("" or match.group(1))
+            self.assertEqual(rows, [])
+            projected[name] = json.dumps([row[field] for row in rows])
+        # If a choice is active, an absent real retry must still fail closed.
+        result = subprocess.run([sys.executable, str(SCRIPT), "--review-result"],
+                                env={**os.environ, **projected}, capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("actual retry comparison did not confirm", result.stderr)
 
     def test_workflow_rechecks_full_policy_and_actual_retry_comparison(self):
         workflow = SCRIPT.parents[1] / "workflows" / "dependency-review.yml"
