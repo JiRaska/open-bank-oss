@@ -4,14 +4,19 @@
 
 package com.openbank.pension.statecontribution
 
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.Money
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.application.port.out.ReturnReport
 import com.openbank.pension.application.port.out.StateContributionReturnRepository
+import com.openbank.pension.application.port.out.StateReturnEvent
 import com.openbank.pension.application.usecase.StateContributionReturnService
 import com.openbank.pension.domain.contribution.ContributionChannel
 import com.openbank.pension.domain.contribution.IncomingPayment
 import com.openbank.pension.domain.incentive.ClaimStatus
 import com.openbank.pension.domain.incentive.LedgerEntryKind
 import com.openbank.pension.domain.statecontribution.ReturnCause
+import com.openbank.pension.domain.statecontribution.ReturnReportLine
 import com.openbank.pension.domain.statecontribution.ReturnStatus
 import com.openbank.pension.domain.statecontribution.StateContributionReturn
 import com.openbank.pension.e2e.support.StateAgencySimulator
@@ -62,6 +67,95 @@ class StateContributionChannelTest {
 
     private fun at(date: String) {
         f.now = Instant.parse("${date}T10:00:00Z")
+    }
+
+    @Test
+    fun `R mixed CZK and EUR DUE returns are filed as one report per currency with its own total`(): Unit =
+        runBlocking {
+            val crownA = f.contract()
+            val crownB = f.contract()
+            val euroContract = f.contract()
+            val czkA = requireNotNull(
+                returns.registerTermination(crownA.contractId, BigDecimal("100.50"), LocalDate.of(2026, 3, 15), "a"),
+            )
+            val czkB = requireNotNull(
+                returns.registerTermination(crownB.contractId, BigDecimal("200"), LocalDate.of(2026, 3, 15), "b"),
+            )
+            val eurRaw = requireNotNull(
+                returns.registerTermination(
+                    euroContract.contractId,
+                    BigDecimal("20.25"),
+                    LocalDate.of(2026, 3, 15),
+                    "c",
+                ),
+            )
+            val eur = eurRaw.copy(currency = "EUR").also { store.rows[it.id] = it }
+            val reported = mutableListOf<Triple<Int, BigDecimal?, String?>>()
+            val withMetrics = StateContributionReturnService(
+                store, f.claims, f.directory, f.references, f.incentiveService, f.agency,
+                CzReturnChannel(Optional.of("12345678")), f.clock,
+                object : PensionMetrics {
+                    override fun stateContributionReturns(
+                        event: StateReturnEvent,
+                        count: Int,
+                        amount: BigDecimal?,
+                        currency: String?,
+                    ) {
+                        if (event == StateReturnEvent.REPORTED) reported += Triple(count, amount, currency)
+                    }
+                },
+            )
+
+            val filed = withMetrics.fileReturnReport(YearMonth.of(2026, 6))
+
+            assertThat(filed.map { it.total.currency.code }).containsExactly("CZK", "EUR")
+            val czk = filed.single { it.total.currency.code == "CZK" }
+            val euro = filed.single { it.total.currency.code == "EUR" }
+            assertThat(czk.total.amount).isEqualByComparingTo("300.50")
+            assertThat(euro.total.amount).isEqualByComparingTo("20.25")
+            assertThat(czk.returnIds).containsExactlyInAnyOrder(czkA.id, czkB.id)
+            assertThat(euro.returnIds).containsExactly(eur.id)
+            // Each filed document names its currency and totals only its own lines.
+            assertThat(czk.payload.lines().first().split(";").takeLast(3)).containsExactly("CZK", "2", "300.50")
+            assertThat(euro.payload.lines().first().split(";").takeLast(3)).containsExactly("EUR", "1", "20.25")
+            assertThat(StateAgencySimulator.parseReturns(euro.payload).map { it.returnId })
+                .containsExactly(eur.id.toString())
+            assertThat(f.agency.sent).hasSize(2)
+            assertThat(store.rows.values.map { it.status }).containsOnly(ReturnStatus.REPORTED)
+            assertThat(reported).containsExactlyInAnyOrder(
+                Triple(2, BigDecimal("300.50"), "CZK"),
+                Triple(1, BigDecimal("20.25"), "EUR"),
+            )
+            assertThat(
+                withMetrics.fileReturnReport(YearMonth.of(2026, 6)),
+            ).describedAs("nothing DUE any more").isEmpty()
+        }
+
+    @Test
+    fun `a return with a currency that is not ISO 4217 is refused at the boundary`(): Unit = runBlocking {
+        val c = f.contract()
+        val item = requireNotNull(
+            returns.registerTermination(c.contractId, BigDecimal("100"), LocalDate.of(2026, 3, 15), "iso"),
+        )
+        listOf("XYZ", "czk", "CZ", "XXX", "").forEach { bad ->
+            assertThatThrownBy { item.copy(currency = bad) }
+                .describedAs(bad)
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+    }
+
+    @Test
+    fun `a return report line in another currency is refused by the single-currency format`() {
+        val line = ReturnReportLine(
+            UUID.randomUUID(),
+            "REF",
+            ReturnCause.CONTRACT_TERMINATED,
+            Money.of(BigDecimal("1"), "EUR"),
+            null,
+        )
+        assertThatThrownBy {
+            CzReturnChannel(Optional.of("12345678")).render(YearMonth.of(2026, 5), CurrencyCode.CZK, listOf(line))
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("single-currency")
     }
 
     @Test
@@ -164,11 +258,11 @@ class StateContributionChannelTest {
             assertThat(returns.registerIneligibility(c.contractId, YearMonth.of(2026, 2)).map { it.id })
                 .describedAs("idempotent per claim").isEqualTo(owed.map { it.id })
 
-            val first = requireNotNull(returns.fileReturnReport(YearMonth.of(2026, 6)))
+            val first = returns.fileReturnReport(YearMonth.of(2026, 6)).single()
             assertThat(
                 StateAgencySimulator.parseReturns(first.payload).single().returnId,
             ).isEqualTo(owed.single().id.toString())
-            assertThat(returns.fileReturnReport(YearMonth.of(2026, 6))).describedAs("nothing DUE any more").isNull()
+            assertThat(returns.fileReturnReport(YearMonth.of(2026, 6))).describedAs("nothing DUE any more").isEmpty()
             returns.applyReturnResult(
                 first.id,
                 StateAgencySimulator.returnResult(
@@ -180,7 +274,7 @@ class StateContributionChannelTest {
             )
             assertThat(store.rows.getValue(owed.single().id).status).isEqualTo(ReturnStatus.DUE)
 
-            val second = requireNotNull(returns.fileReturnReport(YearMonth.of(2026, 7)))
+            val second = returns.fileReturnReport(YearMonth.of(2026, 7)).single()
             returns.applyReturnResult(second.id, StateAgencySimulator.returnResult(second.payload))
             assertThat(store.rows.getValue(owed.single().id).status).isEqualTo(ReturnStatus.CONFIRMED)
             assertThat(
@@ -271,7 +365,7 @@ class StateContributionChannelTest {
             ).describedAs("680 balance less the open 340 ineligibility").isEqualByComparingTo("340")
             assertThat(store.coveredMonths(c)).containsExactlyInAnyOrder(YearMonth.of(2026, 1), YearMonth.of(2026, 2))
 
-            val report = requireNotNull(returns.fileReturnReport(YearMonth.of(2026, 6)))
+            val report = returns.fileReturnReport(YearMonth.of(2026, 6)).single()
             returns.applyReturnResult(report.id, StateAgencySimulator.returnResult(report.payload))
             returns.settle(inel.id)
             returns.settle(exitReturn.id)
@@ -285,7 +379,7 @@ class StateContributionChannelTest {
         runBlocking {
             val c = twoReceivedMonths()
             val inel = returns.registerIneligibility(c, YearMonth.of(2026, 2)).single()
-            val report = requireNotNull(returns.fileReturnReport(YearMonth.of(2026, 6)))
+            val report = returns.fileReturnReport(YearMonth.of(2026, 6)).single()
             returns.applyReturnResult(report.id, StateAgencySimulator.returnResult(report.payload))
             returns.settle(inel.id)
             assertThat(returnedInLedger(c)).isEqualByComparingTo("340")
@@ -302,7 +396,7 @@ class StateContributionChannelTest {
         runBlocking {
             val c = twoReceivedMonths()
             val inel = returns.registerIneligibility(c, YearMonth.of(2026, 2)).single()
-            val report = requireNotNull(returns.fileReturnReport(YearMonth.of(2026, 6)))
+            val report = returns.fileReturnReport(YearMonth.of(2026, 6)).single()
             returns.applyReturnResult(report.id, StateAgencySimulator.returnResult(report.payload))
             // S5's activity: ledger entries first ...
             val balance = f.incentiveService.clawbackBalance(c, LocalDate.of(2026, 6, 3)).stateIncentivesToReturn
@@ -326,7 +420,9 @@ class StateContributionChannelTest {
 
     @Test
     fun `nothing is filed without the company ICO - the channel fails closed`(): Unit = runBlocking {
-        assertThatThrownBy { CzReturnChannel(Optional.empty()).render(YearMonth.of(2026, 5), emptyList()) }
+        assertThatThrownBy {
+            CzReturnChannel(Optional.empty()).render(YearMonth.of(2026, 5), CurrencyCode.CZK, emptyList())
+        }
             .isInstanceOf(IllegalStateException::class.java)
     }
 }

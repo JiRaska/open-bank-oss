@@ -142,7 +142,32 @@ repositories {
     mavenCentral()
 }
 
+// The dependency set EVERY openbank.quarkus-service module declared, verbatim, before it moved
+// here: measured 69 of 69 modules applying this plugin. Only the universal set lives here, and
+// that is deliberate. An extension merely on the classpath is ACTIVE in Quarkus (flyway,
+// hibernate-reactive, kafka, redis each boot, read config and add attack surface), so adding a
+// dependency that "most" services have would change behaviour for the rest. Anything short of
+// 69/69 (jackson-kotlin 68, libs-runtime 56, flyway 65, ...) stays in the module's own file.
+// The typed `libs.*` accessor is not generated for precompiled script plugins; the catalog is
+// read through VersionCatalogsExtension, the same way openbank.static-analysis reads detekt.
+val catalog = the<VersionCatalogsExtension>().named("libs")
+fun lib(alias: String) = catalog.findLibrary(alias)
+    .orElseThrow { IllegalStateException("$alias missing in libs.versions.toml") }
+
 dependencies {
+    "implementation"(enforcedPlatform(lib("quarkus-bom")))
+    listOf(
+        "quarkus-kotlin",
+        "quarkus-resteasy-reactive",
+        "quarkus-resteasy-reactive-jackson",
+        "quarkus-smallrye-health",
+        "quarkus-smallrye-openapi",
+        "quarkus-oidc",
+        "quarkus-micrometer-registry-prometheus",
+        "quarkus-config-yaml",
+    ).forEach { "implementation"(lib(it)) }
+    listOf("quarkus-junit5", "assertj", "rest-assured-kotlin").forEach { "testImplementation"(lib(it)) }
+
     // Structured console logging. `quarkus.log.console.json` is a key that ONLY this extension
     // reads: without it on the application's classpath the key is accepted, does nothing, and
     // the console falls back to the text pattern formatter. Declared here rather than in
@@ -215,6 +240,17 @@ tasks.withType<Test>().configureEach {
     systemProperty("quarkus.http.test-port", "0")
     systemProperty("quarkus.http.test-ssl-port", "0")
     systemProperty("quarkus.management.test-port", "0")
+    // Optional context-service pilot: Quarkus keeps its primary resource/profile grouping.
+    // The hint only changes secondary class order; test discovery and method order stay intact.
+    val priorityFile = providers.environmentVariable("OPENBANK_TEST_PRIORITY_FILE").orNull
+        ?.let { file(it) }?.takeIf { it.isFile }
+    if (project.name == "openbank-context-service" && name == "test" && priorityFile != null) {
+        inputs.file(priorityFile).withPropertyName("testClassPriority")
+            .withPathSensitivity(PathSensitivity.NONE)
+        systemProperty("quarkus.test.class-orderer", "com.openbank.libs.testing.evidence.HistoryClassOrderer")
+        systemProperty("openbank.test.priority-file", priorityFile.absolutePath)
+        systemProperty("openbank.test.priority-component", project.name)
+    }
     // Testcontainers Docker endpoint. Inherit the ambient DOCKER_HOST (the ephemeral
     // ARC dind pod exposes the daemon on the unix socket, ADR-0053; a dev workstation
     // sets its own) and fall back to the standard unix socket. The previous hard pin
@@ -338,12 +374,49 @@ val providerPactTest =
 // able to run WITHOUT it, so it never becomes an input the hosted "build" job pays for. Invoke it
 // explicitly: `./gradlew :service:providerPactTest -Dpactbroker.url=...`.
 
-tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
+// CycloneDX 2.x declares its destination as one @OutputDirectory. Give it its own
+// directory so it cannot claim Kover's verify.err or other report producers.
+val cyclonedxBomTask = tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setIncludeConfigs(listOf("runtimeClasspath"))
     setSkipConfigs(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
     setProjectType("application")
     setSchemaVersion("1.5")
+    setDestination(layout.buildDirectory.dir("reports/cyclonedx").get().asFile)
 }
+
+// Existing image/release consumers use reports/bom.{json,xml}. Export only those
+// exact files; a Copy task targeting reports/ would reintroduce directory ownership.
+val exportCycloneDxBom = tasks.register("exportCycloneDxBom") {
+    dependsOn(cyclonedxBomTask)
+    inputs.dir(cyclonedxBomTask.flatMap { it.destination }).withPropertyName("sbomDirectory")
+    inputs.property("outputFormat", cyclonedxBomTask.flatMap { it.outputFormat })
+    inputs.property("outputName", cyclonedxBomTask.flatMap { it.outputName })
+    outputs.files(layout.buildDirectory.file("reports/bom.json"), layout.buildDirectory.file("reports/bom.xml"))
+    onlyIf {
+        val producer = cyclonedxBomTask.get()
+        producer.enabled && runCatching { producer.state.rethrowFailure() }.isSuccess &&
+            (producer.state.didWork || producer.state.upToDate)
+    }
+    doLast {
+        val producer = cyclonedxBomTask.get()
+        val formats = when (producer.outputFormat.get()) {
+            "all" -> setOf("json", "xml")
+            else -> setOf(producer.outputFormat.get())
+        }
+        for (format in listOf("json", "xml")) {
+            val target = layout.buildDirectory.file("reports/bom.$format").get().asFile
+            if (format in formats) {
+                val source = producer.destination.get().resolve("${producer.outputName.get()}.$format")
+                check(source.isFile) { "CycloneDX did not produce the enabled $format SBOM" }
+                target.parentFile.mkdirs()
+                source.copyTo(target, overwrite = true)
+            } else {
+                target.delete()
+            }
+        }
+    }
+}
+cyclonedxBomTask.configure { finalizedBy(exportCycloneDxBom) }
 
 // Reproducible archives (issue #8355, OpenSSF Silver build_reproducible): jar entries carry
 // mtimes by default, so two builds of the SAME commit differ byte-for-byte and no supply-chain

@@ -6,6 +6,7 @@ import { dailyCounts, ReportTrend } from '@/components/reporting/ReportTrend'
 import { WarehouseDashboard } from '@/components/reporting/WarehouseDashboard'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { REPORT_REGISTRY, validateParams } from '@/lib/reporting/registry'
+import { clickHouseRiskLargeSettledRows } from '../../e2e/fixtures/clickhouse-risk-large-settled'
 
 const wrap = (child: React.ReactNode) => <LanguageProvider initialLanguage="en">{child}</LanguageProvider>
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
@@ -34,6 +35,35 @@ it('rejects impossible dates and inverted date ranges before querying', () => {
 })
 
 describe('report ownership', () => {
+  it('renders the real ClickHouse ISO DateTime64 wire shape and derives catalogue count from the registry', async () => {
+    const settled = REPORT_REGISTRY.find((entry) => entry.id === 'risk-large-settled')!
+    const catalogueResponse = { reports: REPORT_REGISTRY.map(({ sql: _sql, ...entry }) => entry) }
+    const resultResponse = {
+      available: true,
+      reportId: settled.id,
+      titleCs: settled.titleCs,
+      titleEn: settled.titleEn,
+      columns: settled.columns,
+      rows: clickHouseRiskLargeSettledRows,
+      generatedAt: '2026-10-19T12:35:00.000Z',
+      rowCount: clickHouseRiskLargeSettledRows.length,
+      truncated: false,
+    }
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(
+      url === '/api/reporting' ? catalogueResponse : resultResponse,
+    ))))
+
+    render(wrap(<ReportingPage />))
+    expect(await screen.findByText(`Available registry views: ${REPORT_REGISTRY.length}`)).toBeVisible()
+    fireEvent.click(await screen.findByRole('button', { name: /Large settled transactions/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Run report' }))
+
+    expect(await screen.findByText('2026-10-19T12:34:56.789Z')).toBeVisible()
+    expect(screen.getByText('fixture-tx-001')).toBeVisible()
+    expect(screen.getByText(/Query executed:/)).toBeVisible()
+    expect(screen.queryByText('Invalid report response')).not.toBeInTheDocument()
+  })
+
   it('discards an in-flight result when the operator selects a different report', async () => {
     let resolve!: (response: Response) => void
     vi.stubGlobal('fetch', vi.fn((url: string) => url === '/api/reporting'
@@ -50,13 +80,23 @@ describe('report ownership', () => {
   it('distinguishes a warehouse outage from an empty successful report', async () => {
     vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(url === '/api/reporting'
       ? { reports: REPORT_REGISTRY }
-      : { available: false, reportId: REPORT_REGISTRY[0].id, rows: [], columns: [], rowCount: 0 }))))
+      : { available: false, reportId: REPORT_REGISTRY[0].id, rows: [], columns: REPORT_REGISTRY[0].columns, generatedAt: null, rowCount: 0, truncated: false }))))
     render(wrap(<ReportingPage />))
     await screen.findByRole('button', { name: /Daily settled transaction volume/ })
     fireEvent.click(screen.getByRole('button', { name: 'Run report' }))
     await waitFor(() => expect(screen.queryByText('Loading report…')).not.toBeInTheDocument())
     expect(screen.getByText(/ClickHouse/)).toBeInTheDocument()
     expect(screen.queryByText('No data yet')).not.toBeInTheDocument()
+  })
+  it('shows malformed warehouse data as an invalid response, not as an outage', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(url === '/api/reporting'
+      ? { reports: REPORT_REGISTRY }
+      : { available: true, reportId: REPORT_REGISTRY[0].id, rows: [{ unexpected: 'hidden' }], columns: REPORT_REGISTRY[0].columns, generatedAt: '2026-10-19T12:00:00Z', rowCount: 1, truncated: false }))))
+    render(wrap(<ReportingPage />))
+    await screen.findByRole('button', { name: /Daily settled transaction volume/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Run report' }))
+    expect(await screen.findByText('Invalid report response')).toBeVisible()
+    expect(screen.queryByText('ClickHouse is unavailable')).not.toBeInTheDocument()
   })
 })
 

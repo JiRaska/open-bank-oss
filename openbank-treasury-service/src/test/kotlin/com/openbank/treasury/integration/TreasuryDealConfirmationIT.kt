@@ -80,7 +80,11 @@ class TreasuryDealConfirmationIT {
     fun `4 - an AI agent can never confirm, whatever roles it carries`() {
         action(dealId, "confirm").then().statusCode(403).body("error", equalTo("ACTOR_NOT_PERMITTED"))
         assertThat(state()).isEqualTo("BOOKED")
-        assertThat(outboxTypes()).containsExactly("treasury.deal.booked.v1")
+        assertThat(outboxTypes()).containsExactly(
+            // ADR-0344 D4: the submission stored the cash-flow ledger and announced it.
+            "treasury.cashflow.generated.v1",
+            "treasury.deal.booked.v1",
+        )
     }
 
     @Test
@@ -100,10 +104,16 @@ class TreasuryDealConfirmationIT {
             .body("state", equalTo("CONFIRMED"))
         // Row, timeline and outbox committed together; the replay added no second event.
         assertThat(state()).isEqualTo("CONFIRMED")
-        assertThat(outboxTypes()).containsExactly("treasury.deal.booked.v1", "treasury.deal.confirmed.v1")
+        assertThat(outboxTypes()).containsExactly(
+            // ADR-0344 D4: the submission stored the cash-flow ledger and announced it.
+            "treasury.cashflow.generated.v1",
+            "treasury.deal.booked.v1",
+            "treasury.deal.confirmed.v1",
+        )
         assertThat(confirmedPayload()).contains("\"confirmedBy\":\"bob.approver\"").contains("\"simulated\":false")
         action(dealId, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
         assertThat(outboxTypes()).containsExactly(
+            "treasury.cashflow.generated.v1",
             "treasury.deal.booked.v1",
             "treasury.deal.confirmed.v1",
             "treasury.deal.settled.v1",

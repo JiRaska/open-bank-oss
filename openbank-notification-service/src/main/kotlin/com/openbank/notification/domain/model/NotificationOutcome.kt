@@ -21,7 +21,7 @@ import java.util.UUID
  * D4 gives it a defined meaning for consumers — a later refinement of an earlier `SENT`. A consumer
  * written now must already tolerate it; adding it later would be the breaking change.
  */
-enum class NotificationOutcome { SENT, SUPPRESSED, FAILED, BOUNCED, REROUTED }
+enum class NotificationOutcome { SENT, SUPPRESSED, FAILED, BOUNCED, REROUTED, VISIBLE }
 
 /**
  * The `openbank.notification.outcomes.v1` payload (ADR-0239 D2).
@@ -47,6 +47,8 @@ data class NotificationOutcomeEvent(
     val outcome: NotificationOutcome,
     val reason: String?,
     val occurredAt: Instant,
+    /** Null for built-in copy; otherwise the exact immutable editorial revision used. */
+    val templateRevision: Long? = null,
 ) {
     companion object {
         /** `eventType` on the outbox row and the `ce-type`-style header the dispatcher stamps. */

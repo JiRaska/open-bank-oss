@@ -92,6 +92,7 @@ jobs:
   verify:
     permissions:
       contents: read
+      actions: read  # cap the reusable build's optional evidence reader
       id-token: write  # caps the called _service-ci.yml, which assumes AWS roles via OIDC
     uses: ./.github/workflows/_service-ci.yml
     with:

@@ -121,10 +121,6 @@ NOT_WATCHED: dict[str, str] = {
         "guarantees the drift is noticed -- so a red here would only ever be infrastructure, and "
         "paging on a lost optimisation is how an issue label gets filtered."
     ),
-    "Admin-UI deploy": (
-        "Deploy lane, not a verdict on main's tree. Its drift is already escalated by "
-        "deploy-drift-watch.yml against the committed image pin."
-    ),
     "Platform OpenTofu": (
         "Infrastructure apply against live AWS. A red here is an operational event with its own "
         "owner and its own state; an issue opened by this watch would duplicate that without "

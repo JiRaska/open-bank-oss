@@ -10,32 +10,22 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.opentelemetry)
     // Micrometer + Prometheus registry: balance-service had no MeterRegistry, so the shared
     // DomainMetrics (incl. the outbox-backlog gauge) was a silent no-op. Adding this wires the
     // /q/metrics surface so the gauge actually emits (ADR-0077 / ADR-0079).
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     // Redis-backed ApprovalStore for the four-eyes maker-checker mechanism (ADR-0155).
     // First Redis usage in balance-service — see ApprovalConfig KDoc.
     implementation(libs.quarkus.redis.client)
-    implementation(libs.quarkus.config.yaml)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(libs.jackson.module.kotlin)
@@ -45,10 +35,7 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
 
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.rest.assured.kotlin)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     // Property-based testing of balance/overdraft invariants (ADR-0011 L1 — Kotest property).
     // Declared inline (not in the shared version catalog) so this test-only dependency does not

@@ -86,6 +86,9 @@ added to a user later still reaches the token.
 and user alike — and every `@RolesAllowed` endpoint answers 403. So:
 
 - A new realm role must be appended to every `scopeMappings` entry in the same change.
+  `check-realm-template-importable.py` rule R11 enforces it: roles added after the first
+  version of this note (`ROLE_MARKETING`, `ROLE_MERGE_RECORDER`) were missing from all 41
+  entries until it did, and a cold-start import would have dropped them from every token.
 - A new client gets `fullScopeAllowed: false` and its own `scopeMappings` entry.
   `openbank-synthetic-catalog-read` is the one client with no entry: it is meant to carry
   no realm roles at all.
@@ -162,8 +165,9 @@ The five comments removed from `customers-realm-template.json`, by path.
 ### `identityProviders[kubernetes]` (realm-template.json, ADR-0177 Phase 1)
 
 First identity provider in either template: the cluster's Kubernetes OIDC issuer,
-trusted so a pod's projected ServiceAccount token can be exchanged at Keycloak for a
-service token (RFC 8693, workload identity — see `docs/adr/0177-workload-identity-m2m-auth.md`).
+trusted so a pod's projected ServiceAccount token can be submitted to the native
+JWT Authorization Grant, followed by standard RFC 8693 exchange of the returned
+Keycloak access token (see `docs/adr/0177-workload-identity-m2m-auth.md`).
 The import shape is verified against Keycloak 26.8.0 (`firstBrokerLoginFlowAlias`,
 not the `…FlowId` a realm export from older versions shows). `config.issuer` and
 `config.jwksUrl` carry `__KUBERNETES_OIDC_ISSUER__` — the cluster's
@@ -172,19 +176,33 @@ at render time (it becomes one more required env var in
 `render-verify-keycloak-realm-import.sh` runs). `config.clientSecret` is a placeholder
 for the same reason; if the API server does not authenticate JWKS clients, any non-empty
 value works — Keycloak requires the key to exist, the cluster does not check it. The IdP
-is `enabled: true`: it is inert until a token exchange is attempted, and the projected
-token only exists on pods that mount it (pilot: agent-service).
+is `enabled: true` and `hideOnLogin: true`: workload authentication remains available
+without a Kubernetes sign-in button. The EKS JWKS path is `<issuer>/keys`.
+The JWT grant validates `RS256`, requires a pre-provisioned federated user and checks
+the audience; `disableTypeClaimCheck` stays false. Assertion reuse is allowed for
+kubelet rotation, maximum assertion age is 7200 seconds, and access-token lifetime
+is capped by assertion expiration.
 
 ### `clients[openbank-agent].attributes[standard.token.exchange.enabled]` + `authorizationSettings` (realm-template.json, ADR-0177 Phase 1)
 
-Mints agent-service's workload-identity path: the standard-token-exchange switch plus a
-`token-exchange` scope permission on the client's own resource, granted to requester
-client `openbank-agent` — the same authorizationSettings shape `openbank-mcp-service`
-carries for the ADR-0224 OBO exchange (#2762, verified end-to-end on 26.6.3), here
-self-referential because agent-service exchanges its *own* externally-issued SA token for
-its own access token while keeping `__AGENT_CLIENT_SECRET__` as the client-credentials
-fallback. Import of this block against 26.8.0 is verified; the actual
-SA-token→token-exchange round trip is owner-verified live (Phase 1 pilot, non-prod).
+The client enables the native JWT grant for the `kubernetes` IdP. Its
+`oauth2.jwt.authorization.grant.audience` is serialized as
+`[{"key":"kubernetes","value":"keycloak"}]`, not `["keycloak"]`.
+The projected JWT itself correctly carries `aud: ["keycloak"]`.
+`users[wl-openbank-agent]` supplies the explicit ServiceAccount federation link and
+only `ROLE_API`. Unknown subjects are rejected instead of registered.
+
+The returned access token can be exchanged using standard token exchange V2 on
+`openbank-agent`; this path needs neither `subject_issuer` nor FGAP IdP permissions.
+The existing `authorizationSettings` block is not what authorizes the native path.
+Client authentication and the `__AGENT_CLIENT_SECRET__` client-credentials fallback
+remain available; this configuration does not switch the service's outbound client.
+
+Run `python3 openbank-infra/e2e/keycloak_workload_identity_test.py` before changing
+this contract. It exercises real Keycloak with synthetic assertions, including
+negative audience, identity and signature cases. Apply the reviewed attributes to
+the live realm separately; persist the verified template using runbook 0009 so a
+fresh realm has the same behavior. No custom provider or image rebuild is needed.
 
 ### `clients[openbank-app].protocolMappers[sub]`
 
@@ -261,17 +279,16 @@ through the approved identity process and verify their live access tokens and th
 two-person approval flow before enabling publication. Do not make either approval role
 or `catalog:read` a default scope of the Admin UI client.
 
-**Separate and still open — the reason those 25 sites are unreachable is NOT these
-roles.** `catalog:read|author|publish` is not declared as a client scope in either realm
-template: `realm-template.json` has `clientScopes: []`, and `customers-realm-template.json`
-carries `profile`, `accounts:read`, `payments:initiate`, `statements:read`,
-`sca:enroll-device`, `sca:decide`, `telemetry:rum` — no catalog scope. So no token from a
-cold-started realm can carry the scope the augmentor reads, and the augmentor returns the
-identity unchanged. Whether the *live* realm has such a scope is unverified here on
-purpose: `check-realm-role-parity` states its own blind spot (`doesNotVerify:
-"client-role assignments; group membership; …"`) and client scopes are outside it, so
-nothing in this repo currently measures it. Wiring the scope is an authorization design
-decision (default vs optional scope, and which clients may request it), not a drift fix.
+**Catalog read and write grants remain separate.** `catalog:read` is declared in the
+staff realm imports and assigned to `openbank-admin-ui` as an optional scope in both
+Docker and GitOps. The Admin UI explicitly requests it during login; it is not a default
+grant. This enables a cold staff realm to issue the read scope consumed by the augmentor.
+`catalog:author` and `catalog:publish` are still absent, and no catalog scope is assigned
+by the customer realm. Write-scope provisioning remains a separate authorization decision.
+
+These source declarations and their offline parity regression do not establish the live
+realm's assignments or a deployed Admin UI image. The role-parity gate does not verify
+client-scope assignments; runtime access and import reconciliation require separate evidence.
 
 ### `clients[openbank-edge-webauthn].description`
 

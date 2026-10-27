@@ -23,6 +23,7 @@ import {
   BarChart3,
   Bell,
   Bluetooth,
+  QrCode,
   BookOpen,
   Bot,
   Boxes,
@@ -198,6 +199,7 @@ const opsNav: NavItem[] = [
   // Notifications (what we send) rather than under the agent cockpit: the audience is the
   // contact centre and back-office, not agent operators.
   { nameCs: 'Komunikační studio',    nameEn: 'Communication Studio', href: '/communication', icon: MessagesSquare, permission: 'communication:view' },
+  { nameCs: 'Šablony zpráv',          nameEn: 'Message templates', href: '/communication/notification-templates', icon: Bell, permission: 'communication:templates:view' },
   { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]
@@ -208,6 +210,7 @@ const docsNav: NavItem[] = [
   { nameCs: 'Aplikace',       nameEn: 'Customer App',       href: '/docs/customer-app', icon: Smartphone, permission: 'docs:view' },
   { nameCs: 'Identita & dedup', nameEn: 'Identity & Dedup',  href: '/docs/identity-dedup', icon: Fingerprint, permission: 'docs:view' },
   { nameCs: 'QRlessPay',      nameEn: 'QRlessPay',          href: '/docs/qrlesspay',   icon: Bluetooth,  permission: 'docs:view' },
+  { nameCs: 'QR fotoaparátem', nameEn: 'Camera QR',        href: '/docs/spayd-uri',   icon: QrCode,     permission: 'docs:view' },
   { nameCs: 'Senzory',        nameEn: 'Sensors',            href: '/docs/sensors',     icon: Radar,      permission: 'docs:view' },
   { nameCs: 'Správa dokumentů', nameEn: 'Document Management', href: '/docs/document-management', icon: FileSignature, permission: 'docs:view' },
   { nameCs: 'Cloud architektura', nameEn: 'Cloud Architecture', href: '/docs/cloud-architecture', icon: Cloud, permission: 'docs:view' },

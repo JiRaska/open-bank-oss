@@ -1,0 +1,254 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Journey: account-overview (ADR-0252, ADR-0331, #4348). The bank-owned canary customer lists its
+# accounts, opens the fixture account and reads its balance through the PUBLIC customer edge and
+# the public token endpoint -- the first two calls the app makes after login.
+#
+# READ-ONLY. Nothing is written, posted or tainted beyond the read calls. The one write the
+# journey depends on is the FIXTURE, created once by the owner (see the PR that introduced this
+# file): a single ACTIVE account of the canary's SYNTHETIC party whose balance was seeded by one
+# tainted posting (x-openbank-synthetic: true -> ledger journal_entries.synthetic = true, kept out
+# of FINREP/COREP by LedgerScope's default) and which no journey ever moves. A shared real account
+# would make the balance assertion nondeterministic; a journey that moved its own balance would be
+# a payment journey and belongs to domestic-payment, not here.
+#
+# What the checks pin, and what they deliberately do not:
+#   * the balance EQUALS the fixture's seeded value. Authentication and the account listing can
+#     both pass while the balance projection is stale or empty; only an exact expected figure
+#     turns "the projection stopped consuming ledger events" into a red run (catalog falsification).
+#   * the edge's ownership guard still answers 403 for an account the caller does not own, and
+#     401 without a token -- an overview that served anybody's balance would also "pass" a
+#     shape-only check.
+#   * it does NOT prove the balance equals the ledger's own figure at this instant; it proves the
+#     read model converged to the value the ledger was seeded with. The reconciliation of the two
+#     is the ledger's job, not a canary's.
+#
+# The secret arrives through the OPTIONAL ExternalSecret journey-account-overview-oidc. Until the
+# identity is provisioned the script logs "credential absent" and fails every check: red, never a
+# crash loop and never green. Until the fixture is seeded the "balance equals the fixture" and the
+# listing checks fail the same honest way.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: journey-account-overview-script
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: account-overview
+data:
+  journey.js: |
+    import http from 'k6/http';
+    import { check } from 'k6';
+
+    export const options = {
+      vus: 1,
+      iterations: 1,
+      thresholds: {
+        checks: ['rate==1.0'],
+        http_req_duration: ['p(95)<3000'],
+      },
+      tags: { journey: 'account-overview' },
+    };
+
+    // Override the bases only for the catalog's documented falsification.
+    const CUSTOMER_BASE = __ENV.CUSTOMER_BASE || 'https://customer.open-bank.tech';
+    const TOKEN_URL = __ENV.TOKEN_URL || 'https://kc.open-bank.tech/realms/openbank-customers/protocol/openid-connect/token';
+    const CLIENT_ID = __ENV.SYNTHETIC_CLIENT_ID || 'openbank-synthetic-retail';
+    const CLIENT_SECRET = __ENV.SYNTHETIC_CLIENT_SECRET || '';
+    const FIXTURE_BALANCE = Number(__ENV.FIXTURE_BALANCE);
+    const FIXTURE_CURRENCY = __ENV.FIXTURE_CURRENCY || '';
+
+    const CHECKS = [
+      'an unauthenticated account list is refused',
+      'the canary lists exactly its own ACTIVE fixture account',
+      'the account can be opened by id',
+      'the balance is served for the account',
+      'the balance is in the fixture currency and internally consistent',
+      'the balance equals the seeded fixture balance',
+      'an account the caller does not own is refused',
+    ];
+
+    function failAll() {
+      const verdicts = {};
+      for (const name of CHECKS) verdicts[name] = () => false;
+      check(null, verdicts);
+    }
+
+    // Never log the secret, the token, headers or response bodies: retained Job logs must stay
+    // secret-free and PII-free. Status codes only.
+    function fetchToken() {
+      if (!CLIENT_SECRET) {
+        console.error('account-overview credential absent: SYNTHETIC_CLIENT_SECRET is not set (ExternalSecret journey-account-overview-oidc not provisioned); refusing to probe unauthenticated');
+        return null;
+      }
+      const res = http.post(TOKEN_URL, {
+        grant_type: 'client_credentials',
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+      }, { tags: { endpoint: 'token', service: 'keycloak' } });
+      if (res.status !== 200) {
+        console.error(`account-overview token request failed: status=${res.status}`);
+        return null;
+      }
+      let token = null;
+      try { token = res.json('access_token'); } catch (_) { /* reported below */ }
+      if (typeof token !== 'string' || token.length === 0) {
+        console.error('account-overview token response carried no access_token');
+        return null;
+      }
+      return token;
+    }
+
+    function json(res) {
+      try { return res.json(); } catch (_) { return null; }
+    }
+
+    function report(step, res, expected) {
+      if (res.status !== expected) console.error(`account-overview ${step}: status=${res.status} expected=${expected}`);
+    }
+
+    export default function () {
+      if (!Number.isFinite(FIXTURE_BALANCE) || !FIXTURE_CURRENCY) {
+        console.error('account-overview fixture contract absent: FIXTURE_BALANCE / FIXTURE_CURRENCY are not set on the CronJob');
+        failAll();
+        return;
+      }
+      const token = fetchToken();
+      if (token === null) { failAll(); return; }
+      const params = (endpoint) => ({
+        headers: { Authorization: `Bearer ${token}`, 'x-openbank-synthetic': 'true' },
+        tags: { endpoint, service: 'customer-edge' },
+      });
+
+      // 0. no token: the overview must not be readable anonymously
+      const anon = http.get(`${CUSTOMER_BASE}/customer/v1/accounts`, { tags: { endpoint: 'accounts-anonymous', service: 'customer-edge' } });
+
+      // 1. list
+      const listed = http.get(`${CUSTOMER_BASE}/customer/v1/accounts`, params('accounts-list'));
+      report('list', listed, 200);
+      const accounts = listed.status === 200 ? json(listed) : null;
+      const active = Array.isArray(accounts) ? accounts.filter((a) => a && a.status === 'ACTIVE') : [];
+      const owners = new Set(Array.isArray(accounts) ? accounts.map((a) => a && a.partyId) : []);
+      const fixture = active.length === 1 ? active[0] : null;
+      const id = fixture && fixture.id;
+
+      // 2. the account itself, 3. its balance
+      const account = id ? http.get(`${CUSTOMER_BASE}/customer/v1/accounts/${id}`, params('account-get')) : null;
+      if (account) report('account', account, 200);
+      const accountBody = account && account.status === 200 ? json(account) : null;
+      const balance = id ? http.get(`${CUSTOMER_BASE}/customer/v1/balances/${id}`, params('balance-get')) : null;
+      if (balance) report('balance', balance, 200);
+      // balance-service answers a JSON ARRAY of BalanceResponse, one per currency: pick the fixture
+      // currency's row. No match leaves b null, which fails the 'served' check below by name.
+      const balanceRows = balance && balance.status === 200 ? json(balance) : null;
+      const b = Array.isArray(balanceRows) ? (balanceRows.find((r) => r && r.currency === FIXTURE_CURRENCY) || null) : null;
+
+      // 4. negative path: a well-formed id the caller does not own is refused (403, not 404:
+      // the edge deliberately gives no existence oracle)
+      const foreign = http.get(`${CUSTOMER_BASE}/customer/v1/accounts/00000000-0000-4000-8000-${`${Date.now()}`.slice(-12).padStart(12, '0')}`, params('account-foreign'));
+
+      const num = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
+      check(null, {
+        'an unauthenticated account list is refused': () => anon.status === 401,
+        // exactly one ACTIVE account, and every listed account belongs to one party: a second
+        // account appearing is a fixture change a human must make deliberately, not drift.
+        'the canary lists exactly its own ACTIVE fixture account': () => !!fixture && owners.size === 1,
+        'the account can be opened by id': () => !!accountBody && accountBody.id === id,
+        // fails when the array has no element with currency === FIXTURE_CURRENCY (or the body is not an array)
+        'the balance is served for the account': () => !!b && b.accountId === id,
+        'the balance is in the fixture currency and internally consistent': () => !!b
+          && b.currency === FIXTURE_CURRENCY
+          && Number.isFinite(num(b.currentBalance)) && Number.isFinite(num(b.availableBalance))
+          && num(b.reservedBalance) >= 0 && num(b.availableBalance) <= num(b.currentBalance) + 0.005,
+        'the balance equals the seeded fixture balance': () => !!b && Math.abs(num(b.currentBalance) - FIXTURE_BALANCE) < 0.005,
+        'an account the caller does not own is refused': () => foreign.status === 403,
+      });
+    }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: journey-account-overview
+  namespace: observability
+  annotations:
+    # Four runs at */15: a single failed run is the journey's own alert, a silent CronJob is this.
+    openbank.tech/max-success-age-seconds: "3600"
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: account-overview
+spec:
+  schedule: "5,20,35,50 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 120
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: journey
+            openbank.tech/journey: account-overview
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: k6
+              image: docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              args:
+                - run
+                - --quiet
+                - /scripts/journey.js
+              env:
+                # Optional on purpose: an unprovisioned identity must yield a red run with an
+                # explicit "credential absent" error, not CreateContainerConfigError.
+                - name: SYNTHETIC_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: journey-account-overview-oidc
+                      key: SYNTHETIC_CLIENT_SECRET
+                      optional: true
+                # The fixture contract (see the header): the synthetic party's one fixture account
+                # holds exactly this balance, seeded once through a tainted posting and never moved
+                # by any journey. A value moved by a run would make the assertion nondeterministic.
+                - name: FIXTURE_BALANCE
+                  value: "1000"
+                - name: FIXTURE_CURRENCY
+                  value: "CZK"
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 192Mi
+          volumes:
+            - name: script
+              configMap:
+                name: journey-account-overview-script
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule

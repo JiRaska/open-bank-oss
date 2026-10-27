@@ -542,7 +542,7 @@ export default function BusinessOnboardingPage() {
               {t('Hledat firmu nebo případ', 'Find a company or case')}
               <span style={{ position: 'relative' }}>
                 <Search size={14} aria-hidden="true" style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-tertiary)' }} />
-                <input className="input" value={query} onChange={e => setQuery(e.target.value)} placeholder={t('Název, IČO nebo ID případu', 'Name, identifier, or case ID')} autoComplete="off" spellCheck={false} style={{ width: '100%', paddingLeft: 30 }} />
+                <input className="input" value={query} onChange={e => setQuery(e.target.value)} placeholder={t('Název firmy nebo IČO', 'Company name or company ID')} autoComplete="off" spellCheck={false} style={{ width: '100%', paddingLeft: 30 }} />
               </span>
             </label>
           </section>

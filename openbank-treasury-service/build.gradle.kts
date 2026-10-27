@@ -10,23 +10,13 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
     // ledger-service journal API (ADR-0315 D5), bearer from the named oidc-client `m2m` (#10486).
@@ -40,13 +30,12 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
 
     implementation(project(":openbank-libs-domain"))
+    // ADR-0344 D1: schedule generation, accrual and calendars (framework-free).
+    implementation(project(":openbank-libs-finance"))
     implementation(project(":openbank-libs-runtime"))
 
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
@@ -96,6 +85,8 @@ pitest {
         "com.openbank.treasury.domain.*",
         "com.openbank.treasury.application.usecase.*",
         "com.openbank.treasury.nostro.*",
+        // The golden-fixture replay (ADR-0344 D9) exercises the ledger shape end to end.
+        "com.openbank.treasury.parity.*",
     )
     // Advisory (ADR-0063): pitest.yml reports the score and warns below 70%; the Gradle task itself
     // must not fail the run, so the threshold is 0 until the score is measured and sustained.

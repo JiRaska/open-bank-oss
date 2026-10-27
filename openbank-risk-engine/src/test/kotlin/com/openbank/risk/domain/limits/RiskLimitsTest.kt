@@ -87,16 +87,18 @@ class RiskLimitsTest {
     }
 
     @Test
-    fun `the shipped limit set parses, names id and version, and declares the five limits`() {
+    fun `the shipped limit set parses, names id and version, and declares the seven limits`() {
         val set = LimitTestSet.shipped()
         assertThat(set.id).isEqualTo("openbank-risk-appetite")
-        assertThat(set.version).isEqualTo("1")
+        assertThat(set.version).isEqualTo("2")
         assertThat(set.limits.associate { it.id to it.metric }).isEqualTo(
             mapOf(
                 "irrbb-eve-outlier" to LimitMetric.IRRBB_EVE_OUTLIER,
                 "large-exposure-bank-max" to LimitMetric.LARGE_EXPOSURE_BANK,
                 "lcr-min" to LimitMetric.LCR,
                 "nsfr-min" to LimitMetric.NSFR,
+                "own-book-pv01-max" to LimitMetric.PV01,
+                "own-book-var-max" to LimitMetric.VAR_99_1D,
                 "total-capital-ratio-min" to LimitMetric.TOTAL_CAPITAL_RATIO,
             ),
         )

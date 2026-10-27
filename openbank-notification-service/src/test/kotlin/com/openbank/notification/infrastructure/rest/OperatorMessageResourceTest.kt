@@ -3,7 +3,9 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.notification.infrastructure.rest
 
+import com.openbank.notification.application.OperatorDispatchStatus
 import com.openbank.notification.application.OperatorMessageRejected
+import com.openbank.notification.application.OperatorMessageResult
 import com.openbank.notification.application.OperatorMessageService
 import com.openbank.notification.domain.model.OperatorMessageTemplate
 import io.mockk.coEvery
@@ -25,7 +27,7 @@ class OperatorMessageResourceTest {
     fun `a successful compose returns 201 with the new notification id`(): Unit = runBlocking {
         val id = UUID.randomUUID()
         val service = mockk<OperatorMessageService> {
-            coEvery { compose(any()) } returns id
+            coEvery { compose(any()) } returns OperatorMessageResult(id, OperatorDispatchStatus.SENT)
         }
         val resource = OperatorMessageResource().apply { this.service = service }
 
@@ -40,6 +42,29 @@ class OperatorMessageResourceTest {
 
         assertThat(response.status).isEqualTo(201)
         assertThat((response.entity as Map<*, *>)["id"]).isEqualTo(id)
+        assertThat((response.entity as Map<*, *>)["dispatchStatus"]).isEqualTo("SENT")
+    }
+
+    @Test
+    fun `an unresolved handoff returns 202 with an id for reconciliation`(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        val service = mockk<OperatorMessageService> {
+            coEvery { compose(any()) } returns OperatorMessageResult(id, OperatorDispatchStatus.IN_DOUBT)
+        }
+        val resource = OperatorMessageResource().apply { this.service = service }
+
+        val response = resource.compose(
+            ComposeMessageRequest(
+                partyId = UUID.randomUUID(),
+                template = OperatorMessageTemplate.SUPPORT_FOLLOWUP,
+                recipient = "customer@example.com",
+                variables = mapOf("ticketReference" to "TCK-123"),
+            ),
+        )
+
+        assertThat(response.status).isEqualTo(202)
+        assertThat((response.entity as Map<*, *>)["id"]).isEqualTo(id)
+        assertThat((response.entity as Map<*, *>)["dispatchStatus"]).isEqualTo("IN_DOUBT")
     }
 
     @Test

@@ -63,7 +63,13 @@ export interface PlatformSecurityReport {
 }
 
 export type SecurityEnvelope =
-  | { available: true; report: PlatformSecurityReport }
+  | {
+      available: true
+      report: PlatformSecurityReport
+      source?: 'scanner' | 'ci-bundle'
+      freshness?: 'fresh' | 'stale' | 'unknown'
+      scannerStatus?: 'available' | 'unavailable' | 'not-configured'
+    }
   | { available: false; reason: 'not_deployed' | 'unreachable' | 'error' | 'unauthorized'; detail?: string }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -160,6 +166,11 @@ export function parseSecurityEnvelope(value: unknown): SecurityEnvelope {
     return { available: false, reason, detail: envelope.detail == null ? undefined : string(envelope.detail, 2_000, true) }
   }
   if (envelope.available !== true) throw new Error('Invalid security envelope')
+  const source = envelope.source == null ? undefined : enumValue(envelope.source, ['scanner', 'ci-bundle'] as const)
+  const freshness = envelope.freshness == null ? undefined : enumValue(envelope.freshness, ['fresh', 'stale', 'unknown'] as const)
+  const scannerStatus = envelope.scannerStatus == null
+    ? undefined
+    : enumValue(envelope.scannerStatus, ['available', 'unavailable', 'not-configured'] as const)
   const raw = object(envelope.report)
   if (!Array.isArray(raw.serviceResults) || raw.serviceResults.length > 1_000) throw new Error('Invalid service results')
   const serviceResults = raw.serviceResults.map(serviceResult)
@@ -192,7 +203,7 @@ export function parseSecurityEnvelope(value: unknown): SecurityEnvelope {
     generatedAt: instant(raw.generatedAt), totalServices, reachableServices, serviceResults,
     platformScore, platformGrade, criticalFindings, highFindings, owaspCoverage,
     complianceStatus: booleanRecord(raw.complianceStatus),
-  } }
+  }, ...(source ? { source } : {}), ...(freshness ? { freshness } : {}), ...(scannerStatus ? { scannerStatus } : {}) }
 }
 
 // Standard letter-grade bands, used to derive the platform grade from the score
