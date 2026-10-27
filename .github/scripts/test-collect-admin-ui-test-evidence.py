@@ -195,6 +195,48 @@ class ArchiveTests(unittest.TestCase):
             self.payload(output.getvalue())
 
 
+class PerformanceMergeTests(unittest.TestCase):
+    def row(self, scenario, component, observed_at, state="passed", attempt=1):
+        return {"id": scenario, "component": component, "observedAt": observed_at, "state": state,
+                "run": ENVELOPE["run"] | {"attempt": attempt, "observedAt": observed_at},
+                "detail": f"{scenario}: {state}", "metrics": {"requests": attempt * 100}}
+
+    def merge(self, current, retained):
+        core = {"performance": current, "warnings": []}
+        seed = {"schemaVersion": 1, "collectedAt": "2026-10-19T12:00:00Z", "performance": retained}
+        return COLLECTOR.merge_ancillary(core, seed)["performance"]
+
+    def test_platform_scenarios_with_null_component_keep_separate_identities(self):
+        retained = [self.row("platform-a", None, "2026-10-18T12:00:00Z"),
+                    self.row("platform-b", None, "2026-10-18T12:00:00Z")]
+        current = [self.row("platform-a", None, "2026-10-19T12:00:00Z", "failed", 2),
+                   self.row("platform-c", None, "2026-10-19T12:00:00Z")]
+        self.assertCountEqual(self.merge(current, retained), [current[0], retained[1], current[1]])
+
+    def test_multiple_scenarios_of_one_service_keep_separate_identities(self):
+        retained = [self.row("service-read", COMPONENT, "2026-10-18T12:00:00Z"),
+                    self.row("service-write", COMPONENT, "2026-10-18T12:00:00Z")]
+        current = [self.row("service-read", COMPONENT, "2026-10-19T12:00:00Z", "failed", 2),
+                   self.row("service-batch", COMPONENT, "2026-10-19T12:00:00Z")]
+        self.assertCountEqual(self.merge(current, retained), [current[0], retained[1], current[1]])
+
+    def test_newest_failed_attempt_and_its_provenance_win_out_of_order(self):
+        retained = [self.row("service-read", COMPONENT, "2026-10-18T12:00:00Z")]
+        failed = self.row("service-read", COMPONENT, "2026-10-19T12:00:00Z", "failed", 3)
+        older_pass = self.row("service-read", COMPONENT, "2026-10-19T11:00:00Z", attempt=2)
+        for current in ([failed, older_pass], [older_pass, failed]):
+            with self.subTest(current=current):
+                self.assertEqual(self.merge(current, retained), [failed])
+        self.assertEqual(self.merge([older_pass], [failed]), [failed])
+
+    def test_newer_not_run_is_authoritative_but_undated_declaration_is_not(self):
+        retained = self.row("service-read", COMPONENT, "2026-10-18T12:00:00Z")
+        not_run = self.row("service-read", COMPONENT, "2026-10-19T12:00:00Z", "not-run", 2)
+        self.assertEqual(self.merge([not_run], [retained]), [not_run])
+        declaration = {"id": "service-read", "component": COMPONENT, "state": "not-run", "observedAt": None}
+        self.assertEqual(self.merge([declaration], [retained]), [retained])
+
+
 class AggregateSeedTests(unittest.TestCase):
     def setUp(self):
         self.report = {"schemaVersion": 1, "collectedAt": "2026-10-19T12:00:00Z", "components": [], "totals": {},
@@ -366,6 +408,12 @@ class CollectionTests(unittest.TestCase):
         (self.repo / "openbank-admin-ui/scripts").mkdir(parents=True)
         (self.repo / "openbank-admin-ui/scripts/collect-test-intelligence.mjs").write_text("// stub\n")
 
+    def collect(self, *args, **kwargs):
+        # Existing service-only fixtures must never perform implicit network reads.
+        kwargs.setdefault("performance_stage", lambda *_args, **_kwargs:
+                          {"payloads": {}, "sources": [], "warnings": []})
+        return COLLECTOR.collect(*args, **kwargs)
+
     def tearDown(self):
         self.temp.cleanup()
 
@@ -392,7 +440,7 @@ class CollectionTests(unittest.TestCase):
                 "mutations": [{"component": COMPONENT, "state": "passed", "observedAt": "2026-10-17T11:00:00Z"}]}
         with tempfile.TemporaryDirectory() as output_dir:
             output = Path(output_dir) / "test-intelligence.json"
-            result = COLLECTOR.collect(
+            result = self.collect(
                 self.repo, output, "org/repo", "test-token", fetch_page=lambda name, page: [artifact],
                 fetch_run=lambda run_id: RUN, fetch_archive=lambda artifact_id: archive({
                     "run.json": json.dumps(ENVELOPE).encode(),
@@ -415,13 +463,13 @@ class CollectionTests(unittest.TestCase):
                                           "components": [], "warnings": [], "totals": {}}))
         with tempfile.TemporaryDirectory() as output_dir:
             output = Path(output_dir) / "result.json"
-            result = COLLECTOR.collect(self.repo, output, "org/repo", "token",
+            result = self.collect(self.repo, output, "org/repo", "token",
                                        fetch_page=lambda _name, _page: [], seed=None, run_collector=run)
             self.assertEqual(result["missing"], [COMPONENT])
             report = json.loads(output.read_text())
             self.assertTrue(any("unknown, not passed" in warning for warning in report["warnings"]))
         with self.assertRaises(COLLECTOR.CollectionError):
-            COLLECTOR.collect(self.repo, Path(self.temp.name) / "bad.json", "org/repo", "token",
+            self.collect(self.repo, Path(self.temp.name) / "bad.json", "org/repo", "token",
                               fetch_page=lambda *_: (_ for _ in ()).throw(COLLECTOR.CollectionError("API down")),
                               seed=None, run_collector=run)
 
@@ -433,7 +481,7 @@ class CollectionTests(unittest.TestCase):
                 metadata = RUN | {"status": status}
                 if status is None:
                     metadata.pop("status")
-                result = COLLECTOR.collect(
+                result = self.collect(
                     self.repo, Path(output_dir) / "result.json", "org/repo", "token",
                     fetch_page=lambda *_: [artifact], fetch_run=lambda _, metadata=metadata: metadata,
                     fetch_archive=lambda _: self.fail("unfinished evidence must not be downloaded"),
@@ -449,7 +497,7 @@ class CollectionTests(unittest.TestCase):
         artifact = {"id": 7, "name": f"test-intelligence-{COMPONENT}", "expired": False,
                     "workflow_run": {"id": 123, "head_branch": "main"}}
         with self.assertRaisesRegex(COLLECTOR.CollectionError, "pre-existing path"):
-            COLLECTOR.collect(self.repo, self.repo / "out.json", "org/repo", "token",
+            self.collect(self.repo, self.repo / "out.json", "org/repo", "token",
                               fetch_page=lambda *_: [artifact], fetch_run=lambda _: RUN,
                               fetch_archive=lambda _: archive({"run.json": json.dumps(ENVELOPE).encode()}),
                               seed=None, run_collector=self.fake_collector(None))
@@ -477,7 +525,7 @@ class CollectionTests(unittest.TestCase):
                               "run_started_at": "2026-10-19T11:00:00Z",
                               "updated_at": "2026-10-19T12:30:00Z"}
         with tempfile.TemporaryDirectory() as output_dir:
-            result = COLLECTOR.collect(
+            result = self.collect(
                 self.repo, Path(output_dir) / "result.json", "org/repo", "token",
                 fetch_page=lambda name, _page: [next(row for row in artifacts.values() if row["name"] == name)],
                 fetch_run=lambda run_id: run_calls.append(run_id) or RUN,
@@ -488,6 +536,149 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(set(result["staged"]), {COMPONENT, second})
         self.assertEqual(run_calls, [123])
         self.assertEqual(attempt_calls, [(123, 1)])
+
+    def performance_row(self, local="read", state="not-run"):
+        return {"id": COMPONENT + "-" + local, "component": COMPONENT,
+                "source": f"{COMPONENT}/src/test/k6/{local}.js", "state": state,
+                "observedAt": ENVELOPE["run"]["observedAt"], "run": ENVELOPE["run"],
+                "detail": "No safe authenticated target was supplied.", "thresholds": 1}
+
+    def performance_source(self, rows, *, scope="full", selected=True):
+        expected = [{"scenario_id": row["id"], "component": row["component"]} for row in rows]
+        return {"workflow": "perf-baseline.yml", "scope": scope,
+                "run_id": None if scope == "absent" else 123,
+                "attempt": None if scope == "absent" else 2,
+                **({} if scope == "absent" else {"commit": SHA, "observed_at": "2026-10-19T11:00:00Z"}),
+                "expected": expected, "selected": expected if selected else [],
+                "missing": [] if selected else [entry | {"reason": "no attributable latest-job artifact"} for entry in expected]}
+
+    def collect_performance(self, rows, sources, *, seed=None, payloads=None, run=None):
+        def collector(command, cwd, check):
+            self.fake_collector(None)(command, cwd, check)
+            output = Path(command[command.index("--out") + 1])
+            report = json.loads(output.read_text())
+            report["performance"] = rows
+            output.write_text(json.dumps(report))
+        output = self.repo / "performance-result.json"
+        self.collect(self.repo, output, "org/repo", "token", fetch_page=lambda *_: [], seed=seed,
+                     performance_stage=lambda *_args, **_kwargs:
+                     {"payloads": payloads or {}, "sources": sources, "warnings": ["fixture selection"]},
+                     run_collector=run or collector)
+        return json.loads(output.read_text())
+
+    def test_selected_not_run_retains_detail_and_beats_newer_seed(self):
+        row = self.performance_row()
+        old = row | {"state": "passed", "observedAt": "2026-10-20T00:00:00Z", "metrics": {"requests": 900}}
+        historical = {"id": row["id"], "collectedAt": "2026-10-18T00:00:00Z", "metrics": {"requests": 100}}
+        seed = {"schemaVersion": 1, "collectedAt": "2026-10-20T00:00:00Z",
+                "performance": [old], "performanceHistory": [historical]}
+        report = self.collect_performance([row], [self.performance_source([row])], seed=seed)
+        self.assertEqual(report["performance"], [row])
+        self.assertEqual(report["performanceHistory"], [historical])
+        self.assertEqual(report["performance"][0]["detail"], "No safe authenticated target was supplied.")
+        self.assertNotIn("metrics", report["performance"][0])
+
+    def test_latest_missing_barrier_and_global_absence_block_old_pass_without_fake_measurements(self):
+        for scope in ("full", "barrier", "absent"):
+            with self.subTest(scope=scope):
+                row = self.performance_row(state="passed") | {"metrics": {"requests": 999},
+                                                             "thresholdResults": {"evaluated": 1, "breached": 0}}
+                seed = {"schemaVersion": 1, "collectedAt": "2026-10-20T00:00:00Z", "performance": [row]}
+                source = self.performance_source([row], scope=scope, selected=False)
+                result = self.collect_performance([row], [source], seed=seed)["performance"][0]
+                self.assertEqual(result["state"], "unknown")
+                self.assertEqual(result["observedAt"], source.get("observed_at"))
+                self.assertEqual(result["collectionStatus"]["runId"], source["run_id"])
+                self.assertIn("no attributable", result["detail"])
+                for key in ("metrics", "run", "thresholdResults"):
+                    self.assertNotIn(key, result)
+
+    def test_authority_preserves_multiple_scenarios_of_one_component_and_unrelated_scenarios(self):
+        rows = [self.performance_row("read"), self.performance_row("write", "failed")]
+        untouched = {"id": "platform-unrelated", "component": None, "state": "not-run", "observedAt": None}
+        seed = {"schemaVersion": 1, "collectedAt": "2026-10-20T00:00:00Z",
+                "performance": [row | {"state": "passed", "observedAt": "2026-10-20T00:00:00Z"} for row in rows]}
+        report = self.collect_performance(rows + [untouched], [self.performance_source(rows)], seed=seed)
+        self.assertCountEqual(report["performance"], rows + [untouched])
+
+    def test_selected_global_money_path_matches_null_component_javascript_identity(self):
+        row = self.performance_row() | {"id": "money-path-smoke", "component": None,
+                                       "source": "perf/k6/money-path-smoke.js"}
+        source = self.performance_source([row])
+        source["expected"][0]["component"] = "openbank-money-path"
+        self.assertEqual(self.collect_performance([row], [source])["performance"], [row])
+
+    def test_selected_row_identity_and_provenance_fail_closed(self):
+        for change in ({"source": f"{COMPONENT}/src/test/k6/wrong.js"},
+                       {"run": ENVELOPE["run"] | {"id": "999"}}, {"run": None}):
+            with self.subTest(change=change), self.assertRaises(COLLECTOR.CollectionError):
+                row = self.performance_row()
+                self.collect_performance([row | change], [self.performance_source([row])])
+
+    def test_removed_missing_declaration_does_not_resurrect_seed_pass(self):
+        row = self.performance_row(state="passed")
+        seed = {"schemaVersion": 1, "collectedAt": "2026-10-20T00:00:00Z", "performance": [row]}
+        report = self.collect_performance([], [self.performance_source([row], selected=False)], seed=seed)
+        self.assertEqual(report["performance"], [])
+
+    def test_performance_payloads_are_visible_only_during_collection_and_cleaned_after_failure(self):
+        relative = "openbank-admin-ui/perf-artifacts/read-summary.json.run.json"
+        target = self.repo / relative
+        for fail in (False, True):
+            def collector(command, cwd, check):
+                self.assertEqual(target.read_bytes(), b"fixture")
+                if fail:
+                    raise RuntimeError("collector failed")
+                self.fake_collector(None)(command, cwd, check)
+            if fail:
+                with self.assertRaisesRegex(RuntimeError, "collector failed"):
+                    self.collect_performance([], [], payloads={relative: b"fixture"}, run=collector)
+            else:
+                self.collect_performance([], [], payloads={relative: b"fixture"}, run=collector)
+            self.assertFalse(target.exists())
+            self.assertFalse(target.parent.exists())
+            self.assertTrue((self.repo / "openbank-admin-ui/scripts").is_dir())
+
+    def test_performance_staging_rejects_traversal_symlinks_and_preexisting_files(self):
+        for relative in ("../outside.json", "/absolute.json", "openbank-admin-ui/../outside.json", "x\\evil"):
+            with self.subTest(relative=relative), self.assertRaises(COLLECTOR.CollectionError):
+                self.collect_performance([], [], payloads={relative: b"invalid"})
+        folder = self.repo / "openbank-admin-ui/perf-artifacts"
+        folder.mkdir()
+        existing = folder / "old.json"
+        existing.write_bytes(b"keep")
+        with self.assertRaises(COLLECTOR.CollectionError):
+            self.collect_performance([], [], payloads={str(existing.relative_to(self.repo)): b"replace"})
+        self.assertEqual(existing.read_bytes(), b"keep")
+        existing.unlink()
+        folder.rmdir()
+        folder.symlink_to(self.repo / "openbank-admin-ui/scripts", target_is_directory=True)
+        with self.assertRaisesRegex(COLLECTOR.CollectionError, "symlink"):
+            self.collect_performance([], [], payloads={"openbank-admin-ui/perf-artifacts/new.json": b"invalid"})
+        self.assertFalse((self.repo / "openbank-admin-ui/scripts/new.json").exists())
+
+    def test_performance_callbacks_are_authenticated_memoized_and_stage_errors_translate(self):
+        url = "https://api.github.com/repos/org/repo/actions/runs/123"
+        archive_url = "https://api.github.com/repos/org/repo/actions/artifacts/8/zip"
+        def stage(_repo, _slug, fetch_json, fetch_bytes, **callbacks):
+            self.assertEqual(fetch_json(url), fetch_json(url))
+            self.assertEqual(fetch_bytes(archive_url), fetch_bytes(archive_url))
+            self.assertEqual(callbacks["fetch_log"](9), callbacks["fetch_log"](9))
+            return {"payloads": {}, "sources": [], "warnings": []}
+        with patch.object(COLLECTOR, "api_json", return_value={}) as json_api, \
+                patch.object(COLLECTOR, "api_bytes", return_value=b"fixture") as bytes_api:
+            self.collect(self.repo, self.repo / "out.json", "org/repo", "token", fetch_page=lambda *_: [],
+                         seed=None, performance_stage=stage, run_collector=self.fake_collector(None))
+        json_api.assert_called_once_with(url, "token")
+        self.assertEqual(bytes_api.call_count, 2)
+        self.assertEqual(bytes_api.call_args_list[0].args, (archive_url, "token"))
+        self.assertEqual(bytes_api.call_args_list[1].args,
+                         ("https://api.github.com/repos/org/repo/actions/jobs/9/logs", "token"))
+        def invalid(*_args, **_kwargs):
+            raise COLLECTOR.PERFORMANCE.StageError("bad producer")
+        with self.assertRaisesRegex(COLLECTOR.CollectionError, "performance artifact collection failed"):
+            self.collect(self.repo, self.repo / "bad.json", "org/repo", "token", fetch_page=lambda *_: [],
+                         seed=None, performance_stage=invalid)
 
 
 if __name__ == "__main__":
