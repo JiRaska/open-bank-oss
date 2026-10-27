@@ -35,7 +35,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: finops-agent
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finops-agent:sandbox-bc453312
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finops-agent:sandbox-cc62ac6a@sha256:5fb24288b6a02a7a2d3f9c41e9d750f5fe186cde8003dcebce3e73f6f172d0eb
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

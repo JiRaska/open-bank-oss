@@ -37,7 +37,7 @@ spec:
         - name: governance-auditor
           # Pending first CI build (ADR-0164 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-governance-auditor:sandbox-bc453312
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-governance-auditor:sandbox-cc62ac6a@sha256:13f4ef9c1da52bca54f442347fa5e3d25d81e71c9d5c49fa431beb4b282fcada
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
