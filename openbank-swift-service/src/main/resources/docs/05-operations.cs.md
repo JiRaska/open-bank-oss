@@ -157,6 +157,13 @@ nepřibývá veřejné API ani automatické historické opravy.
 
 Ověřené pozdní zaúčtování po rozhodnutí ACK/REJECT uloží důkaz transakce bez přepsání rozhodnutí a bez události COMPLETED. Výsledek `late-completion` vyžaduje porovnání existující transakce se stejným klíčem. Výjimka vyžaduje úplný čas, neprázdný důvod a schvalovatele, nikoli částečné NULL údaje.
 
+## Typ platby v pacs.008 (#13663)
+
+Adaptér krycí platby SWIFT výslovně ponechává volitelný blok typu platby sdíleného builderu
+nepřítomný. Přeshraniční krycí platba nesmí deklarovat úroveň služby EPC SEPA jen proto, že
+používá stejný XML builder. Zpráva bez bloku se nemění; tato úprava kompatibility knihovny
+nemění účetní vypořádání, callbacky ani pravidla opětovného zpracování.
+
 ## Vlastní převody banky uvolněné treasury
 
 Událost treasury `treasury.payment.released.v1` (kanál `treasury-payments-in`) se stane jedním
