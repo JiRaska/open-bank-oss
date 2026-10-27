@@ -6,14 +6,12 @@ package com.openbank.domestic.application.workflow
 
 import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.AmlCasePort
-import com.openbank.domestic.application.port.out.AmlCaseRiskLevel
 import com.openbank.domestic.application.port.out.CustomerNotificationPort
 import com.openbank.domestic.application.port.out.DomesticBookingWrites
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.port.out.FraudScoreCommand
 import com.openbank.domestic.application.port.out.FraudScoringPort
-import com.openbank.domestic.application.port.out.FraudVerdict
 import com.openbank.domestic.application.port.out.OpenAmlCaseCommand
 import com.openbank.domestic.application.port.out.SanctionsScreeningPort
 import com.openbank.domestic.application.port.out.SchemeGatewayPort
@@ -26,11 +24,13 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
-import com.openbank.domestic.domain.screening.ScreeningDecision
-import com.openbank.domestic.domain.screening.ScreeningMatchStatus
-import com.openbank.domestic.domain.screening.ScreeningPolicy
-import com.openbank.domestic.domain.screening.ScreeningResult
-import com.openbank.domestic.domain.screening.ScreeningRole
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningPolicy
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.vertx.VertxContextSupport
@@ -95,7 +95,7 @@ open class DomesticPaymentActivitiesImpl(
             )
         } catch (ex: ScreeningUnavailableException) {
             log.warnf(ex, "Sanctions screening unavailable for payment %s; returning REVIEW", paymentId)
-            openCaseQuietly(payment, AmlCaseRiskLevel.MEDIUM, ALERT_SCREENING_UNAVAILABLE, ex.message, null)
+            openCaseQuietly(payment, AmlCaseSeverity.MEDIUM, ALERT_SCREENING_UNAVAILABLE, ex.message, null)
             return@vtx ScreeningDecision.REVIEW
         }
 
@@ -140,7 +140,7 @@ open class DomesticPaymentActivitiesImpl(
         val detail = nonClear
             .joinToString("; ") { "${it.role} '${it.subject}' ${it.status} score=${it.score}" }
             .ifBlank { "no actionable matches" }
-        val riskLevel = if (decision == ScreeningDecision.BLOCK) AmlCaseRiskLevel.CRITICAL else AmlCaseRiskLevel.HIGH
+        val riskLevel = if (decision == ScreeningDecision.BLOCK) AmlCaseSeverity.CRITICAL else AmlCaseSeverity.HIGH
         openCaseQuietly(
             payment,
             riskLevel,
@@ -427,7 +427,7 @@ open class DomesticPaymentActivitiesImpl(
     @Suppress("TooGenericExceptionCaught")
     private suspend fun openCaseQuietly(
         payment: DomesticPayment,
-        riskLevel: AmlCaseRiskLevel,
+        riskLevel: AmlCaseSeverity,
         alertCode: String,
         detail: String?,
         matchedEntity: String?,
