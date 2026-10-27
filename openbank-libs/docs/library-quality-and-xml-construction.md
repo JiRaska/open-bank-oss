@@ -41,6 +41,12 @@ rejected XML. The existing namespace, XSD and external-entity rejection tests re
 mutations, typed status-reader failures and invalid-to-valid recovery on the same reader and
 validator instances.
 
+`Semt002Reader` (custodian statement of holdings) parses uploaded input through `SecureXml.parse`,
+so DOCTYPE and external entities are refused like every other reader here. It reads elements by
+local name; the vendored semt.002.001.11 XSD is a working subset validated only against the test
+fixtures. Its quantity dimension maps to `PortfolioQuantityBasis` in libs-domain, which treasury
+and tax-reporting share so neither infers a dimension from the CFI.
+
 The existing `Iso20022Bench.buildPacs008` workload measures the allocation effect. Compare results
 using the same JVM, heap, collector, workload and multiple forks. Allocation budgets are not raised
 to hide regressions; throughput and timing observations need comparable hardware and load.

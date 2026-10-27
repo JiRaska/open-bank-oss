@@ -463,6 +463,36 @@ def owner_approval_valid(number: int, ref: str, app: dict | None) -> bool:
             and (app or {}).get(OWNER_APPROVAL_CONTEXT) == ("success", f"owner-approved PR #{number}"))
 
 
+def live_source_intent(gh, number: int, head: str) -> bool:
+    """Re-read a SOURCE PR immediately before acting, for every branch prefix.
+
+    A planner's armed snapshot expires while it judges other PRs or verifies a bundle. Internal
+    carriers are deliberately draft/disarmed and are never passed here. This is a last read, not
+    an atomic lock with GitHub's subsequent write; the merge API still pins the exact head.
+    """
+    with deciding():
+        pr = gh.pr(number)
+        if not isinstance(pr, dict):
+            return False
+        source = pr.get("head")
+        if (pr.get("number") != number or pr.get("state") != "open" or pr.get("draft") is not False
+                or not isinstance(pr.get("auto_merge"), dict) or not pr["auto_merge"]
+                or not isinstance(source, dict) or source.get("sha") != head):
+            return False
+        target = pr.get("base")
+        if not isinstance(target, dict) or target.get("ref") != gh.branch:
+            return False
+        for endpoint in (source, target):
+            repo = endpoint.get("repo")
+            if not isinstance(repo, dict) or repo.get("full_name") != gh.repo:
+                return False
+        ref = source.get("ref")
+        if not isinstance(ref, str) or not ref or TRAIN_BRANCH_RE.fullmatch(ref):
+            return False
+        app = gh.app_statuses(head) if any(ref.startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES) else None
+        return owner_approval_valid(number, ref, app)
+
+
 def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
               app: dict[str, tuple[str, str]] | None = None, untrainable=None,
               extra: list[str] | None = None) -> tuple[bool, str]:
@@ -1450,13 +1480,20 @@ class GitHub:
         bad = [c for c in required if c != STATUS_CONTEXT and checks.get(c) != "success"]
         return f"required context(s) not green on the head now: {', '.join(bad)}" if bad else None
 
-    def post_status(self, sha: str, state: str, description: str, context: str = STATUS_CONTEXT) -> None:
+    def post_status(self, sha: str, state: str, description: str, context: str = STATUS_CONTEXT,
+                    *, source_number: int | None = None) -> None:
         if not SHA_RE.fullmatch(sha):
             raise SystemExit(f"::error::refusing a status on non-sha {sha!r}")
         if state == "success" and context == STATUS_CONTEXT:
+            if type(source_number) is not int or source_number <= 0:
+                raise SystemExit("::error::merge-train success requires a source PR number")
             why = self.unverified(sha, guard=False)
             if why:
                 log(f"::warning::no merge-train success on {sha[:12]}: {why}")
+                return
+            # A success status can release native auto-merge before our explicit merge call.
+            if not live_source_intent(self, source_number, sha):
+                log(f"::notice::#{source_number} source intent changed — no merge-train success")
                 return
         code, data = api("POST", f"/repos/{self.repo}/statuses/{sha}",
                          {"state": state, "context": context, "description": description[:140], "target_url": self.run_url})
@@ -1468,15 +1505,12 @@ class GitHub:
 
     def merge(self, n: int, head: str) -> str | None:
         """Squash-merge pinned to the verified head sha (the API's `sha` = --match-head-commit)."""
-        pr = self.pr(n)
-        if pr["head"]["sha"] != head:
-            return None
-        if not owner_approval_valid(n, pr["head"]["ref"], None):
-            if not pr.get("auto_merge") or not owner_approval_valid(n, pr["head"]["ref"], self.app_statuses(head)):
-                return None
-        why = self.unverified(head, guard=True)   # live, last thing before the write (cache safety)
+        why = self.unverified(head, guard=True)   # live verdict and ruleset (cache safety)
         if why:
             log(f"::warning::#{n} not merged: {why}")
+            return None
+        if not live_source_intent(self, n, head):  # last read, after potentially slow verdict reads
+            log(f"::notice::#{n} source intent or head changed — not merged")
             return None
         code, data = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/merge", {"merge_method": "squash", "sha": head})
         return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
@@ -1906,6 +1940,11 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
         return "rejected"
     for n in v.dropped:
         gh.comment(n, DROP_MESSAGE)
+    heads = {m.number: m.head_sha for m in batch}
+    for n in v.applied:
+        if not live_source_intent(gh, n, heads[n]):
+            log(f"::notice::#{n} source intent or head changed — carrier not published")
+            return "rejected"
     Pusher(git, branch, gh.remote).push(v.tip)
     gh.post_status(v.tip, "success", f"tree={v.tree}", context=RECORD_CONTEXT)
     gh.create_carrier(branch)
@@ -2050,15 +2089,13 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
         elif not failing:
             expected = live_main
             for n, head in chain[1]:
-                pr = gh.pr(n)
-                if (pr.get("state") != "open" or pr["head"]["sha"] != head
-                        or not owner_approval_valid(n, pr["head"]["ref"], gh.app_statuses(head))):
-                    log(f"#{n} changed since the train was verified; stopping")
+                if not live_source_intent(gh, n, head):
+                    log(f"#{n} source intent or head changed since the train was verified; stopping")
                     break
                 if not shadow and gh.main_sha() != expected:
                     log("main advanced by a foreign merge; stopping, the next tick rebuilds")
                     break
-                gh.post_status(head, "success", f"verified on train over main {chain[0][:12]}")
+                gh.post_status(head, "success", f"verified on train over main {chain[0][:12]}", source_number=n)
                 if shadow:
                     continue
                 merged = gh.merge(n, head)
@@ -2139,7 +2176,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             log(f"#{m.number:>6} fast      held: {hold} — next tick")
             continue
         if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success":
-            gh.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base[:12]} and the batch")
+            gh.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base[:12]} and the batch",
+                           source_number=m.number)
         summary["fast"].append(m.number)
     stale_red_refresh(gh, git, base, red, shadow, summary)
     return summary
@@ -2617,17 +2655,15 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         if gh.main_sha() != base:
             log(f"#{n:>6} strict    main moved since it was read — next tick")
             break
-        live_pr = gh.pr(n)
-        if (live_pr["head"]["sha"] != head
-                or not owner_approval_valid(n, live_pr["head"]["ref"], gh.app_statuses(head))):
-            log(f"#{n:>6} strict    head or owner approval changed — next tick")
+        if not live_source_intent(gh, n, head):
+            log(f"#{n:>6} strict    source intent or head changed — next tick")
             continue
         if fix:
             desc = f"strict lane: fix for {', '.join(fix)} red on main {base[:12]}, verified on its up-to-date head"
             log(f"#{n:>6} strict    fix for {', '.join(fix)} red on main {base[:12]}: combined head verified, merging")
         else:
             desc = f"strict lane: green on an up-to-date head over main {base[:12]}"
-        gh.post_status(head, "success", desc)
+        gh.post_status(head, "success", desc, source_number=n)
         merged = gh.merge(n, head)
         if not merged:
             log(f"#{n:>6} strict    did not merge; stopping")
@@ -2814,6 +2850,7 @@ class FakeGitHub:
 
     def __init__(self, origin: str, scratch: str):
         self.origin, self.scratch, self.branch, self.run_url, self.remote = origin, scratch, "main", "http://run", origin
+        self.repo = "o/r"
         self.prs: dict[int, dict] = {}
         self.statuses: dict[str, list[tuple[str, str, str, str]]] = {}
         self.comments: list[tuple[int, str]] = []
@@ -2848,7 +2885,8 @@ class FakeGitHub:
     def add_pr(self, n: int, branch: str, created: str):
         self.prs[n] = {"number": n, "state": "open", "draft": False, "auto_merge": {"x": 1}, "title": branch, "body": "",
                        "created_at": created, "user": {"login": "someone"},
-                       "head": {"ref": branch, "sha": self.g("rev-parse", branch).stdout.strip(), "repo": {"full_name": "o/r"}}}
+                       "head": {"ref": branch, "sha": self.g("rev-parse", branch).stdout.strip(), "repo": {"full_name": "o/r"}},
+                       "base": {"ref": self.branch, "repo": {"full_name": self.repo}}}
 
     def head_refspec(self, n): return f"refs/heads/{self.prs[n]['head']['ref']}"
     def required(self): return list(SYN_REQUIRED)
@@ -2899,7 +2937,7 @@ class FakeGitHub:
                 out.setdefault(ctx, (state, desc))
         return out
 
-    def post_status(self, sha, state, description, context=STATUS_CONTEXT, creator=BOT_LOGIN):
+    def post_status(self, sha, state, description, context=STATUS_CONTEXT, creator=BOT_LOGIN, *, source_number=None):
         self.statuses.setdefault(sha, []).append((context, state, description, creator))
 
     def comment(self, n, text): self.comments.append((n, text))
