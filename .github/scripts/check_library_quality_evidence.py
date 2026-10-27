@@ -77,21 +77,6 @@ if gh_retry 3 -- fetch_pages "$1"; then cat "$candidate"; else exit $?; fi
     return json.loads(output)
 
 
-def attach_jobs(runs, head, repo, cache, deadline):
-    for workflow in WORKFLOWS:
-        candidates = [r for r in runs if r.get("path") == workflow and r.get("head_sha") == head
-                      and r.get("event") == "pull_request"]
-        if not candidates:
-            continue
-        latest = max(candidates, key=lambda r: (r["id"], r.get("run_attempt", 1)))
-        if latest["status"] == "completed" and latest.get("conclusion") == "success":
-            key = (latest["id"], latest.get("run_attempt", 1))
-            if key not in cache:
-                endpoint = f"repos/{repo}/actions/runs/{key[0]}/attempts/{key[1]}/jobs?per_page=100"
-                cache[key] = [j for page in api(endpoint, deadline) for j in page["jobs"]]
-            latest["jobs"] = cache[key]
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True)
@@ -104,13 +89,29 @@ def main():
     if not applicable(paths):
         print("Library proofs: not applicable to these paths")
         return 0
-    # Only completed attempt-specific job rosters are immutable. Keep the run
-    # inventory fresh so reruns/new failures supersede previously green proofs.
-    cache = {}
+    completed_jobs = {}
     while True:
         runs = [r for page in api(f"repos/{args.repo}/actions/runs?head_sha={args.head}&event=pull_request&per_page=100", deadline)
                 for r in page["workflow_runs"]]
-        attach_jobs(runs, args.head, args.repo, cache, deadline)
+        for workflow in WORKFLOWS:
+            candidates = [r for r in runs if r.get("path") == workflow and r.get("head_sha") == args.head
+                          and r.get("event") == "pull_request"]
+            if candidates:
+                latest = max(candidates, key=lambda r: (r["id"], r.get("run_attempt", 1)))
+                if latest["status"] == "completed" and latest.get("conclusion") == "success":
+                    # Keep reading the run inventory: reruns and newer producers must
+                    # supersede old success. Only a proven successful terminal attempt's
+                    # job roster is immutable and reusable within this invocation.
+                    key = (args.repo, workflow, latest["head_sha"], latest["event"],
+                           latest["id"], latest.get("run_attempt", 1))
+                    if key in completed_jobs:
+                        latest["jobs"] = completed_jobs[key]
+                    else:
+                        endpoint = f"repos/{args.repo}/actions/runs/{latest['id']}/attempts/{latest.get('run_attempt', 1)}/jobs?per_page=100"
+                        latest["jobs"] = [j for page in api(endpoint, deadline) for j in page["jobs"]]
+                        proofs = [j for j in latest["jobs"] if j.get("name") == JOBS[workflow]]
+                        if proofs and all(j.get("status") == "completed" and j.get("conclusion") == "success" for j in proofs):
+                            completed_jobs[key] = latest["jobs"]
         state, detail = verdict(runs, args.head)
         print(f"Library proofs: {state}: {detail}", flush=True)
         if state == "success":
