@@ -308,3 +308,15 @@ from Vault KV, and those are a strict stale ancestor of these files (measured in
 4 roles / 2 clients against 14 / 10). Making the templates importable is the precondition
 for the reconcile, not the reconcile itself — that is an owner-gated `vault kv put`,
 runbook 0009.
+
+
+### Account catalog read prerequisite
+
+The account-owned client declares only the existing `catalog:read` scope, without a staff
+role or a catalog author/publish scope. This declaration does not update an existing live
+realm. The owner-managed provisioning procedure in runbook 0009 must reconcile the existing
+client assignment and verify fresh token claims before the consuming account change is
+activated. Import-artifact reconciliation and live client configuration are separate steps.
+The matching catalog policy admits only the verified account service identity for
+`catalog.read`. This prerequisite does not change which client account-service selects and
+does not establish live issuer configuration or a successful published-revision read.

@@ -1045,3 +1045,16 @@ invoke its scoped projection; it does not acquire shared operator or compliance
 roles. Realm import and credential delivery must be verified before deployment.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+
+### Account catalog read authorization prerequisite
+
+The named account service identity receives only a catalog read grant when the current PEP
+supplies a verified service-account marker, the exact account client identity, `ROLE_API`
+and the role mapped from the `catalog:read` scope. Missing or contradictory identity markers,
+other clients and catalog write actions receive no grant from this rule. No staff role or
+publish scope is added. This prerequisite leaves existing account client selection unchanged.
+Generated OPA bundles and pod checksums carry the policy through normal GitOps; generation
+is not live rollout evidence. An owner must reconcile the existing issuer scope assignment
+and verify the normal account identity's read before the consuming change is enabled. Rollback
+removes the read grant and read-scope assignment together, without rewriting stored account pins.
