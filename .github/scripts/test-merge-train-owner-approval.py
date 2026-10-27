@@ -158,7 +158,8 @@ class OwnerApprovalTest(unittest.TestCase):
         with patch.object(gh, "pr", return_value=pr), patch.object(gh, "app_statuses", return_value={}), patch.object(train, "api") as api:
             self.assertIsNone(gh.merge(7, self.sha))
             api.assert_not_called()
-        with patch.object(gh, "pr", return_value=pr), patch.object(gh, "app_statuses", return_value=self.approval), patch.object(train, "api", return_value=(200, {"merged": True, "sha": "c" * 40})) as api:
+        # The live verdict re-read (cache safety, #13988) has its own tests in merge-train.py --self-test.
+        with patch.object(gh, "pr", return_value=pr), patch.object(gh, "app_statuses", return_value=self.approval), patch.object(gh, "unverified", return_value=None), patch.object(train, "api", return_value=(200, {"merged": True, "sha": "c" * 40})) as api:
             self.assertEqual("c" * 40, gh.merge(7, self.sha))
             api.assert_called_once_with("PUT", "/repos/owner/repo/pulls/7/merge", {"merge_method": "squash", "sha": self.sha})
 
