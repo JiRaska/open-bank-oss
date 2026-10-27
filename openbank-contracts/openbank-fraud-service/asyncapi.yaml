@@ -5,19 +5,18 @@
 #
 # WHAT IS AND IS NOT ENFORCED HERE. `check-event-contract-coverage.py` asserts this FILE EXISTS;
 # nothing validates its content against what the code actually sends, and no schema is registered
-# in Apicurio. Everything below is DERIVED from `FraudHoldService.emitHoldChanged`, the only
-# producer, and each claim names its source — same convention as the engagement-service contract.
+# in Apicurio. The hold signal is derived from `FraudHoldService.emitHoldChanged`; the opt-in
+# velocity projection is derived from `ShadowVelocityTopology` (ADR-0140 amendment).
 
 asyncapi: 3.0.0
 
 info:
   title: OpenBank Fraud Service — events
-  version: 1.0.0
+  version: 1.1.0
   description: |
-    fraud-service's first-ever published topic (ADR-0220 D3.5, issue #2749). Everything else the
-    service does — `POST /api/v1/fraud/score` — is synchronous request/response with no event;
-    this is the sole exception, a side-effect signal for the fraud-hold marketing-suppression
-    exclusion, not a scoring-decision feed.
+    Fraud-hold marketing-suppression signals (ADR-0220 D3.5, #2749) and an opt-in
+    Kafka Streams velocity shadow projection (ADR-0140 amendment, #13888).
+    Neither topic is a scoring-decision feed.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -34,6 +33,21 @@ servers:
       grants Write + Describe on this topic, its first-ever producer grant.
 
 channels:
+  fraudShadowVelocity:
+    address: openbank.fraud.shadow.velocity.v1
+    description: |
+      Direct Kafka Streams emitter, disabled by default. Key is
+      accountId:window:windowStartEpochMillis. The body eventType is FraudShadowVelocity;
+      the topic carries only schemaVersion=1
+      H1/H24 bucket snapshots; it has no verdict or online-feature consumer.
+      Seven-day compact/delete retention, initially one partition; dedicated
+      fraud-streams-shadow identity in kafka-streams-shadow.yaml. Original source
+      coordinates and outbox ce-id survive repartition and event-ID deduplication.
+      Event time is the last contributing input, not a historical as-of watermark.
+    messages:
+      FraudShadowVelocity:
+        $ref: '#/components/messages/FraudShadowVelocity'
+
   fraudHoldChanged:
     address: openbank.fraud.hold.changed
     title: Fraud-hold raised or cleared for a party
@@ -56,6 +70,13 @@ channels:
         $ref: '#/components/messages/fraud.hold_changed'
 
 operations:
+  publishFraudShadowVelocity:
+    action: send
+    channel:
+      $ref: '#/channels/fraudShadowVelocity'
+    messages:
+      - $ref: '#/channels/fraudShadowVelocity/messages/FraudShadowVelocity'
+
   publishFraudHoldChanged:
     action: send
     title: Publish a fraud-hold state transition
@@ -99,6 +120,49 @@ components:
               `active`/`reason` state rather than accumulating.
 
   schemas:
+    FraudShadowVelocityPayload:
+      type: object
+      required: [eventType, schemaVersion, accountId, eventId, occurredAt, sourceTopic, sourcePartition, sourceOffset, window, windowStart, windowEndExclusive, count]
+      properties:
+        eventType:
+          type: string
+          const: FraudShadowVelocity
+        schemaVersion:
+          type: integer
+          const: 1
+        accountId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+          description: Last contributing outbox ce-id, not the independently generated body eventId.
+        occurredAt:
+          type: string
+          format: date-time
+          description: Business time of the last contributing input, not an as-of watermark.
+        sourceTopic:
+          type: string
+          const: openbank.transactions.transaction.initiated
+        sourcePartition:
+          type: integer
+          minimum: 0
+        sourceOffset:
+          type: integer
+          minimum: 0
+        window:
+          type: string
+          enum: [H1, H24]
+        windowStart:
+          type: string
+          format: date-time
+        windowEndExclusive:
+          type: string
+          format: date-time
+        count:
+          type: integer
+          minimum: 1
+
     holdReason:
       type: string
       description: >-
@@ -110,6 +174,12 @@ components:
       enum: [repeated_review, expired]
 
   messages:
+    FraudShadowVelocity:
+      name: FraudShadowVelocity
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/FraudShadowVelocityPayload'
+
     fraud.hold_changed:
       name: fraud.hold_changed
       title: A fraud-hold was raised or cleared for a party
