@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.26.0...interest-service-v0.26.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **ledger:** capture source-linked journal history snapshots with idempotent capture ([#13763](https://github.com/JiRaska/open-bank-oss/issues/13763)) ([c7d103c](https://github.com/JiRaska/open-bank-oss/commit/c7d103c9f9482c8725af567a770a2ad1cf5f5cad))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.25.0...interest-service-v0.26.0) (2026-10-22)
 
 

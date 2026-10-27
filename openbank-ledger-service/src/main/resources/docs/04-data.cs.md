@@ -69,3 +69,9 @@ Re-identifikace (spojení `sub_account_id`/`transaction_id` zpět na zákazníka
 - Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
 - Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
 - Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
+
+## Životní cyklus mezipaměti historie
+
+V36 přidává volitelné údaje o původu a neměnné manifesty, řádky a provenienci snímků. Jedna transakce repeatable-read kopíruje potvrzená data z jednoho SQL/MVCC pohledu; maximum sekvence není důkazem potvrzení transakcí. Provenience zahrnuje i zdroje počátečního součtu. Smazání zdrojového zápisu či řádku a změna údajů o původu transakčně zneplatní odvozené kopie. Čtení odmítá nedostupné připojené zdroje; stávající údržba partition takové kopie fyzicky odstraní. Prázdný výsledek bez zdrojů se neukládá. Nevzniká nová samostatná retenční lhůta, mazání zdrojů ani změna právního pozastavení výmazu; dostupnost kopie následuje všechny původní zdroje. Nejde o nový zákonný doklad uzávěrky.
+
+V37 přidává atomický záznam o zachycení historie poté, co V36 vytvoří odkazované snímky. V35 zůstává stávající migrací nástrojových účtů treasury beze změny. Rozšíření může souběžně existovat s předchozí aplikací, která nový endpoint ani tabulky nepoužívá. Při návratu nejprve nasaďte předchozí aplikaci a vypněte nový endpoint; zachycená data a záznamy uchovejte do posouzení retence před případným zvlášť schváleným destruktivním návratem schématu. Součástí nasazení není Flyway repair ani přepis kontrolních součtů.
