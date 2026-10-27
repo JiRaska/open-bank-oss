@@ -67,14 +67,16 @@ if [ "$is_status" = true ]; then
   case "$url" in
     */versions/*)
       case "${BROKER_MODE:-known}" in
-        mixed|mixed-late-absent|mixed-late-unavailable)
-          if [[ "$url" == */pacticipants/openbank-good-service/* ]] || [ "$BROKER_MODE" != mixed ]; then
+        mixed|mixed-late-absent|mixed-late-unavailable|push-mixed-source)
+          if [[ "$url" == */pacticipants/openbank-good-service/* ]] || \
+             { [ "$BROKER_MODE" != mixed ] && [ "$BROKER_MODE" != push-mixed-source ]; }; then
             echo 200
           else
             echo 404
           fi
           ;;
         push-fails|verified) echo 200 ;;
+        unavailable) echo 503 ;;
         source-ready)
           if [[ "$url" == */versions/${RESOLVER_SHA:-unset} ]]; then echo 200; else echo 404; fi
           ;;
@@ -115,8 +117,15 @@ cat > "$tmp/bin/pact-broker" <<'STUB'
 #!/usr/bin/env bash
 echo "$*" >> "$PACT_CLI_LOG"
 if [ "$1" = "can-i-deploy" ]; then
+  case "${PACT_CLI_MODE:-failure}" in
+    success) echo "Computer says yes"; exit 0 ;;
+    no-main-tag) echo "No version with tag main exists"; exit 1 ;;
+    counterpart-not-deployed)
+      echo "There is no verified pact: no version is currently recorded as deployed/released in this environment"
+      exit 1
+      ;;
+  esac
   echo "pact verification failed"
-  [ "${PACT_CLI_MODE:-failure}" = "success" ] && exit 0
   exit 1
 fi
 exit 0
@@ -392,11 +401,10 @@ printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
   export GH_TOKEN=fixture-token BROKER_MODE=source-ready LATEST_MAIN_SHA
   export SERVICE_CI_MODE=success SERVICE_CI_EXPECTED_SOURCE="$OLDER_SHA"
   export RESOLVER_MODE=success RESOLVER_SHA="$OLDER_SHA"
-  export PACT_CLI_MODE=success
   export IMAGE_TAGS="{\"openbank-demo-service\":\"sandbox-${CURRENT_SHA:0:8}\"}"
   export IMAGE_DIGESTS='{"openbank-demo-service":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
   export BUILD_IMAGE_TAG="sandbox-${CURRENT_SHA:0:8}"
-  if ! bash .github/scripts/can-i-deploy-gate.sh >"$tmp/positive-log" 2>&1; then
+  if ! PACT_CLI_MODE=success bash .github/scripts/can-i-deploy-gate.sh >"$tmp/positive-log" 2>&1; then
     echo "FAIL: equivalent older-Pact source did not complete the positive gate" >&2
     cat "$tmp/positive-log" "$PACT_CLI_LOG" "$SERVICE_CI_LOG" >&2
     exit 1
@@ -406,6 +414,48 @@ printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
      ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT"; then
     echo "FAIL: positive gate did not carry the exact equivalent Pact/CI SHA through" >&2
     cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$SERVICE_CI_LOG" "$tmp/positive-log" >&2
+    exit 1
+  fi
+
+  # The existing non-push probe proves Git equivalence. Its ordinary per-service
+  # verdict must still ask about that exact version without reconcile preflight.
+  : > "$GITHUB_OUTPUT"
+  : > "$GITHUB_STEP_SUMMARY"
+  : > "$PACT_CLI_LOG"
+  if ! RECONCILE_SOURCE_REQUIRED=false EVENT_NAME=schedule GITHUB_EVENT_NAME=schedule \
+     LATEST_MAIN_SHA="$OLDER_SHA" PACT_CLI_MODE=success \
+     bash .github/scripts/can-i-deploy-gate.sh >"$tmp/push-equivalent-log" 2>&1 || \
+     ! grep -F -- "--pacticipant openbank-demo-service --version $OLDER_SHA" "$PACT_CLI_LOG" >/dev/null || \
+     ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT"; then
+    echo "FAIL: per-service verdict did not preserve the proven-equivalent exact version" >&2
+    cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/push-equivalent-log" >&2
+    exit 1
+  fi
+
+  # Explicit co-deploy keeps its separate exact-version matrix and equivalence proof.
+  : > "$GITHUB_OUTPUT"
+  : > "$GITHUB_STEP_SUMMARY"
+  : > "$PACT_CLI_LOG"
+  if ! RECONCILE_SOURCE_REQUIRED=false EVENT_NAME=workflow_dispatch GITHUB_EVENT_NAME=workflow_dispatch \
+     INPUT_CODEPLOY=true INPUT_CODEPLOY_PACT_VERSIONS="{\"openbank-demo-service\":\"$OLDER_SHA\"}" \
+     PACT_CLI_MODE=success bash .github/scripts/can-i-deploy-gate.sh >"$tmp/codeploy-exact-log" 2>&1 || \
+     ! grep -F -- "--pacticipant openbank-demo-service --version $OLDER_SHA" "$PACT_CLI_LOG" >/dev/null || \
+     ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT"; then
+    echo "FAIL: explicit co-deploy exact-version behavior changed" >&2
+    cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/codeploy-exact-log" >&2
+    exit 1
+  fi
+
+  : > "$GITHUB_OUTPUT"
+  : > "$GITHUB_STEP_SUMMARY"
+  : > "$PACT_CLI_LOG"
+  if ! RECONCILE_SOURCE_REQUIRED=false EVENT_NAME=schedule GITHUB_EVENT_NAME=schedule \
+     LATEST_MAIN_SHA="$OLDER_SHA" PACT_CLI_MODE=counterpart-not-deployed \
+     bash .github/scripts/can-i-deploy-gate.sh >"$tmp/equivalent-counterpart-log" 2>&1 || \
+     ! grep -F -- "--pacticipant openbank-demo-service --version $OLDER_SHA" "$PACT_CLI_LOG" >/dev/null || \
+     ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT"; then
+    echo "FAIL: proven-equivalent source lost the existing counterpart-not-deployed policy" >&2
+    cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/equivalent-counterpart-log" >&2
     exit 1
   fi
 )
@@ -450,3 +500,119 @@ if ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT" || \
   exit 1
 fi
 echo "PASS: ordinary push keeps the documented no-contract deployment behavior"
+
+# An older latest/main verdict is not evidence about the offered image. Keep the
+# exact-version peer moving, while the missing source remains PENDING_BUILD and red.
+: > "$GITHUB_OUTPUT"
+: > "$GITHUB_STEP_SUMMARY"
+: > "$PACT_CLI_LOG"
+export SERVICES='["openbank-demo-service","openbank-good-service"]'
+export BROKER_MODE=push-mixed-source PACT_CLI_MODE=success PACT_WAIT_PER_SERVICE_SECONDS=0
+if bash "$root/.github/scripts/can-i-deploy-gate.sh" >"$tmp/push-stale-green-log" 2>&1; then
+  echo "FAIL: older latest/main green authorized an image without exact or equivalent Pact source" >&2
+  cat "$GITHUB_OUTPUT" "$tmp/push-stale-green-log" >&2
+  exit 1
+fi
+if ! grep -q '^deployable=\["openbank-good-service"\]$' "$GITHUB_OUTPUT" || \
+   ! grep -q '^blocked=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT" || \
+   ! grep -q 'openbank-demo-service.*PENDING_BUILD' "$GITHUB_STEP_SUMMARY" || \
+   ! grep -F -- "--pacticipant openbank-good-service --version $sha" "$PACT_CLI_LOG" >/dev/null; then
+  echo "FAIL: stale-green refusal lost the block class or blocked the verified peer" >&2
+  cat "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY" "$PACT_CLI_LOG" "$tmp/push-stale-green-log" >&2
+  exit 1
+fi
+echo "PASS: older latest/main green cannot authorize an unproved source; exact peer continues"
+
+# An unavailable probe cannot borrow the older CLI verdict either, nor be relabelled
+# as a pending build. No contract CLI question is made for an unobservable source.
+export SERVICES='["openbank-demo-service"]' BROKER_MODE=unavailable
+for event in push schedule; do
+  : > "$GITHUB_OUTPUT"
+  : > "$GITHUB_STEP_SUMMARY"
+  : > "$PACT_CLI_LOG"
+  export EVENT_NAME="$event" GITHUB_EVENT_NAME="$event"
+  if bash "$root/.github/scripts/can-i-deploy-gate.sh" >"$tmp/push-unknown-log" 2>&1 || \
+     ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT" || \
+     ! grep -q '^GATE_VERDICT=NOT_EVALUATED$' "$tmp/push-unknown-log" || \
+     ! grep -q 'openbank-demo-service.*UNKNOWN' "$GITHUB_STEP_SUMMARY" || \
+     grep -q '^can-i-deploy ' "$PACT_CLI_LOG"; then
+    echo "FAIL: unavailable $event probe was not refused before the contract CLI" >&2
+    cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/push-unknown-log" >&2
+    exit 1
+  fi
+done
+export EVENT_NAME=push GITHUB_EVENT_NAME=push
+echo "PASS: unavailable push/schedule probe stays UNKNOWN / NOT_EVALUATED, nonzero, without a Pact verdict"
+
+# The real probe emits only a full equivalent SHA. A malformed producer sentinel must
+# still fail closed at the driver boundary instead of demoting to a latest/main green.
+real_bash="$(command -v bash)"
+export REAL_BASH="$real_bash"
+cat > "$tmp/bin/bash" <<'STUB'
+#!/bin/bash
+if [ "${1:-}" = .github/scripts/probe-pact-version.sh ] && [ -n "${MALFORMED_PROBE:-}" ]; then
+  printf '%s\n' "$MALFORMED_PROBE"
+  exit 0
+fi
+exec "$REAL_BASH" "$@"
+STUB
+chmod +x "$tmp/bin/bash"
+for malformed in equivalent:short "equivalent:$(printf '%040d' 0 | tr 0 A)"; do
+  : > "$GITHUB_OUTPUT"
+  : > "$GITHUB_STEP_SUMMARY"
+  : > "$PACT_CLI_LOG"
+  export MALFORMED_PROBE="$malformed" BROKER_MODE=known
+  if bash "$root/.github/scripts/can-i-deploy-gate.sh" >"$tmp/push-malformed-log" 2>&1 || \
+     ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT" || \
+     ! grep -q '^GATE_VERDICT=NOT_EVALUATED$' "$tmp/push-malformed-log" || \
+     grep -q '^can-i-deploy ' "$PACT_CLI_LOG"; then
+    echo "FAIL: malformed source sentinel reached Pact or authorized the image" >&2
+    cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/push-malformed-log" >&2
+    exit 1
+  fi
+done
+unset MALFORMED_PROBE
+echo "PASS: malformed equivalence fails closed before Pact CLI"
+
+# Preserve the separately declared ADR-0092 exception used by a registered service
+# with no main-tagged version. This is policy, not a successful source verdict.
+: > "$GITHUB_OUTPUT"
+: > "$GITHUB_STEP_SUMMARY"
+: > "$PACT_CLI_LOG"
+export BROKER_MODE=known PACT_CLI_MODE=no-main-tag
+if ! bash "$root/.github/scripts/can-i-deploy-gate.sh" >"$tmp/push-no-main-log" 2>&1 || \
+   ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT" || \
+   ! grep -q 'no .main.-tagged version yet .* treating as deployable (ADR-0092)' "$tmp/push-no-main-log"; then
+  echo "FAIL: the separate no-main-tag policy exception changed" >&2
+  cat "$GITHUB_OUTPUT" "$tmp/push-no-main-log" >&2
+  exit 1
+fi
+echo "PASS: existing no-main-tag policy exception remains unchanged"
+
+# The counterpart-not-deployed exception also answers a question about a particular
+# version. It cannot authorize this image when that version belongs to different source.
+: > "$GITHUB_OUTPUT"
+: > "$GITHUB_STEP_SUMMARY"
+: > "$PACT_CLI_LOG"
+export BROKER_MODE=known PACT_CLI_MODE=counterpart-not-deployed
+if bash "$root/.github/scripts/can-i-deploy-gate.sh" >"$tmp/missing-source-counterpart-log" 2>&1 || \
+   ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT" || \
+   ! grep -q 'openbank-demo-service.*PENDING_BUILD' "$GITHUB_STEP_SUMMARY"; then
+  echo "FAIL: counterpart-not-deployed exception authorized an unproved latest/main source" >&2
+  cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/missing-source-counterpart-log" >&2
+  exit 1
+fi
+echo "PASS: counterpart-not-deployed cannot discharge missing exact/equivalent source"
+
+: > "$GITHUB_OUTPUT"
+: > "$GITHUB_STEP_SUMMARY"
+: > "$PACT_CLI_LOG"
+export BROKER_MODE=verified
+if ! bash "$root/.github/scripts/can-i-deploy-gate.sh" >"$tmp/exact-counterpart-log" 2>&1 || \
+   ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT" || \
+   ! grep -F -- "--pacticipant openbank-demo-service --version $sha" "$PACT_CLI_LOG" >/dev/null; then
+  echo "FAIL: exact source lost the existing counterpart-not-deployed policy" >&2
+  cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/exact-counterpart-log" >&2
+  exit 1
+fi
+echo "PASS: exact and proven-equivalent sources keep the existing counterpart policy"

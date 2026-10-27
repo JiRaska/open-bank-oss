@@ -84,13 +84,19 @@ svc=openbank-context-service
     def test_handoff_never_borrows_latest_after_missing_inconclusive_or_malformed_probe(self):
         for present in ("no", "unknown", "absent", "", "equivalent:short", "equivalent:" + "C" * 40):
             with self.subTest(present=present):
-                self.assertEqual(self.select(present), ["REFUSE"])
+                expected = ["REFUSE"] if present in ("no", "absent") else ["GATE_VERDICT=NOT_EVALUATED", "REFUSE"]
+                self.assertEqual(self.select(present), expected)
 
-    def test_legacy_push_keeps_latest_fallback_and_default_github_source(self):
-        for present in ("no", "unknown", "absent"):
+    def test_push_keeps_diagnostic_latest_and_default_github_source(self):
+        for present in ("no", "absent"):
             with self.subTest(present=present):
                 self.assertEqual(self.select(present, event="push", source=None), ["--latest", "main"])
         self.assertEqual(self.select("yes", event="push", source=None), ["--version", WORKFLOW])
+
+    def test_push_refuses_inconclusive_or_malformed_probe_before_cli(self):
+        for present in ("unknown", "", "unrecognized", "equivalent:short", "equivalent:" + "C" * 40):
+            with self.subTest(present=present):
+                self.assertEqual(self.select(present, event="push"), ["GATE_VERDICT=NOT_EVALUATED", "REFUSE"])
 
     def test_handoff_does_not_bypass_selector_on_pacticipant_404(self):
         for event, expected in (("workflow_run", ["selector-required"]), ("push", [SERVICE])):

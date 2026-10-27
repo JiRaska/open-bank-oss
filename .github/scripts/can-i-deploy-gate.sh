@@ -73,6 +73,7 @@ block_class='{}'
 block_reason='{}'
 reconcile_blocked='[]'
 reconcile_source_blocked=0
+source_not_evaluated=0
 
 refuse_reconcile_source() {
   local svc="$1"
@@ -497,9 +498,24 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
   else
     vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$SOURCE_COMMIT")"
   fi
+  # An inconclusive or malformed probe cannot authorize a different latest/main source.
+  # Keep UNKNOWN as the existing block class; NOT_EVALUATED records the missing evidence.
+  case "$vpresent" in
+    yes|no|absent) ;;
+    equivalent:*)
+      [[ "${vpresent#equivalent:}" =~ ^[0-9a-f]{40}$ ]] || vpresent=unknown
+      ;;
+    *) vpresent=unknown ;;
+  esac
   sel_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$SELECTOR_EVENT" \
     bash .github/scripts/resolve-can-i-deploy-selector.sh "$svc" "$SOURCE_COMMIT")"
   read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
+  if [ "$vpresent" = unknown ]; then
+    source_not_evaluated=1
+    echo 'GATE_VERDICT=NOT_EVALUATED'
+    sel_line=$'REFUSE\tPact source probe is unavailable or malformed; no contract verdict can authorize this image'
+    CID_SELECTOR=(REFUSE)
+  fi
   if [ "$EVENT_NAME" = workflow_run ] &&
      { [ "${#CID_SELECTOR[@]}" -ne 2 ] || [ "${CID_SELECTOR[0]:-}" != --version ] ||
        ! [[ "${CID_SELECTOR[1]:-}" =~ ^[0-9a-f]{40}$ ]]; }; then
@@ -536,6 +552,21 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
        --broker-password "$PACT_BROKER_PASSWORD" \
        --retry-while-unknown 3 --retry-interval 5 2>&1) && cid_rc=0 || cid_rc=$?
   echo "$cid_out"
+  if [ "$vpresent" = no ] &&
+     { [ "$cid_rc" -eq 0 ] || ! grep -q "No version with tag" <<< "$cid_out"; }; then
+    # latest/main is diagnostic for an unproved source, including its counterpart
+    # exceptions. Preserve only the separate ADR-0092 no-main-tag policy below.
+    cls=PENDING_BUILD
+    cls_why="no exact or tree-equivalent Pact version for ${SOURCE_COMMIT}; the latest/main verdict does not authorize this image"
+    block_class="$(jq -cn --argjson old "$block_class" --arg svc "$svc" --arg cls "$cls" \
+      '$old + {($svc): $cls}')"
+    block_reason="$(jq -cn --argjson old "$block_reason" --arg svc "$svc" --arg why "$cls_why" \
+      '$old + {($svc): $why}')"
+    echo "::error::can-i-deploy: ${svc} NOT deployable [${cls}] — ${cls_why}"
+    printf '===SERVICE %s\t%s\n%s\n' "$svc" "$cls" "$cls_why" >> "$BLOCKS_FILE"
+    rc=1
+    continue
+  fi
   if [ "$cid_rc" -eq 0 ]; then
     echo "  ✓ ${svc} deployable"
     deployable_list+=("$svc")
@@ -701,7 +732,7 @@ fi
 # scheduled run exactly as a money-path block does.
 if [ "${EVENT_NAME}" = "schedule" ] && [ "$rc" -ne 0 ] \
    && [ "${mp_blocked:-0}" != "1" ] && [ "${regression_blocked:-0}" != "1" ] \
-   && [ "$reconcile_source_blocked" != "1" ]; then
+   && [ "$reconcile_source_blocked" != "1" ] && [ "$source_not_evaluated" != "1" ]; then
   echo "::notice::reconcile tick: ${BLOCKED_N:-0} service(s) still gate-blocked (non money-path, self-clearing classes only) — left for a later tick; the deployable subset deployed. Not failing the scheduled run."
   exit 0
 fi
