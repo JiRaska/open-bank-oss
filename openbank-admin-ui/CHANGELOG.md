@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.13.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.12.2...admin-ui-v3.13.0) (2026-10-27)
+
+
+### Features
+
+* **admin-ui:** feed the trace-contract layer of the Test Intelligence matrix ([#12865](https://github.com/JiRaska/open-bank-oss/issues/12865)) ([97b5086](https://github.com/JiRaska/open-bank-oss/commit/97b5086d5c6e2f67f64d4b6a29d6f2855b590245))
+
 ## [3.12.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.12.1...admin-ui-v3.12.2) (2026-10-26)
 
 
