@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import math
+from datetime import timedelta
 from pathlib import Path
 import re
 import sys
@@ -52,6 +53,14 @@ def _date(selector, value):
         return parsed
     except (ValueError, TypeError) as error:
         raise StageError("performance timestamp is invalid") from error
+
+
+def _not_after_reported_time(observed, raw_timestamp, selector):
+    # Whole-second GitHub API values describe [second, second + 1 second).
+    # A fractional API value keeps its exact upper bound.
+    reported = _date(selector, raw_timestamp)
+    whole_second = re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})", raw_timestamp)
+    return observed < reported + timedelta(seconds=1) if whole_second else observed <= reported
 
 
 def _trusted_run(run, repo_slug, workflow, selector):
@@ -228,7 +237,10 @@ def _validate_identity(raw, artifact, metadata, spec, repo_slug, workflow, selec
              "performance envelope producer/component identity mismatch")
     observed = _date(selector, evidence.get("observedAt"))
     created = _date(selector, artifact.get("created_at"))
-    _require(_date(selector, producer["run_started_at"]) <= observed <= created <= _date(selector, producer["updated_at"]),
+    started, finished = _date(selector, producer["run_started_at"]), _date(selector, producer["updated_at"])
+    _require(started <= observed and started <= created <= finished
+             and _not_after_reported_time(observed, artifact["created_at"], selector)
+             and _not_after_reported_time(observed, producer["updated_at"], selector),
              "performance envelope/artifact attempt timestamps are inconsistent")
     specialized = [row for row in envelope.get("specializedEvidence", []) if row.get("kind") == "performance"]
     _require(len(specialized) == 1, "performance envelope must have one performance observation")

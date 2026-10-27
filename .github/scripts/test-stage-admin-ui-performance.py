@@ -230,7 +230,8 @@ class PerformanceStageTests(unittest.TestCase):
         metadata = run(100, attempt=2, start="2026-10-01T12:00:00Z", updated_at="2026-10-01T12:12:00Z")
         self.add_run(metadata)
         self.jobs[100][1]["started_at"] = START
-        self.artifact(metadata, "openbank-product-catalog", identifier=1000, attempt=1)
+        self.artifact(metadata, "openbank-product-catalog", identifier=1000, attempt=1,
+                      observed="2026-10-01T10:11:00.106880Z")
         self.artifact(metadata, "openbank-flaky-test-hunter", identifier=1001,
                       created="2026-10-01T12:11:00Z", observed="2026-10-01T12:10:00Z")
         self.attempts[(100, 1)] = run(100)
@@ -240,6 +241,35 @@ class PerformanceStageTests(unittest.TestCase):
         self.attempts[(100, 1)]["head_sha"] = "b" * 40
         with self.assertRaises(STAGE.StageError):
             self.collect()
+
+    def validate_artifact_observation_time(self, created, observed="2026-10-27T19:05:32.106880Z", finished="2026-10-27T19:06:20Z"):
+        metadata = run(100, start="2026-10-27T19:01:54Z", updated_at=finished)
+        self.add_run(metadata)
+        artifact = self.artifact(metadata, "openbank-product-catalog", identifier=1000,
+                                 created=created, observed=observed)
+        return STAGE._validate_identity(
+            json.dumps(envelope(metadata, "openbank-product-catalog", observed=observed)).encode(), artifact, metadata,
+            STAGE._gate_specs(SELECTOR)[0], REPO, "perf-gate.yml", SELECTOR,
+            self.json_api, COLLECTOR.ENVELOPES.validate)
+
+    def test_actual_github_whole_second_created_timestamp_contains_fractional_observation(self):
+        self.assertEqual(self.validate_artifact_observation_time("2026-10-27T19:05:32Z")["state"], "passed")
+        self.assertEqual(self.validate_artifact_observation_time("2026-10-27T19:05:32.106880Z")["state"], "passed")
+        self.assertEqual(self.validate_artifact_observation_time("2026-10-27T19:06:20Z", "2026-10-27T19:06:20.106880Z")["state"], "passed")
+
+    def test_timestamp_precision_does_not_accept_next_second_fractional_cutoff_or_outside_attempt(self):
+        for created, observed in (
+            ("2026-10-27T19:05:32Z", "2026-10-27T19:05:33Z"),
+            ("2026-10-27T19:05:32.100000Z", "2026-10-27T19:05:32.106880Z"),
+            ("2026-10-27T19:01:53Z", "2026-10-27T19:01:53.999999Z"),
+            ("2026-10-27T19:06:21Z", "2026-10-27T19:05:32.106880Z"),
+            ("2026-10-27T19:06:20Z", "2026-10-27T19:06:21Z"),
+        ):
+            with self.subTest(created=created, observed=observed), self.assertRaisesRegex(STAGE.StageError, "timestamps"):
+                self.validate_artifact_observation_time(created, observed)
+        with self.assertRaisesRegex(STAGE.StageError, "timestamps"):
+            self.validate_artifact_observation_time("2026-10-27T19:06:20Z", "2026-10-27T19:06:20.106880Z",
+                                                    finished="2026-10-27T19:06:20.100000Z")
 
     def test_old_failed_job_is_not_carried_into_current_attempt(self):
         metadata = run(100, attempt=2, start="2026-10-01T12:00:00Z", updated_at="2026-10-01T12:12:00Z")
