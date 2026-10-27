@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.11](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.10...pid-service-v0.10.11) (2026-10-26)
+
+
+### Bug Fixes
+
+* **pid:** stop asserting a defaulted AML risk score; deprecate amlRiskScore ([#13772](https://github.com/JiRaska/open-bank-oss/issues/13772)) ([17ca912](https://github.com/JiRaska/open-bank-oss/commit/17ca9124e98a69da3d7c49689b48b4573359b915))
+
 ## [0.10.10](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.9...pid-service-v0.10.10) (2026-10-19)
 
 

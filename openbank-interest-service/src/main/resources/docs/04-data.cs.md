@@ -158,3 +158,9 @@ Datová klasifikace: `internal` (`governance.yaml: dataClassification`). Záznam
 - Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
 - Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
 - Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
+
+## Potvrzení účetního zápisu kapitalizace
+
+Nenulová kapitalizace ukládá skutečné UUID potvrzeného účetního zápisu do existujícího pole `ledgerEntryId`, ve stejné lokální transakci jako kapitalizaci, srážku, outbox událost a změnu stavu naběhlých úroků. REST adaptér přijme potvrzení jen se stavem `POSTED` a identitou transakce odpovídající deterministickému požadavku kapitalizace. Původní obchodní idempotentní klíč zůstává zachován; získání potvrzení nevytváří druhý zápis. Nulová kapitalizace žádný zápis nemá a odkaz zůstává prázdný. Adaptér bez potvrzení ponechá odkaz výslovně neznámý.
+
+Odkaz dokládá potvrzenou odpověď na zaúčtování, nikoli úplnost historie účtu ani ověřené ekonomické zařazení libovolného původu zápisů. Historické prázdné odkazy se nedoplňují podle popisu nebo odhadnutého ID. Platí dosavadní pravidla retence a výmazu zdroje; odkaz nezavádí novou retenční lhůtu.

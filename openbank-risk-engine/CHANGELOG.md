@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.29.0...risk-engine-v0.30.0) (2026-10-26)
+
+
+### Features
+
+* **ledger:** treasury instrument accounts and accounting-class roles; shared schedule and rail vocabularies ([#13697](https://github.com/JiRaska/open-bank-oss/issues/13697)) ([0e044c8](https://github.com/JiRaska/open-bank-oss/commit/0e044c83945eb9d5d46e7860fed4f1c8d9bd9b83))
+
 ## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.28.1...risk-engine-v0.29.0) (2026-10-24)
 
 

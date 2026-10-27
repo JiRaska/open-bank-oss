@@ -20,4 +20,20 @@ Migrace V11 přidává dvě tabulky, žádná se nečte na účtovací cestě. `
 
 V12 ukládá do shadow řádku okamžik a zónu vyměření, skutečné otevření účtu a kadenci volání. Starší řádky ponechají tyto údaje neznámé a skončí jako `INPUT_UNKNOWN`; čas workeru je nenahrazuje. Měsíční plánovač předává svou skutečnou kadenci, ruční volání žádnou. Predikáty závislé na historii událostí či zůstatků zůstávají bez úplných zdrojových údajů neznámé. Není-li skutečný tag zaznamenán, lze starý cyklus porovnat jako kontrafaktuální shadow vyvolání jen pro jedinou nepodmíněnou registraci ON_OPEN se stejnou kadencí, bez možného odmítnutí otevření či duplicitního producenta. Nejde o důkaz skutečného spuštění kalendářní události IR. Podmíněné, pozdější nebo nejednoznačné registrace zůstávají neznámé. Rozdílné měny a nejednoznačné mapování kódu poplatku také znamenají Unknown, nikoli číselnou shodu. Rollback: zastavit shadow worker, nasadit předchozí zapisující verzi a odstranit pouze pět sloupců V12; řádky fronty a rozhodnutí V11 zachovat.
 
+### Zmrazená identita shadow revize
+
+Každý nový shadow vstup ukládá úplnou identitu ze stejné neměnné publikované (nebo nahrazené)
+katalogové odpovědi, která dodala původní podmínky poplatku: kód produktu, ID a číslo revize,
+verzi IR a kanonický hash. Chybějící či chybná volitelná metadata nemění původní poplatek;
+shadow zaznamená `INPUT_UNKNOWN`, místo aby odhadoval historii. V13 přidává nullable
+`expected_revision_identity` do fronty a `actual_revision_identity` do lokální kopie.
+Historické vstupy fronty zůstávají neznámé.
+
+Worker načítá skutečnou identitu nezávisle, porovná ji se zmrazenou očekávanou identitou a před
+uložením či porovnáním ověří úplnou podepsanou obálku. Pro podpis samotného hashe neexistuje
+fallback. Starší lokální kopie může získat identitní metadata jen jednou, pokud její původní
+ID/hash/IR/podpis přesně odpovídají nezávisle ověřené odpovědi. V13 dál zakazuje změny obsahu,
+přepsání identity a smazání. Rollback nasadí starší aplikaci a zachová přidané sloupce i důkazy;
+V11 a V12 se nemění.
+
 Každý běh plánovače, i s vypnutým comparatorem, vymaže všech devět zmrazených údajů v omezené dávce způsobilých řádků starších než `openbank.billing.product-shadow.fact-retention` (`BILLING_PRODUCT_SHADOW_FACT_RETENTION`, výchozí `P30D`). Za běh zpracuje nejvýše `max-batches-per-run × batch-size` řádků. Zamčené řádky a řádky s živým claimem přeskočí; backlog, živé claimy, odstávka či selhání plánovače mohou fyzické vymazání oddálit za nastavené stáří i jeden interval plánovače. Řádek DONE si ponechá výsledek; způsobilý nedokončený řádek skončí jako `FACTS_EXPIRED`, aby se už bez údajů znovu nezamkl. Automatický re-drive neexistuje; samotné ponechání údajů dokončený řádek znovu nezařadí.

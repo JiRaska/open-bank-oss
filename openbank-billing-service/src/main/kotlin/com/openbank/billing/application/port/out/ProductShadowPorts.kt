@@ -55,6 +55,7 @@ data class StoredRevisionIr(
     val revisionHash: String?,
     val irJson: String?,
     val signature: IrSignature?,
+    val identity: com.openbank.billing.domain.ShadowRevisionIdentity? = null,
 )
 
 /** Billing's immutable local copies of pinned revisions' IR; written once per revision id. */

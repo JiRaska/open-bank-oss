@@ -13,8 +13,10 @@ const site = path.join(root, 'openbank-infra/web/landing');
 const read = name => fs.readFileSync(path.join(site, name), 'utf8');
 const formHtml = text => text.match(/<form class="tf-form"[\s\S]*?<\/form>/)[0].replace(/data-theme="(?:light|dark)"/, 'data-theme="THEME"');
 
-function browser() {
-  const dom = new JSDOM(read('index.html'), { url: 'https://open-bank.tech/', runScripts: 'outside-only' });
+function browser(page = 'index.html', language = 'en-US') {
+  const dom = new JSDOM(read(page), { url: 'https://open-bank.tech/', runScripts: 'outside-only' });
+  Object.defineProperty(dom.window.navigator, 'language', { value: language });
+  Object.defineProperty(dom.window.navigator, 'languages', { value: [language] });
   dom.window.IntersectionObserver = class { observe() {} unobserve() {} };
   dom.window.matchMedia = () => ({ matches: true });
   dom.window.fetch = () => { throw new Error('Unmocked network request'); };
@@ -22,6 +24,17 @@ function browser() {
   return dom;
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('English forms force English CAPTCHA even in a Czech browser and refresh cached loaders', () => {
+  for (const page of ['index.html', 'classic.html']) {
+    const dom = browser(page, 'cs-CZ'), d = dom.window.document;
+    const captcha = new URL(d.querySelector('script[src*="js.hcaptcha.com"]').src);
+    assert.equal(captcha.searchParams.get('hl'), 'en', page);
+    assert.equal(captcha.searchParams.get('recaptchacompat'), 'off', page);
+    assert.ok(new URL(d.querySelector('script[src^="main.js"]').src).searchParams.get('v'), page);
+    dom.window.close();
+  }
+});
 
 test('TestFlight form contract and privacy dialog are unchanged except the widget theme', () => {
   assert.equal(formHtml(read('index.html')), formHtml(read('classic.html')));

@@ -10,6 +10,7 @@ import com.openbank.billing.application.port.out.RevisionIrCopyPort
 import com.openbank.billing.application.port.out.StoredRevisionIr
 import com.openbank.billing.domain.ProductShadowInput
 import com.openbank.billing.domain.ShadowLegacyFee
+import com.openbank.billing.domain.ShadowRevisionIdentity
 import com.openbank.billing.infrastructure.persistence.entity.ProductRevisionIrEntity
 import com.openbank.billing.infrastructure.persistence.entity.ProductShadowInputEntity
 import com.openbank.libs.audit.CanonicalJson
@@ -43,6 +44,7 @@ internal object ProductShadowRows {
         openedAt = input.openedAt
         scheduledCadence = input.scheduledCadence
         scheduledTrigger = input.scheduledTrigger
+        expectedRevisionIdentity = ShadowIdentityRows.encode(input.expectedRevision)
         legacyFees = CanonicalJson.write(
             input.legacyFees.map {
                 mapOf("feeId" to it.feeId, "chargedAmount" to it.chargedAmount.toPlainString(), "waived" to it.waived)
@@ -68,6 +70,7 @@ internal object ProductShadowRows {
         openedAt = e.openedAt,
         scheduledCadence = e.scheduledCadence,
         scheduledTrigger = e.scheduledTrigger,
+        expectedRevision = ShadowIdentityRows.decode(e.expectedRevisionIdentity),
         legacyFees = (IrJson.parse(e.legacyFees) as List<*>).map { item ->
             val fee = item as Map<*, *>
             ShadowLegacyFee(
@@ -214,10 +217,27 @@ class RevisionIrCopyRepositoryImpl(private val sf: Mutiny.SessionFactory, privat
     }.awaitSuspending()?.toDomain()
 
     override suspend fun store(copy: StoredRevisionIr): StoredRevisionIr {
+        val existing = find(copy.revisionId)
+        if (existing != null) {
+            if (existing.identity == null && copy.identity != null && existing.copy(identity = copy.identity) == copy) {
+                // Only metadata may be enriched, after the application verified this complete pin.
+                // V13 preserves every original immutable column and permits only NULL -> identity.
+                sf.withTransaction { s ->
+                    s.createMutationQuery(
+                        "UPDATE ProductRevisionIrEntity SET actualRevisionIdentity = :identity " +
+                            "WHERE revisionId = :id AND actualRevisionIdentity IS NULL",
+                    ).setParameter("identity", ShadowIdentityRows.encode(copy.identity))
+                        .setParameter("id", UUID.fromString(copy.revisionId)).executeUpdate()
+                }.awaitSuspending()
+                return find(copy.revisionId) ?: error("Immutable revision copy disappeared")
+            }
+            return existing
+        }
         val entity = ProductRevisionIrEntity().apply {
             revisionId = UUID.fromString(copy.revisionId)
             hasIr = copy.hasIr
             revisionHash = copy.revisionHash
+            actualRevisionIdentity = ShadowIdentityRows.encode(copy.identity)
             irJson = copy.irJson
             keyId = copy.signature?.keyId
             algorithm = copy.signature?.algorithm
@@ -238,10 +258,39 @@ class RevisionIrCopyRepositoryImpl(private val sf: Mutiny.SessionFactory, privat
         hasIr = hasIr,
         revisionHash = revisionHash,
         irJson = irJson,
+        identity = ShadowIdentityRows.decode(actualRevisionIdentity),
         signature = if (keyId != null && algorithm != null && signature != null) {
             IrSignature(keyId!!, algorithm!!, signature!!)
         } else {
             null
         },
     )
+}
+
+/** Canonical metadata only; old or malformed rows never gain an invented identity. */
+internal object ShadowIdentityRows {
+    fun encode(identity: ShadowRevisionIdentity?): String? = identity?.let {
+        CanonicalJson.write(
+            mapOf(
+                "productCode" to it.productCode,
+                "revisionId" to it.revisionId,
+                "revisionNumber" to it.revisionNumber,
+                "irVersion" to it.irVersion,
+                "revisionHash" to it.revisionHash,
+            ),
+        )
+    }
+
+    fun decode(json: String?): ShadowRevisionIdentity? = json?.let {
+        runCatching {
+            val data = IrJson.parse(it) as Map<*, *>
+            ShadowRevisionIdentity(
+                data["productCode"] as String,
+                data["revisionId"] as String,
+                (data["revisionNumber"] as BigDecimal).longValueExact(),
+                (data["irVersion"] as BigDecimal).intValueExact(),
+                data["revisionHash"] as String,
+            )
+        }.getOrNull()
+    }
 }

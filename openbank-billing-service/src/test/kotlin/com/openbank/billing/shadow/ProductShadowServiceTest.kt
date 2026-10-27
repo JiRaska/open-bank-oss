@@ -21,6 +21,7 @@ import com.openbank.libs.product.ir.ProductIrParser
 import com.openbank.libs.productrevision.HmacIrSigner
 import com.openbank.libs.productrevision.IrSignatureVerifierPort
 import com.openbank.libs.productrevision.IrSigningException
+import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.libs.productrevision.shadow.ProductShadowRecorder
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
@@ -57,8 +58,14 @@ class ProductShadowServiceTest {
         override suspend fun store(copy: StoredRevisionIr) = rows.getOrPut(copy.revisionId) { copy }
     }
 
-    private fun signed(revisionId: String) =
-        StoredRevisionIr(revisionId, true, hash, ShadowFixtures.IR, signer.sign(hash))
+    private fun signed(revisionId: String) = StoredRevisionIr(
+        revisionId,
+        true,
+        hash,
+        ShadowFixtures.IR,
+        signer.sign(ShadowFixtures.pin(revisionId)),
+        ShadowFixtures.identity(revisionId),
+    )
 
     private fun service(
         queue: Queue,
@@ -145,9 +152,20 @@ class ProductShadowServiceTest {
     fun `a forged or missing signature is a verification failure, never a comparison`(): Unit = runBlocking {
         val forger = HmacIrSigner("another-secret-entirely-not-shared".toByteArray(), "product-ir-publish")
         val forged = Queue(ShadowFixtures.input("500.00", listOf(ShadowFixtures.charged())))
-        service(forged, { StoredRevisionIr(it, true, hash, ShadowFixtures.IR, forger.sign(hash)) }).runOnce(10)
+        service(forged, {
+            StoredRevisionIr(
+                it,
+                true,
+                hash,
+                ShadowFixtures.IR,
+                forger.sign(ShadowFixtures.pin(it)),
+                ShadowFixtures.identity(it),
+            )
+        }).runOnce(10)
         val unsigned = Queue(ShadowFixtures.input("500.00", listOf(ShadowFixtures.charged())))
-        service(unsigned, { StoredRevisionIr(it, true, null, ShadowFixtures.IR, null) }).runOnce(10)
+        service(unsigned, {
+            StoredRevisionIr(it, true, null, ShadowFixtures.IR, null, ShadowFixtures.identity(it))
+        }).runOnce(10)
         assertThat(forged.completed.values + unsigned.completed.values)
             .containsExactly("VERIFICATION_FAILED", "VERIFICATION_FAILED")
         assertThat(registry.find(ProductShadowRecorder.COMPARED).counters()).isEmpty()
@@ -246,11 +264,77 @@ class ProductShadowServiceTest {
     fun `an input with no fee on either side is NO_FEES with its own counter, never AGREED`(): Unit = runBlocking {
         val empty = """{"irVersion":1,"productCode":"CA-EMPTY","currency":"EUR","fees":[],"hooks":{}}"""
         val emptyHash = ProductIrParser.parse(empty).revisionHash
-        val queue = Queue(ShadowFixtures.input("500.00", emptyList()))
-        service(queue, { StoredRevisionIr(it, true, emptyHash, empty, signer.sign(emptyHash)) }).runOnce(10)
+        val emptyInput = ShadowFixtures.input("500.00", emptyList())
+        val queue =
+            Queue(emptyInput.copy(expectedRevision = ShadowFixtures.identity(emptyInput.productRevisionId, empty)))
+        service(queue, {
+            StoredRevisionIr(
+                it,
+                true,
+                emptyHash,
+                empty,
+                signer.sign(ShadowFixtures.pin(it, empty)),
+                ShadowFixtures.identity(it, empty),
+            )
+        }).runOnce(10)
         assertThat(queue.completed.values).containsExactly(ProductShadowService.NO_FEES)
         assertThat(queue.compared).isEmpty()
         assertThat(count(ProductShadowService.NOTHING_TO_COMPARE)).isEqualTo(1.0)
         assertThat(registry.find(ProductShadowRecorder.COMPARED).counters()).isEmpty()
+    }
+
+    @Test
+    fun `legacy inputs without a captured identity are unknown and never consult a later copy`(): Unit = runBlocking {
+        val copies = Copies()
+        val input = ShadowFixtures.input("500.00", listOf(ShadowFixtures.charged())).copy(expectedRevision = null)
+        val queue = Queue(input)
+        service(queue, { error("A later response must not invent the historical pin") }, copies = copies).runOnce(10)
+        assertThat(queue.completed.values).containsExactly("INPUT_UNKNOWN")
+        assertThat(copies.rows).isEmpty()
+        assertThat(registry.find(ProductShadowRecorder.COMPARED).counters()).isEmpty()
+    }
+
+    @Test
+    fun `later catalog identity substitution is refused before any immutable copy is stored`(): Unit = runBlocking {
+        val input = ShadowFixtures.input("500.00", listOf(ShadowFixtures.charged()))
+        val expected = input.expectedRevision!!
+        val substitutions = listOf(
+            expected.copy(productCode = "OTHER"),
+            expected.copy(revisionId = UUID.randomUUID().toString()),
+            expected.copy(revisionNumber = expected.revisionNumber + 1),
+            expected.copy(
+                irVersion =
+                expected.irVersion + 1,
+            ),
+            expected.copy(revisionHash = "f".repeat(64)),
+        )
+        for (actual in substitutions) {
+            val copies = Copies()
+            val queue = Queue(input)
+            val otherPin = RevisionIdentity(
+                actual.productCode,
+                UUID.fromString(actual.revisionId),
+                actual.revisionNumber,
+                actual.irVersion,
+                actual.revisionHash,
+            )
+            service(queue, {
+                signed(it).copy(identity = actual, signature = signer.sign(otherPin))
+            }, copies = copies).runOnce(10)
+            assertThat(queue.completed.values).containsExactly("VERIFICATION_FAILED")
+            assertThat(copies.rows).isEmpty()
+        }
+    }
+
+    @Test
+    fun `a matching identity with an invalid signature is never stored`(): Unit = runBlocking {
+        val input = ShadowFixtures.input("500.00", listOf(ShadowFixtures.charged()))
+        val copies = Copies()
+        val queue = Queue(input)
+        service(queue, {
+            signed(it).copy(signature = signed(it).signature!!.copy(signature = "Zm9yZ2Vk"))
+        }, copies = copies).runOnce(10)
+        assertThat(queue.completed.values).containsExactly("VERIFICATION_FAILED")
+        assertThat(copies.rows).isEmpty()
     }
 }
