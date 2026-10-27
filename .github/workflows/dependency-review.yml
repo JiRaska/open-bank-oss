@@ -262,12 +262,14 @@ jobs:
         env:
           # The full fleet comparison exceeds the per-variable OS limit. Keep
           # aligned field arrays from the action's actual output; the guard checks lengths.
-          RETRY_NAMES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes).*.name) }}
-          RETRY_PACKAGE_URLS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes).*.package_url) }}
-          RETRY_LICENSES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes).*.license) }}
-          RETRY_VERSIONS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes).*.version) }}
-          RETRY_ECOSYSTEMS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes).*.ecosystem) }}
-          RETRY_CHANGE_TYPES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes).*.change_type) }}
+          # Skipped retries have no output. Keep template evaluation valid; the
+          # review-result guard still rejects empty data whenever this step runs.
+          RETRY_NAMES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.name) }}
+          RETRY_PACKAGE_URLS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.package_url) }}
+          RETRY_LICENSES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.license) }}
+          RETRY_VERSIONS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.version) }}
+          RETRY_ECOSYSTEMS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.ecosystem) }}
+          RETRY_CHANGE_TYPES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.change_type) }}
         run: python3 .github/scripts/dependency_license_choice.py --review-result
 
       # A successful review attempt above can still PROCEED on an invalid basis instead of

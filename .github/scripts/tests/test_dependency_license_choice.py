@@ -89,7 +89,7 @@ class LicenseChoiceTests(unittest.TestCase):
         self.assertEqual(text.count("allow-dependencies-licenses: ${{ steps.license-choice.outputs.packages }}"), 1)
         self.assertIn("dependency_license_choice.py /tmp/dependency-diff.json", text)
         for field, name in choice.RETRY_FIELDS.items():
-            self.assertIn(name + ": ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes).*." + field + ") }}", text)
+            self.assertIn(name + ": ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*." + field + ") }}", text)
         self.assertIn("dependency_license_choice.py --review-result", text)
         self.assertNotRegex(text, r"(?m)^\s+(?:vulnerability-check:\s*false|warn-only:\s*true|allow-ghsas:)")
 
