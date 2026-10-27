@@ -62,7 +62,7 @@ com.openbank.fx/
 ├── domain/                    ◄── core — no framework dependencies
 │   ├── model/                 FxRate, FxConversion, RateType, RateSource, FxConversionStatus
 │   ├── cnb/                   CnbFixing, CnbFixingRate, CnbFixingParser (pure parser)
-│   ├── screening/             ScreeningPolicy (pure decide()), ScreeningResult/Decision
+│   ├── screening/             (moved to openbank-libs-fincrime, ADR-0353)
 │   └── event/                 FxRatePublished, FxConversionExecuted
 │
 ├── application/               ◄── use-case orchestration
