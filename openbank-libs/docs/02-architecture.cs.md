@@ -7,6 +7,7 @@ flowchart LR
   Service[Quarkus služba] --> Runtime[openbank-libs-runtime]
   Runtime --> Domain[openbank-libs-domain]
   Finance[openbank-libs-finance] --> Domain
+  Fincrime[openbank-libs-fincrime]
   Legacy[openbank-libs kompatibilitní zastřešení] --> Runtime
   Legacy --> Domain
   Runtime --> DocsResource[DocsResource /q/openbank/docs]
@@ -25,6 +26,8 @@ Samotný `openbank-libs` nemá běžící endpoint. Jeho kořenová složka `doc
 ## Build a kompatibilita
 
 Kořenový build používá Gradle subprojekty. Služby zpravidla deklarují `implementation(project(":openbank-libs-runtime"))`, starší konzumenti mohou používat zastřešující modul. Autoritativní verze závislostí jsou v `openbank-libs/gradle/libs.versions.toml`; Gradle konvence v `build-logic/src/main/kotlin/`. Release verze každé služby je v jejím `version.txt`.
+
+Sdílené knihovny a služby používají Quarkus **3.40.1.1 LTS** ze stejného katalogu. Frameworkové závislosti runtime, testovacích a Temporal adaptérů zachovávají dosavadní rozsah závislostí; doménové jádro zůstává bez frameworku. Sdílená Micrometer API používají platformní verzi **1.17.1**. Bezpečnostní přepisy verzí musí zachovat alespoň opravené verze platformy. [Postup upgradu a rollbacku](../../docs/runbooks/quarkus-lts-upgrade.md) popisuje kontroly kompatibility a podmínky nasazení.
 
 ## Čtyři oči: shrnutí schvalované operace
 

@@ -22,19 +22,10 @@ duplicate openbank-devops-agent FindingStatus  # #13441
 duplicate openbank-devops-agent RunTrigger  # #13441
 duplicate openbank-docs-truth-agent FindingStatus  # #13441
 duplicate openbank-document-service CeremonyStatus  # #13441
-duplicate openbank-domestic-payment AmlCaseRiskLevel  # #13435
-duplicate openbank-domestic-payment FraudVerdict  # #13439
-duplicate openbank-domestic-payment ScreeningDecision  # #13439
-duplicate openbank-domestic-payment ScreeningMatchStatus  # #13439
 duplicate openbank-engagement-service EngagementEventType  # #13441
 duplicate openbank-engagement-service SurfaceSlot  # #13441
 duplicate openbank-finops-agent RunTrigger  # #13441
 duplicate openbank-flaky-test-hunter FindingStatus  # #13441
-duplicate openbank-fraud-service FraudVerdict  # #13439
-duplicate openbank-fx-service AmlCaseRiskLevel  # #13435
-duplicate openbank-fx-service FraudVerdict  # #13439
-duplicate openbank-fx-service ScreeningDecision  # #13439
-duplicate openbank-fx-service ScreeningMatchStatus  # #13439
 duplicate openbank-governance-auditor FindingStatus  # #13441
 duplicate openbank-interest-service PartyType  # #13441
 duplicate openbank-interest-service RateIndex  # #13434
@@ -57,15 +48,6 @@ duplicate openbank-party-service PartyType  # #13441
 duplicate openbank-product-catalog CardNetwork  # #13438
 duplicate openbank-release-steward FindingStatus  # #13441
 duplicate openbank-risk-engine CurveIndex  # #13434
-duplicate openbank-sanctions-service SanctionsCheckStatus  # #13439
-duplicate openbank-sepa-instant AmlCaseRiskLevel  # #13435
-duplicate openbank-sepa-instant FraudVerdict  # #13439
-duplicate openbank-sepa-instant ScreeningDecision  # #13439
-duplicate openbank-sepa-instant ScreeningMatchStatus  # #13439
-duplicate openbank-sepa-payment AmlCaseRiskLevel  # #13435
-duplicate openbank-sepa-payment FraudVerdict  # #13439
-duplicate openbank-sepa-payment ScreeningDecision  # #13439
-duplicate openbank-sepa-payment ScreeningMatchStatus  # #13439
 duplicate openbank-treasury-service LedgerRole  # #13441
 numeric openbank-kyb-service ExpectedTurnover OVER_10M  # #13436
 numeric openbank-kyb-service ExpectedTurnover UP_TO_100K  # #13436
@@ -103,3 +85,6 @@ numeric openbank-risk-engine TimeBucket Y3_TO_5Y  # #13440
 numeric openbank-risk-engine TimeBucket Y5_TO_10Y  # #13440
 duplicate openbank-sepa-payment Outcome  # #13669
 duplicate openbank-swift-service Outcome  # #13669
+duplicate openbank-libs-iso20022 InstitutionTransferRail  # #13757
+duplicate openbank-libs-iso20022 SettlementRail  # #13757
+duplicate openbank-treasury-service SettlementRail  # #13757

@@ -145,6 +145,8 @@ simply stops existing).
 
 ## 6. Change log
 
+- **2026-10-24** — **Screening, AML case severity and fraud verdict types come from `openbank-libs-fincrime` (ADR-0353, #13435/#13439).** The local copies of `ScreeningPolicy`, `ScreeningMatchStatus`, `ScreeningDecision`, `ScreeningRole`, `ScreeningResult`, the AML case risk level enum (now `AmlCaseSeverity`) and `FraudVerdict` are deleted; the rail uses the one shared definition its producers (sanctions, aml, fraud) also use. Decision logic, the 0.85 block threshold and both fail-closed wire mappings (unknown sanctions status ⇒ ESCALATED ⇒ BLOCK; unknown fraud verdict ⇒ UNKNOWN, never ALLOW) are unchanged — the adapters now call the shared parsers. No wire, DB or Pact change. Rollback: revert the PR.
+- **2026-10-24** — **The pacs.008 now states its EPC payment type (#13663).** `SchemeGatewayAdapter` sets `CdtTrfTxInf/PmtTpInf/SvcLvl/Cd=SEPA` for every SEPA payment and adds `LclInstrm/Cd=INST` for `SCT_INST`, through an exhaustive `when` over `SepaPaymentType`. Before this the two types produced the same message, so nothing on the wire marked a payment as instant. **STRIDE-T (integrity of the scheme instruction):** a real CSM would have routed an SCT_INST as a plain SCT or rejected it. The block is checked by `Iso20022Validator` before submission against the [vendored pacs.008 XML schema](../../openbank-libs-iso20022/src/main/resources/iso20022/schemas/pacs.008.001.08.xsd), whose XML complex type PaymentTypeInformation28 admits it in the official position after `PmtId` (this is an XSD type, not a backend class), and `SchemeGatewaySimulatorIT` asserts the exact block the real adapter posts for each type. No new endpoint, caller, credential or network path. Rollback: revert the commit (the block disappears; the simulator accepts either shape).
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `sepa_payment_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-30** — Fraud verdict mapping (#4403 prerequisite, PR #11614). `FraudScoringAdapter.mapVerdict`
@@ -638,6 +640,7 @@ Booking observability (#13623): an entity-only first-due marker commits with acc
 
 **Residual.** No retry beyond the workflow's own 3 attempts for a held booking, and none for a return (deterministic answers would replay anyway); no
 in-band "mark reconciled" after an out-of-band correction, so such a payment is silenced with a ticket, never by
-writing `booking_proven_at`. The pacs.008 carries no payment-type information (service level SEPA, local instrument INST) for SCT_INST; the clearing
-simulator ignores it, a real SCT Inst connection would not. Tracked in #13663.
+writing `booking_proven_at`. The pacs.008 now carries the EPC payment type (`PmtTpInf/SvcLvl/Cd=SEPA`, plus
+`LclInstrm/Cd=INST` for SCT_INST), so the wire no longer presents an instant payment as a plain SCT; see the 2026-10-24
+change-log entry.
 

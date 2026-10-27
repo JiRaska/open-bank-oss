@@ -130,6 +130,29 @@ class TreasuryDealConsumerIT {
         assertThat(runBlocking { book.dealsOnBook(LocalDate.parse("2026-09-26")) }.map { it.dealId }).contains(deal)
     }
 
+    @Test
+    fun `a HYPOTHETICAL deal is counted not_actual and never stored, while ACTUAL and absent kind are`() {
+        val source = connector.source<Any>("treasury-deal-in")
+        val hypothetical = UUID.randomUUID()
+        val hypotheticalPayload = """
+            {"dealId":"$hypothetical","product":"CNB_DEPOSIT_FACILITY","counterpartyId":"CNB","currency":"CZK",
+             "principal":1000.00,"rate":2.50,"valueDate":"$valueDate","maturityDate":"2026-09-28",
+             "createdBy":"d","approvedBy":"a","kind":"HYPOTHETICAL",
+             "occurredAt":"2026-09-25T07:40:00Z","sourceService":"treasury-service"}
+        """.trimIndent()
+        val before = outcome("not_actual")
+        source.send(record("treasury.deal.booked.v1", hypotheticalPayload))
+        await { outcome("not_actual") >= before + 1.0 }
+        assertThat(runBlocking { book.dealsOnBook(valueDate) }.map { it.dealId }).doesNotContain(hypothetical)
+        assertThat(
+            runBlocking { book.dealsOnBook(LocalDate.parse("2026-09-26")) }.map { it.dealId },
+        ).doesNotContain(hypothetical)
+        // An explicit ACTUAL is processed exactly like an event without the field.
+        val actualSettled = payload(""","ledgerJournalId":"${UUID.randomUUID()}","kind":"ACTUAL"""")
+        source.send(record("treasury.deal.settled.v1", actualSettled))
+        awaitState("SETTLED")
+    }
+
     /**
      * ADR-0315 D2: treasury now emits `treasury.deal.confirmed.v1` between booked and settled. It
      * moves nothing the engine models, so it is acked as `ignored` — never `malformed` — and the
@@ -245,6 +268,46 @@ class TreasuryDealConsumerIT {
         assertThat(kept.legs).isNull()
         assertThat(kept.legsError).contains("exceeds 2000 periods")
         assertThat(outcome("malformed")).isEqualTo(malformedBefore)
+    }
+
+    /** ADR-0344 D5: a fixing patches the stored set of the SAME deal version; another version is a no-op. */
+    @Test
+    fun `a cash-flow fixing patches the stored floating flow of the same deal version`() {
+        val deal = UUID.randomUUID()
+        val source = connector.source<Any>("treasury-deal-in")
+        fun row(state: String, amount: String, rateSource: String) = """{"flowId":"${UUID.randomUUID()}","legIndex":1,
+            "periodIndex":0,"kind":"INTEREST","direction":"IN","currency":"CZK","accrualStart":"2030-01-10",
+            "accrualEnd":"2030-04-10","paymentDate":"2030-04-10","rate":0.0362,"rateSource":"$rateSource",
+            "amount":$amount,"state":"$state"}"""
+        source.send(
+            record(
+                "treasury.cashflow.generated.v1",
+                """{"dealId":"$deal","dealVersion":3,"scheduleHash":"h3","flows":[${row(
+                    "PROJECTED",
+                    "null",
+                    "PROJECTED",
+                )}]}""",
+            ),
+        )
+        await { runBlocking { cashFlows.latest(listOf(deal)) }[deal]?.dealVersion == 3 }
+        val fixed = """{"dealId":"$deal","dealVersion":3,"flows":[${row("FIXED", "90500.00", "OBSERVED")}]}"""
+        source.send(record("treasury.cashflow.fixed.v1", fixed))
+        await { runBlocking { cashFlows.latest(listOf(deal)) }.getValue(deal).flows.single().state == "FIXED" }
+        val stored = runBlocking { cashFlows.latest(listOf(deal)) }.getValue(deal).flows.single()
+        assertThat(stored.amount).isEqualByComparingTo("90500.00")
+        assertThat(stored.isFact).isTrue()
+        // A fixing of another version changes nothing; a PROJECTED row in a fixed event is malformed.
+        val unchangedBefore = outcome("unchanged")
+        source.send(record("treasury.cashflow.fixed.v1", fixed.replace("\"dealVersion\":3", "\"dealVersion\":2")))
+        await { outcome("unchanged") >= unchangedBefore + 1.0 }
+        val malformedBefore = outcome("malformed")
+        source.send(
+            record(
+                "treasury.cashflow.fixed.v1",
+                """{"dealId":"$deal","dealVersion":3,"flows":[${row("PROJECTED", "null", "PROJECTED")}]}""",
+            ),
+        )
+        await { outcome("malformed") >= malformedBefore + 1.0 }
     }
 
     /** ADR-0344 D4: the stored ledger is kept at the latest version; an older version is a no-op. */
