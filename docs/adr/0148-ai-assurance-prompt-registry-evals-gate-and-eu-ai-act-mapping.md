@@ -212,3 +212,11 @@ governance primitive — they consume what ADR-0031/0141 already produce:
 - ADR-0020 (code coverage regression floor) — the ratchet pattern this ADR
   reuses for eval pass rates.
 - `openbank-libs/governance/agents.yaml`.
+
+## Clarification 2026-10-24 — explicit AUTO activation
+
+ADR-0354 section 6 and the revised proposed ADR-0348 replace the historical shorthand
+above that a threshold of 1.0 disables AUTO. With a >= comparison, 1.0 is reachable.
+Future typed consumers require explicit `mode` and `autoEnabled: false` defaults plus
+model/schema/policy-bound calibration and independent approval before activation (#13778).
+This records the correction; it does not claim a runtime gate has been implemented.

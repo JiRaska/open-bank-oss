@@ -215,6 +215,9 @@ class SchemeGatewayAdapter(@RestClient private val client: ClearingSimulatorClie
             creditorName = msg.beneficiaryName,
             creditorIban = msg.beneficiaryAccount,
             remittanceInfo = msg.remittanceInfo,
+            // Decided, not inherited (#13663): no PmtTpInf. A cross-border cover payment is not a SEPA
+            // scheme transfer, so the EPC service level SEPA must not be claimed on it.
+            paymentTypeInformation = null,
         )
     }
 

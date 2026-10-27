@@ -74,6 +74,9 @@ data class CapitalizationPosting(
  */
 interface LedgerPostingPort {
     fun post(posting: CapitalizationPosting): Uni<Unit>
+
+    /** Existing adapters without a receipt remain explicitly unlinked, never fabricate a journal id. */
+    fun postWithReceipt(posting: CapitalizationPosting): Uni<java.util.UUID?> = post(posting).map { null }
 }
 
 /**
