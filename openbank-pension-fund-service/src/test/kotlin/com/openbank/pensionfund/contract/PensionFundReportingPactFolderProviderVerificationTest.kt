@@ -25,7 +25,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 
 /**
  * Git-pact provider replay for pension-fund-service (#12425): tax-reporting-service's consumer
- * pact for `GET /api/v1/reporting/funds/{fundId}/period-figures`, replayed on every PR. A consumer
+ * pact for `GET /api/v2/reporting/funds/{fundId}/period-figures`, replayed on every PR. A consumer
  * pact cannot catch a wrong request path — only this replay can (#2269).
  *
  * Replays AS tax-reporting's own client (`service-account-openbank-tax-reporting`, ROLE_API), the
