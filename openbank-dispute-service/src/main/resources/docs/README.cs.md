@@ -24,3 +24,21 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Idempotence:** `Idempotency-Key` je povolen v CORS; Redis klient je k dispozici, ale vynucení **zatím není zapojeno** (TBD) — otevření používá generovanou referenci `DSP-<epochMillis>`
 - **Autentizace:** Keycloak OIDC (realm `openbank`, klient `openbank-services`); role `ROLE_VIEWER` (čtení), `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API` (zápisy); OPA/`@Authorize` poradní režim (ADR-0034)
 - **Money-path:** **Ne** — není uvedena v `rules.yaml: money_path_services` (1 schválení, threat model není vyžadován)
+
+## Kontrakty čtení pro Agent
+
+`AgentDisputeReadPactConsumerTest` zaznamenává pět interakcí Agenta pouze pro čtení:
+seznam reklamací, detail reklamace, seznam reklamací podle účtu, časovou osu reklamace
+a HTTP 404 pro neznámou reklamaci. Kontrakt je uložen v
+`pacts/openbank-agent-service-openbank-dispute-service.json`.
+`DisputePactProviderVerificationTest` jej načítá z adresáře `pacts/` v repozitáři a přehrává
+všech pět interakcí přes skutečné Quarkus HTTP s připravenými daty v PostgreSQL v Testcontainers.
+Adresářové ověření vyžaduje příslušný JSON: chybějící kontrakt musí způsobit selhání,
+nikoli úspěšný běh bez interakcí. Při změně konzumenta znovu vygenerujte a commitněte JSON;
+obsluhy stavů poskytovatele udržujte shodné pro adresářové i brokerové ověření.
+
+Samostatný brokerový verifikátor zůstává podmíněn neprázdnou vlastností `pactbroker.url`;
+adresářové ověření nepotřebuje přihlašovací údaje brokeru. `DisputePactAuthzOffProfile`
+vypíná vynucení autorizace pro kontraktové testovací scénáře a `@TestSecurity` dodává
+testové identity a role. Testy prokazují kompatibilitu HTTP a JSON, nikoli produkční OIDC,
+vlastnictví zdrojů nebo autorizaci přes OPA.
