@@ -53,6 +53,63 @@ class GitopsFactsTest(unittest.TestCase):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body)
 
+    def management_manifest(self, ports):
+        path = self.root / "workload.yaml"
+        path.write_text("""apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-service
+  namespace: sample
+spec:
+  template:
+    spec:
+      containers:
+        - name: sample-service
+""" + ports)
+        return self.mod.management_port_workloads(self.root)
+
+    def test_management_inventory_accepts_block_port(self):
+        self.assertEqual(self.management_manifest(
+            "          ports:\n            - name: management\n              containerPort: 8085\n"
+        ), {"sample": {"sample-service"}})
+
+    def test_management_inventory_accepts_flow_ports_in_either_order(self):
+        for port in [
+            "{name: management, containerPort: 8085}",
+            "{ name: management, containerPort: 8085 }",
+            "{containerPort: 8085, name: management}",
+            "{name: management, containerPort: 8085} # canonical port",
+        ]:
+            with self.subTest(port=port):
+                self.assertEqual(self.management_manifest(
+                    "          ports:\n            - " + port + "\n"
+                ), {"sample": {"sample-service"}})
+
+    def test_management_inventory_rejects_flow_mentions_without_a_container_port(self):
+        for body in [
+            "          env:\n            - {name: management, value: enabled}\n",
+            "          ports:\n            # - {name: management, containerPort: 8085}\n",
+            "          ports:\n            - {name: management-extra, containerPort: 8085}\n",
+            "          ports:\n            - {name: management2, containerPort: 8085}\n",
+            "          ports:\n            - {name: management, containerPort: invalid}\n",
+            '          ports:\n            - "{name: management, containerPort: 8085}"\n',
+            "          env:\n            - {name: management, containerPort: 8085}\n",
+            "          ports:\n            - {other-name: management, other-containerPort: 8085}\n",
+            "          ports:\n            - {other-name: management, containerPort: 8085}\n",
+            "          ports:\n            - {name: management, other-containerPort: 8085}\n",
+            "          env:\n            - name: EXAMPLE\n              value: |\n                ports:\n                  - {name: management, containerPort: 8085}\n",
+            "          env:\n            - name: EXAMPLE\n              value: >-\n                ports:\n                  - {name: management, containerPort: 8085}\n",
+            "          ports:\n            - {name: http, containerPort: 8080}\n          env:\n            - {name: management, containerPort: 8085}\n",
+        ]:
+            with self.subTest(body=body):
+                self.assertEqual(self.management_manifest(body), {})
+
+    def test_management_inventory_resumes_after_scalar_with_indentless_ports(self):
+        self.assertEqual(self.management_manifest(
+            "          env:\n            - name: EXAMPLE\n              value: |\n                ignored text\n"
+            "          ports:\n          - {name: management, containerPort: 8085}\n"
+        ), {"sample": {"sample-service"}})
+
     # -- module_dir: both naming shapes ------------------------------------
     def test_module_dir_finds_the_service_suffixed_shape(self):
         (self.root / "openbank-ledger-service").mkdir()

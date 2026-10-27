@@ -1,5 +1,56 @@
 # Changelog
 
+## [3.12.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.12.1...admin-ui-v3.12.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **treasury:** versioned deal saves, override eligibility and a reference-only editor role ([#13756](https://github.com/JiRaska/open-bank-oss/issues/13756)) ([e710754](https://github.com/JiRaska/open-bank-oss/commit/e71075488dcfb88c5deb10d426c00d27e5dfa051))
+
+## [3.12.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.12.0...admin-ui-v3.12.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **agent-service:** preserve PR-scoped owner intent under reviewed policy ([#13798](https://github.com/JiRaska/open-bank-oss/issues/13798)) ([e9a5401](https://github.com/JiRaska/open-bank-oss/commit/e9a540196e0aa6181194adf8f3181386357ddc57))
+
+## [3.12.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.11.0...admin-ui-v3.12.0) (2026-10-24)
+
+
+### Features
+
+* **treasury:** reference data and the cash-flow ledger for the five existing products (ADR-0344 phase 0) ([#13614](https://github.com/JiRaska/open-bank-oss/issues/13614)) ([42eec93](https://github.com/JiRaska/open-bank-oss/commit/42eec93ad9ee5c85728242d9b559515037391274))
+
+
+### Bug Fixes
+
+* **admin-ui:** Camera QR page describes the domain-verified link, not the bare scheme ([#13737](https://github.com/JiRaska/open-bank-oss/issues/13737)) ([4a84a1c](https://github.com/JiRaska/open-bank-oss/commit/4a84a1c77e8da18e73ef20cbc87d5b7573116b4b))
+* **agent-service:** preserve merge actors and authorization evidence ([#13764](https://github.com/JiRaska/open-bank-oss/issues/13764)) ([5715671](https://github.com/JiRaska/open-bank-oss/commit/571567125e6762da9edd6c5d6adabac9848e6720))
+
+## [3.11.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.3...admin-ui-v3.11.0) (2026-10-23)
+
+
+### Features
+
+* **products:** Product as Code phase 2 — openbank-products, signed publish-ir, pinned-revision loader (ADR-0352) ([#13644](https://github.com/JiRaska/open-bank-oss/issues/13644)) ([44b68d0](https://github.com/JiRaska/open-bank-oss/commit/44b68d002817537e5fbb1699522b8b1568b3d0ff))
+
+## [3.10.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.2...admin-ui-v3.10.3) (2026-10-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** honor opaque SDD creditor identifiers when reading mandates ([#13611](https://github.com/JiRaska/open-bank-oss/issues/13611)) ([62e70fd](https://github.com/JiRaska/open-bank-oss/commit/62e70fdb36d48322c7cd7a677208b7e5f8398159))
+* **admin-ui:** observe Karpenter runtime version with honest provenance ([#13592](https://github.com/JiRaska/open-bank-oss/issues/13592)) ([0c41dfa](https://github.com/JiRaska/open-bank-oss/commit/0c41dfad12b0862fcb5ef7babbbc99802d3c5002))
+* **admin-ui:** read published platform declarations independently of images ([#13591](https://github.com/JiRaska/open-bank-oss/issues/13591)) ([15ba450](https://github.com/JiRaska/open-bank-oss/commit/15ba450ee81b0eb0255ff90385db02d3c18cdb28))
+* **admin-ui:** refresh FinOps domain classification from published governance ([#13598](https://github.com/JiRaska/open-bank-oss/issues/13598)) ([e56e860](https://github.com/JiRaska/open-bank-oss/commit/e56e860a1e25af0616df6420946c7234d10899f2))
+* **admin-ui:** refresh repository documentation from reviewed content ([#13607](https://github.com/JiRaska/open-bank-oss/issues/13607)) ([a8de1db](https://github.com/JiRaska/open-bank-oss/commit/a8de1db7b1c8afb7f6f0175b768424be5819c67d))
+* **admin-ui:** resolve staged IaC and published BPMN inventory ([#13590](https://github.com/JiRaska/open-bank-oss/issues/13590)) ([94852ab](https://github.com/JiRaska/open-bank-oss/commit/94852ab2836a638892c56fd2c8a6a86ceb9960bd))
+
+
+### Performance
+
+* **admin-ui:** reuse verified immutable evidence bodies ([#13600](https://github.com/JiRaska/open-bank-oss/issues/13600)) ([9d211e9](https://github.com/JiRaska/open-bank-oss/commit/9d211e9370a14b3ba3b3e5d454b558c48379e14f))
+
 ## [3.10.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.1...admin-ui-v3.10.2) (2026-10-22)
 
 

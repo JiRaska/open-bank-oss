@@ -23,7 +23,13 @@ fun interface FraudRule {
 }
 
 /** The outcome of one rule firing: a score delta, the implied verdict and a human-readable reason. */
-data class RuleHit(val scoreDelta: Int, val verdict: FraudVerdict, val reason: String)
+data class RuleHit(val scoreDelta: Int, val verdict: FraudVerdict, val reason: String) {
+    init {
+        // UNKNOWN is a consumer's reading of an unreadable answer (ADR-0353 D4), not a verdict a
+        // rule can render; SEVERITY has no rank for it, so it would sort BELOW ALLOW.
+        require(verdict != FraudVerdict.UNKNOWN) { "a rule cannot render the consumer-only UNKNOWN verdict" }
+    }
+}
 
 /**
  * Phase 1 baseline rule: always ALLOW, contributing nothing.

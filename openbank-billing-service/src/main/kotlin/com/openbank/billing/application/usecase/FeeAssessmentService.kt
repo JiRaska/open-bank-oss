@@ -14,6 +14,9 @@ import com.openbank.billing.application.port.out.RevisionTermsUnreadableExceptio
 import com.openbank.billing.domain.AssessedFee
 import com.openbank.billing.domain.BillableFee
 import com.openbank.billing.domain.BillingAssessment
+import com.openbank.billing.domain.FeeIncomeCurrencies
+import com.openbank.billing.domain.ProductShadowInput
+import com.openbank.billing.domain.ShadowLegacyFee
 import com.openbank.libs.product.FeeContext
 import com.openbank.libs.product.WaiveReason
 import com.openbank.libs.product.WaiverEvaluator
@@ -38,14 +41,25 @@ import java.math.BigDecimal
  * [com.openbank.billing.domain.FeeJournalCommand]s (idempotently keyed).
  */
 @ApplicationScoped
-class FeeAssessmentService(
+class FeeAssessmentService @jakarta.inject.Inject constructor(
     private val accounts: AccountContextPort,
     private val revisions: ProductRevisionPort,
     private val pins: AccountRevisionPinPort,
     private val meters: MeterRegistry,
+    private val clock: java.time.Clock = java.time.Clock.systemUTC(),
 ) {
 
-    suspend fun assess(cycleId: String, accountId: String, currency: String): BillingAssessment {
+    suspend fun assess(
+        cycleId: String,
+        accountId: String,
+        currency: String,
+        scheduledCadence: String? = null,
+    ): BillingAssessment {
+        // Fail-closed (#13226): a currency the ledger has no fee-income account for would only ever 422 at
+        // the ledger and wedge its outbox row. Refuse it here, counted by reason -- never a zero charge.
+        if (!FeeIncomeCurrencies.isMapped(currency)) {
+            return skipped(cycleId, accountId, currency, "FEE_INCOME_CURRENCY_UNMAPPED")
+        }
         val billing = accounts.resolve(accountId, currency)
             ?: return skipped(cycleId, accountId, currency, "ACCOUNT_CONTEXT_UNRESOLVED")
 
@@ -94,7 +108,7 @@ class FeeAssessmentService(
         val assessed = terms.fees.map { fee ->
             assessOne(cycleId, accountId, currency, fee, billing.context, terms.revisionId, accountingClass)
         }
-        return BillingAssessment(
+        val assessment = BillingAssessment(
             cycleId = cycleId,
             accountId = accountId,
             currency = currency,
@@ -102,7 +116,30 @@ class FeeAssessmentService(
             skipReason = null,
             assessedFees = assessed,
         )
+        return assessment.copy(shadowInput = shadowInput(assessment, billing, terms, scheduledCadence))
     }
+
+    private fun shadowInput(
+        assessment: BillingAssessment,
+        billing: AccountBilling,
+        terms: com.openbank.billing.application.port.out.RevisionTerms,
+        scheduledCadence: String?,
+    ) = ProductShadowInput(
+        cycleId = assessment.cycleId,
+        accountId = assessment.accountId,
+        currency = assessment.currency,
+        productRevisionId = terms.revisionId,
+        expectedRevision = terms.shadowRevision,
+        balance = billing.context.balance,
+        monthlyTurnover = billing.context.monthlyTurnover,
+        aggregatePocketBalance = billing.context.aggregatePocketBalance,
+        segment = billing.context.segment,
+        legacyFees = assessment.assessedFees.map { ShadowLegacyFee(it.feeId, it.chargedAmount, it.waived) },
+        evaluatedAt = clock.instant(),
+        evaluationZone = clock.zone.id,
+        openedAt = billing.openedAt,
+        scheduledCadence = scheduledCadence,
+    )
 
     private sealed interface Pin {
         data class Found(val revisionId: String) : Pin

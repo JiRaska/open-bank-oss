@@ -7,6 +7,11 @@ package com.openbank.productcatalog.application
 import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
+import com.openbank.libs.product.ir.ProductIrParser
+import com.openbank.libs.product.ir.ProductRevisionIr
+import com.openbank.libs.productrevision.IrSignerPort
+import com.openbank.libs.productrevision.IrSigningException
+import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
@@ -18,12 +23,16 @@ import com.openbank.productcatalog.domain.catalog.RelationshipKind
 import com.openbank.productcatalog.domain.catalog.RevisionApproval
 import com.openbank.productcatalog.domain.catalog.RevisionApprovalPolicy
 import com.openbank.productcatalog.domain.catalog.RevisionContent
+import com.openbank.productcatalog.domain.catalog.RevisionIrSignature
 import com.openbank.productcatalog.domain.catalog.RevisionState
 import com.openbank.productcatalog.domain.catalog.SchemaRef
 import com.openbank.productcatalog.domain.catalog.SchemaValidationResult
 import com.openbank.productcatalog.domain.catalog.SchemaViolation
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
+import com.openbank.productcatalog.infrastructure.catalog.toPlainTree
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -49,6 +58,7 @@ class GenericCatalogService(
     private val validator: CatalogSchemaValidator,
     private val catalogJson: CatalogJson,
     private val clock: Clock,
+    private val irSigner: IrSignerPort,
 ) {
     suspend fun listSchemas(): List<CatalogSchema> = repository.listSchemas()
 
@@ -106,6 +116,7 @@ class GenericCatalogService(
         }
         findSchema(schemaRef)
         validateOrThrow(schemaRef, content.attributes)
+        parseBehaviour(content)
         validateRelationshipReferences(offeringId, content)
         val now = Instant.now(clock)
         return repository.createDraft(
@@ -146,6 +157,7 @@ class GenericCatalogService(
             throw CatalogConflictException("published revisions are immutable")
         }
         validateOrThrow(existing.schemaRef, content.attributes)
+        parseBehaviour(content)
         validateRelationshipReferences(existing.offeringId, content)
         return repository.updateDraft(
             existing.copy(
@@ -164,6 +176,61 @@ class GenericCatalogService(
 
     suspend fun publish(revisionId: UUID, expectedRevision: Long, checkerId: String, reason: String): ProductRevision {
         val draft = findRevision(revisionId)
+        if (draft.content.behaviour != null) {
+            // ADR-0352 §7: an IR-bearing revision is its own four-eyes action (catalog.publish-ir) and is
+            // signed on the way out; the plain publish path must never let one through unsigned.
+            throw CatalogConflictException("revision carries product IR; publish it through publish-ir")
+        }
+        return publishChecked(draft, expectedRevision, checkerId, reason, irSignature = null)
+    }
+
+    /**
+     * Publishes an IR-bearing revision (ADR-0352 §4, §7): validates the IR, computes its canonical
+     * `revisionHash`, obtains the publish-path signature over the revision identity envelope
+     * (product code, revision id and number, IR version, hash) and stores it next to
+     * the revision in the same transaction. A revision without IR is refused — use [publish].
+     */
+    suspend fun publishIr(
+        revisionId: UUID,
+        expectedRevision: Long,
+        checkerId: String,
+        reason: String,
+    ): ProductRevision {
+        val draft = findRevision(revisionId)
+        val ir = parseBehaviour(draft.content)
+            ?: throw CatalogConflictException("revision carries no product IR; publish it through publish")
+        // Transit `sign` is a blocking HTTP call (and may log in first); never on the event loop.
+        val signature = try {
+            // ADR-0352 §4: the signature binds the whole revision identity, not the bare hash, so it
+            // cannot be presented under another product's or another revision's pin.
+            val identity = RevisionIdentity(
+                productCode = ir.productCode,
+                revisionId = draft.id,
+                revisionNumber = draft.number,
+                irVersion = ir.irVersion,
+                revisionHash = ir.revisionHash,
+            )
+            withContext(Dispatchers.IO) { irSigner.sign(identity) }
+        } catch (e: IrSigningException) {
+            throw CatalogConflictException("revision cannot be signed: ${e.message}", e)
+        }
+        val evidence = RevisionIrSignature(
+            revisionHash = ir.revisionHash,
+            keyId = signature.keyId,
+            algorithm = signature.algorithm,
+            signature = signature.signature,
+            signedAt = Instant.now(clock),
+        )
+        return publishChecked(draft, expectedRevision, checkerId, reason, evidence)
+    }
+
+    private suspend fun publishChecked(
+        draft: ProductRevision,
+        expectedRevision: Long,
+        checkerId: String,
+        reason: String,
+        irSignature: RevisionIrSignature?,
+    ): ProductRevision {
         requireExpected(draft, expectedRevision)
         if (draft.state != RevisionState.DRAFT) {
             throw CatalogConflictException("published revisions are immutable")
@@ -177,14 +244,23 @@ class GenericCatalogService(
         requirePublishableBundleComponents(draft, draft.effectiveFrom ?: publicationAt)
         val hash = catalogJson.sha256(catalogJson.toContentNode(draft.content))
         return repository.publishDraft(
-            revisionId = revisionId,
+            revisionId = draft.id,
             expectedRevision = expectedRevision,
             checkerId = checkerId,
             reason = reason,
             contentHash = hash,
             at = publicationAt,
+            irSignature = irSignature,
         )
     }
+
+    /**
+     * The revision's IR as the parser sees it, or null when the content carries none. Throws
+     * `ProductIrValidationException` (an `IllegalArgumentException`, mapped to 400) for an invalid
+     * document — a draft that cannot be published is refused at the write, never at publication.
+     */
+    fun parseBehaviour(content: RevisionContent): ProductRevisionIr? =
+        content.behaviour?.let { ProductIrParser.fromTree(it.toPlainTree()) }
 
     @Suppress("ThrowsCount")
     suspend fun approveRevision(

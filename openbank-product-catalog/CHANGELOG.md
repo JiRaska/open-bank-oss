@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.4.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.4.0...product-catalog-v1.4.1) (2026-10-26)
+
+
+### Security
+
+* **libs:** bind product revision signatures to the full revision identity ([#13749](https://github.com/JiRaska/open-bank-oss/issues/13749)) ([8171dfd](https://github.com/JiRaska/open-bank-oss/commit/8171dfdbf44a06ac48c058f662acdb6c26cc7b98))
+
+## [1.4.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.3.1...product-catalog-v1.4.0) (2026-10-23)
+
+
+### Features
+
+* **products:** Product as Code phase 2 — openbank-products, signed publish-ir, pinned-revision loader (ADR-0352) ([#13644](https://github.com/JiRaska/open-bank-oss/issues/13644)) ([44b68d0](https://github.com/JiRaska/open-bank-oss/commit/44b68d002817537e5fbb1699522b8b1568b3d0ff))
+
+## [1.3.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.3.0...product-catalog-v1.3.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **product-catalog:** give @Authorize a decision point via an OPA sidecar ([#12896](https://github.com/JiRaska/open-bank-oss/issues/12896)) ([65e47cd](https://github.com/JiRaska/open-bank-oss/commit/65e47cd5420f61a2436c6e608ca915c05058c013))
+
 ## [1.3.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.2.0...product-catalog-v1.3.0) (2026-10-21)
 
 

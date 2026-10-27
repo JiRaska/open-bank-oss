@@ -4,53 +4,24 @@
 
 package com.openbank.sepa.infrastructure.client
 
+import com.openbank.clients.transaction.api.TransactionsApi
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.smallrye.mutiny.Uni
-import jakarta.ws.rs.Consumes
-import jakarta.ws.rs.HeaderParam
-import jakarta.ws.rs.POST
-import jakarta.ws.rs.Path
-import jakarta.ws.rs.PathParam
-import jakarta.ws.rs.Produces
-import jakarta.ws.rs.core.MediaType
-import jakarta.ws.rs.core.Response
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
-import java.math.BigDecimal
-import java.util.UUID
 
+/**
+ * RestClient binding to `openbank-transaction-service`, GENERATED from its own `openapi.yaml`
+ * (`openbank-client-transaction`, ADR-0319). Callers go through the
+ * [com.openbank.clients.transaction.TransactionClient] facade, never the raw generated operations.
+ *
+ * The bearer is minted by the NAMED oidc-client `m2m` (Keycloak client `openbank-sepa-payment`,
+ * ROLE_API only, #10486) through the filter, not by hand (#13224). The filter works on the Temporal
+ * activity path because every activity runs its body on a duplicated Vert.x context
+ * (`SepaPaymentActivitiesImpl.runOnVertxContext`); `SepaTransactionClientWorkerThreadIT` drives the
+ * call from a plain, non-Vert.x thread and asserts the header reaches the wire.
+ */
 @RegisterRestClient(configKey = "transaction-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@Path("/api/v1/transactions")
-@Produces(MediaType.APPLICATION_JSON)
-@Consumes(MediaType.APPLICATION_JSON)
-interface TransactionServiceClient {
-
-    @POST
-    fun initiateTransaction(
-        @HeaderParam("Authorization") authorization: String,
-        request: InitiateSettlementRequest,
-    ): Uni<Response>
-
-    @POST
-    @Path("/{transactionId}/reverse")
-    fun reverseTransaction(
-        @HeaderParam("Authorization") authorization: String,
-        @PathParam("transactionId") transactionId: UUID,
-        request: ReverseTransactionRequest,
-    ): Uni<Response>
-}
-
-data class ReverseTransactionRequest(val idempotencyKey: String, val reason: String)
-
-data class InitiateSettlementRequest(
-    val idempotencyKey: String,
-    val type: String,
-    val sourceAccountId: UUID,
-    val amount: BigDecimal,
-    val currencyCode: String,
-    val description: String,
-    val valueDate: String,
-    val rail: String,
-    val instructionType: String? = null,
-)
+@OidcClientFilter("m2m")
+interface TransactionServiceClient : TransactionsApi

@@ -105,6 +105,10 @@ public final class com/openbank/libs/testing/containers/PostgresTestResource : c
 	public fun start ()Ljava/util/Map;
 }
 
+public final class com/openbank/libs/testing/evidence/HistoryClassOrderer : org/junit/jupiter/api/ClassOrderer {
+	public fun orderClasses (Lorg/junit/jupiter/api/ClassOrdererContext;)V
+}
+
 public final class com/openbank/libs/testing/evidence/TestInfrastructureEvidence {
 	public static final field INSTANCE Lcom/openbank/libs/testing/evidence/TestInfrastructureEvidence;
 	public final fun record (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;)V
@@ -154,7 +158,9 @@ public final class com/openbank/libs/testing/mtls/ListenerMaterial : io/quarkus/
 
 public final class com/openbank/libs/testing/mtls/ListenerMaterial$Companion {
 	public final fun bearer (Ljava/util/List;)Ljava/lang/String;
+	public final fun bearer (Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/String;
 	public static synthetic fun bearer$default (Lcom/openbank/libs/testing/mtls/ListenerMaterial$Companion;Ljava/util/List;ILjava/lang/Object;)Ljava/lang/String;
+	public static synthetic fun bearer$default (Lcom/openbank/libs/testing/mtls/ListenerMaterial$Companion;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ZILjava/lang/Object;)Ljava/lang/String;
 	public final fun sslContext (Z)Ljavax/net/ssl/SSLContext;
 }
 
@@ -170,6 +176,22 @@ public abstract class com/openbank/libs/testing/mtls/ProductionListenerProfile :
 	public fun extraResources ()Ljava/util/List;
 	public fun getConfigOverrides ()Ljava/util/Map;
 	public fun testResources ()Ljava/util/List;
+}
+
+public abstract class com/openbank/libs/testing/oidc/M2mOidcClientIdentityWiringConformance {
+	protected fun assertNamedClientExtras (Ljava/util/Map;)V
+	protected abstract fun getClientId ()Ljava/lang/String;
+	protected abstract fun getNamedClients ()Ljava/util/List;
+	protected final fun getOidcClientName ()Ljava/lang/String;
+	protected final fun namedClientConfig ()Ljava/util/Map;
+	public final fun the default client stays the shared one until the remaining edges migrate ()V
+	public final fun the migrated rest-clients select the named oidc-client and not the default one ()V
+	public final fun the named oidc-client authenticates as its own client with its own secret ()V
+}
+
+public final class com/openbank/libs/testing/openapi/OpenApiWireValidator {
+	public fun <init> ()V
+	public final fun violations (Ljava/lang/String;Ljava/lang/String;)Ljava/util/List;
 }
 
 public abstract class com/openbank/libs/testing/outbox/OutboxDispatchConformanceIT {
@@ -197,6 +219,102 @@ public abstract class com/openbank/libs/testing/outbox/OutboxRepositoryV2Conform
 	public final fun purgeSent removes only old SENT rows - PENDING, FAILED and DEAD survive ()V
 	protected abstract fun seed (Lcom/openbank/libs/persistence/outbox/OutboxMessage;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public final fun two concurrent dispatchers deliver each aggregate's events once, in created_at order ()V
+}
+
+public final class com/openbank/libs/testing/product/GoldenScenario {
+	public static final field Companion Lcom/openbank/libs/testing/product/GoldenScenario$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/time/ZoneId;Lcom/openbank/libs/product/ir/ProductState;Ljava/util/List;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lcom/openbank/libs/product/ir/ProductRevisionIr;
+	public final fun component4 ()Ljava/time/ZoneId;
+	public final fun component5 ()Lcom/openbank/libs/product/ir/ProductState;
+	public final fun component6 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/time/ZoneId;Lcom/openbank/libs/product/ir/ProductState;Ljava/util/List;)Lcom/openbank/libs/testing/product/GoldenScenario;
+	public static synthetic fun copy$default (Lcom/openbank/libs/testing/product/GoldenScenario;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/time/ZoneId;Lcom/openbank/libs/product/ir/ProductState;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/testing/product/GoldenScenario;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDescription ()Ljava/lang/String;
+	public final fun getInitialState ()Lcom/openbank/libs/product/ir/ProductState;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getRevision ()Lcom/openbank/libs/product/ir/ProductRevisionIr;
+	public final fun getSteps ()Ljava/util/List;
+	public final fun getZone ()Ljava/time/ZoneId;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/testing/product/GoldenScenario$Companion {
+	public final fun parse (Ljava/lang/String;)Lcom/openbank/libs/testing/product/GoldenScenario;
+}
+
+public final class com/openbank/libs/testing/product/GoldenScenario$Step {
+	public fun <init> (Ljava/time/Instant;Lcom/openbank/libs/product/ir/ProductEvent;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/time/Instant;
+	public final fun component2 ()Lcom/openbank/libs/product/ir/ProductEvent;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/time/Instant;Lcom/openbank/libs/product/ir/ProductEvent;Ljava/lang/String;)Lcom/openbank/libs/testing/product/GoldenScenario$Step;
+	public static synthetic fun copy$default (Lcom/openbank/libs/testing/product/GoldenScenario$Step;Ljava/time/Instant;Lcom/openbank/libs/product/ir/ProductEvent;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/testing/product/GoldenScenario$Step;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAt ()Ljava/time/Instant;
+	public final fun getEvent ()Lcom/openbank/libs/product/ir/ProductEvent;
+	public final fun getExpectedCanonical ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/testing/product/GoldenScenarioRunner {
+	public fun <init> ()V
+	public fun <init> (Lcom/openbank/libs/product/ir/ProductInterpreter;)V
+	public synthetic fun <init> (Lcom/openbank/libs/product/ir/ProductInterpreter;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun assertPasses (Lcom/openbank/libs/testing/product/GoldenScenario;)V
+	public final fun run (Lcom/openbank/libs/testing/product/GoldenScenario;)Ljava/util/List;
+	public final fun stripHash (Ljava/util/List;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/testing/product/GoldenScenarios {
+	public static final field INSTANCE Lcom/openbank/libs/testing/product/GoldenScenarios;
+	public final fun all ()Ljava/util/List;
+	public final fun load (Ljava/lang/String;)Lcom/openbank/libs/testing/product/GoldenScenario;
+	public final fun names ()Ljava/util/List;
+}
+
+public final class com/openbank/libs/testing/product/GoldenStepResult {
+	public fun <init> (ILcom/openbank/libs/product/ir/ProductEvent;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()I
+	public final fun component2 ()Lcom/openbank/libs/product/ir/ProductEvent;
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (ILcom/openbank/libs/product/ir/ProductEvent;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/testing/product/GoldenStepResult;
+	public static synthetic fun copy$default (Lcom/openbank/libs/testing/product/GoldenStepResult;ILcom/openbank/libs/product/ir/ProductEvent;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/testing/product/GoldenStepResult;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getActualCanonical ()Ljava/lang/String;
+	public final fun getEvent ()Lcom/openbank/libs/product/ir/ProductEvent;
+	public final fun getExpectedCanonical ()Ljava/lang/String;
+	public final fun getIndex ()I
+	public final fun getInstructions ()Ljava/util/List;
+	public final fun getMatches ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/testing/product/MoneyConservation {
+	public static final field INSTANCE Lcom/openbank/libs/testing/product/MoneyConservation;
+	public final fun assertMoneyConserved (Ljava/util/List;)V
+	public final fun violations (Ljava/util/List;)Ljava/util/List;
+}
+
+public final class com/openbank/libs/testing/product/MoneyConservationKt {
+	public static final fun assertMoneyConserved (Ljava/util/List;)V
+}
+
+public final class com/openbank/libs/testing/product/ProductArb {
+	public static final field INSTANCE Lcom/openbank/libs/testing/product/ProductArb;
+	public final fun event (Lcom/openbank/libs/product/ir/ProductRevisionIr;)Lio/kotest/property/Arb;
+	public final fun getRevision ()Lio/kotest/property/Arb;
+	public final fun getRevisionTree ()Lio/kotest/property/Arb;
+	public final fun getToday ()Lio/kotest/property/Arb;
+	public final fun state (Ljava/lang/String;Ljava/time/LocalDate;)Lio/kotest/property/Arb;
 }
 
 public final class com/openbank/libs/testing/security/LocalAesGcmFieldProtector : com/openbank/libs/security/FieldProtector {
@@ -240,5 +358,18 @@ public final class com/openbank/libs/testing/trace/TraceContract {
 
 public final class com/openbank/libs/testing/trace/TraceContract$Companion {
 	public final fun from (Ljava/util/Collection;)Lcom/openbank/libs/testing/trace/TraceContract;
+}
+
+public class com/openbank/libs/testing/trace/TraceContractProfile : io/quarkus/test/junit/QuarkusTestProfile {
+	public fun <init> ()V
+	protected fun extraConfigOverrides ()Ljava/util/Map;
+	public final fun getConfigOverrides ()Ljava/util/Map;
+	protected fun getDisableOutboxDispatcher ()Z
+}
+
+public final class com/openbank/libs/testing/trace/TraceContractRecorder {
+	public fun <init> ()V
+	public final fun recordingExporter ()Lcom/openbank/libs/testing/trace/RecordingSpanExporter;
+	public final fun recordingSpanProcessor (Lcom/openbank/libs/testing/trace/RecordingSpanExporter;)Lio/opentelemetry/sdk/trace/SpanProcessor;
 }
 

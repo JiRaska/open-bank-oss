@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -786,13 +788,123 @@ def performance_selector_self_test_error(selector_path: Path) -> str | None:
     return None
 
 
-def bounded_kover_report(workflow: str) -> bool:
+def service_ci_observer_source(root: Path, workflow: str) -> str:
+    """Read only the active build observer, inline or via the one trusted staged helper."""
+    try:
+        document = yaml.load(workflow, Loader=CapabilityLoader)
+        steps = document['jobs']['build']['steps']
+        builds = [(i, step) for i, step in enumerate(steps)
+                  if step.get('name') == 'Build + test (:${{ inputs.service }})']
+        if len(builds) != 1:
+            return ''
+        build_index, build = builds[0]
+        if 'if' in build or build.get('continue-on-error') or build.get('shell') is not None:
+            return ''
+        source = build.get('run', '')
+        if source == 'bash -e "$SERVICE_CI_HELPERS/build-test.sh"':
+            if build.get('env', {}).get('SERVICE') != '${{ inputs.service }}':
+                return ''
+            stages = [(i, step) for i, step in enumerate(steps)
+                      if step.get('name') == 'Stage trusted service CI step helpers']
+            if len(stages) != 1:
+                return ''
+            stage_index, stage = stages[0]
+            if (stage_index >= build_index or 'if' in stage or stage.get('continue-on-error')
+                    or stage.get('shell') is not None):
+                return ''
+            # A closed staging recipe, not an arbitrary glob or helper resolver. Only this
+            # fixed source directory can supply the regular build-test.sh checked below.
+            recipe = '''set -euo pipefail
+helper_dir="$(mktemp -d "${RUNNER_TEMP}/service-ci-helpers.XXXXXX")"
+cp .github/scripts/service-ci-steps/*.sh "$helper_dir/"
+cp .github/scripts/heal-gradle-verification-failure.sh "$helper_dir/"
+chmod 600 "$helper_dir/"*.sh
+echo "SERVICE_CI_HELPERS=$helper_dir" >> "$GITHUB_ENV"'''
+            def recipe_lines(body: str) -> list[str]:
+                return [line.strip() for line in body.splitlines() if line.strip()]
+            if recipe_lines(stage.get('run', '')) != recipe_lines(recipe):
+                return ''
+            checkouts = [(i, step) for i, step in enumerate(steps[:stage_index])
+                         if step.get('uses', '').startswith('actions/checkout@')]
+            if len(checkouts) != 1:
+                return ''
+            checkout = checkouts[0][1]
+            if ('if' in checkout or checkout.get('continue-on-error')
+                    or checkout.get('with', {}).get('ref') != "${{ inputs.ref != '' && github.sha || '' }}"):
+                return ''
+            if any('git checkout' in step.get('run', '') for step in steps[:stage_index]):
+                return ''
+            helper = root / '.github/scripts/service-ci-steps/build-test.sh'
+            relative = helper.relative_to(root)
+            components = [root.joinpath(*relative.parts[:i]) for i in range(1, len(relative.parts) + 1)]
+            if not helper.is_file() or any(path.is_symlink() for path in components):
+                return ''
+            source = helper.read_text()
+        elif 'SERVICE_CI_HELPERS' in source:
+            return ''
+        # Keep quoted strings and comments out of command identity. Joining shell
+        # continuations is enough for the existing fixed observer command, not a shell evaluator.
+        lexer = shlex.shlex(source.replace('\\\n', ' '), posix=True, punctuation_chars=';&|()\n')
+        lexer.whitespace = ' \t\r'
+        lexer.whitespace_split = True
+        command: list[str] = []
+        observers = []
+        for token in [*lexer, '\n']:
+            if token and all(c in ';&|()\n' for c in token):
+                if command[:2] == ['docker', 'events']:
+                    filters = [command[i + 1] for i, value in enumerate(command[:-1]) if value == '--filter']
+                    required_filters = {'type=container', 'event=start', 'event=die'}
+                    if required_filters <= set(filters):
+                        observers.append('docker events ' + ' '.join(
+                            '--filter ' + value for value in sorted(required_filters)))
+                command = []
+            else:
+                command.append(token)
+        return '\n'.join(observers)
+    except (KeyError, TypeError, AttributeError, ValueError, OSError, yaml.YAMLError):
+        return ''
+
+
+def bounded_kover_report(workflow: str, root: Path | None = None) -> bool:
     # Configuration scoping changes Gradle startup, never the timeout contract.
-    return re.search(
+    if re.search(
         r"timeout --kill-after=10s 600s ./gradlew --no-daemon "
         r"(?:--configure-on-demand )?:\$\{\{ inputs\.service \}\}:koverXmlReport(?:\s|$)",
         workflow,
-    ) is not None
+    ) is not None:
+        return True
+    if root is None:
+        return False
+    try:
+        document = yaml.load(workflow, Loader=CapabilityLoader)
+        steps = document['jobs']['build']['steps']
+        reports = [step for step in steps if step.get('name') == 'Generate Kover XML report']
+        if len(reports) != 1:
+            return False
+        report = reports[0]
+        expected = 'timeout --kill-after=10s 600s bash -e "$SERVICE_CI_HELPERS/render-coverage-report.sh"'
+        if (report.get('run', '').strip() != expected or report.get('shell') is not None
+                or 'if' in report or report.get('continue-on-error') is not True
+                or report.get('env', {}).get('SERVICE') != '${{ inputs.service }}'):
+            return False
+        # The observer resolver already proves the closed staging recipe and trusted checkout.
+        build = next(step for step in steps if step.get('name') == 'Build + test (:${{ inputs.service }})')
+        if (build.get('run') != 'bash -e "$SERVICE_CI_HELPERS/build-test.sh"'
+                or steps.index(report) <= steps.index(build)
+                or not service_ci_observer_source(root, workflow)):
+            return False
+        helper = root / '.github/scripts/service-ci-steps/render-coverage-report.sh'
+        relative = helper.relative_to(root)
+        if (not helper.is_file() or any(root.joinpath(*relative.parts[:i]).is_symlink()
+                                       for i in range(1, len(relative.parts) + 1))):
+            return False
+        # Closed, independently reviewed body: shell text inside heredocs or after an exit
+        # cannot attest execution. Intentional helper changes require renewed body review.
+        return hashlib.sha256(helper.read_bytes()).hexdigest() == (
+            '2186b9c579e58fef1eb0874d7de97598b8d6fdbf145d8b3f02eedb15e369424d'
+        )
+    except (KeyError, TypeError, AttributeError, ValueError, OSError, StopIteration, yaml.YAMLError):
+        return False
 
 
 def admin_collector_source(root: Path) -> str:
@@ -872,14 +984,14 @@ def check(root: Path) -> list[str]:
         "collect-test-run-evidence.py",
         "build/test-intelligence/run.json",
         "if: always()",
-        "docker events",
-        "--filter type=container",
-        "--filter event=start",
-        "--filter event=die",
     ):
         if needle not in workflow:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
-    if not bounded_kover_report(workflow):
+    observer = service_ci_observer_source(root, workflow)
+    for needle in ('docker events', '--filter type=container', '--filter event=start', '--filter event=die'):
+        if needle not in observer:
+            errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
+    if not bounded_kover_report(workflow, root):
         errors.append("Kover evidence is not bounded with the money-path-safe timeout")
     immutable_envelope_artifact = workflow.partition("Retain immutable Test Intelligence run envelope")[2].partition(
         "Upload coverage to Codecov"
@@ -1816,6 +1928,13 @@ function collectContracts() {}
     )
     if selector_error:
         print(f"self-test failed: {selector_error}")
+        return 1
+    observer_test = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("test-service-ci-observer-source.py"))],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if observer_test.returncode != 0:
+        print(f"self-test failed: active observer wiring: {observer_test.stdout}{observer_test.stderr}")
         return 1
     print("test-intelligence ecosystem self-test: red path proven")
     return 0
