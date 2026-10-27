@@ -57,6 +57,7 @@ jobs:
         run: |
           python3 .github/scripts/tests/test_dependency_review_basis.py
           python3 .github/scripts/tests/test_wait_dependency_review_snapshot.py
+          python3 .github/scripts/tests/test_dependency_license_choice.py
 
       - name: Detect dependency-manifest changes
         id: deps
@@ -164,7 +165,8 @@ jobs:
           # touching PRs. The action must not restart its own ten-second polling loop.
           retry-on-snapshot-warnings: false
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
-          # allow-dependencies-licenses: none currently — the schemathesis 3.39.16 rfc3987
+          # No unconditional license exclusions. The guarded retry below records only
+          # the approved RocksDB 10.1.3 Apache alternative. The schemathesis 3.39.16 rfc3987
           # (GPL-3.0-or-later) suppression that used to live here was retired once the
           # 4.22.3 migration dropped rfc3987 from the resolved set entirely. Re-add only
           # with a fresh justification and a tracking issue.
@@ -236,7 +238,16 @@ jobs:
                "finding; the full policy review could not be completed."
           exit 1
 
+      - name: Select the approved Apache alternative for RocksDB
+        id: license-choice
+        if: ${{ steps.review.outcome == 'failure' }}
+        # This exact head/base comparison was captured by the API backoff above.
+        # Owner-approved choice: RocksDB JNI 10.1.3, Apache-2.0 OR GPL-2.0 (#13888).
+        # All RocksDB rows must match: the pinned action ignores exclusion versions.
+        run: python3 .github/scripts/dependency_license_choice.py /tmp/dependency-diff.json >> "$GITHUB_OUTPUT"
+
       - name: Dependency Review retry
+        id: review-retry
         if: ${{ steps.review.outcome == 'failure' }}
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
@@ -244,6 +255,22 @@ jobs:
           comment-summary-in-pr: always
           retry-on-snapshot-warnings: false
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          allow-dependencies-licenses: ${{ steps.license-choice.outputs.packages }}
+
+      - name: Verify the choice against the actual retry comparison
+        if: ${{ success() && steps.license-choice.outputs.packages != '' }}
+        env:
+          # The full fleet comparison exceeds the per-variable OS limit. Keep
+          # aligned field arrays from the action's actual output; the guard checks lengths.
+          # Skipped-step outputs can be evaluated before the step condition; keep them valid JSON.
+          # An active license choice still rejects empty evidence in --review-result.
+          RETRY_NAMES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.name) }}
+          RETRY_PACKAGE_URLS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.package_url) }}
+          RETRY_LICENSES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.license) }}
+          RETRY_VERSIONS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.version) }}
+          RETRY_ECOSYSTEMS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.ecosystem) }}
+          RETRY_CHANGE_TYPES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.change_type) }}
+        run: python3 .github/scripts/dependency_license_choice.py --review-result
 
       # A successful review attempt above can still PROCEED on an invalid basis instead of
       # failing (issue #2833, item 4).

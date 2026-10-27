@@ -138,10 +138,26 @@ print(json.dumps(value))
 const input = JSON.parse(require('fs').readFileSync(0, 'utf8'));
 const outputs = {};
 let clock = 0;
+const calls = [];
+const sleeps = [];
+const read = (key, value, args) => {
+  calls.push({key, clock, timeout: args.request?.timeout});
+  clock += (input.responseDelay || {})[key] || 0;
+  const failures = (input.failures || {})[key] || [];
+  if (failures.length) {
+    const failure = failures.shift();
+    const error = new Error('Fixture API failure');
+    error.status = failure.status;
+    error.response = {headers: failure.headers || {}};
+    throw error;
+  }
+  return {data: value};
+};
 const github = {rest: {actions: {
-  getWorkflow: async () => ({data: {id: 10}}),
-  listArtifactsForRepo: async () => ({data: {artifacts: [input.artifact]}}),
-  getWorkflowRun: async () => ({data: input.run})
+  getWorkflow: async args => read('workflow', {id: 10}, args),
+  listArtifactsForRepo: async args => read('artifacts', {
+    artifacts: clock < (input.artifactAfter || 0) ? [] : [input.artifact]}, args),
+  getWorkflowRun: async args => read('producer', input.run, args)
 }}};
 const context = {repo: {owner: 'fixture', repo: 'bank'}};
 const mockRequire = name => {
@@ -154,9 +170,9 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
   try {
     await new AsyncFunction('github', 'context', 'core', 'require', 'Date', 'setTimeout', input.script)(
       github, context, {setOutput: (key, value) => {outputs[key] = value;}}, mockRequire,
-      {now: () => clock}, cb => {clock += 500000; cb();});
+      {now: () => clock}, (cb, ms) => {sleeps.push(ms); clock += ms; cb();});
   } catch (e) {error = e.message;}
-  console.log(JSON.stringify({error, outputs}));
+  console.log(JSON.stringify({error, outputs, calls, sleeps, clock}));
 })();
 '''
         artifact = {'id': 20, 'name': 'ruleset-bypass-123-a2', 'expired': False, 'workflow_run': {'id': 900}}
@@ -171,12 +187,40 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
             cases.append((f'wrong-producer-{key}', locate, {'run': {**run, key: value}}, True))
         for key, value in [('expired', True), ('name', 'ruleset-bypass-122-a2'), ('workflow_run', None)]:
             cases.append((f'wrong-artifact-{key}', locate, {'artifact': {**artifact, key: value}}, True))
+        quota = {'status': 403, 'headers': {'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '120'}}
+        for endpoint in ('workflow', 'artifacts', 'producer'):
+            cases.append((f'quota-{endpoint}', locate, {'failures': {endpoint: [quota]},
+                          'expect': {'clock': 121000, 'retry': endpoint}}, False))
+        cases += [
+            ('late-collector-22-minutes', locate, {'artifactAfter': 22 * 60 * 1000,
+             'expect': {'min_clock': 22 * 60 * 1000, 'max_reads': 40}}, False),
+            ('collector-after-deadline', locate, {'artifactAfter': 30 * 60 * 1000 + 1,
+             'expect': {'clock': 30 * 60 * 1000, 'max_reads': 40}}, True),
+            ('quota-reset-after-deadline', locate, {'failures': {'workflow': [
+             {**quota, 'headers': {**quota['headers'], 'x-ratelimit-reset': '1900'}}]},
+             'expect': {'clock': 30 * 60 * 1000, 'workflow_reads': 1}}, True),
+            ('response-at-deadline', locate, {'failures': {'workflow': [
+             {**quota, 'headers': {**quota['headers'], 'x-ratelimit-reset': '1784'}}]},
+             'responseDelay': {'producer': 15000},
+             'expect': {'clock': 30 * 60 * 1000, 'workflow_reads': 2}}, True),
+            ('permission-denied', locate, {'failures': {'workflow': [{'status': 403}]},
+             'expect': {'clock': 0, 'workflow_reads': 1}}, True),
+            ('403-with-budget', locate, {'failures': {'workflow': [
+             {**quota, 'headers': {**quota['headers'], 'x-ratelimit-remaining': '1'}}]},
+             'expect': {'clock': 0, 'workflow_reads': 1}}, True),
+            ('quota-invalid-reset', locate, {'failures': {'workflow': [
+             {**quota, 'headers': {**quota['headers'], 'x-ratelimit-reset': 'invalid'}}]},
+             'expect': {'clock': 0, 'workflow_reads': 1}}, True),
+            ('quota-retries-bounded', locate, {'failures': {'workflow': [quota] * 4},
+             'expect': {'clock': 123000, 'workflow_reads': 4}}, True),
+        ]
         cases.append(('bound', read, {}, False))
         for key in ('repository', 'run_id', 'run_attempt', 'source_run_id', 'source_run_attempt', 'version'):
             cases.append((f'wrong-binding-{key}', read, {'snapshot': {**snapshot, key: 'wrong'}}, True))
         cases.append(('oversized', read, {'size': 256 * 1024 + 1}, True))
         for name, step, override, fails in cases:
             with self.subTest(case=name):
+                expected = override.get('expect', {})
                 result = subprocess.run(['node', '-e', harness], input=json.dumps({
                     'script': step['with']['script'], 'artifact': artifact, 'run': run,
                     'snapshot': snapshot, **override}), text=True, capture_output=True, timeout=10,
@@ -185,12 +229,28 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
                 self.assertEqual(result.returncode, 0, result.stderr)
                 output = json.loads(result.stdout)
                 self.assertEqual(output['error'] is not None, fails, output)
+                if 'clock' in expected:
+                    self.assertEqual(output['clock'], expected['clock'], output)
+                if 'min_clock' in expected:
+                    self.assertGreaterEqual(output['clock'], expected['min_clock'], output)
+                artifact_reads = [c for c in output['calls'] if c['key'] == 'artifacts']
+                workflow_reads = [c for c in output['calls'] if c['key'] == 'workflow']
+                if 'max_reads' in expected:
+                    self.assertLessEqual(len(artifact_reads), expected['max_reads'], output)
+                if 'workflow_reads' in expected:
+                    self.assertEqual(len(workflow_reads), expected['workflow_reads'], output)
+                if 'retry' in expected:
+                    reads = [c for c in output['calls'] if c['key'] == expected['retry']]
+                    self.assertEqual(len(reads), 2, output)
+                    self.assertEqual(reads[1]['clock'], 121000, output)
+                self.assertTrue(all(c['clock'] < 30 * 60 * 1000 for c in output['calls']), output)
                 if fails:
                     self.assertEqual(output['outputs'], {})
-                elif name == 'trusted':
+                elif step is locate:
                     self.assertEqual(output['outputs'], {'artifact-id': '20', 'run-id': '900', 'run-attempt': '1'})
                 else:
                     self.assertEqual(json.loads(output['outputs']['snapshot']), snapshot)
+        self.assertEqual(job['timeout-minutes'], 35)
         guard = next(s['run'] for s in workflow['jobs']['validate']['steps']
                      if s['name'] == 'Verify ruleset evidence was collected')
         for status in ('success', 'failure', 'skipped', 'cancelled', ''):

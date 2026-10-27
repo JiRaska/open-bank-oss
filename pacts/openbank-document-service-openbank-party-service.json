@@ -1,0 +1,73 @@
+{
+  "consumer": {
+    "name": "openbank-document-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the party a legal contract is rendered against",
+      "providerStates": [
+        {
+          "name": "a party exists with a registered address"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/parties/e2e2e2e2-f3f3-4a4a-9b5b-c6c6c6c6c6c6"
+      },
+      "response": {
+        "body": {
+          "address": {
+            "city": "Prague",
+            "countryCode": "CZ",
+            "line1": "Pact Avenue 12",
+            "postalCode": "110 00"
+          },
+          "id": "e2e2e2e2-f3f3-4a4a-9b5b-c6c6c6c6c6c6",
+          "legalName": "Pact Verify Address Company a.s."
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.legalName": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a party id the bank does not hold",
+      "providerStates": [
+        {
+          "name": "no party exists for the id"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/parties/0d0d0d0d-1e1e-4f2f-8a3b-4c4c4c4c4c4c"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-party-service"
+  }
+}
