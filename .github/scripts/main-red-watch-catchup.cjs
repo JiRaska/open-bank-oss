@@ -6,7 +6,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
-const { unprocessedAttempts, remainingFailureLines, withFailureLines, mergeFailureLines, LatestRunLagError } =
+const { unprocessedAttempts, remainingFailureLines, withFailureLines, mergeFailureLines, unanswerableAttempt, LatestRunLagError } =
   require('./main-red-watch-order.cjs')
 const { ensureStateBranch, readCheckpoint, writeCheckpoint } = require('./main-red-watch-checkpoint.cjs')
 const { WORKFLOW: TARGET_WORKFLOW, targetPrs, withTargets, loadTargetEvidence } =
@@ -41,12 +41,14 @@ async function classifyAttempt(repo, id, attempt) {
     if (proc.status === 3) {
       throw new TransientClassifierError(`Actions API did not answer for main run ${id}/${attempt}`)
     }
-    if (proc.error || ![0, 2].includes(proc.status)) {
+    if (proc.error || ![0, 1, 2].includes(proc.status)) {
       throw new Error(`Cannot classify main run ${id}/${attempt}: ${proc.error?.message || proc.stderr || proc.stdout}`)
     }
     const verdict = JSON.parse(fs.readFileSync(jsonPath, 'utf8'))
     if (verdict.run_id !== id || verdict.attempt !== attempt ||
-        !['green', 'red', 'not-a-verdict'].includes(verdict.status)) {
+        !({ 0: ['green', 'not-a-verdict'], 1: ['unanswerable'], 2: ['red'] }[proc.status].includes(verdict.status)) ||
+        (verdict.status === 'unanswerable' &&
+         (typeof verdict.reason !== 'string' || !verdict.reason.trim()))) {
       throw new Error(`Malformed verdict for main run ${id}/${attempt}`)
     }
     return verdict
@@ -56,6 +58,13 @@ async function classifyAttempt(repo, id, attempt) {
 }
 
 function failureLines(verdict) {
+  if (verdict.status === 'unanswerable') {
+    const { run_id: id, attempt, reason } = verdict
+    if (!Number.isSafeInteger(id) || id < 1 || !Number.isSafeInteger(attempt) || attempt < 1 ||
+        typeof reason !== 'string' || !reason.trim()) throw new Error('Malformed unanswerable verdict')
+    const detail = reason.replace(/\s+/g, ' ').replace(/`/g, "'").replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    return [`- \`main run ${id} attempt ${attempt}\` [unanswerable] — ${detail} ([log](${verdict.html_url})) <!-- main-red-unanswerable:${id}:${attempt} -->`]
+  }
   if (!Array.isArray(verdict.failing) || !verdict.failing.length) throw new Error('Red verdict has no failing jobs')
   return verdict.failing.map(f => {
     if (!f || typeof f.job !== 'string' || !f.job ||
@@ -68,10 +77,12 @@ function failureLines(verdict) {
 }
 
 function redBody(verdict, marker, lines, context) {
+  const unknown = verdict.status === 'unanswerable'
   const first = verdict.failing[0]
-  const gate = first.steps.length ? `${first.job} / ${first.steps[0]}` : first.job
+  const gate = unknown ? `unclassified run ${verdict.run_id} attempt ${verdict.attempt}`
+    : first.steps.length ? `${first.job} / ${first.steps[0]}` : first.job
   const body = [
-    marker, '## `main` is red — nothing else would have told you', '',
+    marker, unknown ? '## `main` has an unclassified completed run' : '## `main` is red — nothing else would have told you', '',
     '| | |', '|---|---|',
     `| workflow | \`${verdict.workflow}\` |`,
     `| first failing gate | \`${gate}\` |`,
@@ -79,10 +90,14 @@ function redBody(verdict, marker, lines, context) {
     `| run | [${verdict.run_id} attempt ${verdict.attempt}](${verdict.html_url}) |`,
     '', '### Unresolved failing jobs', '', ...lines, '',
     'Each listed job needs a successful execution on main before this issue closes.',
-    'Skipped and absent jobs do not prove recovery.', '',
+    'Skipped and absent jobs do not prove recovery.',
+    ...(lines.some(unanswerableAttempt) ? [
+      'Unanswerable attempts remain unresolved. Later green runs do not classify those attempts;',
+      'this watch does not automatically discharge them without evidence for the same run and attempt.',
+    ] : []), '',
     `_Automated: \`${context.workflow}\` run ${context.runId} (issue #4019)._`,
   ].join('\n')
-  const title = `main is red: ${verdict.workflow} — ${gate} @ ${(verdict.head_sha || '').slice(0, 9)}`
+  const title = `main is ${unknown ? 'unclassified' : 'red'}: ${verdict.workflow} — ${gate} @ ${(verdict.head_sha || '').slice(0, 9)}`
   return { title, body }
 }
 
@@ -278,6 +293,10 @@ async function runCatchup({ github, context, core, classify = classifyAttempt,
         core.warning(`${error.message}; failing attempt remains unprocessed, retry on the next source event`)
         return
       }
+      // A structured unanswerable verdict is a durable unresolved obligation, not green.
+      // Save it in the issue before advancing, so a permanently empty attempt cannot
+      // prevent every later main run from being classified. Transport/malformed responses
+      // above still have no verdict and leave the cursor unchanged.
       await applyVerdict(github, context, verdict)
       lastProcessed = attempt
       processed++

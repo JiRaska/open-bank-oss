@@ -3,6 +3,9 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
 const { applyVerdict, runCatchup, bootstrapCheckpoint, waitForIndex } = require('./main-red-watch-catchup.cjs')
 const { parseCheckpoint, readCheckpoint, writeCheckpoint } = require('./main-red-watch-checkpoint.cjs')
 const { LatestRunLagError, unprocessedAttempts } = require('./main-red-watch-order.cjs')
@@ -21,6 +24,134 @@ const verdict = (run_id, status, failing, successful_jobs = []) => ({
   workflow: 'Services CI',
   head_sha: 'abc123456789', html_url: 'https://example.invalid/run',
 })
+
+// Drive the production subprocess classifier as well as the replay/issue reducer.
+// Only the external Python process is replaced; its exit/JSON contract is preserved.
+async function testUnanswerableReplay() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'main-red-unknown-'))
+  const previousPath = process.env.PATH
+  const previousMode = process.env.MAIN_RED_UNKNOWN_TEST_MODE
+  const previousLog = process.env.MAIN_RED_UNKNOWN_TEST_LOG
+  const log = path.join(directory, 'classified.jsonl')
+  fs.writeFileSync(path.join(directory, 'python3'), `#!/usr/bin/env node
+const fs = require('node:fs')
+const args = process.argv.slice(2)
+const id = Number(args[args.indexOf('--run-id') + 1])
+const attempt = Number(args[args.indexOf('--attempt') + 1])
+const out = args[args.indexOf('--json') + 1]
+fs.appendFileSync(process.env.MAIN_RED_UNKNOWN_TEST_LOG, JSON.stringify({ id, attempt }) + '\\n')
+if (id === 101 && process.env.MAIN_RED_UNKNOWN_TEST_MODE === 'transport') process.exit(3)
+if (id === 101 && process.env.MAIN_RED_UNKNOWN_TEST_MODE === 'malformed') {
+  fs.writeFileSync(out, '{broken json'); process.exit(1)
+}
+const status = id === 101 ? 'unanswerable' : id === 102 ? 'red' : 'green'
+const v = { run_id: id, attempt, workflow: 'CI', head_sha: 'a'.repeat(40), head_branch: 'main',
+  html_url: 'https://example.invalid/run/' + id, status,
+  reason: status === 'unanswerable' ? 'completed attempt has no jobs' : undefined,
+  failing: status === 'red' ? [{ job: 'B', conclusion: 'failure', steps: ['test'], job_url: 'https://example.invalid/job' }] : [],
+  successful_jobs: status === 'green' ? [{ job: id === 103 ? 'B' : 'A', steps: ['test'] },
+    { job: 'main run 101 attempt 1', steps: ['completed attempt has no jobs'] }] : [] }
+if (id === 101 && process.env.MAIN_RED_UNKNOWN_TEST_MODE === 'wrong-attempt') v.attempt = 2
+if (id === 101 && process.env.MAIN_RED_UNKNOWN_TEST_MODE === 'missing-reason') delete v.reason
+fs.writeFileSync(out, JSON.stringify(v))
+if (id === 101 && process.env.MAIN_RED_UNKNOWN_TEST_MODE === 'wrong-exit') process.exit(0)
+process.exit(status === 'unanswerable' ? 1 : status === 'red' ? 2 : 0)
+`, { mode: 0o700 })
+  process.env.PATH = `${directory}${path.delimiter}${previousPath}`
+  process.env.MAIN_RED_UNKNOWN_TEST_LOG = log
+  const make = () => {
+    const state = { checkpoint: { version: 1, workflow_id: 7, run_id: 100, attempt: 1 },
+      issues: [], issueFailure: false, cursorFailure: false, cursorWrites: 0,
+      runs: [103, 102, 101, 100].map(id => ({ id, run_attempt: 1, status: 'completed', head_branch: 'main', event: 'push' })) }
+    const github = { paginate: async (_method, args) => state.issues.filter(i => i.state === args.state), rest: {
+      git: { getRef: async () => ({ data: { object: { sha: 'a'.repeat(40) } } }) },
+      actions: { listWorkflowRuns: async () => ({ data: { total_count: state.runs.length, workflow_runs: state.runs } }) },
+      repos: {
+        getContent: async () => ({ data: { type: 'file', sha: 'cursor-sha', encoding: 'base64',
+          content: Buffer.from(JSON.stringify(state.checkpoint)).toString('base64') } }),
+        createOrUpdateFileContents: async args => {
+          if (state.cursorFailure) throw new Error('cursor write failed')
+          state.cursorWrites++
+          state.checkpoint = JSON.parse(Buffer.from(args.content, 'base64'))
+          return { data: { content: { sha: 'cursor-sha' } } }
+        },
+      },
+      issues: {
+        listForRepo: async () => {},
+        create: async args => {
+          if (state.issueFailure) throw new Error('issue write failed')
+          const issue = { number: state.issues.length + 1, state: 'open', ...args }
+          state.issues.push(issue)
+          return { data: issue }
+        },
+        update: async args => {
+          if (state.issueFailure) throw new Error('issue write failed')
+          const issue = state.issues.find(i => i.number === args.issue_number)
+          Object.assign(issue, args)
+          return { data: issue }
+        },
+        createComment: async () => ({ data: {} }),
+      },
+    } }
+    const run = id => runCatchup({ github,
+      context: { ...context, payload: { workflow_run: { id, workflow_id: 7, run_attempt: 1, head_branch: 'main', event: 'push' } } },
+      core: { info: () => {}, warning: () => {} } })
+    return { state, github, run }
+  }
+  try {
+    delete process.env.MAIN_RED_UNKNOWN_TEST_MODE
+    const { state, github, run } = make()
+    await applyVerdict(github, context, { ...verdict(99, 'red', [failed('A')]), workflow: 'CI',
+      failing: [{ job: 'A', conclusion: 'failure', steps: ['test'], job_url: 'https://example.invalid/job' }] })
+    await run(103)
+    assert.equal(state.checkpoint.run_id, 103)
+    assert.equal(state.issues.length, 1)
+    assert.equal(state.issues[0].state, 'open')
+    assert.match(state.issues[0].body, /\[unanswerable\]/)
+    assert.match(state.issues[0].body, /- `A` \[failure\]/)
+    assert.doesNotMatch(state.issues[0].body, /- `B` \[failure\]/)
+    assert.deepEqual(fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse).map(v => v.id), [101, 102, 103])
+    // A fresh invocation has only the durable issue/cursor, not any in-process obligation.
+    state.runs.unshift({ id: 104, run_attempt: 1, status: 'completed', head_branch: 'main', event: 'push' })
+    await run(104)
+    assert.equal(state.checkpoint.run_id, 104)
+    assert.equal(state.issues[0].state, 'open')
+    assert.match(state.issues[0].body, /<!-- main-red-unanswerable:101:1 -->/)
+    assert.doesNotMatch(state.issues[0].body, /\[failure\]/)
+    // Neither a later step with the same text nor a similarly named successful job
+    // may manufacture a classification of attempt 101/1.
+    assert.match(state.issues[0].body, /\[unanswerable\]/)
+
+    for (const boundary of ['issueFailure', 'cursorFailure']) {
+      const failedWrite = make()
+      failedWrite.state[boundary] = true
+      await assert.rejects(failedWrite.run(103), /write failed/)
+      assert.equal(failedWrite.state.checkpoint.run_id, 100)
+      failedWrite.state[boundary] = false
+      await failedWrite.run(103)
+      assert.equal(failedWrite.state.checkpoint.run_id, 103)
+      assert.equal(failedWrite.state.issues.length, 1)
+      assert.equal((failedWrite.state.issues[0].body.match(/main-red-unanswerable:101:1/g) || []).length, 1)
+      assert.equal(failedWrite.state.issues[0].state, 'open')
+    }
+    for (const mode of ['malformed', 'transport', 'wrong-attempt', 'missing-reason', 'wrong-exit']) {
+      const unavailable = make()
+      process.env.MAIN_RED_UNKNOWN_TEST_MODE = mode
+      if (mode === 'transport') await unavailable.run(103)
+      else await assert.rejects(unavailable.run(103))
+      assert.equal(unavailable.state.checkpoint.run_id, 100)
+      assert.equal(unavailable.state.cursorWrites, 0)
+      assert.equal(unavailable.state.issues.length, 0)
+    }
+  } finally {
+    process.env.PATH = previousPath
+    if (previousMode === undefined) delete process.env.MAIN_RED_UNKNOWN_TEST_MODE
+    else process.env.MAIN_RED_UNKNOWN_TEST_MODE = previousMode
+    if (previousLog === undefined) delete process.env.MAIN_RED_UNKNOWN_TEST_LOG
+    else process.env.MAIN_RED_UNKNOWN_TEST_LOG = previousLog
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+}
 
 async function main() {
   const firstEvent = { id: 102, created_at: '2026-10-11T01:00:00Z' }
@@ -325,7 +456,8 @@ async function main() {
   const freshAttempt = { total_count: 1, workflow_runs: [{ id: 401, run_attempt: 2, status: 'completed' }] }
   assert.deepEqual((await unprocessedAttempts({ run_id: 401, attempt: 0 }, async () => freshAttempt,
     { eventRunId: 401, eventAttempt: 2 })).attempts, [{ id: 401, attempt: 1 }, { id: 401, attempt: 2 }])
-  console.log('main-red-watch durable checkpoint and replaced-event recovery: passed')
+  await testUnanswerableReplay()
+  console.log('main-red-watch durable checkpoint, unknown obligations and replaced-event recovery: passed')
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1 })

@@ -147,7 +147,19 @@ function laterRunAttempts(verdict, runs) {
 const FAILURE_HEADING = '### Unresolved failing jobs'
 const FAILURE_SECTION = /(### (?:Unresolved failing jobs|Every failing job in this attempt)\r?\n\r?\n)([^]*?)(?=\r?\n\r?\n|$)/
 
+function unanswerableAttempt(line) {
+  const match = line.match(/^- `main run (\d+) attempt (\d+)` \[unanswerable\] — .+ <!-- main-red-unanswerable:(\d+):(\d+) -->$/)
+  if (!match) return null
+  const [id, attempt, markerId, markerAttempt] = match.slice(1).map(Number)
+  if (!Number.isSafeInteger(id) || id < 1 || !Number.isSafeInteger(attempt) || attempt < 1 ||
+      id !== markerId || attempt !== markerAttempt) return null
+  return { id, attempt }
+}
+
 function failureName(line) {
+  if (line.includes('[unanswerable]')) {
+    return unanswerableAttempt(line) ? line.match(/^- `([^`]+)`/)[1] : undefined
+  }
   return line.match(/^- `([^`]+)` \[(?:failure|timed_out)\](?: |$)/)?.[1]
 }
 
@@ -169,6 +181,7 @@ function remainingFailureLines(issueBody, successfulJobs) {
   if (successfulJobs.some(job => !job || typeof job.job !== 'string' ||
       !Array.isArray(job.steps) || job.steps.some(step => typeof step !== 'string'))) return null
   return lines.filter(line => {
+    if (unanswerableAttempt(line)) return true // A different successful run cannot classify this attempt.
     const failedSteps = failureSteps(line)
     if (!failedSteps) return true // No step identity cannot prove recovery.
     return !successfulJobs.some(job => job.job === failureName(line) &&
@@ -196,7 +209,7 @@ function mergeFailureLines(priorLines, currentLines) {
     if (!name) throw new Error('Cannot merge malformed main-red failure inventory')
     // Different failed steps in one job remain independently unresolved.
     const steps = failureSteps(line)
-    const key = JSON.stringify([name, steps ? [...steps].sort() : null])
+    const key = JSON.stringify([name, unanswerableAttempt(line) ? 'unanswerable' : 'failure', steps ? [...steps].sort() : null])
     byName.set(key, line)
   }
   return [...byName.values()]
@@ -282,6 +295,6 @@ async function waitForCurrentVerdict(verdict, fetchLatest, sleep,
 module.exports = {
   unprocessedAttempts,
   eventIsSuperseded, latestIndexedRun, laterRunAttempts, failedJobsCovered, remainingFailureLines, withFailureLines,
-  mergeFailureLines, unresolvedAfterLaterRuns, successfulAfterLaterRuns,
+  mergeFailureLines, unanswerableAttempt, unresolvedAfterLaterRuns, successfulAfterLaterRuns,
   fetchCompleteAttemptJobs, waitForCurrentVerdict, LatestRunLagError,
 }
