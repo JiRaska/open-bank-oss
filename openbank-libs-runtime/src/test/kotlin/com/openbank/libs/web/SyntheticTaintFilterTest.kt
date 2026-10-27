@@ -84,15 +84,24 @@ class SyntheticTaintFilterTest {
 
     private fun filterWith(trusted: String?) = SyntheticTaintRequestFilter().apply {
         trustedPrincipals = Optional.ofNullable(trusted)
+        taintContext = SyntheticTaintContext()
     }
 
     @Test
     fun `a trusted principal asserting the header taints the request`() {
         val req = request(header = "true", principal = "service-account-openbank-canary")
+        val holder = SyntheticTaintContext()
+        val filter = SyntheticTaintRequestFilter().apply {
+            trustedPrincipals = Optional.of("service-account-openbank-canary")
+            taintContext = holder
+        }
 
-        filterWith("service-account-openbank-canary").filter(req)
+        filter.filter(req)
 
         verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, true) }
+        // The request-scoped carrier is what a SUSPENDED resource method reads after the coroutine
+        // dispatch (#14058); the JAX-RS property alone is not reliably visible there.
+        assertThat(holder.tainted).isTrue()
         assertThat(MDC.get(MDC_SYNTHETIC)).isEqualTo("true")
     }
 
@@ -116,11 +125,17 @@ class SyntheticTaintFilterTest {
         // of AML scoring and the regulatory returns, using the mechanism built to make the
         // platform more honest.
         val req = request(header = "true", principal = "some-real-customer")
+        val holder = SyntheticTaintContext()
+        val filter = SyntheticTaintRequestFilter().apply {
+            trustedPrincipals = Optional.of("service-account-openbank-canary")
+            taintContext = holder
+        }
 
-        filterWith("service-account-openbank-canary").filter(req)
+        filter.filter(req)
 
         verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, false) }
         verify(exactly = 0) { req.setProperty("openbank.synthetic.baggage-scope", any()) }
+        assertThat(holder.tainted).isFalse()
         assertThat(MDC.get(MDC_SYNTHETIC)).isNull()
     }
 
@@ -170,7 +185,10 @@ class SyntheticTaintFilterTest {
         // fleet-wide hole the moment it merged, on every service that depends on libs-runtime.
         val req = request(header = "true", principal = "service-account-openbank-canary")
 
-        SyntheticTaintRequestFilter().filter(req)
+        SyntheticTaintRequestFilter().apply {
+            trustedPrincipals = Optional.empty()
+            taintContext = SyntheticTaintContext()
+        }.filter(req)
 
         verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, false) }
     }

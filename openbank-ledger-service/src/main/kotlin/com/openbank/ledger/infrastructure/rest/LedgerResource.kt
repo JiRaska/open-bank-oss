@@ -29,6 +29,7 @@ import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
+import com.openbank.libs.web.SyntheticTaintContext
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
@@ -71,6 +72,14 @@ class LedgerResource(
 
     @jakarta.inject.Inject
     private lateinit var callerIdentity: io.quarkus.security.identity.SecurityIdentity
+
+    /**
+     * Request-scoped taint decision, written by [com.openbank.libs.web.SyntheticTaintRequestFilter]
+     * on the CDI request context so a suspended resource method still sees it after the coroutine
+     * dispatch (#14058). The raw `ContainerRequestContext` property is kept only as a fallback read.
+     */
+    @jakarta.inject.Inject
+    private lateinit var taintContext: SyntheticTaintContext
 
     @GET
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
@@ -202,9 +211,15 @@ class LedgerResource(
             description = request.description,
             lines = request.requireLines().map { it.toCommand(accountingClasses) },
             postedBy = request.createdBy,
-            // The filter sets this property only after authenticating a configured canary
-            // principal. Never accept a caller-supplied header or coroutine MDC as synthetic.
-            synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
+            // The filter records its trust decision on BOTH the JAX-RS request property and the
+            // @RequestScoped [SyntheticTaintContext]. A suspended resource method reads the
+            // ContainerRequestContext only after a coroutine dispatch, and the property written
+            // pre-dispatch is not reliably visible there — measured live: five fully trusted
+            // sandbox postings all persisted synthetic = false (#14058). The CDI request context
+            // IS carried across the dispatch (the same channel SecurityIdentity uses), so it is
+            // read first; the property remains as a defensive fallback. Never accept a
+            // caller-supplied header or coroutine MDC as synthetic.
+            synthetic = taintContext.tainted || requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
             origin = request.origin?.let { origin ->
                 check(!callerIdentity.isAnonymous) { "authenticated journal submitter is required" }
                 origin.toDomain(callerIdentity.principal.name)

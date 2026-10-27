@@ -9,6 +9,7 @@ import com.openbank.libs.synthetic.SyntheticTaint
 import io.opentelemetry.api.baggage.Baggage
 import io.opentelemetry.context.Context
 import io.opentelemetry.context.Scope
+import jakarta.inject.Inject
 import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.container.ContainerRequestFilter
 import jakarta.ws.rs.container.ContainerResponseContext
@@ -82,6 +83,14 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
     @ConfigProperty(name = "openbank.synthetic.trusted-principals")
     lateinit var trustedPrincipals: Optional<String>
 
+    /**
+     * The request-scoped carrier read by suspend resource methods. The JAX-RS request property
+     * alone is not reliably visible after a coroutine dispatch (#14058); the CDI request context
+     * IS carried across it, so every decision below is written to both.
+     */
+    @Inject
+    lateinit var taintContext: SyntheticTaintContext
+
     private val log = Logger.getLogger(SyntheticTaintRequestFilter::class.java)
 
     override fun filter(ctx: ContainerRequestContext) {
@@ -107,6 +116,7 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
             return
         }
         ctx.setProperty(SYNTHETIC_TAINT_PROPERTY, true)
+        taintContext.tainted = true
         MDC.put(MDC_SYNTHETIC, "true")
         // This is the observability rail, not an authorization input. Only the trusted decision
         // above may set it; every other path removes an inbound value in [markReal].
@@ -128,6 +138,7 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
      */
     private fun markReal(ctx: ContainerRequestContext) {
         ctx.setProperty(SYNTHETIC_TAINT_PROPERTY, false)
+        taintContext.tainted = false
         val inbound = Baggage.current()
         if (inbound.getEntryValue(SyntheticTaint.BAGGAGE_KEY) == null) return
         val cleaned = inbound.toBuilder().remove(SyntheticTaint.BAGGAGE_KEY).build()
