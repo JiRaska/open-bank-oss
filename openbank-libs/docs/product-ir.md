@@ -30,8 +30,14 @@ the pinned-revision loader (below) and the `openbank-products` content module.
 `com.openbank.libs.productrevision` in openbank-libs-runtime signs a published
 revision and lets a consumer load it only after verification.
 
-- `IrSignature(keyId, algorithm, signature)` is a detached signature over the
-  64-hex `revisionHash` string, not over the JSON bytes. `algorithm` names the
+- `RevisionIdentity(productCode, revisionId, revisionNumber, irVersion,
+  revisionHash)` is what a signature binds and what a consumer pins. The signed
+  bytes are `signingInput()`: canonical JSON of those five fields plus the
+  domain tag `openbank.product-revision-signature.v1`. A bare hash is not
+  enough: two revisions with the same behaviour share a hash, and a hash says
+  nothing about which revision row a contract pinned.
+- `IrSignature(keyId, algorithm, signature)` is a detached signature over that
+  envelope, not over the JSON bytes. `algorithm` names the
   scheme so a verifier refuses what it cannot interpret; `keyId` lets rotation
   keep older revisions verifiable.
 - `IrSignerPort` signs; `IrSignatureVerifierPort` verifies. Only the catalog's
@@ -47,21 +53,43 @@ revision and lets a consumer load it only after verification.
   owning service produces it.
 - `HmacIrSigner` (HMAC-SHA256) is for development and tests only. A shared
   secret cannot show who signed, so a deployment must use the Transit signer.
-- `PinnedRevisionLoader` loads a revision by `revisionHash` from a local
-  `SignedRevisionSource` the consumer owns (never a live catalog call). It
-  parses the IR, checks that its canonical hash equals the pin, and verifies
-  the signature before returning. Any failure throws
+- `PinnedRevisionLoader.load(pin)` loads a revision by its full
+  `RevisionIdentity` from a local `SignedRevisionSource` the consumer owns
+  (never a live catalog call). It requires the copy's identity, and the parsed
+  IR's `productCode` and `irVersion`, to equal the pin, checks that the
+  canonical hash equals the pin, and verifies the signature against the pin's
+  envelope before returning. Any failure throws
   `PinnedRevisionUnavailableException`, and the consumer must not post. Verified
-  revisions go into an immutable cache keyed by hash.
+  revisions go into an immutable cache keyed by pin.
 - Each load increments `openbank_product_revision_load_total` with an `outcome`
   tag: `cache_hit`, `loaded`, `missing`, `invalid_ir`, `hash_mismatch`,
-  `signature_invalid` or `verifier_unavailable`. A failed verification has its
+  `identity_mismatch`, `signature_invalid` or `verifier_unavailable`. A failed verification has its
   own value and never shares one with success.
 
 Governance for the publish step: `catalog.publish-ir` is its own four-eyes
 action, allowed by `rest.rego` only to a human with `ROLE_OPERATOR` or
 `ROLE_ADMIN` who is not a machine principal. Maker and checker must differ,
 which product-catalog enforces separately.
+
+## Shadow comparison (phase 3)
+
+`ProductShadowRecorder` (`openbank-libs-runtime`, package `productrevision`) is the shared
+metrics surface for a service that evaluates the IR in **shadow mode**. That means
+asynchronously, from an outbox row written in the same transaction as the authoritative
+decision. The shadow never runs inside the posting transaction, and its result never changes
+what the legacy code decided.
+
+| Metric | Meaning |
+|---|---|
+| `openbank_product_shadow_inputs_total` | inputs queued, counted after the authoritative transaction commits |
+| `openbank_product_shadow_compared_total` | inputs where the IR result was compared with the authoritative one |
+| `openbank_product_shadow_diverged_total` | comparisons that disagreed |
+| `openbank_product_shadow_not_comparable_total{reason}` | inputs that could not be compared. The `reason` is one value of the closed `ShadowNotComparable` set: no IR, revision unavailable, verification disabled, verification failed, verifier unavailable, rule unmapped, required input unknown, or IR evaluation failed |
+
+Inputs arriving while `compared` stays flat is the "shadow compared nothing" state. An
+all-not-comparable shadow reads as quiet, not as broken, so it gets its own alert
+(`ProductShadowComparedNothing`), alongside `ProductShadowStalled` and
+`ProductShadowDiverged`. billing-service is the first consumer.
 
 ## Testing
 

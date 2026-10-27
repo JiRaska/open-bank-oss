@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.infrastructure.rest
 
+import com.openbank.treasury.application.port.out.DealChangedException
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.LedgerUnavailableException
 import com.openbank.treasury.application.port.out.NostroAccountNotFoundException
@@ -14,6 +15,11 @@ import com.openbank.treasury.domain.model.LimitBreachedException
 import com.openbank.treasury.domain.model.ProductLimitBreachedException
 import com.openbank.treasury.domain.model.QuoteUnavailableException
 import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
+import com.openbank.treasury.domain.reference.ReferenceBackdatedException
+import com.openbank.treasury.domain.reference.ReferenceNotEffectiveException
+import com.openbank.treasury.domain.reference.ReferenceNotFoundException
+import com.openbank.treasury.domain.reference.SeniorApprovalRequiredException
+import com.openbank.treasury.infrastructure.persistence.entity.DealEntity
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 
@@ -32,6 +38,60 @@ class ExceptionMappers {
     @ServerExceptionMapper
     fun notFound(e: DealNotFoundException): Response =
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun referenceNotFound(e: ReferenceNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun referenceNotEffective(e: ReferenceNotEffectiveException): Response = Response.status(UNPROCESSABLE).entity(
+        mapOf(
+            "error" to "REFERENCE_NOT_EFFECTIVE",
+            "message" to e.message,
+            "missingReferences" to e.missing.map { it.toString() },
+        ),
+    ).build()
+
+    @ServerExceptionMapper
+    fun referenceBackdated(e: ReferenceBackdatedException): Response =
+        error(UNPROCESSABLE, "REFERENCE_BACKDATED", e.message)
+
+    @ServerExceptionMapper
+    fun seniorRequired(e: SeniorApprovalRequiredException): Response =
+        error(Response.Status.FORBIDDEN.statusCode, "SENIOR_APPROVAL_REQUIRED", e.message)
+
+    /** A concurrent writer committed first (row_version moved under the lock-free path): a conflict, 409. */
+    @ServerExceptionMapper
+    fun optimisticLock(e: jakarta.persistence.OptimisticLockException): Response = error(
+        Response.Status.CONFLICT.statusCode,
+        if (e.entity is DealEntity) DEAL_CHANGED else "INVALID_STATE",
+        e.message,
+    )
+
+    @ServerExceptionMapper
+    fun staleState(e: org.hibernate.StaleObjectStateException): Response = error(
+        Response.Status.CONFLICT.statusCode,
+        if (e.entityName?.endsWith("DealEntity") == true) DEAL_CHANGED else "INVALID_STATE",
+        e.message,
+    )
+
+    /** A deal write computed from a copy older than the stored row (row_version moved): 409. */
+    @ServerExceptionMapper
+    fun dealChanged(e: DealChangedException): Response =
+        error(Response.Status.CONFLICT.statusCode, DEAL_CHANGED, e.message)
+
+    /** ADR-0344 D4: the flow is no longer overridable (paid, posted, past FIXED, or its deal ended). */
+    @ServerExceptionMapper
+    fun flowNotOverridable(e: com.openbank.treasury.domain.cashflow.FlowNotOverridableException): Response =
+        error(Response.Status.CONFLICT.statusCode, "FLOW_NOT_OVERRIDABLE", e.message)
+
+    @ServerExceptionMapper
+    fun cashFlowNotFound(e: com.openbank.treasury.application.usecase.CashFlowNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun scheduleEngine(e: com.openbank.treasury.domain.cashflow.ScheduleEngineUnavailableException): Response =
+        error(UNPROCESSABLE, "SCHEDULE_ENGINE_UNAVAILABLE", e.message)
 
     @ServerExceptionMapper
     fun statementNotFound(e: StatementNotFoundException): Response =
@@ -80,6 +140,18 @@ class ExceptionMappers {
     ).build()
 
     @ServerExceptionMapper
+    fun batchNotFound(e: com.openbank.treasury.application.port.out.ObservationBatchNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun flowInPayment(e: com.openbank.treasury.domain.cashflow.FlowAlreadyInPaymentException): Response =
+        error(Response.Status.CONFLICT.statusCode, "FLOW_ALREADY_IN_PAYMENT", e.message)
+
+    @ServerExceptionMapper
+    fun flowConflict(e: com.openbank.treasury.application.port.out.CashFlowConflictException): Response =
+        error(Response.Status.CONFLICT.statusCode, "FLOW_CHANGED", e.message)
+
+    @ServerExceptionMapper
     fun notPermitted(e: ActorNotPermittedException): Response =
         error(Response.Status.FORBIDDEN.statusCode, "ACTOR_NOT_PERMITTED", e.message)
 
@@ -88,5 +160,6 @@ class ExceptionMappers {
 
     private companion object {
         const val UNPROCESSABLE = 422
+        const val DEAL_CHANGED = "DEAL_CHANGED"
     }
 }

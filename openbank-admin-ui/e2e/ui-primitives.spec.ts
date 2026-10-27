@@ -120,7 +120,9 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     // The Explorer portrait is deliberately oversized and clipped by the guide,
     // but its top (and therefore its head) must remain inside the visible banner.
     // A negative portrait top previously left only the torso visible in production.
-    const explorerGuide = page.getByLabel('Welcome to your operations cockpit')
+    const explorerGuide = main.getByLabel('Welcome to your operations cockpit')
+    await expect(explorerGuide).toHaveCount(1)
+    await expect(explorerGuide).toBeVisible()
     const guideBox = await explorerGuide.boundingBox()
     const portraitBox = await explorerGuide.locator('img').boundingBox()
     expect(guideBox).not.toBeNull()

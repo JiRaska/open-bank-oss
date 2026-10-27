@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: card-issuance-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "5003307ce189e10d"
+    openbank.tech/policy-checksum: "723fc5258b7a55bc"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -874,17 +874,20 @@ data:
     # admits ROLE_API on exactly these two endpoints, and because card-issuance still runs
     # AUTHZ_ENFORCE=false a Kotlin named-caller check (CardReadCallerGuard.kt) enforces the same lists.
     # CardReadCallerGuardTest pins the Kotlin sets to these rules.
+    #   customer-edge      authenticated customer list and card ownership/delegation checks
     #   delegation-service CardIssuanceRestClient.getCard  GET /cards/{id}             card.read
     #   party-service      CardServiceRestClient.listByParty GET /cards/party/{partyId} card.list
     allowed_reasons contains "service-delegation-card-read" if {
     	input.principal.type == "HUMAN"
-    	machine_named("service-account-openbank-delegation")
+    	some caller in {"service-account-openbank-delegation", "service-account-openbank-edge"}
+    	machine_named(caller)
     	input.action == "card.read"
     }
 
     allowed_reasons contains "service-party-card-list" if {
     	input.principal.type == "HUMAN"
-    	machine_named("service-account-openbank-party")
+    	some caller in {"service-account-openbank-party", "service-account-openbank-edge"}
+    	machine_named(caller)
     	input.action == "card.list"
     }
 
@@ -2212,18 +2215,23 @@ data:
         # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
         # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
         # service's own *_rest_ext.rego with `not principal_is_machine` (the verified input.principal.service_account flag).
-        # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
-        # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+        # The risk-engine curve-set list reuses `.read` (resource ""). The snapshot LIST and the
+        # per-snapshot VALUATION carry their own actions (risk.snapshot.list, risk.valuation.read,
+        # ADR-0344 D8) so a named machine can be granted exactly those two paths and nothing else. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
         # here on purpose: every treasury action, the reads included, is granted in
         # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
         # treasury depends on this matrix.
         ROLE_RISK:
           grant:
             - risk.snapshot.read
+            - risk.snapshot.list
+            - risk.valuation.read
             - risk.curve-set.read
         ROLE_FINANCE:
           grant:
             - risk.snapshot.read
+            - risk.snapshot.list
+            - risk.valuation.read
             - risk.curve-set.read
 
     shared_m2m_write_prohibition:

@@ -6,7 +6,7 @@ package com.openbank.treasury.integration
 
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.domain.glCode
-import com.openbank.treasury.domain.model.DayCount
+import com.openbank.treasury.domain.model.DealCalendars
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -46,7 +46,8 @@ class TreasuryDealApiIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("treasury-events-out")
+            InMemoryConnector.switchOutgoingChannelsToInMemory("treasury-events-out", "treasury-payments-out") +
+                InMemoryConnector.switchIncomingChannelsToInMemory("institution-transfer-status-in")
 
         override fun stop() = InMemoryConnector.clear()
     }
@@ -140,7 +141,11 @@ class TreasuryDealApiIT {
         assertThat(
             ledger.calls,
         ).describedAs("nothing may post before BOOKED, and BOOKED itself posts nothing").isEmpty()
-        assertThat(outboxTypes(UUID.fromString(dealId))).containsExactly("treasury.deal.booked.v1")
+        assertThat(outboxTypes(UUID.fromString(dealId))).containsExactly(
+            // ADR-0344 D4: the submission stored the cash-flow ledger and announced it.
+            "treasury.cashflow.generated.v1",
+            "treasury.deal.booked.v1",
+        )
     }
 
     @Test
@@ -166,7 +171,13 @@ class TreasuryDealApiIT {
         val stored = journalIds(UUID.fromString(dealId))
         assertThat(stored).containsExactly(ledger.journals.getValue(key).first)
         assertThat(outboxTypes(UUID.fromString(dealId)))
-            .containsExactly("treasury.deal.booked.v1", "treasury.deal.confirmed.v1", "treasury.deal.settled.v1")
+            .containsExactly(
+                // ADR-0344 D4: the submission stored the cash-flow ledger and announced it.
+                "treasury.cashflow.generated.v1",
+                "treasury.deal.booked.v1",
+                "treasury.deal.confirmed.v1",
+                "treasury.deal.settled.v1",
+            )
     }
 
     @Test
@@ -306,7 +317,7 @@ class TreasuryDealApiIT {
             .body("product", equalTo("CNB_LOMBARD"))
             .body(
                 "maturityDate",
-                equalTo(com.openbank.treasury.domain.model.DayCount.nextBusinessDay(today).toString()),
+                equalTo(com.openbank.treasury.domain.model.DealCalendars.overnight(today, "CZK").toString()),
             )
         action(lombardId, "submit").then().statusCode(200)
             .body("state", equalTo("PENDING_APPROVAL"))
@@ -324,13 +335,21 @@ class TreasuryDealApiIT {
         assertThat(settled.lines.map { "${it.side} ${it.glCode()} ${it.amount.toPlainString()} ${it.currency}" })
             .containsExactly("DEBIT 1001 2500000.00 CZK", "CREDIT 2320 2500000.00 CZK")
         assertThat(outboxTypes(UUID.fromString(lombardId)))
-            .containsExactly("treasury.deal.booked.v1", "treasury.deal.confirmed.v1", "treasury.deal.settled.v1")
+            .containsExactly(
+                // ADR-0344 D4: the submission stored the cash-flow ledger and announced it.
+                "treasury.cashflow.generated.v1",
+                "treasury.deal.booked.v1",
+                "treasury.deal.confirmed.v1",
+                "treasury.deal.settled.v1",
+            )
     }
 
     // --- #10896: FX spot ---
 
     /** The latest weekday on or before today: a valid FX trade AND value date the test can settle now. */
-    private val businessDay: LocalDate = generateSequence(today) { it.minusDays(1) }.first { !DayCount.isWeekend(it) }
+    private val businessDay: LocalDate = generateSequence(today) {
+        it.minusDays(1)
+    }.first { com.openbank.treasury.domain.model.DealCalendars.isSpotBusinessDay(it, "EUR") }
 
     private fun fxBody(buy: String = "EUR", sell: String = "CZK", extra: String = "") = """
         {"product":"FX_SPOT","counterpartyId":"SIMBK-A","buyCurrency":"$buy","sellCurrency":"$sell",
@@ -347,7 +366,7 @@ class TreasuryDealApiIT {
             .then().statusCode(201)
             .body("product", equalTo("FX_SPOT"))
             .body("currency", equalTo("EUR"))
-            .body("valueDate", equalTo(DayCount.spotDate(businessDay).toString()))
+            .body("valueDate", equalTo(DealCalendars.spotDate(businessDay, "EUR").toString()))
             .body("fx.side", equalTo("BUY"))
             .body("fx.sellCurrency", equalTo("CZK"))
             .body("fx.sellAmount", equalTo(25100.00f))
@@ -404,7 +423,13 @@ class TreasuryDealApiIT {
         action(fxId, "mature").then().statusCode(409)
         assertThat(ledger.calls).containsExactly("treasury:$fxId:settled")
         assertThat(outboxTypes(UUID.fromString(fxId)))
-            .containsExactly("treasury.deal.booked.v1", "treasury.deal.confirmed.v1", "treasury.deal.settled.v1")
+            .containsExactly(
+                // ADR-0344 D4: the submission stored the cash-flow ledger and announced it.
+                "treasury.cashflow.generated.v1",
+                "treasury.deal.booked.v1",
+                "treasury.deal.confirmed.v1",
+                "treasury.deal.settled.v1",
+            )
         // Read back from the row: proves V9's columns and the mapping.
         given().`when`().get("/api/v1/treasury/deals/$fxId").then().statusCode(200)
             .body("fx.buyAmount", equalTo(1000.00f))
@@ -496,7 +521,8 @@ class TreasuryDealApiIT {
             .body("message", containsString("tenor 400 days exceeds the product maximum 366 days"))
             .body("breaches[0].rule", equalTo("MAX_TENOR"))
         assertThat(state(mandateId)).isEqualTo("PENDING_APPROVAL")
-        assertThat(outboxTypes(UUID.fromString(mandateId))).isEmpty()
+        // The submission announced its cash-flow ledger; the refused approval emitted nothing more.
+        assertThat(outboxTypes(UUID.fromString(mandateId))).containsExactly("treasury.cashflow.generated.v1")
         assertThat(ledger.calls).isEmpty()
     }
 
