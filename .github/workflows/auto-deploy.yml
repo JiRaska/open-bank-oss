@@ -675,7 +675,7 @@ jobs:
       # dependency, deterministic. configure-aws-credentials exports the creds to the job env.
       - name: Configure AWS credentials (GitHub OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
+        with: &build_aws_credentials
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1
 
@@ -1040,6 +1040,12 @@ jobs:
           echo "==> deployable after the CVE gate: $(cat "$RUNNER_TEMP/deployable.json")"
           [ "$FAILED" -eq 0 ] || \
             echo "::warning::fixable CRITICAL CVEs blocked $(cat "$RUNNER_TEMP/cve-blocked.json") — the run fails in push-failures; the rest of the fleet deploys"
+
+      # Build, push and scan can consume most of the initial one-hour session.
+      # Start a fresh OIDC session for the bounded attestation and fleet-proof steps.
+      - name: Refresh AWS credentials before attestations (GitHub OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with: *build_aws_credentials
 
       # Deploy-time provenance: attach a signed CycloneDX SBOM ATTESTATION to each pushed
       # image (ADR-0030 D4), complementing the release-time bundle (release-please.yml) and
