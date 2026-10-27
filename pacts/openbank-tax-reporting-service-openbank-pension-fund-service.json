@@ -12,7 +12,7 @@
       ],
       "request": {
         "method": "GET",
-        "path": "/api/v1/reporting/funds/f0a7c1e2-0000-4000-8000-000000012425/period-figures",
+        "path": "/api/v2/reporting/funds/f0a7c1e2-0000-4000-8000-000000012425/period-figures",
         "query": {
           "periodEnd": [
             "2026-09-30"
@@ -311,7 +311,7 @@
       ],
       "request": {
         "method": "GET",
-        "path": "/api/v1/reporting/funds/f0a7c1e2-0000-4000-8000-000000012425/period-figures",
+        "path": "/api/v2/reporting/funds/f0a7c1e2-0000-4000-8000-000000012425/period-figures",
         "query": {
           "periodEnd": [
             "2026-09-30"

@@ -34,7 +34,7 @@ import java.util.UUID
 
 /**
  * Consumer contract: tax-reporting-service -> pension-fund-service
- * `GET /api/v1/reporting/funds/{fundId}/period-figures` (#12425). Replayed by pension-fund-service's
+ * `GET /api/v2/reporting/funds/{fundId}/period-figures` (#12425). Replayed by pension-fund-service's
  * `PensionFundPactFolderProviderVerificationTest` (AS service-account-openbank-tax-reporting) and its
  * negative-auth twin.
  *
@@ -169,7 +169,7 @@ class TaxReportingPensionFundPactConsumerTest {
         const val FUND_ID = "f0a7c1e2-0000-4000-8000-000000012425"
 
         /** LITERAL, retyped from pension-fund-service's FundReportingResource — never derived from the client. */
-        const val EXPECTED_PATH = "/api/v1/reporting/funds/$FUND_ID/period-figures"
+        const val EXPECTED_PATH = "/api/v2/reporting/funds/$FUND_ID/period-figures"
 
         fun clientPath(): String {
             val base = PensionFundReportingClient::class.java.getAnnotation(Path::class.java).value
