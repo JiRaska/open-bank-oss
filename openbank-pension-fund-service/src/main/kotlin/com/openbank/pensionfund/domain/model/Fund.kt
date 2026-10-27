@@ -29,8 +29,14 @@ data class Fund(
     val riskClass: Int,
     /** The fund a participant's savings must sit in when the jurisdiction pack requires a conservative option. */
     val mandatoryConservative: Boolean,
-    /** Annual management fee as a fraction of net assets, e.g. 0.008 for 0.8 %. */
+    /**
+     * Annual management fee as a fraction of net assets, e.g. 0.008 for 0.8 %. For a pinned fund
+     * (ADR-0341) this is the local cache of [productRevisionId]'s fee schedule and is never edited;
+     * only a pre-pinning fund (null revision) carries a rate this service did not derive.
+     */
     val managementFeeRate: BigDecimal,
+    /** The published catalog revision this fund's terms were pinned to at creation; null = grandfathered. */
+    val productRevisionId: UUID? = null,
     /** NAV per unit used for the very first issue, while no units are outstanding. */
     val launchNavPerUnit: BigDecimal,
     val status: FundStatus,
@@ -57,7 +63,6 @@ data class Fund(
         custodyAccountReference: String,
         riskClass: Int,
         mandatoryConservative: Boolean,
-        managementFeeRate: BigDecimal,
         now: Instant,
     ): Fund {
         check(status == FundStatus.ACTIVE) { "fund $id is closed" }
@@ -67,7 +72,6 @@ data class Fund(
             custodyAccountReference = custodyAccountReference,
             riskClass = riskClass,
             mandatoryConservative = mandatoryConservative,
-            managementFeeRate = managementFeeRate,
             updatedAt = now,
         )
     }

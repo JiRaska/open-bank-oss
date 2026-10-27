@@ -17,5 +17,5 @@ import io.quarkus.test.junit.TestProfile
 class PensionFundListenerAuthParityIT : ListenerAuthParityConformance() {
     class ProductionProfile : ProductionListenerProfile()
 
-    override val path: String = "/api/v1/funds"
+    override val path: String = "/api/v2/funds"
 }
