@@ -21,7 +21,14 @@
 # Do not revert to a musl base to reclaim the layer: .github/scripts/verify-image-native-libs.py
 # runs `ldd` on every bundled linux .so INSIDE this exact base before any image is pushed, and
 # fails the push. It reads the base image from THIS file — never give it a second copy.
-FROM eclipse-temurin:25-jre@sha256:fd4b1c02c64eef378212e23656fc0b0caa41a357876fa0b60e51ceda94a3db64
+FROM eclipse-temurin:25-jre@sha256:dbb43d81099eec91e0800226ed2296d03146ee7857165b95112372ad0d67e87f
+
+# Ubuntu USN-8954-1 fixes CVE-2026-85091 in this pinned Resolute base.
+# Pin the vendor security update; apt verifies repository metadata and package hashes.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends --only-upgrade \
+      zlib1g=1:1.3.dfsg+really1.3.1-1ubuntu3.2 \
+ && rm -rf /var/lib/apt/lists/*
 
 # Pebble is unused by this Java runtime; remove its vulnerable embedded Go runtime.
 RUN rm /usr/bin/pebble
