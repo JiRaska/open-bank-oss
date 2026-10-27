@@ -16,6 +16,7 @@ import com.openbank.document.application.port.out.DocumentRepositoryPort
 import com.openbank.libs.storage.ObjectStorePort
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.vertx.core.Vertx
 import jakarta.inject.Inject
@@ -69,9 +70,9 @@ import org.junit.jupiter.api.extension.ExtendWith
  * annotations, so a new consumer module is in scope automatically.
  */
 @QuarkusTest
+@TestProfile(DocumentProviderProfile::class)
 @QuarkusTestResource(com.openbank.document.it.PostgresRedisTestResource::class)
 // The renderer sidecar is the one remote the pension render interaction (#12392) reaches.
-@QuarkusTestResource(PdfRendererStubResource::class, restrictToAnnotatedClass = true)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-document-service")
 @PactFolder("../pacts")

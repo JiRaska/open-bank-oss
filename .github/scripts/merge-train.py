@@ -646,6 +646,11 @@ def main_red_contexts(gh, git, required: list[str], base: str, cache: dict | Non
     """Required contexts (merge-train aside) that are FAILURE in main's latest completed CI at `base`:
     context -> the main commit carrying that verdict. A still-running main run reads as its nearest
     first-parent ancestor's verdict, so a fix that just merged keeps main red until its own push run reports."""
+    # checks(sha) already returns every context. Share each commit's complete result within this
+    # evaluation, including when build/publish omit cache; otherwise the history is fetched again
+    # for every context. Never retain this implicit cache across evaluations: CI results can change.
+    if cache is None:
+        cache = {}
     out: dict[str, str] = {}
     # Extra gates count too: a scan red on main itself makes PRs wait and never makes anyone a culprit.
     for ctx in sorted({c for c in required if c != STATUS_CONTEXT} | set(train_extra_gates(git, base) or {})):
@@ -3429,6 +3434,73 @@ def self_test() -> int:
     check("record: a malformed record is refused", record_problem(f"tree={t1} members=1", BOT_LOGIN, t1) is not None)
     check("comments: fixed texts carry no placeholders", "{" not in DROP_MESSAGE + CULPRIT_MESSAGE + MANUAL_LANE_MESSAGE
           + EXTRA_GATE_MESSAGE)
+
+    # ---- main history API budget: use the real checks + pagination over canned GETs ---------
+    history = [f"{i:040x}" for i in range(STALE_RED_WALK)]
+    budget_reads: list[str] = []
+    history_results: dict[str, dict] = {}
+    budget_required = [f"required-{i}" for i in range(8)]
+    budget_rules = "merge_train:\n  extra_gates:\n    - {workflow: .github/workflows/security.yml, check: Trivy}\n"
+
+    def budget_git(*args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, "\n".join(history) if args[0] == "rev-list" else budget_rules, "")
+
+    def budget_get(path):
+        budget_reads.append(path)
+        sha = path.split("/commits/", 1)[1].split("/", 1)[0]
+        if "/check-runs?" in path:
+            # A full page forces real paginate() to fetch the second page. Relevant contexts
+            # deliberately live there, so a page-one-only optimization cannot pass this test.
+            if path.endswith("page=1"):
+                return {"check_runs": [{"id": i, "name": f"unrelated-{i}", "status": "completed",
+                                        "conclusion": "success"} for i in range(100)]}
+            return {"check_runs": [{"id": 100 + i, "name": name, "status": "completed",
+                                    "conclusion": state} for i, (name, state) in
+                                   enumerate(history_results.get(sha, {}).items())]}
+        return {"statuses": []}
+
+    saved_get = globals()["get"]
+    try:
+        globals()["get"] = budget_get
+        budget_gh = GitHub("o/r", "main", "")
+        got = main_red_contexts(budget_gh, budget_git, budget_required, history[0])
+        check("main history: nine absent contexts fetch each commit once, including every check page",
+              got == {} and len(budget_reads) == 3 * STALE_RED_WALK
+              and len(set(budget_reads)) == len(budget_reads), str(len(budget_reads)))
+        # Pending/cancelled results do not hide a nearest completed failure. A later historical
+        # failure must not override a nearer success, and the extra gate participates too.
+        history_results.update({history[0]: {"required-0": None, "Trivy": "cancelled"},
+                                history[3]: {"required-0": "failure", "Trivy": "failure"},
+                                history[4]: {"required-1": "success"},
+                                history[6]: {"required-1": "failure"}})
+        budget_reads.clear()
+        supplied_cache: dict = {}
+        got = main_red_contexts(budget_gh, budget_git, budget_required, history[0], supplied_cache)
+        check("main history: shared reads preserve nearest completed failures and extra gates",
+              got == {"required-0": history[3], "Trivy": history[3]}
+              and len(budget_reads) == 3 * STALE_RED_WALK, str(got))
+        check("main history: caller's initially empty cache is populated and reused",
+              len(supplied_cache) == STALE_RED_WALK
+              and main_red_contexts(budget_gh, budget_git, budget_required, history[0], supplied_cache) == got
+              and len(budget_reads) == 3 * STALE_RED_WALK)
+        history_results[history[0]] = {"required-0": "success", "Trivy": "success"}
+        budget_reads.clear()
+        check("main history: a new evaluation rereads mutable checks, never reuses a prior verdict",
+              main_red_contexts(budget_gh, budget_git, budget_required, history[0]) == {}
+              and len(budget_reads) == 3 * STALE_RED_WALK)
+
+        def denied_get(path):
+            raise SystemExit("GET denied: API rate limit exceeded")
+
+        globals()["get"] = denied_get
+        refused = False
+        try:
+            main_red_contexts(budget_gh, budget_git, budget_required, history[0])
+        except SystemExit:
+            refused = True
+        check("main history: unreadable checks still abort, never become a clean verdict", refused)
+    finally:
+        globals()["get"] = saved_get
 
     # ---- extra gates (merge_train.extra_gates) -------------------------------------------------
     decl = ("a: 1\nmerge_train:\n  # why\n  extra_gates:\n    - {workflow: .github/workflows/security.yml, check: Trivy}\n"
