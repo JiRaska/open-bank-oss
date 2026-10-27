@@ -156,3 +156,12 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ### Alarm nezaúčtované platby a re-drive (#13623)
 
 `DomesticPaymentBookingUnsettled` alarmuje, když jsou nejstarší otevřené hodiny bookingu starší než 1 h (`openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`, testy v `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`). Temporal opakuje settlement každých 5 minut po 7 dní se stejným klíčem; to zhojí přechodný výpadek, nikdy deterministickou odpověď. Postup operátora (dotaz do transaction-service podle klíče, pak reconcile, reverse nebo re-drive, včetně resetu již selhaného workflow) je v `docs/runbooks/0032-payment-rail-unsettled-booking.md`.
+
+## Typ platby v pacs.008 (#13663)
+
+Domácí adaptér výslovně ponechává volitelný blok typu platby nepřítomný. Úroveň služby SEPA je kód
+EPC, nikoli kód domácího clearingového schématu; nové pole sdílené knihovny z domácího převodu
+nedělá SEPA platbu. Výchozí XML bez bloku se nemění.
+`DomesticPaymentPriority.INSTANT` stále nemá odpovídající kód v této zprávě: volba úrovně služby
+a lokálního instrumentu domácího schématu zůstává nevyřešená. Toto zachování kompatibility
+nedokládá, že se okamžitá priorita předává schématu.
