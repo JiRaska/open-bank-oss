@@ -58,13 +58,22 @@ import java.util.UUID
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class TreasuryLifecycleE2E {
 
-    /** Literal values only: a profile loads in a different classloader from the test (root CLAUDE.md). */
+    /**
+     * Literal values only: a profile loads in a different classloader from the test (root CLAUDE.md).
+     *
+     * Quotes are on (test 1 reads the synthetic board), but the market SCHEDULER is pushed to a
+     * 30-minute horizon: this suite proves the *human* spine — approve, the D2 gate on a manual
+     * settle, manual confirmation — while the scheduler auto-confirms and auto-settles every BOOKED
+     * deal on its 1 s cadence, which would race the HTTP actions mid-suite (observed live as 409
+     * INVALID_STATE and a duplicate key on `deal_transitions_seq_unique`). The scheduled market
+     * itself is proven by `TreasuryQuoteApiIT`, which embraces that asynchrony instead.
+     */
     class QuotesOn : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "openbank.treasury.simulated-market.enabled" to "true",
             "openbank.treasury.simulated-market.quotes.enabled" to "true",
-            "openbank.treasury.simulated-market.interval" to "1s",
-            "openbank.treasury.simulated-market.initial-delay" to "1s",
+            "openbank.treasury.simulated-market.interval" to "30m",
+            "openbank.treasury.simulated-market.initial-delay" to "30m",
         )
     }
 
