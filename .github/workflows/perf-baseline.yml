@@ -157,6 +157,11 @@ jobs:
             component: openbank-ledger-service
             definition: openbank-ledger-service/src/test/k6/ledger-read-baseline.js
             url: "${{ vars.PERF_LEDGER_URL }}"
+          - id: notification
+            fixtures: ""
+            component: openbank-notification-service
+            definition: openbank-notification-service/src/test/k6/notification-read-baseline.js
+            url: "${{ vars.PERF_NOTIFICATION_URL }}"
           - id: sca
             fixtures: "PERF_PARTY_ID PERF_SCA_CHALLENGE_ID"
             component: openbank-sca-service

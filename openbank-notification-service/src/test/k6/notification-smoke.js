@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 // k6 smoke test for openbank-notification-service (ADR-0243 scope extension).
-// Runs a short read-only load against the notification list with lenient CI thresholds.
+// Runs a short read-only load against the notification list read with lenient CI
+// thresholds.
 //
-// READ-ONLY BY CONSTRUCTION: a single GET against the operator read path; nothing is
-// created, mutated or deleted. The notification list is the one notification read that
-// answers 200 on a fresh database — the notification rows are id-scoped
-// (/api/v1/notifications/{id}) and 404 with no seeded fixtures, which the perf-gate
-// pre-flight probe rightly refuses to time.
+// READ-ONLY BY CONSTRUCTION: a single GET against the paginated list; nothing is
+// created, mutated or deleted. The list is the one notification endpoint that answers
+// 200 on a fresh database — an empty page is a legitimate response and the shape is
+// what matters (items/total/unreadCount envelope). The by-id reads are id-scoped and
+// 404 empty; the template list is staff-only editorial surface that belongs to the
+// read-baseline lane, not the unauthenticated smoke probe.
 //
-// The perf-gate harness boots the service in dev mode against a throwaway postgres with
-// auth disabled (quarkus.oidc.enabled=false, authz.enforce=false — the list route carries
-// @Authorize, which the OPA-free harness must not enforce) and the messaging health check
-// off (quarkus.messaging.health.enabled=false — SmallRye reports the channel readiness
-// DOWN without a broker), so the route below answers 200 with an empty page on a fresh
-// database. A declared quarkus.redis host gets a throwaway redis container — without it
-// the Redis readiness check stays DOWN and the gate's readiness wait never goes green
-// (measured on openbank-fx-service).
-
+// The perf-gate harness boots the service in dev mode against a throwaway postgres
+// with auth disabled (quarkus.oidc.enabled=false, authz.enforce=false), so the
+// @RolesAllowed route below answers 200 on a fresh database. A declared quarkus.redis
+// host gets a throwaway redis container — without it the Redis readiness check stays
+// DOWN and the gate's readiness wait never goes green (measured on openbank-fx-service).
+//
+// The FIRST BASE_URL request in this file is what .github/scripts/k6-smoke-path.py
+// extracts for perf-gate.yml's pre-flight probe — keep the notifications list first.
 import http from 'k6/http';
 import { check, group, sleep } from 'k6';
 import { Rate } from 'k6/metrics';
@@ -39,9 +40,7 @@ const okRate = new Rate('endpoint_ok_rate');
 
 export default function () {
   group('notification list read-only smoke', () => {
-    // The FIRST BASE_URL request in this file is what .github/scripts/k6-smoke-path.py
-    // extracts for perf-gate.yml's pre-flight probe — keep the list first.
-    const res = http.get(`${BASE_URL}/api/v1/notifications`, {
+    const res = http.get(`${BASE_URL}/api/v1/notifications?page=0&size=20`, {
       tags: { endpoint: 'notifications-list', service: 'notification-service' },
     });
 
@@ -52,8 +51,9 @@ export default function () {
     check(res, {
       'notifications-list status is 200': (r) => r.status === 200,
       'notifications-list returns JSON':  (r) => isJson,
-      // An empty page is a legitimate fresh-DB response; the shape is what matters.
-      'notifications-list body has items array': (r) => Array.isArray(JSON.parse(r.body).items),
+      // An empty page is a legitimate fresh-DB response; the envelope is what matters.
+      'notifications-list body has items': (r) => Array.isArray(JSON.parse(r.body).items),
+      'notifications-list body has total': (r) => Number.isInteger(JSON.parse(r.body).total),
     });
 
     sleep(1);
