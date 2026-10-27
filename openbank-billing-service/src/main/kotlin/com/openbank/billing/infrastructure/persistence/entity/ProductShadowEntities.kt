@@ -64,6 +64,9 @@ class ProductShadowInputEntity : PanacheEntityBase() {
     @Column(name = "scheduled_trigger")
     var scheduledTrigger: String? = null
 
+    @Column(name = "expected_revision_identity")
+    var expectedRevisionIdentity: String? = null
+
     @Column(name = "legacy_fees", nullable = false)
     lateinit var legacyFees: String
 
@@ -114,6 +117,9 @@ class ProductRevisionIrEntity : PanacheEntityBase() {
 
     @Column(name = "signature")
     var signature: String? = null
+
+    @Column(name = "actual_revision_identity")
+    var actualRevisionIdentity: String? = null
 
     @Column(name = "fetched_at", nullable = false)
     lateinit var fetchedAt: Instant

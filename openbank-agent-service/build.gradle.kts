@@ -40,11 +40,11 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
-    // Pact consumer: AgentBalanceHoldsPactConsumerTest pins the get_balance_holds read tool
-    // against balance-service — the contract test for the GET /{accountId}/holds endpoint this
-    // PR adds (ADR-0063).
-    // Pact consumer: AgentSepaInstantReadPactConsumerTest pins the assistant's SCT Inst read
-    // tools against sepa-instant (ADR-0063, evidence-matrix contract coverage).
+    // Pact consumers pin balance-holds, sanctions and SEPA Instant read tools against their
+    // providers (AgentBalanceHoldsPactConsumerTest, AgentSanctionsReadPactConsumerTest and
+    // AgentSepaInstantReadPactConsumerTest, ADR-0063).
+    // Pact consumers also cover account/transaction, FX, AML, Catalog and Ledger read tools.
+    // They drive read-adapter dispatch through mock-server clients, not live OIDC.
     testImplementation(libs.pact.consumer)
     // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
     // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.

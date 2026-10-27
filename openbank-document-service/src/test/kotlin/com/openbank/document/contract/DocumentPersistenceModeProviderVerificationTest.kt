@@ -7,6 +7,8 @@ package com.openbank.document.contract
 import io.agroal.api.AgroalDataSource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.TestProfile
+import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import jakarta.enterprise.inject.Instance
@@ -19,8 +21,8 @@ import org.junit.jupiter.api.Test
 
 /** Runs in both the build and provider lanes: JDBC migrations must not enable blocking Hibernate. */
 @QuarkusTest
+@TestProfile(DocumentProviderProfile::class)
 @QuarkusTestResource(com.openbank.document.it.PostgresRedisTestResource::class)
-@QuarkusTestResource(PdfRendererStubResource::class, restrictToAnnotatedClass = true)
 class DocumentPersistenceModeProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port")
     lateinit var testPort: String
@@ -32,6 +34,22 @@ class DocumentPersistenceModeProviderVerificationTest {
             .get("/api/v1/documents/templates")
             .then()
             .statusCode(401)
+    }
+
+    @Test
+    @TestSecurity(user = "persistence-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
+    fun `authenticated template reads use the active reactive persistence unit`() {
+        // The direct factory query below does not exercise Panache's session lookup.
+        // Keep a real HTTP read so a stale factory between provider classes cannot hide.
+        val templates = given()
+            .baseUri("http://localhost:$testPort")
+            .get("/api/v1/documents/templates")
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath()
+            .getList<Map<String, Any>>("$")
+        assertThat(templates).isNotEmpty()
     }
 
     @Inject

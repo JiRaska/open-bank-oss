@@ -16,6 +16,9 @@ dependencies {
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.smallrye.kafka)
+    // Independent, opt-in shadow topology; Quarkus BOM keeps clients and Streams aligned.
+    implementation("org.apache.kafka:kafka-streams")
+    testImplementation("org.apache.kafka:kafka-streams-test-utils")
     implementation(libs.quarkus.redis.client)
     // ADR-0220 D3.5 fraud-hold signal: FraudOutboxDispatcher (outbox drain) and
     // FraudHoldService.sweepExpired (TTL expiry) both need @Scheduled — first use in this service.
