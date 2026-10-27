@@ -84,6 +84,34 @@ class FeeAssessmentServiceTest {
     }
 
     @Test
+    fun `a EUR fee is assessed and charged in EUR, the ledger books it on its own fee-income account`(): Unit =
+        runBlocking {
+            val billing = AccountBilling("prod-1", FeeContext(currency = "EUR"), OPENED)
+            val a = service(billing, listOf(fee("f1", "12.50", currency = "EUR"))).assess("c", "acc", "EUR")
+            assertThat(a.skipped).isFalse()
+            val cmd = a.journalCommands().single()
+            assertThat(cmd.currency).isEqualTo("EUR")
+            assertThat(cmd.amount).isEqualByComparingTo("12.50")
+            assertThat(skipCount("FEE_INCOME_CURRENCY_UNMAPPED")).isZero()
+        }
+
+    @Test
+    fun `a currency the ledger has no fee-income account for is a counted skip, never a zero charge`(): Unit =
+        runBlocking {
+            val billing = AccountBilling("prod-1", FeeContext(currency = "CHF"), OPENED)
+            val revisions = FakeRevisions(listOf(fee("f1", "7", currency = "CHF")))
+            val a = service(billing, emptyList(), revisions).assess("c", "acc", "CHF")
+            assertThat(a.skipped).isTrue()
+            assertThat(a.skipReason).isEqualTo("FEE_INCOME_CURRENCY_UNMAPPED")
+            assertThat(a.assessedFees).isEmpty()
+            assertThat(a.journalCommands()).isEmpty()
+            assertThat(skipCount("FEE_INCOME_CURRENCY_UNMAPPED")).isEqualTo(1.0)
+            // refused before anything is pinned or read: nothing is half-done for a currency we cannot book
+            assertThat(pins.pins).isEmpty()
+            assertThat(revisions.termsReads).isEmpty()
+        }
+
+    @Test
     fun `unresolved account context skips the assessment and charges nothing`(): Unit = runBlocking {
         val a = service(null, emptyList()).assess("c", "acc", "CZK")
         assertThat(a.skipped).isTrue()
@@ -341,5 +369,28 @@ class FeeAssessmentServiceTest {
         // a revision without such components does not count
         serviceWith(FakeRevisions(listOf(fee("f1", "5")))).assess("c", "acc-3", "CZK")
         assertThat(meters.counter("openbank.billing.assessment.no_fee_identity").count()).isEqualTo(2.0)
+    }
+
+    @Test
+    fun `assessment captures its own clock and actual opening without guessing a manual trigger`(): Unit = runBlocking {
+        val account = billing()
+        val at = java.time.Instant.parse("2026-05-01T23:30:00Z")
+        val clock = java.time.Clock.fixed(at, java.time.ZoneId.of("Europe/Prague"))
+        val assessed = FeeAssessmentService(
+            accounts(account),
+            FakeRevisions(listOf(fee("f1", "5"))),
+            pins,
+            meters,
+            clock,
+        )
+        val monthly = assessed.assess("2026-05", "acc-clock-monthly", "CZK", "MONTHLY").shadowInput!!
+        assertThat(monthly.evaluatedAt).isEqualTo(at)
+        assertThat(monthly.evaluationZone).isEqualTo("Europe/Prague")
+        assertThat(monthly.openedAt).isEqualTo(account.openedAt)
+        assertThat(monthly.scheduledCadence).isEqualTo("MONTHLY")
+        assertThat(monthly.scheduledTrigger).isNull()
+        val manual = assessed.assess("2026-05", "acc-clock-manual", "CZK").shadowInput!!
+        assertThat(manual.scheduledCadence).isNull()
+        assertThat(manual.scheduledTrigger).isNull()
     }
 }

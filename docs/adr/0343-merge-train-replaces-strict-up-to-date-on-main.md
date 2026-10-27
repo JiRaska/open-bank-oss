@@ -66,7 +66,7 @@ the gitops App**, and the strict up-to-date policy is turned off. Concretely:
 2. **Candidates.** Open, non-draft, same-repository PRs with auto-merge armed, every required
    context of `main-protection` (other than `merge-train` itself) `success` at the head, no
    `agent-pr-guard` refusal, and no App-posted `merge-train` failure on that head (a culprit waits
-   for a push). `codex/` branches are excluded. A PR touching **anything under `.github/` that
+   for a push). `codex/` branches require an explicit owner decision on the exact PR head (see Owner-approved agent PRs below). A PR touching **anything under `.github/` that
    can change what executes** — every workflow and action file, every script of any extension
    (and any extension-less file), `gates.yaml` (its run commands), pip requirement pins, agent
    prompts, the regen inventory — or **any file the generator runner would execute** never
@@ -268,7 +268,7 @@ For each armed, non-draft PR that `qualifies()` refuses ONLY for the manual-lane
    would mean a second definition of "up to date". With strict off `auto-update-armed-prs.yml` exits before enumerating
    PRs, so the train owns this update.
 Refusals other than the manual-lane one keep a PR out of this lane: red, pending, disarmed, draft,
-fork, `codex/`, a `merge-train` failure, `agent-pr-guard`, a path with a control character, and a
+fork, a `codex/` head without owner approval, a `merge-train` failure, `agent-pr-guard`, a path with a control character, and a
 symlink or gitlink. **The human gate is unchanged:** only ARMED PRs are considered, and arming
 money-path, governance and workflow PRs is already human-only through the owner's local hook — the
 strict lane adds no new way for an unarmed or agent-armed workflow change to reach main.
@@ -502,9 +502,34 @@ A candidate build drops because `git merge-tree` conflicts with main, and a stri
 
 The fixed `RESERVATION_TIMEOUT_S` (64 min from the head's committer time) is replaced: a reservation is released when the holder's CI is idle — no check run on the head started or completed for `RESERVATION_STALL_S` (15 min, 3 x the longest gap between consecutive job completions measured on #13204's four heads), with the idle clock starting at the committer time so a CI that never starts is a stall too — or when it passes `RESERVATION_CEILING_S` (4 h from the committer time), and a future-dated head still holds nothing (#13485). Progress is read from GitHub's check-run timestamps, never from the author-supplied commit date. Measured 2026-10-22: #13204's Services CI took 87.1, 70.4 and 67.8 min per head; the 64 min bound released it 2 min 50 s before its CI went green, the next strict-lane PR merged 6 s later, and the next update-branch restarted the clock — a livelock the fixed bound cannot escape for any CI slower than it.
 
+### Amendment (2026-10-23) — a green holder is done, not stalled (#13400)
+
+The stall rule applies only while the holder's required contexts are pending; a green, current holder merges on that tick and keeps only the future-stamp guard and the 4 h ceiling, which it reaches only if its merge is refused for hours (#13608 was released ~15 min after going green).
+
 ### Amendment (2026-10-22) — bounded strict deferral: one carrier during a running reservation (#13400)
 
 While a strict reservation's CI is running and that head has never yielded, settle lets the train build and publish one carrier from green candidates; publish records the yield as the App's `merge-train/strict-deferral` status on the strict head, a green carrier merges past it only under that record, the update-branch that follows inherits it through the first parent, and a green strict head is never pre-empted — so the strict PR still merges within two CI cycles.
+
+### Amendment (2026-10-25) — a verified green carrier merges first (#13400)
+
+This replaces "a green strict head is never pre-empted" in the deferral amendment above. A carrier that is verified green — every required context green on its exact head over live main, extra gates satisfied, the record and chain checks passed — merges in that settle tick before any strict-lane PR is served, and before any `merge-train` success is posted on a strict head; a success the App left on the holder's head is withdrawn first, so GitHub auto-merge cannot act on it while main moves. Measured 2026-10-24 08:00Z to 2026-10-25 11:50Z: 25 merges and 21 carriers; ten full-CI carriers ran 51-91 min (median about 61), and two green carriers (#13790, #13853) were held for a green strict head and voided by its merge in the same tick. A strict PR waits for a still-running carrier only while that carrier is younger than `CARRIER_PRIORITY_S` (120 min, 2 x the median, above the longest measured run); pre-empting running carriers instead, with strict merges arriving about hourly, would void nearly every carrier. Bound: a strict PR waits at most `CARRIER_PRIORITY_S` for a running carrier plus one tick for a green one, and is pre-empted at most once per reservation (its update inherits the deferral record), so it still merges within two of its own CI cycles after its reservation starts.
+
+### Amendment (2026-10-26) — the carrier overlaps the strict CI from the update tick; a conflicting strict PR holds nothing (#13400)
+
+Measured from the 25 non-cancelled settle runs between 2026-10-26 14:25Z and 18:20Z (merge-train.yml run logs): carrier #13939 ran 15:01-16:06 and merged 5, carrier #13946 ran 17:14-18:17 and merged 3, and no carrier existed for the 68 min in between. The deferral above did open twice in that gap (16:18 and 16:38, `in_flight: False`), but both carriers died on GitHub API errors (a 503 in publish, a 403 installation rate limit in build). Every update-branch tick (16:10, 16:44, 16:50, 16:56) reported `in_flight` and built nothing, because the reservation started in that tick and the deferral could only open on the next. Two changes:
+
+- **Overlap from the update tick.** When settle issues exactly one strict update-branch, no carrier is open, train candidates wait, main is green, and the head it updated from never yielded (`deferral_used`), the same tick builds a carrier over that same main. Publish records the yield on the updated head as before, and a re-update inherits it through the first parent. The bound is unchanged: one yield per reservation, so the strict PR still merges within two of its own CI cycles.
+- **A pre-empted head is re-updated at once.** A strict head that yielded (it carries `merge-train/strict-deferral`) and is behind main because its carrier merged first is update-branched in that tick, while its now-useless CI is still running. Before this, it was re-updated only after that CI finished, and in the meantime further carriers could be built over it, so the one-yield bound did not hold.
+- **A strict PR that conflicts with main holds nothing.** Whether it conflicts is decided locally with `git merge-tree`, with no API call. The PR is not update-branched, holds no reservation, and is told once per head (a `merge-train` failure starting `conflicts with main`, the `merge-train/notice` marker, and one comment listing the paths). The next strict PR is served in the same tick. #13739 had been re-requested on every tick since 07:12Z. A refusal that merge-tree did not predict keeps the existing `update-branch refused` notice.
+
+- **A GitHub API outage ends the tick cleanly, without a verdict.** All of the train's API calls go through one helper, `api()`, and the policy lives only there. A GET is retried with bounded exponential backoff on 502/503/504, a connection reset or timeout, and a secondary rate limit that comes with `Retry-After`. Backoff is 2 s doubling up to 60 s, 5 attempts per call, and at most 300 s of sleep per process, well inside the 30-45 min step timeouts. A write is never retried, because its effect may already have landed. Primary quota exhaustion (403/429 with `x-ratelimit-remaining: 0`) is not retried. The tick aborts at once and logs the reset time. 401, a 403 without a rate-limit signal, and 4xx validation errors are returned unchanged, so every caller stays fail-closed. An abort exits the mode cleanly: build reports no train, settle reports in flight, and no status, comment, bisect or halving touches any member. Only owner-approval exits non-zero.
+- **Quota, and never a cached verdict.** Only planning reads are memoised: settle's view of main and the armed PRs, and build's batch plan. Those reads are the check-runs and statuses of a commit, a sha's workflow runs, the ruleset and the open-PR list, and every write clears the memo. Publish plans from live reads, extra-gate runs included. A write that acts on a verdict re-reads it live in the `GitHub` class itself, where the memo neither serves nor stores (`deciding()`), so no call site can skip the re-read. A merge re-reads the ruleset (the merge guard) and every required context on the exact head. A `merge-train` success status re-reads the head's required contexts. A strict update-branch already refused for the same head over the same main is not requested again. On the self-test fixture (#13739 shape) a steady-state settle tick makes 17 API calls, against 21 before.
+
+A strict head that goes green while a carrier is still running keeps waiting, bounded by `CARRIER_PRIORITY_S` (120 min from the carrier's creation). Measured that day: carriers merged 5 and 3 (mean 4) in about 63-65 min, a strict PR merges one, and #13934/#13903 went green at 17:48/17:54 and waited about 25-30 min for #13946. Voiding the carrier would trade about 4 merges plus one full carrier CI for one merge that is roughly 30 min earlier, so waiting gives more merges per hour. The worst-case strict wait is `CARRIER_PRIORITY_S` minus the carrier's age when the strict head went green, plus one more CI cycle after the carrier merges.
+
+### Amendment (2026-10-24) — reviewed gate code rides a train, never with a regeneration commit (#13400)
+
+`.github/scripts/check-*.py` and `.github/scripts/check-*.sh` leave the strict lane (allow-list `GATE_CODE_GLOBS`; any other `.github/` path stays strict). `.github/gates/gates.yaml` was in that list and left it again (#13837): it declares every gate's `run`, `selftest`, `mode`, `when` and `budget_seconds`, so a PR could retire a privileged gate by editing its declaration rather than its script. Separating a privileged entry's edit from an ordinary one needs a YAML parse, which the privileged jobs cannot do under `python3 -I -S` without a hand-rolled parser, so every `gates.yaml` change takes the strict lane. A carrier's CI runs the combined head, so a gate change is judged with the code it judges, as in the strict lane, and bisect isolates a culprit. The one strict-lane property a train lacked is that main's gates prove the regeneration commit, so a train carrying gate code carries no regeneration commit: build keeps the oldest member's class and defers the other without a notice, and publish rejects the mix. Check scripts that prove a derived output, run in the pinned extra gate's workflow, or judge a carrier or the merge contract stay strict (`PRIVILEGED_GATE_CODE`, re-derived from the tree by the self-test). Gate code next to a symlink or gitlink never rides; generators see main's copy of gate code during regeneration; and scanner suppression files (`.gitleaksignore`, `.gitleaks.toml`, `.trivyignore`, `.semgrep*`) take the strict lane.
 
 ## Rollout
 
@@ -634,3 +659,42 @@ undo in git.
 - ADR-0254 — ruleset context parity gate
 - `.github/workflows/auto-update-armed-prs.yml` — the strict-mode workaround this supersedes
 - `.github/workflows/merge-train.yml`, `.github/scripts/merge-train.py`
+
+
+## Owner-approved agent PRs
+
+A `codex/` prefix remains excluded unless the User repository owner records an explicit decision
+for that PR and its full current head SHA. The separate **Merge train owner approval** workflow
+runs only from `main`, checks both the original and triggering actor against the owner before
+minting an App token, and rejects reruns. Its isolated main script rechecks the live repository
+owner, numeric actor identity, PR number, SHA, same-repository head/base, target `main`, open state
+and non-draft state before granting approval. Revocation also works after drafting or closing.
+Neither PR code nor artifacts are executed with that token. Organization ownership fails closed;
+this mechanism currently targets this user-owned repository.
+
+The writer posts only `merge-train/owner-approval`, through the existing GitOps App, with a
+canonical PR-bound description on the supplied SHA. It never posts the required `merge-train`
+verdict, approves a GitHub review, arms auto-merge or merges. The train accepts only the latest
+App-authored decision on that SHA; another producer, PR number, failure/revocation or missing
+record does not authorize a merge. A push (including strict-lane update-branch) expires approval
+because it changes the head SHA. Approval is rechecked before the merge API call.
+
+This changes only the prefix exclusion. A PR must still be explicitly armed, non-draft and
+same-repository, pass every required and extra gate, and obey all conflict, unsafe-path,
+strict-lane, current-main and App-pinned producer checks. Approval is a decision record, never
+substitute CI evidence. An executable workflow/governance change still uses the strict lane,
+including its update-branch and fresh CI cycle.
+
+After reviewing the actual head, the owner may run:
+
+```sh
+gh workflow run merge-train-owner-approval.yml --repo JiRaska/open-bank-oss --ref main \
+  -f pr=PR_NUMBER -f head=FULL_CURRENT_SHA -f decision=approve
+```
+
+Use `decision=revoke` to withdraw that exact decision. A rerun cannot replay an old approval;
+submit a new dispatch. A successful decision triggers the ordinary train reader; it does not
+make other gates green. If strict lane updates the PR, inspect the combined head and CI and
+submit a new decision for the new SHA. The workflow exists only after this governance change
+lands through the existing owner-authorized non-agent-prefix strict lane; it cannot authorize
+its own installation from an untrusted branch.

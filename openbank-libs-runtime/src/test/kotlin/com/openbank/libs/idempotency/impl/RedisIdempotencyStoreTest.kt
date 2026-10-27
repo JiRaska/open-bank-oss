@@ -10,6 +10,7 @@ import com.openbank.libs.api.error.IdempotencyRequestInProgressExceptionMapper
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRecordCorruptException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.idempotency.IdempotencyScope
 import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.idempotency.ReserveResult
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -20,13 +21,17 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands
 import io.quarkus.redis.datasource.value.SetArgs
 import io.smallrye.mutiny.Uni
 import io.vertx.mutiny.redis.client.Response
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.supervisorScope
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.CompletableFuture
 
 /**
  * Binds an `Idempotency-Key` to its request fingerprint. The Redis commands are backed by an
@@ -216,6 +221,82 @@ class RedisIdempotencyStoreTest {
         store.release("k1", first)
         assertThat(store.reserve("k1", first)).isInstanceOf(ReserveResult.Replay::class.java)
     }
+
+    @Test
+    fun `scoped rollout blocks matching legacy work and releases its temporary claim`(): Unit = runBlocking {
+        val scope = IdempotencyScope("payments", "test-principal")
+        val timestamp = "2026-09-26T10:00Z"
+        listOf(
+            "inflight|$first|$timestamp" to ReserveResult.InFlight,
+            "v2|$first|201|$timestamp|{}" to ReserveResult.Mismatch,
+        ).forEach { (legacy, expected) ->
+            backing["idempotency:rollout"] = legacy
+
+            assertThat(store.reserve(scope, "rollout", first, 300)).isEqualTo(expected)
+            assertThat(backing).doesNotContainKey("idempotency:${scope.storeKey("rollout")}")
+            assertThat(backing["idempotency:rollout"]).isEqualTo(legacy)
+
+            backing.remove("idempotency:rollout")
+            assertThat(store.reserve(scope, "rollout", first, 300)).isEqualTo(ReserveResult.Reserved)
+            store.release(scope, "rollout", first)
+        }
+    }
+
+    @Test
+    fun `scoped rollout retains its claim when legacy work belongs to another fingerprint`(): Unit = runBlocking {
+        val scope = IdempotencyScope("payments", "test-principal")
+        val timestamp = "2026-09-26T10:00Z"
+        listOf(
+            "inflight|$other|$timestamp",
+            "v2|$other|201|$timestamp|{}",
+            "201|$timestamp|{}",
+        ).forEach { legacy ->
+            backing["idempotency:rollout"] = legacy
+
+            assertThat(store.reserve(scope, "rollout", first, 300)).isEqualTo(ReserveResult.Reserved)
+            assertThat(store.reserve(scope, "rollout", first, 300)).isEqualTo(ReserveResult.InFlight)
+            assertThat(backing["idempotency:rollout"]).isEqualTo(legacy)
+            store.save(scope, "rollout", first, 201, "scoped response", 86400)
+            assertThat(store.lookup(scope.storeKey("rollout"), first)!!.responseBody).isEqualTo("scoped response")
+            backing.remove("idempotency:${scope.storeKey("rollout")}")
+        }
+    }
+
+    @Test
+    fun `Redis failures after suspension propagate instead of becoming successful misses or writes`(): Unit =
+        runBlocking {
+            listOf("get", "legacy save", "save", "reserve", "release").forEach { name ->
+                supervisorScope {
+                    val read = CompletableFuture<String>()
+                    val command = CompletableFuture<Response>()
+                    val values = mockk<ReactiveValueCommands<String, String>>()
+                    every { values.get(any()) } returns Uni.createFrom().completionStage(read)
+                    val redis = mockk<ReactiveRedisDataSource>()
+                    every { redis.value(String::class.java) } returns values
+                    every { redis.execute("EVAL", *anyVararg()) } returns Uni.createFrom().completionStage(command)
+                    val failingStore = RedisIdempotencyStore(redis, clock)
+                    val result = async(start = CoroutineStart.UNDISPATCHED) {
+                        when (name) {
+                            "get" -> failingStore.get("failure")
+                            "legacy save" -> failingStore.save("failure", 201, "{}")
+                            "save" -> failingStore.save("failure", first, 201, "{}")
+                            "reserve" -> failingStore.reserve("failure", first)
+                            "release" -> failingStore.release("failure", first)
+                        }
+                    }
+                    assertThat(result.isCompleted).describedAs(name).isFalse()
+
+                    val failure = IllegalStateException("Redis unavailable during $name")
+                    read.completeExceptionally(failure)
+                    command.completeExceptionally(failure)
+
+                    val propagated = runCatching { result.await() }.exceptionOrNull()
+                    assertThat(propagated).describedAs(name)
+                        .isInstanceOf(IllegalStateException::class.java)
+                        .hasMessage(failure.message)
+                }
+            }
+        }
 
     @Test
     fun `reuse maps to 409 IDEMPOTENCY_KEY_REUSED without echoing the key`() {

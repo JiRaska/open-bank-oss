@@ -75,6 +75,15 @@ class ScaPactProviderVerificationTest {
         // Must match SavingsWithdrawScaPactConsumerTest (openbank-account-service).
         private val SAVINGS_CHALLENGE_ID = UUID.fromString("5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a")
         private val SAVINGS_PARTY_ID = UUID.fromString("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+
+        // Must match DocumentScaConsumePactConsumerTest (openbank-document-service).
+        const val DOCUMENT_SIGNING_STATE =
+            "a COMPLETED DOCUMENT_SIGNING SCA challenge bound to a document ceremony exists"
+        private val DOCUMENT_CHALLENGE_ID = UUID.fromString("d0c0c0c0-0000-4000-8000-000000000001")
+        private val DOCUMENT_PARTY_ID = UUID.fromString("d0c0c0c0-0000-4000-8000-000000000002")
+        const val DOCUMENT_SHA256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        const val DOCUMENT_CEREMONY_ID = "ceremony-doc-0001"
+        const val NO_SUCH_CHALLENGE_STATE = "no SCA challenge exists with the requested id"
     }
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -247,5 +256,55 @@ class ScaPactProviderVerificationTest {
             ),
         )
         Unit
+    }
+
+    /**
+     * ADR-0169 D2: document-service's document-signing consume. Seeded COMPLETED, unconsumed,
+     * DOCUMENT_SIGNING, with the device-signed `documentSha256` + `ceremonyId` pair, so a consume
+     * restating the same pair succeeds while any other document hash 409s on the dynamic-linking
+     * check without burning the challenge (the state handler re-reads the version, so the second
+     * interaction finds it spendable again). A general consumer (`pact-verifier` is not a reserved
+     * principal) may spend it: the challenge carries no reserved-namespace approvalRequestId.
+     * Constants must match DocumentScaConsumePactConsumerTest (openbank-document-service) — and,
+     * per the folder twin's upkeep note, this class must carry the same handler.
+     */
+    @State(DOCUMENT_SIGNING_STATE)
+    fun stateCompletedDocumentSigningChallengeExists() = runOnVertxContext {
+        challengeRepo.save(
+            ScaChallenge(
+                id = DOCUMENT_CHALLENGE_ID,
+                version = challengeRepo.findById(DOCUMENT_CHALLENGE_ID)?.version ?: 0,
+                partyId = DOCUMENT_PARTY_ID,
+                purpose = ScaPurpose.DOCUMENT_SIGNING,
+                method = ScaMethod.PUSH_NOTIFICATION,
+                status = ScaStatus.COMPLETED,
+                expiresAt = OffsetDateTime.now().plusMinutes(5),
+                completedAt = OffsetDateTime.now(),
+                consumedAt = null,
+                dynamicLinkingData = DynamicLinkingData(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    documentSha256 = DOCUMENT_SHA256,
+                    ceremonyId = DOCUMENT_CEREMONY_ID,
+                ),
+                createdAt = OffsetDateTime.now(),
+            ),
+        )
+        Unit
+    }
+
+    /**
+     * document-service's unknown-challenge consume leg. Deliberately no seed: the pact addresses
+     * an id this test never creates, and the handler must EXIST (with this exact name, matching
+     * DocumentScaConsumePactConsumerTest) because the folder twin's [au.com.dius.pact.provider.
+     * junitsupport.loader.PactFilter] drops stateless interactions from the git replay — the
+     * interaction must declare a providerState to run anywhere.
+     */
+    @State(NO_SUCH_CHALLENGE_STATE)
+    fun stateNoSuchChallengeExists() {
+        // No seed: the requested id is one this provider test never creates.
     }
 }

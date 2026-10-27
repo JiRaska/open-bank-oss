@@ -40,9 +40,11 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
-    // Pact consumer: AgentBalanceHoldsPactConsumerTest pins the get_balance_holds read tool
-    // against balance-service — the contract test for the GET /{accountId}/holds endpoint this
-    // PR adds (ADR-0063).
+    // Pact consumers pin balance-holds, sanctions and SEPA Instant read tools against their
+    // providers (AgentBalanceHoldsPactConsumerTest, AgentSanctionsReadPactConsumerTest and
+    // AgentSepaInstantReadPactConsumerTest, ADR-0063).
+    // Pact consumers also cover account/transaction, FX, AML, Catalog and Ledger read tools.
+    // They drive read-adapter dispatch through mock-server clients, not live OIDC.
     testImplementation(libs.pact.consumer)
     // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
     // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.
@@ -55,6 +57,12 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Standalone V6 -> V7 migration test runs outside Quarkus' isolated Flyway classloader.
+    testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
+    // OpenAPI 3.1 uses JSON Schema 2020-12; prove null unions with the fleet's existing validator.
+    testImplementation("com.networknt:json-schema-validator:1.5.9") {
+        exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
+    }
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
 }
 

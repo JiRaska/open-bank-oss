@@ -218,22 +218,43 @@ unmigrated_branch_holds() {
     "$SUPERSEDE_BRANCH_HOLDS_HOOK" "$1"
     return
   fi
-  local head branch_rules main_rules
+  local head tmpd rc
   head="$(gh pr view "$1" --repo "$REPO" --json headRefOid --jq .headRefOid)" || return 1
   [[ "$head" =~ ^[0-9a-f]{40}$ ]] || return 1
-  branch_rules="$(gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$RULES_PATH?ref=$head")" || return 1
-  main_rules="$(gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$RULES_PATH?ref=main")" || return 1
-  BRANCH_RULES="$branch_rules" MAIN_RULES="$main_rules" "${DEPLOY_HOLD_PYTHON:-python3}" -c '
-import os, yaml
-def held(text):
-    doc = yaml.safe_load(text) or {}
-    services = ((doc.get("deploy_holds") or {}).get("services")) or {}
+  # By FILE, never env/argv: rules.yaml exceeds Linux MAX_ARG_STRLEN (128 KiB per string), and an
+  # env var carrying it makes exec fail with "Argument list too long" (E2BIG).
+  tmpd="$(mktemp -d)" || return 1
+  if gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$RULES_PATH?ref=$head" >"$tmpd/branch.yaml" &&
+     gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$RULES_PATH?ref=main" >"$tmpd/main.yaml"; then
+    diff_deploy_holds "$tmpd/branch.yaml" "$tmpd/main.yaml"; rc=$?
+  else
+    rc=1
+  fi
+  rm -rf "$tmpd"
+  return "$rc"
+}
+
+# Services held in rules.yaml file $1 but not in file $2 (paths, not contents — see above).
+diff_deploy_holds() {
+  "${DEPLOY_HOLD_PYTHON:-python3}" -c '
+import sys, yaml
+def held(path):
+    with open(path) as f:
+        doc = yaml.safe_load(f)
+    # Fail closed: an empty body parses to None, which would read as "no holds".
+    if not isinstance(doc, dict) or not doc:
+        raise SystemExit("rules.yaml is empty or not a mapping: " + path)
+    if "deploy_holds" not in doc or not isinstance(doc["deploy_holds"], dict):
+        raise SystemExit("deploy_holds missing or not a map: " + path)
+    services = doc["deploy_holds"].get("services")
+    if services is None:
+        services = {}
     if not isinstance(services, dict):
         raise SystemExit("deploy_holds.services is not a map")
     return set(services)
-for name in sorted(held(os.environ["BRANCH_RULES"]) - held(os.environ["MAIN_RULES"])):
+for name in sorted(held(sys.argv[1]) - held(sys.argv[2])):
     print(name)
-'
+' "$1" "$2"
 }
 
 # rc 0 iff PR $1 already carries the notice marked $2 (default: the owner-hold notice).
@@ -1002,6 +1023,68 @@ HOOK
   else
     echo "self-test case 47 OK (legacy holds, disjoint pins -> rc=0)"
   fi
+
+  # case 48 — E2BIG regression: a rules.yaml over MAX_ARG_STRLEN (128 KiB) must be diffed by file.
+  local bigd bigout bigrc
+  bigd="$(mktemp -d)"
+  {
+    printf 'filler:\n'
+    for _ in $(seq 1 6000); do printf '  - "padding padding padding padding padding"\n'; done
+  } >"$bigd/pad.yaml"
+  { printf 'deploy_holds:\n  services:\n    openbank-kyc-service: {}\n    openbank-fraud-service: {}\n'; cat "$bigd/pad.yaml"; } >"$bigd/branch.yaml"
+  { printf 'deploy_holds:\n  services:\n    openbank-kyc-service: {}\n'; cat "$bigd/pad.yaml"; } >"$bigd/main.yaml"
+  bigout="$(diff_deploy_holds "$bigd/branch.yaml" "$bigd/main.yaml" 2>&1)" && bigrc=0 || bigrc=$?
+  if [ "$(wc -c <"$bigd/branch.yaml")" -le 204800 ] || [ "$bigrc" -ne 0 ] || [ "$bigout" != "openbank-fraud-service" ]; then
+    echo "SELF-TEST FAIL case 48: >200 KiB rules diff rc=$bigrc out='$bigout'"; ok=1
+  else
+    echo "self-test case 48 OK (>200 KiB rules.yaml diffed by file -> rc=0, openbank-fraud-service)"
+  fi
+  rm -rf "$bigd"
+
+  # case 48b — platform-independent E2BIG guard: the hold check must receive FILE PATHS whose
+  # content is the fetched rules.yaml, never the content in argv/env (Linux caps one string at
+  # 128 KiB, macOS does not, so a size-based test cannot see a revert there).
+  local fk fkd fkrc
+  fkd="$(mktemp -d)"
+  mkdir "$fkd/bin"
+  cat >"$fkd/bin/gh" <<'GHSTUB'
+#!/bin/bash
+case "$*" in
+  *"pr view"*) echo 0123456789012345678901234567890123456789 ;;
+  *) printf 'deploy_holds:\n  services: {}\n' ;;
+esac
+GHSTUB
+  cat >"$fkd/py" <<'PYSTUB'
+#!/bin/bash
+# stub python3: records whether its two trailing args are readable files holding a mapping doc
+shift 2
+[ -f "$1" ] && [ -f "$2" ] && grep -q '^deploy_holds:' "$1" && grep -q '^deploy_holds:' "$2" && exit 0
+echo "hold check got non-file args" >&2; exit 97
+PYSTUB
+  chmod +x "$fkd/bin/gh" "$fkd/py"
+  # shellcheck disable=SC2031
+  ( export PATH="$fkd/bin:$PATH" REPO=fixture/repo DEPLOY_HOLD_PYTHON="$fkd/py"; unmigrated_branch_holds 1 ) >/dev/null 2>&1 && fkrc=0 || fkrc=$?
+  if [ "$fkrc" -ne 0 ]; then
+    echo "SELF-TEST FAIL case 48b: hold check was not invoked with readable rules.yaml file paths; rc=$fkrc"; ok=1
+  else
+    echo "self-test case 48b OK (hold check invoked with file paths)"
+  fi
+  # case 48c — empty body and malformed YAML must be non-zero (fail closed), not "no holds".
+  for fk in empty malformed scalar nodeploy_holds; do
+    case "$fk" in
+      empty) : >"$fkd/a.yaml" ;;
+      malformed) printf 'deploy_holds: [unclosed\n  - : :\n' >"$fkd/a.yaml" ;;
+      scalar) printf 'just a string\n' >"$fkd/a.yaml" ;;
+      nodeploy_holds) printf 'other: 1\n' >"$fkd/a.yaml" ;;
+    esac
+    printf 'deploy_holds:\n  services: {}\n' >"$fkd/b.yaml"
+    diff_deploy_holds "$fkd/a.yaml" "$fkd/b.yaml" >/dev/null 2>&1 && fkrc=0 || fkrc=$?
+    [ "$fkrc" -ne 0 ] || { echo "SELF-TEST FAIL case 48c: $fk branch rules.yaml read as no-holds (rc=0)"; ok=1; }
+    diff_deploy_holds "$fkd/b.yaml" "$fkd/a.yaml" >/dev/null 2>&1 && fkrc=0 || fkrc=$?
+    [ "$fkrc" -ne 0 ] || { echo "SELF-TEST FAIL case 48c: $fk main rules.yaml read as no-holds (rc=0)"; ok=1; }
+  done
+  echo "self-test case 48c checked (empty/malformed/scalar/no deploy_holds -> non-zero)"
+  rm -rf "$fkd"
 
   # case 29 — producer-run isolation (#13460) suffixes every branch with `-run<id>`. The sha must
   # still parse, or KEEP_SHA is empty and every run classifies every predecessor SKIP — measured on

@@ -44,6 +44,7 @@ MAX_ARCHIVE_MEMBERS = 20_000
 MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
 MAX_MEMBER_BYTES = 64 * 1024 * 1024
 SNAPSHOT_PREFIX = "test-intelligence-snapshot-"
+SEED_ALIAS = "admin-ui-test-intelligence-seed"
 SEEDED_LIST_FIELDS = ("mutations", "performance", "performanceHistory", "history", "runHistory", "testCases")
 COMPONENT = re.compile(r"openbank-[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 SHA = re.compile(r"[0-9a-f]{7,40}\Z")
@@ -374,8 +375,101 @@ def merge_ancillary(core: dict, seed: dict | None) -> dict:
     return core
 
 
+def aggregate_report(archive: bytes, *, named_seed: bool = False) -> tuple[dict, dict | None]:
+    """Read the original report unchanged; the alias adds a producer-only sidecar."""
+    try:
+        entries = safe_archive_members(archive)
+        with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+            reports = [(info, path) for info, path in entries if path.name == "test-intelligence.json"]
+            if len(reports) != 1:
+                raise CollectionError("aggregate snapshot artifact must contain exactly one test-intelligence.json")
+            report = json.loads(zipped.read(reports[0][0]))
+            provenance = None
+            if named_seed:
+                files = {str(path): info for info, path in entries if not info.is_dir()}
+                if set(files) != {"test-intelligence.json", "seed-provenance.json"}:
+                    raise CollectionError("named aggregate must contain report and provenance only")
+                provenance = json.loads(zipped.read(files["seed-provenance.json"]))
+    except (zipfile.BadZipFile, json.JSONDecodeError, ValueError) as exc:
+        if isinstance(exc, CollectionError):
+            raise
+        raise CollectionError("aggregate snapshot archive is corrupt") from exc
+    if (not isinstance(report, dict) or report.get("schemaVersion") != 1
+            or not isinstance(report.get("components"), list) or not isinstance(report.get("totals"), dict)):
+        raise CollectionError("aggregate snapshot schema is incomplete")
+    return report, provenance
+
+
+def named_aggregate(repo_slug: str, token: str) -> tuple[bool, dict | None]:
+    """One complete exact-name inventory; absent or expired aliases permit legacy lookup."""
+    query = urlencode({"name": SEED_ALIAS, "per_page": PER_PAGE})
+    listing = api_json(f"{API_ORIGIN}/repos/{repo_slug}/actions/artifacts?{query}", token)
+    artifacts, total = listing.get("artifacts"), listing.get("total_count")
+    if (not isinstance(artifacts, list) or type(total) is not int or total < 0
+            or len(artifacts) != total or total > PER_PAGE):
+        raise CollectionError("named aggregate inventory is incomplete or invalid")
+    if not artifacts:
+        return False, None
+    identities = set()
+    for artifact in artifacts:
+        if (not isinstance(artifact, dict) or artifact.get("name") != SEED_ALIAS
+                or type(artifact.get("id")) is not int or artifact["id"] <= 0
+                or artifact["id"] in identities or _timestamp(artifact.get("created_at")) is None
+                or type(artifact.get("expired")) is not bool):
+            raise CollectionError("named aggregate artifact identity is invalid or ambiguous")
+        identities.add(artifact["id"])
+    ordered = sorted(artifacts, key=lambda item: (_timestamp(item["created_at"]), item["id"]), reverse=True)
+    seen_runs = set()
+    for artifact in ordered:
+        producer = artifact.get("workflow_run")
+        run_id = producer.get("id") if isinstance(producer, dict) else None
+        if (type(run_id) is not int or run_id <= 0 or run_id in seen_runs
+                or producer.get("head_branch") != "main"
+                or not isinstance(producer.get("head_sha"), str)
+                or re.fullmatch(r"[0-9a-f]{40}", producer["head_sha"]) is None):
+            raise CollectionError("named aggregate producer is invalid or ambiguous")
+        seen_runs.add(run_id)
+    # The short-lived alias can remain listed after expiry. Its immutable snapshot
+    # has longer retention; only a complete, structurally valid all-expired
+    # inventory authorizes that legacy lookup. Unknown expiration is never absence.
+    if all(artifact["expired"] for artifact in ordered):
+        return False, None
+    for artifact in ordered:
+        if artifact["expired"]:
+            continue
+        producer = artifact["workflow_run"]
+        run_id = producer["id"]
+        run = api_json(f"{API_ORIGIN}/repos/{repo_slug}/actions/runs/{run_id}", token)
+        if (not trusted_deploy_run(run, repo_slug) or run.get("status") != "completed"
+                or run.get("conclusion") != "success"):
+            continue
+        if (type(run.get("id")) is not int or run["id"] != run_id
+                or type(run.get("run_attempt")) is not int or run["run_attempt"] <= 0
+                or producer.get("head_sha") != run["head_sha"] or producer.get("head_branch") != "main"):
+            raise CollectionError("named aggregate producer identity mismatch")
+        raw = api_bytes(f"{API_ORIGIN}/repos/{repo_slug}/actions/artifacts/{artifact['id']}/zip", token)
+        report, provenance = aggregate_report(raw, named_seed=True)
+        if (not isinstance(provenance, dict) or set(provenance) != {"schemaVersion", "runId", "attempt", "sourceSha", "workflowSha"}
+                or type(provenance.get("schemaVersion")) is not int or provenance["schemaVersion"] != 1
+                or type(provenance.get("runId")) is not int or provenance["runId"] != run_id
+                or type(provenance.get("attempt")) is not int or provenance["attempt"] != run["run_attempt"]
+                or provenance.get("workflowSha") != run["head_sha"]
+                or not isinstance(provenance.get("sourceSha"), str)
+                or re.fullmatch(r"[0-9a-f]{40}", provenance["sourceSha"]) is None):
+            raise CollectionError("named aggregate attempt/source provenance mismatch")
+        started, collected, created, updated = (_timestamp(run.get("run_started_at")),
+            _timestamp(report.get("collectedAt")), _timestamp(artifact.get("created_at")), _timestamp(run.get("updated_at")))
+        if not all((started, collected, created, updated)) or not started <= collected <= created <= updated:
+            raise CollectionError("named aggregate attempt timestamps are invalid or inconsistent")
+        return True, report
+    raise CollectionError("named aggregate exists but no successful trusted unexpired producer is available")
+
+
 def latest_aggregate(repo_slug: str, token: str) -> dict | None:
-    """Return the latest safely published aggregate, or None when the source is absent."""
+    """Prefer the bounded alias; retain legacy discovery only during migration."""
+    present, report = named_aggregate(repo_slug, token)
+    if present:
+        return report
     workflow_url = f"{API_ORIGIN}/repos/{repo_slug}/actions/workflows/admin-ui-deploy.yml/runs?branch=main&status=success&per_page={PER_PAGE}"
     runs = api_json(workflow_url, token).get("workflow_runs")
     if not isinstance(runs, list):
@@ -405,20 +499,7 @@ def latest_aggregate(repo_slug: str, token: str) -> dict | None:
             raise CollectionError("aggregate snapshot artifact has no valid id")
         archive_url = f"{API_ORIGIN}/repos/{repo_slug}/actions/artifacts/{artifact_id}/zip"
         archive = api_bytes(archive_url, token)
-        try:
-            with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
-                entries = safe_archive_members(archive)
-                reports = [(info, path) for info, path in entries if path.name == "test-intelligence.json"]
-                if len(reports) != 1:
-                    raise CollectionError("aggregate snapshot artifact must contain exactly one test-intelligence.json")
-                report = json.loads(zipped.read(reports[0][0]))
-        except (zipfile.BadZipFile, json.JSONDecodeError, ValueError) as exc:
-            if isinstance(exc, CollectionError):
-                raise
-            raise CollectionError("aggregate snapshot archive is corrupt") from exc
-        if (not isinstance(report, dict) or report.get("schemaVersion") != 1
-                or not isinstance(report.get("components"), list) or not isinstance(report.get("totals"), dict)):
-            raise CollectionError("aggregate snapshot schema is incomplete")
+        report, _ = aggregate_report(archive)
         return report
     return None
 

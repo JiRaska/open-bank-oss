@@ -11,6 +11,22 @@ dropped components; it does not count the components themselves. These aggregate
 identify an individual assessment;
 investigate affected records through authorized business data access, not operational logs.
 
+## Which price components are billed (#13230)
+
+A revision whose price components carry a catalog `role` is billed by role. Only `FEE` is charged; a `LIMIT`,
+`THRESHOLD` or `RATE` never is. If the revision also embeds a v1 document, a `FEE` is billed only when its
+code is one the v1 document derives, and it keeps that v1 fee's id. The idempotency key
+(cycle, account, fee id, currency) therefore stays the same when an account is re-pinned mid-cycle, and
+nothing is charged twice. A `FEE` with any other code is dropped and counted as
+`openbank.billing.fee.component.dropped{reason=NOT_IN_LEGACY_DOCUMENT}`. A revision with no roles at all
+is billed by the legacy match against its embedded v1 fees, exactly as before.
+
+A dropped `NOT_IN_LEGACY_DOCUMENT` fee is never charged, so it is lost revenue on every assessment
+under that revision. The `BillingFeeComponentNotBilledNotInLegacyDocument` alert (warning) fires on
+it. The remedy is a new catalog revision: either add the fee to the v1 product so its code is derived,
+or publish a revision without the embedded v1 document. Then re-pin the affected accounts. The steps
+are in `docs/runbooks/0031-billing-fee-not-in-legacy-document.md`.
+
 ## Billing metric prefix migration
 
 Seven billing counters now use the `openbank.billing.*` Micrometer prefix. The suffixes are
@@ -41,11 +57,50 @@ Rollout order, always:
 
 Deploying Billing before the ledger is safe while the flag is `false`.
 
-With `false` fee legs carry the accounts billing always posted (2100 / 4003). With `true` they name a class
-and role and the ledger map decides; fees in a currency without a mapped fee-income account are then
-refused by the ledger (422, tracked in #13226), exactly as they were refused before.
+With `false` a **CZK** fee's legs carry the accounts billing always posted (2100 / 4003). A non-CZK fee
+always names a class and role, whatever the flag: the two literal accounts are CZK and the ledger refuses
+them for any other currency (#13226). With `true` every fee names a class and role and the ledger map
+decides. Fee income is booked in the fee's own currency on 4003 (CZK), 4004 (EUR), 4005 (USD) and
+4006 (GBP), seeded by ledger `V34`, so deploy that ledger before this Billing release. A fee in any other
+currency is not written to the outbox: it is counted as
+`openbank_billing_assessment_skipped_total{reason="FEE_INCOME_CURRENCY_UNMAPPED"}`. To measure and replay
+the non-CZK backlog that the old behaviour stranded, follow `docs/runbooks/0030-billing-non-czk-fee-backlog.md`.
 
 **Rollback.** With the flag `true` the legs carry no account, so an older ledger (below `V32`) refuses
 every line. There is no rollback by configuration alone: set `OPENBANK_BILLING_LEDGER_POST_BY_CLASS=false` and redeploy Billing FIRST,
 and only then roll the ledger back. Rolling the ledger back first fails every posting until Billing is
 redeployed.
+
+## Product-IR shadow comparator (ADR-0352 phase 3)
+
+Billing still decides every fee the legacy way; the shadow only measures. `openbank.billing.product-ir.decision-mode` is `shadow` (default and the only accepted value); `ir`, the ADR-0352 §9 switch, is refused at boot until it is built. `ProductShadowScheduler` runs every `openbank.billing.product-shadow.every` (default 5 minutes, on by default) and re-decides committed assessments with the product IR of the account's pinned revision. It reads the IR and its signature from product-catalog once per revision and keeps a local immutable copy; the posting path never calls the catalog for it.
+
+Signature verification is `openbank.billing.product-shadow.verification.mode`: `disabled` (default; nothing is compared and every IR-bearing input counts as `verification_disabled`), `openbao` (Transit `verify` on key `product-ir-publish`; billing's role must hold `verify` only) or `hmac` (dev and test only; a production launch with it refuses to boot).
+
+Every IR `Post` is checked for money conservation before it is compared; an unbalanced one, or an evaluation the interpreter refuses, counts as `ir_evaluation_failed` and is never compared. Metrics: `openbank_product_shadow_inputs_total`, `openbank_product_shadow_compared_total{product,rule_id}`, `openbank_product_shadow_diverged_total{product,rule_id}` and `openbank_product_shadow_not_comparable_total{reason}`, all with `consumer="billing"`. Alerts: `ProductShadowStalled` (queued, none processed in 6 hours), `ProductShadowComparedNothing` (IR revisions met, none compared in 24 hours) and `ProductShadowDiverged`. Inputs that are all `no_ir` alert on nothing: those products are not migrated yet. Billing may switch to the IR only after divergence has been zero across a full cadence of every fee rule (ADR-0352 §9), behind a flag that does not exist yet.
+
+A missing balance is never substituted for a measured zero when a scheduled trigger depends on balance. Such a fee records `input_unknown` in the not-comparable counter and `INPUT_UNKNOWN` as the queue outcome, without increasing compared or divergence counters. Fees whose trigger does not need balance remain comparable.
+
+## Day-close participation (ADR-0342, #13167)
+
+Billing reports each completed Prague accounting day to ledger-service as participant `billing`
+(`BillingCloseParticipationScheduler`, hourly at :50; `openbank.billing.close.report-cron`, lookback
+`openbank.billing.close.lookback-days`, default 3), on its own identity (named oidc-client `m2m`,
+Keycloak `openbank-billing`), authorized by the ledger as `ledger.close.participate` for `billing` only.
+
+| Day state | What is reported |
+|---|---|
+| the cycle is not due (not the cron's day), or the sweep is off | SKIPPED with the reason |
+| the cycle was due and has no `billing_close_job_run` row, or a fee of the cycle is still PENDING | nothing yet - the ledger holds the day |
+| cycle ran, every fee booked | RAN (journals = POSTED/reversed fees) |
+| accounts failed to assess, sweep aborted, or a fee ended FAILED | REFUSED with a fixed category |
+
+**Missed cycle.** The cron fires once a month in Europe/Prague. `BillingCycleScheduler.catchUp`
+(every `openbank.billing.scheduler.catch-up-every`, default 15m, first 2m after boot) runs the sweep
+for the due day when the cron has already fired this month and no cycle run is recorded. It is
+idempotent by cycle id and never overlaps a running sweep.
+
+**Fee refused into a closed day.** A `409 ACCOUNTING_DAY_CLOSED` marks the fee FAILED at once and
+increments `openbank_billing_fee_post_closed_day_refusals_total`. Alert `BillingFeeRefusedIntoClosedDay`
+fires. Recover with runbook `0033-billing-fee-refused-into-closed-day.md` (four-eyes re-bill under a new
+key recorded in `billing_fee_rebill`).

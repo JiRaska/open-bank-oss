@@ -78,6 +78,12 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 ## Runbooks
 
+### Unsettled internal booking outcomes
+
+`openbank_payment_unsettled_total{rail="SWIFT",outcome="..."}` counts unsuccessful transaction-service attempts. The bounded outcomes are `mismatch`, `failed-replay`, `conflict`, `unexpected-status` and `transport-error`; five zero series are registered before any attempt. Retries count as separate attempts, so this is not a count of unique messages. Cancellation and matched successful responses do not increment it. `failed-replay` denotes a decoded FAILED response and does not prove that this call was a replay.
+
+Settlement requires HTTP 201, a COMPLETED transaction with an id, and a match to the submitted booking fields. Other outcomes do not prove booking completion; independent ACK/reject callbacks may change the business status. Preserve the existing `swift-settlement-<messageId>` key during investigation: a 409 or an uncertain response is not proof of a completed booking. Establish the transaction outcome through approved reconciliation tooling before selecting a corrective action; do not rotate the key or use a new booking POST as a lookup. transaction-service still has no public lookup by idempotency key; the runbook reads its database. The unsettled-booking alert is described below.
+
 ### Outbox lag / events not flowing
 
 1. Count pending: `SELECT count(*) FROM swift_outbox WHERE status='PENDING'`.
@@ -96,6 +102,17 @@ Symptom: outbox INSERT fails with `relation "swift_outbox_seq" does not exist`. 
 ### Idempotency key conflict
 
 A repeated submit with the same `idempotencyKey` returns the existing message. A `409` indicates a duplicate key with a conflicting payload — do not retry; fix the client or use a new key.
+
+## Bank-own transfers released by treasury
+
+Treasury's `treasury.payment.released.v1` (channel `treasury-payments-in`) becomes one bank-own
+transfer per payment, sent as pacs.009 on the route the release names; its status is published on
+`openbank.swift.institution-transfers`. A release whose value date is more than
+`institution-transfer.value-date-past-tolerance-days` in the past is refused (DT01). A transfer is
+never resubmitted blindly and a known one is never rejected: an ambiguous submission is resolved by
+asking the scheme by UETR. The resolution sweeper (`institution-transfer.resolution.*`: `every`,
+`initial-delay`, `min-age`, `batch-size`) asks about unknown submissions and SENT transfers older
+than `min-age`. A record the consumer cannot process is dead-lettered by the channel configuration.
 
 ## Tests & coverage
 
@@ -116,3 +133,44 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Outbound booking clock (#13623)
+
+The generated response's nullable internal `targetAccountId` must match the submitted null.
+An otherwise matching completed response naming an internal destination is an unsettled
+`mismatch`, not proof of this external SWIFT booking. An omitted or explicitly null destination
+continues to be accepted when all other booking fields match (#13217).
+
+Accepted MT103 submission commits the first booking-due timestamp with SENT and its existing
+status event before calling transaction-service. A missing ordering account also leaves this
+obligation pending. Only the existing strictly matched 201 COMPLETED response with a transaction
+identity can commit local booking proof together with COMPLETED and its status event. A concurrent
+ACK/rejection or revision change refuses stale completion; it does not overwrite the callback.
+An unresolved local proof can therefore coexist with a provider that actually booked. Reconcile
+the original `swift-settlement-<messageId>` key; no new financial retry or replacement key is added.
+
+`openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="SWIFT"}` is the oldest
+tracked pending local-proof age, a lower bound. It remains numeric even when
+`openbank_payment_booking_unknown_coverage{rail="SWIFT"}` reports uncovered legacy/bypassed MT103 rows.
+The query does not filter by business status: ACKNOWLEDGED/REJECTED does not prove ledger booking.
+Startup before a successful query is NaN; a known empty tracked set is zero, independently of
+unknown coverage. Query failure retains the cached timestamp so age continues advancing and
+records no workflow success. Nullable migration columns do not invent historical due times.
+`SwiftBookingUnsettled` alerts on it (30m, below); the re-drive below retries tracked obligations only; no public API or automatic historical repair is introduced.
+
+### Unsettled booking alert (#13623)
+
+`SwiftBookingUnsettled` fires when the oldest open MT103 booking clock is older than 30 minutes (`openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`, tested by `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`). swift-service makes one transaction-service call per accepted message; anything unproven is then re-driven by the sweep below, and the age is still the signal that reaches an operator if the re-drive cannot prove it either. That includes a message with no ordering account id or an unparseable value date, which the outcome counter never sees. The remedy (query transaction-service by key, then reconcile or reverse) is the SWIFT section of `docs/runbooks/0032-payment-rail-unsettled-booking.md`. `ack`/`reject` do not close the clock and must not be used to silence the alert.
+
+### Settlement re-drive (#13686)
+
+`SwiftSettlementRedriveScheduler` runs every 60 s and re-drives each MT103 that is `SENT` with an open booking clock (`booking_first_due_at` set, `booking_proven_at` null) and at least `openbank.swift.settlement-redrive.min-age` (2 min) old. It calls transaction-service again under the same `swift-settlement-<messageId>` key with the request rebuilt from the stored message, so the value date is the MT103's 32A date, never today's. It never resubmits to the scheme. Concurrent sweeps cannot both call: each message is claimed with a token and a 2 min lease by one conditional UPDATE, and every later write is conditional on that token. An unproven attempt is counted in `booking_redrive_attempts` and waits `min(2 min * 2^(n-1), 1 h)`; after 10 attempts the message is marked `booking_redrive_exhausted_at`, `openbank_payment_unsettled_total{rail="SWIFT",outcome="redrive-exhausted"}` increments, and the open clock keeps `SwiftBookingUnsettled` firing. A stopped sweep is caught by `WorkflowLivenessStale` (`swift-settlement-redrive`). Switch: `SWIFT_SETTLEMENT_REDRIVE_ENABLED` (default `true`). A message an operator already acknowledged or rejected is not `SENT` and is never re-driven; it needs the runbook. A stored `FAILED` or mismatched answer comes back the same on every attempt, so the re-drive exhausts on it; the runbook is the remedy there too. The alert (30 min) can fire while the re-drive is still live (10 attempts span about 6 h), so any manual remediation starts with the runbook's four-eyes stop (`booking_redrive_stopped_at`, refused while a re-drive holds a live claim); the sweep never claims a stopped message. `ack`/`reject` stop the re-drive too, answer 409 while a claim is live, and leave the booking clock open. Unparseable stored value dates are counted as `outcome="bad-data"` and exhaust at once; one message's database error is counted as `outcome="redrive-error"` and the sweep continues. A stop does not cancel a call already in flight: a re-drive stalled past its lease can still book after it, which records the proof and counts `outcome="late-completion"`. So any manual booking must use the same `swift-settlement-<messageId>` key, after reading transaction-service for it. A message that owes no debit (e.g. rejected after ACSC) is closed by the runbook's four-eyes waive (`booking_waived_at`, reason, approver), which removes it from the age gauge, the alert and the sweep; the service never writes it.
+
+A validated late booking after an operator ACK/REJECT retains its transaction proof without replacing that decision or emitting a COMPLETED event. It is reported as `late-completion`; reconcile the existing same-key transaction. A waiver requires a complete timestamp, nonblank reason and approver, never partial NULL evidence.
+
+## Payment type on pacs.008 (#13663)
+
+The SWIFT cover-payment adapter explicitly leaves the shared builder's optional payment-type
+block absent. A cross-border cover payment must not claim the EPC SEPA service level merely
+because it uses the same XML builder. The no-block message remains unchanged; this library
+compatibility update does not change the settlement booking, callbacks or re-drive policy.

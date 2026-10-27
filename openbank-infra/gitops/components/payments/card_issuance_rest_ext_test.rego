@@ -276,3 +276,29 @@ test_pan_read_denied_when_verified_client_does_not_match_edge if {
 			with data.rules as pan_rules
 	}
 }
+
+# Customer-facing masked card reads retain verified client binding.
+test_customer_edge_may_list_and_read_cards if {
+	every action in {"card.read", "card.list"} {
+		d := rest.allow with input as {"principal": b6_sa("edge"), "action": action}
+			with data.rules as b6_rules
+		d.allow == true
+	}
+}
+
+test_customer_edge_read_grants_do_not_allow_card_writes if {
+	every action in b6_all_card_actions - {"card.read", "card.list", "card.details.read"} {
+		rest.allow == false with input as {"principal": b6_sa("edge"), "action": action}
+			with data.rules as b6_rules
+	}
+}
+
+test_customer_edge_spoofed_name_cannot_list_or_read if {
+	every action in {"card.read", "card.list"} {
+		rest.allow == false with input as {
+			"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"], "service_account": true, "client_id": "openbank-unrelated"},
+			"action": action,
+		}
+			with data.rules as b6_rules
+	}
+}

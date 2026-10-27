@@ -194,6 +194,13 @@ openbank:
       # `enabled`, so flipping the scheduler on for a scoped manual run can never fan out.
       discovery-enabled: "${BILLING_SCHEDULER_DISCOVERY_ENABLED:false}"
       discovery-page-size: "${BILLING_SCHEDULER_DISCOVERY_PAGE_SIZE:100}"
+    # Day-close participation (ADR-0342, #13167): BillingCloseParticipationScheduler reports each
+    # completed accounting day (RAN / SKIPPED / REFUSED, from billing_close_job_run plus the cycle's
+    # fee posting status) to ledger-service as participant `billing`, re-offering the last
+    # `lookback-days` days every tick. Runs even while the cycle is off: those days report SKIPPED.
+    close:
+      report-cron: "${BILLING_CLOSE_REPORT_CRON:0 50 * * * ?}"
+      lookback-days: "${BILLING_CLOSE_LOOKBACK_DAYS:3}"
     annual-fee-summary:
       scheduler:
         # ADR-0248. Disabled by default — see AnnualFeeSummaryScheduler's class KDoc for why this
@@ -205,6 +212,25 @@ openbank:
         cron: "${BILLING_ANNUAL_FEE_SUMMARY_SCHEDULER_CRON:0 0 5 15 1 ?}"
         currency: "${BILLING_ANNUAL_FEE_SUMMARY_SCHEDULER_CURRENCY:CZK}"
         discovery-page-size: "${BILLING_ANNUAL_FEE_SUMMARY_SCHEDULER_DISCOVERY_PAGE_SIZE:100}"
+    # ADR-0352 phase 3: the product-IR SHADOW comparator. It re-decides each committed assessment with
+    # the product IR of the account's pinned revision and counts agreement per ruleId; it never posts.
+    # verification.mode: disabled (default; nothing is compared, counted as verification_disabled) |
+    # openbao (Transit verify, billing's role holds verify only) | hmac (dev/test only; refused at boot
+    # in a production launch). The hmac secret has no default outside the dev and test profiles.
+    product-ir:
+      # Which path DECIDES a fee: shadow (default, the only accepted value) = legacy decides, IR compared.
+      # `ir` is the ADR-0352 §9 switch and is refused at boot until it is built.
+      decision-mode: "${BILLING_PRODUCT_IR_DECISION_MODE:shadow}"
+    product-shadow:
+      enabled: "${BILLING_PRODUCT_SHADOW_ENABLED:true}"
+      every: "${BILLING_PRODUCT_SHADOW_EVERY:5m}"
+      batch-size: "${BILLING_PRODUCT_SHADOW_BATCH_SIZE:200}"
+      max-batches-per-run: "${BILLING_PRODUCT_SHADOW_MAX_BATCHES:10}"
+      verification:
+        mode: "${BILLING_PRODUCT_SHADOW_VERIFICATION_MODE:disabled}"
+        key-id: "${BILLING_PRODUCT_SHADOW_VERIFICATION_KEY_ID:product-ir-publish}"
+        openbao:
+          address: "${BILLING_PRODUCT_SHADOW_VERIFICATION_OPENBAO_ADDRESS:https://openbao.vault.svc:8200}"
 
 "%dev":
   quarkus:
@@ -245,3 +271,10 @@ openbank:
     # explicitly and never races the assertions (mirrors openbank-interest-service).
     scheduler:
       enabled: false
+  openbank:
+    billing:
+      product-shadow:
+        # The secret product-catalog signs with in its own %test profile, so an IT can publish-then-verify.
+        verification:
+          mode: hmac
+          hmac-secret: test-only-ir-signing-secret-not-for-production
