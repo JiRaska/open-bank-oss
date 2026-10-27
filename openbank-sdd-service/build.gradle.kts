@@ -89,5 +89,7 @@ pitest {
 // CI's sdd test task died with OutOfMemoryError at Gradle's default 512m heap. Per-module, as
 // account-service and case-coordinator do: nothing measures test heap fleet-wide.
 tasks.withType<Test>().configureEach {
-    maxHeapSize = "1g"
+    // The wire E2E suite adds a Redpanda container, broker admin/consumer clients and a second
+    // daemon tap thread to this fork; 1g measured marginal next to a fully booted Quarkus app.
+    maxHeapSize = "2g"
 }
