@@ -6,6 +6,7 @@ package com.openbank.pid.contract
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
+import io.agroal.api.AgroalDataSource
 import io.quarkus.arc.Arc
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -14,6 +15,7 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
+import jakarta.inject.Inject
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HEAD
@@ -27,6 +29,7 @@ import org.junit.jupiter.api.Test
 import java.io.File
 import java.lang.reflect.Method
 import java.net.URI
+import java.util.UUID
 import jakarta.enterprise.inject.Any as CdiAny
 
 /**
@@ -109,6 +112,9 @@ class PidApiContractTest {
     }
 
     private val spec: JsonNode = YAMLMapper().readTree(File(SPEC_PATH))
+
+    @Inject
+    lateinit var dataSource: AgroalDataSource
 
     // ---------------------------------------------------------------- operations, both directions
 
@@ -304,6 +310,65 @@ class PidApiContractTest {
         assertThat(status).describedAs("POST %s with an empty body", RESOLVE_PATH).isNotEqualTo(200)
     }
 
+    // ---------------------------------------------------------- PUT /api/v1/parties/{id}/kyc
+
+    @Test
+    @TestSecurity(user = "contract-test", roles = ["ROLE_OPERATOR"])
+    fun `the deprecated risk field is optional on the wire and a new party remains unrated`() {
+        val schema = requestSchema(KYC_PATH, "put")
+        assertThat(schema.path("required").map { it.asText() }).doesNotContain("amlRiskScore")
+        assertThat(schema.at("/properties/amlRiskScore/deprecated").asBoolean()).isTrue()
+        assertThat(schema.at("/properties/kycLevel/enum").map { it.asText() }).contains("ENHANCED")
+
+        val partyId = createKycParty()
+        assertStoredRisk(partyId, null)
+        val response = given()
+            .contentType(ContentType.JSON)
+            .body("""{"kycLevel":"ENHANCED","pepFlag":false,"sanctionsFlag":false}""")
+            .put(KYC_PATH.replace("{id}", partyId))
+            .then().statusCode(200).extract().jsonPath()
+
+        assertThat(response.getString("id")).isEqualTo(partyId)
+        assertThat(response.getString("kycAttributes.kycLevel")).isEqualTo("ENHANCED")
+        assertThat(response.getString("kycAttributes.amlRiskScore")).isNull()
+        assertStoredRisk(partyId, null)
+    }
+
+    @Test
+    @TestSecurity(user = "contract-test", roles = ["ROLE_OPERATOR"])
+    fun `explicit legacy risk values still round trip and a later omission does not erase them`() {
+        val schema = requestSchema(KYC_PATH, "put")
+        assertThat(schema.at("/properties/amlRiskScore/type").asText()).isEqualTo("string")
+        assertThat(schema.at("/properties/amlRiskScore/enum").map { it.asText() })
+            .containsExactly("LOW", "MEDIUM", "HIGH", "UNACCEPTABLE")
+        val partyId = createKycParty()
+        val path = KYC_PATH.replace("{id}", partyId)
+        val explicit = given()
+            .contentType(ContentType.JSON)
+            .body("""{"kycLevel":"ENHANCED","amlRiskScore":"HIGH"}""")
+            .put(path)
+            .then().statusCode(200).extract().jsonPath()
+        assertThat(explicit.getString("kycAttributes.amlRiskScore")).isEqualTo("HIGH")
+        assertStoredRisk(partyId, "HIGH")
+
+        val omitted = given()
+            .contentType(ContentType.JSON)
+            .body("""{"kycLevel":"BASIC"}""")
+            .put(path)
+            .then().statusCode(200).extract().jsonPath()
+        assertThat(omitted.getString("kycAttributes.kycLevel")).isEqualTo("BASIC")
+        assertThat(omitted.getString("kycAttributes.amlRiskScore")).isEqualTo("HIGH")
+        assertStoredRisk(partyId, "HIGH")
+
+        // AML case severity is not a valid PID legacy customer-rating value.
+        given()
+            .contentType(ContentType.JSON)
+            .body("""{"kycLevel":"BASIC","amlRiskScore":"CRITICAL"}""")
+            .put(path)
+            .then().statusCode(400)
+        assertStoredRisk(partyId, "HIGH")
+    }
+
     // -------------------------------------------- GET /.well-known/openid-credential-issuer (EUDI)
 
     @Test
@@ -347,6 +412,27 @@ class PidApiContractTest {
     }
 
     // ------------------------------------------------------------------------------------ helpers
+
+    private fun createKycParty(): String = given()
+        .contentType(ContentType.JSON)
+        .body(
+            """{"givenName":"Contract","familyName":"Kyc","birthdate":"1990-01-01","bankIdSub":"kyc-contract-${UUID.randomUUID()}"}""",
+        )
+        .post("/api/v1/parties")
+        .then().statusCode(201).extract().jsonPath().getString("id")
+
+    private fun assertStoredRisk(partyId: String, expected: String?) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT aml_risk_score FROM parties WHERE id = ?").use { statement ->
+                statement.setObject(1, UUID.fromString(partyId))
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString("aml_risk_score")).isEqualTo(expected)
+                    assertThat(rows.next()).isFalse()
+                }
+            }
+        }
+    }
 
     /** `(METHOD, path)` pairs the spec declares, each resolved against the `servers:` base path. */
     private fun declaredOperations(): Set<String> = spec.at("/paths").properties()
@@ -442,6 +528,7 @@ class PidApiContractTest {
         const val SPEC_PATH = "src/main/resources/openapi.yaml"
         const val SERVICE_PACKAGE = "com.openbank.pid."
         const val RESOLVE_PATH = "/api/v1/parties/resolve"
+        const val KYC_PATH = "/api/v1/parties/{id}/kyc"
         const val WELL_KNOWN_PATH = "/.well-known/openid-credential-issuer"
         val HTTP_METHODS = setOf("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS")
     }

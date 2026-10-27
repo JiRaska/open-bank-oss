@@ -22,6 +22,9 @@ import java.util.UUID
 /** Raised when a command names a deal that does not exist. Mapped to 404. */
 class DealNotFoundException(dealId: UUID) : NoSuchElementException("deal $dealId not found")
 
+/** A deal write was computed from a copy older than the stored row. Mapped to 409 DEAL_CHANGED. */
+class DealChangedException(message: String) : IllegalStateException(message)
+
 /** Raised when a deal names a counterparty not in the master. Mapped to 400 via IllegalArgumentException. */
 class UnknownCounterpartyException(id: String) : IllegalArgumentException("unknown counterparty '$id'")
 

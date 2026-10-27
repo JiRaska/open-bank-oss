@@ -186,6 +186,23 @@ spec:
     retention.ms: 604800000
     cleanup.policy: delete
 ---
+# swift-service: bank-own transfer status (contract 9.2, swift.institution-transfer.status.v1) —
+# ACCEPTED / SENT / SETTLED / REJECTED, written through swift's outbox, read by treasury-service.
+# Keyed by paymentId so one payment's lifecycle stays ordered.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.swift.institution-transfers
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
 # Settlement state facts; eventId is stable across outbox retries.
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic

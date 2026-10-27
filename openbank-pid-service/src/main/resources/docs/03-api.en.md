@@ -55,7 +55,7 @@ The existing `GET /api/v1/parties/by-external-id` implementation currently reads
 }
 ```
 
-On create the service sets `status=ACTIVE`, `kycLevel=BASIC`, `amlRiskScore=LOW`, opens a `PID_VERIFICATION` case (`status=OPEN`), and emits `PartyCreated`, `case.created`, `RelationshipAdded`.
+On create the service sets `status=ACTIVE`, `kycLevel=BASIC`, no `amlRiskScore` (deprecated, ADR-0353 — the customer risk rating is kyc-service's), opens a `PID_VERIFICATION` case (`status=OPEN`), and emits `PartyCreated`, `case.created`, `RelationshipAdded`.
 
 ### `PartyResponse` (returned everywhere)
 
@@ -64,7 +64,7 @@ Nested object with `id`, `partyType`, `status`, `externalIds[]`, `coreAttributes
 ### `UpdateKycRequest` (PUT /kyc)
 
 ```json
-{ "kycLevel": "ENHANCED", "amlRiskScore": "MEDIUM", "pepFlag": false, "sanctionsFlag": false }
+{ "kycLevel": "ENHANCED", "pepFlag": false, "sanctionsFlag": false }
 ```
 
 ### `TransitionCaseRequest` (PATCH /case)

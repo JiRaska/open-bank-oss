@@ -349,3 +349,16 @@ public final class com/openbank/libs/testing/trace/TraceContract$Companion {
 	public final fun from (Ljava/util/Collection;)Lcom/openbank/libs/testing/trace/TraceContract;
 }
 
+public class com/openbank/libs/testing/trace/TraceContractProfile : io/quarkus/test/junit/QuarkusTestProfile {
+	public fun <init> ()V
+	protected fun extraConfigOverrides ()Ljava/util/Map;
+	public final fun getConfigOverrides ()Ljava/util/Map;
+	protected fun getDisableOutboxDispatcher ()Z
+}
+
+public final class com/openbank/libs/testing/trace/TraceContractRecorder {
+	public fun <init> ()V
+	public final fun recordingExporter ()Lcom/openbank/libs/testing/trace/RecordingSpanExporter;
+	public final fun recordingSpanProcessor (Lcom/openbank/libs/testing/trace/RecordingSpanExporter;)Lio/opentelemetry/sdk/trace/SpanProcessor;
+}
+
