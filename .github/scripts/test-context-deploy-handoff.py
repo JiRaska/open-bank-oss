@@ -215,12 +215,21 @@ class WorkflowPartitionTests(unittest.TestCase):
     def test_handoff_contract_step_runs_even_when_broker_configuration_is_missing(self):
         gate = self.workflow.split("  can-i-deploy:\n", 1)[1].split("  gitops-pr:\n", 1)[0]
         condition = re.search(r"        id: check\n        if: \$\{\{ (.+) }}", gate).group(1)
-        condition = condition.replace("||", " or ")
-        for event_name, broker, expected in (("workflow_run", "", True), ("push", "", False),
-                                              ("push", "configured", True)):
-            with self.subTest(event=event_name, broker=broker):
+        # Project only this workflow's boolean/string condition, not general Actions expressions.
+        condition = condition.replace("&&", " and ").replace("||", " or ")
+        cases = (("workflow_run", "", "", True), ("push", "", "", False),
+                 ("push", "configured", "", True), ("schedule", "", "", True),
+                 ("workflow_dispatch", "", "true", True),
+                 ("workflow_dispatch", "", "false", False),
+                 ("workflow_dispatch", "", "", False),
+                 ("workflow_dispatch", "configured", "false", True),
+                 ("push", "", "true", False))
+        for event_name, broker, reconcile, expected in cases:
+            with self.subTest(event=event_name, broker=broker, reconcile=reconcile):
                 actual = eval(condition, {"__builtins__": {}},
-                              {"github": SimpleNamespace(event_name=event_name),
+                              {"github": SimpleNamespace(event_name=event_name,
+                                                         event=SimpleNamespace(inputs=SimpleNamespace(
+                                                             reconcile=reconcile))),
                                "vars": SimpleNamespace(PACT_BROKER_URL=broker)})
                 self.assertEqual(actual, expected)
 

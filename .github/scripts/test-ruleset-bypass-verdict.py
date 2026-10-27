@@ -2,14 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 """Run the real bypass checker and gate runner against synthetic GitHub responses."""
+import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 
 import yaml
 
@@ -21,6 +24,58 @@ EMPTY = {"conditions": CONDITIONS, "bypass_actors": []}
 
 
 class BypassVerdictTest(unittest.TestCase):
+    def test_ci_app_identity_without_secret_access_preserves_live_pin(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        expression = workflow["jobs"]["gates"]["env"]["GITOPS_APP_ID"]
+        # Deliberately only string-valued vars/secrets projections and their OR;
+        # this is not a general Actions evaluator. Unknown syntax fails the test.
+        self.assertRegex(expression, r"^\$\{\{\s*(?:vars|secrets)\.GITOPS_APP_ID"
+                                    r"(?:\s*\|\|\s*(?:vars|secrets)\.GITOPS_APP_ID)*\s*\}\}$")
+        sources = re.findall(r"(vars|secrets)\.GITOPS_APP_ID", expression)
+        spec = importlib.util.spec_from_file_location(
+            "deploy_hold_guard", ROOT / ".github/scripts/check-deploy-holds.py")
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        cases = [
+            ("dependabot-public-id", "4242", "", 4242, True),
+            ("legacy-secret-id", "", "4242", 4242, True),
+            ("both-present", "4242", "4242", 4242, True),
+            ("both-missing", "", "", 4242, False),
+            ("wrong-public-no-secret-fallback", "99", "4242", 4242, False),
+            ("invalid-public-no-secret-fallback", "invalid", "4242", 4242, False),
+            ("wrong-secret", "", "99", 4242, False),
+            ("unpinned-context", "4242", "", None, False),
+            ("another-app-pin", "4242", "", 99, False),
+        ]
+        with tempfile.TemporaryDirectory(prefix="ci-app-id-") as tmp:
+            root = Path(tmp)
+            rules = root / guard.RULES
+            rules.parent.mkdir(parents=True)
+            rules.write_text("deploy_holds:\n  services:\n    openbank-ledger-service:\n"
+                             "      issue: '#1'\n      reason: fixture\n"
+                             "      release_condition: reviewed image\n")
+            for name, public_id, secret_id, integration, allowed in cases:
+                context = {"vars": public_id, "secrets": secret_id}
+                resolved = next((context[source] for source in sources if context[source]), "")
+                checks = {"context": "merge-train"}
+                if integration is not None:
+                    checks["integration_id"] = integration
+                response = [{"type": "required_status_checks", "parameters": {
+                    "strict_required_status_checks_policy": False,
+                    "required_status_checks": [checks],
+                }}]
+                result = subprocess.CompletedProcess([], 0, stdout=json.dumps(response), stderr="")
+                with self.subTest(case=name), patch.dict(os.environ, {"GITOPS_APP_ID": resolved}), \
+                        patch.object(guard.subprocess, "run", return_value=result) as read:
+                    if allowed:
+                        guard.require_live_strict(root, None, "fixture/bank")
+                    else:
+                        with self.assertRaises(guard.InvalidHold):
+                            guard.require_live_strict(root, None, "fixture/bank")
+                    read.assert_called_once_with(
+                        ["gh", "api", "repos/fixture/bank/rules/branches/main"],
+                        capture_output=True, text=True, timeout=30, check=False)
+
     def test_checker_runner_and_json_agree(self):
         gate = next(g for g in yaml.safe_load((ROOT / ".github/gates/gates.yaml").read_text())["gates"]
                     if g["id"] == GATE_ID)
