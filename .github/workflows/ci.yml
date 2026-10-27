@@ -568,7 +568,9 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # An id, not a credential: check-deploy-holds.py (gate deploy-hold-image-pins) accepts a
       # `merge-train` context pinned to this App in place of strict up-to-date (ADR-0343).
-      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
+      # Dependabot cannot read Actions secrets; the reviewed public id remains available.
+      # Missing or incorrect ids still fail the guard; retain the legacy secret fallback.
+      GITOPS_APP_ID: ${{ vars.GITOPS_APP_ID || secrets.GITOPS_APP_ID }}
       RULESET_BYPASS_SNAPSHOT: ${{ needs.ruleset-evidence.outputs.snapshot }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -47,6 +47,77 @@ class ProducerIsolationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(marker.read_text().splitlines(), ['.github/scripts/deploy-window.py --self-test'])
 
+    def test_final_freshness_restores_history_without_accepting_stale_sources(self):
+        verify = next(step for step in self.steps if step.get('name') == 'Verify GitOps image source freshness')
+        clean_env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+        clean_env['GIT_CONFIG_NOSYSTEM'] = '1'
+        for case in ('equivalent', 'changed', 'unknown', 'fetch-failed'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as d:
+                directory = Path(d)
+                origin = directory / 'origin'
+                origin.mkdir()
+
+                def git(*args, cwd=origin, check=True):
+                    return subprocess.run(['git', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
+                                           *args], cwd=cwd, env=clean_env, check=check, capture_output=True, text=True)
+
+                git('init', '-q', '-b', 'main')
+                git('config', 'user.email', 'test@example.invalid')
+                git('config', 'user.name', 'test')
+                scripts = origin / '.github/scripts'
+                scripts.mkdir(parents=True)
+                for name in ('deploy-window.py', 'pact-version-tree-equivalent.sh'):
+                    shutil.copyfile(ROOT / '.github/scripts' / name, scripts / name)
+                workflow = origin / '.github/workflows/auto-deploy.yml'
+                workflow.parent.mkdir()
+                workflow.write_text('env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n')
+                service = origin / 'openbank-test-service'
+                service.mkdir()
+                (service / 'build.gradle.kts').write_text('// fixture\n')
+                source = service / 'App.kt'
+                source.write_text('v1\n')
+                git('add', '.github/scripts', '.github/workflows/auto-deploy.yml', 'openbank-test-service')
+                git('commit', '-qm', 'seed source')
+                image_source = git('rev-parse', 'HEAD').stdout.strip()
+                (origin / 'docs').mkdir()
+                (origin / 'docs/note.md').write_text('unrelated documentation\n')
+                git('add', 'docs/note.md')
+                git('commit', '-qm', 'advance main without changing image inputs')
+                work = directory / 'work'
+                git('clone', '-q', '--depth=100', origin.as_uri(), str(work))
+                git('checkout', '--detach', cwd=work)
+                # Reproduce create-pull-request's fetch while preserving the same HEAD and objects.
+                git('fetch', '-q', '--depth=1', 'origin', 'main:main', cwd=work)
+                self.assertEqual(git('rev-parse', '--verify', image_source, cwd=work).returncode, 0)
+                self.assertNotEqual(git('merge-base', '--is-ancestor', image_source, 'HEAD',
+                                        cwd=work, check=False).returncode, 0)
+                if case == 'changed':
+                    source.write_text('v2\n')
+                    git('add', 'openbank-test-service/App.kt')
+                    git('commit', '-qm', 'change the actual image source')
+                if case == 'fetch-failed':
+                    git('remote', 'set-url', 'origin', (directory / 'missing').as_uri(), cwd=work)
+                tag = 'sandbox-' + (image_source[:8] if case != 'unknown' else 'ffffffff')
+                diff = directory / 'proposal.diff'
+                diff.write_text('--- a/openbank-infra/gitops/test.yaml\n'
+                                '+++ b/openbank-infra/gitops/test.yaml\n'
+                                '-image: registry.invalid/openbank-test-service:sandbox-00000000\n'
+                                f'+image: registry.invalid/openbank-test-service:{tag}\n')
+                marker = directory / 'reads'
+                env = {**clean_env, 'PR_NUMBER': '1', 'GITHUB_REPOSITORY': 'example/repo',
+                       'PROPOSAL_DIFF': str(diff), 'READ_MARKER': str(marker)}
+                gh = 'gh() { printf "read\\n" >> "$READ_MARKER"; cat "$PROPOSAL_DIFF"; }\n'
+                result = subprocess.run(['bash', '-c', gh + verify['run']], cwd=work, env=env,
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode == 0, case == 'equivalent', result.stdout + result.stderr)
+                if case == 'fetch-failed':
+                    self.assertFalse(marker.exists(), 'failed history refresh must stop before PR lookup')
+                else:
+                    self.assertEqual(marker.read_text().splitlines(), ['read'])
+                    self.assertEqual(git('rev-parse', 'HEAD', cwd=work).stdout, git('rev-parse', 'HEAD').stdout)
+                    if case != 'equivalent':
+                        self.assertIn('stale GitOps image pin:', result.stdout + result.stderr)
+
     def test_targeted_recovery_does_not_read_or_carry_unrelated_proposals(self):
         rewrite = next(step for step in self.steps if step.get('id') == 'rewrite')
         self.assertEqual(rewrite['env']['RECONCILE_TARGETS'], '${{ github.event.inputs.reconcile_services }}')
@@ -96,7 +167,7 @@ class ProducerIsolationTests(unittest.TestCase):
                     path.write_text(text)
 
                 def commit(origin=origin):
-                    git(origin, 'add', 'openbank-example', 'docs', 'config')
+                    git(origin, 'add', 'openbank-example', 'docs', 'config', '.github/workflows/auto-deploy.yml')
                     git(origin, 'commit', '-qm', 'test fixture')
                     return git(origin, 'rev-parse', 'HEAD').stdout.strip()
 
@@ -105,6 +176,8 @@ class ProducerIsolationTests(unittest.TestCase):
                 write(origin, 'openbank-example/build.gradle.kts', 'plugins {}\n')
                 write(origin, 'docs/fixture.md', 'first\n')
                 write(origin, 'config/fixture.txt', 'first\n')
+                write(origin, '.github/workflows/auto-deploy.yml',
+                      'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n')
                 source = commit()
                 if change == 'service':
                     write(origin, 'openbank-example/build.gradle.kts', 'plugins {} // changed\n')

@@ -16,39 +16,43 @@ import sys
 
 TAG = re.compile(r'sandbox-([0-9a-f]{8,40})')
 IMAGE = re.compile(
-    rb'(?m)^([ \t]*image:[ \t]+[^\s#]+/openbank-[a-z0-9-]+:sandbox-)'
-    rb'[0-9a-f]{8,40}(-run[1-9][0-9]*)?([ \t]*(?:#[^\r\n]*)?\r?$)'
+    rb'(?m)^(?P<prefix>[ \t]*image:[ \t]+)(?P<quote>["\']?)'
+    rb'(?P<image>[^\s"\'#]+/openbank-[a-z0-9-]+:sandbox-)'
+    rb'[0-9a-f]{8,40}(?:-run[1-9][0-9]*)?(?:@sha256:[0-9a-f]{64})?'
+    rb'(?P=quote)(?P<suffix>[ \t]*(?:#[^\r\n]*)?\r?$)'
 )
 
 
-def git(*args):
-    return subprocess.check_output(['git', *args], stderr=subprocess.DEVNULL)
+def git(*args, root=None):
+    command = ['git'] if root is None else ['git', '-C', str(root)]
+    return subprocess.check_output([*command, *args], stderr=subprocess.DEVNULL)
 
 
-def resolve(tag):
+def resolve(tag, *, root=None):
     match = TAG.fullmatch(tag)
     if not match:
         raise ValueError('cannot resolve image source tag')
-    return git('rev-parse', '--verify', match[1] + '^{commit}').decode().strip()
+    return git('rev-parse', '--verify', match[1] + '^{commit}', root=root).decode().strip()
 
 
-def same_sources(left, right):
-    changed = git('diff', '--no-renames', '--name-only', '-z', left, right).split(b'\0')
+def same_sources(left, right, *, root=None):
+    changed = git('diff', '--no-renames', '--name-only', '-z', left, right, root=root).split(b'\0')
     for raw in filter(None, changed):
         path = raw.decode()
         if not path.startswith('openbank-infra/gitops/components/') or not path.endswith(('.yaml', '.yml')):
             return False
-        entries = [git('ls-tree', ref, '--', path).split() for ref in (left, right)]
+        entries = [git('ls-tree', ref, '--', path, root=root).split() for ref in (left, right)]
         if any(not entry or entry[0] != b'100644' or entry[1] != b'blob' for entry in entries):
             return False
-        blobs = [git('show', ref + ':' + path) for ref in (left, right)]
-        normalized = [IMAGE.sub(rb'\1PIN\3', blob) for blob in blobs]
+        blobs = [git('show', ref + ':' + path, root=root) for ref in (left, right)]
+        normalized = [IMAGE.sub(rb'\g<prefix>\g<quote>\g<image>PIN\g<quote>\g<suffix>', blob)
+                      for blob in blobs]
         if normalized[0] != normalized[1]:
             return False
     return True
 
 
-def decision(event, reconcile, initial, current, candidate, source):
+def decision(event, reconcile, initial, current, candidate, source, *, root=None):
     if event != 'schedule' and not (event == 'workflow_dispatch' and reconcile == 'true'):
         return 'publish'
     if current == initial or current == candidate:
@@ -58,12 +62,12 @@ def decision(event, reconcile, initial, current, candidate, source):
         return 'publish'
     if not re.fullmatch(r'[0-9a-f]{40}', source):
         raise ValueError('invalid build source')
-    target = resolve(candidate)
-    if target != git('rev-parse', '--verify', source + '^{commit}').decode().strip():
+    target = resolve(candidate, root=root)
+    if target != git('rev-parse', '--verify', source + '^{commit}', root=root).decode().strip():
         raise ValueError('candidate image does not match this build source')
     # Preserve a concurrently published provenance refresh when its source is identical.
     current_source_tag = re.sub(r'-run[1-9][0-9]*$', '', current)
-    return 'preserve' if same_sources(resolve(current_source_tag), target) else 'publish'
+    return 'preserve' if same_sources(resolve(current_source_tag, root=root), target, root=root) else 'publish'
 
 
 def main():

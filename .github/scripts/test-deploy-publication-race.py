@@ -4,6 +4,7 @@
 """Real git histories and the actual workflow publication block; no remote writes."""
 import importlib.util
 import errno
+import json
 import os
 import subprocess
 import tempfile
@@ -142,50 +143,111 @@ class PublicationTest(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises((ValueError, subprocess.CalledProcessError)):
                 self.decide(**change)
 
-    def test_workflow_initial_manifest_evidence_missing_aborts(self):
-        start = WORKFLOW.index('              initial_tag=')
-        end = WORKFLOW.index('              rm -f', start)
+    def rewrite_workflow(self, source, tags=None, digests=None, event='schedule', reconcile=''):
+        # Execute the actual workflow's only image writer; neither shell nor Python is transcribed.
+        start = WORKFLOW.index('          python3 .github/scripts/rewrite-reconcile-image-pins.py')
+        end = WORKFLOW.index('          while IFS=', start)
         block = WORKFLOW[start:end]
-        for missing_file in (True, False):
-            with self.subTest(missing_file=missing_file):
-                path = 'openbank-infra/gitops/components/new/service.yaml' if missing_file else self.manifest
-                source = self.tip
-                if not missing_file:
-                    self.write(path, 'replicas: 1\n')
+        for name in ('deploy-publication-race.py', 'rewrite-reconcile-image-pins.py'):
+            target = Path('.github/scripts') / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((SCRIPTS / name).read_bytes())
+        tags = tags or {'openbank-example': 'sandbox-' + source[:8]}
+        if digests is None:
+            digests = {service: 'sha256:' + 'c' * 64 for service in tags}
+        env = dict(os.environ, SOURCE_COMMIT=source, GITHUB_SHA='f' * 40,
+                   GITHUB_EVENT_NAME=event, INPUT_RECONCILE=reconcile,
+                   ECR_REGISTRY='registry.example', SELECTED_TAGS=json.dumps(tags),
+                   SELECTED_DIGESTS=json.dumps(digests))
+        return subprocess.run(['/bin/bash', '-c', 'set -euo pipefail\n' + block],
+                              env=env, capture_output=True, text=True, check=False)
+
+    def test_workflow_initial_manifest_evidence_missing_aborts(self):
+        for origin in ('missing', 'without-image', 'ambiguous', 'malformed'):
+            with self.subTest(origin=origin):
+                self.git('reset', '--hard', self.tip)
+                if origin == 'missing':
+                    self.git('rm', self.manifest)
+                    self.git('commit', '-qm', 'missing original')
+                    source = self.git('rev-parse', 'HEAD')
+                else:
+                    contents = {
+                        'without-image': 'replicas: 1\n',
+                        'ambiguous': 'image: registry.example/openbank-example:sandbox-11111111\n'
+                                     'image: registry.example/openbank-example:sandbox-22222222\n',
+                        'malformed': 'image: registry.example/openbank-example:sandbox-11111111@sha256:nope\n',
+                    }[origin]
+                    self.write(self.manifest, contents)
                     source = self.commit()
                 live = 'image: registry.example/openbank-example:sandbox-' + self.base[:8] + '\n'
-                self.write(path, live)
-                env = dict(os.environ, GITHUB_SHA=source, GITHUB_EVENT_NAME='schedule', INPUT_RECONCILE='',
-                           image='registry.example/openbank-example', f=path, old_tag='sandbox-' + self.base[:8],
-                           tag='sandbox-' + source[:8], svc='openbank-example')
-                result = subprocess.run(['/bin/bash', '-c', 'set -euo pipefail\nfor once in 1; do\n' + block + '\ndone'],
-                                        env=env, capture_output=True, text=True, check=False)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(Path(path).read_text(), live)
-                if missing_file:
-                    Path(path).unlink()
+                self.write(self.manifest, live)
+                result = self.rewrite_workflow(source)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(Path(self.manifest).read_text(), live)
 
     def test_actual_workflow_block_preserves_concurrent_pin(self):
-        # Execute the extracted block, including continue and sed, rather than a transcription.
-        start = WORKFLOW.index('              initial_tag=')
-        end = WORKFLOW.index('              rm -f', start)
-        block = WORKFLOW[start:end]
-        self.write('openbank-infra/gitops/components/admin/ui.yaml', 'image: registry.example/openbank-ui:sandbox-11111111\n')
-        intermediate = self.commit()
-        self.write('openbank-infra/gitops/components/admin/ui.yaml', 'image: registry.example/openbank-ui:sandbox-22222222\n')
+        for quote in ('', '"', "'"):
+            with self.subTest(quote=quote):
+                self.git('reset', '--hard', self.tip)
+                def reference(tag, digest, quote=quote):
+                    return f'image: {quote}registry.example/openbank-example:{tag}@sha256:{digest * 64}{quote} # pin\n'
+                self.write(self.manifest, reference('sandbox-11111111', 'a'))
+                previous = self.commit()
+                self.write(self.manifest, reference('sandbox-' + previous[:8], 'b'))
+                source = self.commit()
+                live = reference('sandbox-' + previous[:8] + '-run123', 'd')
+                self.write(self.manifest, live)
+                self.assertEqual(self.decide(initial='sandbox-11111111', current='sandbox-' + previous[:8],
+                                             candidate='sandbox-' + source[:8], source=source), 'preserve')
+                result = self.rewrite_workflow(source)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(Path(self.manifest).read_text(), live)
+                # A substantive input change must still publish the exact candidate digest.
+                self.write('service/version.txt', '2.0\n')
+                changed = self.commit()
+                self.write(self.manifest, reference('sandbox-' + previous[:8], 'e'))
+                result = self.rewrite_workflow(changed)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('sandbox-' + changed[:8] + '@sha256:' + 'c' * 64,
+                              Path(self.manifest).read_text())
+
+    def test_actual_writer_failure_does_not_partially_publish(self):
+        first = 'openbank-infra/gitops/components/first/service.yaml'
+        self.write(first, 'image: registry.example/openbank-first:sandbox-11111111\n')
         source = self.commit()
-        target = Path('.github/scripts/deploy-publication-race.py')
-        target.parent.mkdir(parents=True)
-        target.write_bytes((SCRIPTS / target.name).read_bytes())
-        self.write(self.manifest, f'image: registry.example/openbank-example:sandbox-{intermediate[:8]}\n')
-        env = dict(os.environ, GITHUB_SHA=source, GITHUB_EVENT_NAME='schedule', INPUT_RECONCILE='',
-                   image='registry.example/openbank-example', f=self.manifest,
-                   old_tag='sandbox-' + intermediate[:8], tag='sandbox-' + source[:8], svc='openbank-example')
-        result = subprocess.run(['/bin/bash', '-c', 'set -euo pipefail\nfor once in 1; do\n' + block + '\ndone'],
-                                env=env, capture_output=True, text=True, check=False)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('preserving', result.stdout)
-        self.assertNotIn(env['tag'], Path(self.manifest).read_text())
+        tags = {'openbank-first': 'sandbox-' + source[:8], 'openbank-example': 'sandbox-' + source[:8]}
+        originals = {path: Path(path).read_text() for path in (first, self.manifest)}
+        for failure in ('invalid-digest', 'missing-digest', 'unproven-source', 'malformed-current'):
+            with self.subTest(failure=failure):
+                for path, contents in originals.items():
+                    Path(path).write_text(contents)
+                digests = {service: 'sha256:' + 'c' * 64 for service in tags}
+                if failure == 'invalid-digest':
+                    digests['openbank-example'] = 'sha256:invalid'
+                elif failure == 'missing-digest':
+                    del digests['openbank-example']
+                elif failure == 'unproven-source':
+                    Path(self.manifest).write_text('image: registry.example/openbank-example:sandbox-ffffffff\n')
+                else:
+                    Path(self.manifest).write_text(originals[self.manifest] +
+                        'image: registry.example/openbank-example:sandbox-11111111@sha256:invalid\n')
+                before = {path: Path(path).read_bytes() for path in originals}
+                result = self.rewrite_workflow(source, tags, digests)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertEqual({path: Path(path).read_bytes() for path in originals}, before)
+
+    def test_manual_refresh_and_same_tag_digest_refresh_still_publish(self):
+        for event, reconcile, run_suffix in (('push', '', ''), ('workflow_dispatch', '', ''),
+                                            ('workflow_dispatch', 'true', '-run123'), ('schedule', '', '')):
+            with self.subTest(event=event, reconcile=reconcile, suffix=run_suffix):
+                self.git('reset', '--hard', self.tip)
+                # The same tag is an intentional digest refresh, not a concurrent tag advance.
+                candidate = 'sandbox-' + self.tip[:8] + run_suffix
+                self.write(self.manifest, f'image: registry.example/openbank-example:{candidate}@sha256:{"a" * 64}\n')
+                result = self.rewrite_workflow(self.tip, {'openbank-example': candidate},
+                                               event=event, reconcile=reconcile)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('@sha256:' + 'c' * 64, Path(self.manifest).read_text())
 
 
 if __name__ == '__main__':
