@@ -1687,6 +1687,27 @@
       "secret": "__SYNTHETIC_FX_READ_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-synthetic-ledger-seed",
+      "name": "OpenBank Synthetic Journey: Ledger seed posting",
+      "description": "Synthetic-only identity for seeding the account-overview k6 journey fixture (ADR-0252, #14058). Carries ROLE_API because ledger's postJournal requires it; its only permitted action is ledger.create, admitted by ledger_rest_ext.rego for exactly this principal, and the synthetic taint must arrive on the x-openbank-synthetic header (#14059).",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "optionalClientScopes": [],
+      "secret": "__SYNTHETIC_LEDGER_SEED_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-grafana",
       "fullScopeAllowed": false,
       "name": "Grafana (observability single pane)",
@@ -2272,6 +2293,14 @@
       "enabled": true,
       "serviceAccountClientId": "openbank-synthetic-fx-read",
       "realmRoles": []
+    },
+    {
+      "username": "service-account-openbank-synthetic-ledger-seed",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-synthetic-ledger-seed",
+      "realmRoles": [
+        "ROLE_API"
+      ]
     },
     {
       "username": "service-account-openbank-mcp-service",
