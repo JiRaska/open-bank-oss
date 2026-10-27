@@ -6,7 +6,16 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+// Multiple Quarkus profiles retain application/Kafka state during the suite. The full
+// suite exhausted Gradle's default test heap after adding the isolated overload profile.
+// Keep the measured increase local to this service's test JVMs.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
+
 dependencies {
+    implementation("io.quarkus:quarkus-load-shedding")
+    testImplementation("io.quarkus:quarkus-junit-component")
     // Micrometer + Prometheus registry: customer-edge had no MeterRegistry, so it
     // exposed no /q/metrics surface and the openbank-services PodMonitor scraped a
     // 404 -> TargetDown. Adding this wires /q/metrics on the management port like
