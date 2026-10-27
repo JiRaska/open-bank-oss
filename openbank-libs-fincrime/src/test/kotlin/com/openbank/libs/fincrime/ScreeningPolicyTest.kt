@@ -2,15 +2,18 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-package com.openbank.fx.domain.screening
+package com.openbank.libs.fincrime
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class ScreeningPolicyTest {
 
-    private fun result(status: ScreeningMatchStatus, score: Double = 0.0, role: ScreeningRole = ScreeningRole.DEBTOR) =
-        ScreeningResult("Subject", role, status, score, matchedEntity = null)
+    private fun result(
+        status: ScreeningMatchStatus,
+        score: Double = 0.0,
+        role: ScreeningRole = ScreeningRole.CREDITOR,
+    ) = ScreeningResult("Subject", role, status, score, matchedEntity = null)
 
     @Test
     fun `empty results are CLEAR`() {
@@ -20,7 +23,7 @@ class ScreeningPolicyTest {
     @Test
     fun `all clear or whitelisted is CLEAR`() {
         val results = listOf(
-            result(ScreeningMatchStatus.CLEAR),
+            result(ScreeningMatchStatus.CLEAR, role = ScreeningRole.DEBTOR),
             result(ScreeningMatchStatus.WHITELISTED, score = 1.0),
         )
         assertThat(ScreeningPolicy.decide(results)).isEqualTo(ScreeningDecision.CLEAR)
@@ -63,5 +66,24 @@ class ScreeningPolicyTest {
             result(ScreeningMatchStatus.HIT, 0.95), // BLOCK
         )
         assertThat(ScreeningPolicy.decide(results)).isEqualTo(ScreeningDecision.BLOCK)
+    }
+
+    @Test
+    fun `screening result exposes the verdict fields it was built from`() {
+        val matched = ScreeningResult(
+            subject = "ACME Corp",
+            role = ScreeningRole.DEBTOR,
+            status = ScreeningMatchStatus.POTENTIAL_HIT,
+            score = 0.91,
+            matchedEntity = "OFAC-SDN-123",
+        )
+
+        assertThat(matched.subject).isEqualTo("ACME Corp")
+        assertThat(matched.role).isEqualTo(ScreeningRole.DEBTOR)
+        assertThat(matched.status).isEqualTo(ScreeningMatchStatus.POTENTIAL_HIT)
+        assertThat(matched.score).isEqualTo(0.91)
+        assertThat(matched.matchedEntity).isEqualTo("OFAC-SDN-123")
+        assertThat(ScreeningResult("X", ScreeningRole.CREDITOR, ScreeningMatchStatus.CLEAR, 0.0, null).matchedEntity)
+            .isNull()
     }
 }
