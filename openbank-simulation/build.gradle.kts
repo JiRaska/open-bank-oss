@@ -89,6 +89,13 @@ dependencies {
     // is framework-free (ADR-0002), so only the domain POJOs land on the classpath.
     implementation(project(":openbank-statement-service"))
 
+    // The harness also drives the REAL standing-order-service domain — the `StandingOrder`
+    // status machine (recordExecution/confirmExecution/recordFailure, calculateNextDate,
+    // MAX_CONSECUTIVE_FAILURES) — so StandingOrderScenario exercises the exact sweep-executor
+    // ordering production uses, not a re-model. The domain package is framework-free (ADR-0002),
+    // so only the domain POJOs land on the classpath.
+    implementation(project(":openbank-standing-order-service"))
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
