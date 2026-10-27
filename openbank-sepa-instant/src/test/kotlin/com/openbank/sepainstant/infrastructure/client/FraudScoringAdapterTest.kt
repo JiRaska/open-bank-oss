@@ -4,8 +4,8 @@
 
 package com.openbank.sepainstant.infrastructure.client
 
+import com.openbank.libs.fincrime.FraudVerdict
 import com.openbank.sepainstant.application.port.out.FraudScoreCommand
-import com.openbank.sepainstant.application.port.out.FraudVerdict
 import com.openbank.sepainstant.infrastructure.observability.FraudScoringMetrics
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
