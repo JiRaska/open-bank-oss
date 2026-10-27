@@ -6,8 +6,11 @@
 # PR gate during the pilot: it runs weekly on openbank-batch and on manual
 # dispatch, and its failures create issues rather than blocking merges.
 #
-# v1 scope: read-only Product Catalog and Flaky Test Hunter paths. Money-path services follow
-# only once the isolated harness and synthetic-data boundary are proven (issue #3348).
+# Scope: read-only Product Catalog and Flaky Test Hunter paths, plus the first money-path
+# READ baseline (openbank-ledger-service). The lane is GET-only against a throwaway
+# PostgreSQL, so unlike money-path writes it needs no isolated target or synthetic
+# identity. Money-path WRITE flows still wait for the isolated harness and synthetic-data
+# boundary (issue #3348).
 name: Performance gate
 
 on:
@@ -47,23 +50,36 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, pathlib, re
-          # The declared v1 scope (ADR-0243, issue #3348). Kept as a named constant so the
+          # The declared scope (ADR-0243, issue #3348). Kept as a named constant so the
           # summary can say what the run was SUPPOSED to measure, not only what it did.
-          # Both subjects are non-mutating reads booted against disposable PostgreSQL.  Keep
-          # money-path flows out of this GitHub-hosted lane until their isolated target and
-          # synthetic identities exist (perf/scenarios.yaml).
-          DECLARED = ["openbank-product-catalog", "openbank-flaky-test-hunter"]
+          # All subjects are non-mutating reads booted against disposable PostgreSQL; the
+          # ledger read baseline is a money-path READ lane — GET-only by construction, so
+          # unlike money-path writes it needs no isolated target or synthetic identity.
+          # Write flows stay out of this GitHub-hosted lane until that boundary is proven
+          # (perf/scenarios.yaml).
+          DECLARED = [
+              "openbank-product-catalog",
+              "openbank-flaky-test-hunter",
+              "openbank-ledger-service",
+          ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
           matrix, skipped = [], []
           for svc in services:
               app = pathlib.Path(svc) / "src/main/resources/application.yaml"
-              script = pathlib.Path(svc) / "src/test/k6" / f"{svc.replace('openbank-','').replace('-service','')}-smoke.js"
+              stem = svc.replace('openbank-','').replace('-service','')
+              # A module exposes exactly one k6 lane: either its `<stem>-smoke.js` or its
+              # `<stem>-read-baseline.js` (the money-path read baselines).
+              script = next(
+                  (candidate for name in (f"{stem}-smoke.js", f"{stem}-read-baseline.js")
+                   if (candidate := pathlib.Path(svc) / "src/test/k6" / name).is_file()),
+                  None,
+              )
               if not app.is_file():
                   skipped.append((svc, "no application.yaml"))
                   continue
-              if not script.is_file():
-                  skipped.append((svc, f"no k6 script at `{script}`"))
+              if script is None:
+                  skipped.append((svc, f"no k6 script at `{stem}-smoke.js` or `{stem}-read-baseline.js`"))
                   continue
               raw = app.read_text()
               port = re.search(r"^  http:\n(?:.*\n)?\s*port:\s*(\d+)", raw, re.M)
@@ -71,7 +87,7 @@ jobs:
               if not port or not db:
                   skipped.append((svc, "cannot derive port/DB"))
                   continue
-              matrix.append({"service": svc, "port": int(port.group(1)), "db": db.group(1)})
+              matrix.append({"service": svc, "port": int(port.group(1)), "db": db.group(1), "script": str(script)})
           for svc, why in skipped:
               print(f"::warning::perf-gate: {svc} EXCLUDED — {why}")
           print(f"perf-gate: {len(matrix)} service(s); {len(skipped)} excluded")
@@ -136,6 +152,12 @@ jobs:
       SERVICE: ${{ matrix.service }}
       PORT: ${{ matrix.port }}
       DB: ${{ matrix.db }}
+      # The harness boots with OIDC and dev-mode auth DISABLED (see the quarkusDev flags
+      # below), so every @RolesAllowed/@Authorize check is bypassed and no real read
+      # identity exists yet. The read-baseline scripts fail loudly on a 401 (a rejection is
+      # not a baseline), and this placeholder keeps that tripwire armed: the day the lane
+      # grows a real least-privilege read identity it becomes a secret (perf/scenarios.yaml).
+      PERF_READ_TOKEN: "perf-ci-auth-disabled-placeholder"
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
       # mutable; the digest is the executable supply-chain identity.
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
@@ -216,7 +238,9 @@ jobs:
             exit 1
           fi
 
-          SCRIPT="${SERVICE}/src/test/k6/$(echo "${SERVICE}" | sed 's/^openbank-//;s/-service$//')-smoke.js"
+          # The script path was resolved in `prepare` (smoke or read-baseline — a module has
+          # exactly one lane), so the run step never re-derives a name it could get wrong.
+          SCRIPT="${{ matrix.script }}"
 
           # A readiness probe is not proof the PROBED route answers. This gate spent its whole
           # life measuring 401s: /q/health/ready returned 200, @Authenticated rejected every
@@ -236,6 +260,7 @@ jobs:
               --network host \
               --user "$(id -u):$(id -g)" \
               --env "BASE_URL=http://localhost:${PORT}" \
+              --env "PERF_READ_TOKEN=${PERF_READ_TOKEN}" \
               --volume "$PWD:/work" \
               --workdir /work \
               "${K6_IMAGE}" run \

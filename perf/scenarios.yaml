@@ -52,10 +52,10 @@ scenarios:
 
   - id: ledger-read-baseline
     definition: openbank-ledger-service/src/test/k6/ledger-read-baseline.js
-    execution_mode: planned-read-only-sandbox
-    safety_boundary: Read-only by construction — every request is a GET against openbank-ledger-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
-    target_schedule: "0 5 * * *"
-    blocker: Needs a booted openbank-ledger-service target and a least-privilege read identity (PERF_READ_TOKEN); the scenario is wired into the perf-baseline.yml module-read-baselines matrix and runs whenever PERF_LEDGER_URL plus PERF_READ_TOKEN are set; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-ledger-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL (OIDC and dev-mode auth disabled, so no read identity is required and the empty-book probes answer 200; verified locally, 0 failed requests over a 2-minute ramp). The perf-baseline.yml leg remains for the shared-sandbox mode and lights up whenever PERF_LEDGER_URL plus the PERF_READ_TOKEN secret are set; a 401 there is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are still required before the id-scoped probes (account/journal detail) can join this lane.
     assertions: Exercises journal list, trial balance, current accounting day. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
 
   - id: transaction-read-baseline
