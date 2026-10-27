@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.12.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.12.1...admin-ui-v3.12.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **treasury:** versioned deal saves, override eligibility and a reference-only editor role ([#13756](https://github.com/JiRaska/open-bank-oss/issues/13756)) ([e710754](https://github.com/JiRaska/open-bank-oss/commit/e71075488dcfb88c5deb10d426c00d27e5dfa051))
+
 ## [3.12.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.12.0...admin-ui-v3.12.1) (2026-10-26)
 
 

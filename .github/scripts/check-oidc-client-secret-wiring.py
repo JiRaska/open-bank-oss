@@ -54,8 +54,10 @@ ENV_NAME = "OIDC_CLIENT_SECRET"
 # source (code OR a KDoc comparing themselves to a real filter, as `SyntheticTaintClientFilter`'s
 # KDoc does) is therefore an unfixable-by-design false positive, never a real gap. This is a small,
 # stable set of directory names — not a growing debt list — so a hand-kept exclusion is the
-# `rules.yaml: agpl_modules` shape, not the kind this repo distrusts.
-NON_DEPLOYABLE_MODULES = frozenset({"openbank-libs", "openbank-libs-domain", "openbank-libs-finance", "openbank-libs-fincrime", "openbank-libs-iso20022", "openbank-libs-lending", "openbank-libs-runtime"})
+# `rules.yaml: agpl_modules` shape, not the kind this repo distrusts. openbank-libs-testing is a
+# test-kit jar (its M2mOidcClientIdentityWiringConformance names OidcClientFilter to assert on
+# services); it has no workload either.
+NON_DEPLOYABLE_MODULES = frozenset({"openbank-libs", "openbank-libs-domain", "openbank-libs-finance", "openbank-libs-fincrime", "openbank-libs-iso20022", "openbank-libs-lending", "openbank-libs-runtime", "openbank-libs-testing"})
 
 # Workloads still carrying `optional: true` on a secret that IS provisioned by an ExternalSecret.
 # Not flipped here on purpose: `optional: false` makes the pod refuse to start if the Secret is
@@ -116,12 +118,12 @@ def strip_kotlin_comments(src: str) -> str:
     return "".join(out)
 
 
-def services_minting_tokens() -> set[str]:
+def services_minting_tokens(exempt: frozenset[str] = NON_DEPLOYABLE_MODULES) -> set[str]:
     """Services whose main sources wire an OIDC client filter onto a rest-client."""
     found: set[str] = set()
     for service in gatelib.glob(REPO, "openbank-*/src/main"):
         name = service.parts[len(REPO.parts)]
-        if name in NON_DEPLOYABLE_MODULES:
+        if name in exempt:
             continue
         for path in gatelib.rglob(service, "*"):
             if not path.is_file() or path.suffix not in (".kt", ".yaml", ".yml", ".properties"):
@@ -195,6 +197,19 @@ def selftest() -> int:
     # A name that cannot exist must not resolve, or the membership test is vacuous.
     if ("nowhere", "no-such-service-oidc") in provisioned:
         print("selftest FAIL: an invented secret resolved as provisioned.")
+        return 1
+    # The libs-testing exemption must be real and narrow: without it the kit IS flagged, with it
+    # it is not, and an actual service stays in the set either way.
+    unexempted = services_minting_tokens(frozenset())
+    if "openbank-libs-testing" not in unexempted:
+        print("selftest FAIL: libs-testing no longer mentions a filter marker, so its exemption is untested.")
+        return 1
+    if "openbank-libs-testing" in minting:
+        print("selftest FAIL: libs-testing is flagged although it is exempt.")
+        return 1
+    real = {s for s in minting if s not in NON_DEPLOYABLE_MODULES}
+    if not real or not real <= unexempted:
+        print("selftest FAIL: the exemption removed a real service from the scan.")
         return 1
     print(f"selftest OK: {len(minting)} token-minting service(s), {len(refs)} env ref(s), "
           f"{len(provisioned)} provisioned secret(s); the invented name does not resolve.")

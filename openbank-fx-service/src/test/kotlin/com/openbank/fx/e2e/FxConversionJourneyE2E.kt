@@ -4,10 +4,10 @@
 
 package com.openbank.fx.e2e
 
-import com.openbank.fx.domain.screening.ScreeningMatchStatus
-import com.openbank.fx.domain.screening.ScreeningResult
-import com.openbank.fx.domain.screening.ScreeningRole
 import com.openbank.fx.infrastructure.client.SanctionsScreeningAdapter
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource

@@ -4,9 +4,9 @@
 
 package com.openbank.sepainstant.infrastructure.client
 
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.sepainstant.application.port.out.ScreeningUnavailableException
-import com.openbank.sepainstant.domain.screening.ScreeningMatchStatus
-import com.openbank.sepainstant.domain.screening.ScreeningRole
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
