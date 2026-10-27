@@ -41,7 +41,7 @@
         "path": "/api/v1/clearing/fi-credit-transfers/target2"
       },
       "response": {
-        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pacs.002.001.10\">\n    <FIToFIPmtStsRpt>\n        <GrpHdr>\n            <MsgId>SIM-STS-1b4e28ba2fa14d2e883f0016d3</MsgId>\n            <CreDtTm>2026-10-19T09:00:00.123456Z</CreDtTm>\n        </GrpHdr>\n        <TxInfAndSts>\n            <OrgnlEndToEndId>1b4e28ba2fa14d2e883f0016d3cca427</OrgnlEndToEndId>\n            <OrgnlTxId>1b4e28ba2fa14d2e883f0016d3cca427</OrgnlTxId>\n            <TxSts>ACSC</TxSts>\n        </TxInfAndSts>\n    </FIToFIPmtStsRpt>\n</Document>\n",
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pacs.002.001.10\">\n    <FIToFIPmtStsRpt>\n        <GrpHdr>\n            <MsgId>SIM-STS-1b4e28ba2fa14d2e883f0016d3</MsgId>\n            <CreDtTm>2026-10-19T09:00:00.123456Z</CreDtTm>\n        </GrpHdr>\n        <TxInfAndSts>\n            <OrgnlGrpInf>\n                <OrgnlMsgId>FI-1B4E28BA2FA14D2E</OrgnlMsgId>\n                <OrgnlMsgNmId>pacs.009.001.08</OrgnlMsgNmId>\n            </OrgnlGrpInf>\n            <OrgnlEndToEndId>1b4e28ba2fa14d2e883f0016d3cca427</OrgnlEndToEndId>\n            <OrgnlTxId>1b4e28ba2fa14d2e883f0016d3cca427</OrgnlTxId>\n            <OrgnlUETR>3f0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f</OrgnlUETR>\n            <TxSts>ACSC</TxSts>\n        </TxInfAndSts>\n    </FIToFIPmtStsRpt>\n</Document>\n",
         "headers": {
           "Content-Type": "application/xml"
         },

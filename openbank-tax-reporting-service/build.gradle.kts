@@ -52,3 +52,10 @@ kover {
         }
     }
 }
+
+// Shared synthetic wire fixture is test-only; it is never packaged in the service runtime.
+sourceSets {
+    test {
+        resources.srcDir(rootProject.file("openbank-libs-domain/src/test/resources/portfolio-contract"))
+    }
+}
