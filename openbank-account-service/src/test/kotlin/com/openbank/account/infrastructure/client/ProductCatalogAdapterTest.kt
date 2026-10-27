@@ -54,6 +54,31 @@ class ProductCatalogAdapterTest {
     }
 
     @Test
+    fun `the requested product is returned unchanged`(): Unit = runBlocking {
+        coEvery { reads.product(productId) } returns CatalogRead.Answered(
+            ProductCatalogResponse(productId.toString(), "BEZNY_UCET", "ACTIVE", "CZK"),
+        )
+
+        val found = (adapter.findById(productId) as ProductLookupResult.Found).product
+
+        assertThat(found.id).isEqualTo(productId)
+        assertThat(found.code).isEqualTo("BEZNY_UCET")
+    }
+
+    @Test
+    fun `a blank product code or substituted product identity is unavailable`(): Unit = runBlocking {
+        val malformed = listOf(
+            ProductCatalogResponse(productId.toString(), " ", "ACTIVE", "CZK"),
+            ProductCatalogResponse(UUID.randomUUID().toString(), "BEZNY_UCET", "ACTIVE", "CZK"),
+        )
+        for (body in malformed) {
+            coEvery { reads.product(productId) } returns CatalogRead.Answered(body)
+
+            assertThat(adapter.findById(productId)).isEqualTo(ProductLookupResult.Unavailable)
+        }
+    }
+
+    @Test
     fun `a 404 is NoPublishedRevision`(): Unit = runBlocking {
         coEvery { reads.publishedRevision(productId, at) } returns CatalogRead.NotFound
 
@@ -84,14 +109,44 @@ class ProductCatalogAdapterTest {
     }
 
     @Test
-    fun `a signature without an IR version, or the reverse, yields neither`(): Unit = runBlocking {
-        coEvery { reads.publishedRevision(productId, at) } returns
-            CatalogRead.Answered(revision(signature = CatalogIrSignature("e".repeat(64))))
+    fun `a revision genuinely without IR remains publishable`(): Unit = runBlocking {
+        coEvery { reads.publishedRevision(productId, at) } returns CatalogRead.Answered(revision())
 
         val published = (adapter.resolvePublishedRevision(productId, at) as RevisionResolution.Published).revision
 
         assertThat(published.irRevisionHash).isNull()
         assertThat(published.irVersion).isNull()
+    }
+
+    @Test
+    fun `partial IR metadata is unavailable rather than downgraded to no IR`(): Unit = runBlocking {
+        val partial = listOf(
+            revision(signature = CatalogIrSignature("e".repeat(64))),
+            revision(behaviour = CatalogBehaviour(irVersion = 1)),
+            revision(signature = CatalogIrSignature("e".repeat(64)), behaviour = CatalogBehaviour()),
+        )
+        for (body in partial) {
+            coEvery { reads.publishedRevision(productId, at) } returns CatalogRead.Answered(body)
+
+            assertThat(adapter.resolvePublishedRevision(productId, at)).isEqualTo(RevisionResolution.Unavailable)
+        }
+    }
+
+    @Test
+    fun `malformed upstream pin fields are unavailable rather than caller errors`(): Unit = runBlocking {
+        val malformed = listOf(
+            revision().copy(number = 0),
+            revision().copy(number = -1),
+            revision().copy(contentHash = "not-a-hash"),
+            revision(signature = CatalogIrSignature("not-a-hash"), behaviour = CatalogBehaviour(irVersion = 1)),
+            revision(signature = CatalogIrSignature("e".repeat(64)), behaviour = CatalogBehaviour(irVersion = 0)),
+            revision(signature = CatalogIrSignature("e".repeat(64)), behaviour = CatalogBehaviour(irVersion = -1)),
+        )
+        for (body in malformed) {
+            coEvery { reads.publishedRevision(productId, at) } returns CatalogRead.Answered(body)
+
+            assertThat(adapter.resolvePublishedRevision(productId, at)).isEqualTo(RevisionResolution.Unavailable)
+        }
     }
 
     private fun revision(

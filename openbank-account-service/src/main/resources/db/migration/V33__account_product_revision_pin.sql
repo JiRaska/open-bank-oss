@@ -27,7 +27,8 @@ ALTER TABLE accounts
             AND product_revision_ir_hash IS NULL AND product_revision_ir_version IS NULL
             AND product_revision_pinned_at IS NULL)
         OR
-        (product_revision_id IS NOT NULL AND product_revision_number >= 1 AND product_offering_id IS NOT NULL
+        (product_revision_id IS NOT NULL AND product_revision_number IS NOT NULL
+            AND product_revision_number >= 1 AND product_offering_id IS NOT NULL
             AND product_revision_product_code IS NOT NULL AND product_revision_pinned_at IS NOT NULL)
     ),
     -- The IR hash and its version travel together: a revision either carries signed IR or none.

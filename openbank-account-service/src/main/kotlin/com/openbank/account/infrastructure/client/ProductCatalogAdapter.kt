@@ -31,9 +31,12 @@ class ProductCatalogAdapter(private val reads: ResilientProductCatalogReads) : P
     @Suppress("TooGenericExceptionCaught")
     override suspend fun findById(productId: UUID): ProductLookupResult = try {
         when (val read = reads.product(productId)) {
-            is CatalogRead.Answered -> ProductLookupResult.Found(
-                CatalogProduct(UUID.fromString(read.body.id), read.body.code, read.body.status, read.body.currency),
-            )
+            is CatalogRead.Answered -> {
+                val id = UUID.fromString(read.body.id)
+                require(id == productId) { "catalog returned another product" }
+                require(read.body.code.isNotBlank()) { "catalog product code must not be blank" }
+                ProductLookupResult.Found(CatalogProduct(id, read.body.code, read.body.status, read.body.currency))
+            }
             CatalogRead.NotFound -> ProductLookupResult.NotFound
             is CatalogRead.Refused -> {
                 Log.warnf("product-catalog refused product %s with HTTP %d", productId, read.status)
@@ -71,20 +74,31 @@ class ProductCatalogAdapter(private val reads: ResilientProductCatalogReads) : P
         }
         val irHash = body.irSignature?.revisionHash
         val irVersion = body.content.behaviour?.irVersion
+        require(body.number >= 1) { "catalog revision number must be positive" }
+        body.contentHash?.let { require(HASH.matches(it)) { "invalid catalog content hash" } }
+        // publish rejects IR-bearing content; publish-ir stores its signature atomically.
+        // A partial response is unavailable, never silently downgraded to a revision without IR.
+        require((body.irSignature == null) == (body.content.behaviour == null)) {
+            "catalog IR and signature must travel together"
+        }
+        if (body.irSignature != null) {
+            require(irHash != null && HASH.matches(irHash)) { "invalid catalog IR hash" }
+            require(irVersion != null && irVersion >= 1) { "invalid catalog IR version" }
+        }
         return RevisionResolution.Published(
             PublishedRevision(
                 revisionId = UUID.fromString(body.id),
                 offeringId = UUID.fromString(body.offeringId),
                 number = body.number,
                 contentHash = body.contentHash,
-                // Both or neither: a signature without an IR version (or the reverse) is not a pin we can verify.
-                irRevisionHash = irHash.takeIf { irVersion != null },
-                irVersion = irVersion.takeIf { irHash != null },
+                irRevisionHash = irHash,
+                irVersion = irVersion,
             ),
         )
     }
 
     private companion object {
         const val PUBLISHED = "PUBLISHED"
+        val HASH = Regex("^[0-9a-f]{64}$")
     }
 }

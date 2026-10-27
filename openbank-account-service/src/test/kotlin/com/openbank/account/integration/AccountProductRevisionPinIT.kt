@@ -160,6 +160,52 @@ class AccountProductRevisionPinIT {
         assertThat(renamed).isEqualTo(1)
     }
 
+    @Test
+    fun `a legacy row accepts a whole pin but refuses a pin with a missing revision number`() {
+        val accountId = UUID.randomUUID()
+        dataSource.connection.use { c ->
+            c.prepareStatement(
+                """
+                INSERT INTO accounts (id, account_number, account_type, party_id, product_id, currency_code)
+                VALUES (?, ?, 'CURRENT', ?, ?, 'CZK')
+                """.trimIndent(),
+            ).use {
+                it.setObject(1, accountId)
+                it.setString(2, accountId.toString().replace("-", ""))
+                it.setObject(3, UUID.randomUUID())
+                it.setObject(4, productId)
+                assertThat(it.executeUpdate()).isEqualTo(1)
+            }
+        }
+        assertThat(query("SELECT product_revision_id FROM accounts WHERE id = ?", accountId).single()[0]).isNull()
+
+        assertThatThrownBy { pinLegacyRow(accountId, null) }
+            .isInstanceOf(SQLException::class.java)
+            .hasMessageContaining("chk_accounts_product_revision_pin_whole")
+        assertThat(query("SELECT product_revision_id FROM accounts WHERE id = ?", accountId).single()[0]).isNull()
+
+        // The nullable legacy state and a complete first pin remain supported; only the partial pin fails.
+        assertThat(pinLegacyRow(accountId, 4L)).isEqualTo(1)
+        assertThat(query("SELECT product_revision_number FROM accounts WHERE id = ?", accountId).single()[0])
+            .isEqualTo(4L)
+    }
+
+    private fun pinLegacyRow(accountId: UUID, number: Long?): Int = dataSource.connection.use { c ->
+        c.prepareStatement(
+            """
+            UPDATE accounts SET product_revision_id = ?, product_revision_number = ?, product_offering_id = ?,
+                product_revision_product_code = 'BEZNY_UCET', product_revision_pinned_at = opened_at
+            WHERE id = ?
+            """.trimIndent(),
+        ).use {
+            it.setObject(1, UUID.randomUUID())
+            it.setObject(2, number)
+            it.setObject(3, UUID.randomUUID())
+            it.setObject(4, accountId)
+            it.executeUpdate()
+        }
+    }
+
     private fun assertNothingPersistedFor(partyId: UUID) {
         assertThat(query("SELECT id FROM accounts WHERE party_id = ?", partyId))
             .describedAs("no account row for a refused opening")
