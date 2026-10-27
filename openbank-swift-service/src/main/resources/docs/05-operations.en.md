@@ -103,6 +103,17 @@ Symptom: outbox INSERT fails with `relation "swift_outbox_seq" does not exist`. 
 
 A repeated submit with the same `idempotencyKey` returns the existing message. A `409` indicates a duplicate key with a conflicting payload — do not retry; fix the client or use a new key.
 
+## Bank-own transfers released by treasury
+
+Treasury's `treasury.payment.released.v1` (channel `treasury-payments-in`) becomes one bank-own
+transfer per payment, sent as pacs.009 on the route the release names; its status is published on
+`openbank.swift.institution-transfers`. A release whose value date is more than
+`institution-transfer.value-date-past-tolerance-days` in the past is refused (DT01). A transfer is
+never resubmitted blindly and a known one is never rejected: an ambiguous submission is resolved by
+asking the scheme by UETR. The resolution sweeper (`institution-transfer.resolution.*`: `every`,
+`initial-delay`, `min-age`, `batch-size`) asks about unknown submissions and SENT transfers older
+than `min-age`. A record the consumer cannot process is dead-lettered by the channel configuration.
+
 ## Tests & coverage
 
 - Tests: `SwiftServiceTest`, `SwiftMessageTest`, `HibernateSequenceGuardTest` (Quarkus JUnit5, AssertJ, MockK).
@@ -156,3 +167,10 @@ records no workflow success. Nullable migration columns do not invent historical
 `SwiftSettlementRedriveScheduler` runs every 60 s and re-drives each MT103 that is `SENT` with an open booking clock (`booking_first_due_at` set, `booking_proven_at` null) and at least `openbank.swift.settlement-redrive.min-age` (2 min) old. It calls transaction-service again under the same `swift-settlement-<messageId>` key with the request rebuilt from the stored message, so the value date is the MT103's 32A date, never today's. It never resubmits to the scheme. Concurrent sweeps cannot both call: each message is claimed with a token and a 2 min lease by one conditional UPDATE, and every later write is conditional on that token. An unproven attempt is counted in `booking_redrive_attempts` and waits `min(2 min * 2^(n-1), 1 h)`; after 10 attempts the message is marked `booking_redrive_exhausted_at`, `openbank_payment_unsettled_total{rail="SWIFT",outcome="redrive-exhausted"}` increments, and the open clock keeps `SwiftBookingUnsettled` firing. A stopped sweep is caught by `WorkflowLivenessStale` (`swift-settlement-redrive`). Switch: `SWIFT_SETTLEMENT_REDRIVE_ENABLED` (default `true`). A message an operator already acknowledged or rejected is not `SENT` and is never re-driven; it needs the runbook. A stored `FAILED` or mismatched answer comes back the same on every attempt, so the re-drive exhausts on it; the runbook is the remedy there too. The alert (30 min) can fire while the re-drive is still live (10 attempts span about 6 h), so any manual remediation starts with the runbook's four-eyes stop (`booking_redrive_stopped_at`, refused while a re-drive holds a live claim); the sweep never claims a stopped message. `ack`/`reject` stop the re-drive too, answer 409 while a claim is live, and leave the booking clock open. Unparseable stored value dates are counted as `outcome="bad-data"` and exhaust at once; one message's database error is counted as `outcome="redrive-error"` and the sweep continues. A stop does not cancel a call already in flight: a re-drive stalled past its lease can still book after it, which records the proof and counts `outcome="late-completion"`. So any manual booking must use the same `swift-settlement-<messageId>` key, after reading transaction-service for it. A message that owes no debit (e.g. rejected after ACSC) is closed by the runbook's four-eyes waive (`booking_waived_at`, reason, approver), which removes it from the age gauge, the alert and the sweep; the service never writes it.
 
 A validated late booking after an operator ACK/REJECT retains its transaction proof without replacing that decision or emitting a COMPLETED event. It is reported as `late-completion`; reconcile the existing same-key transaction. A waiver requires a complete timestamp, nonblank reason and approver, never partial NULL evidence.
+
+## Payment type on pacs.008 (#13663)
+
+The SWIFT cover-payment adapter explicitly leaves the shared builder's optional payment-type
+block absent. A cross-border cover payment must not claim the EPC SEPA service level merely
+because it uses the same XML builder. The no-block message remains unchanged; this library
+compatibility update does not change the settlement booking, callbacks or re-drive policy.

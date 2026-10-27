@@ -57,6 +57,7 @@ def main():
         print("Library proofs: not applicable to these paths")
         return 0
     deadline = time.monotonic() + args.timeout
+    completed_jobs = {}
     while True:
         runs = [r for page in api(f"repos/{args.repo}/actions/runs?head_sha={args.head}&event=pull_request&per_page=100")
                 for r in page["workflow_runs"]]
@@ -66,8 +67,19 @@ def main():
             if candidates:
                 latest = max(candidates, key=lambda r: (r["id"], r.get("run_attempt", 1)))
                 if latest["status"] == "completed" and latest.get("conclusion") == "success":
-                    endpoint = f"repos/{args.repo}/actions/runs/{latest['id']}/attempts/{latest.get('run_attempt', 1)}/jobs?per_page=100"
-                    latest["jobs"] = [j for page in api(endpoint) for j in page["jobs"]]
+                    # Keep reading the run inventory: reruns and newer producers must
+                    # supersede old success. Only a proven successful terminal attempt's
+                    # job roster is immutable and reusable within this invocation.
+                    key = (args.repo, workflow, latest["head_sha"], latest["event"],
+                           latest["id"], latest.get("run_attempt", 1))
+                    if key in completed_jobs:
+                        latest["jobs"] = completed_jobs[key]
+                    else:
+                        endpoint = f"repos/{args.repo}/actions/runs/{latest['id']}/attempts/{latest.get('run_attempt', 1)}/jobs?per_page=100"
+                        latest["jobs"] = [j for page in api(endpoint) for j in page["jobs"]]
+                        proofs = [j for j in latest["jobs"] if j.get("name") == JOBS[workflow]]
+                        if proofs and all(j.get("status") == "completed" and j.get("conclusion") == "success" for j in proofs):
+                            completed_jobs[key] = latest["jobs"]
         state, detail = verdict(runs, args.head)
         print(f"Library proofs: {state}: {detail}", flush=True)
         if state == "success":

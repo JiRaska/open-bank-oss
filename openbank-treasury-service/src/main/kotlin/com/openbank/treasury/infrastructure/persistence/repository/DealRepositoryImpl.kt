@@ -10,6 +10,7 @@ import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
+import com.openbank.treasury.application.port.out.DealChangedException
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealReferenceLookup
 import com.openbank.treasury.application.port.out.DealRepository
@@ -54,6 +55,7 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.LockModeType
 import jakarta.persistence.PersistenceException
 import java.math.BigDecimal
 import java.time.Clock
@@ -165,6 +167,13 @@ class DealRepositoryImpl(
      * Deal row, its NEW timeline entries, the journal reference and the outbox event — one
      * transaction (ADR-0003). Timeline rows already stored are counted and skipped, so the table
      * stays append-only.
+     *
+     * Every lifecycle command (edit, submit, approve, override, reject, cancel, confirm, settle,
+     * mature, reverse, send-confirmation) writes through here. The row is ALWAYS locked
+     * (PESSIMISTIC_WRITE) and its `row_version` compared with the copy the command was computed
+     * from: a copy older than the row is refused (409 DEAL_CHANGED), never written over — so an
+     * edit racing a submission, or two edits, cannot lose either change. The `@Version` column is
+     * the backstop if anything ever writes the entity outside this path.
      */
     override suspend fun save(
         deal: Deal,
@@ -175,9 +184,15 @@ class DealRepositoryImpl(
         extraEvents: List<DealEvent>,
     ): Deal {
         val actor = deal.history.lastOrNull()?.actor?.id ?: deal.createdBy.id
-        Panache.withTransaction {
-            val row = find("dealId", deal.id).firstResult()
+        val storedVersion = Panache.withTransaction {
+            val row = find("dealId", deal.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
             row.flatMap { existing ->
+                if (existing != null && existing.rowVersion != deal.rowVersion) {
+                    throw DealChangedException(
+                        "deal ${deal.id} changed since it was read (row version ${existing.rowVersion}, " +
+                            "this change was made on ${deal.rowVersion}); reload and retry",
+                    )
+                }
                 val entity = existing ?: DealEntity().apply {
                     dealId = deal.id
                     createdAt = deal.createdAt
@@ -214,9 +229,12 @@ class DealRepositoryImpl(
                             }
                         }
                     }
+                    // Flush inside the transaction: the @Version bump is what the returned copy carries.
+                    .flatMap { Panache.getSession().flatMap { it.flush() } }
+                    .map { entity.rowVersion }
             }
         }.awaitSuspending()
-        return deal
+        return deal.copy(rowVersion = storedVersion)
     }
 
     /** One `deal_versions` row per terms version; the schedule columns follow the latest generation. */
@@ -570,6 +588,7 @@ class DealRepositoryImpl(
             version = dealVersion,
             scheduleVersion = scheduleVersion,
             scheduleHash = scheduleHash,
+            rowVersion = rowVersion,
         ).let { d -> if (d.product.legacy) d.copy(legs = LegacyLegs.derive(d)) else d }
     }
 

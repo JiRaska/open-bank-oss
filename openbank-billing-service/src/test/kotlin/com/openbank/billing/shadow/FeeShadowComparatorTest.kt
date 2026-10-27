@@ -46,6 +46,15 @@ class FeeShadowComparatorTest {
     }
 
     @Test
+    fun `a legacy zero charge not flagged waived agrees with an IR waiver, and disagrees with an IR charge`() {
+        val zero = ShadowFixtures.charged("0.00")
+        val waivedByIr = single("5000.00", zero) as FeeShadowResult.Compared
+        assertThat(waivedByIr.diverged).isFalse()
+        assertThat(waivedByIr.legacyCharged).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat((single("500.00", zero) as FeeShadowResult.Compared).diverged).isTrue()
+    }
+
+    @Test
     fun `an unknown balance is not treated as a known zero`() {
         assertThat(single(null, ShadowFixtures.charged())).isInstanceOf(FeeShadowResult.UnknownInput::class.java)
     }

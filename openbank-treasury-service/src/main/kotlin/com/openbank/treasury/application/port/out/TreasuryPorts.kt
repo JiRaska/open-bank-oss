@@ -22,6 +22,9 @@ import java.util.UUID
 /** Raised when a command names a deal that does not exist. Mapped to 404. */
 class DealNotFoundException(dealId: UUID) : NoSuchElementException("deal $dealId not found")
 
+/** A deal write was computed from a copy older than the stored row. Mapped to 409 DEAL_CHANGED. */
+class DealChangedException(message: String) : IllegalStateException(message)
+
 /** Raised when a deal names a counterparty not in the master. Mapped to 400 via IllegalArgumentException. */
 class UnknownCounterpartyException(id: String) : IllegalArgumentException("unknown counterparty '$id'")
 
@@ -37,7 +40,7 @@ data class LedgerJournalRef(
     /**
      * The journal's value day: the economic accounting day it belongs to (an accrual's day, a
      * settlement's value date). ADR-0342: treasury's day-close count attributes the journal to it.
-     * Null only for rows recorded before V21 (backfilled there from posted_at).
+     * Null only for rows recorded before V26 (backfilled there from posted_at).
      */
     val valueDate: LocalDate? = null,
 )

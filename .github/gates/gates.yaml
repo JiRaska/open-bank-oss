@@ -1775,6 +1775,31 @@ gates:
     run: |
       python3 .github/scripts/check-stateful-not-on-spot.py
 
+  - id: default-nodepool-budget-shape
+    name: "default NodePool disruption budgets stay pinned: <=1 node, windowed drift, freeze (#13726, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 20
+    rationale: >-
+      #13704 bounded the spot `default` NodePool (most CNPG pods) to one disrupted node at a time and
+      confined Drifted replacements to a daily window via a scheduled Drifted budget of 0 nodes,
+      beside the overnight freeze. Nothing enforced it, and stateful-not-on-spot covers only the
+      stateful pool. Every budget must allow at most one node (a "50%" entry is live the day the tight
+      one goes), a catch-all budget must exist, the Drifted-0 schedule must leave a window of at most
+      4h, and the freeze (scheduled, no reasons, 0 nodes) must remain. The HCL is brace-matched, as
+      in check-stateful-not-on-spot.py.
+    review_after: "2027-04-30"
+    verified: >-
+      2026-10-24 -- run on the branch: OK, 4 budgets. Self-test falsifies 7 mutations on the real
+      file (catch-all removed, catch-all raised to 50%, Drifted raised to 5, scheduled Drifted
+      budget removed, window widened to 12h, freeze removed, pool renamed) and a missing file.
+    min_subjects: 3   # 4 budget entries today (2026-10-24)
+    selftest_inputs: [".github/scripts/check-default-nodepool-budget.py"]
+    selftest: python3 .github/scripts/check-default-nodepool-budget.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-default-nodepool-budget.py
+
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
   # Rolling campaign-service into the sandbox hit five defects that each kill the pod or its
@@ -3617,7 +3642,7 @@ gates:
       capability preflight, committed read-back, canonical parent/tree/blob identity and
       PR timeline. Unknown policy source, codex downgrade and revoked intent fail closed.
     budget_seconds: 60
-    min_subjects: 26
+    min_subjects: 32
     rationale: >-
       PR intent under a reviewed pre-merge prefix rule is distinct from exact-head approval
       and from bounded legacy reconstruction. The original evidence gate retains its floor.
@@ -5306,7 +5331,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-event-contract-code-agreement.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-event-contract-code-agreement.py"]
+    selftest_inputs: [".github/scripts/check-event-contract-code-agreement.py", ".github/scripts/check-asyncapi-doc-discriminator.py"]
     run: |
       python3 .github/scripts/check-event-contract-code-agreement.py
 
@@ -5612,7 +5637,10 @@ gates:
     mode: enforced
     when: pull_request
     needs_base: required
-    budget_seconds: 20   # money-path only: bounded live GitHub read plus local diff
+    # 20 s -> 60 s (2026-10-24): on a merge-train carrier the gate judges every member on its own
+    # body and diff, one after another, so its time grows with the train. A five-member carrier
+    # measured 22.2 s and passed on content, yet the overrun made it inconclusive and held the train.
+    budget_seconds: 60   # one bounded live GitHub read plus local diff per member
     rationale: "The security checklist is the fleet's per-PR control and unticked boxes were free; on money-path code the six lines written for exactly that case must be answered, not carried."
     review_after: "2027-03-04"
     selftest: python3 .github/scripts/check-security-checklist.py --self-test
@@ -7248,6 +7276,29 @@ gates:
     selftest_inputs: [".github/scripts/check-hibernate-sequence-guard.py", ".github/scripts/collect-test-run-evidence.py"]
     run: |
       python3 .github/scripts/check-hibernate-sequence-guard.py --root .
+
+  # #13169: a test file that is the same source in more than two modules is a copy that belongs once
+  # in openbank-libs-testing. No existing gate covers it (`pr-shared-files` compares OPEN PRs, not the
+  # tree). Compared with the `package` line removed, since a copy necessarily differs by package: the
+  # raw-byte comparison finds 0 groups on origin/main, the package-normalised one finds 3.
+  - id: duplicate-test-files
+    name: "no test file is identical in more than two modules (#13169, enforced ratchet)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      Per-service copies drift independently (HibernateSequenceGuardTest had three byte variants,
+      M2mOidcClientIdentityWiringTest 15 shapes) and every fix has to be repeated N times. A baselined
+      group may not spread, a shrunk or vanished one fails until its baseline is lowered, and a
+      new group fails.
+    review_after: "2027-04-23"
+    verified: "2026-10-23 — self-test has a 3-module package-only copy (flagged), a 2-module one, a one-line variation, a grown baselined group (flagged), a shrunk and a vanished one (both flagged: lower the baseline) and a package directory named build (scanned); on origin/main with an empty baseline it reports TraceContractRecorder (20), TraceContractProfile (11) and MockAuthzProducer (3)"
+    budget_seconds: 30
+    min_subjects: 1380   # 2760 distinct test-file contents measured 2026-10-23; half
+    selftest: python3 .github/scripts/check-duplicate-test-files.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-duplicate-test-files.py"]
+    run: |
+      python3 .github/scripts/check-duplicate-test-files.py --root .
 
   # #13172: an ExternalSecret reading `creds/<role>` for a role the openbao-config CronJob never
   # creates fails every reconcile with `unknown role` and nothing pages (the service keeps its

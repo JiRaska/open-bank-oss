@@ -48,7 +48,7 @@ data class InFlightRun(val businessDate: LocalDate, val job: String, val started
  * only once none of those events is still in the outbox.
  *
  * @property journals journals recorded with this VALUE day (`deal_journals.value_date`), whenever posted
- * @property pending journal events created on the day and not yet delivered: PENDING, DISPATCHING, or
+ * @property pending journal events associated with this value day and not yet delivered: PENDING, DISPATCHING, or
  *   FAILED and still retried
  * @property dead journal events the outbox gave up on (DEAD): the day's journal record is incomplete
  * @property lastSettlementAt when the day's latest SETTLED or MATURED journal was recorded, or null: a
@@ -59,6 +59,8 @@ data class DayJournalPostings(
     val pending: Int,
     val dead: Int,
     val lastSettlementAt: Instant? = null,
+    /** Acknowledged lifecycle journals whose matching state transition has not committed. */
+    val unapplied: Int = 0,
 )
 
 /** Read side of [DayJournalPostings]. */

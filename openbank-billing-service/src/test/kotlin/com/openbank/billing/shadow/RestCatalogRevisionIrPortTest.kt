@@ -4,6 +4,7 @@
 
 package com.openbank.billing.shadow
 
+import com.openbank.billing.application.port.out.CatalogRevisionMismatchException
 import com.openbank.billing.application.port.out.CatalogRevisionUnavailableException
 import com.openbank.billing.infrastructure.adapter.RestCatalogRevisionIrPort
 import com.openbank.billing.infrastructure.client.ProductCatalogRestClient
@@ -24,10 +25,14 @@ class RestCatalogRevisionIrPortTest {
     fun `a signed revision keeps its IR bytes exact, numeric decimals included`() {
         val numeric = ShadowFixtures.IR.replace("\"4.90\"", "4.90").replace("\"1000.00\"", "1000.00")
         val hash = ProductIrParser.parse(ShadowFixtures.IR).revisionHash
-        val body = """{"id":"r1","content":{"behaviour":$numeric},"irSignature":{"revisionHash":"$hash",""" +
-            """"keyId":"product-ir-publish","algorithm":"hmac-sha256","signature":"c2ln","signedAt":"2026-10-23T00:00:00Z"}}"""
-        val stored = port.parse("r1", body)
+        val revisionId = "a8d4bdf3-73e7-46e4-a48d-9ebd869b9081"
+        val body =
+            """{"id":"$revisionId","number":7,"state":"PUBLISHED",""" +
+                """"content":{"behaviour":$numeric},"irSignature":{"revisionHash":"$hash",""" +
+                """"keyId":"product-ir-publish","algorithm":"hmac-sha256","signature":"c2ln","signedAt":"2026-10-23T00:00:00Z"}}"""
+        val stored = port.parse(revisionId, body)
         assertThat(stored.hasIr).isTrue()
+        assertThat(stored.identity).isEqualTo(ShadowFixtures.identity(revisionId))
         assertThat(stored.revisionHash).isEqualTo(hash)
         assertThat(stored.signature!!.algorithm).isEqualTo("hmac-sha256")
         // The decimals survive as written, so the loader re-derives the hash that was signed.
@@ -62,4 +67,15 @@ class RestCatalogRevisionIrPortTest {
             assertThatThrownBy { runBlocking { RestCatalogRevisionIrPort(garbled).fetch("r1") } }
                 .isInstanceOf(CatalogRevisionUnavailableException::class.java)
         }
+
+    @Test
+    fun `a body naming another revision, or none, is refused before anything is stored`() {
+        for (body in listOf(
+            """{"id":"other","content":{"behaviour":${ShadowFixtures.IR}}}""",
+            """{"content":{"behaviour":${ShadowFixtures.IR}}}""",
+            """{"id":"other","content":{"attributes":{}}}""",
+        )) {
+            assertThatThrownBy { port.parse("r1", body) }.isInstanceOf(CatalogRevisionMismatchException::class.java)
+        }
+    }
 }

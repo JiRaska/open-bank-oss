@@ -109,8 +109,11 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
   re-persisted beyond the audit record, with ONE bounded exception since ADR-0352 phase 3: the
   product-IR shadow freezes the account's balance, monthly turnover, pocket balance and segment in
   `billing_product_shadow_input`, committed with the assessment, so the comparator can re-decide the
-  same facts later. They are erased (set to NULL) when the comparison completes, leaving only the
-  outcome; a row stuck PENDING keeps them until it completes or exhausts its retries. The comparator's
+  same facts later. They are erased (set to NULL) when the IR actually re-decides the input, leaving
+  only the outcome; a row stuck PENDING keeps them until it completes or exhausts its retries, and a
+  row completed as not comparable (`NO_IR`, `VERIFICATION_DISABLED`, `VERIFICATION_FAILED`, ...) keeps
+  them so it can be compared once the cause is fixed. No re-drive or purge of such rows exists yet, so
+  that retention is unbounded until one does; tracked as a follow-up. The comparator's
   metrics carry consumer, product code, rule id and a reason only, never an account, amount or
   balance. Transport is TLS; reads are OPA-authorized.
 - **Tampering (product IR, ADR-0352 phase 3)** — the shadow evaluates a revision's IR only after the
@@ -345,9 +348,19 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
 - **2026-10-23** — **Review of #13709: missed-cycle catch-up, closed-day refusal alert and four-eyes re-bill.** (1) **Catch-up:** the cycle fires at one instant a month, so a pod down at that instant (a deploy on the 1st, or the move of the trigger to Europe/Prague) skipped the month. `BillingCycleScheduler.catchUp` (every 15m, 2m after boot) runs the sweep for the due day when the cron's latest firing is in the current month and no cycle run is recorded; idempotent by `cycleId` (assessments are unique per cycle, account, currency), one sweep at a time across both triggers, evidence filed under the due day. **STRIDE-T:** it can only re-run an idempotent cycle, never charge twice; an unreadable cron or evidence store skips the catch-up rather than firing. (2) **Alert:** `BillingFeeRefusedIntoClosedDay` on `closed_day_refusals` (any increase in 6h, summed over pods), promtool-tested with both a raw-counter and a single-pod sabotage turning the tests red. (3) **Recovery:** runbook 0033 re-bills a refused fee into the next open day under a NEW key recorded in `billing_fee_rebill` (V10: original key, new key, ticket, maker, checker; `CHECK (maker <> checker)`). The re-bill outbox row carries `rebillOf`, so the dispatcher posts under the new key and settles the ORIGINAL fee row; a closed-day refusal of the re-bill marks the original FAILED again and re-fires the alert. **STRIDE-R:** every re-bill is attributable to two named people and a ticket; the closed day itself is never reopened. Rollback: revert; V10 is additive.
 - **2026-10-24** — **Final review of #13709: re-bill authorisation, case-insensitive four-eyes, overlap-guard scope.** (1) **STRIDE-T/E:** a `billing.fee.post-intent.v1` row carrying `rebillOf` settles the ORIGINAL fee with a journal posted under a new key. An outbox row is text, so a hand-written one could otherwise mark any fee POSTED. `LedgerOutboxEventPublisher` now checks `billing_fee_rebill` BEFORE posting: the row must bind exactly that new key to that original, and the original must be PENDING/FAILED with no journal. Otherwise the post is refused, `openbank.billing.fee.rebill.refused` is counted, and the row retries to DEAD. The store-less test constructor refuses every re-bill (fail closed). A unit test covers a forged row, and `BillingFeeRebillIT` checks the query against real Postgres. (2) **STRIDE-R:** the V10 four-eyes CHECK compares `lower(btrim(maker))` with `lower(btrim(checker))`, so case or padding cannot pass one person as two; the IT asserts it. (3) **Overlap guard:** the in-JVM `sweepInFlight` relies on billing running ONE replica (Deployment, `replicas: 1`). A rolling-update overlap costs duplicate work, never a double charge, because assessments are unique per (cycle, account, currency). A cluster advisory lock was rejected because it wraps its block in one transaction that the per-account transactions would join. Scaling past one replica must revisit this. Rollback: revert; V10 is additive.
 
+
 Shadow comparison rejects mismatched IR/input currencies and ambiguous fee-code mappings as
 unknown. When the recorded cycle has no explicit tag, counterfactual dispatch is supported only
 for a unique unconditional ON_OPEN schedule registration of the same cadence, with no potential
 opening Reject or duplicate producer. This does not establish that the IR's own calendar fired.
 Opening predicates are not reconstructed from today's balances; unsupported registrations and
 historical facts stay unknown. These guards cannot change a legacy fee or grant posting authority.
+
+Billing's shadow worker accepts only a full revision identity frozen with the original assessment
+from its authoritative immutable catalog terms response. The worker's later copy is a separate
+input, never the source of the expected pin. Missing historical identity stays unknown; malformed
+optional metadata cannot suppress or alter a legacy charge. For copies carrying IR, signature and all five identity fields are verified before insertion
+or one-time NULL identity metadata enrichment. V13 permits
+only that metadata transition with every pre-existing immutable field unchanged; it still rejects
+identity overwrite, IR/hash/signature mutation and deletion. No bare-hash signature fallback,
+revision-number default, posting authority or deployment activation is introduced.

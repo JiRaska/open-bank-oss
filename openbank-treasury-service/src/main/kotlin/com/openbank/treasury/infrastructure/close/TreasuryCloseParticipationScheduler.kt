@@ -38,17 +38,19 @@ import java.time.LocalDate
  * switched on; switched off, the day is SKIPPED with that reason. A due job with no completed
  * `treasury_close_job_run` row means the day is not reported at all and the ledger keeps it in CUTOFF.
  *
- * Two more holds, both "not reported yet", never a guess:
+ * Additional holds, all "not reported yet", never a guess:
  *  - **in flight**: a pass for the day marked itself started and has not finished. A marker older
  *    than the DERIVED [TreasuryCloseJobs.staleAfter] is a pass that died, reported REFUSED
  *    `pass started and never completed`, so a crash cannot hold the day unresolvably;
  *  - **journal events pending**: treasury posts its journals synchronously, but the deal events that
  *    announce them (`treasury.deal.settled|matured|reversed.v1`) leave through `treasury_outbox`. The
- *    day waits until none created on it is still PENDING, DISPATCHING or FAILED; DEAD ones make the
- *    day REFUSED.
+ *    day waits until none associated with its journal value day is still PENDING, DISPATCHING or
+ *    FAILED; DEAD ones make the day REFUSED. Unattributable events hold their creation day;
+ *  - **unapplied acknowledgement**: a lifecycle journal has no matching committed deal transition.
+ *    A completed accrual pass does not prove that the lifecycle state and its event committed.
  *
- * The day's journal count is the `deal_journals` rows posted in it, every journal the ledger
- * acknowledged to treasury that day (accruals, settlements, maturities, reversals).
+ * The day's journal count is the `deal_journals` rows with that economic value day: accruals,
+ * settlements, maturities and reversals acknowledged by the ledger.
  *
  * Returns the `Uni` for Quarkus to subscribe: a plain `@Scheduled` method has no Vert.x context
  * (CLAUDE.md). `TreasuryCloseParticipationSchedulerCronIT` drives the real cron.
@@ -136,6 +138,14 @@ class TreasuryCloseParticipationScheduler(
                 "treasury day-close for %s not reported: %d journal event(s) still in the outbox",
                 day,
                 postings.pending,
+            )
+            return@flatMap Uni.createFrom().nullItem()
+        }
+        if (postings.unapplied > 0) {
+            log.infof(
+                "treasury day-close for %s not reported: %d acknowledged journal(s) await lifecycle application",
+                day,
+                postings.unapplied,
             )
             return@flatMap Uni.createFrom().nullItem()
         }

@@ -18,7 +18,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 
 /**
- * Postgres day-close evidence for treasury (ADR-0342 D1): `treasury_close_job_run` (V21), the shape
+ * Postgres day-close evidence for treasury (ADR-0342 D1): `treasury_close_job_run` (V26), the shape
  * lending-service keeps (in-flight marker, items accumulating across a day's passes), plus the day's
  * journals: `deal_journals` rows posted in the Prague day, and the deal events announcing them that
  * are still in `treasury_outbox`.
@@ -61,8 +61,8 @@ class TreasuryCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : T
     }.map { rows -> rows.map { InFlightRun(asDate(it[0]), it[1] as String, asInstant(it[2])) } }
 
     /**
-     * The Prague day is turned into a UTC instant range here, so both tables are read by a plain
-     * range on their timestamp (indexed: `idx_deal_journals_posted_at`, `idx_treasury_outbox_status`).
+     * Known lifecycle events follow their exact deal/event journal value day. The UTC range
+     * attributes only events without a matching dated journal to their creation day.
      */
     override fun postingsFor(accountingDate: LocalDate): Uni<DayJournalPostings> {
         val start = OffsetDateTime.ofInstant(
@@ -85,6 +85,7 @@ class TreasuryCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : T
                 pending = (row[1] as Number).toInt(),
                 dead = (row[2] as Number).toInt(),
                 lastSettlementAt = row[COL_LAST_SETTLEMENT]?.let { asInstant(it) },
+                unapplied = (row[COL_UNAPPLIED] as Number).toInt(),
             )
         }
     }
@@ -170,6 +171,7 @@ class TreasuryCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : T
         // purges them, so the day's journal count comes from deal_journals instead.
         const val P_VALUE_DATE = 3
         const val COL_LAST_SETTLEMENT = 3
+        const val COL_UNAPPLIED = 4
 
         // Positional parameters of LATEST_PASS_SQL.
         const val P_LATEST_JOB = 1
@@ -181,15 +183,34 @@ class TreasuryCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : T
             "SELECT max(started_at) FROM treasury_close_job_run WHERE job = ?1 AND business_date >= ?2 " +
                 "AND NOT running AND completed_at IS NOT NULL AND refused = 0"
 
-        // Journals by VALUE day (#13882 review); the outbox events by the day they were created.
+        // Legacy lifecycle keys are one journal per (deal, event). Match the exact event kind,
+        // not every event for an aggregate: settlement, maturity and reversal can have different
+        // value days. An event without attributable journal evidence retains its creation-day hold.
+        const val EVENT_JOURNAL_MATCH =
+            "j.deal_id = o.aggregate_id AND j.event = CASE o.event_type " +
+                "WHEN 'treasury.deal.settled.v1' THEN 'SETTLED' " +
+                "WHEN 'treasury.deal.matured.v1' THEN 'MATURED' " +
+                "WHEN 'treasury.deal.reversed.v1' THEN 'REVERSED' END"
+
+        const val EVENT_DAY_SCOPE =
+            "(EXISTS (SELECT 1 FROM deal_journals j WHERE " + EVENT_JOURNAL_MATCH + " AND j.value_date = ?3) " +
+                "OR (o.created_at >= ?1 AND o.created_at < ?2 AND NOT EXISTS " +
+                "(SELECT 1 FROM deal_journals j WHERE " + EVENT_JOURNAL_MATCH + " AND j.value_date IS NOT NULL)))"
+
+        // A journal acknowledgement commits independently of the lifecycle save. Only a matching
+        // append-only transition proves that save (including its outbox insertion) committed.
+        // Current state is insufficient: a legitimate settled deal may subsequently mature/reverse.
         const val POSTINGS_SQL =
             "SELECT " +
                 "(SELECT count(*) FROM deal_journals WHERE value_date = ?3), " +
-                "(SELECT count(*) FROM treasury_outbox WHERE event_type IN (" + JOURNAL_EVENTS + ") " +
-                "AND status IN ('PENDING', 'DISPATCHING', 'FAILED') AND created_at >= ?1 AND created_at < ?2), " +
-                "(SELECT count(*) FROM treasury_outbox WHERE event_type IN (" + JOURNAL_EVENTS + ") " +
-                "AND status = 'DEAD' AND created_at >= ?1 AND created_at < ?2), " +
+                "(SELECT count(*) FROM treasury_outbox o WHERE o.event_type IN (" + JOURNAL_EVENTS + ") " +
+                "AND o.status IN ('PENDING', 'DISPATCHING', 'FAILED') AND " + EVENT_DAY_SCOPE + "), " +
+                "(SELECT count(*) FROM treasury_outbox o WHERE o.event_type IN (" + JOURNAL_EVENTS + ") " +
+                "AND o.status = 'DEAD' AND " + EVENT_DAY_SCOPE + "), " +
                 "(SELECT max(posted_at) FROM deal_journals WHERE value_date = ?3 " +
-                "AND event IN ('SETTLED', 'MATURED'))"
+                "AND event IN ('SETTLED', 'MATURED')), " +
+                "(SELECT count(*) FROM deal_journals j WHERE j.value_date = ?3 " +
+                "AND j.event IN ('SETTLED', 'MATURED', 'REVERSED') AND NOT EXISTS " +
+                "(SELECT 1 FROM deal_transitions t WHERE t.deal_id = j.deal_id AND t.to_state = j.event))"
     }
 }

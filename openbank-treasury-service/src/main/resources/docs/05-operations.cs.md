@@ -69,7 +69,7 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
 účastníka.
 
 - **Doklad.** Každý průchod hodinového časového rozlišení (`InterestAccrualScheduler`) pracuje k jednomu
-  pražskému účetnímu dni. Než cokoli udělá, označí se v `treasury_close_job_run` (V21) jako
+  pražskému účetnímu dni. Než cokoli udělá, označí se v `treasury_close_job_run` (V26) jako
   rozběhnutý. Po skončení zapíše počet posouzených obchodů. Odmítnutí zapíše, když se obchod nepodařilo
   rozlišit, když ledger odpověděl `409 ACCOUNTING_DAY_CLOSED`, když vyčerpal rozpočet a obchody zbyly,
   nebo když průchod selhal. Odmítnutí uzavřeným dnem má vlastní kategorii. Pokud nejde zapsat značka
@@ -78,7 +78,7 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   proto účtuje s `entryDate` = dnešní otevřený pražský den a nese svůj ekonomický den jako `valueDate`
   (den rozlišení, datum valuty vypořádání). Stejně se rozhodl lending. Dohánění za dřívější den tak už
   nemůže narazit na `409 ACCOUNTING_DAY_CLOSED` jen proto, že ten den přešel do CUTOFF. Každý žurnál
-  se zapisuje do `deal_journals` se svým dnem valuty (V21 `value_date`).
+  se zapisuje do `deal_journals` se svým dnem valuty (V26 `value_date`).
 - **Jak se den nahlásí.** Pozdržení kvůli outboxu a kontrola DEAD běží vždy, ať je splatné cokoli.
   - Je-li rozlišení vypnuté, den je REFUSED při událostech DEAD, RAN má-li žurnály, a SKIPPED jen
     tehdy, když nemá ani jedno.
@@ -92,8 +92,11 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   za uzavřený den uloží jako pozdní.
 - **Pozdržení.** Den drží kterékoli z těchto:
   - průchod, který ještě běží;
-  - událost `treasury.deal.settled|matured|reversed.v1` vytvořená ten den, dokud je v `treasury_outbox`
-    ve stavu PENDING, DISPATCHING nebo FAILED (událost DEAD udělá z dne REFUSED);
+  - událost `treasury.deal.settled|matured|reversed.v1` přiřazená přes stejný obchod a druh životního
+    přechodu ke dni valuty žurnálu, dokud je v `treasury_outbox` ve stavu PENDING, DISPATCHING nebo
+    FAILED (událost DEAD udělá z dne REFUSED). Událost bez odpovídajícího datovaného žurnálu drží den vytvoření;
+  - potvrzený žurnál životního přechodu bez odpovídajícího potvrzeného přechodu obchodu. Pozdější stav
+    obchodu nezneplatňuje jeho dřívější potvrzený přechod;
   - vypořádání nebo splatnost s valutou ten den, zapsané až po startu posledního dokončeného průchodu
     rozlišení. Počítá se i průchod zapsaný pod pozdější den, protože po půlnoci rozliší i tento den.
 - **Práh zastarání.** Je odvozený, nikdy se nenastavuje samostatně. Průchod kontroluje
@@ -106,7 +109,7 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   ledaže jeho vlastní průchod ještě běží.
 - **Zapsáno před potvrzením.** Vypořádání, splatnost a storno zapíšou žurnál ve vlastní transakci,
   jakmile ho ledger přijme, ještě před potvrzením změny stavu obchodu. Když se toto potvrzení vrátí
-  zpět, žurnál se přesto započítá. Opakování účtuje pod stejným idempotentním klíčem, dostane zpět
+  zpět, žurnál se přesto započítá, ale den čeká na potvrzení odpovídajícího přechodu. Opakování účtuje pod stejným idempotentním klíčem, dostane zpět
   původní žurnál a najde ho zapsaný. Zbývá okno pádu mezi odpovědí ledgeru a tímto zápisem; řešení
   „záměr napřed“ se sleduje zvlášť.
 - **Provoz.** V režimu `shadow` ledger pozdržení jen počítá. V režimu `enforce` operátor den REFUSED

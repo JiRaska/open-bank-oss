@@ -65,6 +65,19 @@ class TreasuryCloseParticipationSchedulerTest {
     }
 
     @Test
+    fun `an acknowledged journal with an unapplied lifecycle holds even after a complete pass`() {
+        ran()
+        evidence.postings[DAY] = DayJournalPostings(1, 0, 0, unapplied = 1)
+        assertThat(report()).isNull()
+    }
+
+    @Test
+    fun `an unapplied lifecycle also holds when accrual is switched off`() {
+        evidence.postings[DAY] = DayJournalPostings(1, 0, 0, unapplied = 1)
+        assertThat(report(accrualEnabled = false)).isNull()
+    }
+
+    @Test
     fun `no accrual run for the day reports nothing, so the ledger holds the day`() {
         assertThat(report()).isNull()
     }

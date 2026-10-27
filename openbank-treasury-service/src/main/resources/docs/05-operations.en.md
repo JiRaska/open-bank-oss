@@ -76,7 +76,7 @@ It reports on treasury's own m2m identity (`service-account-openbank-treasury`),
 admits under `ledger.close.participate` for this participant only.
 
 - **Evidence.** Each pass of the hourly accrual (`InterestAccrualScheduler`) works as of one Prague
-  accounting day. Before it does any work it marks itself in flight in `treasury_close_job_run` (V21).
+  accounting day. Before it does any work it marks itself in flight in `treasury_close_job_run` (V26).
   When it finishes it records the deals it assessed. It records a refusal when a deal failed to accrue,
   when the ledger answered `409 ACCOUNTING_DAY_CLOSED`, when its budget ran out with deals left, or
   when the pass failed. A closed-day refusal has its own category. If the in-flight marker cannot be
@@ -85,7 +85,7 @@ admits under `ledger.close.participate` for this participant only.
   therefore booked with `entryDate` = today's open Prague day and carries its economic day as
   `valueDate` (an accrual's day, a settlement's value date). This is the decision lending made. A
   catch-up for an earlier day can no longer hit `409 ACCOUNTING_DAY_CLOSED` because that day reached
-  CUTOFF. Each journal is recorded in `deal_journals` with its value day (V21 `value_date`).
+  CUTOFF. Each journal is recorded in `deal_journals` with its value day (V26 `value_date`).
 - **What a day is reported as.** The outbox hold and the DEAD check always run, whatever is due.
   - With the accrual off, the day is REFUSED if it has DEAD events, RAN if it has journals, and
     SKIPPED only if it has neither.
@@ -99,8 +99,11 @@ admits under `ledger.close.participate` for this participant only.
   count, and the ledger stores a report for a closed day as late.
 - **Holds.** Any of these holds the day:
   - a pass still in flight;
-  - a `treasury.deal.settled|matured|reversed.v1` event created that day that is still PENDING,
-    DISPATCHING or FAILED in `treasury_outbox` (a DEAD event makes the day REFUSED);
+  - a `treasury.deal.settled|matured|reversed.v1` event associated with that exact deal and lifecycle
+    journal value day, still PENDING, DISPATCHING or FAILED in `treasury_outbox` (a DEAD event makes
+    the day REFUSED). An event without a matching dated journal holds its creation day;
+  - an acknowledged lifecycle journal without its matching committed deal transition. Later lifecycle
+    states do not invalidate an earlier committed transition;
   - a settlement or maturity valued on the day that was recorded after the latest completed accrual
     pass started. A pass filed under a later day counts, because after midnight it accrues the day too.
 - **Stale threshold.** It is derived and never configured on its own. The pass checks
@@ -113,7 +116,7 @@ admits under `ledger.close.participate` for this participant only.
   still live.
 - **Recorded before committed.** Settle, mature and reverse record the journal in its own transaction
   as soon as the ledger accepts it, before the deal's state change commits. If that commit rolls back,
-  the journal is still counted. A retry posts under the same idempotency key, gets the original journal
+  the journal is still counted, but the day is held until its lifecycle transition commits. A retry posts under the same idempotency key, gets the original journal
   back, and finds it recorded. The remaining window is a crash between the ledger's answer and that
   write; the intent-first follow-up is tracked separately.
 - **Operating it.** Under `shadow` mode the ledger only counts a hold. Under `enforce` an operator

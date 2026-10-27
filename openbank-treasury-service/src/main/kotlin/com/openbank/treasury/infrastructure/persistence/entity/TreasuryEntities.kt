@@ -45,6 +45,11 @@ class CounterpartyEntity : PanacheEntity() {
 @Entity
 @Table(name = "deals")
 class DealEntity : PanacheEntity() {
+    /** Optimistic lock (V21): a stale copy of the deal row fails at flush instead of overwriting it. */
+    @jakarta.persistence.Version
+    @Column(name = "row_version", nullable = false)
+    var rowVersion: Long = 0
+
     @Column(name = "deal_id", nullable = false, unique = true)
     lateinit var dealId: UUID
 
@@ -225,7 +230,7 @@ class DealJournalEntity : PanacheEntity() {
     @Column(name = "posted_at", nullable = false)
     lateinit var postedAt: Instant
 
-    /** The journal's value day (V21): the accounting day the day-close report counts it under. */
+    /** The journal's value day (V26): the accounting day the day-close report counts it under. */
     @Column(name = "value_date")
     var valueDate: java.time.LocalDate? = null
 
