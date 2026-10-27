@@ -158,3 +158,9 @@ Data classification: `internal` (`governance.yaml: dataClassification`). The wit
 - Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
 - Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
 - Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.
+
+## Capitalization ledger receipt
+
+A nonzero capitalization records the actual confirmed ledger journal UUID in the existing `ledgerEntryId` field, in the same local transaction as the capitalization, withholding record, outbox event and accrual transition. The REST adapter accepts a receipt only when its status is `POSTED` and its transaction identity matches the deterministic capitalization request. It reuses the existing business idempotency key; obtaining the receipt does not post a second journal. A zero-amount capitalization has no journal and keeps a null reference. Adapters without a receipt also leave it explicitly unknown.
+
+This link proves a confirmed posting response, not complete account history or an authenticated economic classification of arbitrary ledger origins. Historical null references are not backfilled from descriptions or guessed IDs. Existing source retention and erasure rules apply; the reference creates no new retention period.
