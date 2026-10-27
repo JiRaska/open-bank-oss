@@ -1205,7 +1205,7 @@ jobs:
       # JSON array of services that passed their own can-i-deploy check, set even when the
       # step (and therefore this job) ultimately exits non-zero — step outputs written via
       # $GITHUB_OUTPUT persist regardless of the step's own exit code. Empty/unset when the
-      # step didn't run at all (no PACT_BROKER_URL) — gitops-pr treats that as "no filter".
+      # step did not run at all; only non-strict legacy events may treat that as "no filter".
       deployable: ${{ steps.check.outputs.deployable }}
       # 'true' iff the gate step actually started (written before any fallible command).
       # Lets gitops-pr distinguish "gate absent (no broker) → no filter" from "gate ran but
@@ -1270,7 +1270,7 @@ jobs:
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
         id: check
-        if: ${{ vars.PACT_BROKER_URL != '' || github.event_name == 'workflow_run' }}
+        if: ${{ vars.PACT_BROKER_URL != '' || github.event_name == 'workflow_run' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true') }}
         run: |
           # Extracted to .github/scripts/can-i-deploy-gate.sh (#4086). It sat at 18955 chars
           # against a 19000 ceiling whose breach makes the WHOLE workflow unparseable, so the
@@ -1314,7 +1314,9 @@ jobs:
     # failed (nothing built to deploy) or was cancelled/skipped.
     # The last clause: every push failing leaves nothing to pin, and without it this job opens
     # a gitops PR whose image-tag set is empty — a no-op PR for a run that deployed nothing
-    # (#9714).
+    # (#9714). Strict reconcile additionally requires an actual nonempty gate verdict even
+    # when setup failed before the driver ran. A failed gate with a proven partial subset
+    # remains eligible; the writer validates that subset before any GitOps operation.
     if: |
       always() &&
       needs.changes.outputs.any == 'true' &&
@@ -1323,6 +1325,10 @@ jobs:
       needs.can-i-deploy.result != 'cancelled' &&
       (github.event_name != 'workflow_run' ||
        (needs.can-i-deploy.result == 'success' && needs.can-i-deploy.outputs.gate_ran == 'true' &&
+        needs.can-i-deploy.outputs.deployable != '' && needs.can-i-deploy.outputs.deployable != '[]')) &&
+      ((github.event_name != 'schedule' &&
+        (github.event_name != 'workflow_dispatch' || github.event.inputs.reconcile != 'true')) ||
+       (needs.can-i-deploy.outputs.gate_ran == 'true' &&
         needs.can-i-deploy.outputs.deployable != '' && needs.can-i-deploy.outputs.deployable != '[]')) &&
       needs.build-push.outputs.deployable_services != '[]'
     runs-on: ubuntu-latest  # manifest rewrite + PR only; hosted-first (public repo, free)
@@ -1335,14 +1341,16 @@ jobs:
       SOURCE_COMMIT: ${{ needs.changes.outputs.source_commit }}
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
       # Services can-i-deploy confirmed deployable, as a JSON array. Empty/unset (can-i-deploy
-      # skipped entirely — no PACT_BROKER_URL) means "no filter, process everything", matching
-      # the pre-fix behavior for that case; an explicit `[]` means "checked, none passed".
+      # skipped entirely — no PACT_BROKER_URL) means "no filter" only for non-strict legacy
+      # events; strict reconcile requires a proven subset. `[]` means "checked, none passed".
       DEPLOYABLE_SERVICES: ${{ needs.can-i-deploy.outputs.deployable || '' }}
       # 'true' when the contract gate ran (whatever its verdict); '' when it was absent
       # (no PACT_BROKER_URL). GATE_RAN=true together with an empty DEPLOYABLE_SERVICES means
       # the gate crashed before deciding — the fail-closed guard in the rewrite/record steps
       # keys on exactly that (issue #1348).
       GATE_RAN: ${{ needs.can-i-deploy.outputs.gate_ran || '' }}
+      RECONCILE_SOURCE_REQUIRED: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true') }}
+      BUILT_SERVICES: ${{ needs.build-push.outputs.deployable_services }}
       # Mirrored into env because the `secrets` context is NOT available in a step-level `if:`
       # — only job-level env can read it. Used solely to decide whether to mint an App token.
       GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
@@ -1386,6 +1394,23 @@ jobs:
           RECONCILE_TARGETS: ${{ github.event.inputs.reconcile_services }}
         run: |
           set -euo pipefail
+          # Strict reconcile may never interpret an absent or malformed verdict as no filter.
+          # Validate a nonempty subset before checkout mutation, API calls or donor carry.
+          # Per-service partial success is valid; the driver already enforces atomic sets.
+          if [ "${RECONCILE_SOURCE_REQUIRED}" = "true" ]; then
+            if [ "${GATE_RAN}" != "true" ] || \
+               ! jq -e --argjson built "$BUILT_SERVICES" '
+                 ($built | type == "array") and
+                 all($built[]; type == "string") and
+                 type == "array" and length > 0 and
+                 all(.[]; type == "string") and
+                 (unique | length) == length and
+                 all(.[]; . as $service | $built | index($service) != null)
+               ' <<< "$DEPLOYABLE_SERVICES" >/dev/null; then
+              echo "::error::Strict reconcile requires a proven nonempty subset of built services."
+              exit 1
+            fi
+          fi
           # Recompute against LIVE main (#3194). Same exposure admin-ui-deploy.yml has: the
           # checkout holds the verified source SHA, the build takes minutes, and create-pull-request branches
           # from that HEAD. If another deploy merges in the window, both sides have rewritten the
@@ -1419,8 +1444,8 @@ jobs:
           # as "no filter" and EVERY changed service got deployed AND recorded to the broker as
           # a version that was never contract-checked — the money-path fail-open behind #1348.
           # Deploy nothing this run: the run is already red from can-i-deploy, so it is loud and
-          # re-dispatchable. GATE_RAN empty = no broker at all = the legitimate no-filter case,
-          # left to the per-service logic below.
+          # re-dispatchable. The strict boundary above already rejects an absent gate; legacy
+          # non-strict events retain their no-broker/no-filter behavior below.
           if [ "${GATE_RAN}" = "true" ] && [ -z "${DEPLOYABLE_SERVICES}" ]; then
             echo "::error::can-i-deploy ran but produced no verdict (crashed before deciding) — failing closed: deploying nothing this run rather than deploying every service unchecked (#1348). Re-dispatch once the gate can run."
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -1430,8 +1455,8 @@ jobs:
           SELECTED_TAGS='{}'
           SELECTED_DIGESTS='{}'
           for svc in $(echo "$IMAGE_TAGS" | jq -r 'keys[]'); do
-            # DEPLOYABLE_SERVICES empty/unset = can-i-deploy didn't run at all (no filter,
-            # process everything, matching pre-fix behavior). Otherwise it is the explicit
+            # Empty/unset retains no-filter behavior only for the non-strict legacy events
+            # allowed above. Otherwise this is the explicit
             # set of services confirmed by can-i-deploy.
             if [ -n "${DEPLOYABLE_SERVICES}" ] && \
                ! echo "${DEPLOYABLE_SERVICES}" | jq -e --arg s "$svc" 'index($s) != null' >/dev/null; then

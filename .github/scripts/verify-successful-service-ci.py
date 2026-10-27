@@ -11,13 +11,17 @@ build and contract child jobs. Every API or schema failure is a refusal.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import runpy
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request, urlopen
@@ -219,7 +223,7 @@ def _jobs_prove_services(
         if isinstance(job.get("name"), str)
         and job["name"].startswith("verification-metadata (")
     ]
-    expected_metadata = _expected_verification_modules(run, deadline=deadline)
+    expected_metadata = _expected_verification_jobs(run, deadline=deadline)
     metadata_names = [job["name"] for job in metadata_jobs]
     # all-green also aggregates unrelated service builds, so its failure alone must
     # not erase valid per-service evidence. Its verification-metadata dependency is
@@ -227,12 +231,10 @@ def _jobs_prove_services(
     # blocking even when this service's build and contract children passed.
     metadata_green = (
         expected_metadata is not None
+        and set(metadata_names) == expected_metadata
         and len(metadata_names) == len(set(metadata_names))
         and all(job.get("conclusion") == "success" for job in metadata_jobs)
-        and all(
-            metadata_names.count(f"verification-metadata ({module})") == 1
-            for module in expected_metadata
-        )
+        and all(metadata_names.count(name) == 1 for name in expected_metadata)
     )
     return {
         service
@@ -245,18 +247,143 @@ def _jobs_prove_services(
     }
 
 
-def _expected_verification_modules(
+def _git_source(sha: str, path: str, deadline: float | None) -> str:
+    return subprocess.run(
+        ["git", "show", f"{sha}:{path}"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=_bounded_timeout(deadline, 30),
+    ).stdout
+
+
+def _workflow_job(source: str, job: str) -> str:
+    match = re.search(
+        rf"(?ms)^  {re.escape(job)}:\n.*?(?=^  [A-Za-z0-9_-]+:\n|\Z)", source
+    )
+    if match is None:
+        raise VerificationError(f"source workflow has no {job} job")
+    # Comments do not change the job's execution contract; every executable line does.
+    return "\n".join(
+        line
+        for line in match.group().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+
+
+def _normalized_code(source: str) -> str:
+    return "\n".join(
+        line.strip()
+        for line in source.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+
+
+def _detect_step(source: str) -> str:
+    match = re.search(
+        r"(?ms)^      - id: detect\n.*?(?=^      - |^  [A-Za-z0-9_-]+:\n|\Z)", source
+    )
+    if match is None:
+        raise VerificationError("source workflow has no scope detection step")
+    return _normalized_code(match.group())
+
+
+def _metadata_job_contract(source: str) -> str:
+    # Runner capacity and time budgets do not change matrix membership or the
+    # verifier invocation. All other executable job lines remain part of the model.
+    return "\n".join(
+        line.strip()
+        for line in _workflow_job(source, "verification-metadata").splitlines()
+        if not re.match(r"\s*(timeout-minutes|max-parallel):", line)
+    )
+
+
+def _source_metadata_contract(
+    sha: str, deadline: float | None
+) -> tuple[str, bool] | None:
+    """Recognize exact historical CI, without running historical source code.
+
+    Support the original per-module/module-only contract and the sharded/shared-
+    input contract. Unrelated jobs/steps and comments are not compared. A changed
+    detector or verifier shape is unknown, never inferred from current job names.
+    """
+    root = Path(SCRIPT_DIR).parent.parent
+    source = _git_source(sha, ".github/workflows/services-ci.yml", deadline)
+    current = (root / ".github/workflows/services-ci.yml").read_text()
+    expected = _metadata_job_contract(current)
+    legacy = (
+        expected.replace("matrix.shard.label", "matrix.module")
+        .replace(
+            "shard: ${{ fromJSON(needs.changes.outputs.verification-shards-json) }}",
+            "module: ${{ fromJSON(needs.changes.outputs.verification-modules-json) }}",
+        )
+        .replace("matrix.shard.modules", "matrix.module")
+    )
+    actual = _metadata_job_contract(source)
+    if actual == expected:
+        style = "shard"
+    elif actual == legacy:
+        style = "module"
+    else:
+        return None
+    changes = _workflow_job(source, "changes")
+    outputs = ["verification-modules", "verification-modules-json"]
+    if style == "shard":
+        outputs.append("verification-shards-json")
+    for output in outputs:
+        bindings = re.findall(rf"(?m)^      {re.escape(output)}: (.+)$", changes)
+        if bindings != ["${{ steps.detect.outputs." + output + " }}"]:
+            return None
+    detect = _detect_step(source)
+    # Normalize only the reviewed sharding output addition to the original inline detector.
+    legacy_detect = detect.replace(
+        'VERIFICATION=$(printf \'%s\\n\' "${FILES:-}" | python3 .github/scripts/derive-verification-modules.py)\nprintf \'%s\\n\' "$VERIFICATION" >> "$GITHUB_OUTPUT"\nprintf \'%s\\n\' "$VERIFICATION" | python3 .github/scripts/shard-verification-modules.py >> "$GITHUB_OUTPUT"',
+        'printf \'%s\\n\' "${FILES:-}" | python3 .github/scripts/derive-verification-modules.py >> "$GITHUB_OUTPUT"',
+    )
+    if detect == _detect_step(current):
+        path = ".github/scripts/service-ci-select-modules.sh"
+        if _git_source(sha, path, deadline) != (root / path).read_text():
+            return None
+    elif (
+        hashlib.sha256(legacy_detect.encode()).hexdigest()
+        != "09c5ceb2cbafbce2ef1d0bece05d0dbf94d25c477365051f449b7ace52301286"
+    ):
+        # Reviewed inline detector from Services CI immediately before #13579.
+        return None
+    path = ".github/scripts/derive-verification-modules.py"
+    deriver = _git_source(sha, path, deadline)
+    if deriver == (root / path).read_text():
+        shared = True
+    elif (
+        hashlib.sha256(deriver.encode()).hexdigest()
+        == "d44bc6d1374351c82da82541cdb84efb7e1049a895641d2efa4498c0d876d446"
+    ):
+        # Original derivation selects only root module build files, not shared inputs.
+        shared = False
+    else:
+        return None
+    if style == "shard":
+        path = ".github/scripts/shard-verification-modules.py"
+        if _git_source(sha, path, deadline) != (root / path).read_text():
+            return None
+    return style, shared
+
+
+def _expected_verification_jobs(
     run: dict, *, deadline: float | None = None
 ) -> set[str] | None:
-    """Reproduce the Services CI metadata matrix for a push from its exact diff."""
-    if run.get("event") != "push":
-        # schedule/workflow_dispatch set FILES empty in services-ci.yml, so the
-        # derive-verification-modules step deliberately emits an empty matrix.
-        return set()
+    """Reproduce the recognized exact-source metadata jobs and module inventory."""
     sha = run.get("head_sha")
     if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
         return None
     try:
+        contract = _source_metadata_contract(sha, deadline)
+        if contract is None:
+            return None
+        style, shared = contract
+        if run.get("event") != "push":
+            # Both recognized dispatch selectors emit no changed files.
+            return set()
         changed = subprocess.run(
             ["git", "diff", "--name-only", f"{sha}^", sha],
             check=True,
@@ -264,13 +391,49 @@ def _expected_verification_modules(
             text=True,
             timeout=_bounded_timeout(deadline, 30),
         ).stdout.splitlines()
-    except (OSError, subprocess.SubprocessError):
+        if shared:
+            paths = subprocess.run(
+                ["git", "ls-tree", "-r", "--name-only", sha],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=_bounded_timeout(deadline, 30),
+            ).stdout.splitlines()
+            deriver = runpy.run_path(
+                os.path.join(SCRIPT_DIR, "derive-verification-modules.py")
+            )
+            # Only materialize the source revision's module inventory, never its code.
+            with tempfile.TemporaryDirectory(prefix="reconcile-metadata-") as directory:
+                root = Path(directory)
+                for path in paths:
+                    if re.fullmatch(r"openbank-[^/]+/build\.gradle\.kts", path):
+                        target = root / path
+                        target.parent.mkdir()
+                        target.touch()
+                modules = deriver["modules_from"](changed, root)
+        else:
+            modules = sorted(
+                {
+                    match.group(1)
+                    for path in changed
+                    if (
+                        match := re.fullmatch(
+                            r"(openbank-[^/]+)/build\.gradle\.kts", path
+                        )
+                    )
+                }
+            )
+        if style == "module":
+            return {f"verification-metadata ({module})" for module in modules}
+        sharder = runpy.run_path(
+            os.path.join(SCRIPT_DIR, "shard-verification-modules.py")
+        )
+        return {
+            f"verification-metadata ({shard['label']})"
+            for shard in sharder["shards"](modules)
+        }
+    except (OSError, subprocess.SubprocessError, VerificationError):
         return None
-    return {
-        match.group(1)
-        for path in changed
-        if (match := re.fullmatch(r"(openbank-[^/]+)/build\.gradle\.kts", path))
-    }
 
 
 def _is_ancestor(

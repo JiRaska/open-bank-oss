@@ -62,8 +62,9 @@ fi
 # the per-service guard below also rejects inconclusive or absent evidence.
 SELECTOR_EVENT="${EVENT_NAME:?}"
 [ "$SELECTOR_EVENT" != workflow_run ] || SELECTOR_EVENT=workflow_dispatch
-if [ "$EVENT_NAME" = workflow_run ] && [ -z "${PACT_BROKER_URL:-}" ]; then
-  echo '::error::Completed-CI handoff requires a configured Pact broker.'
+if { [ "$EVENT_NAME" = workflow_run ] || [ "${RECONCILE_SOURCE_REQUIRED:-false}" = true ]; } \
+   && [ -z "${PACT_BROKER_URL:-}" ]; then
+  echo '::error::Completed-CI handoff and strict reconcile require a configured Pact broker.'
   echo 'deployable=[]' >> "$GITHUB_OUTPUT"
   exit 1
 fi

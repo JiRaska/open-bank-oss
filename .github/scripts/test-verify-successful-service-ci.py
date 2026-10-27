@@ -307,7 +307,7 @@ class ResolveReconcileSourceTest(unittest.TestCase):
 
         with (
             patch.object(MODULE, "urlopen", fake_urlopen),
-            patch.object(MODULE, "_expected_verification_modules", return_value=set()),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
             patch.object(MODULE, "_is_ancestor", return_value=True),
             patch.object(MODULE, "_tree_equivalent", return_value=True),
             patch.object(MODULE, "_exact_pact_exists", return_value=True),
@@ -331,7 +331,7 @@ class ResolveReconcileSourceTest(unittest.TestCase):
         ]
         with (
             patch.object(MODULE, "_json_pages", return_value=jobs),
-            patch.object(MODULE, "_expected_verification_modules", return_value=set()),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
         ):
             proven = MODULE._jobs_prove_services(
                 run, {SERVICE}, REPOSITORY, "fixture-token", "https://api.github.test"
@@ -344,7 +344,7 @@ class ResolveReconcileSourceTest(unittest.TestCase):
             patch.object(MODULE, "_json_pages", return_value=job_fixture()["jobs"]),
             patch.object(
                 MODULE,
-                "_expected_verification_modules",
+                "_expected_verification_jobs",
                 return_value={"openbank-libs-domain"},
             ),
         ):
@@ -353,26 +353,154 @@ class ResolveReconcileSourceTest(unittest.TestCase):
             )
         self.assertEqual(proven, set())
 
-    def test_push_metadata_matrix_matches_the_workflow_deriver(self):
+    def test_push_metadata_matrix_uses_actual_shared_deriver_and_sharder(self):
         run = self.run_record(34, self.OLDER, "2026-10-17T12:00:00Z")
-        changed = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=(
-                "openbank-ledger-service/build.gradle.kts\n"
-                "openbank-libs-domain/build.gradle.kts\n"
-                "openbank-ledger-service/src/main/Ledger.kt\n"
-                "docs/a.md\n"
-            ),
-            stderr="",
-        )
-        with patch.object(MODULE.subprocess, "run", return_value=changed) as git:
-            modules = MODULE._expected_verification_modules(run)
-        self.assertEqual(modules, {"openbank-ledger-service", "openbank-libs-domain"})
-        self.assertEqual(
-            git.call_args.args[0],
-            ["git", "diff", "--name-only", f"{self.OLDER}^", self.OLDER],
-        )
+        inventory = [
+            "openbank-ledger-service/build.gradle.kts",
+            "openbank-libs-domain/build.gradle.kts",
+        ]
+        for paths in (
+            inventory,
+            ["gradle/verification-metadata.xml"],
+            ["build-logic/src/main/plugin.kt"],
+        ):
+
+            def fake_git(args, paths=paths, **kwargs):
+                del kwargs
+                rows = inventory if args[1] == "ls-tree" else paths
+                return subprocess.CompletedProcess(
+                    args, 0, stdout="\n".join(rows) + "\n"
+                )
+
+            with (
+                self.subTest(paths=paths),
+                patch.object(
+                    MODULE, "_source_metadata_contract", return_value=("shard", True)
+                ),
+                patch.object(MODULE.subprocess, "run", side_effect=fake_git),
+            ):
+                self.assertEqual(
+                    MODULE._expected_verification_jobs(run),
+                    {"verification-metadata (shard 1/1)"},
+                )
+
+    def test_actual_matrix_requires_all_successful_shards_for_exact_attempt(self):
+        run = self.run_record(34, self.OLDER, "2026-10-17T12:00:00Z")
+        expected = {f"verification-metadata (shard {i}/2)" for i in (1, 2)}
+        metadata = [
+            {"name": name, "conclusion": "success"} for name in sorted(expected)
+        ]
+        for state in ("success", "missing", "failure", "skipped", "duplicate", "extra"):
+            jobs = job_fixture()["jobs"] + [dict(job) for job in metadata]
+            if state == "missing":
+                jobs.pop()
+            elif state in {"failure", "skipped"}:
+                jobs[-1]["conclusion"] = state
+            elif state == "duplicate":
+                jobs.append(dict(metadata[0]))
+            elif state == "extra":
+                jobs.append(
+                    {
+                        "name": "verification-metadata (unexpected)",
+                        "conclusion": "success",
+                    }
+                )
+            with (
+                self.subTest(state=state),
+                patch.object(
+                    MODULE, "_expected_verification_jobs", return_value=expected
+                ),
+                patch.object(MODULE, "_json_pages", return_value=jobs) as api,
+            ):
+                proven = MODULE._jobs_prove_services(
+                    run,
+                    {SERVICE},
+                    REPOSITORY,
+                    "fixture-token",
+                    "https://api.github.test",
+                )
+            self.assertEqual(proven, {SERVICE} if state == "success" else set())
+            self.assertIn("/runs/34/attempts/1/jobs", api.call_args.args[0])
+
+    def test_legacy_module_matrix_retains_its_original_shared_input_rules(self):
+        run = self.run_record(34, self.OLDER, "2026-10-17T12:00:00Z")
+        for changed, expected in (
+            (f"{SERVICE}/build.gradle.kts\n", {f"verification-metadata ({SERVICE})"}),
+            ("gradle/verification-metadata.xml\n", set()),
+        ):
+            with (
+                self.subTest(changed=changed),
+                patch.object(
+                    MODULE, "_source_metadata_contract", return_value=("module", False)
+                ),
+                patch.object(
+                    MODULE.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], 0, stdout=changed),
+                ),
+            ):
+                self.assertEqual(MODULE._expected_verification_jobs(run), expected)
+
+    def test_source_contract_ignores_unrelated_steps_but_rejects_changed_matrix(self):
+        root = SCRIPT.parents[2]
+        original = (root / ".github/workflows/services-ci.yml").read_text()
+        for change, expected in (
+            ("unchanged", ("shard", True)),
+            ("unrelated-step", ("shard", True)),
+            ("module", ("module", True)),
+            ("unknown-matrix", None),
+            ("wrong-output-binding", None),
+            ("changed-deriver", None),
+        ):
+            workflow = original
+            if change == "unrelated-step":
+                workflow = workflow.replace(
+                    "    steps:\n",
+                    "    steps:\n      - name: unrelated diagnostic\n        run: echo diagnostic\n",
+                    1,
+                )
+            elif change == "module":
+                workflow = (
+                    workflow.replace("matrix.shard.label", "matrix.module")
+                    .replace(
+                        "shard: ${{ fromJSON(needs.changes.outputs.verification-shards-json) }}",
+                        "module: ${{ fromJSON(needs.changes.outputs.verification-modules-json) }}",
+                    )
+                    .replace("matrix.shard.modules", "matrix.module")
+                )
+            elif change == "wrong-output-binding":
+                workflow = workflow.replace(
+                    "${{ steps.detect.outputs.verification-shards-json }}",
+                    "${{ steps.other.outputs.verification-shards-json }}",
+                )
+            elif change == "unknown-matrix":
+                workflow = workflow.replace("matrix.shard.label", "matrix.unknown")
+
+            def read_source(sha, path, deadline, workflow=workflow, change=change):
+                self.assertEqual(sha, self.OLDER)
+                del deadline
+                if path.endswith("services-ci.yml"):
+                    return workflow
+                value = (root / path).read_text()
+                return (
+                    value + "\nUNKNOWN = True\n"
+                    if change == "changed-deriver"
+                    and path.endswith("derive-verification-modules.py")
+                    else value
+                )
+
+            with (
+                self.subTest(change=change),
+                patch.object(MODULE, "_git_source", side_effect=read_source),
+            ):
+                self.assertEqual(
+                    MODULE._source_metadata_contract(self.OLDER, None), expected
+                )
+
+    def test_unknown_source_contract_cannot_prove_metadata(self):
+        run = self.run_record(34, self.OLDER, "2026-10-17T12:00:00Z")
+        with patch.object(MODULE, "_source_metadata_contract", return_value=None):
+            self.assertIsNone(MODULE._expected_verification_jobs(run))
 
     def test_paginates_and_chooses_newest_service_success_even_if_unrelated_job_failed(
         self,
@@ -427,7 +555,7 @@ class ResolveReconcileSourceTest(unittest.TestCase):
 
         with (
             patch.object(MODULE, "urlopen", fake_urlopen),
-            patch.object(MODULE, "_expected_verification_modules", return_value=set()),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
             patch.object(
                 MODULE,
                 "_is_ancestor",
@@ -481,7 +609,7 @@ class ResolveReconcileSourceTest(unittest.TestCase):
 
         with (
             patch.object(MODULE, "urlopen", fake_urlopen),
-            patch.object(MODULE, "_expected_verification_modules", return_value=set()),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
             patch.object(MODULE, "_is_ancestor", return_value=True),
             patch.object(MODULE, "_tree_equivalent", return_value=True),
             self.assertRaises(MODULE.VerificationError),
@@ -598,7 +726,7 @@ class ResolveReconcileSourceTest(unittest.TestCase):
 
         with (
             patch.object(MODULE, "urlopen", fake_urlopen),
-            patch.object(MODULE, "_expected_verification_modules", return_value=set()),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
             patch.object(MODULE, "_is_ancestor", return_value=True),
             patch.object(MODULE, "_tree_equivalent", return_value=True),
             patch.object(MODULE, "_exact_pact_exists", return_value=True),
