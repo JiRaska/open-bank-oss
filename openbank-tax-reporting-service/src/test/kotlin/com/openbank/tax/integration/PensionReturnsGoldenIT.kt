@@ -106,9 +106,9 @@ class PensionReturnsGoldenIT {
 
         // Each return asked its provider for exactly its own period.
         assertThat(PensionProvidersStub.requests).contains(
-            "/api/v1/reporting/funds/$FUND/period-figures?periodStart=2025-10-01&periodEnd=2025-10-31",
-            "/api/v1/reporting/funds/$FUND/period-figures?periodStart=2025-10-01&periodEnd=2025-12-31",
-            "/api/v1/reporting/funds/$FUND/period-figures?periodStart=2025-01-01&periodEnd=2025-12-31",
+            "/api/v2/reporting/funds/$FUND/period-figures?periodStart=2025-10-01&periodEnd=2025-10-31",
+            "/api/v2/reporting/funds/$FUND/period-figures?periodStart=2025-10-01&periodEnd=2025-12-31",
+            "/api/v2/reporting/funds/$FUND/period-figures?periodStart=2025-01-01&periodEnd=2025-12-31",
         )
     }
 
@@ -215,7 +215,7 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
         const val FUND = "0f0f2425-0000-4000-8000-000000002025"
         const val FUND2 = "0f0f2425-0000-4000-8000-000000002026"
         val requests = CopyOnWriteArrayList<String>()
-        private const val FUNDS = "/api/v1/reporting/funds/$FUND/period-figures"
+        private const val FUNDS = "/api/v2/reporting/funds/$FUND/period-figures"
         private val ROUTES = mapOf(
             "$FUNDS?periodStart=2025-10-01&periodEnd=2025-10-31" to "fund-month-2025-10.json",
             "$FUNDS?periodStart=2025-11-01&periodEnd=2025-11-30" to "fund-month-2025-10.json",
@@ -223,7 +223,7 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
             "$FUNDS?periodStart=2025-01-01&periodEnd=2025-12-31" to "fund-year-2025.json",
             "$FUNDS?periodStart=2025-03-01&periodEnd=2025-03-31" to "fund-loss-month-2025-03.json",
             "$FUNDS?periodStart=2025-01-01&periodEnd=2025-03-31" to "fund-loss-quarter-2025-q1.json",
-            "/api/v1/reporting/funds/$FUND2/period-figures?periodStart=2025-01-01&periodEnd=2025-03-31" to
+            "/api/v2/reporting/funds/$FUND2/period-figures?periodStart=2025-01-01&periodEnd=2025-03-31" to
                 "fund-unclassified-quarter-2025-q1.json",
             "/api/v2/pension/reporting/participant-aggregates?periodStart=2009-01-01&periodEnd=2009-03-31" to
                 "participants-2009-q1.json",
