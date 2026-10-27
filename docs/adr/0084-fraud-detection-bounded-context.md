@@ -116,6 +116,12 @@ summary: "A new openbank-fraud-service scores payments in real time, returning A
 > `FraudScoreOutcome.synthetic`, the `openbank_fraud_scoring_degraded` gauge and the
 > `openbank_fraud_scoring_outcomes_total` counters now separate the two, on every rail.
 
+> **Amendment 2026-10-24:** [ADR-0354](0354-financial-crime-as-code-governed-packs-and-learning.md)
+> changes only section 3 strategy authoring and the corresponding UI-editable-engine rejection:
+> reviewed bounded packs replace code-defined business strategies after a tested migration.
+> This ADR still establishes fraud-service, verdicts, enrichment and rollout boundaries.
+> No runtime behavior changes with the amendment.
+
 ## Context
 
 The platform has a **regulatory screening gate** (ADR-0032: synchronous sanctions/AML screening
