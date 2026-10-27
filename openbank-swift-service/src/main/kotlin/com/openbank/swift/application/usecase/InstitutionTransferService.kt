@@ -6,6 +6,7 @@ package com.openbank.swift.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.swift.application.port.out.ConcurrentTransitionException
 import com.openbank.swift.application.port.out.InstitutionTransferMetrics
 import com.openbank.swift.application.port.out.InstitutionTransferRejection
 import com.openbank.swift.application.port.out.InstitutionTransferRepository
@@ -102,7 +103,7 @@ class InstitutionTransferService(
             // Same key, different payment (or the reverse): never a second message, never a silent merge.
             log.errorf(
                 "Release for payment %s conflicts with stored transfer %s; dead-lettering",
-                payment.paymentId,
+                existing.paymentId,
                 existing.id,
             )
             throw InstitutionTransferRefusedException("idempotencyKey and paymentId do not match the stored transfer")
@@ -199,8 +200,8 @@ class InstitutionTransferService(
     private suspend fun send(prepared: InstitutionTransfer): InstitutionTransfer {
         val submission = try {
             gateway.submitInstitutionTransfer(prepared)
-        } catch (e: NonConformingMessageException) {
-            log.errorf(e, "Rail built a non-conforming pacs.009 for payment %s; rejecting", prepared.paymentId)
+        } catch (_: NonConformingMessageException) {
+            log.errorf("Rail built a non-conforming pacs.009 for payment %s; rejecting", prepared.paymentId)
             return transition(
                 prepared,
                 InstitutionTransferStatus.REJECTED,
@@ -217,12 +218,19 @@ class InstitutionTransferService(
 
     private suspend fun markUnknown(t: InstitutionTransfer) {
         val current = repo.findByPaymentId(t.paymentId) ?: t
-        if (current.status == InstitutionTransferStatus.SUBMISSION_UNKNOWN) return
-        val now = maxOf(Instant.now(clock), current.updatedAt.plusMillis(1))
-        repo.saveWithOutbox(
-            current.copy(status = InstitutionTransferStatus.SUBMISSION_UNKNOWN, updatedAt = now),
-            emptyList(),
-        )
+        // A timeout belongs to the version that sent or queried. A newer decision (including
+        // another worker's resend claim) must never be replaced with this worker's uncertainty.
+        if (current.version != t.version || current.status != InstitutionTransferStatus.SUBMITTING) return
+        val now = maxOf(Instant.now(clock), t.updatedAt.plusMillis(1))
+        try {
+            repo.saveWithOutbox(
+                t.copy(status = InstitutionTransferStatus.SUBMISSION_UNKNOWN, updatedAt = now),
+                emptyList(),
+            )
+        } catch (_: ConcurrentTransitionException) {
+            // The expected-version write lost a race; retain the winner and propagate the
+            // original gateway failure to the caller, without writing an event or new state.
+        }
     }
 
     private suspend fun apply(
