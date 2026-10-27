@@ -4,12 +4,17 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.sdd.domain.lifecycle.MandateLifecycle
+import com.openbank.sdd.domain.model.MandateStatus
+import com.openbank.sdd.domain.model.SequenceType
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.runner.World
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
+import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * The ADR-0100 Layer-3 invariant set for the money path. Each is a pure function of the
@@ -17,6 +22,9 @@ import java.math.BigDecimal
  * reproducible seed.
  */
 object MoneyPathInvariants {
+
+    /** The settlement date every scenario and this invariant read the virtual clock as (Europe/Prague). */
+    private val ZONE: ZoneId = ZoneId.of("Europe/Prague")
 
     /** `Σ debit == Σ credit` across the whole ledger ⇒ net movement per currency is zero. */
     val conservationOfMoney = object : Invariant {
@@ -241,6 +249,55 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * ADR-0036 §B / ADR-0100 full-service adoption: the SDD collection invariant, reconciling the
+     * REAL `SddMandate` lifecycle against the money-path book, once a step has fully settled:
+     *
+     * 1. a mandate with a recorded collection (book side) must carry the matching stamp on the
+     *    aggregate itself (`lastCollectionDate`, and FRST advanced to RCUR by the real
+     *    `MandateLifecycle.recordCollection`) — a collection the lifecycle never recorded is the
+     *    defect class this catches, and an always-empty book would let it pass vacuously;
+     * 2. the book's last collection date must equal the mandate's own `lastCollectionDate` — the
+     *    two sides are written independently by the scenario, so drift between them means one
+     *    side lost an outcome;
+     * 3. no live (ACTIVE/SUSPENDED) mandate may be idle past the EPC 36-month auto-expiry — the
+     *    step's `expireIfIdle` precondition must actually fire, never leave a stale mandate
+     *    collectable.
+     */
+    val sddCollectionCompleteness = object : Invariant {
+        override val name = "sdd-collection-completeness"
+        override fun check(world: World): Violation? {
+            world.sddMandates.forEach { mandate ->
+                val posted = world.sddCollections.postedCollections(mandate.id)
+                if (posted > 0) {
+                    if (mandate.lastCollectionDate == null) {
+                        return Violation(name, "mandate ${mandate.id} has $posted collections but no lifecycle stamp")
+                    }
+                    if (mandate.sequenceType == SequenceType.FRST) {
+                        return Violation(name, "mandate ${mandate.id} collected but still FRST")
+                    }
+                    val bookDate = world.sddCollections.lastCollectionDate(mandate.id)
+                    if (bookDate != mandate.lastCollectionDate) {
+                        return Violation(
+                            name,
+                            "mandate ${mandate.id} stamped ${mandate.lastCollectionDate} but book has $bookDate",
+                        )
+                    }
+                }
+                if (mandate.status == MandateStatus.ACTIVE || mandate.status == MandateStatus.SUSPENDED) {
+                    val asOf = LocalDate.ofInstant(world.context.clock.instant(), ZONE)
+                    if (MandateLifecycle.isIdle(MandateLifecycle.lastActivity(mandate), asOf)) {
+                        return Violation(
+                            name,
+                            "mandate ${mandate.id} idle past ${MandateLifecycle.IDLE_EXPIRY_MONTHS}m but still ${mandate.status}",
+                        )
+                    }
+                }
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -253,6 +310,7 @@ object MoneyPathInvariants {
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,
+        sddCollectionCompleteness,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */
