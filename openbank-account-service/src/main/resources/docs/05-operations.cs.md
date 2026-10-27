@@ -163,3 +163,13 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 Úvěrování uvítacího bonusu se odesílá přes sdílenou fasádu `TransactionClient` z generovaného modulu `openbank-client-transaction` (ADR-0319), která HTTP odpověď klasifikuje na jednom místě. Stav 2xx znamená přiznáno jen tehdy, když fasáda přečte transakci ve stavu COMPLETED a adaptér ověří přítomnost jejího identifikátoru; jakýkoli jiný stav 2xx (FAILED, probíhá, nečitelné tělo) se vyhodí jako nejistě dokončený a zopakuje se se stejným idempotentním klíčem. Odpověď 409 nebo odmítnutí 400/422 nadále způsobí selhání přiznání, stejně jako dříve výjimka klienta. Jakýkoli jiný stav nebo ztracené spojení se vyhodí, aby volající zopakoval pokus; požadavek musí zachovat původní idempotentní klíč `welcome-bonus-<accountId>`. Tento zdroj nedokládá živou ochranu poskytovatele pro každé souběžné nebo vícedenní opakování. Konfigurace se nezměnila.
 
 Chybějící identifikátor transakce zůstává nejistým výsledkem a nikdy nepotvrdí přiznání bonusu. Zachovává se tím původní požadavek vazby potvrzení. Oprava nemění přijímané stavy 200/201/202/206. Existující logování výjimek mimo tuto kontrolu není prohlášené za anonymní.
+
+
+### Identita pro čtení publikované revize
+
+Čtení produktu a publikované revize používá vlastní pojmenovaný klient `m2m` služby account.
+Před nasazením musí konfigurace vydavatele tokenů dodat tomuto klientovi scope `catalog:read`;
+role operátora není potřeba. Odmítnutí autorizace dál zablokuje otevření účtu jako nedostupný
+katalog. Před aktivací ověřte čtení publikované revize běžnou identitou služby; změna zdrojů
+ani testovací token nedokládají živou konfiguraci. Při návratu odeberte společně grant pro
+čtení, scope a výběr klienta. Již uložené vazby účtů na revize zůstanou zachované.

@@ -164,3 +164,13 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 The welcome-bonus credit is sent through the shared `TransactionClient` facade of the generated `openbank-client-transaction` module (ADR-0319), which classifies the HTTP answer in one place. A 2xx counts as granted only when the facade reads a COMPLETED transaction and the adapter sees its transaction id; any other 2xx state (FAILED, in progress, unreadable) is thrown as a completion-uncertain error and retried under the same idempotency key. A 409 or a 400/422 refusal still fails the grant, as the client's own exception did before. Any other status, or a dropped connection, is thrown so the caller retries; the request must retain the original idempotency key `welcome-bonus-<accountId>`. This source does not establish live provider protection for every concurrent or cross-date replay. No configuration changed.
 
 A missing transaction id remains uncertain and never grants the welcome bonus. This preserves the former acknowledgement binding requirement. The accepted 200/201/202/206 statuses are unchanged by this repair. Existing exception logging outside this check is not claimed to be anonymous.
+
+
+### Published catalog read identity
+
+Account product and published-revision reads use the account-owned named `m2m` client.
+The issuer must reconcile its `catalog:read` scope before rollout; no operator role is needed.
+Authorization refusal remains a fail-closed catalog-unavailable result. Verify the normal
+account identity against the published-revision read before activation; a source change or
+mock token does not prove live issuer configuration. Rollback the read grant, scope and client
+selection together, preserving all recorded account pins.
