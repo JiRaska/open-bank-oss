@@ -146,6 +146,25 @@ changing assertions. A dedicated empty test profile can separate boot contexts;
 verify the complete suite and its memory use before adopting it. Set any measured
 test heap requirement on that module's test task, keeping runtime settings separate.
 
+### CI coverage evidence and retries
+
+A Kover coverage-data load warning invalidates the measurement even if Gradle exits
+successfully. The enforcing build rejects it; report generation publishes XML only
+after successful validation and atomic replacement. A failed, skipped or interrupted
+renderer leaves coverage unknown, not zero. JUnit outcomes remain available. Invalid
+raw coverage is retained separately in the run/attempt-bound diagnostic artifact for
+three days; do not substitute a lower coverage floor or publish full logs/environment
+as diagnostic evidence. Report generation must not run the tests a second time.
+
+Ruleset evidence belongs to one CI run and attempt. Retrying only a failed gate can
+inherit a successful receiver from an older attempt, which the binding check rejects.
+Retry the current-attempt receiver and its dependent checks when they cover the
+failure; otherwise rerun the complete CI workflow. An inherited receiver cannot be
+rerun as a current-attempt job. Never relabel an old snapshot. After an uncertain
+retry request, inspect the actual run state before sending another request; a
+transport timeout does not prove that GitHub rejected it. Other workflow retries
+retain their own dependency rules.
+
 ### Run admin-ui locally
 
 ```bash

@@ -161,10 +161,25 @@ class BoundedCoverageTest(unittest.TestCase):
         self.report_helper = self.helper.with_name('render-coverage-report.sh')
         self.report_body = (ROOT / '.github/scripts/service-ci-steps/render-coverage-report.sh').read_text()
         self.report_helper.write_text(self.report_body)
+        self.shared_helper = self.helper.with_name("coverage-evidence.sh")
+        self.shared_body = (ROOT / ".github/scripts/service-ci-steps/coverage-evidence.sh").read_text()
+        self.shared_helper.write_text(self.shared_body)
 
     def test_real_staged_helper_is_bounded(self):
         self.prepare_report()
         self.assertTrue(self.bounded())
+
+    def test_missing_changed_or_symlinked_shared_validator_is_rejected(self):
+        self.prepare_report()
+        self.shared_helper.unlink()
+        self.assertFalse(self.bounded())
+        self.shared_helper.write_text('coverage_run() { "$@"; }')
+        self.assertFalse(self.bounded())
+        self.shared_helper.unlink()
+        outside = self.root / 'outside-validator.sh'
+        outside.write_text(self.shared_body)
+        self.shared_helper.symlink_to(outside)
+        self.assertFalse(self.bounded())
 
     def test_missing_or_changed_timeout_and_inexact_call_are_rejected(self):
         self.prepare_report()

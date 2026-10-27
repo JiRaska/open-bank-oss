@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
+# shellcheck source-path=SCRIPTDIR
+source "$(dirname "${BASH_SOURCE[0]}")/coverage-evidence.sh"
+coverage_paths
+# Never retain a previous invocation's report as evidence for this build.
+rm -f "$coverage_xml"
 # Capture image/lifecycle/time plus a transient daemon id from this job's Docker
 # stream. The collector uses the id only to resolve one-to-one duplicate
 # observations and strips it before schema validation/publication; it is never
@@ -38,7 +43,7 @@ if [ "${DEPLOY_ARTIFACT_PILOT:-false}" = true ]; then
 fi
 # Cache healing replays this command only if verification fails before
 # the first Gradle task; tests and build outputs are never replayed.
-bash .github/scripts/retry-testcontainers-ebusy.sh -- \
+coverage_run build bash .github/scripts/retry-testcontainers-ebusy.sh -- \
   bash .github/scripts/retry-gradle-verification-cache.sh -- \
   ./gradlew "${GRADLE_PROFILE_ARGS[@]}" --configure-on-demand :"${SERVICE}":build "${deploy_tasks[@]}" --build-cache --console=plain --stacktrace \
   "${deploy_options[@]}" \

@@ -898,11 +898,16 @@ def bounded_kover_report(workflow: str, root: Path | None = None) -> bool:
         if (not helper.is_file() or any(root.joinpath(*relative.parts[:i]).is_symlink()
                                        for i in range(1, len(relative.parts) + 1))):
             return False
-        # Closed, independently reviewed body: shell text inside heredocs or after an exit
-        # cannot attest execution. Intentional helper changes require renewed body review.
-        return hashlib.sha256(helper.read_bytes()).hexdigest() == (
-            '2186b9c579e58fef1eb0874d7de97598b8d6fdbf145d8b3f02eedb15e369424d'
-        )
+        # Closed helper bodies: shell text inside heredocs or after an exit cannot attest
+        # execution. The sibling is staged with the report, never loaded from historical code.
+        # Intentional helper changes require renewed body review.
+        shared = helper.with_name('coverage-evidence.sh')
+        if not shared.is_file() or shared.is_symlink():
+            return False
+        return (hashlib.sha256(helper.read_bytes()).hexdigest() ==
+                '15a5349221070810f671a4558bdac2c083dd474898ce9cd972644d75774b5b73'
+                and hashlib.sha256(shared.read_bytes()).hexdigest() ==
+                '64062707a69e5f92bb18eae0eaaa8492935cd21cb8fa056b0de35587dbfc9f89')
     except (KeyError, TypeError, AttributeError, ValueError, OSError, StopIteration, yaml.YAMLError):
         return False
 

@@ -168,13 +168,32 @@ jobs:
         \ \\\n  --service \"${{ inputs.service }}\" \\\n  --generated \"${{ inputs.service }}/build/openapi-generated/openapi.yaml\"\
         \ \\\n  --enforce\n"
     - name: Generate Kover XML report
+      id: coverage_report
       continue-on-error: true
       env:
         SERVICE: ${{ inputs.service }}
       run: timeout --kill-after=10s 600s bash -e "$SERVICE_CI_HELPERS/render-coverage-report.sh"
+    - name: Preserve incomplete coverage evidence
+      if: always() && (failure() || steps.coverage_report.outcome == 'failure')
+      continue-on-error: true
+      env:
+        SERVICE: ${{ inputs.service }}
+      run: bash -e "$SERVICE_CI_HELPERS/coverage-evidence.sh" preserve-incomplete
+    - name: Retain invalid raw coverage evidence
+      if: always() && (failure() || steps.coverage_report.outcome == 'failure' || hashFiles(format('{0}/build/coverage-diagnostics/**/invalid.json',
+        inputs.service)) != '')
+      continue-on-error: true
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      with:
+        name: invalid-coverage-${{ inputs.service }}-${{ github.run_id }}-a${{ github.run_attempt }}
+        path: ${{ inputs.service }}/build/coverage-diagnostics/
+        if-no-files-found: error
+        retention-days: 3
     - name: Build Test Intelligence run envelope
       if: always()
       continue-on-error: true
+      env:
+        OPENBANK_COVERAGE_REPORT_OUTCOME: ${{ steps.coverage_report.outcome }}
       run: "python3 .github/scripts/collect-test-run-evidence.py \\\n  --service \"${{ inputs.service }}\" \\\n  --out \"\
         ${{ inputs.service }}/build/test-intelligence/run.json\"\n"
     - name: Retain immutable Test Intelligence run envelope
@@ -187,6 +206,7 @@ jobs:
         if-no-files-found: error
         retention-days: 30
     - name: Upload coverage to Codecov
+      if: steps.coverage_report.outcome == 'success'
       continue-on-error: true
       uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5
       with:
@@ -232,7 +252,8 @@ jobs:
         name: quality-evidence-${{ inputs.service }}-a${{ github.run_attempt }}
         path: '${{ inputs.service }}/build/test-results/**/*.xml
 
-          ${{ inputs.service }}/build/reports/kover/report.xml
+          ${{ steps.coverage_report.outcome == ''success'' && format(''{0}/build/reports/kover/report.xml'', inputs.service)
+          || '''' }}
 
           '
         if-no-files-found: ignore
@@ -257,7 +278,8 @@ jobs:
 
           ${{ inputs.service }}/build/test-results/**/*.xml
 
-          ${{ inputs.service }}/build/reports/kover/report.xml
+          ${{ steps.coverage_report.outcome == ''success'' && format(''{0}/build/reports/kover/report.xml'', inputs.service)
+          || '''' }}
 
           '
         if-no-files-found: ignore
