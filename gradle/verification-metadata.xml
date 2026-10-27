@@ -29640,5 +29640,35 @@
             <sha256 value="0221b31f96df01a158c645371aad81b2d3f5bee0f589ca0d0c2eaa6e8da092f3" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
          </artifact>
       </component>
+      <component group="org.apache.kafka" name="kafka-streams" version="4.2.1">
+         <artifact name="kafka-streams-4.2.1.module">
+            <sha256 value="b38f737140afc9f9c81c1ed167238fcbb1ff61c76881c7fa09b7a00e399f06c9" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+         <artifact name="kafka-streams-4.2.1.jar">
+            <sha256 value="1ae087197b4a65d40f3e526a88a14003a8ac2e24e1edb6d6cfe897da0781c60b" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+         <artifact name="kafka-streams-4.2.1.pom">
+            <sha256 value="f0b04e570df2c7ca7ba388e0e81b9edba6bd43339471d9b3aa97586953acf053" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+      </component>
+      <component group="org.rocksdb" name="rocksdbjni" version="10.1.3">
+         <artifact name="rocksdbjni-10.1.3.pom">
+            <sha256 value="7ddf878d389aee8408b9c22307952bd382673b2828f32d8af8959354a338083f" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+         <artifact name="rocksdbjni-10.1.3.jar">
+            <sha256 value="e7f925287d9fe2574fb7c7a86f7facaa9b8ab602a2eed0e598bf633528121498" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+      </component>
+      <component group="org.apache.kafka" name="kafka-streams-test-utils" version="4.2.1">
+         <artifact name="kafka-streams-test-utils-4.2.1.module">
+            <sha256 value="bbab75d9a319a07c84eefdee575067c998cb2871f741b618f48a479250bb7f6f" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+         <artifact name="kafka-streams-test-utils-4.2.1.jar">
+            <sha256 value="1cbcb67d7fbb57d52a3291b16e071ae4a8224b86afcf96eeb3a01033a00bbe1d" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+         <artifact name="kafka-streams-test-utils-4.2.1.pom">
+            <sha256 value="df9f49d85ed60885d3948d243494d85961b735f10965baaa7529907777eb066f" origin="Verified upgrade artifact from Gradle cache or Maven Central"/>
+         </artifact>
+      </component>
    </components>
 </verification-metadata>

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.4...customer-edge-v1.5.0) (2026-10-26)
+
+
+### Features
+
+* **customer-edge:** add measured runtime resilience pilots ([#13891](https://github.com/JiRaska/open-bank-oss/issues/13891)) ([c0c19be](https://github.com/JiRaska/open-bank-oss/commit/c0c19be26b70b4d06433138e1f5f5016db31888b))
+
 ## [1.4.4](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.3...customer-edge-v1.4.4) (2026-10-26)
 
 
