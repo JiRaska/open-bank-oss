@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.swift.application.usecase.InstitutionTransferRefusedException
 import com.openbank.swift.application.usecase.InstitutionTransferService
 import com.openbank.swift.infrastructure.kafka.TreasuryPaymentReleasedConsumer
+import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.smallrye.config.source.yaml.YamlConfigSource
@@ -76,6 +77,65 @@ class TreasuryPaymentReleasedConsumerTest {
         ).isEqualTo("openbank.swift.institution-transfers")
         assertThat(cfg.propertyNames).doesNotContain("$c.\"dead-letter-queue.topic\"")
     }
+
+    @Test
+    fun `retry logs redact wire identifiers and dependency causes while nack retains the original`(): Unit =
+        runBlocking {
+            val failure = RuntimeException(
+                "PRIVATE_RETRY_SENTINEL\nforged-cause",
+                IllegalArgumentException("PRIVATE_NESTED_CAUSE"),
+            ).also { it.addSuppressed(RuntimeException("PRIVATE_SUPPRESSED_CAUSE")) }
+            var chosen: Exception = failure
+            coEvery { service.onReleased(any()) } answers { throw chosen }
+            val records = mutableListOf<java.util.logging.LogRecord>()
+            val logger = java.util.logging.Logger.getLogger(TreasuryPaymentReleasedConsumer::class.java.name)
+            val handler = object : java.util.logging.Handler() {
+                override fun publish(record: java.util.logging.LogRecord) {
+                    records += record
+                }
+                override fun flush() = Unit
+                override fun close() = Unit
+            }
+            var nacked: Throwable? = null
+            val payload = InstitutionTransferFixtures.json(
+                InstitutionTransferFixtures.release(extra = mapOf("paymentId" to "PRIVATE_WIRE_SENTINEL\nforged-id")),
+            )
+            val message = org.eclipse.microprofile.reactive.messaging.Message.of(payload).withNack {
+                nacked = it
+                java.util.concurrent.CompletableFuture.completedFuture(null)
+            }
+            logger.addHandler(handler)
+            try {
+                consumer.consume(message)
+                assertThat(nacked).isSameAs(failure)
+                coVerify(exactly = com.openbank.libs.messaging.EventRetry.DEFAULT_MAX_ATTEMPTS) {
+                    service.onReleased(any())
+                }
+                chosen = InstitutionTransferRefusedException("PRIVATE_DETERMINISTIC_CAUSE")
+                consumer.consume(message)
+                assertThat(nacked).isSameAs(chosen)
+            } finally {
+                logger.removeHandler(handler)
+            }
+            coVerify(exactly = com.openbank.libs.messaging.EventRetry.DEFAULT_MAX_ATTEMPTS + 1) {
+                service.onReleased(any())
+            }
+            assertThat(records).isNotEmpty()
+            val emitted = records.joinToString { record ->
+                record.message + record.parameters?.joinToString().orEmpty() +
+                    record.thrown?.stackTraceToString().orEmpty()
+            }
+            assertThat(emitted).doesNotContain(
+                "PRIVATE_RETRY_SENTINEL",
+                "PRIVATE_WIRE_SENTINEL",
+                "forged-cause",
+                "forged-id",
+                "PRIVATE_NESTED_CAUSE",
+                "PRIVATE_SUPPRESSED_CAUSE",
+                "PRIVATE_DETERMINISTIC_CAUSE",
+            )
+            assertThat(emitted).contains("RuntimeException", "InstitutionTransferRefusedException")
+        }
 
     @Test
     fun `consume acks a handled record and nacks a refused one`(): Unit = runBlocking {
