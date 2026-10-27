@@ -347,8 +347,50 @@ class PerformanceStageTests(unittest.TestCase):
         self.module()
         self.module("openbank-account-service", "account-other")
         result = self.collect()
-        self.assertEqual(len(result["sources"][1]["expected"]), 1)
+        self.assertEqual(len(result["sources"][1]["expected"]), 3)
+        ambiguous = [entry for entry in result["sources"][1]["missing"] if entry.get("ambiguous")]
+        self.assertEqual(len(ambiguous), 2)
+        self.assertTrue(all("ambiguous" in entry["reason"] for entry in ambiguous))
         self.assertTrue(any("Ambiguous" in value for value in result["warnings"]))
+
+    def assert_ambiguous_stage_blocks_retained_passes(self, definitions):
+        metadata = run(200, "perf-baseline.yml")
+        self.add_run(metadata)
+        rows = []
+        for index, (component, identifier) in enumerate(definitions):
+            self.module(component, identifier)
+            self.jobs[200].append({"name": f"k6 module read baseline ({identifier})",
+                                   "started_at": START, "conclusion": "success"})
+            self.artifact(metadata, component, identifier=2000 + index, baseline=identifier)
+            rows.append({"id": f"{component}-{identifier}-read-baseline", "component": component,
+                         "source": f"{component}/src/test/k6/{identifier}-read-baseline.js",
+                         "state": "not-run", "observedAt": None})
+        staged = self.collect()
+        core = {"performance": copy.deepcopy(rows), "warnings": []}
+        seed = {"schemaVersion": 1, "collectedAt": "2026-10-20T00:00:00Z", "performance": [
+            row | {"state": "passed", "observedAt": "2026-10-20T00:00:00Z", "metrics": {"requests": 99}}
+            for row in rows]}
+        authority = COLLECTOR.performance_authority(core, staged, REPO)
+        report = COLLECTOR.merge_ancillary(core, seed, authoritative_performance_ids=authority)
+        self.assertEqual({row["state"] for row in report["performance"]}, {"unknown"})
+        for row in report["performance"]:
+            self.assertIn(row["id"], authority)
+            self.assertNotIn("metrics", row)
+            self.assertEqual(row["observedAt"], START)
+            self.assertIn("ambiguous", row["collectionStatus"]["reason"])
+        expected = {entry["scenario_id"] for entry in staged["sources"][1]["expected"]}
+        self.assertTrue({row["id"] for row in rows} <= expected)
+        self.assertFalse(staged["sources"][1]["selected"])
+        self.assertFalse(staged["payloads"])
+        self.assertFalse(any(url.endswith("/zip") for url in self.reads))
+
+    def test_two_baselines_in_same_component_keep_missing_authority_and_block_seed_pass(self):
+        self.assert_ambiguous_stage_blocks_retained_passes([
+            ("openbank-account-service", "account"), ("openbank-account-service", "alternate")])
+
+    def test_same_artifact_across_components_keeps_missing_authority_and_blocks_seed_pass(self):
+        self.assert_ambiguous_stage_blocks_retained_passes([
+            ("openbank-account-service", "account"), ("openbank-other-service", "account")])
 
     def test_complete_history_pagination_is_reused_and_bounded(self):
         calls = []

@@ -96,16 +96,16 @@ def _baseline_specs(repo_root, warnings):
                                "artifact": "k6-" + scenario + "-summary",
                                "job": "k6 module read baseline (" + identifier + ")",
                                "summary": identifier + "-summary.json", "envelope": identifier + "-perf-run.json"})
-    selected = []
     for spec in candidates:
         if (sum(other["component"] == spec["component"] for other in candidates) != 1
                 or sum(other["artifact"] == spec["artifact"] for other in candidates) != 1):
+            spec["ambiguous"] = True
             warnings.append("Ambiguous baseline definition was not attributed: " + spec["scenario_id"])
-            continue
-        selected.append(spec)
+            # Keep the declaration authoritative so an old aggregate pass cannot
+            # stand in for a baseline whose current producer cannot be identified.
     return [{"component": "openbank-money-path", "scenario_id": "money-path-smoke",
              "artifact": "k6-money-path-summary", "job": "k6 money-path read baseline",
-             "summary": "perf-summary.json", "envelope": "perf-run.json"}, *selected]
+             "summary": "perf-summary.json", "envelope": "perf-run.json"}, *candidates]
 
 
 def _gate_specs(selector):
@@ -121,6 +121,8 @@ def _gate_specs(selector):
 def _baseline_policies(jobs, start, specs, selector):
     policies = {}
     for spec in specs:
+        if spec.get("ambiguous"):
+            continue
         matches = [job for job in jobs if job.get("name") == spec["job"]]
         if len(matches) != 1 or not matches[0].get("started_at"):
             continue
@@ -257,7 +259,8 @@ def stage_performance(repo_root, repo_slug, fetch_json, fetch_bytes, *, safe_arc
                 _trusted_run(metadata, repo_slug, workflow, selector)
         candidates = selector.ordered_runs(pages)
         source = {"workflow": workflow, "run_id": None, "attempt": None, "scope": "absent",
-                  "expected": [{"scenario_id": spec["scenario_id"], "component": spec["component"]} for spec in specs],
+                  "expected": [{"scenario_id": spec["scenario_id"], "component": spec["component"],
+                                **({"ambiguous": True} if spec.get("ambiguous") else {})} for spec in specs],
                   "selected": [], "missing": []}
         result["sources"].append(source)
         for metadata in candidates:
@@ -290,8 +293,11 @@ def stage_performance(repo_root, repo_slug, fetch_json, fetch_bytes, *, safe_arc
             selected = selector.newest_artifacts(artifact_pages, policies)
             selected = {artifact["name"]: artifact for artifact in selected}
             for spec in specs:
-                artifact = selected.get(spec["artifact"])
                 absent = {"scenario_id": spec["scenario_id"], "component": spec["component"]}
+                if spec.get("ambiguous"):
+                    source["missing"].append({**absent, "reason": "ambiguous baseline producer mapping"})
+                    continue
+                artifact = selected.get(spec["artifact"])
                 if artifact is None:
                     source["missing"].append({**absent, "reason": "no attributable latest-job artifact"})
                     continue
@@ -321,7 +327,8 @@ def stage_performance(repo_root, repo_slug, fetch_json, fetch_bytes, *, safe_arc
                                            "artifact_created_at": artifact["created_at"]})
             break  # The newest non-narrow attempt is authoritative, even with missing evidence.
         if source["scope"] == "absent":
-            source["missing"] = [{**entry, "reason": "no completed authoritative main run"} for entry in source["expected"]]
+            source["missing"] = [{**entry, "reason": "ambiguous baseline producer mapping" if entry.get("ambiguous")
+                                  else "no completed authoritative main run"} for entry in source["expected"]]
         if source["missing"]:
             result["warnings"].append(f"{workflow}: {len(source['missing'])} performance scenario(s) lack attributable current evidence.")
     return result
