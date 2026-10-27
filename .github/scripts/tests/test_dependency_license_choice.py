@@ -72,6 +72,20 @@ class LicenseChoiceTests(unittest.TestCase):
             result = subprocess.run([sys.executable, str(SCRIPT), "--review-result"], env=env, capture_output=True)
             self.assertEqual(result.returncode, expected, result.stderr.decode())
 
+    def test_absent_retry_output_cannot_authorize_a_license_choice(self):
+        # The workflow supplies [] when a skipped step has no output. If the guard
+        # does execute, neither these defaults nor entirely missing fields are proof.
+        base_env = {key: value for key, value in os.environ.items() if key not in choice.RETRY_FIELDS.values()}
+        for fields in [{}, {name: "[]" for name in choice.RETRY_FIELDS.values()}]:
+            with self.subTest(fields=fields):
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), "--review-result"],
+                    env={**base_env, **fields}, capture_output=True,
+                )
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(b"License choice cannot be established", result.stderr)
+                self.assertNotIn(b"packages=", result.stdout)
+
     def test_retry_field_projection_cannot_drop_or_misalign_rows(self):
         env = {name: json.dumps([self.row().get(field)]) for field, name in choice.RETRY_FIELDS.items()}
         with patch.dict(os.environ, env):
@@ -89,7 +103,7 @@ class LicenseChoiceTests(unittest.TestCase):
         self.assertEqual(text.count("allow-dependencies-licenses: ${{ steps.license-choice.outputs.packages }}"), 1)
         self.assertIn("dependency_license_choice.py /tmp/dependency-diff.json", text)
         for field, name in choice.RETRY_FIELDS.items():
-            self.assertIn(name + ": ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes).*." + field + ") }}", text)
+            self.assertIn(name + ": ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*." + field + ") }}", text)
         self.assertIn("dependency_license_choice.py --review-result", text)
         self.assertNotRegex(text, r"(?m)^\s+(?:vulnerability-check:\s*false|warn-only:\s*true|allow-ghsas:)")
 
