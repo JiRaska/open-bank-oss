@@ -38,6 +38,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Provider-side pact verification for the agent's read tools over this service's API.
+    testImplementation(libs.pact.provider)
 }
 
 kover {
