@@ -15,8 +15,10 @@ import com.openbank.treasury.application.port.out.TreasuryOutboxRepository
 import com.openbank.treasury.domain.cashflow.CashFlow
 import com.openbank.treasury.domain.cashflow.CashFlowConflict
 import com.openbank.treasury.domain.cashflow.CashFlowOverride
+import com.openbank.treasury.domain.cashflow.OverrideEligibility
 import com.openbank.treasury.domain.cashflow.OverrideStatus
 import com.openbank.treasury.domain.model.DealKind
+import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.infrastructure.persistence.entity.DealCommandEntity
 import com.openbank.treasury.infrastructure.persistence.entity.DealEntity
 import com.openbank.treasury.infrastructure.persistence.repository.CashFlowConflictPanacheRepository
@@ -155,25 +157,46 @@ class CashFlowRepositoryImpl(
         }.awaitSuspending()
     }
 
-    /** The flow row is locked too: an override applies only to the flow as it stands. */
+    /**
+     * The flow row is locked too: an override applies only to the flow as it stands. Under that lock
+     * (and a share lock on the deal row, taken FIRST, which every deal transition updates) [OverrideEligibility]
+     * is evaluated again on the STORED state — deal state, flow state, payment link and any
+     * PAYMENT/AMORTISATION journal recorded for the flow — so a flow that moved on between the
+     * approver's read and this write is refused (409 FLOW_NOT_OVERRIDABLE), never overwritten.
+     */
     private fun applyFlow(flow: CashFlow): Uni<Void> =
-        flowRepo.find("flowId", flow.flowId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().map { row ->
-            checkNotNull(row) { "flow ${flow.flowId} disappeared" }
-            // The override was computed from the flow as read; if a fixing or a payment touched the
-            // row since, refuse rather than write a stale state over it (fill never writes the
-            // payment link or the fixing provenance, but state/rate/amount must not regress either).
-            if (row.paymentId !=
-                null
-            ) {
-                throw com.openbank.treasury.domain.cashflow.FlowAlreadyInPaymentException(flow.flowId)
+        // Lock order deal -> flow, the same order applyFixing takes (deal FOR UPDATE, then its flows),
+        // so an override approval racing a fixing of the same deal waits instead of deadlocking.
+        deals.find("dealId", flow.dealId).withLock(LockModeType.PESSIMISTIC_READ).firstResult().flatMap { deal ->
+            checkNotNull(deal) { "deal ${flow.dealId} disappeared" }
+            flowRepo.find("flowId", flow.flowId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { row ->
+                checkNotNull(row) { "flow ${flow.flowId} disappeared" }
+                check(row.dealId == flow.dealId) { "flow ${flow.flowId} does not belong to deal ${flow.dealId}" }
+                postedUnderLock(row.dealId, flow.flowId).map { posted ->
+                    OverrideEligibility(DealState.valueOf(deal.state), posted).require(row.toDomain())
+                    // The override was computed from the flow as read; if anything moved the row's
+                    // state, fixing provenance or payment link since, refuse rather than write a
+                    // stale value over it.
+                    val moved =
+                        row.state != flow.state.name ||
+                            row.fixedAt != flow.fixedAt ||
+                            row.paymentId != flow.paymentId
+                    if (moved) {
+                        throw CashFlowConflictException(
+                            "flow ${flow.flowId} changed since it was read (now ${row.state}); reload and retry",
+                        )
+                    }
+                    row.fill(flow)
+                }
             }
-            if (row.state != flow.state.name || row.paymentId != flow.paymentId) {
-                throw CashFlowConflictException(
-                    "flow ${flow.flowId} changed since it was read (now ${row.state}); reload and retry",
-                )
-            }
-            row.fill(flow)
         }.replaceWithVoid()
+
+    private fun postedUnderLock(dealId: UUID, flowId: UUID): Uni<Boolean> = Panache.getSession().flatMap { s ->
+        s.createNativeQuery<Any>(
+            "select count(*) from deal_journals where deal_id = :d and event in ('PAYMENT', 'AMORTISATION') " +
+                "and idempotency_key like :k",
+        ).setParameter("d", dealId).setParameter("k", "%:$flowId").singleResult.map { (it as Number).toLong() > 0 }
+    }
 
     override suspend fun calendarFlows(from: LocalDate, to: LocalDate, bookId: String?): List<CalendarFlow> {
         val dealRows = Panache.withSession {

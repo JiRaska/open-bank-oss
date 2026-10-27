@@ -15,6 +15,7 @@
 #   treasury.deal.override-limit              — ROLE_TREASURY_SENIOR_APPROVER only (ADR-0315 D4)
 #   treasury.nostro.read                      — treasury dealers, approvers and admins (#10896)
 #   treasury.reference.read, treasury.cashflow.read, treasury.calendar.read — treasury staff (ADR-0344)
+#   treasury.reference.read (ONLY)            — ROLE_TREASURY_REFERENCE_EDITOR (least privilege)
 #   treasury.reference.propose, .import       — ROLE_TREASURY_REFERENCE_EDITOR or ROLE_TREASURY_BACK_OFFICE
 #   treasury.reference.approve                — ROLE_TREASURY_APPROVER; for kind `counterparty` (limits)
 #                                               ROLE_TREASURY_SENIOR_APPROVER only
@@ -23,6 +24,9 @@
 #   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
 #   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
 #   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
+#   treasury.fixing.read, treasury.marketdata.read — treasury staff (ADR-0344 D5)
+#   treasury.marketdata.import, treasury.fixing.manual, treasury.fixing.run — ROLE_TREASURY_BACK_OFFICE
+#   treasury.marketdata.approve               — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
 #                                               balance; it is still back-office evidence, #10896)
 #
@@ -65,7 +69,7 @@ allowed_reasons contains "treasury-staff-read" if {
 	treasury_staff
 	some role in {
 		"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER",
-		"ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR",
+		"ROLE_TREASURY_BACK_OFFICE",
 		"ROLE_ADMIN",
 	}
 	role in input.principal.roles
@@ -80,7 +84,19 @@ allowed_reasons contains "treasury-staff-read" if {
 		"treasury.reference.read",
 		"treasury.cashflow.read",
 		"treasury.calendar.read",
+		# ADR-0344 D5: fixings and market data (factor history, quality, batches).
+		"treasury.fixing.read",
+		"treasury.marketdata.read",
 	}
+}
+
+# Least privilege: the reference editor maintains code lists, so its ONLY read is reference data.
+# It must not reach deals, counterparty exposure, positions, nostro, quotes, the cash-flow ledger
+# or the event calendar — those describe the bank's book, not the lists the editor keeps.
+allowed_reasons contains "treasury-reference-read" if {
+	treasury_staff
+	"ROLE_TREASURY_REFERENCE_EDITOR" in input.principal.roles
+	input.action == "treasury.reference.read"
 }
 
 allowed_reasons contains "treasury-dealer-write" if {
@@ -203,4 +219,20 @@ allowed_reasons contains "treasury-schedule-preview" if {
 	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_BACK_OFFICE"}
 	role in input.principal.roles
 	input.action == "treasury.deal.preview"
+}
+
+# ADR-0344 D5: back office imports observations, proposes manual fixings and runs the fixing pass;
+# an approver (a different human, checked in the domain and the database) activates them. No role
+# both writes and activates market data; machines and AI agents get nothing from this file.
+allowed_reasons contains "treasury-back-office-market-data" if {
+	treasury_staff
+	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
+	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run"}
+}
+
+allowed_reasons contains "treasury-approver-market-data" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
+	role in input.principal.roles
+	input.action == "treasury.marketdata.approve"
 }

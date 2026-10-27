@@ -60,6 +60,14 @@ concurrent decisions on the same ceremony conflict loudly (422) instead of lost-
 
 ## Persistence
 
+Repositories use Hibernate Reactive. The JDBC datasource remains available for Flyway startup migrations,
+while `quarkus.hibernate-orm.blocking=false` prevents an unused blocking Hibernate factory from starting.
+This keeps migration access separate from reactive session creation. Do not disable the JDBC datasource
+or Hibernate Reactive to achieve this separation.
+
+`DocumentPersistenceModeProviderVerificationTest` checks the absence of a blocking factory, matching
+reactive/JDBC reads from the migrated database, and HTTP 401 when an M2M identity is missing.
+
 Dedicated database `openbank_documents`, `generation: none`, Flyway V1..V3. Only the outbox entity
 extends `PanacheOutboxEntity` (Hibernate sequence `document_outbox_seq`, created in V3 — guarded by
 `HibernateSequenceGuardTest`); all other entities use application-assigned UUID/String ids.

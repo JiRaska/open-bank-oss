@@ -270,3 +270,42 @@ test_schedule_preview_is_dealer_and_back_office_only if {
 	allowed(dealer, "treasury.deal.preview")
 	allowed(back_office, "treasury.deal.preview")
 }
+
+# Least privilege: the reference editor reads reference data and NOTHING else — no deal,
+# counterparty, position, nostro or quote read, neither the cash-flow ledger nor the calendar, and
+# no fixing or market-data read (phase 1a).
+# Back office keeps all of them (must-allow control).
+test_reference_editor_reads_reference_only if {
+	allowed(editor, "treasury.reference.read")
+	every a in (reads | {"treasury.cashflow.read", "treasury.calendar.read", "treasury.fixing.read", "treasury.marketdata.read"}) {
+		not allowed(editor, a)
+		allowed(back_office, a)
+	}
+}
+
+test_market_data_proposer_cannot_approve_and_approver_cannot_propose if {
+	not allowed(back_office, "treasury.marketdata.approve")
+	not allowed(approver, "treasury.marketdata.import")
+	not allowed(approver, "treasury.fixing.manual")
+	not allowed(dealer, "treasury.marketdata.import")
+	allowed(back_office, "treasury.marketdata.import")
+	allowed(back_office, "treasury.fixing.manual")
+	allowed(back_office, "treasury.fixing.run")
+	allowed(approver, "treasury.marketdata.approve")
+	allowed(senior, "treasury.marketdata.approve")
+}
+
+test_market_data_machines_and_agents_get_nothing if {
+	every p in [shared_sa, renamed_sa, agent, nobody] {
+		not allowed(p, "treasury.marketdata.import")
+		not allowed(p, "treasury.marketdata.approve")
+		not allowed(p, "treasury.fixing.manual")
+		not allowed(p, "treasury.fixing.run")
+	}
+}
+
+test_staff_read_fixings_and_market_data if {
+	allowed(dealer, "treasury.fixing.read")
+	allowed(approver, "treasury.marketdata.read")
+	not allowed(agent, "treasury.marketdata.read")
+}

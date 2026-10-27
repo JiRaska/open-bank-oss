@@ -17,7 +17,7 @@ from library_dependency_graph import read_dependencies, reverse_dependents
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCOPED = {"openbank-libs-lending", "openbank-libs-iso20022", "openbank-libs-finance"}
+SCOPED = {"openbank-libs-lending", "openbank-libs-iso20022", "openbank-libs-finance", "openbank-libs-fincrime"}
 RUNTIME_CHANGE = re.compile(
     r"^(openbank-(?:libs(?:-[A-Za-z0-9._-]+)?|client-[A-Za-z0-9._-]+))/"
     r"(?:src/main(?:/|$)|build\.gradle\.kts$|gradle/)"

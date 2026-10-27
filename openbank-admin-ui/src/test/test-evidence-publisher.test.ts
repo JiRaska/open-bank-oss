@@ -34,10 +34,15 @@ describe('commit-addressed evidence store key (#13201)', () => {
     // The reader derives the commit from `sandbox-<prefix>`; a key of any other length is a
     // permanent 404 that reads as "not yet published".
     const workflow = readFileSync(AUTO_DEPLOY, 'utf8')
-    const match = workflow.match(/SHA="\$\{GITHUB_SHA::(\d+)\}"\s*\n\s*TAG="sandbox-\$\{SHA\}"/)
-    expect(match, 'auto-deploy.yml no longer derives the tag as sandbox-${GITHUB_SHA::N}').not.toBeNull()
+    expect(workflow).toContain('SOURCE_COMMIT: ${{ needs.changes.outputs.source_commit }}')
+    const match = workflow.match(/SHA="\$\{SOURCE_COMMIT::(\d+)\}"\s*\n\s*TAG="sandbox-\$\{SHA\}"/)
+    expect(match, 'auto-deploy.yml must tag the verified source commit, not the workflow commit').not.toBeNull()
     expect(DEPLOY_TAG_SHA_LENGTH).toBe(Number(match![1]))
-    expect(evidenceStoreKey('openbank-alpha-service', SHA)).toBe(`openbank-alpha-service/${SHA.slice(0, Number(match![1]))}/test-intelligence.json`)
+    const tag = execFileSync('bash', ['-euc', `${match![0]}\nprintf '%s' "$TAG"`], {
+      env: { ...process.env, SOURCE_COMMIT: SHA, GITHUB_SHA: OTHER }, encoding: 'utf8',
+    }).trim()
+    expect(tag).toBe(`sandbox-${SHA.slice(0, DEPLOY_TAG_SHA_LENGTH)}`)
+    expect(evidenceStoreKey('openbank-alpha-service', SHA)).toBe(`openbank-alpha-service/${tag.slice('sandbox-'.length)}/test-intelligence.json`)
   })
 
   it('refuses a short commit or an unsafe component', () => {

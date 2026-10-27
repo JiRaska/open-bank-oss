@@ -163,3 +163,14 @@ Adaptér krycí platby SWIFT výslovně ponechává volitelný blok typu platby 
 nepřítomný. Přeshraniční krycí platba nesmí deklarovat úroveň služby EPC SEPA jen proto, že
 používá stejný XML builder. Zpráva bez bloku se nemění; tato úprava kompatibility knihovny
 nemění účetní vypořádání, callbacky ani pravidla opětovného zpracování.
+
+## Vlastní převody banky uvolněné treasury
+
+Událost treasury `treasury.payment.released.v1` (kanál `treasury-payments-in`) se stane jedním
+vlastním převodem banky na platbu, odeslaným jako pacs.009 po trase, kterou uvolnění určuje; stav se
+publikuje na `openbank.swift.institution-transfers`. Uvolnění s datem valuty starším než
+`institution-transfer.value-date-past-tolerance-days` je odmítnuto (DT01). Převod se nikdy neposílá
+naslepo znovu a známý převod se nikdy neodmítne: nejasné odeslání se řeší dotazem na schéma podle
+UETR. Sweeper (`institution-transfer.resolution.*`: `every`, `initial-delay`, `min-age`,
+`batch-size`) se ptá na neznámá odeslání a SENT převody starší než `min-age`. Záznam, který konzument
+nezpracuje, jde do dead-letter podle konfigurace kanálu.

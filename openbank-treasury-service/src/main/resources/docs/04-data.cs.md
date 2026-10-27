@@ -20,5 +20,14 @@ Noha zaúčtování nově nese `accountingClass` + `LedgerRole` (jistina, naběh
 
 - **`reference_records`** (V16, V17) drží efektivně datovaná, verzovaná referenční data: kalendáře, indexy, protistrany, platební instrukce, knihy, typy produktů a další druhy z katalogu ADR-0344. Verze je PENDING, dokud ji neschválí jiný člověk. Schválení `counterparty`, které zvyšuje limit, vyžaduje senior approvera. `row_version` je optimistický zámek. Kontrola limitů čte ACTIVE verzi `counterparty`; tabulka `counterparties` je jen projekce pro cizí klíč obchodů. `reference_commands` ukládá Idempotency-Key každého příkazu.
 - **`deal_versions`, `deal_cash_flows`, `cash_flow_overrides`, `cash_flow_conflicts`** (V18, V19) ukládají každou verzi podmínek a její vygenerovaný cash-flow ledger. Podání zapíše ledger a `treasury.cashflow.generated.v1` spolu s obchodem v jedné transakci. Override je čtyřoký a zachovává původní datum i částku. Regeneraci přežije, jen dokud se nezmění hash specifikace nohy; jinak se z něj stane evidovaný konflikt. `deal_cash_flows.row_version` je optimistický zámek.
+- **`deals.row_version`** (V21) verzuje řádek obchodu. Každý příkaz životního cyklu (úprava, podání, schválení, potvrzení, vypořádání) ukládá jednou cestou, která řádek zamkne a porovná verzi; souběžná změna vrátí 409 `DEAL_CHANGED` místo přepsání. Override lze navrhnout, schválit a použít jen dokud je tok PROJECTED nebo FIXED, nemá platbu ani platební či amortizační účetní zápis a jeho obchod není ukončený; poslední kontrola se opakuje pod zámkem řádku toku a neúspěch vrátí 409 `FLOW_NOT_OVERRIDABLE`.
 - Ve fázi 0 lze sjednat jen pět stávajících produktů. Návrh obchodu s produktem popsaným nohami vrátí 400, dokud jeho fáze nedodá účtovací pravidla.
-- **Rollback:** V16 až V19 jsou aditivní. Stávající obchody dostanou druh `ACTUAL`, verzi 1 a verzi rozvrhu 0. Nové tabulky lze odstranit jen dokud se nepoužívají; příkazy jsou v hlavičce každé migrace.
+- **Rollback:** V16 až V21 jsou aditivní (V21 přidává jeden sloupec s výchozí hodnotou 0). Stávající obchody dostanou druh `ACTUAL`, verzi 1 a verzi rozvrhu 0. Nové tabulky lze odstranit jen dokud se nepoužívají; příkazy jsou v hlavičce každé migrace.
+
+
+## Fixingy a tržní data (ADR-0344, fáze 1a)
+
+- **`observation_batches`, `index_observations`, `fixing_cases`** (V20) drží pozorování indexů. Dávka je PENDING, dokud ji neschválí jiný člověk, a použijí se jen ACTIVE pozorování. Kontrola kvality ověří MISSING, STALE a SUSPICIOUS ještě před fixingem; selhání otevře případ a nic nezafixuje.
+- **`deal_cash_flows.fixing_source`, `fixing_sha256`, `fixed_at`** (V20) zaznamenávají původ zafixované sazby. Zapisuje je jen repozitář fixingů, hlídaným UPDATE.
+- Hodinový běh fixingů (`openbank.treasury.fixing.enabled`, ve výchozím stavu zapnutý) zafixuje splatné pohyblivé toky a publikuje `treasury.cashflow.fixed.v1`.
+- IRS a FRA lze nově navrhnout, podat a zafixovat. Vypořádat je půjde až s maticí účtovacích pravidel (fáze 2).

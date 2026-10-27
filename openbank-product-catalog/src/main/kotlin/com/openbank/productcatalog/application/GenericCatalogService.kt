@@ -11,6 +11,7 @@ import com.openbank.libs.product.ir.ProductIrParser
 import com.openbank.libs.product.ir.ProductRevisionIr
 import com.openbank.libs.productrevision.IrSignerPort
 import com.openbank.libs.productrevision.IrSigningException
+import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
@@ -185,7 +186,8 @@ class GenericCatalogService(
 
     /**
      * Publishes an IR-bearing revision (ADR-0352 §4, §7): validates the IR, computes its canonical
-     * `revisionHash`, obtains the publish-path signature over exactly that hash and stores it next to
+     * `revisionHash`, obtains the publish-path signature over the revision identity envelope
+     * (product code, revision id and number, IR version, hash) and stores it next to
      * the revision in the same transaction. A revision without IR is refused — use [publish].
      */
     suspend fun publishIr(
@@ -199,7 +201,16 @@ class GenericCatalogService(
             ?: throw CatalogConflictException("revision carries no product IR; publish it through publish")
         // Transit `sign` is a blocking HTTP call (and may log in first); never on the event loop.
         val signature = try {
-            withContext(Dispatchers.IO) { irSigner.sign(ir.revisionHash) }
+            // ADR-0352 §4: the signature binds the whole revision identity, not the bare hash, so it
+            // cannot be presented under another product's or another revision's pin.
+            val identity = RevisionIdentity(
+                productCode = ir.productCode,
+                revisionId = draft.id,
+                revisionNumber = draft.number,
+                irVersion = ir.irVersion,
+                revisionHash = ir.revisionHash,
+            )
+            withContext(Dispatchers.IO) { irSigner.sign(identity) }
         } catch (e: IrSigningException) {
             throw CatalogConflictException("revision cannot be signed: ${e.message}", e)
         }

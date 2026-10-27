@@ -250,6 +250,45 @@ data class LedgerFlowItem(
     }
 }
 
+/** One flow fixed by [CashFlowFixed]: its slot, the observed rate and the amount it now pays. */
+data class FixedFlowItem(
+    val flowId: UUID,
+    val legIndex: Int,
+    val periodIndex: Int,
+    val kind: String,
+    val direction: String,
+    val currency: String,
+    val accrualStart: LocalDate?,
+    val accrualEnd: LocalDate?,
+    val paymentDate: LocalDate,
+    val rate: BigDecimal,
+    val amount: BigDecimal,
+    val rateSource: String,
+    val state: String,
+)
+
+/**
+ * ADR-0344 D5: floating flows of one deal moved PROJECTED/MISSING -> FIXED from an observed index
+ * value that passed the quality gate. [sha256] is the provenance hash of (index, date, value, source).
+ */
+data class CashFlowFixed(
+    val dealId: UUID,
+    val dealVersion: Int,
+    val scheduleVersion: Int,
+    val index: String,
+    val fixingDate: LocalDate,
+    val value: BigDecimal,
+    val source: String,
+    val sha256: String,
+    val flows: List<FixedFlowItem>,
+    val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
+) {
+    companion object {
+        const val EVENT_TYPE = "treasury.cashflow.fixed.v1"
+    }
+}
+
 /** ADR-0344 D4: a four-eyes cash-flow override was approved or rejected. */
 data class CashFlowOverridden(
     val dealId: UUID,

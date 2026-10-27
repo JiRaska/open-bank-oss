@@ -32,6 +32,7 @@ dependencies {
     implementation(libs.quarkus.scheduler)
 
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.test.security)
@@ -54,6 +55,7 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
+    testImplementation("org.testcontainers:testcontainers-toxiproxy")
 
     // Shared authz conformance kit (issue #467) — LedgerAuthzConformanceTest pilot migration.
     testImplementation(project(":openbank-libs-testing"))

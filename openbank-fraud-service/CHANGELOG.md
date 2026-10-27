@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.17.2...fraud-service-v0.18.0) (2026-10-26)
+
+
+### Features
+
+* **fraud:** add isolated Kafka Streams velocity shadow ([#13893](https://github.com/JiRaska/open-bank-oss/issues/13893)) ([0bf57fa](https://github.com/JiRaska/open-bank-oss/commit/0bf57fab5491e931dd5e33514bb4318c242feccc))
+
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.17.1...fraud-service-v0.17.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **fraud:** share the financial-crime vocabulary in openbank-libs-fincrime ([#13770](https://github.com/JiRaska/open-bank-oss/issues/13770)) ([bc45331](https://github.com/JiRaska/open-bank-oss/commit/bc4533123a2d8b52ba0b5e3bdfefaa91a712d6f2))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.17.0...fraud-service-v0.17.1) (2026-10-22)
 
 

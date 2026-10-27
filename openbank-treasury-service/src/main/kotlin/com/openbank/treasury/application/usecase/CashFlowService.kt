@@ -19,6 +19,7 @@ import com.openbank.treasury.application.port.out.DealVersionView
 import com.openbank.treasury.domain.cashflow.CashFlowConflict
 import com.openbank.treasury.domain.cashflow.CashFlowKind
 import com.openbank.treasury.domain.cashflow.CashFlowOverride
+import com.openbank.treasury.domain.cashflow.OverrideEligibility
 import com.openbank.treasury.domain.cashflow.OverrideStatus
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.CashFlowOverridden
@@ -85,7 +86,16 @@ class CashFlowService(
         replayOverride(key, PROPOSE, dealId)?.let { return it }
         val deal = load(dealId)
         val flow = currentFlow(deal, flowId)
-        val o = CashFlowOverride.propose(newId(), flow, paymentDate, amount, reason, actor, clock.instant())
+        val o = CashFlowOverride.propose(
+            newId(),
+            flow,
+            eligibility(deal, flowId),
+            paymentDate,
+            amount,
+            reason,
+            actor,
+            clock.instant(),
+        )
         flows.saveOverride(o, null, null, null, CommandKey(key, "$PROPOSE:${o.overrideId}", dealId))
         return o
     }
@@ -105,6 +115,9 @@ class CashFlowService(
         check(flow.legHash == approved.legHash && flow.slot == approved.slot) {
             "the flow changed since the override was proposed; propose it again against the current schedule"
         }
+        // Re-checked at approval on the flow as read (a flow can settle, post or lose its deal between
+        // proposal and decision), and again by the store under the flow-row lock.
+        eligibility(deal, flowId).require(flow)
         val changed = flow.withOverride(approved)
         flows.saveOverride(
             approved,
@@ -136,6 +149,13 @@ class CashFlowService(
         )
         return rejected
     }
+
+    private suspend fun eligibility(deal: Deal, flowId: UUID) = OverrideEligibility(
+        deal.state,
+        posted = deals.journals(deal.id).any {
+            OverrideEligibility.isFlowPaymentJournal(it.event, it.idempotencyKey, flowId)
+        },
+    )
 
     override suspend fun overrides(dealId: UUID, status: OverrideStatus?): List<CashFlowOverride> {
         load(dealId)
