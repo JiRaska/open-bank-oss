@@ -50,6 +50,10 @@ export const ROLES = {
   // #10896: nostro reconciliation. NostroResource's class-level @RolesAllowed (reads) also admits
   // this role, unlike TreasuryResource's — see the treasury:nostro:read comment below.
   TREASURY_SENIOR_APPROVER: "ROLE_TREASURY_SENIOR_APPROVER",
+  // ADR-0344 phase 0 (treasury API 1.19.0): back office proposes cash-flow overrides and records
+  // sent confirmations; the reference editor proposes reference-data versions. Neither approves.
+  TREASURY_BACK_OFFICE: "ROLE_TREASURY_BACK_OFFICE",
+  TREASURY_REFERENCE_EDITOR: "ROLE_TREASURY_REFERENCE_EDITOR",
 } as const
 
 export type Role = typeof ROLES[keyof typeof ROLES]
@@ -61,7 +65,7 @@ export const PERMISSIONS = {
   // the KYC and supervisor entries their role-specific workspace can be
   // derived, but the role matrix says they may not view the dashboard — a
   // contradiction ADR-0229 D4 explicitly rules out.
-  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.RISK, ROLES.FINANCE, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.RISK, ROLES.FINANCE, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_REFERENCE_EDITOR],
   // Accounts
   "accounts:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS],
   "accounts:create":          [ROLES.ADMIN, ROLES.OPERATOR],
@@ -111,7 +115,11 @@ export const PERMISSIONS = {
   // (approve/reject/settle/mature/reverse) APPROVER only — ADMIN is deliberately NOT in either
   // write set, because the method-level @RolesAllowed does not admit it. Cancel admits both desk
   // roles. Four-eyes between two PEOPLE is the domain's 422, not a role split.
-  "treasury:view":          [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  // ADR-0344 (API 1.19.0) widens the class-level read set with the back-office role. The reference
+  // editor is NOT a reader of the book (least privilege, API 1.20.0): it reads reference data only,
+  // through `treasury:reference:read`, which mirrors ReferenceResource's class-level set.
+  "treasury:view":          [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE],
+  "treasury:reference:read": [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_REFERENCE_EDITOR],
   "treasury:deal:create":   [ROLES.TREASURY_DEALER],
   "treasury:deal:approve":  [ROLES.TREASURY_APPROVER],
   "treasury:deal:cancel":   [ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER],

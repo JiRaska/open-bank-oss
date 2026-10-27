@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.29.0...party-service-v0.29.1) (2026-10-24)
+
+
+### Security
+
+* **libs:** preserve reactive guards and patch renderer decoder ([#13716](https://github.com/JiRaska/open-bank-oss/issues/13716)) ([dad97cf](https://github.com/JiRaska/open-bank-oss/commit/dad97cfb5f9e1b0a57c73320b3cefed0b239cabf))
+
 ## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.28.0...party-service-v0.29.0) (2026-10-18)
 
 
