@@ -16,6 +16,29 @@ referenced from ADR-0084.
   ADR-0065 (customer edge — device/IP context source), ADR-0067 (feature flags, four-eyes
   on money-path flips), ADR-0077 (DomainMetrics), ADR-0009 (Postgres-per-service)
 
+## Kafka Streams shadow amendment (2026-10-25, #13888)
+
+The opt-in velocity projection adds a Kafka source → local RocksDB/changelog →
+versioned shadow-topic boundary. It is disabled by default and no verdict or Redis
+feature-store adapter consumes its output. A dedicated TLS identity can read the
+transaction-initiated source and write only shadow/internal topics. Internal topics
+are pre-created; Delete is scoped to the one repartition topic for consumed-record
+cleanup. The identity has no Create grant or write permission on the source.
+
+The parser checks event type, identifiers, synthetic markers and business event time
+before advancing stream time. Original source coordinates survive account
+repartition; bounded event-ID state handles outbox redelivery separately from Kafka
+transactional offset/state/output commits. Broker-backed tests exercise fresh-state
+restoration and redelivery under read-committed observation. These are implementation
+proofs, not a claim of human security review or production rollout.
+
+Residual risks: CPU, heap, native memory and disk remain shared with the service;
+degraded shadow metrics do not provide process isolation. Promotion requires measured
+resource budgets. Account-derived output, changelogs and local state inherit the
+retention/erasure obligations in ADR-0118. Bucket snapshots cannot answer arbitrary
+historical point-in-time feature queries and must not be wired into a verdict until
+the separate serving design and parity evidence are reviewed (ADR-0140 amendment).
+
 ## 0. Phase-1 posture (read first)
 
 This is a **skeleton**. The rule engine holds a single deterministic **always-ALLOW** baseline

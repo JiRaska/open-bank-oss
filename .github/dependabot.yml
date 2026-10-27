@@ -64,6 +64,10 @@ updates:
           - "react"
           - "react-dom"
           - "@types/react*"
+      # Stable SDK majors, API minors and experimental 0.x releases form one cohort.
+      opentelemetry:
+        patterns:
+          - "@opentelemetry/*"
       # Catch-all so minor/patch bumps (radix-ui, recharts, ...) land in ONE PR
       # instead of flooding the runner budget with a dozen separate runs.
       ui-minor:

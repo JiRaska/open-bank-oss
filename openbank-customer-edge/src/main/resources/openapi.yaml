@@ -55,7 +55,9 @@ info:
   # 1.84.0 -> 1.85.0 (#13210): CORRECTION — GET /balances/{accountId} is documented as the wire
   # actually carries it, `{"balances": [Balance]}` (balance-service wraps its list), not a bare array;
   # Balance gains the `id` and `version` it always sent. No served behaviour changed.
-  version: 1.85.0
+  # 1.85.0 -> 1.86.0 (#13711): additive — optional `cursor` query parameter on GET /accounts;
+  # delegated accounts are listed in the account page on the first page only.
+  version: 1.86.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2101,8 +2103,15 @@ paths:
       tags: [Accounts]
       summary: List the authenticated customer's accounts
       operationId: listAccounts
+      description: |
+        Accounts shared WITH the caller (active delegation grants with read capability) are appended
+        to `data`, marked `sharedWithMe: true`, on the FIRST page only (no `cursor`), and raise
+        `pagination.totalCount` accordingly. They sit outside cursor pagination; cursors are
+        account-service's own and are forwarded unchanged.
       security:
         - customerOidc: [accounts:read]
+      parameters:
+        - {name: cursor, in: query, required: false, schema: {type: string}}
       responses:
         '200':
           description: Account list

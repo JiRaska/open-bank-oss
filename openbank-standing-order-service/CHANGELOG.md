@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.19.0...standing-order-service-v0.19.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **standing-order:** persist the failure count with the failed outbox event ([#13744](https://github.com/JiRaska/open-bank-oss/issues/13744)) ([7d495ca](https://github.com/JiRaska/open-bank-oss/commit/7d495ca5a310c78fa10a7f38a70e3600af26cb8a))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.18.3...standing-order-service-v0.19.0) (2026-10-18)
 
 
