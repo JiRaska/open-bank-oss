@@ -6,14 +6,12 @@ package com.openbank.domestic.application.workflow
 
 import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.AmlCasePort
-import com.openbank.domestic.application.port.out.AmlCaseRiskLevel
 import com.openbank.domestic.application.port.out.CustomerNotificationPort
 import com.openbank.domestic.application.port.out.DomesticBookingWrites
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.port.out.FraudScoreOutcome
 import com.openbank.domestic.application.port.out.FraudScoringPort
-import com.openbank.domestic.application.port.out.FraudVerdict
 import com.openbank.domestic.application.port.out.OpenAmlCaseCommand
 import com.openbank.domestic.application.port.out.SanctionsScreeningPort
 import com.openbank.domestic.application.port.out.SchemeGatewayPort
@@ -29,12 +27,14 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
-import com.openbank.domestic.domain.screening.ScreeningDecision
-import com.openbank.domestic.domain.screening.ScreeningMatchStatus
-import com.openbank.domestic.domain.screening.ScreeningResult
-import com.openbank.domestic.domain.screening.ScreeningRole.CREDITOR
-import com.openbank.domestic.domain.screening.ScreeningRole.DEBTOR
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole.CREDITOR
+import com.openbank.libs.fincrime.ScreeningRole.DEBTOR
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
@@ -216,7 +216,7 @@ class DomesticPaymentActivitiesImplTest {
         val decision = activities.screenPayment(payment.id)
 
         assertThat(decision).isEqualTo(ScreeningDecision.BLOCK)
-        assertThat(captured.captured.riskLevel).isEqualTo(AmlCaseRiskLevel.CRITICAL)
+        assertThat(captured.captured.riskLevel).isEqualTo(AmlCaseSeverity.CRITICAL)
         assertThat(captured.captured.matchedEntity).isEqualTo("OFAC:123")
         assertThat(captured.captured.idempotencyKey).isEqualTo("aml-${payment.id}-SANCTIONS_HIT")
     }
@@ -236,7 +236,7 @@ class DomesticPaymentActivitiesImplTest {
         val decision = activities.screenPayment(payment.id)
 
         assertThat(decision).isEqualTo(ScreeningDecision.REVIEW)
-        assertThat(captured.captured.riskLevel).isEqualTo(AmlCaseRiskLevel.HIGH)
+        assertThat(captured.captured.riskLevel).isEqualTo(AmlCaseSeverity.HIGH)
     }
 
     @Test
@@ -252,7 +252,7 @@ class DomesticPaymentActivitiesImplTest {
         val decision = activities.screenPayment(payment.id)
 
         assertThat(decision).isEqualTo(ScreeningDecision.REVIEW)
-        assertThat(captured.captured.riskLevel).isEqualTo(AmlCaseRiskLevel.MEDIUM)
+        assertThat(captured.captured.riskLevel).isEqualTo(AmlCaseSeverity.MEDIUM)
         assertThat(captured.captured.idempotencyKey).isEqualTo("aml-${payment.id}-SCREENING_UNAVAILABLE")
     }
 

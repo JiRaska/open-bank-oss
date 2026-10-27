@@ -218,6 +218,12 @@ data class Deal(
     /** 0 until the first cash-flow ledger is generated at submission (ADR-0344 D4). */
     val scheduleVersion: Int = 0,
     val scheduleHash: String? = null,
+    /**
+     * The stored row's optimistic-lock version as this copy was read (null before the first save).
+     * Persistence only: the whole-row save compares it under the row lock, so a copy older than the
+     * row is refused (409 DEAL_CHANGED) and no write can overwrite a change it never saw.
+     */
+    val rowVersion: Long? = null,
 ) {
     init {
         require(currency in SUPPORTED_CURRENCIES) { "currency must be one of $SUPPORTED_CURRENCIES" }
@@ -440,6 +446,7 @@ data class Deal(
             createdAt = createdAt,
             updatedAt = at,
             version = version + 1,
+            rowVersion = rowVersion,
             history =
             history +
                 DealTransition(
