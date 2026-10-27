@@ -4,12 +4,16 @@
 
 package com.openbank.sepa.application.workflow
 
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningPolicy
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepa.application.port.out.AmlCasePort
-import com.openbank.sepa.application.port.out.AmlCaseRiskLevel
 import com.openbank.sepa.application.port.out.FraudScoreCommand
 import com.openbank.sepa.application.port.out.FraudScoringPort
-import com.openbank.sepa.application.port.out.FraudVerdict
 import com.openbank.sepa.application.port.out.OpenAmlCaseCommand
 import com.openbank.sepa.application.port.out.SanctionsScreeningPort
 import com.openbank.sepa.application.port.out.SchemeGatewayPort
@@ -24,10 +28,6 @@ import com.openbank.sepa.application.port.out.SettlementUnavailableException
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaRejectReason
-import com.openbank.sepa.domain.screening.ScreeningDecision
-import com.openbank.sepa.domain.screening.ScreeningMatchStatus
-import com.openbank.sepa.domain.screening.ScreeningPolicy
-import com.openbank.sepa.domain.screening.ScreeningRole
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
 import jakarta.enterprise.context.ApplicationScoped
@@ -76,7 +76,7 @@ open class SepaPaymentActivitiesImpl(
             log.warnf(ex, "Sanctions screening unavailable for payment %s; returning REVIEW", paymentId)
             openCaseQuietly(
                 payment = payment,
-                riskLevel = AmlCaseRiskLevel.MEDIUM,
+                riskLevel = AmlCaseSeverity.MEDIUM,
                 alertCode = ALERT_SCREENING_UNAVAILABLE,
                 detail = ex.message,
                 matchedEntity = null,
@@ -111,9 +111,9 @@ open class SepaPaymentActivitiesImpl(
                 .joinToString("; ") { "${it.role} '${it.subject}' ${it.status} score=${it.score}" }
                 .ifBlank { "no actionable matches" }
             val riskLevel = if (decision == ScreeningDecision.BLOCK) {
-                AmlCaseRiskLevel.CRITICAL
+                AmlCaseSeverity.CRITICAL
             } else {
-                AmlCaseRiskLevel.HIGH
+                AmlCaseSeverity.HIGH
             }
             openCaseQuietly(
                 payment = payment,
@@ -323,7 +323,7 @@ open class SepaPaymentActivitiesImpl(
     @Suppress("TooGenericExceptionCaught")
     private suspend fun openCaseQuietly(
         payment: SepaPayment,
-        riskLevel: AmlCaseRiskLevel,
+        riskLevel: AmlCaseSeverity,
         alertCode: String,
         detail: String?,
         matchedEntity: String?,
