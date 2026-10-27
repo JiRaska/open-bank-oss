@@ -20,6 +20,12 @@ cleanup_test_evidence() {
   wait "${docker_events_pid}" 2>/dev/null || true
 }
 trap cleanup_test_evidence EXIT
+# Local task durations for the two observed slow builds; no second build
+# or Build Scan upload. Parallel task times are not a critical-path sum.
+GRADLE_PROFILE_ARGS=()
+case "$SERVICE" in
+  openbank-lending-service|openbank-pension-service) GRADLE_PROFILE_ARGS=(--profile) ;;
+esac
 # The pilot uses deployment's native runner and augmentation properties. Other service
 # builds retain their existing recipe. SBOM and application come from one Gradle graph.
 deploy_tasks=()
@@ -34,6 +40,6 @@ fi
 # the first Gradle task; tests and build outputs are never replayed.
 bash .github/scripts/retry-testcontainers-ebusy.sh -- \
   bash .github/scripts/retry-gradle-verification-cache.sh -- \
-  ./gradlew --configure-on-demand :"${SERVICE}":build "${deploy_tasks[@]}" --build-cache --console=plain --stacktrace \
+  ./gradlew "${GRADLE_PROFILE_ARGS[@]}" --configure-on-demand :"${SERVICE}":build "${deploy_tasks[@]}" --build-cache --console=plain --stacktrace \
   "${deploy_options[@]}" \
   -Dquarkus.smallrye-openapi.store-schema-directory="build/openapi-generated"

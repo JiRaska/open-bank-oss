@@ -9,6 +9,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -27,9 +29,13 @@ import org.junit.jupiter.api.Test
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_tax_reporting_boot_it")],
+    restrictToAnnotatedClass = true,
 )
 @QuarkusTestResource(TaxFilingDeployReadinessIT.InMemoryChannels::class)
+@TestProfile(TaxFilingDeployReadinessIT.DeployReadinessProfile::class)
 class TaxFilingDeployReadinessIT {
+    class DeployReadinessProfile : QuarkusTestProfile
+
     private val path = "/api/v1/tax/filings"
 
     @Test

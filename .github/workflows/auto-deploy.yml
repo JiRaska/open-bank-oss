@@ -1305,6 +1305,7 @@ jobs:
         with:
           ref: ${{ needs.changes.outputs.source_commit }}
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Install deploy-hold parser
         run: |
@@ -1333,6 +1334,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          INPUT_RECONCILE: ${{ github.event.inputs.reconcile }}
           RECONCILE_TARGETS: ${{ github.event.inputs.reconcile_services }}
         run: |
           set -euo pipefail
@@ -1343,9 +1345,9 @@ jobs:
           # and therefore NO workflow run at all. Not skipped, absent. It renders as "waiting",
           # never as broken, and the image is never deployed.
           #
-          # Safe because the rewrite is deterministic — pin each image: to the tag just built —
-          # so recomputing against a newer main is always correct.
-          git fetch --depth=100 origin main
+          # Reconciliation preserves concurrently advanced pins when the complete source
+          # trees differ only in GitOps image pins; manual rebuilds retain their intent.
+          git fetch origin main
           git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
           # Read the hold from the newly fetched main, before assembling a bot PR.
@@ -1398,6 +1400,17 @@ jobs:
               old_tag="$(grep -oE "${image}:sandbox-[A-Za-z0-9._-]+" "$f" | head -1 | cut -d: -f2 || true)"
               if [ "$old_tag" = "$tag" ]; then
                 echo "  [${svc}] already at ${tag} in ${f}"
+                continue
+              fi
+              initial_tag="$old_tag"
+              if [ "$GITHUB_EVENT_NAME" = "schedule" ] || { [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$INPUT_RECONCILE" = "true" ]; }; then
+                initial_tag="$(git show "${GITHUB_SHA}:${f}" | grep -oE "${image}:sandbox-[A-Za-z0-9._-]+" | head -1 | cut -d: -f2)"
+              fi
+              publication="$(python3 .github/scripts/deploy-publication-race.py \
+                --event "$GITHUB_EVENT_NAME" --reconcile "$INPUT_RECONCILE" \
+                --initial "$initial_tag" --current "$old_tag" --candidate "$tag" --source "$GITHUB_SHA")"
+              if [ "$publication" = "preserve" ]; then
+                echo "  [${svc}] concurrent main pin already covers these sources — preserving ${old_tag}"
                 continue
               fi
               sed -i.bak "s|${image}:sandbox-[A-Za-z0-9._-]*|${image}:${tag}|g" "$f"
@@ -1559,6 +1572,12 @@ jobs:
           PR_NUMBER: ${{ steps.gitops_pr.outputs.pull-request-number }}
         run: |
           set -euo pipefail
+          # create-pull-request fetches main with depth=1, removing ancestry that carry
+          # already proved. Restore the same bounded history as rewrite, for this exact
+          # checkout (not a moving main), then run the unchanged fail-closed verifier.
+          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+            git fetch --no-tags --depth=100 origin "$(git rev-parse HEAD)"
+          fi
           gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
             | python3 .github/scripts/deploy-window.py verify --root .
 

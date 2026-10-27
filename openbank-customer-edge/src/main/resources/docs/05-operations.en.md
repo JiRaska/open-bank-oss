@@ -106,6 +106,10 @@ Every custom Micrometer counter is registered with the `openbank.` prefix (the `
 - Image build → push to registry; ArgoCD picks up the new tag.
 - The customer ingress applies a per-IP rate limit (`limit-rps`) as the first line of abuse defence (ADR-0065 / ADR-0069); deeper bot/spam hardening on `/onboarding/start` is an ADR-0069 Phase 2 follow-up.
 
+## Consumer contract verification
+
+The delegated-payment Pact test checks the authorization request sent to account-service. It constructs the edge with an in-memory payment-session store for the contract run; this is test-only, while the running service uses Redis. Run that contract with `./gradlew :openbank-customer-edge:consumerPactTest --tests '*CustomerEdgeDelegatedPaymentPactConsumerTest*'`.
+
 ## Tech stack
 
 | Component | Version |
