@@ -125,6 +125,11 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 
 ## Hodiny odchozího zaúčtování (#13623)
 
+Nullable interní `targetAccountId` v generované odpovědi musí odpovídat odeslanému null.
+Jinak shodná dokončená odpověď s interním cílovým účtem zůstává nevyřízeným výsledkem
+`mismatch`, nikoli důkazem tohoto externího SWIFT zaúčtování. Vynechaný nebo explicitně null
+cílový účet je při shodě ostatních údajů nadále přijat (#13217).
+
 Přijetí MT103 uloží první čas splatnosti zaúčtování atomicky se SENT a existující stavovou
 událostí před voláním transaction-service. Chybějící účet povinnost neuzavírá. Pouze striktně
 ověřená odpověď 201 COMPLETED s identitou transakce dovolí atomicky uložit lokální důkaz,
@@ -139,9 +144,26 @@ nejstarší sledované povinnosti bez lokálního důkazu. Zůstává číselná
 Dotaz nefiltruje obchodní stav: ACKNOWLEDGED/REJECTED není důkaz zaúčtování. Před prvním
 úspěšným dotazem je hodnota NaN, známá prázdná sledovaná množina má nulu nezávisle na neznámém
 pokrytí. Chyba dotazu zachová čas v cache, stáří dále roste a nezaznamená se úspěch workflow.
-Nullable sloupce nedoplňují smyšlené historické časy. Alarmuje na ně `SwiftBookingUnsettled` (30 min, níže); nepřibývá veřejné API,
-automatické historické opravy ani finanční opakování.
+Nullable sloupce nedoplňují smyšlené historické časy. Alarmuje na ně `SwiftBookingUnsettled` (30 min, níže); re-drive níže opakuje jen sledované závazky;
+nepřibývá veřejné API ani automatické historické opravy.
 
 ### Alarm nezaúčtované zprávy (#13623)
 
-`SwiftBookingUnsettled` alarmuje, když jsou nejstarší otevřené hodiny zaúčtování MT103 starší než 30 minut (`openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`, testy v `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`). swift-service volá transaction-service jednou za přijatou zprávu, nikdy neopakuje a nemá cestu re-drive (#13686), takže stáří je jediný signál, který se k operátorovi dostane. Platí to i pro zprávu bez id účtu příkazce nebo s nečitelným datem valuty, kterou čítač výsledků nevidí. Náprava (dotaz do transaction-service podle klíče, pak reconcile nebo reverse) je v sekci SWIFT v `docs/runbooks/0032-payment-rail-unsettled-booking.md`. `ack`/`reject` hodiny nezavírají a nesmí se jimi alarm umlčet.
+`SwiftBookingUnsettled` alarmuje, když jsou nejstarší otevřené hodiny zaúčtování MT103 starší než 30 minut (`openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`, testy v `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`). swift-service volá transaction-service jednou za přijatou zprávu; cokoli neprokázaného pak znovu zkouší re-drive níže, a pokud ani ten zaúčtování neprokáže, k operátorovi se dostane signál stáří. Platí to i pro zprávu bez id účtu příkazce nebo s nečitelným datem valuty, kterou čítač výsledků nevidí. Náprava (dotaz do transaction-service podle klíče, pak reconcile nebo reverse) je v sekci SWIFT v `docs/runbooks/0032-payment-rail-unsettled-booking.md`. `ack`/`reject` hodiny nezavírají a nesmí se jimi alarm umlčet.
+
+### Re-drive zaúčtování (#13686)
+
+`SwiftSettlementRedriveScheduler` běží každých 60 s a znovu zkouší zaúčtovat každou MT103 ve stavu `SENT` s otevřenými hodinami zaúčtování (`booking_first_due_at` nastaveno, `booking_proven_at` null), starší než `openbank.swift.settlement-redrive.min-age` (2 min). Volá transaction-service znovu pod stejným klíčem `swift-settlement-<messageId>` s požadavkem sestaveným z uložené zprávy, takže datum valuty je datum z pole 32A, nikdy dnešní. Nikdy znovu neodesílá do schématu. Souběžné běhy nemohou volat oba: každou zprávu si jedním podmíněným UPDATE zabere token s 2min leasem a každý další zápis je podmíněný tímto tokenem. Neprokázaný pokus se počítá v `booking_redrive_attempts` a další čeká `min(2 min * 2^(n-1), 1 h)`; po 10 pokusech se zpráva označí `booking_redrive_exhausted_at`, zvýší se `openbank_payment_unsettled_total{rail="SWIFT",outcome="redrive-exhausted"}` a otevřené hodiny dál drží `SwiftBookingUnsettled` v alarmu. Zastavený sweep zachytí `WorkflowLivenessStale` (`swift-settlement-redrive`). Vypínač: `SWIFT_SETTLEMENT_REDRIVE_ENABLED` (výchozí `true`). Zprávu, kterou operátor už potvrdil nebo odmítl, re-drive nebere (není `SENT`); řeší ji runbook. Uložená odpověď `FAILED` nebo neshodná se vrací při každém pokusu stejně, re-drive se na ní vyčerpá a nápravou je opět runbook. Alarm (30 min) může vzniknout, když re-drive ještě běží (10 pokusů trvá asi 6 h), proto každá ruční náprava začíná zastavením podle runbooku ve čtyřech očích (`booking_redrive_stopped_at`, odmítnuto, dokud re-drive drží živý claim); zastavenou zprávu sweep nikdy nezabere. `ack`/`reject` re-drive také zastaví, při živém claimu vrátí 409 a hodiny zaúčtování nechají otevřené. Nečitelné uložené datum valuty se počítá jako `outcome="bad-data"` a vyčerpá se hned; chyba databáze u jedné zprávy se počítá jako `outcome="redrive-error"` a sweep pokračuje. Zastavení nezruší volání, které už běží: re-drive zaseknutý po vypršení leasu může po zastavení ještě zaúčtovat; důkaz se zapíše a počítá se `outcome="late-completion"`. Každé ruční zaúčtování proto musí použít stejný klíč `swift-settlement-<messageId>`, až po dotazu do transaction-service na tento klíč. Zprávu, u níž žádné zaúčtování nedluží (např. odmítnutou po ACSC), uzavře čtyřoký waive z runbooku (`booking_waived_at`, důvod, schvalovatel); zmizí z gauge stáří, z alarmu i ze sweepu. Služba tyto sloupce nikdy nezapisuje.
+
+Ověřené pozdní zaúčtování po rozhodnutí ACK/REJECT uloží důkaz transakce bez přepsání rozhodnutí a bez události COMPLETED. Výsledek `late-completion` vyžaduje porovnání existující transakce se stejným klíčem. Výjimka vyžaduje úplný čas, neprázdný důvod a schvalovatele, nikoli částečné NULL údaje.
+
+## Vlastní převody banky uvolněné treasury
+
+Událost treasury `treasury.payment.released.v1` (kanál `treasury-payments-in`) se stane jedním
+vlastním převodem banky na platbu, odeslaným jako pacs.009 po trase, kterou uvolnění určuje; stav se
+publikuje na `openbank.swift.institution-transfers`. Uvolnění s datem valuty starším než
+`institution-transfer.value-date-past-tolerance-days` je odmítnuto (DT01). Převod se nikdy neposílá
+naslepo znovu a známý převod se nikdy neodmítne: nejasné odeslání se řeší dotazem na schéma podle
+UETR. Sweeper (`institution-transfer.resolution.*`: `every`, `initial-delay`, `min-age`,
+`batch-size`) se ptá na neznámá odeslání a SENT převody starší než `min-age`. Záznam, který konzument
+nezpracuje, jde do dead-letter podle konfigurace kanálu.

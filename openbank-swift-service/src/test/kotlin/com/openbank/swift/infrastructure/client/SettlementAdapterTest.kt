@@ -109,6 +109,21 @@ class SettlementAdapterTest {
     }
 
     @Test
+    fun `a matching COMPLETED 201 with an explicit null target account still settles`(): Unit = runBlocking {
+        val txId = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc")
+        answer { request ->
+            assertThat(request.targetAccountId).isNull()
+            matching(request, txId).copy(targetAccountId = null)
+        }
+
+        val outcome = adapter.settle(message())
+
+        assertThat(outcome.settled).isTrue()
+        assertThat(outcome.transactionId).isEqualTo(txId)
+        assertAllUnsettledZero()
+    }
+
+    @Test
     fun `settle returns settled=false without account UUID`(): Unit = runBlocking {
         val outcome = adapter.settle(message(accountId = null))
 
@@ -172,13 +187,17 @@ class SettlementAdapterTest {
     }
 
     @ParameterizedTest(name = "mismatched {0}")
-    @CsvSource("type", "account", "amount", "currency", "rail", "instructionType")
+    @CsvSource("type", "account", "targetAccount", "amount", "currency", "rail", "instructionType")
     fun `a COMPLETED 201 for a different booking never settles the SWIFT message`(field: String): Unit = runBlocking {
         answer { request ->
             val tx = matching(request)
             when (field) {
                 "type" -> tx.copy(type = "CREDIT")
                 "account" -> tx.copy(sourceAccountId = UUID.randomUUID())
+                "targetAccount" -> {
+                    assertThat(request.targetAccountId).isNull()
+                    tx.copy(targetAccountId = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+                }
                 "amount" -> tx.copy(amount = request.amount.add(BigDecimal.ONE))
                 "currency" -> tx.copy(currencyCode = "USD")
                 "rail" -> tx.copy(rail = "SEPA_CT")
@@ -321,6 +340,9 @@ class SettlementAdapterTest {
         val outcome = adapter.settle(message(valueDate = "2026-06-22"))
 
         assertThat(outcome.settled).isFalse()
+        // #13686: it can never heal, so it is permanent (the re-drive stops) and counted as bad-data.
+        assertThat(outcome.permanent).isTrue()
+        assertSingleUnsettled("bad-data")
         verify(exactly = 0) { client.initiateTransaction(any()) }
     }
 

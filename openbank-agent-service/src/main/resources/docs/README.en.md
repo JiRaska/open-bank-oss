@@ -51,3 +51,18 @@ The consumer fixtures call the real read adapter through handwritten HTTP client
 execute the production MicroProfile annotations or establish JWT, OPA, ownership or live broker
 interoperability. Catalog/Ledger mapping needs its own real-client proof; FX/AML mapping results
 cannot be transferred to these interfaces. These supplemental interactions are not yet executed.
+
+## SCT Inst read contracts
+
+The agent consumer contract uses the canonical provider name `openbank-sepa-instant`. Its
+consumer test lives in the discovered `contract` package and regenerates
+`pacts/openbank-agent-service-openbank-sepa-instant.json`. The four interactions cover the
+payment list, one settled payment, the debtor payment list and an unknown payment returning
+404. The consumer exercises real tool dispatch with a client bound to the Pact mock; a 404
+remains an exception rather than a fabricated payment.
+
+The SEPA Instant folder provider test replays all four interactions from `../pacts` against
+real HTTP and a JDBC-seeded test database. Missing committed JSON must fail. Broker
+verification remains conditional on `pactbroker.url`; the folder replay requires no broker.
+Test identities, disabled test OIDC and advisory authorization do not prove production
+JWT/OPA authorization. This adds no endpoint or runtime activation.

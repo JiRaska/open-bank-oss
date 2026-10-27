@@ -51,3 +51,18 @@ Consumer fixtures volají skutečný read adapter přes ručně napsané HTTP kl
 produkční MicroProfile anotace a nedokazují JWT, OPA, vlastnictví ani živou broker interoperabilitu.
 Catalog/Ledger potřebují vlastní důkaz mapování skutečných klientů; výsledky FX/AML na ně nelze
 přenést. Tyto doplňkové interakce zatím nebyly spuštěny.
+
+## Kontrakty čtení SCT Inst
+
+Konzumentský kontrakt agenta používá kanonický název poskytovatele `openbank-sepa-instant`.
+Test konzumenta je v automaticky vyhledávaném balíčku `contract` a regeneruje
+`pacts/openbank-agent-service-openbank-sepa-instant.json`. Čtyři interakce pokrývají seznam
+plateb, jednu vypořádanou platbu, seznam plateb plátce a odpověď 404 pro neznámou platbu.
+Konzument prověřuje skutečné směrování nástrojů s klientem připojeným k Pact mocku; 404
+zůstává výjimkou místo vymyšlené platby.
+
+Adresářový test poskytovatele SEPA Instant přehrává všechny čtyři interakce z `../pacts`
+proti skutečnému HTTP a testovací databázi připravené přes JDBC. Chybějící uložený JSON musí
+selhat. Ověření přes broker zůstává podmíněné nastavením `pactbroker.url`; adresářové přehrání
+broker nepotřebuje. Testovací identity, vypnuté testovací OIDC a poradní autorizace
+neprokazují produkční autorizaci JWT/OPA. Změna nepřidává endpoint ani aktivaci za běhu.

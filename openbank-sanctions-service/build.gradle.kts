@@ -24,6 +24,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    // ADR-0353: the financial-crime published language, declared once for producers and rails.
+    implementation(project(":openbank-libs-fincrime"))
     implementation(project(":openbank-libs-runtime"))
     testImplementation(libs.mockk)
     // AuditEventTime — the ONE copy of the rule openbank-audit-service's AuditConsumer applies to
@@ -53,6 +55,12 @@ dependencies {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// The instrumented Quarkus/HTTP/DB suite exceeds Gradle's default 512 MiB test heap
+// in hosted CI. Preserve the full suite and coverage checks with a bounded 1 GiB worker.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "1g"
+}
 
 kover {
     reports {

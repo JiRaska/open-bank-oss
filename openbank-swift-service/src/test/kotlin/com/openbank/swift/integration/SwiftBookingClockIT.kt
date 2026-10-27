@@ -185,7 +185,9 @@ class SwiftBookingClockIT {
     }
 
     @Test
-    fun `operator callback while provider books preserves callback state and unresolved local proof`() {
+    fun `operator callback while provider books preserves callback state and retains validated late proof`() {
+        val transactionId = UUID.fromString("12345678-1234-4567-8123-123456789abc")
+        val isolatedDue = Instant.parse("1900-01-01T00:00:00Z")
         val started = CountDownLatch(1)
         val release = CompletableDeferred<Unit>()
         val inFlight = AtomicReference<SwiftMessage>()
@@ -193,22 +195,26 @@ class SwiftBookingClockIT {
             inFlight.set(message)
             started.countDown()
             withTimeout(30_000) { release.await() }
-            SettlementOutcome(true, UUID.randomUUID())
+            SettlementOutcome(true, transactionId)
         }
         val result = CompletableFuture.supplyAsync { send() }
         try {
             check(started.await(30, TimeUnit.SECONDS))
             val id = inFlight.get().id
+            execute("update swift_messages set booking_first_due_at = '$isolatedDue' where id = '$id'")
+            assertThat(onContext { query.bookingAgeSnapshot() }.oldestDueAt).isEqualTo(isolatedDue)
+            val firstDue = row(id)["booking_first_due_at"]
             operator(id, "ack", "ackRef")
             release.complete(Unit)
             assertThat(result.get(30, TimeUnit.SECONDS)).isEqualTo(id)
             val current = row(id)
             assertThat(current["status"]).isEqualTo("ACKNOWLEDGED")
-            assertThat(current["booking_first_due_at"]).isNotNull()
-            assertThat(current["booking_proven_at"]).isNull()
-            assertThat(current["booking_transaction_id"]).isNull()
+            assertThat(current["booking_first_due_at"]).isEqualTo(firstDue)
+            assertThat(current["booking_proven_at"]).isNotNull()
+            assertThat(current["booking_transaction_id"]).isEqualTo(transactionId.toString())
+            assertThat(current["booking_clock_covered"]).isEqualTo("true")
             assertThat(completedEvents(id)).isZero()
-            assertThat(onContext { query.bookingAgeSnapshot() }.oldestDueAt).isNotNull()
+            assertThat(onContext { query.bookingAgeSnapshot() }.oldestDueAt).isNotEqualTo(isolatedDue)
         } finally {
             release.complete(Unit)
             result.get(30, TimeUnit.SECONDS)
@@ -351,13 +357,21 @@ class SwiftBookingClockIT {
 
     private fun row(id: UUID): Map<String, String?> = dataSource.connection.use { connection ->
         connection.prepareStatement(
-            "select status, booking_first_due_at, booking_proven_at, booking_transaction_id, xmin::text " +
+            "select status, booking_first_due_at, booking_proven_at, booking_transaction_id, " +
+                "booking_clock_covered::text as booking_clock_covered, xmin::text " +
                 "from swift_messages where id = ?",
         ).use { statement ->
             statement.setObject(1, id)
             statement.executeQuery().use { result ->
                 check(result.next())
-                listOf("status", "booking_first_due_at", "booking_proven_at", "booking_transaction_id", "xmin")
+                listOf(
+                    "status",
+                    "booking_first_due_at",
+                    "booking_proven_at",
+                    "booking_transaction_id",
+                    "booking_clock_covered",
+                    "xmin",
+                )
                     .associateWith { result.getString(it) }
             }
         }
