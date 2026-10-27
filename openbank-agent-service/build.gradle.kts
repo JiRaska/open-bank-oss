@@ -43,6 +43,8 @@ dependencies {
     // Pact consumers pin balance-holds, sanctions and SEPA Instant read tools against their
     // providers (AgentBalanceHoldsPactConsumerTest, AgentSanctionsReadPactConsumerTest and
     // AgentSepaInstantReadPactConsumerTest, ADR-0063).
+    // Pact consumers also cover account/transaction, FX, AML, Catalog and Ledger read tools.
+    // They drive read-adapter dispatch through mock-server clients, not live OIDC.
     testImplementation(libs.pact.consumer)
     // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
     // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.
