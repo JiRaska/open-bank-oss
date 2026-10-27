@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import subprocess
 import time
+from pathlib import Path
 
 WORKFLOWS = (".github/workflows/libs-quality.yml", ".github/workflows/cflite-pr.yml", ".github/workflows/libs-bench.yml")
 JOBS = dict(zip(WORKFLOWS, ("Library ABI and recovery", "Fuzz changed code (Jazzer, 300s)",
@@ -40,9 +43,53 @@ def verdict(runs, head):
     return ("pending", "; ".join(pending)) if pending else ("success", "all library proofs passed on this head")
 
 
-def api(endpoint):
-    output = subprocess.check_output(["gh", "api", "--paginate", "--slurp", endpoint], text=True)
+def api(endpoint, deadline):
+    # Reuse the fleet retry classifier/reset wait. Each attempt owns its complete
+    # paginated output: a failed page must never leak into a later successful read.
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise RuntimeError("Library evidence API deadline expired; refusing all-green")
+    wrapper = r'''source "$1"; shift
+candidate=$(mktemp)
+trap 'rm -f "$candidate"' EXIT
+fetch_pages() { gh api --paginate --slurp "$1" > "$candidate"; }
+if gh_retry 3 -- fetch_pages "$1"; then cat "$candidate"; else exit $?; fi
+'''
+    env = dict(os.environ, GH_RETRY_MAX_WAIT_SECONDS="60", GH_RETRY_DEAD_LETTER="0")
+    process = subprocess.Popen(
+        ["bash", "-c", wrapper, "library-evidence", str(Path(__file__).with_name("gh-retry.sh")), endpoint],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, start_new_session=True,
+    )
+    try:
+        output, diagnostic = process.communicate(timeout=min(300, remaining))
+    except subprocess.TimeoutExpired as error:
+        # Stop the wrapper AND its gh/sleep children at the shared deadline.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate()
+        raise RuntimeError("Library evidence API request timed out; refusing all-green") from error
+    if process.returncode:
+        raise RuntimeError(f"Library evidence API failed: {' '.join(diagnostic.split())[-400:]}")
+    if diagnostic:
+        print("Library evidence API recovered after a bounded transient retry", flush=True)
     return json.loads(output)
+
+
+def attach_jobs(runs, head, repo, cache, deadline):
+    for workflow in WORKFLOWS:
+        candidates = [r for r in runs if r.get("path") == workflow and r.get("head_sha") == head
+                      and r.get("event") == "pull_request"]
+        if not candidates:
+            continue
+        latest = max(candidates, key=lambda r: (r["id"], r.get("run_attempt", 1)))
+        if latest["status"] == "completed" and latest.get("conclusion") == "success":
+            key = (latest["id"], latest.get("run_attempt", 1))
+            if key not in cache:
+                endpoint = f"repos/{repo}/actions/runs/{key[0]}/attempts/{key[1]}/jobs?per_page=100"
+                cache[key] = [j for page in api(endpoint, deadline) for j in page["jobs"]]
+            latest["jobs"] = cache[key]
 
 
 def main():
@@ -52,22 +99,18 @@ def main():
     parser.add_argument("--head", required=True)
     parser.add_argument("--timeout", type=int, default=900)
     args = parser.parse_args()
-    paths = [f["filename"] for page in api(f"repos/{args.repo}/pulls/{args.pr}/files?per_page=100") for f in page]
+    deadline = time.monotonic() + args.timeout
+    paths = [f["filename"] for page in api(f"repos/{args.repo}/pulls/{args.pr}/files?per_page=100", deadline) for f in page]
     if not applicable(paths):
         print("Library proofs: not applicable to these paths")
         return 0
-    deadline = time.monotonic() + args.timeout
+    # Only completed attempt-specific job rosters are immutable. Keep the run
+    # inventory fresh so reruns/new failures supersede previously green proofs.
+    cache = {}
     while True:
-        runs = [r for page in api(f"repos/{args.repo}/actions/runs?head_sha={args.head}&event=pull_request&per_page=100")
+        runs = [r for page in api(f"repos/{args.repo}/actions/runs?head_sha={args.head}&event=pull_request&per_page=100", deadline)
                 for r in page["workflow_runs"]]
-        for workflow in WORKFLOWS:
-            candidates = [r for r in runs if r.get("path") == workflow and r.get("head_sha") == args.head
-                          and r.get("event") == "pull_request"]
-            if candidates:
-                latest = max(candidates, key=lambda r: (r["id"], r.get("run_attempt", 1)))
-                if latest["status"] == "completed" and latest.get("conclusion") == "success":
-                    endpoint = f"repos/{args.repo}/actions/runs/{latest['id']}/attempts/{latest.get('run_attempt', 1)}/jobs?per_page=100"
-                    latest["jobs"] = [j for page in api(endpoint) for j in page["jobs"]]
+        attach_jobs(runs, args.head, args.repo, cache, deadline)
         state, detail = verdict(runs, args.head)
         print(f"Library proofs: {state}: {detail}", flush=True)
         if state == "success":
