@@ -262,8 +262,8 @@ jobs:
         env:
           # The full fleet comparison exceeds the per-variable OS limit. Keep
           # aligned field arrays from the action's actual output; the guard checks lengths.
-          # Expressions are expanded even when retry was skipped. Empty arrays make that
-          # expansion valid; an executed guard still rejects missing approval evidence.
+          # Skipped-step outputs can be evaluated before the step condition; keep them valid JSON.
+          # An active license choice still rejects empty evidence in --review-result.
           RETRY_NAMES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.name) }}
           RETRY_PACKAGE_URLS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.package_url) }}
           RETRY_LICENSES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.license) }}
