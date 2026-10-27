@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.1...billing-service-v0.17.2) (2026-10-26)
+
+
+### Security
+
+* **libs:** bind product revision signatures to the full revision identity ([#13749](https://github.com/JiRaska/open-bank-oss/issues/13749)) ([8171dfd](https://github.com/JiRaska/open-bank-oss/commit/8171dfdbf44a06ac48c058f662acdb6c26cc7b98))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.0...billing-service-v0.17.1) (2026-10-26)
 
 

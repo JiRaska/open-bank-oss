@@ -25,3 +25,9 @@ This documentation is published directly by the service at the management endpoi
 - **Idempotency:** `Idempotency-Key` header is required on `POST /api/v1/parties`; the email uniqueness constraint additionally de-duplicates parties (409 on replay)
 - **Auth:** Keycloak OIDC, roles `ROLE_VIEWER` / `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_KYC` / `ROLE_API`; OPA authz in advisory mode (ADR-0034)
 - **Data classification:** `restricted` — this service holds PII (legal name, e-mail, phone, address, nationality, tax id). Not a money-path service.
+
+## Outbound HTTP consumer contracts
+
+Party-service publishes two HTTP consumer pacts. `PartyAccountListPactConsumerTest` calls the real `AccountServiceClient` merge guard for `GET /api/v1/accounts?partyId=...&limit=100`; it checks one active account, an empty account page, and propagation of an unauthenticated 401. `PartyTransactionListPactConsumerTest` calls the real `PortabilityAggregationAdapter` for `GET /api/v1/transactions?accountId=...&limit=200`; it checks a transaction page, empty history, and a 401 that fails aggregation with `GdprAggregationAuthException`.
+
+Both tests provide handwritten REST-client interface implementations that send HTTP to a Pact mock server and deserialize the response. Account and card dependencies in the transaction test are local fakes. These tests cover the adapter mapping and refusal behavior, not the generated REST client or token acquisition. The committed JSON is replayed by account/transaction provider folder suites; separate negative-auth suites replay the anonymous interactions. Provider identities use `@TestSecurity`. These fixtures establish neither JWT signature/TLS validation, cross-party ownership isolation, nor completeness of multi-page exports. An empty-history state deliberately seeds nothing; the broker and folder twins declare the same state names.
