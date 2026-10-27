@@ -4,6 +4,7 @@
 
 package com.openbank.lending.e2e
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
@@ -111,22 +112,25 @@ class LendingEventsWireE2E {
             statusCode(409)
         }
 
-        // Let the dispatcher tick settle, then assert the whole window for this application:
-        // a contiguous chain of transitions (same key → one partition → observed order is the
-        // commit order) and exactly one refusal.
-        Thread.sleep(3_000)
-        val transitions = observed()
-            .filter { it.key() == refusalApplicationId && ceType(it) == TRANSITION }
-            .toList()
-        val refusals = observed()
-            .filter { it.key() == refusalApplicationId && ceType(it) == REFUSED }
-            .toList()
+        // Wait until the lifecycle is complete on the wire. A send that hits the publish
+        // timeout is marked FAILED and re-claimed on a later dispatcher tick, so on a slow
+        // (emulated) environment envelopes can land OUT of commit order — a fixed settle
+        // sleep cannot know when the retry tick has caught up. The settled condition is
+        // defined the way a reader rebuilds the lifecycle (ADR-0214 D1): the occurredAt-
+        // latest transition is the four-eyes gate and the refusal has landed. Only the
+        // endpoints are asserted, not pairwise chain contiguity.
+        val settled = awaitSettled(refusalApplicationId)
+        val transitions = settled.transitions
+        val refusals = settled.refusals
         assertThat(transitions.size)
             .describedAs("apply + four advances must each co-commit one transition")
             .isGreaterThanOrEqualTo(4)
         assertThat(refusals).hasSize(1)
 
-        val first = mapper.readTree(transitions.first().value())
+        // The reader's view: endpoints are picked by occurredAt, never by arrival order —
+        // a retried envelope can legally land after later ones (see awaitSettled).
+        val first = mapper.readTree(earliestByOccurredAt(transitions).value())
+        val last = latestByOccurredAt(transitions)
         assertThat(first["eventType"].asText()).isEqualTo(TRANSITION)
         assertThat(first["aggregateType"].asText()).isEqualTo("LOAN_APPLICATION")
         assertThat(first["aggregateId"].asText()).isEqualTo(refusalApplicationId)
@@ -151,13 +155,12 @@ class LendingEventsWireE2E {
         // the application is actually in, so a reader rebuilding the lifecycle sees the gate
         // step that happened (note: the state machine has intermediate states not every writer
         // evidences, so pairwise from/to contiguity is NOT asserted — only the endpoints).
-        assertThat(mapper.readTree(transitions.last().value())["toState"].asText()).isEqualTo("FOUR_EYES")
+        assertThat(last["toState"].asText()).isEqualTo("FOUR_EYES")
         val refusal = mapper.readTree(refusals.single().value())
         assertThat(refusal["outcome"].asText()).isEqualTo("REFUSED")
         assertThat(refusal["attemptedAction"].asText()).isNotBlank()
         assertThat(refusal["code"].asText()).isNotBlank()
-        assertThat(refusal["state"].asText())
-            .isEqualTo(mapper.readTree(transitions.last().value())["toState"].asText())
+        assertThat(refusal["state"].asText()).isEqualTo(last["toState"].asText())
         assertThat(refusal["correlationId"].asText()).isEqualTo(refusalApplicationId)
         assertThat(refusal["sourceService"].asText()).isEqualTo("lending")
         Instant.parse(refusal["occurredAt"].asText())
@@ -320,6 +323,50 @@ class LendingEventsWireE2E {
 
     private fun observed(): List<ConsumerRecord<String, String>> = OBSERVED
 
+    private fun occurredAt(record: ConsumerRecord<String, String>): Instant =
+        Instant.parse(mapper.readTree(record.value())["occurredAt"].asText())
+
+    private fun earliestByOccurredAt(records: List<ConsumerRecord<String, String>>): ConsumerRecord<String, String> =
+        records.minBy { occurredAt(it) }
+
+    private fun latestByOccurredAt(records: List<ConsumerRecord<String, String>>): JsonNode =
+        mapper.readTree(records.maxBy { occurredAt(it) }.value())
+
+    private class SettledWindow(
+        val transitions: List<ConsumerRecord<String, String>>,
+        val refusals: List<ConsumerRecord<String, String>>,
+    )
+
+    /**
+     * Poll the wire tap until the refusal window is complete — occurredAt-latest transition is
+     * the four-eyes gate and exactly one refusal has landed — or return whatever accumulated
+     * after [SETTLE_TIMEOUT] so the assertions render the real mismatch. A publish that hits
+     * the 3 s outbox timeout is marked FAILED and re-claimed on a later tick, so envelopes can
+     * legally land out of commit order on a slow environment; a fixed sleep cannot know when
+     * the retry tick has caught up.
+     */
+    private fun awaitSettled(applicationId: String): SettledWindow {
+        val deadline = System.nanoTime() + SETTLE_TIMEOUT.toNanos()
+        while (System.nanoTime() < deadline) {
+            val window = snapshot(applicationId)
+            if (isSettled(window)) return window
+            Thread.sleep(250)
+        }
+        return snapshot(applicationId)
+    }
+
+    private fun isSettled(window: SettledWindow): Boolean {
+        if (window.transitions.size < 4) return false
+        if (window.refusals.size != 1) return false
+        val latest = window.transitions.maxByOrNull { occurredAt(it) } ?: return false
+        return mapper.readTree(latest.value())["toState"].asText() == "FOUR_EYES"
+    }
+
+    private fun snapshot(applicationId: String): SettledWindow = SettledWindow(
+        observed().filter { it.key() == applicationId && ceType(it) == TRANSITION }.toList(),
+        observed().filter { it.key() == applicationId && ceType(it) == REFUSED }.toList(),
+    )
+
     private fun ceType(record: ConsumerRecord<String, String>): String? = header(record, "ce-type")
 
     private fun header(record: ConsumerRecord<String, String>, name: String): String? =
@@ -387,6 +434,7 @@ class LendingEventsWireE2E {
         private const val TOPIC = "openbank.lending.events"
         private const val TRANSITION = "credit.application.transition"
         private const val REFUSED = "credit.application.transition.refused"
+        private val SETTLE_TIMEOUT: Duration = Duration.ofSeconds(30)
 
         private val OBSERVED = CopyOnWriteArrayList<ConsumerRecord<String, String>>()
 
