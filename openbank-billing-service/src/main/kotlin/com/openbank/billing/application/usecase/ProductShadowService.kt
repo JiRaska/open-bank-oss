@@ -11,15 +11,19 @@ import com.openbank.billing.application.port.out.ProductShadowQueuePort
 import com.openbank.billing.application.port.out.QueuedShadowInput
 import com.openbank.billing.application.port.out.RevisionIrCopyPort
 import com.openbank.billing.application.port.out.StoredRevisionIr
+import com.openbank.billing.domain.ProductShadowInput
+import com.openbank.billing.domain.ShadowRevisionIdentity
 import com.openbank.libs.product.ir.ProductEvaluationException
 import com.openbank.libs.productrevision.IrSignatureVerifierPort
 import com.openbank.libs.productrevision.PinnedRevisionLoader
 import com.openbank.libs.productrevision.PinnedRevisionUnavailableException
+import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.libs.productrevision.RevisionLoadOutcome
 import com.openbank.libs.productrevision.SignedRevisionCopy
 import com.openbank.libs.productrevision.shadow.ProductShadowRecorder
 import com.openbank.libs.productrevision.shadow.ShadowNotComparable
 import io.micrometer.core.instrument.Counter
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -44,7 +48,7 @@ class ProductShadowService(
     private val maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
 ) {
     /** The loader's source: copies this service has read from its own table, by hash. */
-    private val verifiedSource = ConcurrentHashMap<String, SignedRevisionCopy>()
+    private val verifiedSource = ConcurrentHashMap<RevisionIdentity, SignedRevisionCopy>()
     private val loader = verifier?.let { PinnedRevisionLoader({ hash -> verifiedSource[hash] }, it, meters) }
     private val log = org.jboss.logging.Logger.getLogger(ProductShadowService::class.java)
 
@@ -87,17 +91,23 @@ class ProductShadowService(
 
     private suspend fun process(item: QueuedShadowInput): Outcome {
         val input = item.input ?: return notComparable(ShadowNotComparable.IR_EVALUATION_FAILED)
+        val expected = input.expectedRevision
+            ?: return notComparable(ShadowNotComparable.INPUT_UNKNOWN)
+        val pin = capturedPin(input) ?: return notComparable(ShadowNotComparable.INPUT_UNKNOWN)
         val stored = try {
-            localCopy(input.productRevisionId)
+            localCopy(expected)
         } catch (e: CatalogRevisionMismatchException) {
             log.warnf("product shadow: %s; copy not stored", e.message)
             return notComparable(ShadowNotComparable.VERIFICATION_FAILED)
         } ?: return notComparable(ShadowNotComparable.REVISION_UNAVAILABLE, retry = true)
-        if (!stored.hasIr) return notComparable(ShadowNotComparable.NO_IR)
+        if (!stored.hasIr) {
+            copies.store(stored)
+            return notComparable(ShadowNotComparable.NO_IR)
+        }
         val loader = loader ?: return notComparable(ShadowNotComparable.VERIFICATION_DISABLED)
-        val hash = trustedHash(stored) ?: return notComparable(ShadowNotComparable.VERIFICATION_FAILED)
+        if (!trustedCopy(stored, expected)) return notComparable(ShadowNotComparable.VERIFICATION_FAILED)
         val revision = try {
-            loader.load(hash)
+            loader.load(pin)
         } catch (e: PinnedRevisionUnavailableException) {
             return if (e.outcome == RevisionLoadOutcome.VERIFIER_UNAVAILABLE) {
                 notComparable(ShadowNotComparable.VERIFIER_UNAVAILABLE, retry = true)
@@ -105,6 +115,8 @@ class ProductShadowService(
                 notComparable(ShadowNotComparable.VERIFICATION_FAILED)
             }
         }
+        // Verify the full signed pin before inserting or enriching an immutable local copy.
+        if (copies.store(stored) != stored) return notComparable(ShadowNotComparable.VERIFICATION_FAILED)
         val results = try {
             comparator.compare(revision, input)
         } catch (e: ProductEvaluationException) {
@@ -118,11 +130,17 @@ class ProductShadowService(
     }
 
     /** Billing's local copy, fetched from the catalog and stored on first sight; null when the catalog cannot answer. */
-    private suspend fun localCopy(revisionId: String): StoredRevisionIr? = copies.find(revisionId) ?: try {
-        copies.store(catalog.fetch(revisionId))
+    private suspend fun localCopy(expected: ShadowRevisionIdentity): StoredRevisionIr? = try {
+        val existing = copies.find(expected.revisionId)
+        if (existing != null && existing.identity != null) return existing
+        val fetched = catalog.fetch(expected.revisionId)
+        if (fetched.hasIr && fetched.identity != expected) {
+            throw CatalogRevisionMismatchException("catalog identity differs from the frozen assessment pin")
+        }
+        fetched
     } catch (e: CatalogRevisionUnavailableException) {
         // Counted as revision_unavailable by the caller; the cause is named, never the payload.
-        log.warnf("product shadow: revision %s unavailable (%s); retried later", revisionId, e.message)
+        log.warnf("product shadow: revision %s unavailable (%s); retried later", expected.revisionId, e.message)
         null
     }
 
@@ -164,14 +182,33 @@ class ProductShadowService(
         }
     }
 
-    /** Registers the stored copy with the loader's source and returns its hash; null when it carries no signature. */
-    private fun trustedHash(stored: StoredRevisionIr): String? {
-        val hash = stored.revisionHash ?: return null
-        val json = stored.irJson ?: return null
-        val signature = stored.signature ?: return null
-        verifiedSource.putIfAbsent(hash, SignedRevisionCopy(json, signature))
-        return hash
+    /** Only an independently captured complete pin can authorize a shadow comparison. */
+    private fun capturedPin(input: ProductShadowInput): RevisionIdentity? {
+        val expected = input.expectedRevision ?: return null
+        if (expected.revisionId != input.productRevisionId) return null
+        return runCatching { expected.pin() }.getOrNull()
     }
+
+    private fun trustedCopy(stored: StoredRevisionIr, expected: ShadowRevisionIdentity): Boolean {
+        if (stored.identity != expected ||
+            stored.revisionId != expected.revisionId ||
+            stored.revisionHash != expected.revisionHash
+        ) {
+            return false
+        }
+        val json = stored.irJson ?: return false
+        val signature = stored.signature ?: return false
+        verifiedSource.putIfAbsent(expected.pin(), SignedRevisionCopy(json, expected.pin(), signature))
+        return true
+    }
+
+    private fun ShadowRevisionIdentity.pin() = RevisionIdentity(
+        productCode,
+        UUID.fromString(revisionId),
+        revisionNumber,
+        irVersion,
+        revisionHash,
+    )
 
     private fun notComparable(reason: ShadowNotComparable, retry: Boolean = false): Outcome {
         recorder.notComparable(reason)

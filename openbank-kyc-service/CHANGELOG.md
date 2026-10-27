@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.17.0...kyc-service-v0.17.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **kyc:** classify mapped coordinator responses inside retry boundary ([#13738](https://github.com/JiRaska/open-bank-oss/issues/13738)) ([dedeffc](https://github.com/JiRaska/open-bank-oss/commit/dedeffc307d3e972e58bb3d6d131be7d31f940a8))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.16.4...kyc-service-v0.17.0) (2026-10-14)
 
 

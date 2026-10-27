@@ -78,6 +78,11 @@ spec:
         - record: openbank:expected_service:info
           expr: vector(1)
           labels:
+            namespace: context
+            workload: context-service
+        - record: openbank:expected_service:info
+          expr: vector(1)
+          labels:
             namespace: control-liveness-sentinel
             workload: control-liveness-sentinel
         - record: openbank:expected_service:info
@@ -95,6 +100,11 @@ spec:
           labels:
             namespace: devops-agent
             workload: devops-agent
+        - record: openbank:expected_service:info
+          expr: vector(1)
+          labels:
+            namespace: dispute
+            workload: dispute-service
         - record: openbank:expected_service:info
           expr: vector(1)
           labels:
@@ -128,6 +138,16 @@ spec:
         - record: openbank:expected_service:info
           expr: vector(1)
           labels:
+            namespace: fraud
+            workload: fraud-service
+        - record: openbank:expected_service:info
+          expr: vector(1)
+          labels:
+            namespace: fx
+            workload: fx-service
+        - record: openbank:expected_service:info
+          expr: vector(1)
+          labels:
             namespace: governance-auditor
             workload: governance-auditor
         - record: openbank:expected_service:info
@@ -140,6 +160,11 @@ spec:
           labels:
             namespace: incentive
             workload: incentive-service
+        - record: openbank:expected_service:info
+          expr: vector(1)
+          labels:
+            namespace: interest
+            workload: interest-service
         - record: openbank:expected_service:info
           expr: vector(1)
           labels:
@@ -285,6 +310,11 @@ spec:
           labels:
             namespace: platform
             workload: mcp-service
+        - record: openbank:expected_service:info
+          expr: vector(1)
+          labels:
+            namespace: psd2
+            workload: psd2-service
         - record: openbank:expected_service:info
           expr: vector(1)
           labels:
