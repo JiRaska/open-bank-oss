@@ -451,10 +451,13 @@ class ThinCalleeTest(unittest.TestCase):
         import yaml
         workflow = yaml.safe_load((graph.ROOT / '.github/workflows/_service-ci.yml').read_text())
         folder = graph.ROOT / '.github/scripts/service-ci-steps'
-        self.assertEqual({p.name for p in folder.glob('*.sh')}, set(self.BODIES) | {'coverage-evidence.sh'})
+        self.assertEqual({p.name for p in folder.glob('*.sh')}, set(self.BODIES) | {'coverage-evidence.sh', 'diagnostic-actions.sh'})
         shared = folder / 'coverage-evidence.sh'
         self.assertEqual(hashlib.sha256(shared.read_bytes()).hexdigest(), '64062707a69e5f92bb18eae0eaaa8492935cd21cb8fa056b0de35587dbfc9f89')
         subprocess.run(['bash', '-n', str(shared)], check=True)
+        diagnostics = folder / 'diagnostic-actions.sh'
+        self.assertEqual(hashlib.sha256(diagnostics.read_bytes()).hexdigest(), '860f5df9ff1cc9f7a3d829e437d0dfb903189d4a9cb5984c8d834444e2048a79')
+        subprocess.run(['bash', '-n', str(diagnostics)], check=True)
         for filename, (job, name, digest, bindings) in self.BODIES.items():
             with self.subTest(helper=filename):
                 path = folder / filename
@@ -959,22 +962,107 @@ sys.exit(int(os.environ['RESULT']))
         steps = document['jobs']['build']['steps']
         step = lambda name: next(item for item in steps if item.get('name') == name)
         self.assertEqual(step('Generate Kover XML report')['id'], 'coverage_report')
-        self.assertEqual(step('Build Test Intelligence run envelope')['env']['OPENBANK_COVERAGE_REPORT_OUTCOME'],
-                         '${{ steps.coverage_report.outcome }}')
-        self.assertEqual(step('Upload coverage to Codecov')['if'], "steps.coverage_report.outcome == 'success'")
         for name in ['Upload quality evidence (every run)', 'Upload Test Intelligence evidence']:
             path = step(name)['with']['path']
             self.assertIn("steps.coverage_report.outcome == 'success'", path)
             self.assertIn('build/test-results/**/*.xml', path)
-        raw = step('Retain invalid raw coverage evidence')
-        self.assertEqual(raw['with']['path'], '${{ inputs.service }}/build/coverage-diagnostics/')
-        self.assertIn('github.run_id', raw['with']['name'])
-        self.assertIn('github.run_attempt', raw['with']['name'])
-        self.assertEqual(raw['with']['retention-days'], 3)
-        self.assertNotIn('log', raw['with']['path'])
-        self.assertEqual(step('Preserve incomplete coverage evidence')['run'],
-                         'bash -e "$SERVICE_CI_HELPERS/coverage-evidence.sh" preserve-incomplete')
+        call = step('Retain coverage and Test Intelligence evidence')
+        self.assertEqual(call['uses'], './.github/actions/service-ci-coverage-evidence')
+        self.assertEqual(call['if'], 'always()')
+        self.assertTrue(call['continue-on-error'])
+        self.assertEqual(call['env'], {
+            'SERVICE': '${{ inputs.service }}',
+            'SERVICE_CI_JOB_STATUS': '${{ job.status }}',
+            'SERVICE_CI_REPORT_OUTCOME': '${{ steps.coverage_report.outcome }}',
+        })
+        action = yaml.safe_load((graph.ROOT / '.github/actions/service-ci-coverage-evidence/action.yml').read_text())
+        self.assertEqual(action['runs']['using'], 'composite')
+        preserve, raw, collector, envelope, codecov = action['runs']['steps']
+        failed = "env.SERVICE_CI_JOB_STATUS == 'failure' || env.SERVICE_CI_REPORT_OUTCOME == 'failure'"
+        self.assertEqual(preserve['if'], f'always() && ({failed})')
+        self.assertEqual(raw['if'], f"always() && ({failed} || hashFiles(format('{{0}}/build/coverage-diagnostics/**/invalid.json', env.SERVICE)) != '')")
+        self.assertEqual(preserve['name'], 'Preserve incomplete coverage evidence')
+        self.assertEqual(preserve['run'], 'bash -e "$SERVICE_CI_HELPERS/coverage-evidence.sh" preserve-incomplete')
+        self.assertEqual(preserve['shell'], 'bash')
+        self.assertTrue(preserve['continue-on-error'])
+        self.assertTrue(raw['continue-on-error'])
+        self.assertEqual(raw['uses'], step('Upload quality evidence (every run)')['uses'])
+        self.assertEqual(raw['with'], {
+            'name': 'invalid-coverage-${{ env.SERVICE }}-${{ github.run_id }}-a${{ github.run_attempt }}',
+            'path': '${{ env.SERVICE }}/build/coverage-diagnostics/',
+            'if-no-files-found': 'error', 'retention-days': 3,
+        })
+        self.assertLess(steps.index(step('Generate Kover XML report')), steps.index(call))
+        self.assertLess(steps.index(call), steps.index(step('Collect consumer pacts for hand-off to the contract job')))
+        # Keeping these definitions inside the local action prevents their re-expansion
+        # in every caller; this is a structural regression, not a GitHub server-cap oracle.
+        for name in ['Preserve incomplete coverage evidence', 'Retain invalid raw coverage evidence',
+                     'Build Test Intelligence run envelope', 'Retain immutable Test Intelligence run envelope',
+                     'Upload coverage to Codecov']:
+            self.assertFalse(any(item.get('name') == name for item in steps))
+        self.assertEqual(collector['name'], 'Build Test Intelligence run envelope')
+        self.assertEqual(collector['if'], 'always()')
+        self.assertTrue(collector['continue-on-error'])
+        self.assertEqual(collector['env']['OPENBANK_COVERAGE_REPORT_OUTCOME'], '${{ env.SERVICE_CI_REPORT_OUTCOME }}')
+        self.assertEqual(collector['shell'], 'bash')
+        self.assertNotIn('${{', collector['run'])
+        self.assertEqual(envelope['name'], 'Retain immutable Test Intelligence run envelope')
+        self.assertEqual(envelope['if'], 'always()')
+        self.assertTrue(envelope['continue-on-error'])
+        self.assertEqual(envelope['uses'], raw['uses'])
+        self.assertEqual(envelope['with'], {
+            'name': 'test-intelligence-run-${{ env.SERVICE }}-${{ github.run_id }}-a${{ github.run_attempt }}',
+            'path': '${{ env.SERVICE }}/build/test-intelligence/run.json',
+            'if-no-files-found': 'error', 'retention-days': 30,
+        })
+        self.assertEqual(codecov['name'], 'Upload coverage to Codecov')
+        self.assertEqual(codecov['if'], "always() && job.status == 'success' && env.SERVICE_CI_REPORT_OUTCOME == 'success'")
+        self.assertTrue(codecov['continue-on-error'])
+        self.assertEqual(codecov['uses'], 'codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5')
+        self.assertEqual(codecov['with'], {
+            'files': '${{ env.SERVICE }}/build/reports/kover/report.xml',
+            'flags': '${{ env.SERVICE }}', 'fail_ci_if_error': False,
+        })
+
         graph.validate_callee(graph.ROOT)
+
+    def test_actual_composite_collector_preserves_junit_and_unknown_coverage(self):
+        import os
+        import subprocess
+
+        import yaml
+        action = yaml.safe_load((graph.ROOT / '.github/actions/service-ci-coverage-evidence/action.yml').read_text())
+        collector = next(step for step in action['runs']['steps']
+                         if step['name'] == 'Build Test Intelligence run envelope')
+        for outcome in ['success', 'failure', 'skipped', 'cancelled', '']:
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                service = 'openbank-fixture'
+                scripts = root / '.github/scripts'
+                scripts.mkdir(parents=True)
+                shutil.copyfile(graph.ROOT / '.github/scripts/collect-test-run-evidence.py',
+                                scripts / 'collect-test-run-evidence.py')
+                junit = root / service / 'build/test-results/test/TEST-Example.xml'
+                junit.parent.mkdir(parents=True)
+                contents = b'<testsuite name="ExampleTest" tests="1" failures="0" errors="0" skipped="0" time="0.1"><testcase classname="ExampleTest" name="works" time="0.1"/></testsuite>'
+                junit.write_bytes(contents)
+                report = root / service / 'build/reports/kover/report.xml'
+                report.parent.mkdir(parents=True)
+                report.write_text('<report><counter type="LINE" covered="90" missed="10"/></report>')
+                env = dict(os.environ, SERVICE=service, OPENBANK_COVERAGE_REPORT_OUTCOME=outcome,
+                           GITHUB_SERVER_URL='https://github.com', GITHUB_REPOSITORY='JiRaska/open-bank-oss',
+                           GITHUB_RUN_ID='12345', GITHUB_RUN_ATTEMPT='2', GITHUB_SHA='a' * 40,
+                           GITHUB_REF_NAME='fixture', GITHUB_WORKFLOW='Services CI')
+                run = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', collector['run']],
+                                     cwd=root, env=env, capture_output=True, text=True, check=False)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                envelope = json.loads((root / service / 'build/test-intelligence/run.json').read_text())
+                if outcome == 'success':
+                    self.assertEqual(envelope['coverage']['lines']['percentage'], 90.0)
+                else:
+                    self.assertIsNone(envelope['coverage'])
+                self.assertEqual(envelope['suites'][0]['passed'], 1)
+                self.assertEqual(junit.read_bytes(), contents)
 
     def test_failure_snapshot_is_separate_and_rejects_symlinked_raw_data(self):
         import os
