@@ -148,6 +148,31 @@ test_extension_is_loaded if {
 		with data.rules as rules_mock
 }
 
+# --- #14058: synthetic seed identity for the account-overview journey fixture ---
+# ROLE_API only (the seed must pass postJournal's RBAC); the identity rule is its whole grant.
+
+ledger_seed_m2m := {"service_account": true, "client_id": "openbank-synthetic-ledger-seed", "type": "HUMAN", "id": "service-account-openbank-synthetic-ledger-seed", "roles": ["ROLE_API"]}
+
+test_ledger_seed_may_create_via_its_identity_rule if {
+	decision := rest.allow with input as {"principal": ledger_seed_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"synthetic-ledger-seed-post" in rest.allowed_reasons with input as {"principal": ledger_seed_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+test_ledger_seed_may_not_perform_any_other_ledger_action if {
+	every action in {"ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft", "ledger.read", "ledger.list", "ledger.close.inspect"} {
+		rest.allow == false with input as {"principal": ledger_seed_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_ledger_seed_identity_rule_does_not_admit_the_shared_client if {
+	not "synthetic-ledger-seed-post" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
 # --- #10486: interest-service's own machine identity (ROLE_API only) ---
 # The identity carries ROLE_API and nothing else, exactly as the realm template grants it. The
 # matrix mock grants ROLE_OPERATOR only, so no role-based reason can admit these principals: the
