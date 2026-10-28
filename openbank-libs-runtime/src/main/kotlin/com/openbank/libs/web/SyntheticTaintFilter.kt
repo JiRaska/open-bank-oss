@@ -65,9 +65,8 @@ private const val SYNTHETIC_TAINT_BAGGAGE_SCOPE_PROPERTY: String = "openbank.syn
  * ## Blast radius
  *
  * `@Provider` means this runs on every request of every service that depends on libs-runtime, so
- * it deliberately injects nothing but configuration and reads only the JAX-RS
- * `SecurityContext` — no `SecurityIdentity`, no registry, nothing that can be unsatisfied at
- * build time or throw at request time.
+ * it reads the JAX-RS `SecurityContext` and injects configuration plus the CDI request holder.
+ * It does not change the caller identity or trust list; the holder requires an active request context.
  */
 @Provider
 class SyntheticTaintRequestFilter : ContainerRequestFilter {
@@ -84,9 +83,9 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
     lateinit var trustedPrincipals: Optional<String>
 
     /**
-     * The request-scoped carrier read by suspend resource methods. The JAX-RS request property
-     * alone is not reliably visible after a coroutine dispatch (#14058); the CDI request context
-     * IS carried across it, so every decision below is written to both.
+     * The request-scoped carrier read by suspend resource methods. Every decision below is written
+     * to both this Boolean and the JAX-RS request property. Controlled property-loss tests check
+     * the holder read without claiming to reproduce the older image's dispatch mechanism.
      */
     @Inject
     lateinit var taintContext: SyntheticTaintContext

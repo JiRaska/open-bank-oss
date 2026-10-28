@@ -211,14 +211,10 @@ class LedgerResource(
             description = request.description,
             lines = request.requireLines().map { it.toCommand(accountingClasses) },
             postedBy = request.createdBy,
-            // The filter records its trust decision on BOTH the JAX-RS request property and the
-            // @RequestScoped [SyntheticTaintContext]. A suspended resource method reads the
-            // ContainerRequestContext only after a coroutine dispatch, and the property written
-            // pre-dispatch is not reliably visible there — measured live: five fully trusted
-            // sandbox postings all persisted synthetic = false (#14058). The CDI request context
-            // IS carried across the dispatch (the same channel SecurityIdentity uses), so it is
-            // read first; the property remains as a defensive fallback. Never accept a
-            // caller-supplied header or coroutine MDC as synthetic.
+            // Both values carry the filter's authenticated trust decision; either true value wins.
+            // The property is a fallback when the holder is false, not when CDI is inactive.
+            // Never classify from a raw header or coroutine MDC. Controlled property-loss tests
+            // establish this read's role, not the older deployed image's loss mechanism.
             synthetic = taintContext.tainted || requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
             origin = request.origin?.let { origin ->
                 check(!callerIdentity.isAnonymous) { "authenticated journal submitter is required" }

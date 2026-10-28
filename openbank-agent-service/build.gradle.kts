@@ -85,8 +85,8 @@ tasks.named<Copy>("processResources") {
 // two consecutive Services CI runs of PR #14059 failed koverVerify with
 // `Failed to load coverage data ... java.io.EOFException` and coverage 60.08% / 86.24%
 // against this floor of 87, on a change that touches no agent-service source. The
-// truncated report means the kover agent's JVM died mid-suite under the default 512m
-// forked-test heap; the 2g override is the per-module mitigation already used by
+// incomplete report does not establish whether the JVM exited early, ran out of memory, or a
+// writer remained active. The 2g override is a per-module mitigation already used by
 // account-service / consent-service / kyc / domestic-payment. Not a fleet default —
 // see account-service's comment for why.
 tasks.withType<Test>().configureEach {
@@ -103,10 +103,10 @@ tasks.withType<Test>().configureEach {
 //       already short when Gradle moves on, and nothing writes it afterwards), or
 //   (b) something still holds and writes the file after `test` ends — a JVM that
 //       inherited the agent — so koverCachedVerify reads a file that is still growing.
-// Two readings tell them apart: size + mtime when `test` finishes, and again
+// Two readings help investigate them: size + mtime when `test` finishes, and again
 // immediately before koverCachedVerify reads it, plus any live process still carrying
-// the kover agent. (a) reads equal sizes and no agent process; (b) reads a larger
-// second size or a live agent process. Remove this block once a failing run has
+// the kover agent. Equal readings or a visible agent process are diagnostic clues, not proof
+// of a single mechanism or an out-of-memory exit. Remove this block once a failing run has
 // printed both lines and #9919 has its answer.
 val koverTestIc = layout.buildDirectory.file("kover/bin-reports/test.ic")
 fun describeKoverIc(moment: String, ic: File): String {

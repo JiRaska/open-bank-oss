@@ -99,8 +99,8 @@ class SyntheticTaintFilterTest {
         filter.filter(req)
 
         verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, true) }
-        // The request-scoped carrier is what a SUSPENDED resource method reads after the coroutine
-        // dispatch (#14058); the JAX-RS property alone is not reliably visible there.
+        // This unit fixture checks the manually constructed holder. HTTP tests separately exercise
+        // suspended resource reads under controlled request-property loss.
         assertThat(holder.tainted).isTrue()
         assertThat(MDC.get(MDC_SYNTHETIC)).isEqualTo("true")
     }
