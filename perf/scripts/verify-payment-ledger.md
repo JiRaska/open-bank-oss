@@ -19,6 +19,56 @@ synthetic journal column is from
 Reversal rows are explicitly unsupported and fail the pilot. The verifier checks journal
 balances per currency in addition to the stricter transfer-leg checks.
 
+## Schema-v2 causal closure for a shared sandbox
+
+The additive `verify-payment-ledger-v2.py` and
+[`payment-ledger-snapshot-v2.sql`](payment-ledger-snapshot-v2.sql) support a shared-sandbox
+read-only snapshot without changing the schema-v1 isolated-pilot contract. V2 closes the causal
+chain from every run-prefix idempotency claim through its transaction row, the derived
+`workflow-<transaction-id>-ledger` idempotency key, the pointed journal header, and all journal
+lines. It does not filter linked evidence by transaction or journal status or by a time window.
+An optional `observed_transaction_id` on an expected instruction is retained and checked against
+the persisted claim and row; do not remove rejected, timed-out, or otherwise unwanted intended
+instructions from the expected artifact.
+
+Capture the transaction snapshot first. For the ledger query, pass the union of transaction IDs
+from **all** captured run-prefix claims and rows, plus every `observed_transaction_id` in the
+expected artifact when present. This keeps a response ID visible even when its claim or row is
+missing. V2 separately preserves the declared time-window census and whole-table orphan-line
+census. Linked-run success with unrelated window entries or any orphan lines is `inconclusive`,
+not an overall pass; a linked-run failure remains `fail`. A clear snapshot is still only
+offline database consistency evidence: it does not attest the request source, prove workload
+completeness, or qualify capacity.
+
+Use the same snapshot and credential handling rules above, substituting the v2 SQL and verifier.
+The transaction query returns both `claims` and `rows`; the ledger query requires their complete
+ID union, not merely successful response IDs:
+
+```sh
+psql -X -qAt -v ON_ERROR_STOP=1 'service=capacity-transactions' \
+  -v run_id="$RUN_ID" -v run_prefix="$RUN_PREFIX" \
+  -f perf/scripts/payment-ledger-snapshot-v2.sql > /path/outside/repo/transactions-v2.json
+
+TX_IDS=$(jq -r --slurpfile expected /path/outside/repo/expected-v2.json \
+  '[.claims[].transaction_id, .rows[].id] + [$expected[0].instructions[] | .observed_transaction_id // empty] | unique | "{" + join(",") + "}"' \
+  /path/outside/repo/transactions-v2.json)
+psql -X -qAt -v ON_ERROR_STOP=1 'service=capacity-ledger' \
+  -v ledger=true -v run_id="$RUN_ID" -v transaction_ids="$TX_IDS" \
+  -v started_at="$RUN_STARTED_AT" -v ended_at="$RUN_ENDED_AT" \
+  -f perf/scripts/payment-ledger-snapshot-v2.sql > /path/outside/repo/ledger-v2.json
+
+python3 perf/scripts/verify-payment-ledger-v2.py \
+  --expected /path/outside/repo/expected-v2.json \
+  --transactions /path/outside/repo/transactions-v2.json \
+  --ledger /path/outside/repo/ledger-v2.json \
+  --output /path/outside/repo/oracle-v2-result.json
+```
+
+V2 is a consistency and attribution aid, not a qualification gate. Ambient records that cannot be
+attributed to the run remain unresolved; do not relabel them as unrelated or suppress them to
+obtain a pass. Snapshot permissions, ownership, request evidence and approved run boundaries must
+be established independently.
+
 ## Inputs
 
 The three JSON artifacts have `schema_version: 1`, the same `run_id`, `profile_id:
