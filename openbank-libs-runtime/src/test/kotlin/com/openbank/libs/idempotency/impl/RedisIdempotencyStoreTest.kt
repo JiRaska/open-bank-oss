@@ -27,11 +27,17 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.supervisorScope
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.concurrent.CompletableFuture
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger as JulLogger
 
 /**
  * Binds an `Idempotency-Key` to its request fingerprint. The Redis commands are backed by an
@@ -53,6 +59,38 @@ class RedisIdempotencyStoreTest {
 
     private val first = RequestFingerprint.of("POST", "/api/v1/payments", """{"amount":"10.00"}""")
     private val other = RequestFingerprint.of("POST", "/api/v1/payments", """{"amount":"9999.00"}""")
+
+    // Log capture (same idiom as OutboxSentRetentionJobTest): the once-vs-always branches in
+    // decode are the operational-signal half of the legacy/corrupt telemetry (the metric counts,
+    // the log line is what an on-call reads), so these tests pin the level and the one-shot
+    // behaviour, not just the outcome.
+    private val julLogger = JulLogger.getLogger("com.openbank.libs.idempotency.impl.RedisIdempotencyStore")
+    private val captured = mutableListOf<LogRecord>()
+    private val handler = object : Handler() {
+        override fun publish(record: LogRecord) {
+            captured += record
+        }
+        override fun flush() = Unit
+        override fun close() = Unit
+    }
+
+    @BeforeEach
+    fun attachHandler() {
+        julLogger.level = Level.ALL
+        julLogger.useParentHandlers = false
+        julLogger.addHandler(handler)
+    }
+
+    @AfterEach
+    fun detachHandler() {
+        julLogger.removeHandler(handler)
+        julLogger.useParentHandlers = true
+    }
+
+    private fun loggedText(): String = captured.joinToString(" | ") {
+        val params = it.parameters
+        if (params.isNullOrEmpty()) it.message ?: "" else String.format(it.message, *params)
+    }
 
     @Test
     fun `same key and same fingerprint replays the stored response`(): Unit = runBlocking {
@@ -167,6 +205,46 @@ class RedisIdempotencyStoreTest {
         store.reserve("old", first)
 
         assertThat(meters.counter(RedisIdempotencyStore.LEGACY_METRIC).count()).isEqualTo(2.0)
+    }
+
+    @Test
+    fun `the first legacy read is announced at info, later ones at debug`(): Unit = runBlocking {
+        backing["idempotency:l1"] = "201|2026-09-01T00:00:00Z|{}"
+        backing["idempotency:l2"] = "202|2026-09-01T00:00:00Z|{}"
+
+        store.get("l1")
+        val infoAfterFirst = captured.count {
+            it.level == Level.INFO && (it.message ?: "").contains("legacy layout")
+        }
+        assertThat(infoAfterFirst).describedAs("info lines after the first legacy read").isEqualTo(1)
+        assertThat(loggedText()).contains("never replayed (legacy layout)")
+
+        store.get("l2")
+        val infoAfterSecond = captured.count {
+            it.level == Level.INFO && (it.message ?: "").contains("legacy layout")
+        }
+        assertThat(infoAfterSecond).describedAs("info lines stay one-shot across reads").isEqualTo(infoAfterFirst)
+        assertThat(captured.count { it.level == Level.FINE }).describedAs("second read demoted to debug").isEqualTo(1)
+    }
+
+    @Test
+    fun `a corrupt record is refused loudly once, then quietly`(): Unit = runBlocking {
+        backing["idempotency:c1"] = "v2|$first|not-a-status|2026-09-26T10:00:00Z|body"
+        backing["idempotency:c2"] = "v2|$first|200|not-a-timestamp|body"
+
+        assertThatThrownBy { runBlocking { store.get("c1") } }
+            .isInstanceOf(IdempotencyRecordCorruptException::class.java)
+        val errorsAfterFirst = captured.count {
+            it.level == Level.SEVERE && (it.message ?: "").contains("undecodable")
+        }
+        assertThat(errorsAfterFirst).describedAs("error lines after the first corrupt read").isEqualTo(1)
+
+        assertThatThrownBy { runBlocking { store.get("c2") } }
+            .isInstanceOf(IdempotencyRecordCorruptException::class.java)
+        val errorsAfterSecond = captured.count {
+            it.level == Level.SEVERE && (it.message ?: "").contains("undecodable")
+        }
+        assertThat(errorsAfterSecond).describedAs("the one-shot flag suppresses the repeat").isEqualTo(errorsAfterFirst)
     }
 
     @Test
