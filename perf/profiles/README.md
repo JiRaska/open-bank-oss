@@ -68,6 +68,12 @@ Run the contract check with `python3 .github/scripts/check-capacity-profile.py -
 and its rejection fixtures with `python3 .github/scripts/check-capacity-profile.py --self-test`.
 These commands validate the proposed model; they do not run traffic or validate run attestations.
 
+The [fixed-sandbox sizing model](cz-current-account-5m-model.md) records demand arithmetic,
+source-level outbox/retention bounds, sensitivity examples and the required calibration method.
+Its unknown coefficients and capacity conclusion remain explicit.
+The [internal CZK pilot oracle](../scripts/verify-payment-ledger.md) verifies a limited set of
+financial invariants from offline database snapshots; it is not a full-profile oracle or attestation.
+
 The ADR proposes a 30-day qualification freshness limit; evidence retention remains a separate
 policy. No profile or passing CI check alone establishes bank approval, commercial qualification,
 external-rail settlement, regulatory compliance or production readiness.

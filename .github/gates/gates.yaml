@@ -1988,6 +1988,7 @@ gates:
       python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts/tests -p 'test_*.py' -v
+      python3 -m unittest discover -s perf/tests -p 'test_*.py' -v
       bash .github/scripts/tests/test-resolve-historical-service-ref.sh
       python3 .github/scripts/test-admin-ui-delivery-baseline.py
       python3 .github/scripts/test-admin-ui-evidence-plan.py
@@ -6688,7 +6689,7 @@ gates:
         # config-recorder-healer Lambda; the WeasyPrint render sidecar) and sat outside every
         # root (#6253). Not yet scripts/ or openbank-ap2-service/demo: they carry findings today.
         find .github/scripts openbank-infra/scripts docs openbank-infra/aws openbank-document-renderer \
-          openbank-treasury-service/src/test/parity-oracle -name '*.py' -type f | sort
+          openbank-treasury-service/src/test/parity-oracle perf/scripts perf/tests -name '*.py' -type f | sort
       )
       echo "SUBJECTS=${#files[@]}"
       python3 -m ruff check --no-cache --isolated --target-version py311 \
