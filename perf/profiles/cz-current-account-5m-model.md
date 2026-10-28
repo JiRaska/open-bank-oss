@@ -21,6 +21,37 @@ campaign uses existing sandbox resources; it does not increase capacity or chang
 These are proposed business assumptions, not observations. Client count alone cannot
 determine throughput. The read-channel assumption and active/dormant account mix remain open.
 
+## CPU and client-count sensitivity
+
+For arithmetic sensitivity only, assume these **incremental CPU costs** per operation; they
+are CPU time, not wall latency, and none is measured. Multiplying rate by CPU-seconds gives
+raw core-equivalents before baseline load, headroom, I/O waits, redundancy or HA:
+
+| Proposed rate | Assumed incremental CPU / operation | Raw core-equivalents |
+| ---: | ---: | ---: |
+| 50,000 reads/s | 0.1 ms | 5 |
+| 50,000 reads/s | 0.5 ms | 25 |
+| 50,000 reads/s | 2 ms | 100 |
+| 2,314.8148 instructions/s | 1 ms | 2.315 |
+| 2,314.8148 instructions/s | 5 ms | 11.574 |
+| 2,314.8148 instructions/s | 20 ms | 46.296 |
+
+These are not sizing recommendations, resource changes or measured coefficients. The
+back-calculation is also conditional. If `mu_instr` is a measured sustained peak rate of
+unique, valid, complete, financially reconciled instructions/s that meets the profile's
+end-to-end SLOs, then `N_peak = mu_instr * 86,400 / (2 * 20) = 2,160 * mu_instr` clients.
+If `mu_read` is a measured sustained reads/s under the profile's endpoint mix, authorization
+and SLOs, then `N_read = mu_read / (50,000 / 5,000,000) = 100 * mu_read` clients. For an
+outbox service `i`, use `2,160 * mu_i / f_i` only when `mu_i` is its measured eligible event
+rows/s at the same valid workload and `f_i` is that service's measured event rows per
+instruction; an outbox row rate cannot be applied directly as an instruction rate.
+
+The minimum of these client estimates is meaningful only where every input is calibrated
+against complete, SLO-valid and reconciled work under the same workload assumptions. It
+does not imply a current maximum, and idle CPU readings cannot establish any of these rates.
+History placement/size, account-state fractions, interactive workload and approved SLOs
+remain unresolved inputs, so an uncalibrated or incomplete minimum stays inconclusive.
+
 ## Code bounds that already affect the plan
 
 The shared defaults are a batch of 25, a five-second poll and 16 concurrent sends for v2.
