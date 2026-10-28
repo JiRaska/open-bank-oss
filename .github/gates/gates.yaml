@@ -1980,6 +1980,7 @@ gates:
       node --test .github/scripts/test-publish-admin-ui-evidence-import-boundary.mjs
       node --test .github/scripts/test-publish-admin-ui-gate-health.mjs .github/scripts/test-publish-admin-ui-evidence.mjs
       python3 .github/scripts/test-collect-admin-ui-test-evidence.py
+      python3 .github/scripts/test-stage-admin-ui-performance.py
       python3 .github/scripts/test-collect-admin-ui-security-kpis.py
 
   # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
