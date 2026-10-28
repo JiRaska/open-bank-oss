@@ -742,3 +742,19 @@ set) apply equally to the new `ledger.approval.decide` action.
 - Copied facts are linked to every opening/window source. Source erasure invalidates copies; detached sources make reads unavailable and the existing partition lifecycle purges the raw copies. No independent retention extension or legal-hold override is authorized. These controls require real concurrent PostgreSQL, source-deletion and partition-lifecycle tests before delivery; no local/hosted PASS is claimed by this note.
 - Snapshot capture and its idempotent result binding commit in the same PostgreSQL transaction. The binding frames the operation and authenticated caller/key scope, stores digests rather than the request or a financial response, and expires after the existing 86,400-second lifetime without replay renewal. Replays revalidate the retained source-linked manifest. Erasure clears its foreign-key reference and subsequent replay is 410, never a new capture under the unexpired key. An explicit EMPTY result stores only its original opaque identifier, observation instant and database-view metadata, so source erasure cannot be mistaken for an empty financial history. These digests and identifiers are not claimed to be anonymous.
 - Expired replay metadata is removed on access and by minute maintenance; physical cleanup can lag during an outage. This metadata has no independent financial response body in Redis. A contending or failed transaction rolls back both copied facts and replay binding; loss of the HTTP response after commit must replay the original result. Real HTTP/PostgreSQL erasure, contention, rollback and response-loss regressions must verify these claims before delivery.
+
+- **2026-10-28** — **Synthetic-taint carrier widened to the CDI request context (#14059, refs #4348).**
+  `LedgerResource.postJournal` now reads the trusted `x-openbank-synthetic` classification from a
+  request-scoped holder first (`taintContext.tainted || requestContext.getProperty(...)`), because a
+  suspended resource method observes the `ContainerRequestContext` only after a coroutine dispatch
+  and the pre-dispatch property set by the inbound filter is not reliably visible there — measured
+  live: five fully trusted synthetic postings persisted `synthetic = false`, silently corrupting the
+  synthetic/financial split in the book of record. **Trust boundary: unchanged.** The same
+  verified-service-account check (`check-synthetic-customer-identity.py`), the same fail-closed
+  default, the same downstream `trusted-principals` allow-list; only the carrier the already-trusted
+  decision rides on into the suspended resource is added — the header alone still carries no weight
+  without the verified identity, so no new spoofing surface opens. **Risk class:** integrity of the
+  synthetic/financial split — a LOST taint mislabels synthetic money as real (wrong
+  FINREP/COREP/AML treatment), which is the defect being fixed, not introduced. Rollback: revert;
+  the holder reads absent/false and the inbound filter path is untouched, so the pre-existing
+  (broken-for-suspended-resources) behaviour returns.
