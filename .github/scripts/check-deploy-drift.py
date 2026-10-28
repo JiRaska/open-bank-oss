@@ -65,7 +65,12 @@ IMAGE_RE = re.compile(
 # A manually requested evidence refresh may rebuild the same commit. ECR tags are immutable,
 # so it appends the GitHub workflow run id. The suffix is deliberately narrow: it is provenance,
 # not a second version axis, and parsing must still resolve exactly the commit prefix.
-SANDBOX_TAG_RE = re.compile(r"^sandbox-([0-9a-f]{8,40})(?:-run([1-9][0-9]*))?$")
+# A manifest may also pin `tag@sha256:<digest>` (the form ECR/Flux resolves to an immutable
+# image). The digest is content provenance on top of the commit tag, not a version axis, so
+# parsing strips it and keeps resolving the commit prefix (deploy PRs since 2026-10 carry it).
+SANDBOX_TAG_RE = re.compile(
+    r"^sandbox-([0-9a-f]{8,40})(?:-run([1-9][0-9]*))?(?:@sha256:[0-9a-f]{64})?$"
+)
 
 STATUS_OK = "ok"
 STATUS_DRIFT = "drift"
@@ -323,6 +328,16 @@ def self_test() -> int:
     expect("rejects sandbox-sec1", parse_sandbox_tag("sandbox-sec1") is None)
     expect("rejects non-numeric refresh suffix", parse_sandbox_tag("sandbox-99114189-runproof") is None)
     expect("rejects zero refresh run", parse_sandbox_tag("sandbox-99114189-run0") is None)
+    expect("parses tag@sha256 digest pin",
+           parse_sandbox_tag("sandbox-99114189@sha256:" + "a" * 64) == "99114189")
+    expect("parses refresh tag@sha256 digest pin",
+           parse_sandbox_tag("sandbox-99114189-run32826611610@sha256:" + "b" * 64)
+           == "99114189")
+    expect("rejects digest with short hash", parse_sandbox_tag("sandbox-99114189@sha256:abc") is None)
+    expect("rejects digest without sha256 prefix",
+           parse_sandbox_tag("sandbox-99114189@md5:" + "a" * 64) is None)
+    expect("rejects trailing garbage after digest",
+           parse_sandbox_tag("sandbox-99114189@sha256:" + "a" * 64 + "-x") is None)
     expect("rejects latest", parse_sandbox_tag("latest") is None)
     expect("rejects semver", parse_sandbox_tag("1.2.3") is None)
     expect("same version is in sync",
