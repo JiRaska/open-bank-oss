@@ -54,6 +54,20 @@ jobs:
               return
             }
 
+            const body = pr.body ?? ''
+            // GitHub still treats the closing verb in "does not close #123" as a directive.
+            // Reject only known adjacent negations, including the observed "not supersede or
+            // close" shape. This is a narrow metadata safety check, not an English/GitHub parser.
+            // Raw-body scanning intentionally includes literal examples; use #<number> there.
+            const negatedClosing = /\b(?:not|(?:doesn|don|didn|won|wouldn|shouldn|mustn|can)['’]t)\s+(?:(?:supersede|replace)\s+or\s+)?(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#\d+\b/i
+            if (negatedClosing.test(body)) {
+              core.setFailed(
+                'issue-hygiene: a negated closing phrase can still close its GitHub target. '
+                + 'Use "Refs #<number>; acceptance remains separate" or "does not supersede PR '
+                + '#<number>". Literal examples must also use a placeholder, not an issue number.')
+              return
+            }
+
             // --- Exemptions -------------------------------------------------
             const botAuthor = author.endsWith('[bot]')
             const isRelease = /^chore(\(.+\))?:\s*release\b/i.test(pr.title ?? '')
@@ -64,7 +78,6 @@ jobs:
               return
             }
 
-            const body = pr.body ?? ''
             // Strip HTML comments so the template placeholder doesn't count as content.
             const stripped = body.replace(/<!--[\s\S]*?-->/g, '')
 
