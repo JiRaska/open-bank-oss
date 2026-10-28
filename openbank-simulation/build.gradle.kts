@@ -105,6 +105,12 @@ dependencies {
     // domain-only artifact or exclude the service's runtime transitive dependencies.
     implementation(project(":openbank-sdd-service"))
 
+    // Issue #667 (E2E money-path): the harness drives the REAL swift-service domain object —
+    // `SwiftMessage` with its validate() admission gate (BIC lengths, reference, amount,
+    // charge code, value-date format) and MT103 status vocabulary — rather than a re-model of
+    // the cross-border rail. The domain package is framework-free (ADR-0002).
+    implementation(project(":openbank-swift-service"))
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
