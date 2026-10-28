@@ -44,10 +44,10 @@ scenarios:
 
   - id: balance-read-baseline
     definition: openbank-balance-service/src/test/k6/balance-read-baseline.js
-    execution_mode: planned-read-only-sandbox
-    safety_boundary: Read-only by construction — every request is a GET against openbank-balance-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
-    target_schedule: "0 5 * * *"
-    blocker: Needs a booted openbank-balance-service target and a least-privilege read identity (PERF_READ_TOKEN); the scenario is wired into the perf-baseline.yml module-read-baselines matrix and runs whenever PERF_BALANCE_URL plus PERF_READ_TOKEN are set; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-balance-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope. The two id-scoped probes (single-currency balance, latest reconciliation) need seeded rows to answer 200, so the module ships src/test/k6/fixtures.sql, which the gate loads into the throwaway database after boot; verified locally end to end. The perf-baseline.yml leg remains for the shared-sandbox mode (PERF_BALANCE_URL plus the PERF_READ_TOKEN secret); a 401 there is rejection evidence, not a handler baseline.
     assertions: Exercises all balances for an account, single-currency balance, latest reconciliation run. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
 
   - id: ledger-read-baseline

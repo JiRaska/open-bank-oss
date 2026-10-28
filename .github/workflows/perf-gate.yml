@@ -61,6 +61,7 @@ jobs:
               "openbank-product-catalog",
               "openbank-flaky-test-hunter",
               "openbank-ledger-service",
+              "openbank-balance-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -87,7 +88,17 @@ jobs:
               if not port or not db:
                   skipped.append((svc, "cannot derive port/DB"))
                   continue
-              matrix.append({"service": svc, "port": int(port.group(1)), "db": db.group(1), "script": str(script)})
+              # Optional read fixtures: a `<module>/src/test/k6/fixtures.sql` is loaded into
+              # the throwaway database after boot so id-scoped probes hit a real row instead
+              # of timing a 404. Modules without one get an empty string (no load step).
+              fixtures = pathlib.Path(svc) / "src/test/k6" / "fixtures.sql"
+              matrix.append({
+                  "service": svc,
+                  "port": int(port.group(1)),
+                  "db": db.group(1),
+                  "script": str(script),
+                  "fixtures": str(fixtures) if fixtures.is_file() else "",
+              })
           for svc, why in skipped:
               print(f"::warning::perf-gate: {svc} EXCLUDED — {why}")
           print(f"perf-gate: {len(matrix)} service(s); {len(skipped)} excluded")
@@ -158,6 +169,12 @@ jobs:
       # not a baseline), and this placeholder keeps that tripwire armed: the day the lane
       # grows a real least-privilege read identity it becomes a secret (perf/scenarios.yaml).
       PERF_READ_TOKEN: "perf-ci-auth-disabled-placeholder"
+      # The fixture account id seeded by `<module>/src/test/k6/fixtures.sql` and probed by the
+      # id-scoped read baselines. One fleet-wide constant (the same id the account-overview
+      # synthetic journey uses), injected into every script; lanes that never reference it
+      # simply ignore it.
+      PERF_ACCOUNT_ID: "00000000-0000-0000-0000-0000000000c2"
+      PERF_CURRENCY: "CZK"
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
       # mutable; the digest is the executable supply-chain identity.
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
@@ -207,6 +224,15 @@ jobs:
             exit 1
           fi
 
+          # The money-path services pin an explicit `quarkus.redis.hosts` in application.yaml,
+          # which DISABLES the Redis dev-service (dev-services only start when no host is
+          # configured) — so without a throwaway Redis the Redis readiness check stays DOWN
+          # forever and the boot loop below would time out. Verified locally: readiness is
+          # DOWN on exactly this check until a Redis answers on localhost:6379.
+          echo "==> [${SERVICE}] starting throwaway redis"
+          docker rm -f perf-redis >/dev/null 2>&1 || true
+          docker run -d --name perf-redis -p 6379:6379 redis:8.0-alpine >/dev/null
+
           echo "==> [${SERVICE}] starting quarkusDev on port ${PORT}"
           ./gradlew ":${SERVICE}:quarkusDev" \
             -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
@@ -242,6 +268,15 @@ jobs:
           # exactly one lane), so the run step never re-derives a name it could get wrong.
           SCRIPT="${{ matrix.script }}"
 
+          # Read fixtures: modules whose lane is id-scoped ship a `src/test/k6/fixtures.sql`
+          # that seeds the throwaway database now that Flyway has created the schema. Without
+          # it those probes would time a 404 — rejection evidence, not a handler baseline. A
+          # fixture that fails to apply is a misconfigured lane: fail loudly, don't measure.
+          if [ -n "${{ matrix.fixtures }}" ]; then
+            echo "==> [${SERVICE}] loading read fixtures from ${{ matrix.fixtures }}"
+            docker exec -i perf-pg psql -U openbank -d "${DB}" -v ON_ERROR_STOP=1 < "${{ matrix.fixtures }}"
+          fi
+
           # A readiness probe is not proof the PROBED route answers. This gate spent its whole
           # life measuring 401s: /q/health/ready returned 200, @Authenticated rejected every
           # request to the route the script actually calls, and k6 reported a p95 for the
@@ -261,6 +296,8 @@ jobs:
               --user "$(id -u):$(id -g)" \
               --env "BASE_URL=http://localhost:${PORT}" \
               --env "PERF_READ_TOKEN=${PERF_READ_TOKEN}" \
+              --env "PERF_ACCOUNT_ID=${PERF_ACCOUNT_ID}" \
+              --env "PERF_CURRENCY=${PERF_CURRENCY}" \
               --volume "$PWD:/work" \
               --workdir /work \
               "${K6_IMAGE}" run \
@@ -269,7 +306,7 @@ jobs:
 
           kill "$DEV_PID" 2>/dev/null || true
           pkill -f "quarkusDev" 2>/dev/null || true
-          docker rm -f perf-pg >/dev/null 2>&1 || true
+          docker rm -f perf-pg perf-redis >/dev/null 2>&1 || true
 
       - name: Build performance Test Intelligence envelope
         if: always()
