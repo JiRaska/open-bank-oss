@@ -4,8 +4,11 @@ package com.openbank.communication.contract
 import java.util.UUID
 import javax.sql.DataSource
 
-/** Sets legitimate persisted publication states; verification still calls the real HTTP resource. */
-internal object CommunicationPactStates {
+/**
+ * Sets legitimate persisted publication states; verification still calls the real HTTP resource.
+ * Public so the separate providerPactTest source set can reuse this compiled test helper.
+ */
+object CommunicationPactStates {
     fun configure(dataSource: DataSource, published: Boolean) {
         dataSource.connection.use { connection ->
             connection.autoCommit = false
