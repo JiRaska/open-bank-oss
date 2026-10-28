@@ -44,6 +44,24 @@ def require_remote(root: Path, tag: str, expected: str) -> None:
         raise ValueError("release tag moved during evidence generation")
 
 
+def require_validated_wrapper(producer: Path, source: Path) -> None:
+    # The workflow validated the producer's JAR. Equality transfers that validation
+    # and preserves its trusted launcher/distribution selection, without substituting
+    # different build inputs into the release checkout.
+    for relative in ("gradlew", "gradle/wrapper/gradle-wrapper.jar", "gradle/wrapper/gradle-wrapper.properties"):
+        paths = []
+        for base in (producer, source):
+            parts = Path(relative).parts
+            if any(base.joinpath(*parts[:end]).is_symlink() for end in range(1, len(parts) + 1)):
+                raise ValueError("release wrapper inputs must not contain symlinks")
+            path = base / relative
+            if not path.is_file():
+                raise ValueError("release wrapper input is missing or not a regular file")
+            paths.append(path)
+        if paths[0].read_bytes() != paths[1].read_bytes():
+            raise ValueError("release wrapper differs from the validated producer inputs")
+
+
 def prepare(root: Path, module: str, component: str, version: str, tag: str) -> str:
     if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", module) is None:
         raise ValueError("invalid release module")
@@ -70,6 +88,7 @@ def prepare(root: Path, module: str, component: str, version: str, tag: str) -> 
             sbom = checkout / (tag + ".cdx.json")
             env = {**os.environ, "RELEASE_EVIDENCE_SOURCE_SHA": commit, "SOURCE_COMMIT": commit}
             if (module_path / "build.gradle.kts").is_file():
+                require_validated_wrapper(root, checkout)
                 # A failed JVM build must not fall back to an incomplete filesystem SBOM.
                 subprocess.run(["./gradlew", f":{module}:cyclonedxBom", "--console=plain", "--no-daemon"], cwd=checkout, env=env, stdout=sys.stderr, check=True)
                 shutil.copyfile(module_path / "build/reports/bom.json", sbom)

@@ -91,7 +91,11 @@ if os.environ.get('MOVE_REMOTE'):
     subprocess.run(['git','-C',os.environ['MOVE_REMOTE'],'tag','-f','fixture-v1.1.0',os.environ['TRIGGER']],check=True,stdout=sys.stderr)
 """)
         (self.remote / "gradlew").chmod(0o755)
-        self.git(self.remote, "add", "module", "gradlew", "release-please-config.json")
+        wrapper = self.remote / "gradle/wrapper"
+        wrapper.mkdir(parents=True)
+        (wrapper / "gradle-wrapper.jar").write_bytes(b"fixture validated wrapper")
+        (wrapper / "gradle-wrapper.properties").write_text("distributionUrl=fixture\n")
+        self.git(self.remote, "add", "module", "gradlew", "gradle/wrapper", "release-please-config.json")
         self.git(self.remote, "-c", "commit.gpgsign=false", "commit", "-qm", "trigger")
         self.trigger = self.git(self.remote, "rev-parse", "HEAD")
         (self.module / "version.txt").write_text("1.1.0\n")
@@ -183,6 +187,31 @@ if os.environ.get('MOVE_REMOTE'):
 
     def test_unsafe_tag_is_rejected_without_git_interpretation(self):
         self.assertNotEqual(self.prepare(component="../fixture", tag="../fixture-v1.1.0").returncode, 0)
+
+    def test_changed_wrapper_inputs_rejected_before_gradle(self):
+        names = ("gradlew", "gradle/wrapper/gradle-wrapper.jar", "gradle/wrapper/gradle-wrapper.properties")
+        originals = {name: (self.remote / name).read_bytes() for name in names}
+        for changed in names:
+            with self.subTest(changed=changed):
+                for name, data in originals.items():
+                    (self.remote / name).write_bytes(data)
+                (self.remote / changed).write_bytes(originals[changed] + b"changed")
+                self.git(self.remote, "-c", "commit.gpgsign=false", "commit", "-qam", "different wrapper input")
+                self.git(self.remote, "tag", "-f", "fixture-v1.1.0")
+                result = self.prepare(FAIL_BUILD="1")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("wrapper differs", result.stderr)
+                self.assertFalse((self.checkout / "fixture-v1.1.0.evidence.json").exists())
+
+    def test_symlink_wrapper_input_rejected_before_gradle(self):
+        wrapper = self.remote / "gradle/wrapper/gradle-wrapper.jar"
+        wrapper.unlink()
+        wrapper.symlink_to("gradle-wrapper.properties")
+        self.git(self.remote, "-c", "commit.gpgsign=false", "commit", "-qam", "symlink wrapper input")
+        self.git(self.remote, "tag", "-f", "fixture-v1.1.0")
+        result = self.prepare(FAIL_BUILD="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must not contain symlinks", result.stderr)
 
     def test_non_gradle_source_uses_trivy_in_exact_checkout(self):
         self.git(self.remote, "rm", "module/build.gradle.kts")
