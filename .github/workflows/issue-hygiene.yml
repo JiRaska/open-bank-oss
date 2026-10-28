@@ -59,7 +59,7 @@ jobs:
             // Reject only known adjacent negations, including the observed "not supersede or
             // close" shape. This is a narrow metadata safety check, not an English/GitHub parser.
             // Raw-body scanning intentionally includes literal examples; use #<number> there.
-            const negatedClosing = /\b(?:not|(?:doesn|don|didn|won|wouldn|shouldn|mustn|can)['’]t)\s+(?:(?:supersede|replace)\s+or\s+)?(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#\d+\b/i
+            const negatedClosing = /\b(?:not|(?:doesn|don|didn|won|wouldn|shouldn|mustn|can)['’]t)\s+(?:claim\s+to\s+)?(?:(?:supersede|replace)\s+or\s+)?(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#\d+\b/i
             if (negatedClosing.test(body)) {
               core.setFailed(
                 'issue-hygiene: a negated closing phrase can still close its GitHub target. '

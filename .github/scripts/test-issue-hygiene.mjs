@@ -19,6 +19,9 @@ const execute = new Function('context', 'core', script);
 const cases = [
   ['actual PR-preservation incident', 'does not supersede or close #12886', true],
   ['actual issue-preservation incident', 'does not close #7284', true],
+  ['actual claim-to draft incident', 'does not claim to close #7284', true],
+  ['claim-to contraction', "doesn’t claim to fix #42", true],
+  ['claim ownership control', 'does not claim ownership and fixes #42', false],
   ['direct negation', 'not close #42', true],
   ['replace phrase', 'will not replace or resolve #42', true],
   ['contraction', "doesn't fix #42", true],
@@ -46,7 +49,7 @@ const cases = [
   ['skip exemption retained', '', false, { labels: [{ name: 'skip-hygiene' }] }],
   ['release exemption retained', '', false, { title: 'chore: release' }],
 ];
-assert.ok(cases.length >= 28, 'at least 28 issue-hygiene workflow fixtures must run');
+assert.ok(cases.length >= 31, 'at least 31 issue-hygiene workflow fixtures must run');
 let failures = 0;
 for (const [name, body, expectFailure, overrides = {}] of cases) {
   const errors = [];
