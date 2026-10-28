@@ -22,6 +22,7 @@ dependencies {
 
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.pact.provider)
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
