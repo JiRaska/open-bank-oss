@@ -103,8 +103,8 @@ object StandingOrderScenario {
             world.ledger.post("standing-order-${order.id}-${claimed.executionCount}", entry)
             publishBooked(world, entry)
         } catch (e: SimulatedWriteFailure) {
-            // Nothing durable: release the hold and record the outcome. The order stays ACTIVE
-            // (recordFailure applies), mirroring the consumer's recordFailureSafely.
+            // Nothing durable: release the hold and record the failed attempt. Only an ACTIVE
+            // order acknowledges it; an ended recurring order may already be COMPLETED.
             world.balances.put(world.balances.get(source).releaseReservation(amount))
             recordOutcomeFailure(world, index, claimed, order.id, now)
             world.audit.append("standing order ${order.id} compensated: ${e.message}")

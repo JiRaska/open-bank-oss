@@ -9,9 +9,15 @@ import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.MoneyPathInvariants
 import com.openbank.simulation.runner.SimulationConfig
 import com.openbank.simulation.runner.World
+import com.openbank.standingorder.domain.model.Frequency
+import com.openbank.standingorder.domain.model.PaymentType
+import com.openbank.standingorder.domain.model.StandingOrder
 import com.openbank.standingorder.domain.model.StandingOrderStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.LocalDate
+import java.time.ZoneId
+import java.util.UUID
 
 /**
  * The standing-order sweep scenario driven directly against the REAL
@@ -90,8 +96,11 @@ class StandingOrderScenarioTest {
                 when (order.frequency) {
                     com.openbank.standingorder.domain.model.Frequency.ONCE ->
                         sawOnce = sawOnce || order.status == StandingOrderStatus.COMPLETED
-                    else ->
-                        sawRecurring = sawRecurring || order.nextExecutionDate != null
+                    else -> {
+                        val today = LocalDate.ofInstant(world.context.clock.instant(), ZoneId.of("Europe/Prague"))
+                        assertThat(order.nextExecutionDate).isEqualTo(today.plusMonths(1))
+                        sawRecurring = true
+                    }
                 }
             }
             assertThat(MoneyPathInvariants.standingOrderCompleteness.check(world)).isNull()
@@ -99,6 +108,85 @@ class StandingOrderScenarioTest {
         }
         assertThat(sawOnce).isTrue()
         assertThat(sawRecurring).isTrue()
+    }
+
+    @Test
+    fun `a selected monthly order advances to exactly next month and confirms one execution`() {
+        val world = World(SimulationContext(seed = 0L, FaultProfile.NONE), SimulationConfig())
+        val today = LocalDate.ofInstant(world.context.clock.instant(), ZoneId.of("Europe/Prague"))
+        val order = monthlyOrder(world, today.plusMonths(6))
+        world.standingOrders.add(order)
+
+        StandingOrderScenario.step(world)
+        world.context.scheduler.drain()
+
+        val actual = world.standingOrders.single()
+        assertThat(actual.id).isEqualTo(order.id)
+        assertThat(actual.nextExecutionDate).isEqualTo(today.plusMonths(1))
+        assertThat(actual.lastExecutionDate).isEqualTo(today)
+        assertThat(actual.executionCount).isEqualTo(1)
+        assertThat(actual.status).isEqualTo(StandingOrderStatus.ACTIVE)
+        assertThat(world.standingOrdersBook.confirmedCount(order.id)).isEqualTo(1)
+        assertThat(world.ledger.postedCount()).isEqualTo(1)
+        assertThat(MoneyPathInvariants.standingOrderCompleteness.check(world)).isNull()
+        assertThat(MoneyPathInvariants.projectionConsistency.check(world)).isNull()
+    }
+
+    @Test
+    fun `an ended recurring order records a failed attempt without an impossible machine acknowledgement`() {
+        val world = World(SimulationContext(seed = 0L, FaultProfile(writeFailureRate = 1.0)), SimulationConfig())
+        val today = LocalDate.ofInstant(world.context.clock.instant(), ZoneId.of("Europe/Prague"))
+        val order = monthlyOrder(world, today)
+        world.standingOrders.add(order)
+
+        StandingOrderScenario.step(world)
+        world.context.scheduler.drain()
+
+        val actual = world.standingOrders.single()
+        assertThat(actual.id).isEqualTo(order.id)
+        assertThat(actual.status).isEqualTo(StandingOrderStatus.COMPLETED)
+        assertThat(actual.nextExecutionDate).isEqualTo(today.plusMonths(1))
+        assertThat(actual.executionCount).isEqualTo(1)
+        assertThat(actual.failureCount).isZero()
+        assertThat(world.standingOrdersBook.attemptedFailureCount(order.id)).isEqualTo(1)
+        assertThat(world.standingOrdersBook.machineAcknowledgedFailureCount(order.id)).isZero()
+        assertThat(world.standingOrdersBook.confirmedCount(order.id)).isZero()
+        assertThat(world.ledger.postedCount()).isZero()
+        assertThat(MoneyPathInvariants.standingOrderCompleteness.check(world)).isNull()
+        assertThat(MoneyPathInvariants.noNegativeBalance.check(world)).isNull()
+        assertThat(MoneyPathInvariants.projectionConsistency.check(world)).isNull()
+    }
+
+    // An explicit lifecycle precondition, not a claim about the scenario's randomized factory.
+    // Fixed identifiers consume no seeded random values: seed 0 reuses this sole ACTIVE order.
+    private fun monthlyOrder(world: World, endDate: LocalDate): StandingOrder {
+        val now = world.context.clock.instant()
+        val today = LocalDate.ofInstant(now, ZoneId.of("Europe/Prague"))
+        return StandingOrder(
+            id = UUID(0L, 401L),
+            idempotencyKey = "sim-standing-order-exact-date",
+            partyId = UUID(0L, 402L),
+            debitAccountId = world.customerAccounts.first(),
+            debtorIban = "SIM-DEBTOR",
+            debtorName = "Sim Debtor",
+            creditorIban = "SIM-CREDITOR",
+            creditorName = "Sim Creditor",
+            creditorBic = null,
+            amountMinorUnits = 100L,
+            currency = world.currency,
+            frequency = Frequency.MONTHLY,
+            paymentType = PaymentType.INTERNAL,
+            remittanceInfo = null,
+            startDate = today,
+            endDate = endDate,
+            nextExecutionDate = today,
+            lastExecutionDate = null,
+            executionCount = 0,
+            failureCount = 0,
+            status = StandingOrderStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now,
+        )
     }
 
     @Test
