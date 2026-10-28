@@ -32,10 +32,17 @@ const BASE_URL = __ENV.BASE_URL || "http://localhost:8101";
 // PERF_READ_TOKEN is injected by the scheduled workflow from an environment secret.
 // Deliberately no default; never logged, never used as a k6 tag.
 const readHeaders = { Authorization: `Bearer ${__ENV.PERF_READ_TOKEN || ""}` };
+// PERF_ACCOUNT_ID is the fleet-wide fixture account; the ledger lane probes the per-customer
+// deposit-control sub-ledger balance for it. PERF_JOURNAL_ID names the fixed journal-detail
+// fixture (seeded by src/test/k6/fixtures.sql).
+const ACCOUNT_ID = __ENV.PERF_ACCOUNT_ID || "00000000-0000-0000-0000-000000000002";
+const JOURNAL_ID = __ENV.PERF_JOURNAL_ID || "00000000-0000-0000-0000-0000000000e1";
 
 const journalsMs = new Trend("ledger_journals_ms", true);
 const trialBalanceMs = new Trend("ledger_trial_balance_ms", true);
 const accountingDayMs = new Trend("ledger_accounting_day_ms", true);
+const journalDetailMs = new Trend("ledger_journal_detail_ms", true);
+const subLedgerMs = new Trend("ledger_sub_ledger_ms", true);
 
 export const options = {
   scenarios: {
@@ -56,6 +63,8 @@ export const options = {
     // A whole-book aggregate: generous tripwire, but a regression here is a close-cycle risk.
     "ledger_trial_balance_ms": ["p(95)<2000"],
     "ledger_accounting_day_ms": ["p(95)<300"],
+    "ledger_journal_detail_ms": ["p(95)<800"],
+    "ledger_sub_ledger_ms": ["p(95)<1500"],
 
     "http_req_failed": ["rate<0.01"],
     // A transport percentile is not a handler baseline unless every asserted route answered.
@@ -84,4 +93,20 @@ export default function () {
   });
   accountingDayMs.add(d.timings.duration);
   check(d, { "current accounting day 200": (res) => res.status === 200 });
+
+  // Id-scoped reads: a fixed journal (fixture row) and the per-customer deposit-control
+  // sub-ledger balance for the fixture account — the two probes that need seeded rows.
+  const jd = http.get(`${BASE_URL}/api/v1/journals/${JOURNAL_ID}`, {
+    headers: readHeaders,
+    tags: { name: "ledger_journal_detail" },
+  });
+  journalDetailMs.add(jd.timings.duration);
+  check(jd, { "journal detail 200": (res) => res.status === 200 });
+
+  const sb = http.get(`${BASE_URL}/api/v1/journals/sub-ledger-balances?subAccountId=${ACCOUNT_ID}`, {
+    headers: readHeaders,
+    tags: { name: "ledger_sub_ledger" },
+  });
+  subLedgerMs.add(sb.timings.duration);
+  check(sb, { "sub-ledger balances 200": (res) => res.status === 200 });
 }
