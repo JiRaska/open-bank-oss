@@ -200,6 +200,54 @@ class PolicyEvidenceTests(unittest.TestCase):
             proof.app_authorization(copy.deepcopy(github.pull), old.REPO, github)
 
 
+    def assert_reviewed_source_chain(self, identity):
+        # Complete public controller source is inert data; never import or execute it.
+        raw = gzip.decompress(Path(__file__).with_name('fixtures').joinpath(
+            f'merge-policy-{identity[:8]}.py.gz').read_bytes())
+        self.assertEqual(hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest(), identity)
+
+        def fixture(content=raw):
+            github = PolicyGitHub()
+            sha = hashlib.sha1(b'blob ' + str(len(content)).encode() + b'\0' + content).hexdigest()
+            github.responses[f'/git/trees/{SCRIPTS}']['tree'][0]['sha'] = sha
+            github.responses[f'/git/blobs/{sha}'] = {
+                'sha': sha, 'size': len(content), 'encoding': 'base64',
+                'content': base64.b64encode(content).decode(),
+            }
+            return github
+
+        github = fixture()
+        result = proof.app_authorization(copy.deepcopy(github.pull), old.REPO, github)
+        self.assertNotIn('authorization', result)
+        self.assertEqual(result['mergedById'], old.BOT['id'])
+        context = result['policyAuthorization']
+        self.assertEqual(context['approvedById'], old.OWNER['id'])
+        self.assertEqual(context['policyCommitSha'], PARENT)
+        self.assertEqual(context['policyBlobSha'], identity)
+        self.assertEqual((context['kind'], context['scope']), ('POLICY_PR_AUTO_MERGE', 'PR'))
+        # Recognition does not widen to nearby source, off-main ancestry or codex approval.
+        github = fixture(raw + b'\n# Unreviewed source revision.\n')
+        with self.assertRaisesRegex(ValueError, 'unreviewed immutable policy blob'):
+            proof.app_authorization(copy.deepcopy(github.pull), old.REPO, github)
+        github = fixture()
+        github.responses[f'/compare/{PARENT}...main']['status'] = 'diverged'
+        with self.assertRaisesRegex(ValueError, 'not on canonical main'):
+            proof.app_authorization(copy.deepcopy(github.pull), old.REPO, github)
+        github = fixture()
+        github.pull['head']['ref'] = 'codex/audit'
+        with self.assertRaises(ValueError):
+            proof.app_authorization(copy.deepcopy(github.pull), old.REPO, github)
+        self.assertFalse(any('/git/' in path for path in github.calls))
+
+    def test_reviewed_14bd8b1e_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('14bd8b1e81b94eb0a297f645007c44d1245732cc')
+
+    def test_reviewed_6ab73053_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('6ab73053858f41097033b13d5813ad70fcadc088')
+
+    def test_reviewed_82d51b27_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('82d51b27e40de7e15fb7d3180cc9baaad6ebde40')
+
     def test_branch_spoofing_rejected(self):
         github = PolicyGitHub()
         pull = copy.deepcopy(github.pull)
