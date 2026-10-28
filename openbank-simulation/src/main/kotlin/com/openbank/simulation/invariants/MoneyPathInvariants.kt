@@ -7,6 +7,7 @@ package com.openbank.simulation.invariants
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.delegation.domain.model.SpendWindows
+import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.sdd.domain.lifecycle.MandateLifecycle
 import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SequenceType
@@ -22,6 +23,7 @@ import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.UUID
 
 /**
  * The ADR-0100 Layer-3 invariant set for the money path. Each is a pure function of the
@@ -401,6 +403,40 @@ object MoneyPathInvariants {
     val delegatedSpendConservation = object : Invariant {
         override val name = "delegated-spend-conservation"
         override fun check(world: World): Violation? {
+            val entriesByTransaction = world.ledger.entriesByTransaction()
+            val grants = world.delegationGrants.associateBy { it.id }
+            world.spendReservations.forEach { reservation ->
+                val grant = grants[reservation.grantId]
+                    ?: return Violation(name, "reservation ${reservation.id} has no grant")
+                val actual = mutableMapOf<Triple<UUID, UUID?, String>, BigDecimal>()
+                entriesByTransaction[reservation.id].orEmpty().forEach { entry ->
+                    entry.lines.forEach { line ->
+                        val key = Triple(line.glAccountId, line.subAccountId, line.baseAmount.currency.code)
+                        val signed = if (line.side == JournalSide.CREDIT) {
+                            line.baseAmount.amount
+                        } else {
+                            line.baseAmount.amount.negate()
+                        }
+                        actual.merge(key, signed, BigDecimal::add)
+                    }
+                }
+                val net = actual.filterValues { it.signum() != 0 }
+                val expected = if (reservation.state == SpendReservationState.CONFIRMED) {
+                    val target = world.customerAccounts.first { it != grant.resourceId }
+                    mapOf(
+                        Triple(UUID(0L, 1L), grant.resourceId, reservation.amount.currency.code) to
+                            reservation.amount.amount.negate(),
+                        Triple(UUID(0L, 1L), target, reservation.amount.currency.code) to reservation.amount.amount,
+                    )
+                } else {
+                    emptyMap()
+                }
+                if (net.keys != expected.keys ||
+                    expected.any { (key, amount) -> net.getValue(key).compareTo(amount) != 0 }
+                ) {
+                    return Violation(name, "reservation ${reservation.id} actual ledger legs disagree with its state")
+                }
+            }
             world.delegationSpends.grantIds().forEach { grantId ->
                 val confirmed = world.delegationSpends.confirmedAmount(grantId)
                 val posted = world.delegationSpends.postedAmount(grantId)

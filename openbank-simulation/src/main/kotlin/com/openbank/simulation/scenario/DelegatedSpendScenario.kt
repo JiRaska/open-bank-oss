@@ -196,6 +196,16 @@ object DelegatedSpendScenario {
         // 8a. Seeded release: the delegate did not spend. The hold returns to available balance
         //     and the real release gives the ceiling headroom back (settledAt is stamped).
         if (random.nextInt(RELEASE_FRACTION) == RELEASE_MARK) {
+            // Posting already happened: release must compensate its actual durable journal first.
+            val reversal = world.ledger.reverse(
+                entry.id,
+                UUID.nameUUIDFromBytes("delegated-spend-release-${reservation.id}".toByteArray()),
+                SYSTEM_ACTOR,
+                lineIdProvider = { originalId ->
+                    UUID.nameUUIDFromBytes("delegated-spend-release-line-${reservation.id}-$originalId".toByteArray())
+                },
+            )
+            publishBooked(world, reversal)
             world.balances.put(world.balances.get(source).releaseReservation(amount.amount))
             replaceReservation(world, reservation, reservation.release(now))
             world.audit.append("delegated spend ${reservation.id} released before settlement")

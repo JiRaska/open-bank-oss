@@ -22,6 +22,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -279,4 +280,58 @@ class DelegatedSpendScenarioTest {
         idempotencyKey = "history-regression",
         createdAt = at,
     )
+
+    @Test
+    fun `the seeded post-write release retains a journal and reversal with zero net movement`() {
+        val world = newWorld()
+        repeat(300) {
+            DelegatedSpendScenario.step(world)
+            if (world.audit.events().last().endsWith("released before settlement")) {
+                val reservation = world.spendReservations.last()
+                val entries = world.ledger.entriesByTransaction().getValue(reservation.id)
+                assertThat(reservation.state).isEqualTo(SpendReservationState.RELEASED)
+                assertThat(entries).hasSize(2)
+                assertThat(entries.count { it.reversalOf != null }).isEqualTo(1)
+                val deltas = entries.flatMap { it.bookedDeltas() }.groupBy { it.accountId to it.currency }
+                assertThat(deltas.values.all { legs -> legs.sumOf { it.delta }.signum() == 0 }).isTrue()
+                assertThat(MoneyPathInvariants.delegatedSpendConservation.check(world)).isNull()
+                return
+            }
+        }
+        throw AssertionError("no explicit seeded post-write release in 300 steps")
+    }
+
+    @Test
+    fun `balanced half amount cannot hide behind full confirmed and posted books`() {
+        val source = newWorld()
+        repeat(300) {
+            DelegatedSpendScenario.step(source)
+            val reservation = source.spendReservations.lastOrNull()
+            if (reservation != null &&
+                reservation.state == SpendReservationState.CONFIRMED &&
+                reservation.amount.amount > BigDecimal.ONE
+            ) {
+                val original = source.ledger.entriesByTransaction().getValue(reservation.id).single()
+                val half = Money.of(
+                    reservation.amount.amount.divide(BigDecimal("2")).setScale(2, RoundingMode.DOWN),
+                    reservation.amount.currency.code,
+                )
+                val world = newWorld()
+                world.delegationGrants.add(source.delegationGrants.first { it.id == reservation.grantId })
+                world.spendReservations.add(reservation)
+                world.delegationSpends.recordConfirmed(reservation.grantId, reservation.amount.amount)
+                world.delegationSpends.recordPosted(reservation.grantId, reservation.amount.amount)
+                world.ledger.post(
+                    "delegated-spend-${reservation.id}",
+                    original.copy(lines = original.lines.map { it.copy(amount = half, baseAmount = half) }),
+                )
+                assertThat(world.ledger.lineNetByCurrency().values.all { it.signum() == 0 }).isTrue()
+                assertThat(world.delegationSpends.confirmedAmount(reservation.grantId))
+                    .isEqualByComparingTo(world.delegationSpends.postedAmount(reservation.grantId))
+                assertThat(MoneyPathInvariants.delegatedSpendConservation.check(world)).isNotNull()
+                return
+            }
+        }
+        throw AssertionError("no confirmed reservation above one currency unit in 300 steps")
+    }
 }
