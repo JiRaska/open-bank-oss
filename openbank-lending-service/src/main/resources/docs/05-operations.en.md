@@ -29,6 +29,8 @@
 
 `LENDING_LEDGER_BACKEND` is **build-time** (`@IfBuildProperty`): it selects the adapter at image build, not at runtime.
 
+Compliance-pack refresh uses `lending.compliance.refresh-initial-delay` (default `10s`) before its first scheduled pass.
+
 ## Ports & probes
 
 - **App:** `8126`. **Management:** `8086`, root-path `/q` (`quarkus.management.enabled=true`).

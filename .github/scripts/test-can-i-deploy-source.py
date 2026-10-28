@@ -23,6 +23,33 @@ EQUIVALENT = "c" * 40
 SERVICE = "openbank-context-service"
 
 
+class StandalonePlatformTests(unittest.TestCase):
+    def test_pinned_release_urls_match_supported_platform_assets(self):
+        source = DRIVER.read_text()
+        platform = source[source.index('arch="$(uname'):source.index('CLI=')]
+        asset = source[source.index('  tgz="pact-'):source.index('  dl_ok=0')]
+        for system, architecture, expected in (
+            ("Darwin", "arm64", "macos-arm64"),
+            ("Darwin", "x86_64", "macos-x86_64"),
+            ("Linux", "aarch64", "linux-arm64"),
+            ("Linux", "x86_64", "linux-x86_64"),
+        ):
+            with self.subTest(system=system, architecture=architecture):
+                stub = 'uname() { case "$1" in -m) echo "$TEST_ARCH";; -s) echo "$TEST_OS";; esac; }\n'
+                result = subprocess.run(
+                    ["bash", "-c", stub + platform + asset + 'printf "%s\\n" "$url"'],
+                    env=dict(os.environ, TEST_OS=system, TEST_ARCH=architecture,
+                             PACT_STANDALONE_VERSION="2.6.2"),
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    result.stdout.strip(),
+                    "https://github.com/pact-foundation/pact-ruby-standalone/releases/download/"
+                    f"v2.6.2/pact-2.6.2-{expected}.tar.gz",
+                )
+
+
 class SourceSelectorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

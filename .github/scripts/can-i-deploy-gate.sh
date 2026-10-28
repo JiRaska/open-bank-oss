@@ -257,7 +257,7 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
 fi
 
 arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
-os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) o=osx ;; *) o=linux ;; esac
+os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) o=macos ;; *) o=linux ;; esac
 CLI="${PACT_CLI:-/tmp/pact/pact/bin/pact-broker}"
 # Download only on a cache miss (the "Cache pact standalone CLI" step restores /tmp/pact
 # on a hit). This removes the flaky github.com release download — the single point of
