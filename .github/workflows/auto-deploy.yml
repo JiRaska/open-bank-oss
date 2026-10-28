@@ -652,7 +652,7 @@ jobs:
             jq -e --arg source "$SOURCE_COMMIT" --arg workflow "${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}" \
               '.materials[0].digest.sha1 == $source and .invocation.configSource.digest.sha1 == $workflow' >/dev/null
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: |
@@ -675,9 +675,10 @@ jobs:
       # dependency, deterministic. configure-aws-credentials exports the creds to the job env.
       - name: Configure AWS credentials (GitHub OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
+        with: &build-aws-credentials
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1
+          unset-current-credentials: true
 
       - name: Clear stale ECR credentials (macOS keychain)
         if: runner.os == 'macOS'
@@ -923,6 +924,10 @@ jobs:
       # used to push without signing, which is the other half of why deploys never landed.
       # cosign v2 is pinned on purpose: kyverno 3.2.6 finds only the legacy sha256-<digest>.sig
       # tag scheme; cosign v3 writes OCI-referrer sigs it cannot read (see #770).
+      - name: Refresh AWS credentials before image signing
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with: *build-aws-credentials
+
       - name: Sign images (cosign v2 + KMS)
         run: |
           set -uo pipefail
@@ -1058,6 +1063,10 @@ jobs:
       #
       # An unattested image cannot be admitted, so a deploy that "succeeds" while producing one
       # is not a successful deploy — it is a time bomb with a green check. Fail here instead.
+      - name: Refresh AWS credentials before image attestations
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with: *build-aws-credentials
+
       - name: Attest image SBOMs + SLSA provenance (cosign + KMS)
         # A full-fleet docs rebuild attests every pushed image in sequence. The
         # previous 15-minute cap stopped after successful image pushes, leaving
@@ -1381,7 +1390,7 @@ jobs:
       - name: Mint a GitHub App installation token
         id: app_token
         if: env.GITOPS_APP_ID != ''
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
