@@ -20,7 +20,9 @@ import com.openbank.simulation.model.SddCollectionBook
 import com.openbank.simulation.model.SimPaymentSaga
 import com.openbank.simulation.model.StandingOrderBook
 import com.openbank.simulation.model.StatementCloseBook
+import com.openbank.simulation.model.SwiftBook
 import com.openbank.standingorder.domain.model.StandingOrder
+import com.openbank.swift.domain.model.SwiftMessage
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -85,6 +87,13 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // Framework-free domain (ADR-0002), same convention as sepaPayments/settlements above.
     val sddMandates = mutableListOf<SddMandate>()
     val sddCollections = SddCollectionBook()
+
+    // The SWIFT rail's invariant state: the REAL `SwiftMessage` objects driven by
+    // SwiftScenario (its validate() admission gate and PENDING→…→COMPLETED/REJECTED/FAILED
+    // lifecycle), plus the per-message posted amounts the conservation invariant replays.
+    // Empty (trivially satisfied) otherwise.
+    val swiftMessages = mutableListOf<SwiftMessage>()
+    val swiftBook = SwiftBook()
 
     val customerAccounts: List<UUID>
     val currency: String = config.currency
