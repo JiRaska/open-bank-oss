@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.14.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.13.1...admin-ui-v3.14.0) (2026-10-28)
+
+
+### Features
+
+* **admin-ui:** project new simulation scenarios onto their services (Refs [#667](https://github.com/JiRaska/open-bank-oss/issues/667)) ([#14118](https://github.com/JiRaska/open-bank-oss/issues/14118)) ([f4c4b37](https://github.com/JiRaska/open-bank-oss/commit/f4c4b371b8bfda07a388854eb5c48c86b3f1e6c8))
+
 ## [3.13.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.13.0...admin-ui-v3.13.1) (2026-10-28)
 
 
