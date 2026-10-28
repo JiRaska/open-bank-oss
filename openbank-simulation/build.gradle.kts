@@ -89,6 +89,22 @@ dependencies {
     // is framework-free (ADR-0002), so only the domain POJOs land on the classpath.
     implementation(project(":openbank-statement-service"))
 
+    // The harness also drives the REAL standing-order-service domain — the `StandingOrder`
+    // status machine (recordExecution/confirmExecution/recordFailure, calculateNextDate,
+    // MAX_CONSECUTIVE_FAILURES) — so StandingOrderScenario exercises the exact sweep-executor
+    // ordering production uses, not a re-model. The harness invokes those domain classes
+    // directly without starting the service server. This project edge does not select a
+    // domain-only artifact or exclude the service's runtime transitive dependencies.
+    implementation(project(":openbank-standing-order-service"))
+
+    // The harness also drives the REAL sdd-service domain — the `SddMandate` aggregate and the
+    // ADR-0036 §B `MandateLifecycle` pure state machine (confirm/suspend/resume/cancel/amend/
+    // recordCollection/expireIfIdle) — so SddCollectionScenario exercises the exact collection
+    // preconditions production uses, not a re-model. The harness invokes those domain classes
+    // directly without starting the service server. This project edge does not select a
+    // domain-only artifact or exclude the service's runtime transitive dependencies.
+    implementation(project(":openbank-sdd-service"))
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)

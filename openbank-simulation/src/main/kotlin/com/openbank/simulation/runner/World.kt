@@ -4,6 +4,7 @@
 
 package com.openbank.simulation.runner
 
+import com.openbank.sdd.domain.model.SddMandate
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.simulation.adapters.AuditLog
@@ -15,8 +16,11 @@ import com.openbank.simulation.model.BalanceStore
 import com.openbank.simulation.model.BillingFeeLedger
 import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
+import com.openbank.simulation.model.SddCollectionBook
 import com.openbank.simulation.model.SimPaymentSaga
+import com.openbank.simulation.model.StandingOrderBook
 import com.openbank.simulation.model.StatementCloseBook
+import com.openbank.standingorder.domain.model.StandingOrder
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -68,6 +72,19 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // attempt's ReconciliationPolicy decision cross-checked against whether a period was actually
     // persisted. Populated by StatementCloseScenario; empty (trivially satisfied) otherwise.
     val statementCloses = StatementCloseBook()
+
+    // The standing-order execution state: the REAL `StandingOrder` aggregates driven by
+    // StandingOrderScenario plus the both-sides execution book the completeness invariant
+    // reconciles (status-machine counts vs money actually moved). Framework-free domain
+    // (ADR-0002), same convention as sepaPayments/settlements above.
+    val standingOrders = mutableListOf<StandingOrder>()
+    val standingOrdersBook = StandingOrderBook()
+
+    // The SDD collection state: the REAL `SddMandate` aggregates driven by SddCollectionScenario
+    // plus the both-sides collection book (posted amount vs the mandate's own collection stamp).
+    // Framework-free domain (ADR-0002), same convention as sepaPayments/settlements above.
+    val sddMandates = mutableListOf<SddMandate>()
+    val sddCollections = SddCollectionBook()
 
     val customerAccounts: List<UUID>
     val currency: String = config.currency

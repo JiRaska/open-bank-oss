@@ -11,7 +11,9 @@ import com.openbank.simulation.invariants.MoneyPathInvariants
 import com.openbank.simulation.scenario.FeeBillingScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
+import com.openbank.simulation.scenario.SddCollectionScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
+import com.openbank.simulation.scenario.StandingOrderScenario
 import com.openbank.simulation.scenario.StatementCloseScenario
 
 /**
@@ -69,6 +71,17 @@ class SimulationRunner(
             // only, posts nothing, so this drain is a no-op today but kept for the same
             // "settled before the invariant sweep" convention as every other scenario above.
             StatementCloseScenario.step(world)
+            context.scheduler.drain()
+            // The standing-order sweep step (issue #667 E2E money-path): drives the REAL
+            // StandingOrder status machine against real journals so its execution/failure
+            // counters stay reconciled with the ledger under the same fault profile.
+            StandingOrderScenario.step(world)
+            context.scheduler.drain()
+            // ADR-0036 (ADR-0100 full-service adoption): interleave the SDD collection path —
+            // REAL SddMandate lifecycle (confirm/expireIfIdle/recordCollection) against real
+            // journals — so sddCollectionCompleteness is swept every step under the same fault
+            // profile. Kept before the invariant sweep, after the per-scenario drain convention.
+            SddCollectionScenario.step(world)
             context.scheduler.drain()
             invariants.forEach { invariant ->
                 val violation = invariant.check(world)
