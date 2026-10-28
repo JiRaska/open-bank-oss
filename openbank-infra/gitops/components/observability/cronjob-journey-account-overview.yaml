@@ -1,17 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Journey: account-overview (ADR-0252, ADR-0331, #4348). The bank-owned canary customer lists its
-# accounts, opens the fixture account and reads its balance through the PUBLIC customer edge and
-# the public token endpoint -- the first two calls the app makes after login.
+# Journey: account-overview (ADR-0252, ADR-0331, #4348, #14058). The bank-owned canary customer
+# lists its accounts and reads an existing fixture account and balance through the PUBLIC customer
+# edge and public token endpoint -- the first two calls the app makes after login.
 #
-# READ-ONLY. Nothing is written, posted or tainted beyond the read calls. The one write the
-# journey depends on is the FIXTURE, created once by the owner (see the PR that introduced this
-# file): a single ACTIVE account of the canary's SYNTHETIC party whose balance was seeded by one
-# tainted posting (x-openbank-synthetic: true -> ledger journal_entries.synthetic = true, kept out
-# of FINREP/COREP by LedgerScope's default) and which no journey ever moves. A shared real account
-# would make the balance assertion nondeterministic; a journey that moved its own balance would be
-# a payment journey and belongs to domestic-payment, not here.
+# READ-ONLY. Before enabling the journey, the owner confirms one bank-approved synthetic fixture:
+# exactly one ACTIVE, unshared account owned by the token party, denominated in CZK, with the
+# configured 1000.00 CZK balance. Open the account through the standard account-opening process
+# and establish its opening balance through the approved regulated booking process with synthetic
+# taint. The approved posting carries x-openbank-synthetic: true; ledger persists it as
+# journal_entries.synthetic = true, which LedgerScope excludes from FINREP/COREP by default.
+# Provisioning this identity and running this read-only journey do not authorize account creation
+# or funding; use the approved fixture setup process. This journey never creates a party/account,
+# posts money or changes the balance. Before setting the expected balance below, the owner confirms
+# fixture ownership, status, currency, taint and expected booking/ledger state. The probe checks
+# the account projection; it does not reconcile that projection to the ledger or prove a regulatory
+# outcome.
 #
 # What the checks pin, and what they deliberately do not:
 #   * the balance EQUALS the fixture's seeded value. Authentication and the account listing can

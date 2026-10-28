@@ -154,6 +154,18 @@ secret or a token. Step 1 signs you in through the browser with the operator CLI
 `openbank-ops-cli` (#10905); the live realm predates that client, so the script first creates it
 from its reviewed `realm-template.json` entry if it is missing.
 
+This provisions the synthetic party and its customer identity only; it does not open an account
+or seed a balance. The account-overview journey also requires one owner-approved synthetic fixture:
+exactly one ACTIVE, unshared CZK account owned by the bound party and an expected balance of
+1000.00 CZK. Establish the account through the standard account-opening process and the balance
+through the approved regulated booking process, with synthetic taint preserved. Provisioning
+this identity and running the read-only journey do not authorize account creation or funding; use
+the approved fixture setup process. Before enabling the journey, the owner verifies account
+ownership/status/currency, the tainted booking and independent ledger state against the configured
+expected balance. The journey itself reads the account and
+balance projection; it is not a ledger reconciliation or a regulatory-control attestation
+(ADR-0252, ADR-0331, #4348, #14058).
+
 The taint switches on when that principal is honoured by customer-edge's
 `OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS`. It is already listed, inert until step 2 exists.
 Removing it from that list switches the canary back to real, which is the containment lever.
