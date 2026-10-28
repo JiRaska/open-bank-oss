@@ -41,6 +41,7 @@ data:
   journey.js: |
     import http from 'k6/http';
     import { check } from 'k6';
+    import encoding from 'k6/encoding';
 
     export const options = {
       vus: 1,
@@ -105,6 +106,54 @@ data:
       try { return res.json(); } catch (_) { return null; }
     }
 
+    // Bind the ownership assertion to the party claim in the token used for this request.
+    // The token comes directly from the configured TLS issuer; never log its payload or value.
+    function partyIdFromToken(token) {
+      if (typeof token !== 'string') return null;
+      const parts = token.split('.');
+      if (parts.length !== 3 || !parts[1]) return null;
+      try {
+        const claims = JSON.parse(encoding.b64decode(parts[1], 'rawurl', 's'));
+        return claims && typeof claims.party_id === 'string' && claims.party_id.length > 0
+          ? claims.party_id : null;
+      } catch (_) { return null; }
+    }
+
+    // The current API returns CursorPage {data, pagination}. Only accept a complete first page:
+    // the canary's fixture must not disappear behind an unexamined cursor. Accept the former
+    // bare array only for backward compatibility.
+    function accountRows(body) {
+      if (Array.isArray(body)) return body;
+      const pagination = body && body.pagination;
+      const hasMoreField = pagination && Object.prototype.hasOwnProperty.call(pagination, 'hasMore');
+      const hasNextPageField = pagination && Object.prototype.hasOwnProperty.call(pagination, 'hasNextPage');
+      // PageInfo is @JsonInclude(NON_NULL), so a complete runtime page can omit nextCursor.
+      // Missing is safe only with an explicit false completion flag; a present cursor must be null.
+      const cursorIsNullish = pagination && (!Object.prototype.hasOwnProperty.call(pagination, 'nextCursor')
+        || pagination.nextCursor === null);
+      const explicitCompletePage = pagination && (
+        (hasMoreField && !hasNextPageField && pagination.hasMore === false)
+        || (hasNextPageField && !hasMoreField && pagination.hasNextPage === false)
+        || (hasMoreField && hasNextPageField && pagination.hasMore === false && pagination.hasNextPage === false)
+      );
+      if (body && Array.isArray(body.data) && pagination && typeof pagination === 'object'
+          && !Array.isArray(pagination) && explicitCompletePage && cursorIsNullish) {
+        return body.data;
+      }
+      return null;
+    }
+
+    function ownedActiveFixture(body, expectedPartyId) {
+      const rows = accountRows(body);
+      if (!rows || !expectedPartyId || rows.length === 0) return null;
+      // A share is not the canary's own account. Also reject any row outside the token party
+      // instead of treating a single distinct owner as proof of which party owns the list.
+      if (rows.some((account) => !account || account.partyId !== expectedPartyId
+          || account.sharedWithMe === true)) return null;
+      const active = rows.filter((account) => account.status === 'ACTIVE');
+      return active.length === 1 ? active[0] : null;
+    }
+
     function report(step, res, expected) {
       if (res.status !== expected) console.error(`account-overview ${step}: status=${res.status} expected=${expected}`);
     }
@@ -117,6 +166,12 @@ data:
       }
       const token = fetchToken();
       if (token === null) { failAll(); return; }
+      const ownPartyId = partyIdFromToken(token);
+      if (ownPartyId === null) {
+        console.error('account-overview token has no usable party_id claim; refusing ownership probe');
+        failAll();
+        return;
+      }
       const params = (endpoint) => ({
         headers: { Authorization: `Bearer ${token}`, 'x-openbank-synthetic': 'true' },
         tags: { endpoint, service: 'customer-edge' },
@@ -129,9 +184,7 @@ data:
       const listed = http.get(`${CUSTOMER_BASE}/customer/v1/accounts`, params('accounts-list'));
       report('list', listed, 200);
       const accounts = listed.status === 200 ? json(listed) : null;
-      const active = Array.isArray(accounts) ? accounts.filter((a) => a && a.status === 'ACTIVE') : [];
-      const owners = new Set(Array.isArray(accounts) ? accounts.map((a) => a && a.partyId) : []);
-      const fixture = active.length === 1 ? active[0] : null;
+      const fixture = ownedActiveFixture(accounts, ownPartyId);
       const id = fixture && fixture.id;
 
       // 2. the account itself, 3. its balance
@@ -152,9 +205,8 @@ data:
       const num = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
       check(null, {
         'an unauthenticated account list is refused': () => anon.status === 401,
-        // exactly one ACTIVE account, and every listed account belongs to one party: a second
-        // account appearing is a fixture change a human must make deliberately, not drift.
-        'the canary lists exactly its own ACTIVE fixture account': () => !!fixture && owners.size === 1,
+        // exactly one ACTIVE fixture for the authenticated party, with no delegated/shared row.
+        'the canary lists exactly its own ACTIVE fixture account': () => !!fixture && fixture.partyId === ownPartyId,
         'the account can be opened by id': () => !!accountBody && accountBody.id === id,
         // fails when the array has no element with currency === FIXTURE_CURRENCY (or the body is not an array)
         'the balance is served for the account': () => !!b && b.accountId === id,

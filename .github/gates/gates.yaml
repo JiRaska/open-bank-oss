@@ -2581,9 +2581,14 @@ gates:
     group: registry
     budget_seconds: 26
     mode: enforced
-    selftest: python3 .github/scripts/check-journey-catalog.py --self-test
+    selftest: >-
+      python3 .github/scripts/check-journey-catalog.py --self-test &&
+      python3 .github/scripts/test-account-overview-probe.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-journey-catalog.py"]
+    selftest_inputs:
+      - .github/scripts/check-journey-catalog.py
+      - .github/scripts/test-account-overview-probe.py
+      - openbank-infra/gitops/components/observability/cronjob-journey-account-overview.yaml
     min_subjects: 12  # 12 governed journeys today (2026-08-26): 1 active, 11 planned
     run: |
       # Falsified against the REAL tree before wiring in, not only in the self-test's temp
