@@ -5,7 +5,7 @@ import java.util.UUID
 import javax.sql.DataSource
 
 /** Sets legitimate persisted publication states; verification still calls the real HTTP resource. */
-internal object CommunicationPactStates {
+object CommunicationPactStates {
     fun configure(dataSource: DataSource, published: Boolean) {
         dataSource.connection.use { connection ->
             connection.autoCommit = false
