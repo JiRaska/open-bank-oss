@@ -48,7 +48,7 @@ class CustomerEdgeCommunicationPactConsumerTest {
         tokenServer.stop(0)
     }
 
-    @Pact(consumer = "openbank-customer-edge")
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-communication-service")
     fun publishedCopy(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("customer-copilot has approved published app copy")
         .uponReceiving("the edge reads the published customer app copy")
@@ -68,7 +68,7 @@ class CustomerEdgeCommunicationPactConsumerTest {
         )
         .toPact()
 
-    @Pact(consumer = "openbank-customer-edge")
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-communication-service")
     fun unpublishedCopy(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("customer-copilot has no published app copy")
         .uponReceiving("the edge reads app copy with no published version")

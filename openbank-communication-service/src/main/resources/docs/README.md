@@ -37,3 +37,9 @@ lane and publishes results for the exact provider version. Local folder replay i
 publication, deployment or customer delivery evidence. Fixtures never publish live content.
 Rollback removes the test wiring together; strict reconcile must still reject missing Pact
 source evidence rather than accepting empty contracts or an absent-participant exception.
+
+Provider publication fixtures run in a dedicated Quarkus test profile with their own real
+PostgreSQL resource; they cannot advance publication versions used by the ordinary HTTP
+integration suite. Provider verification also exercises forbidden-role and unauthenticated
+reads through the real HTTP endpoint. Consumer declarations explicitly identify both Pact
+participants, so the normal scope/drift checker can discover the generated contract.
