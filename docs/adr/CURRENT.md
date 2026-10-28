@@ -457,7 +457,7 @@ _Also tagged `resilience`: 0004 0050 0088 0098 0100 0101 0120 0132 0146 0159 021
 ## capacity
 
 - **[0173](0173-capacity-management-and-headroom.md)** · Capacity management and headroom · `partial` · Karpenter NodePool limits (cpu 48, memory 128Gi) are declared the deliberate fleet capacity ceiling, resource requests are treated as a correctness input, and an alert is added so a binding cap stops failing silently as Pending pods.
-- **[0356](0356-five-million-client-capacity-qualification.md)** · Five-million-client capacity qualification for Czech current accounts _(proposed)_ · `planned` · Qualify five million Czech current-account clients against a versioned full-path workload and financial invariants; retain one logical ledger write authority until measured limits justify a separate topology decision.
+- **[0356](0356-five-million-client-capacity-qualification.md)** · Five-million-client capacity qualification for Czech current accounts _(proposed)_ · `partial` · Qualify five million Czech current-account clients against a versioned full-path workload and financial invariants; retain one logical ledger write authority until measured limits justify a separate topology decision.
 
 _Also tagged `capacity`: 0040 0083 0250 0325 0333_
 

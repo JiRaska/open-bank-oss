@@ -1,7 +1,7 @@
 ---
 date: 2026-10-28
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [OpenBank contributors]
 supersedes: []
 superseded-by: []
@@ -79,9 +79,11 @@ transfer booking, p99 <= 300ms per read class. External settlement follows a sep
 rail contract. Booking is not external settlement. A lost reply after commit is an unknown
 client outcome until idempotent retry/reconciliation resolves it.
 
-At target load, unexpected failures/timeouts are <= 0.1%; capacity-driven 429/503 responses
-cannot masquerade as successful throughput. Business rejections and negative-security tests
-have separate denominators. Every accepted ID must reconcile to its correct completed or
+Normal and burst runs must pass the same latency, financial and queue budgets. At target
+load, the failure fraction is <= 0.1% of intended offered valid unique instructions; its
+numerator includes generator omissions, unresolved timeouts and capacity-driven 429/503
+responses. Retried failed attempts remain separately visible even after eventual success.
+Business rejections and negative-security tests have separate denominators. Every accepted ID must reconcile to its correct completed or
 explicitly pending state and resolve within its journey deadline. Skips remain visible.
 
 The oracle checks every test instruction: balanced journals per currency, one financial
@@ -91,9 +93,11 @@ projections after the convergence bound. Test concurrent debits, duplicate/delay
 events, lost replies and retries across booking dates. Broker-level delivery claims do not
 establish exactly-once financial effects.
 
-During steady normal load, unfinished work in the last ten-minute window must not exceed
-the first ten-minute window by more than one second of offered work; unresolved age stays
-within journey deadlines. Observe all nonterminal outbox states, delayed retries, DEAD rows,
+During a constant-rate plateau, unfinished work in the last ten-minute window must not
+exceed the first ten-minute window by more than the plateau rate times one second; unresolved
+age stays within journey deadlines. Compare only windows with equal arrival rate. Report
+soak transitions separately rather than comparing peak and background windows. Observe all
+nonterminal outbox states, delayed retries, DEAD rows,
 consumer lag and workflow queues. Zero eligible rows is not zero outstanding work.
 Unexpected DEAD rows or unexplained reconciliation differences fail qualification. After
 arrivals stop, internal work reconciles within five minutes; simulated external work within
@@ -103,6 +107,8 @@ its declared bounded settlement window.
 
 Exercise loss of an application replica, database primary, broker and availability zone,
 plus latency, network partition and response loss. Describe independent failure domains.
+Freeze each injection duration, severity and recovery criterion with SRE/payments approval
+before qualification; absent bounds block acceptance of that scenario.
 For AZ loss, target recovery within five minutes to >= 2,500 instructions/s and >= 25,000
 reads/s for 60 minutes, meeting normal latency budgets after recovery. Report the entire
 interruption/rejection interval in availability evidence. Above this degraded envelope,
@@ -183,8 +189,10 @@ production sizing promise.
 Implement the proposed `capacity-qualification` gate using
 `.github/scripts/check-capacity-qualification.py`, a profile at
 `perf/profiles/cz-current-account-5m-v1.yaml`, and an ADR-0273-compatible evidence manifest.
-These are **planned interfaces, not existing tools**. #7284 owns authenticated money-path
-execution; #3348 owns regression gating. Extend them instead of duplicating their trackers.
+The proposed workload profile is now present; the full-path scenarios, financial oracle,
+qualification checker and trusted-run evidence remain planned. The separate
+`check-capacity-profile.py` validates profile consistency only and cannot qualify capacity.
+#7284 owns authenticated money-path execution; #3348 owns regression gating. Extend them instead of duplicating their trackers.
 
 Reject absent/stale/failed/skipped required runs, wrong image/config/profile hashes, missing
 invariants/scenarios, invalid attestations and unapproved threshold changes. Negative fixtures
@@ -236,7 +244,8 @@ From the repository root:
 test -f perf/profiles/cz-current-account-5m-v1.yaml && test -f .github/scripts/check-capacity-qualification.py && echo ready
 ```
 
-Expected **today: nonzero**, because delivery is planned. After implementation both files
+Expected **today: nonzero**: the profile exists but the qualification checker and evidence
+are not delivered, so status is partial. After implementation both files
 must exist, `capacity-qualification` must have `mode: enforced`, and this planned CLI must
 return zero only for complete, fresh, attested evidence:
 

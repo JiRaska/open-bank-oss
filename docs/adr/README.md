@@ -360,7 +360,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0353](0353-financial-crime-vocabulary-one-customer-risk-rating-one-aml-case-severity-shared-rail-screening-types.md) | Financial-crime vocabulary: one customer risk rating, one AML case severity, shared rail screening types | Accepted | Planned | aml-sanctions,kyc,fraud,libs | — |
 | [0354](0354-financial-crime-as-code-governed-packs-and-learning.md) | Financial Crime as Code: governed packs, pure evaluation and reviewed learning | Accepted | Planned | fraud,aml-sanctions,ai-agents,libs | — |
 | [0355](0355-payment-worker-deployment-versioning-and-immutable-replay-corpora.md) | Payment worker deployment versioning and immutable replay corpora | Accepted | Partial | payments,testing,architecture | — |
-| [0356](0356-five-million-client-capacity-qualification.md) | Five-million-client capacity qualification for Czech current accounts | Proposed | Planned | capacity,payments,resilience,testing | — |
+| [0356](0356-five-million-client-capacity-qualification.md) | Five-million-client capacity qualification for Czech current accounts | Proposed | Partial | capacity,payments,resilience,testing | — |
 
 ## By tag
 
