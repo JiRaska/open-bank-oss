@@ -296,7 +296,7 @@ jobs:
       # Same derivation `prepare` uses from application.yaml (http.port + datasource
       # database). A drift check below fails the leg loudly if the file moves.
       PORT: 8104
-      DB: productcatalog
+      DB: openbank_products
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0 (same pin as the perf job).
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
       # Canonical build pin from openbank-infra/docker/keycloak/Dockerfile (KEYCLOAK_VERSION).
