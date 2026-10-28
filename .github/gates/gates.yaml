@@ -1977,6 +1977,7 @@ gates:
       bash .github/scripts/tests/test-resolve-historical-service-ref.sh
       python3 .github/scripts/test-admin-ui-delivery-baseline.py
       python3 .github/scripts/test-admin-ui-evidence-plan.py
+      node .github/scripts/test-issue-hygiene.mjs
       node --test .github/scripts/test-publish-admin-ui-evidence-import-boundary.mjs
       node --test .github/scripts/test-publish-admin-ui-gate-health.mjs .github/scripts/test-publish-admin-ui-evidence.mjs
       python3 .github/scripts/test-collect-admin-ui-test-evidence.py
