@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.29.0...audit-service-v0.29.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **swift:** preserve institution transfer safeguards on current main ([#13838](https://github.com/JiRaska/open-bank-oss/issues/13838)) ([a9d9549](https://github.com/JiRaska/open-bank-oss/commit/a9d954930bf32a32340faece398777838ded4992))
+
 ## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.28.0...audit-service-v0.29.0) (2026-10-26)
 
 
