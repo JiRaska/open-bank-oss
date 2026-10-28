@@ -26,3 +26,20 @@ Style draft, submit, publish and retire writes use `/api/v2/personas` because re
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+### Published-copy consumer contract
+
+Customer-edge's Pact consumer test exercises the real app-copy adapter for a published
+version with locale messages and for a 404 that clears cached overrides. Communication's
+folder verifier replays the generated contract through the real HTTP server and PostgreSQL
+publication state. The separate broker verifier runs in the normal main provider-contract
+lane and publishes results for the exact provider version. Local folder replay is not broker
+publication, deployment or customer delivery evidence. Fixtures never publish live content.
+Rollback removes the test wiring together; strict reconcile must still reject missing Pact
+source evidence rather than accepting empty contracts or an absent-participant exception.
+
+Provider publication fixtures run in a dedicated Quarkus test profile with their own real
+PostgreSQL resource; they cannot advance publication versions used by the ordinary HTTP
+integration suite. Provider verification also exercises forbidden-role and unauthenticated
+reads through the real HTTP endpoint. Consumer declarations explicitly identify both Pact
+participants, so the normal scope/drift checker can discover the generated contract.
