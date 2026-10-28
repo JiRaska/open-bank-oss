@@ -4,7 +4,9 @@
 
 package com.openbank.simulation.scenario
 
+import com.openbank.sdd.domain.lifecycle.MandateLifecycle
 import com.openbank.sdd.domain.model.MandateStatus
+import com.openbank.sdd.domain.model.SddMandate
 import com.openbank.sdd.domain.model.SddScheme
 import com.openbank.sdd.domain.model.SequenceType
 import com.openbank.simulation.engine.FaultProfile
@@ -14,6 +16,9 @@ import com.openbank.simulation.runner.SimulationConfig
 import com.openbank.simulation.runner.World
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.LocalDate
+import java.time.ZoneId
+import java.util.UUID
 
 /**
  * The SDD collection scenario driven directly against the REAL `SddMandate` aggregate and the
@@ -43,24 +48,89 @@ class SddCollectionScenarioTest {
     }
 
     @Test
-    fun `a first collection advances FRST to RCUR through the real lifecycle`() {
-        // Seeded exploration until a FRST mandate exists (the scenario seeds FRST at 1/3 of new
-        // mandates), then assert the exact rulebook advancement on the real aggregate.
-        var checked = false
-        var seed = 0L
-        while (!checked && seed < 60L) {
-            val world = World(SimulationContext(seed, FaultProfile.NONE), SimulationConfig())
-            SddCollectionScenario.step(world)
-            world.context.scheduler.drain()
-            val mandate = world.sddMandates.single()
-            if (world.sddCollections.postedCollections(mandate.id) == 1 && mandate.sequenceType == SequenceType.RCUR) {
-                checked = true
-                assertThat(MoneyPathInvariants.sddCollectionCompleteness.check(world)).isNull()
-            }
-            seed += 1
-        }
-        assertThat(checked).isTrue()
+    fun `an explicitly FRST mandate advances to RCUR when that same mandate is collected`() {
+        val world = World(SimulationContext(seed = 0L, FaultProfile.NONE), SimulationConfig())
+        val mandate = freshMandate(world)
+        // This is an explicit transition precondition, not proof of randomized factory defaults.
+        assertThat(mandate.sequenceType).isEqualTo(SequenceType.FRST)
+        assertThat(mandate.lastCollectionDate).isNull()
+        world.sddMandates.add(mandate)
+
+        SddCollectionScenario.step(world)
+        world.context.scheduler.drain()
+
+        val actual = world.sddMandates.single()
+        assertThat(actual.id).isEqualTo(mandate.id)
+        assertThat(actual.sequenceType).isEqualTo(SequenceType.RCUR)
+        assertThat(actual.lastCollectionDate).isEqualTo(today(world))
+        assertThat(world.sddCollections.postedCollections(mandate.id)).isEqualTo(1)
+        assertThat(world.sddCollections.lastCollectionDate(mandate.id)).isEqualTo(actual.lastCollectionDate)
+        assertThat(world.ledger.postedCount()).isEqualTo(1)
+        assertThat(MoneyPathInvariants.sddCollectionCompleteness.check(world)).isNull()
     }
+
+    @Test
+    fun `a lifecycle collection stamp without its book outcome is a completeness violation`() {
+        val world = newWorld()
+        val mandate = MandateLifecycle.recordCollection(freshMandate(world), today(world))
+        world.sddMandates.add(mandate)
+        assertThat(world.sddCollections.postedCollections(mandate.id)).isZero()
+
+        val violation = MoneyPathInvariants.sddCollectionCompleteness.check(world)
+        assertThat(violation).isNotNull()
+        assertThat(violation?.invariant).isEqualTo("sdd-collection-completeness")
+    }
+
+    @Test
+    fun `a never-collected mandate legitimately has no book outcome`() {
+        val world = newWorld()
+        val mandate = freshMandate(world)
+        world.sddMandates.add(mandate)
+        assertThat(mandate.lastCollectionDate).isNull()
+        assertThat(world.sddCollections.postedCollections(mandate.id)).isZero()
+        assertThat(MoneyPathInvariants.sddCollectionCompleteness.check(world)).isNull()
+    }
+
+    @Test
+    fun `an active mandate idle for 37 months expires before any collection write`() {
+        val world = World(SimulationContext(seed = 0L, FaultProfile.NONE), SimulationConfig())
+        val mandate = freshMandate(world, signatureDate = today(world).minusMonths(37))
+        world.sddMandates.add(mandate)
+
+        SddCollectionScenario.step(world)
+        world.context.scheduler.drain()
+
+        val actual = world.sddMandates.single()
+        assertThat(actual.id).isEqualTo(mandate.id)
+        assertThat(actual.status).isEqualTo(MandateStatus.EXPIRED)
+        assertThat(actual.lastCollectionDate).isNull()
+        assertThat(world.sddCollections.postedCollections(mandate.id)).isZero()
+        assertThat(world.sddCollections.attemptedFailureCount(mandate.id)).isZero()
+        assertThat(world.ledger.postedCount()).isZero()
+        assertThat(MoneyPathInvariants.sddCollectionCompleteness.check(world)).isNull()
+    }
+
+    private fun today(world: World): LocalDate =
+        LocalDate.ofInstant(world.context.clock.instant(), ZoneId.of("Europe/Prague"))
+
+    // Explicit domain fixture; it consumes no RNG values and claims no production birth behavior.
+    private fun freshMandate(world: World, signatureDate: LocalDate = today(world)): SddMandate = SddMandate(
+        id = UUID(0L, 501L),
+        accountId = world.customerAccounts.first(),
+        debtorIban = "SIM-DEBTOR",
+        creditorIdentifier = "SIM-CREDITOR",
+        umr = "SIM-MANDATE",
+        scheme = SddScheme.CORE,
+        sequenceType = SequenceType.FRST,
+        creditorName = "Sim Creditor",
+        debtorName = "Sim Debtor",
+        signatureDate = signatureDate,
+        status = MandateStatus.ACTIVE,
+        b2bConfirmed = false,
+        lastCollectionDate = null,
+        lastPreNotificationDate = null,
+        createdAt = signatureDate.atStartOfDay(ZoneId.of("Europe/Prague")).toInstant(),
+    )
 
     @Test
     fun `a B2B mandate is confirmed through the debtor-bank gate before it can be collected`() {

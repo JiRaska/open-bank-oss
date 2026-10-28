@@ -269,6 +269,12 @@ object MoneyPathInvariants {
         override fun check(world: World): Violation? {
             world.sddMandates.forEach { mandate ->
                 val posted = world.sddCollections.postedCollections(mandate.id)
+                // World creates mandates without prior collections; its book covers their
+                // complete simulated lifecycle. Imported history would need an explicit book
+                // baseline, never silent inference from an aggregate stamp.
+                if (posted == 0 && mandate.lastCollectionDate != null) {
+                    return Violation(name, "mandate ${mandate.id} has a lifecycle stamp but no recorded collection")
+                }
                 if (posted > 0) {
                     if (mandate.lastCollectionDate == null) {
                         return Violation(name, "mandate ${mandate.id} has $posted collections but no lifecycle stamp")
