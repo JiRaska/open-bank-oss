@@ -123,7 +123,11 @@ class ProductCatalogHostHeaderIT {
             }
             http.createContext("/api/v2/legacy-products") { ex ->
                 revisionAuthorizations += ex.requestHeaders.getFirst("Authorization") ?: ""
-                val body = """{"id":"22222222-2222-2222-2222-222222222222","offeringId":"33333333-3333-3333-3333-333333333333","number":1,"state":"PUBLISHED"}""".toByteArray()
+                val body =
+                    """
+                        {"id":"22222222-2222-2222-2222-222222222222",
+                        "offeringId":"33333333-3333-3333-3333-333333333333","number":1,"state":"PUBLISHED"}
+                    """.trimIndent().toByteArray()
                 ex.responseHeaders.add("Content-Type", "application/json")
                 ex.sendResponseHeaders(200, body.size.toLong())
                 ex.responseBody.use { it.write(body) }
