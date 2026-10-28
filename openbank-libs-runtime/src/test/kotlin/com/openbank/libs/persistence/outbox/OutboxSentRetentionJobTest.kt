@@ -27,6 +27,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.logging.Handler
 import java.util.logging.Level
 import java.util.logging.LogRecord
@@ -43,8 +44,10 @@ class OutboxSentRetentionJobTest {
     // same underlying node the production code logs to. The once-vs-always log branches in
     // purgeAll are security-adjacent telemetry (a silent purge must be distinguishable from a
     // purge that did nothing), so these tests pin the formatted line, not just the metric.
-    private val julLogger = JulLogger.getLogger("com.openbank.libs.persistence.outbox")
-    private val captured = mutableListOf<LogRecord>()
+    private val julLogger = JulLogger.getLogger("com.openbank.libs.persistence.outbox.OutboxSentRetentionJob")
+    private val captured = ConcurrentLinkedQueue<LogRecord>()
+    private var originalLevel: Level? = null
+    private var originalUseParentHandlers = true
     private val handler = object : Handler() {
         override fun publish(record: LogRecord) {
             captured += record
@@ -55,6 +58,9 @@ class OutboxSentRetentionJobTest {
 
     @BeforeEach
     fun attachHandler() {
+        originalLevel = julLogger.level
+        originalUseParentHandlers = julLogger.useParentHandlers
+        captured.clear()
         julLogger.level = Level.ALL
         julLogger.useParentHandlers = false
         julLogger.addHandler(handler)
@@ -63,7 +69,8 @@ class OutboxSentRetentionJobTest {
     @AfterEach
     fun detachHandler() {
         julLogger.removeHandler(handler)
-        julLogger.useParentHandlers = true
+        julLogger.level = originalLevel
+        julLogger.useParentHandlers = originalUseParentHandlers
     }
 
     /** Joins captured records; falls back to manual String.format when the backend hands back

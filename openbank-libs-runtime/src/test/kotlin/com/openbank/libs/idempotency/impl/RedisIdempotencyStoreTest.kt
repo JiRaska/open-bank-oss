@@ -34,6 +34,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.logging.Handler
 import java.util.logging.Level
 import java.util.logging.LogRecord
@@ -65,7 +66,9 @@ class RedisIdempotencyStoreTest {
     // the log line is what an on-call reads), so these tests pin the level and the one-shot
     // behaviour, not just the outcome.
     private val julLogger = JulLogger.getLogger("com.openbank.libs.idempotency.impl.RedisIdempotencyStore")
-    private val captured = mutableListOf<LogRecord>()
+    private val captured = ConcurrentLinkedQueue<LogRecord>()
+    private var originalLevel: Level? = null
+    private var originalUseParentHandlers = true
     private val handler = object : Handler() {
         override fun publish(record: LogRecord) {
             captured += record
@@ -76,6 +79,9 @@ class RedisIdempotencyStoreTest {
 
     @BeforeEach
     fun attachHandler() {
+        originalLevel = julLogger.level
+        originalUseParentHandlers = julLogger.useParentHandlers
+        captured.clear()
         julLogger.level = Level.ALL
         julLogger.useParentHandlers = false
         julLogger.addHandler(handler)
@@ -84,7 +90,8 @@ class RedisIdempotencyStoreTest {
     @AfterEach
     fun detachHandler() {
         julLogger.removeHandler(handler)
-        julLogger.useParentHandlers = true
+        julLogger.level = originalLevel
+        julLogger.useParentHandlers = originalUseParentHandlers
     }
 
     private fun loggedText(): String = captured.joinToString(" | ") {
