@@ -26,9 +26,16 @@ const foreignId = '00000000-0000-4000-8000-700000000000';
 const customerBase = 'https://customer.open-bank.tech';
 const row = { id: fixtureId, partyId: owner, status: 'ACTIVE', sharedWithMe: false };
 const account = { id: fixtureId };
-const balance = [{ accountId: fixtureId, currency: 'CZK', currentBalance: 1000, availableBalance: 1000, reservedBalance: 0 }];
+const balance = { balances: [
+  { id: '44444444-4444-4444-8444-444444444444', accountId: fixtureId, currency: 'CZK',
+    bookedAmount: 1000, availableAmount: 1000, reservedAmount: 0, pendingAmount: 0,
+    notYetEffectiveCredit: 0, effectiveAvailableAmount: 1000 },
+  { id: '55555555-5555-4555-8555-555555555555', accountId: fixtureId, currency: 'EUR',
+    bookedAmount: 0, availableAmount: 0, reservedAmount: 0, pendingAmount: 0,
+    notYetEffectiveCredit: 0, effectiveAvailableAmount: 0 },
+] };
 
-function execute(script, listing, tokenPartyId = owner) {
+function execute(script, listing, tokenPartyId = owner, balanceBody = balance) {
   const payload = Buffer.from(JSON.stringify({ party_id: tokenPartyId })).toString('base64url');
   const token = `header.${payload}.signature`;
   const results = {};
@@ -45,7 +52,7 @@ function execute(script, listing, tokenPartyId = owner) {
         if (url === `${customerBase}/customer/v1/accounts` && !params.headers) return response(401, {});
         if (url === `${customerBase}/customer/v1/accounts`) return response(200, listing);
         if (url === `${customerBase}/customer/v1/accounts/${fixtureId}`) return response(200, account);
-        if (url === `${customerBase}/customer/v1/balances/${fixtureId}`) return response(200, balance);
+        if (url === `${customerBase}/customer/v1/balances/${fixtureId}`) return response(200, balanceBody);
         if (url === `${customerBase}/customer/v1/accounts/${foreignId}`) return response(403, {});
         return response(500, {});
       },
@@ -56,8 +63,8 @@ function execute(script, listing, tokenPartyId = owner) {
   return { checks: results, probe: context.__probe };
 }
 
-function assertAllPass(label, listing) {
-  const { checks } = execute(input.script, listing);
+function assertAllPass(label, listing, balanceBody = balance) {
+  const { checks } = execute(input.script, listing, owner, balanceBody);
   if (Object.keys(checks).length !== 7 || Object.values(checks).some((value) => !value)) {
     throw new Error(`${label} did not pass all seven checks: ${JSON.stringify(checks)}`);
   }
@@ -68,6 +75,12 @@ function assertOwnershipFails(label, listing, tokenPartyId = owner) {
     throw new Error(`${label} passed the ownership check`);
   }
 }
+function assertBalanceFails(label, balanceBody, checkName) {
+  const { checks } = execute(input.script, actualRuntimePage, owner, balanceBody);
+  if (Object.keys(checks).length !== 7 || checks[checkName] !== false) {
+    throw new Error(`${label} did not fail ${checkName}: ${JSON.stringify(checks)}`);
+  }
+}
 
 const actualRuntimePage = { data: [row], pagination: { limit: 20, hasNextPage: false } };
 const openApiPage = { data: [row], pagination: { hasMore: false, nextCursor: null } };
@@ -75,7 +88,14 @@ const dualPage = { data: [row], pagination: { hasMore: false, hasNextPage: false
 assertAllPass('runtime PageInfo', actualRuntimePage);
 assertAllPass('OpenAPI CursorPagination', openApiPage);
 assertAllPass('both completion fields agree', dualPage);
-assertAllPass('legacy array', [row]);
+assertAllPass('legacy account-list array', [row]);
+assertAllPass('balance-service wrapped multi-currency response', actualRuntimePage, balance);
+const futureCreditBalance = { balances: [{ ...balance.balances[0],
+  notYetEffectiveCredit: 50, effectiveAvailableAmount: 950 }] };
+assertAllPass('booked balance is distinct from future-credit spendability', actualRuntimePage, futureCreditBalance);
+const overdraftLimitBalance = { balances: [{ ...balance.balances[0],
+  availableAmount: 1100, effectiveAvailableAmount: 1100 }] };
+assertAllPass('available amount may exceed booked amount', actualRuntimePage, overdraftLimitBalance);
 assertOwnershipFails('wrong owner', { data: [{ ...row, partyId: other }], pagination: actualRuntimePage.pagination });
 assertOwnershipFails('shared row', { data: [{ ...row, sharedWithMe: true }], pagination: actualRuntimePage.pagination });
 assertOwnershipFails('missing own row', { data: [], pagination: actualRuntimePage.pagination });
@@ -90,6 +110,34 @@ assertOwnershipFails('missing completion flag', { data: [row], pagination: { nex
 assertOwnershipFails('non-boolean completion flag', { data: [row], pagination: { hasMore: 'false', nextCursor: null } });
 assertOwnershipFails('conflicting completion flags', { data: [row], pagination: { hasMore: false, hasNextPage: true, nextCursor: null } });
 assertOwnershipFails('token party claim mismatch', actualRuntimePage, other);
+
+const balanceCheck = 'the balance is in the fixture currency and internally consistent';
+assertBalanceFails('bare balance array envelope', balance.balances, 'the balance is served for the account');
+assertBalanceFails('missing balances envelope', { data: balance.balances }, 'the balance is served for the account');
+assertBalanceFails('wrong balance account', { balances: [{ ...balance.balances[0], accountId: other }] }, 'the balance is served for the account');
+assertBalanceFails('duplicate balance currencies', { balances: [balance.balances[0], { ...balance.balances[0] }] }, 'the balance is served for the account');
+assertBalanceFails('wrong fixture currency', { balances: [{ ...balance.balances[0], currency: 'EUR' }] }, 'the balance is served for the account');
+for (const malformed of ['not-a-number', '1000', true, [], null]) {
+  assertBalanceFails(`malformed bookedAmount ${JSON.stringify(malformed)}`, {
+    balances: [{ ...balance.balances[0], bookedAmount: malformed }],
+  }, balanceCheck);
+}
+assertBalanceFails('malformed balance collection', { balances: {} }, 'the balance is served for the account');
+assertBalanceFails('inconsistent spendable value', {
+  balances: [{ ...balance.balances[0], effectiveAvailableAmount: 999 }],
+}, balanceCheck);
+
+// Mutation control: restore the prior bare-array/currentBalance selection in the actual journey.
+const currentBalanceSelection = 'const b = id ? ownedCurrencyBalance(balanceBody, id, FIXTURE_CURRENCY) : null;';
+const oldBalanceSelection = `const balanceRows = balance && balance.status === 200 ? json(balance) : null;
+      const b = Array.isArray(balanceRows) ? (balanceRows.find((r) => r && r.currency === FIXTURE_CURRENCY) || null) : null;`;
+if (!input.script.includes(currentBalanceSelection)) throw new Error('current balance selection fragment missing');
+const oldBalanceParser = input.script.replace(currentBalanceSelection, oldBalanceSelection);
+if (oldBalanceParser === input.script) throw new Error('could not apply old bare-array balance parser mutation');
+const { checks: oldBalanceChecks } = execute(oldBalanceParser, actualRuntimePage);
+if (oldBalanceChecks['the balance is served for the account'] !== false) {
+  throw new Error('old bare-array/currentBalance parser passed the wrapped-balance journey');
+}
 
 const { probe } = execute(input.script, actualRuntimePage);
 if (probe.accountRows({ data: [row], pagination: [] }) !== null) throw new Error('array pagination helper accepted');
@@ -152,7 +200,7 @@ def main() -> int:
     if result.returncode:
         print(result.stderr or result.stdout, file=sys.stderr)
         return result.returncode
-    print("account-overview probe test: pass (journey page/array, owner/share negatives, parser and foreign-route mutations)")
+    print("account-overview probe test: pass (account page and legacy array, wrapped multi-currency balance, ownership and balance negatives, parser/route mutations)")
     return 0
 
 

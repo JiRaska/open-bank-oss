@@ -159,6 +159,19 @@ data:
       return active.length === 1 ? active[0] : null;
     }
 
+    // Customer-edge transparently proxies balance-service's {balances: Balance[]} response.
+    // The endpoint returns one row per currency for this account; reject malformed, duplicate,
+    // foreign-account, or absent rows instead of treating a partial body as a fixture balance.
+    function ownedCurrencyBalance(body, accountId, currency) {
+      if (!body || typeof body !== 'object' || Array.isArray(body) || !Array.isArray(body.balances)) return null;
+      const rows = body.balances;
+      if (rows.length === 0 || rows.some((row) => !row || typeof row !== 'object'
+          || row.accountId !== accountId || typeof row.currency !== 'string')) return null;
+      if (new Set(rows.map((row) => row.currency)).size !== rows.length) return null;
+      const matches = rows.filter((row) => row.currency === currency);
+      return matches.length === 1 ? matches[0] : null;
+    }
+
     function report(step, res, expected) {
       if (res.status !== expected) console.error(`account-overview ${step}: status=${res.status} expected=${expected}`);
     }
@@ -198,28 +211,33 @@ data:
       const accountBody = account && account.status === 200 ? json(account) : null;
       const balance = id ? http.get(`${CUSTOMER_BASE}/customer/v1/balances/${id}`, params('balance-get')) : null;
       if (balance) report('balance', balance, 200);
-      // balance-service answers a JSON ARRAY of BalanceResponse, one per currency: pick the fixture
-      // currency's row. No match leaves b null, which fails the 'served' check below by name.
-      const balanceRows = balance && balance.status === 200 ? json(balance) : null;
-      const b = Array.isArray(balanceRows) ? (balanceRows.find((r) => r && r.currency === FIXTURE_CURRENCY) || null) : null;
+      // BalanceResource returns {balances: Balance[]}; customer-edge forwards that body unchanged.
+      // bookedAmount is the ledger-projected balance. effectiveAvailableAmount is spendable money,
+      // so it is checked for wire consistency but never compared to the seeded balance.
+      const balanceBody = balance && balance.status === 200 ? json(balance) : null;
+      const b = id ? ownedCurrencyBalance(balanceBody, id, FIXTURE_CURRENCY) : null;
 
       // 4. negative path: a well-formed id the caller does not own is refused (403, not 404:
       // the edge deliberately gives no existence oracle)
       const foreign = http.get(`${CUSTOMER_BASE}/customer/v1/accounts/00000000-0000-4000-8000-${`${Date.now()}`.slice(-12).padStart(12, '0')}`, params('account-foreign'));
 
-      const num = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
+      const isFiniteAmount = (value) => typeof value === 'number' && Number.isFinite(value);
       check(null, {
         'an unauthenticated account list is refused': () => anon.status === 401,
         // exactly one ACTIVE fixture for the authenticated party, with no delegated/shared row.
         'the canary lists exactly its own ACTIVE fixture account': () => !!fixture && fixture.partyId === ownPartyId,
         'the account can be opened by id': () => !!accountBody && accountBody.id === id,
-        // fails when the array has no element with currency === FIXTURE_CURRENCY (or the body is not an array)
+        // Requires one wrapped row for this account and the configured currency.
         'the balance is served for the account': () => !!b && b.accountId === id,
         'the balance is in the fixture currency and internally consistent': () => !!b
           && b.currency === FIXTURE_CURRENCY
-          && Number.isFinite(num(b.currentBalance)) && Number.isFinite(num(b.availableBalance))
-          && num(b.reservedBalance) >= 0 && num(b.availableBalance) <= num(b.currentBalance) + 0.005,
-        'the balance equals the seeded fixture balance': () => !!b && Math.abs(num(b.currentBalance) - FIXTURE_BALANCE) < 0.005,
+          && isFiniteAmount(b.bookedAmount) && isFiniteAmount(b.availableAmount)
+          && isFiniteAmount(b.reservedAmount) && b.reservedAmount >= 0
+          && isFiniteAmount(b.pendingAmount) && isFiniteAmount(b.notYetEffectiveCredit)
+          && b.notYetEffectiveCredit >= 0 && isFiniteAmount(b.effectiveAvailableAmount)
+          && Math.abs(b.effectiveAvailableAmount - (b.availableAmount - b.notYetEffectiveCredit)) < 0.005,
+        'the balance equals the seeded fixture balance': () => !!b
+          && isFiniteAmount(b.bookedAmount) && Math.abs(b.bookedAmount - FIXTURE_BALANCE) < 0.005,
         'an account the caller does not own is refused': () => foreign.status === 403,
       });
     }
