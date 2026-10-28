@@ -28,6 +28,9 @@ repositories {
 }
 
 dependencies {
+    // Reuse the kernel canonical JSON and SHA-256; no context-to-context dependency.
+    implementation(project(":openbank-libs-domain"))
+
     // NO framework dependencies here — same rule as openbank-libs-domain (ADR-0002, #3670).
 
     testImplementation(platform(libs.junit.bom))
