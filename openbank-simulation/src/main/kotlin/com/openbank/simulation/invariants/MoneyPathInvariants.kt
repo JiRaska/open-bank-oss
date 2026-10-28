@@ -14,6 +14,7 @@ import com.openbank.simulation.runner.World
 import com.openbank.standingorder.domain.model.Frequency
 import com.openbank.standingorder.domain.model.StandingOrder
 import com.openbank.standingorder.domain.model.StandingOrderStatus
+import com.openbank.swift.domain.model.SwiftStatus
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -315,6 +316,27 @@ object MoneyPathInvariants {
     }
 
     /**
+     * Outgoing-SWIFT completeness: every `SwiftMessage` the scenario created must reach a
+     * terminal status (COMPLETED / REJECTED / FAILED) once the step has settled — none may
+     * remain mid-flight in PENDING/VALIDATED/SENT, the states where a crash would leave the
+     * operator guessing whether the money left. Same "settled" semantics as
+     * [settlementCompleteness]: checked after the scheduler drains.
+     */
+    val swiftCompleteness = object : Invariant {
+        private val terminal = setOf(SwiftStatus.COMPLETED, SwiftStatus.REJECTED, SwiftStatus.FAILED)
+
+        override val name = "swift-completeness"
+        override fun check(world: World): Violation? {
+            world.swiftMessages.forEach { message ->
+                if (message.status !in terminal) {
+                    return Violation(name, "swift message ${message.id} stuck in ${message.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
      * ADR-0036 §B / ADR-0100 full-service adoption: the SDD collection invariant, reconciling the
      * REAL `SddMandate` lifecycle against the money-path book, once a step has fully settled:
      *
@@ -369,6 +391,35 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * Outgoing-SWIFT conservation: a COMPLETED MT103 must have posted exactly its amount, and
+     * nothing else may post under a SWIFT message id — so a message that completed without
+     * money leaving (or money that left without a completion) is caught per message, while a
+     * REJECTED (validate refused) or FAILED (compensated) message provably posted nothing.
+     */
+    val swiftMoneyConservation = object : Invariant {
+        override val name = "swift-money-conservation"
+        override fun check(world: World): Violation? {
+            world.swiftMessages.forEach { message ->
+                val posted = world.swiftBook.postedAmount(message.id)
+                if (message.status == SwiftStatus.COMPLETED) {
+                    val amount = message.amount.amount
+                    if (posted.compareTo(amount) != 0) {
+                        return Violation(name, "swift ${message.id} completed but posted=$posted amount=$amount")
+                    }
+                } else if (posted.signum() != 0) {
+                    return Violation(name, "swift ${message.id} is ${message.status} but posted=$posted")
+                }
+            }
+            world.swiftBook.postedIds().forEach { messageId ->
+                if (world.swiftMessages.none { it.id == messageId }) {
+                    return Violation(name, "posted under unknown swift message $messageId")
+                }
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -383,6 +434,8 @@ object MoneyPathInvariants {
         statementCloseIntegrity,
         standingOrderCompleteness,
         sddCollectionCompleteness,
+        swiftCompleteness,
+        swiftMoneyConservation,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */
