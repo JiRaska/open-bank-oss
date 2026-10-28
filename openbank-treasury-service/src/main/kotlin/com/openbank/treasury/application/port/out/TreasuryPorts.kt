@@ -12,6 +12,7 @@ import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.PostingEvent
+import com.openbank.treasury.domain.model.ResolvedAccount
 import io.smallrye.mutiny.Uni
 import java.math.BigDecimal
 import java.time.Instant
@@ -20,6 +21,9 @@ import java.util.UUID
 
 /** Raised when a command names a deal that does not exist. Mapped to 404. */
 class DealNotFoundException(dealId: UUID) : NoSuchElementException("deal $dealId not found")
+
+/** A deal write was computed from a copy older than the stored row. Mapped to 409 DEAL_CHANGED. */
+class DealChangedException(message: String) : IllegalStateException(message)
 
 /** Raised when a deal names a counterparty not in the master. Mapped to 400 via IllegalArgumentException. */
 class UnknownCounterpartyException(id: String) : IllegalArgumentException("unknown counterparty '$id'")
@@ -31,6 +35,8 @@ data class LedgerJournalRef(
     val idempotencyKey: String,
     val journalId: UUID,
     val postedAt: Instant,
+    /** The accounts the ledger resolved each leg to, so a reversal can offset exactly these. */
+    val accounts: List<ResolvedAccount> = emptyList(),
 )
 
 /**
@@ -52,6 +58,10 @@ interface DealRepository {
         journal: LedgerJournalRef? = null,
         event: DealEvent? = null,
         command: CommandKey? = null,
+        /** ADR-0344 D4: the schedule generated with this change, stored in the same transaction. */
+        schedule: ScheduleWrite? = null,
+        /** Further outbox events of the same change (e.g. treasury.cashflow.generated). */
+        extraEvents: List<DealEvent> = emptyList(),
     ): Deal
 
     /** The command previously recorded under [key], if any. */
@@ -96,8 +106,11 @@ interface CounterpartyRepository {
  * writes the ledger's database. Must be idempotent on [JournalSpec.idempotencyKey].
  */
 interface LedgerPostingPort {
-    /** Returns the ledger's journal id — the original one on an idempotent replay. */
-    suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID
+    /**
+     * Returns the ledger's journal — the original one on an idempotent replay, with the accounts its
+     * legs were ORIGINALLY resolved to.
+     */
+    suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): PostedJournal
 }
 
 /**
@@ -137,3 +150,6 @@ fun interface CurveSetPort {
 interface TreasuryOutboxRepository : OutboxRepository {
     fun persistInTransaction(message: OutboxMessage): Uni<Void>
 }
+
+/** A journal the ledger holds for a posted [JournalSpec]: its id and where each leg landed. */
+data class PostedJournal(val journalId: UUID, val accounts: List<ResolvedAccount> = emptyList())

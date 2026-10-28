@@ -30,11 +30,13 @@ import io.mockk.mockk
 import io.mockk.verify
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
+import jakarta.persistence.PersistenceException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.sql.SQLException
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -110,6 +112,38 @@ class TransactionServiceTest {
 
         assertThat(result).isEqualTo(existing)
         coVerify(exactly = 0) { transactionRepository.save(any(), any()) }
+        verify(exactly = 0) { workflowClient.newWorkflowStub(any<Class<*>>(), any<WorkflowOptions>()) }
+    }
+
+    @Test
+    fun `rolled back global collision returns winner status without starting a workflow`(): Unit = runBlocking {
+        val command = initiateCommand()
+        val winner = transaction(idempotencyKey = command.idempotencyKey).copy(status = TransactionStatus.FAILED)
+        val sql = SQLException(
+            "duplicate key violates unique constraint \"pk_transaction_idempotency_keys\"",
+            "23505",
+        )
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returnsMany
+            listOf(null, winner)
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        coEvery { transactionRepository.save(any(), any()) } throws PersistenceException(sql)
+
+        assertThat(service.initiateTransaction(command)).isEqualTo(winner)
+        coVerify(exactly = 2) { transactionRepository.findByIdempotencyKey(command.idempotencyKey) }
+        verify(exactly = 0) { workflowClient.newWorkflowStub(any<Class<*>>(), any<WorkflowOptions>()) }
+    }
+
+    @Test
+    fun `an unrelated persistence failure mentioning idempotency still propagates`(): Unit = runBlocking {
+        val command = initiateCommand()
+        val failure = PersistenceException("idempotency storage unavailable")
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        coEvery { transactionRepository.save(any(), any()) } throws failure
+
+        val thrown = runCatching { service.initiateTransaction(command) }.exceptionOrNull()
+        assertThat(thrown).isSameAs(failure)
+        coVerify(exactly = 1) { transactionRepository.findByIdempotencyKey(command.idempotencyKey) }
         verify(exactly = 0) { workflowClient.newWorkflowStub(any<Class<*>>(), any<WorkflowOptions>()) }
     }
 

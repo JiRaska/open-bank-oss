@@ -18,7 +18,7 @@ import {
   type IctIncident, type IncidentSeverity, type IncidentStatus,
 } from '@/lib/security/incidentEvidence'
 
-type Failure = 'unauthorized' | 'not_deployed' | 'unreachable' | 'invalid_response' | 'result_limit' | 'error'
+type Failure = 'unauthorized' | 'not_deployed' | 'discovery_unavailable' | 'unreachable' | 'invalid_response' | 'result_limit' | 'error'
 type Envelope = { available: true; incidents: unknown } | { available: false; reason: Failure }
 const ALL = '__ALL__'
 const ACTIVE_STATUSES: readonly IncidentStatus[] = ['OPEN', 'INVESTIGATING', 'CONTAINED']
@@ -112,6 +112,8 @@ export default function IncidentsPage() {
     ? t('Vaše role nemá oprávnění zobrazit registr. Požádejte správce o přístup system:view.', 'Your role cannot view this register. Ask an administrator for system:view access.')
     : failure === 'not_deployed'
       ? t('Zdroj incidentů není nasazen. To není důkaz, že incidenty neexistují.', 'The incident source is not deployed. This is not evidence that no incidents exist.')
+      : failure === 'discovery_unavailable'
+        ? t('Inventář služeb je neúplný, takže dostupnost zdroje incidentů nelze ověřit.', 'The service inventory is incomplete, so incident-source availability cannot be verified.')
       : failure === 'invalid_response'
         ? t('Zdroj vrátil data, která nelze ověřit jako platný DORA registr.', 'The source returned data that cannot be verified as a valid DORA register.')
         : failure === 'result_limit'

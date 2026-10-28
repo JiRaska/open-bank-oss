@@ -3,7 +3,7 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Async Event API
-  version: 2.3.0
+  version: 2.4.0
   description: |
     Kafka event streams across OpenBank services.
 
@@ -203,6 +203,19 @@ channels:
     messages:
       TransactionInitiated:
         $ref: '#/components/messages/TransactionInitiated'
+
+  fraud-shadow-velocity:
+    address: openbank.fraud.shadow.velocity.v1
+    description: >-
+      Opt-in Kafka Streams direct emitter of shadow bucket snapshots, discriminated by
+      body eventType=FraudShadowVelocity and schemaVersion=1. Key is accountId:window:windowStartEpochMillis.
+      This is a diagnostic projection, not a decision or arbitrary point-in-time feature value.
+      One-hour grace follows each UTC bucket end; updates may arrive out of order across buckets.
+      Original input topic/partition/offset and outbox ce-id survive account repartition.
+      No fraud verdict path or existing Redis feature store consumes this topic.
+    messages:
+      FraudShadowVelocity:
+        $ref: '#/components/messages/FraudShadowVelocity'
 
   balance-events:
     address: openbank.balance.events
@@ -480,6 +493,12 @@ channels:
         $ref: '#/components/messages/SanctionsListChangeStorm'
 
 operations:
+  publishFraudShadowVelocity:
+    action: send
+    channel:
+      $ref: '#/channels/fraud-shadow-velocity'
+    summary: fraud-service emits opt-in H1/H24 bucket snapshots without changing verdict inputs
+
   publishAccountEvents:
     action: send
     channel:
@@ -619,6 +638,11 @@ operations:
 
 components:
   messages:
+    FraudShadowVelocity:
+      name: FraudShadowVelocity
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/FraudShadowVelocityPayload'
     AccountCreated:
       name: AccountCreated
       title: Account Created
@@ -996,6 +1020,48 @@ components:
         $ref: '#/components/schemas/SanctionsListChangeStormPayload'
 
   schemas:
+    FraudShadowVelocityPayload:
+      type: object
+      required: [eventType, schemaVersion, accountId, eventId, occurredAt, sourceTopic, sourcePartition, sourceOffset, window, windowStart, windowEndExclusive, count]
+      properties:
+        eventType:
+          type: string
+          const: FraudShadowVelocity
+        schemaVersion:
+          type: integer
+          const: 1
+        accountId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+          description: Last contributing outbox ce-id, not the independently generated body eventId.
+        occurredAt:
+          type: string
+          format: date-time
+          description: Business time of the last contributing input, not an as-of watermark.
+        sourceTopic:
+          type: string
+          const: openbank.transactions.transaction.initiated
+        sourcePartition:
+          type: integer
+          minimum: 0
+        sourceOffset:
+          type: integer
+          minimum: 0
+        window:
+          type: string
+          enum: [H1, H24]
+        windowStart:
+          type: string
+          format: date-time
+        windowEndExclusive:
+          type: string
+          format: date-time
+        count:
+          type: integer
+          minimum: 1
     SanctionsListChangedPayload:
       type: object
       required: [aggregateId, aggregateType, listType, changedExternalIds, deactivatedExternalIds, changeCount, publicationId, chunkIndex, chunkCount, occurredAt]
@@ -1929,7 +1995,7 @@ components:
           format: uuid
         channel:
           type: string
-          enum: [EMAIL, PUSH]
+          enum: [EMAIL, PUSH, INBOX]
         template:
           type: string
           description: Closed notification-service template identifier.

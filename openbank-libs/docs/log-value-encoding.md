@@ -41,6 +41,13 @@ non-dash input. This implementation choice preserves the encoding semantics; it
 is not a throughput improvement or a benchmark result. Keep the existing
 null/dash, quoting, control-character and round-trip regressions when changing it.
 
+The nullable receiver is assigned to an explicit non-null local after the null
+placeholder return. Both the full-token check and quoted-value loop use that
+same local; the null sentinel, complete-token matching and escaping are unchanged.
+This makes the checked value explicit to static analysis without changing the
+encoding contract. Local analyzer fixtures do not establish closure of findings
+in the production source tree; the native scan remains required.
+
 ## Privacy and verification limits
 
 Encoding is not redaction, anonymization or permission to log a value. Both

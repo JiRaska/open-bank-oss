@@ -46,7 +46,7 @@ describe('Transaction search UX', () => {
     expect(dateTo).toHaveAttribute('aria-describedby', 'transaction-date-range-error')
     expect(screen.getByRole('alert')).toHaveTextContent('The start date must be on or before the end date.')
     expect(screen.getByRole('button', { name: 'Search transactions' })).toBeDisabled()
-    fireEvent.keyDown(screen.getByLabelText('Search by account ID'), { key: 'Enter' })
+    fireEvent.keyDown(screen.getByLabelText('Filter by IBAN'), { key: 'Enter' })
     expect(fetch.mock.calls.some(([url]) => String(url).includes('/transactions/search'))).toBe(false)
 
     fireEvent.change(dateTo, { target: { value: '2026-09-30' } })
@@ -57,7 +57,25 @@ describe('Transaction search UX', () => {
     expect(amountMin).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByRole('alert')).toHaveTextContent('The minimum amount cannot exceed the maximum amount.')
     expect(screen.getByRole('button', { name: 'Search transactions' })).toBeDisabled()
-    fireEvent.keyDown(screen.getByLabelText('Search by account ID'), { key: 'Enter' })
+    fireEvent.keyDown(screen.getByLabelText('Filter by IBAN'), { key: 'Enter' })
     expect(fetch.mock.calls.some(([url]) => String(url).includes('/transactions/search'))).toBe(false)
   })
+  it('discards a filtered empty result when clearing criteria without claiming the ledger is empty', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ data: [], count: 0, limit: 51, offset: 0 }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetch)
+    render(React.createElement(LanguageProvider, null, React.createElement(TransactionsPage)))
+    fireEvent.change(screen.getByLabelText('Filter by IBAN'), { target: { value: 'CZ6508000000192000145399' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search transactions' }))
+    expect(await screen.findByText('No transactions match your search criteria')).toBeVisible()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search criteria' }))
+    expect(screen.getByLabelText('Filter by IBAN')).toHaveValue('')
+    expect(screen.getByRole('status')).toHaveTextContent('Find a transaction using the details you have')
+    expect(screen.queryByText('No transactions have been recorded yet')).not.toBeInTheDocument()
+    expect(screen.queryByText('No transactions match your search criteria')).not.toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
 })

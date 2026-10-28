@@ -53,6 +53,8 @@ data class ModelVersionsDto(
     val minReservesSetVersion: String,
     val behaviouralModelId: String,
     val behaviouralModelVersion: String,
+    val curveModelVersion: String? = null,
+    val valuationModelVersion: String? = null,
 )
 
 fun ModelVersions.toDto() = ModelVersionsDto(
@@ -67,6 +69,8 @@ fun ModelVersions.toDto() = ModelVersionsDto(
     minReservesSetVersion,
     behaviouralModelId,
     behaviouralModelVersion,
+    curveModelVersion,
+    valuationModelVersion,
 )
 
 data class PositionDto(

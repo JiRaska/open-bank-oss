@@ -1,0 +1,29 @@
+public final class com/openbank/libs/temporal/OpenTelemetryContextPropagator : io/temporal/common/context/ContextPropagator {
+	public static final field Companion Lcom/openbank/libs/temporal/OpenTelemetryContextPropagator$Companion;
+	public static final field NAME Ljava/lang/String;
+	public fun <init> ()V
+	public fun deserializeContext (Ljava/util/Map;)Ljava/lang/Object;
+	public fun getCurrentContext ()Ljava/lang/Object;
+	public fun getName ()Ljava/lang/String;
+	public fun serializeContext (Ljava/lang/Object;)Ljava/util/Map;
+	public fun setCurrentContext (Ljava/lang/Object;)V
+}
+
+public final class com/openbank/libs/temporal/OpenTelemetryContextPropagator$Companion {
+	public final fun install ()Ljava/util/List;
+}
+
+public final class com/openbank/libs/temporal/TemporalClientProducer {
+	public fun <init> (Lcom/openbank/libs/temporal/TemporalConfig;Lio/micrometer/core/instrument/MeterRegistry;)V
+	public final fun workflowClient ()Lio/temporal/client/WorkflowClient;
+	public final fun workflowClientOptions ()Lio/temporal/client/WorkflowClientOptions;
+}
+
+public abstract interface class com/openbank/libs/temporal/TemporalConfig {
+	public abstract fun enabled ()Z
+	public abstract fun metricsEnabled ()Z
+	public abstract fun namespace ()Ljava/lang/String;
+	public abstract fun serverUrl ()Ljava/lang/String;
+	public abstract fun taskQueue ()Ljava/lang/String;
+}
+

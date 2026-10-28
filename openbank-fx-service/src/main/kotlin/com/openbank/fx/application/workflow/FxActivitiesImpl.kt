@@ -5,21 +5,21 @@
 package com.openbank.fx.application.workflow
 
 import com.openbank.fx.application.port.out.AmlCasePort
-import com.openbank.fx.application.port.out.AmlCaseRiskLevel
 import com.openbank.fx.application.port.out.FraudScoreCommand
 import com.openbank.fx.application.port.out.FraudScoringPort
-import com.openbank.fx.application.port.out.FraudVerdict
 import com.openbank.fx.application.port.out.FxConversionRepository
 import com.openbank.fx.application.port.out.OpenAmlCaseCommand
 import com.openbank.fx.application.port.out.SanctionsScreeningPort
 import com.openbank.fx.application.port.out.ScreeningUnavailableException
 import com.openbank.fx.domain.model.FxConversion
 import com.openbank.fx.domain.model.FxConversionStatus
-import com.openbank.fx.domain.screening.ScreeningDecision
-import com.openbank.fx.domain.screening.ScreeningMatchStatus
-import com.openbank.fx.domain.screening.ScreeningPolicy
-import com.openbank.fx.domain.screening.ScreeningRole
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningPolicy
+import com.openbank.libs.fincrime.ScreeningRole
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
 import jakarta.enterprise.context.ApplicationScoped
@@ -60,7 +60,7 @@ open class FxActivitiesImpl(
             log.warnf(ex, "Sanctions screening unavailable for conversion %s; returning REVIEW", conversionId)
             openCaseQuietly(
                 conv = conv,
-                riskLevel = AmlCaseRiskLevel.MEDIUM,
+                riskLevel = AmlCaseSeverity.MEDIUM,
                 alertCode = ALERT_SCREENING_UNAVAILABLE,
                 detail = ex.message,
                 matchedEntity = null,
@@ -79,9 +79,9 @@ open class FxActivitiesImpl(
                 .joinToString("; ") { "${it.role} '${it.subject}' ${it.status} score=${it.score}" }
                 .ifBlank { "no actionable matches" }
             val riskLevel = if (decision == ScreeningDecision.BLOCK) {
-                AmlCaseRiskLevel.CRITICAL
+                AmlCaseSeverity.CRITICAL
             } else {
-                AmlCaseRiskLevel.HIGH
+                AmlCaseSeverity.HIGH
             }
             val alertCode = if (decision == ScreeningDecision.BLOCK) ALERT_SANCTIONS_HIT else ALERT_AML_HOLD
             openCaseQuietly(
@@ -154,7 +154,7 @@ open class FxActivitiesImpl(
     @Suppress("TooGenericExceptionCaught")
     private suspend fun openCaseQuietly(
         conv: FxConversion,
-        riskLevel: AmlCaseRiskLevel,
+        riskLevel: AmlCaseSeverity,
         alertCode: String,
         detail: String?,
         matchedEntity: String?,

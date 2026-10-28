@@ -34,6 +34,10 @@ data class ModelVersions(
     val minReservesSetVersion: String,
     val behaviouralModelId: String,
     val behaviouralModelVersion: String,
+    /** ADR-0344 D8: the curve bootstrap + interpolation version; null on a run recorded before it. */
+    val curveModelVersion: String? = null,
+    /** ADR-0344 D8: the valuation / sensitivity / VaR model version; null on an older run. */
+    val valuationModelVersion: String? = null,
 ) {
     companion object {
         private const val FINGERPRINT_HEX = 16

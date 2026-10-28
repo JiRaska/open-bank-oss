@@ -1,8 +1,13 @@
 # Runbook 0029 — EKS minor-version upgrade (worked example: 1.36 to 1.37)
 
 **Owner step, not agent step.** `tofu apply` and every `aws eks update-*` call is run by the
-human owner. This runbook is the ordered procedure; the PR that carries it only changes the
-declared version (`envs/sandbox-substrate/variables.tf`) and the lifecycle table.
+human owner. This runbook is the ordered procedure.
+
+**The declared version on `main` always equals the LIVE control plane.** `kubernetes_version` in
+`envs/sandbox-substrate/variables.tf` is applied by every substrate `tofu apply`, so a target
+version merged ahead of the window upgrades the control plane and all six add-ons the next time
+anyone applies that root for any reason, skipping sections 0-3. Changing it is therefore the
+first step of the window (section 4.0), not a preparatory PR.
 
 **Why the order matters.** Karpenter validates the control-plane version at startup and
 crash-loops when it is outside its compatibility range (the 1.34 incident recorded in
@@ -31,8 +36,9 @@ Version source of truth: `envs/sandbox-substrate/variables.tf` (`kubernetes_vers
    aws-ebs-csi-driver. Each must return at least one version.
 4. **Component compatibility matrix** (section 2). Anything not listing the target must be
    upgraded first or explicitly accepted by the owner.
-5. **Fresh state.** `git fetch`, then confirm `kubernetes_version` on `origin/main` and that no
-   other infra PR is open against the same files.
+5. **Fresh state.** `git fetch`, then confirm `kubernetes_version` on `origin/main` still equals
+   the live version (`aws eks describe-cluster --query cluster.version`) and that no other infra
+   PR is open against the same files.
 6. **Database health.** All CNPG clusters report `Cluster in healthy state` with 2 ready
    instances: `kubectl get clusters.postgresql.cnpg.io -A`. Do not start a window with a
    degraded cluster: a drain takes the second instance away.
@@ -59,7 +65,7 @@ look, not a gate.
 
 | Component (running) | Upstream statement for 1.37 |
 |---|---|
-| Karpenter 1.14.1 | NOT supported; 1.15.x is the first line listing 1.37. Blocker, prerequisite PR |
+| Karpenter 1.15.0 (declared on `main`; confirm it is applied and Ready) | Supported; 1.15.x is the first line listing 1.37. Prerequisite done once applied |
 | Envoy Gateway v1.9.2 | NOT supported; only `latest` lists 1.37 (v1.9 lists 1.33-1.36) |
 | CloudNativePG operator 1.30.1 | "tested, not supported" for 1.37 (supported 1.34-1.36) |
 | cert-manager v1.21.2 | not listed (tested 1.33-1.36) |
@@ -71,7 +77,8 @@ look, not a gate.
 
 ## 3. Plan review
 
-At the approved change window, after prerequisites and pre-checks pass, generate a fresh plan
+Run this only after step 4.0 below has set the target version (on the window branch). At the
+approved change window, after prerequisites and pre-checks pass, generate a fresh plan
 against the current configuration and state. Keep backend state locking enabled, review this
 plan, and apply only this reviewed plan; do not reuse a plan from an earlier window or revision.
 
@@ -90,6 +97,11 @@ never as a side effect of the upgrade.
 
 ## 4. Apply the control plane (owner)
 
+0. **Flip the declared version — first step of the window.** In
+   `envs/sandbox-substrate/variables.tf` change `kubernetes_version` from the live version to the
+   target (1.36 to 1.37 here) and update its comment. Merge it as its own PR only once the
+   window is open, then run section 3's plan from that commit. If the window is abandoned,
+   revert the PR before anyone else applies the substrate root.
 1. Announce a window. The control-plane update is rolling and the API stays available, but
    admission webhooks and controllers see leader changes.
 2. `tofu apply eks.plan`. EKS rolls the control plane first, then the managed `bootstrap` node

@@ -5,7 +5,7 @@
 package com.openbank.fx.application.workflow
 
 import com.openbank.fx.domain.model.FxConversionStatus
-import com.openbank.fx.domain.screening.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningDecision
 import io.temporal.activity.ActivityOptions
 import io.temporal.common.RetryOptions
 import io.temporal.workflow.Workflow

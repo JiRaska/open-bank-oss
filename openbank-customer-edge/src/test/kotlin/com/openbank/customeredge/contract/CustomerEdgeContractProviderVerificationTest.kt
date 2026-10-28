@@ -15,8 +15,10 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
+import io.restassured.RestAssured
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 
@@ -50,7 +52,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * (`GET /api/v1/accounts/{accountId}`) stubbed — [ownedAccountFixture] is that shared fixture.
  */
 @QuarkusTest
-@QuarkusTestResource(StubUpstreamResource::class)
+@QuarkusTestResource(StubUpstreamResource::class, restrictToAnnotatedClass = true)
 @TestSecurity(user = "customer:$PARTY_ID", roles = ["ROLE_CUSTOMER"])
 @OidcSecurity(claims = [Claim(key = "party_id", value = PARTY_ID)])
 @Provider("openbank-customer-edge")
@@ -170,6 +172,16 @@ class CustomerEdgeContractProviderVerificationTest {
              "partyId":"$PARTY_ID","productId":"current-standard","currencyCode":"CZK",
              "status":"ACTIVE"}
         """
+    }
+}
+
+/** Keep negative HTTP coverage separate from Pact's parameterized @BeforeEach hook. */
+@QuarkusTest
+class CustomerEdgeContractReadAuthorizationTest {
+    @Test
+    @TestSecurity(user = "wrong-role", roles = ["ROLE_API"])
+    fun `a caller without the customer role is forbidden from contract reads`() {
+        RestAssured.get("/customer/v1/accounts").then().statusCode(403)
     }
 }
 

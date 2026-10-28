@@ -143,6 +143,15 @@ const TO_MONTH: ReportParam = {
 const monthRange = (p: Record<string, string>, column = 'period') =>
   `${column} BETWEEN '${p.fromMonth}' AND '${p.toMonth}'`
 
+/**
+ * The same period range over a `Date` column holding the first day of the month (a
+ * `toStartOfMonth` result, e.g. `gold_loan_vintage.vintage_month`). Comparing that column with
+ * the bare `'2026-01'` string makes ClickHouse parse the string as a Date and fail the whole
+ * query with CANNOT_PARSE_DATE — which the page then shows as "warehouse not responding".
+ */
+const monthStartRange = (p: Record<string, string>, column: string) =>
+  `${column} BETWEEN toDate('${p.fromMonth}-01') AND toDate('${p.toMonth}-01')`
+
 export const REPORT_REGISTRY: readonly ReportEntry[] = [
   {
     id: 'risk-settlement-daily',
@@ -337,7 +346,7 @@ export const REPORT_REGISTRY: readonly ReportEntry[] = [
     sql: (p) => `
       SELECT vintage_month, loans, never_migrated, reached_stage_2, reached_stage_3, ever_90_plus_dpd
       FROM ${DB}.gold_loan_vintage
-      WHERE ${monthRange(p, 'vintage_month')}
+      WHERE ${monthStartRange(p, 'vintage_month')}
       ORDER BY vintage_month DESC`,
   },
 

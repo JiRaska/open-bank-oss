@@ -9,7 +9,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { RefreshCw } from 'lucide-react'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -32,6 +32,8 @@ type Props = {
   columns: QueueColumn[]
   /** Optional per-row link (e.g. to the contract the record belongs to). */
   hrefOf?: (row: QueueRow) => string | null
+  /** Optional per-row action cell (e.g. a button), rendered in a trailing column. `reload` re-reads the list. */
+  rowAction?: (row: QueueRow, id: string | null, reload: () => void) => ReactNode
 }
 
 function cell(value: unknown): string {
@@ -40,7 +42,7 @@ function cell(value: unknown): string {
   return String(value)
 }
 
-export function PensionQueue({ title, url, service, feature, columns, hrefOf, statusPath = 'status' }: Props) {
+export function PensionQueue({ title, url, service, feature, columns, hrefOf, rowAction, statusPath = 'status' }: Props) {
   const { t, language } = useLanguage()
   const [rows, setRows] = useState<QueueRow[] | null>(null)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -75,6 +77,7 @@ export function PensionQueue({ title, url, service, feature, columns, hrefOf, st
                 <th scope="col" style={{ textAlign: 'left' }}>{t('Záznam', 'Record')}</th>
                 <th scope="col" style={{ textAlign: 'left' }}>{t('Stav', 'Status')}</th>
                 {columns.map(c => <th key={c.key} scope="col" style={{ textAlign: 'left' }}>{t(c.cs, c.en)}</th>)}
+                {rowAction && <th scope="col" />}
               </tr>
             </thead>
             <tbody>
@@ -88,6 +91,7 @@ export function PensionQueue({ title, url, service, feature, columns, hrefOf, st
                     <td>{id === null ? '—' : href ? <Link href={href}>{id}</Link> : id}</td>
                     <td>{typeof status === 'string' ? statusLabel(status, t) : '—'}</td>
                     {columns.map(c => <td key={c.key}>{cell(fieldOf(row, c.key))}</td>)}
+                    {rowAction && <td>{rowAction(row, id, () => void load())}</td>}
                   </tr>
                 )
               })}

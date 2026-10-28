@@ -11,7 +11,16 @@ info:
   # 1.23.0 -> 1.24.0 (#12501): additive frozen and live calendar-year-to-date flow reads.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 1.25.0
+  # 1.26.0 -> 1.27.0 (ADR-0341 D3): additive. GET /accounting-classes[/resolve] and an alternative way to
+  # name a journal line's account (accountingClass + accountingRole) -- glAccountId stops being required,
+  # which relaxes the request and breaks no caller.
+  # 1.27.0 -> 1.28.0 (ADR-0342): additive. Day-close participants: GET/PUT
+  # /ledger/accounting-days/{businessDate}/participants[/{participant}] and PUT .../{participant}/waiver.
+  # 1.28.0 -> 1.29.0 (ADR-0344 D7): additive. The accounting role enum gains the treasury instrument
+  # roles (premium/discount, fair value, revaluation reserve, realised/unrealised result, memo, memo
+  # contra) that migration V35 maps for the posting-rule matrix classes.
+  # 1.29.0 -> 1.30.0: additive raw journal snapshot reads and optional unverified caller-origin evidence.
+  version: 1.30.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -26,6 +35,90 @@ tags:
   - name: ClosedPeriod
 
 paths:
+  /api/v1/journals/history-snapshots:
+    post:
+      tags: [Ledger]
+      summary: Capture an immutable raw account journal view
+      description: >
+        Uses the existing ledger.list read authorization. Copies committed attached journal facts
+        from one database view; never posts money or classifies an IR event. Coverage is explicitly
+        ATTACHED_LEDGER_VIEW_ONLY, not account lifetime or complete classified history. A source-free
+        result is returned inline with persisted=false; no financial snapshot is stored for it.
+        A caller- and operation-scoped Idempotency-Key binds the first result for 86400 seconds.
+        Snapshot creation and its replay binding commit in one database transaction. A retry
+        with the same key and body replays the original result (X-Idempotency-Replayed: true),
+        without extending expiry; a different body under the same key is 409. Replay rereads
+        the retained source-linked snapshot instead of a separately cached financial response.
+        If its source is erased or unavailable during that lifetime, replay is 410 and does not
+        create another observation. After expiry a new capture may use the key again.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Caller-chosen key binding a retry to the first capture.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '^[A-Za-z0-9._:-]+$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/JournalHistoryRequest'}
+      responses:
+        '200':
+          description: Source-free inline manifest, not persisted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JournalHistoryManifest'}
+        '201':
+          description: Immutable manifest with stable ordinal pages
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JournalHistoryManifest'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '410':
+          description: The original captured source is no longer available; no replay or recapture under this unexpired key
+  /api/v1/journals/history-snapshots/{snapshotId}:
+    get:
+      tags: [Ledger]
+      summary: Read the immutable manifest while all source facts remain attached
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Captured manifest, unaffected by newer postings
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JournalHistoryManifest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/journals/history-snapshots/{snapshotId}/entries:
+    get:
+      tags: [Ledger]
+      summary: Read a stable page of raw immutable journal records
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: afterOrdinal, in: query, schema: {type: integer, format: int64, minimum: 0, default: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 100}}
+      responses:
+        '200':
+          description: Ordered records; nextAfterOrdinal is null only at manifest entryCount
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JournalHistoryPage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
   /api/v1/journals:
     get:
       tags: [Ledger]
@@ -391,6 +484,51 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/accounting-classes:
+    get:
+      tags: [Accounting classes]
+      summary: List every accountingClass to GL account mapping (ADR-0341 D3)
+      description: >
+        The ledger owns the chart of accounts and the map from a product's accounting class to its
+        GL accounts. The map changes by reviewed migration only; this is its read side.
+      operationId: listAccountingClasses
+      responses:
+        '200':
+          description: All mappings, ordered by class, role and currency
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountingClassMappingResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/accounting-classes/resolve:
+    get:
+      tags: [Accounting classes]
+      summary: Resolve one (accountingClass, role, currency) to its GL account
+      operationId: resolveAccountingClass
+      parameters:
+        - { name: accountingClass, in: query, required: true, schema: { type: string } }
+        - { name: role, in: query, required: true, schema: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, PREMIUM_DISCOUNT, FAIR_VALUE, REVALUATION_RESERVE, REALISED_GAIN, REALISED_LOSS, UNREALISED_GAIN, UNREALISED_LOSS, MEMO, MEMO_CONTRA] } }
+        - { name: currency, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The mapping
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountingClassMappingResponse'
+        '400':
+          description: A required query parameter is missing
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: No GL account is mapped for that class, role and currency
   /api/v1/control-accounts/{controlAccountId}/tie-out:
     get:
       tags: [Ledger]
@@ -712,7 +850,113 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Illegal transition (not the immediate successor), or a concurrent transition won
+          description: >
+            Illegal transition (not the immediate successor), a concurrent transition won, or
+            enforce mode requires a missing or REFUSED day-close participant to report or be explicitly waived.
+
+  /api/v1/ledger/accounting-days/{businessDate}/participants:
+    get:
+      tags: [AccountingDay]
+      summary: Day-close completeness (ADR-0342 D3)
+      description: >
+        Every declared day-close participant with its latest report for the day, or MISSING.
+        While a participant is MISSING the day does not leave CUTOFF once the participant check is
+        enforced (openbank.ledger.close.participants-mode).
+      operationId: getDayCloseParticipants
+      parameters:
+        - $ref: '#/components/parameters/BusinessDatePath'
+      responses:
+        '200':
+          description: Completeness of the day's close over the declared participants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloseCompletenessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/ledger/accounting-days/{businessDate}/participants/{participant}:
+    put:
+      tags: [AccountingDay]
+      summary: Report a product service's day-close outcome (ADR-0342 D1)
+      description: >
+        A participant reports RAN (with journals posted), SKIPPED or REFUSED (both with a reason)
+        for one accounting day. Path-addressed: a re-report appends history and becomes the day's
+        answer (ADR-0294 idiom). Only the service-account declared for the participant may report
+        for it; any other caller is 403. A report for a day already TIED_OUT or LOCKED is stored
+        with late=true and never moves the day.
+      operationId: reportDayCloseParticipation
+      parameters:
+        - $ref: '#/components/parameters/BusinessDatePath'
+        - $ref: '#/components/parameters/ParticipantPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportParticipationRequest'
+      responses:
+        '200':
+          description: Report recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParticipationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/ledger/accounting-days/{businessDate}/participants/{participant}/waiver:
+    put:
+      tags: [AccountingDay]
+      summary: Waive a missing day-close participant (ADR-0342 D3)
+      description: >
+        Operator-only. Records WAIVED with the operator's identity and a mandatory reason, which
+        counts as reported for the day's completeness. Never written by a participant. Allowed only
+        for an existing CUTOFF day (404 for a day never opened, 409 for any other status) and only
+        for a participant with no RAN report (409); it may supersede a REFUSED report, and no
+        existing row is ever rewritten.
+        A verified human JWT is required even in advisory OPA mode; a machine identity is 403.
+        Audit attribution uses its nonblank sub only; missing or unreadable sub is 401, without a display-name fallback.
+      operationId: waiveDayCloseParticipant
+      parameters:
+        - $ref: '#/components/parameters/BusinessDatePath'
+        - $ref: '#/components/parameters/ParticipantPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 1000 }
+      responses:
+        '200':
+          description: Waiver recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParticipationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/ledger/periods:
     get:
@@ -1130,6 +1374,13 @@ components:
       schema:
         type: string
         format: date
+    ParticipantPath:
+      name: participant
+      in: path
+      required: true
+      description: A declared day-close participant name, e.g. interest (ADR-0342).
+      schema:
+        type: string
 
   securitySchemes:
     bearerAuth:
@@ -1170,6 +1421,78 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    JournalOriginInput:
+      type: object
+      description: >
+        Unverified raw assertion by the already-authorized journal writer. Ledger assigns the
+        authenticated submitter from its security context. This does not prove economic classification,
+        confer a new origin authority or establish complete IR history. Legacy omission means unknown.
+      required: [kind, sourceRecordId]
+      properties:
+        kind: {type: string, enum: [PAYMENT_TRANSACTION, BILLING_FEE, INTEREST_CAPITALIZATION, OTHER]}
+        sourceRecordId: {type: string, format: uuid}
+        rail:
+          type: string
+          enum: [CARD, SEPA_CT, SEPA_INST, SWIFT, DOMESTIC, INTERNAL, CASH, FEE, INTEREST, UNKNOWN]
+        instructionType:
+          type: string
+          enum: [ONE_OFF, STANDING_ORDER, DIRECT_DEBIT, FUTURE_DATED, SYSTEM, UNKNOWN]
+        reversalOfTransactionId: {type: string, format: uuid}
+    JournalHistoryRequest:
+      type: object
+      required: [accountId, currency, fromDate, throughDate]
+      properties:
+        accountId: {type: string, format: uuid}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        fromDate: {type: string, format: date}
+        throughDate: {type: string, format: date}
+    JournalHistoryManifest:
+      type: object
+      required: [snapshotId, persisted, accountId, currency, fromDate, throughDate, observedAt, databaseView,
+        coverageScope, openingAnchorScope, accountLifetimeComplete, classifiedHistoryComplete, originTrust,
+        openingBooked, closingBooked, entryCount, missingOriginCount, recordsSha256, canonicalization]
+      properties:
+        snapshotId: {type: string, format: uuid}
+        persisted: {type: boolean}
+        accountId: {type: string, format: uuid}
+        currency: {type: string}
+        fromDate: {type: string, format: date}
+        throughDate: {type: string, format: date}
+        observedAt: {type: string, format: date-time}
+        databaseView: {type: string, description: PostgreSQL committed MVCC view identifier; not a sequence watermark}
+        coverageScope: {type: string, enum: [ATTACHED_LEDGER_VIEW_ONLY]}
+        openingAnchorScope: {type: string, enum: [SUM_OF_ATTACHED_BOOKED_LINES_BEFORE_FROM_DATE]}
+        accountLifetimeComplete: {type: boolean, enum: [false]}
+        classifiedHistoryComplete: {type: boolean, enum: [false]}
+        originTrust: {type: string, enum: [AUTHENTICATED_CALLER_ASSERTION_UNVERIFIED]}
+        openingBooked: {type: number}
+        closingBooked: {type: number}
+        entryCount: {type: integer, format: int64, minimum: 0}
+        missingOriginCount: {type: integer, format: int64, minimum: 0}
+        recordsSha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        canonicalization:
+          type: string
+          enum: [POSTGRES_JSONB_TEXT_LINES_V1]
+          description: SHA256 of ordered canonicalJson strings joined by one LF, with no trailing LF
+    JournalHistoryRecord:
+      type: object
+      required: [ordinal, canonicalJson]
+      properties:
+        ordinal: {type: integer, format: int64, minimum: 1}
+        canonicalJson:
+          type: string
+          description: >
+            Exact PostgreSQL JSONB text for one journal and account/currency. Contains journalId,
+            entryDate/valueDate, journalCreatedAt, transactionId, statusAtSnapshot, reversalOfJournalId,
+            synthetic, bookedDelta, customerLines and nullable unverified origin. Preserve the exact
+            string when checking the manifest digest; JSON reserialization is not equivalent bytes.
+    JournalHistoryPage:
+      type: object
+      required: [snapshotId, records, nextAfterOrdinal]
+      properties:
+        snapshotId: {type: string, format: uuid}
+        records: {type: array, items: {$ref: '#/components/schemas/JournalHistoryRecord'}}
+        nextAfterOrdinal: {type: integer, format: int64, nullable: true}
     PeriodTrialBalanceResponse:
       type: object
       description: Trial balance for one statutory period, with its attestation anchor (ADR-0096 D1).
@@ -1266,6 +1589,60 @@ components:
         balanced: { type: boolean }
         recomputedAt: { type: string, format: date-time }
 
+    CloseCompletenessResponse:
+      type: object
+      required: [businessDate, complete, missing, refused, participants]
+      properties:
+        businessDate: { type: string, format: date }
+        complete:
+          type: boolean
+          description: False while any declared participant is missing or its latest report is REFUSED.
+        missing:
+          type: array
+          description: Declared participants with no report for the day.
+          items: { type: string }
+        refused:
+          type: array
+          description: >
+            Declared participants whose latest report is REFUSED - their work was not posted, so
+            they hold the day exactly like a missing one until they report RAN or are waived.
+          items: { type: string }
+        participants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParticipationResponse'
+    ParticipationResponse:
+      type: object
+      required: [participant, status, journalsPosted, itemsProcessed, late]
+      properties:
+        participant: { type: string }
+        status:
+          type: string
+          description: >
+            RAN, SKIPPED and REFUSED are outcomes reported by product services.
+            WAIVED is recorded by a ledger operator; MISSING means no record exists.
+          oneOf:
+            - enum: [RAN, SKIPPED, REFUSED]
+            - enum: [WAIVED, MISSING]
+        journalsPosted: { type: integer, minimum: 0 }
+        itemsProcessed: { type: integer, minimum: 0 }
+        reason: { type: string, nullable: true }
+        reportedBy: { type: string, nullable: true }
+        reportedAt: { type: string, format: date-time, nullable: true }
+        late: { type: boolean }
+    ReportParticipationRequest:
+      type: object
+      required: [outcome]
+      properties:
+        outcome:
+          type: string
+          enum: [RAN, SKIPPED, REFUSED]
+        journalsPosted: { type: integer, minimum: 0 }
+        itemsProcessed: { type: integer, minimum: 0 }
+        reason:
+          type: string
+          maxLength: 1000
+          description: Required unless outcome is RAN.
     CurrentAccountingDayResponse:
       type: object
       description: The current accounting day per the business-date authority (ADR-0207 D1).
@@ -1561,13 +1938,38 @@ components:
             type: number
           description: Net booked delta per currency across the window — a sanity preview of what the replay carries.
 
+    AccountingClassMappingResponse:
+      type: object
+      required: [accountingClass, role, currencyCode, glAccountId, glCode]
+      properties:
+        accountingClass: { type: string }
+        # x-extensible-enum, not enum: roles GROW as products are mapped (ADR-0341/ADR-0344), so a
+        # client must tolerate an unknown role in a response. Requests keep the closed enum.
+        role: { type: string, x-extensible-enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, PREMIUM_DISCOUNT, FAIR_VALUE, REVALUATION_RESERVE, REALISED_GAIN, REALISED_LOSS, UNREALISED_GAIN, UNREALISED_LOSS, MEMO, MEMO_CONTRA] }
+        currencyCode: { type: string }
+        glAccountId: { type: string, format: uuid }
+        glCode: { type: string }
+
     PostJournalLineRequest:
       type: object
-      required: [glAccountId, side, amount, currencyCode, baseAmount, baseCurrencyCode]
+      description: >
+        Names its GL account either by `glAccountId` or by `accountingClass` + `accountingRole`
+        (ADR-0341 D3; resolved with the line's `currencyCode`). Exactly one of the two; both or
+        neither is a 400.
+      required: [side, amount, currencyCode, baseAmount, baseCurrencyCode]
       properties:
         glAccountId:
           type: string
           format: uuid
+          nullable: true
+        accountingClass:
+          type: string
+          nullable: true
+          description: Product accounting class, resolved by the ledger to a GL account (ADR-0341 D3).
+        accountingRole:
+          type: string
+          nullable: true
+          enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, PREMIUM_DISCOUNT, FAIR_VALUE, REVALUATION_RESERVE, REALISED_GAIN, REALISED_LOSS, UNREALISED_GAIN, UNREALISED_LOSS, MEMO, MEMO_CONTRA]
         side:
           type: string
           enum: [DEBIT, CREDIT]
@@ -1595,6 +1997,8 @@ components:
       type: object
       required: [idempotencyKey, transactionId, entryDate, valueDate, createdBy, lines]
       properties:
+        origin:
+          $ref: '#/components/schemas/JournalOriginInput'
         idempotencyKey:
           type: string
           description: Caller-supplied idempotency key; replaying the same key returns the original entry.

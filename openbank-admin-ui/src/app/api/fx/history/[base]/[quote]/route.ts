@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { inCluster, resolveInClusterBaseUrl } from '@/lib/discovery'
+import { inCluster, resolveInClusterService } from '@/lib/discovery'
 import { auth } from '@/auth'
 import { defaultTrendWindow } from '@/lib/fx/trend'
 
@@ -18,8 +18,15 @@ export async function GET(_request: Request, context: { params: Promise<{ base: 
 
   const { from, to } = defaultTrendWindow()
   try {
-    const serviceUrl = inCluster() ? await resolveInClusterBaseUrl('fx-service') : FX_SERVICE_URL
-    if (!serviceUrl) return NextResponse.json({ error: 'FX history unavailable' }, { status: 503 })
+    let serviceUrl: string
+    if (inCluster()) {
+      const resolution = await resolveInClusterService('fx-service')
+      if (resolution.state === 'unknown') return NextResponse.json({ error: 'discovery_unavailable' }, { status: 503 })
+      if (resolution.state !== 'found') return NextResponse.json({ error: 'FX history unavailable' }, { status: 503 })
+      serviceUrl = resolution.baseUrl
+    } else {
+      serviceUrl = FX_SERVICE_URL
+    }
     const url = `${serviceUrl}/api/v1/fx/rates/${base}/${quote}/history?source=CNB&limit=100&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
     const response = await fetch(url, {
       cache: 'no-store',

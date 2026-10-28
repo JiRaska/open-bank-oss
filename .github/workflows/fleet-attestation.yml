@@ -72,6 +72,8 @@ jobs:
       # reads this so a registry throttle never files a supply-chain gap ticket.
       status: ${{ steps.gate.outputs.status }}
     env:
+      # Fresh public-default trust only; custom/preseeded state fails closed.
+      FLEET_ATTEST_TUF_CACHE_MODE: isolated-default
       AWS_REGION: eu-north-1
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
     steps:

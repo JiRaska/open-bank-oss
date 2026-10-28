@@ -1,5 +1,55 @@
 # Changelog
 
+## [1.31.4](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.3...agent-service-v1.31.4) (2026-10-27)
+
+
+### Bug Fixes
+
+* **sanctions:** preserve JSONB payloads in reactive persistence ([#13084](https://github.com/JiRaska/open-bank-oss/issues/13084)) ([acc9f60](https://github.com/JiRaska/open-bank-oss/commit/acc9f60c8bed588c2a611436473e13abbf7fc1c2))
+* **sanctions:** src/main touched -&gt; patch release. Refs [#11948](https://github.com/JiRaska/open-bank-oss/issues/11948) ([acc9f60](https://github.com/JiRaska/open-bank-oss/commit/acc9f60c8bed588c2a611436473e13abbf7fc1c2))
+
+## [1.31.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.2...agent-service-v1.31.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **agent-service:** preserve PR-scoped owner intent under reviewed policy ([#13798](https://github.com/JiRaska/open-bank-oss/issues/13798)) ([e9a5401](https://github.com/JiRaska/open-bank-oss/commit/e9a540196e0aa6181194adf8f3181386357ddc57))
+
+## [1.31.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.1...agent-service-v1.31.2) (2026-10-24)
+
+
+### Bug Fixes
+
+* **agent-service:** preserve merge actors and authorization evidence ([#13764](https://github.com/JiRaska/open-bank-oss/issues/13764)) ([5715671](https://github.com/JiRaska/open-bank-oss/commit/571567125e6762da9edd6c5d6adabac9848e6720))
+
+## [1.31.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.0...agent-service-v1.31.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **agent:** enable sandbox catalog reviews through existing LiteLLM models ([#13390](https://github.com/JiRaska/open-bank-oss/issues/13390)) ([dc4ecc9](https://github.com/JiRaska/open-bank-oss/commit/dc4ecc9788d925b64230712a36b46e45f025f5ef))
+
+## [1.31.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.30.1...agent-service-v1.31.0) (2026-10-19)
+
+
+### Features
+
+* **balance:** expose active holds via GET /{accountId}/holds, the read get_balance_holds has called all along ([#13071](https://github.com/JiRaska/open-bank-oss/issues/13071)) ([df80cbb](https://github.com/JiRaska/open-bank-oss/commit/df80cbb61daebd591f0977f481d3e866eed48f0b))
+
+## [1.30.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.30.0...agent-service-v1.30.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **agent-service:** persist proposals with their audit events ([#12983](https://github.com/JiRaska/open-bank-oss/issues/12983)) ([d4de764](https://github.com/JiRaska/open-bank-oss/commit/d4de7648b03700336f162d91d16765c766b0f1b6))
+
+## [1.30.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.29.0...agent-service-v1.30.0) (2026-10-18)
+
+
+### Features
+
+* **sanctions:** workflow-liveness heartbeats for five scheduled jobs ([#13153](https://github.com/JiRaska/open-bank-oss/issues/13153)) ([c352a0e](https://github.com/JiRaska/open-bank-oss/commit/c352a0ec0d75d439a85132070a1e77aa4e8052b4))
+
 ## [1.29.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.28.0...agent-service-v1.29.0) (2026-10-16)
 
 

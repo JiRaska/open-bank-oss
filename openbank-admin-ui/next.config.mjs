@@ -21,6 +21,10 @@ const nextConfig = {
   // already been deleted after upload — a 404 per chunk in devtools, and an index of exactly where
   // the sources would be if a build ever skipped the delete.
   poweredByHeader: false,
+  // Envoy's HTTP ext_authz appends the original tool path to /api/gate/<tool>.
+  // Keep its trailing slash intact so Next does not return a 308 denial to the browser.
+  // src/proxy.ts preserves the normal no-trailing-slash canonical redirect elsewhere.
+  skipTrailingSlashRedirect: true,
   output: process.env.NEXT_STANDALONE === 'true' ? 'standalone' : undefined,
   // `pg` (node-postgres) uses dynamic requires (pg-native, connection-string).
   // If webpack bundles it into a route, those requires break in the standalone

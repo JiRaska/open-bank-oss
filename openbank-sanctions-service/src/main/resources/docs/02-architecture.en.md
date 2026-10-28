@@ -165,3 +165,11 @@ audit-service + aml-service consume the event
 3. **Human-in-the-loop for fuzzy matches** — `POTENTIAL_HIT` never auto-blocks; requires compliance review.
 4. **No list data stored** — only match metadata; list entries remain at their authoritative source URLs.
 5. **PII minimisation** — `name` and `dateOfBirth` are PII; masked in logs.
+
+## Scheduled-job heartbeat
+
+The 60-second sanctions-list refresh tick registers the fleet workflow-liveness heartbeat `sanctions-list-refresh` (`DomainMetrics.registerWorkflowLiveness`, seeded at startup) and records a success only on its success path: a tick counts as a success only when no list failed in it, so a feed that fails every minute goes stale instead of reading healthy. `WorkflowLivenessStale` alerts when the age exceeds twice the expected interval.
+
+## Shared check status and block threshold (ADR-0353)
+
+`SanctionsCheckStatus` is a typealias of `ScreeningMatchStatus` from `openbank-libs-fincrime`, the type the payment rails read off the wire. `isHighRisk` reads the shared `ScreeningPolicy.POTENTIAL_HIT_BLOCK_THRESHOLD` (0.85), the same bound the rails block on. Persisted values (`@Enumerated(STRING)`) and the API spelling are unchanged.

@@ -5,12 +5,16 @@
 package com.openbank.treasury.infrastructure
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.treasury.application.port.`in`.CashFlowUseCase
 import com.openbank.treasury.application.port.`in`.NostroBreakUseCase
 import com.openbank.treasury.application.port.`in`.NostroReconciliationUseCase
+import com.openbank.treasury.application.port.`in`.PortfolioStatementUseCase
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.application.port.`in`.TreasuryQuoteUseCase
+import com.openbank.treasury.application.port.out.CashFlowRepository
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.CurveSetPort
+import com.openbank.treasury.application.port.out.DealReferenceLookup
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
@@ -18,12 +22,21 @@ import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.LedgerReadPort
 import com.openbank.treasury.application.port.out.NostroBreakRepository
 import com.openbank.treasury.application.port.out.NostroStatementRepository
+import com.openbank.treasury.application.port.out.PortfolioStatementRepository
+import com.openbank.treasury.application.port.out.ReferenceRepository
+import com.openbank.treasury.application.usecase.CashFlowService
 import com.openbank.treasury.application.usecase.NostroBreakService
 import com.openbank.treasury.application.usecase.NostroReconciliationService
+import com.openbank.treasury.application.usecase.PortfolioStatementService
+import com.openbank.treasury.application.usecase.ProductMandate
+import com.openbank.treasury.application.usecase.ReferenceDataService
+import com.openbank.treasury.application.usecase.ScheduleService
 import com.openbank.treasury.application.usecase.SimulatedQuoteService
 import com.openbank.treasury.application.usecase.TreasuryDealService
 import com.openbank.treasury.domain.model.BreakAlertPolicy
+import com.openbank.treasury.domain.model.CfiClassMapping
 import com.openbank.treasury.infrastructure.nostro.NostroConfig
+import com.openbank.treasury.infrastructure.portfolio.PortfolioConfig
 import com.openbank.treasury.infrastructure.quote.SimulatedQuoteConfig
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
@@ -33,6 +46,7 @@ import java.time.Clock
 
 /** The use case is a plain class (no CDI annotation in the application layer); wired here. */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one producer per use case
 class TreasuryServiceProducer {
     /**
      * ADR-0315 D9: the simulated counterparties' quotes. Enabled only when the simulated market
@@ -69,6 +83,8 @@ class TreasuryServiceProducer {
         confirmationRequired: Boolean,
         quotes: SimulatedQuoteService,
         productLimits: ProductLimitConfig,
+        schedules: ScheduleService,
+        references: ReferenceRepository,
     ): TreasuryDealUseCase = TreasuryDealService(
         deals,
         counterparties,
@@ -82,7 +98,60 @@ class TreasuryServiceProducer {
         confirmationRequired,
         quotes,
         productLimits.toPolicy(),
+        schedules,
+        ProductMandate(references, productLimits.toPolicy(), clock)::policy,
     )
+
+    /** ADR-0344 D3/D4: reference validation and schedule generation through openbank-libs-finance. */
+    @Produces
+    @ApplicationScoped
+    fun scheduleService(references: ReferenceRepository, cashFlows: CashFlowRepository, clock: Clock): ScheduleService =
+        ScheduleService(references, cashFlows, clock)
+
+    /** ADR-0344 D5: the fixing workflow and its four-eyes market data. */
+    @Produces
+    @ApplicationScoped
+    fun fixingService(
+        flows: com.openbank.treasury.application.port.out.FixingFlowRepository,
+        deals: DealRepository,
+        schedules: ScheduleService,
+        marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
+        objectMapper: ObjectMapper,
+        clock: Clock,
+    ): com.openbank.treasury.application.usecase.FixingService =
+        com.openbank.treasury.application.usecase.FixingService(
+            flows,
+            deals,
+            schedules,
+            marketData,
+            objectMapper,
+            clock,
+        )
+
+    /** ADR-0344 D5: no feed ingests the interbank indices yet; the port is where one plugs in. */
+    @Produces
+    @ApplicationScoped
+    fun indexFeed(): com.openbank.treasury.application.port.out.IndexFeed =
+        com.openbank.treasury.application.port.out.IndexFeed { emptyList() }
+
+    @Produces
+    @ApplicationScoped
+    fun cashFlowUseCase(
+        deals: DealRepository,
+        cashFlows: CashFlowRepository,
+        schedules: ScheduleService,
+        objectMapper: ObjectMapper,
+        clock: Clock,
+    ): CashFlowUseCase = CashFlowService(deals, cashFlows, schedules, objectMapper, clock)
+
+    /** ADR-0344 D3: the reference-data steward; the plain service is also what deal capture validates against. */
+    @Produces
+    @ApplicationScoped
+    fun referenceDataService(
+        records: ReferenceRepository,
+        deals: DealReferenceLookup,
+        clock: Clock,
+    ): ReferenceDataService = ReferenceDataService(records, deals, clock)
 
     @Produces
     @ApplicationScoped
@@ -92,6 +161,21 @@ class TreasuryServiceProducer {
         config: NostroConfig,
         clock: Clock,
     ): NostroReconciliationUseCase = NostroReconciliationService(statements, ledger, config.accounts(), clock)
+
+    /** ADR-0337 amendment: the custodian's period-end statement of holdings (`openbank.treasury.portfolio`). */
+    @Produces
+    @ApplicationScoped
+    fun portfolioStatementUseCase(
+        statements: PortfolioStatementRepository,
+        config: PortfolioConfig,
+        clock: Clock,
+    ): PortfolioStatementUseCase = PortfolioStatementService(
+        statements = statements,
+        entity = config.entity().orElse(null)?.takeIf { it.isNotBlank() },
+        safekeepingAccounts = config.safekeepingAccounts().orElse(emptyList()),
+        classes = CfiClassMapping(config.cfiClasses(), config.debtClassesByIsin()),
+        clock = clock,
+    )
 
     /** ADR-0315 D7: breaks with age and the alert threshold (`openbank.treasury.nostro.break-alert-*`). */
     @Produces

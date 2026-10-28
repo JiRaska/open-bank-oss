@@ -86,3 +86,17 @@ There is **no `Idempotency-Key` layer** on this service. The inbound Kafka path 
 - **Release:** `version.txt = 0.4.0`, owned by release-please. The two are independent and must not be forced equal.
 
 > **Spec note:** `openapi.yaml` `servers[0].url` lists port `8125`; the service actually listens on `8112` (see `application.yaml`). Treat `8112` as authoritative; the spec server URL is a stale example.
+
+## Managed notification templates: who may do what
+
+`/api/v1/notification-templates` (ADR-0333 D6) splits drafting from publishing:
+
+| Endpoint | OPA action | Roles |
+|---|---|---|
+| `POST /` (create draft) | `commstemplate.create` | `ROLE_OPERATOR`, `ROLE_ADMIN` |
+| `GET /`, `GET /{id}` | `commstemplate.read` | `ROLE_OPERATOR`, `ROLE_COMMS_APPROVER`, `ROLE_ADMIN` |
+| `POST /preview` | `commstemplate.preview` | `ROLE_OPERATOR`, `ROLE_COMMS_APPROVER`, `ROLE_ADMIN` |
+| `POST /{id}/publish` | `commstemplate.publish` | `ROLE_COMMS_APPROVER`, `ROLE_ADMIN` |
+
+Machine identities are refused on every action, whatever role they carry. Publishing also
+refuses the revision's own maker with `409`, including an administrator.

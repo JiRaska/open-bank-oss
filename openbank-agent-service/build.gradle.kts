@@ -8,23 +8,13 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     // Service-to-service auth: acquire a client-credentials token (openbank-services)
     // and attach it as a Bearer on the outbound MCP tool calls (ADR-0031 / ADR-0034).
     // Catalog alias maps to quarkus-rest-client-oidc-filter (the new REST client's OIDC filter).
     implementation(libs.quarkus.oidc.client.reactive.filter)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.smallrye.kafka)
@@ -47,11 +37,15 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
 
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // Pact consumers pin balance-holds, sanctions and SEPA Instant read tools against their
+    // providers (AgentBalanceHoldsPactConsumerTest, AgentSanctionsReadPactConsumerTest and
+    // AgentSepaInstantReadPactConsumerTest, ADR-0063).
+    // Pact consumers also cover account/transaction, FX, AML, Catalog and Ledger read tools.
+    // They drive read-adapter dispatch through mock-server clients, not live OIDC.
+    testImplementation(libs.pact.consumer)
     // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
     // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.
     testImplementation(project(":openbank-libs-testing"))
@@ -63,6 +57,12 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Standalone V6 -> V7 migration test runs outside Quarkus' isolated Flyway classloader.
+    testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
+    // OpenAPI 3.1 uses JSON Schema 2020-12; prove null unions with the fleet's existing validator.
+    testImplementation("com.networknt:json-schema-validator:1.5.9") {
+        exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
+    }
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
 }
 
