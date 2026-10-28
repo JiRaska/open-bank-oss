@@ -10,8 +10,29 @@ import sys
 from pathlib import Path
 
 
-def verify(tag: str, directory: Path) -> list[str]:
+def verify(
+    tag: str,
+    directory: Path,
+    expected_component: str | None = None,
+    expected_version: str | None = None,
+    expected_commit: str | None = None,
+) -> list[str]:
     errors: list[str] = []
+    expected_identity = (expected_component, expected_version, expected_commit)
+    if any(value is not None for value in expected_identity) and not all(
+        value is not None for value in expected_identity
+    ):
+        errors.append("expected component, version and commit must be supplied together")
+    if all(value is not None for value in expected_identity):
+        assert expected_component is not None
+        assert expected_version is not None
+        assert expected_commit is not None
+        if not expected_component or not expected_version:
+            errors.append("expected component and version must be nonempty")
+        if re.fullmatch(r"[0-9a-f]{40}", expected_commit) is None:
+            errors.append("expected commit must be a full 40-character lowercase SHA-1")
+        if f"{expected_component}-v{expected_version}" != tag:
+            errors.append("expected component and version do not match the release tag")
     manifest_path = directory / f"{tag}.evidence.json"
     signature_path = directory / f"{tag}.evidence.json.sig"
     if not manifest_path.is_file() or not manifest_path.stat().st_size:
@@ -28,6 +49,13 @@ def verify(tag: str, directory: Path) -> list[str]:
         errors.append("evidence manifest tag does not match the requested release")
     if not isinstance(manifest, dict):
         return errors
+    if all(value is not None for value in expected_identity):
+        if manifest.get("component") != expected_component:
+            errors.append("manifest component does not match the expected component")
+        if manifest.get("version") != expected_version:
+            errors.append("manifest version does not match the expected version")
+        if manifest.get("git_commit") != expected_commit:
+            errors.append("manifest git_commit does not match the expected release commit")
     for key, suffix in (("sbom", ".cdx.json"), ("slsa_provenance", ".slsa.json"), ("vex", ".vex.json")):
         expected = f"{tag}{suffix}"
         ref = manifest.get(key)
@@ -55,15 +83,43 @@ def verify(tag: str, directory: Path) -> list[str]:
 
 
 def main() -> int:
-    if len(sys.argv) != 2 or not sys.argv[1] or "/" in sys.argv[1] or sys.argv[1] in {".", ".."}:
-        print("usage: verify-release-evidence-manifest.py <release-tag>", file=sys.stderr)
-        return 2
-    errors = verify(sys.argv[1], Path.cwd())
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Verify release evidence digests and, when supplied, tag identity."
+    )
+    parser.add_argument("tag", help="release tag")
+    parser.add_argument("--expected-component")
+    parser.add_argument("--expected-version")
+    parser.add_argument("--expected-commit")
+    args = parser.parse_args()
+    if not args.tag or "/" in args.tag or args.tag in {".", ".."}:
+        parser.error("release tag must be a safe single path component")
+    expected = (args.expected_component, args.expected_version, args.expected_commit)
+    if any(value is not None for value in expected) and not all(
+        value is not None for value in expected
+    ):
+        parser.error("--expected-component, --expected-version and --expected-commit are required together")
+    if not all(value is not None for value in expected):
+        print(
+            "::notice::legacy digest-only verification; manifest release identity was not checked",
+            file=sys.stderr,
+        )
+    errors = verify(
+        args.tag,
+        Path.cwd(),
+        args.expected_component,
+        args.expected_version,
+        args.expected_commit,
+    )
     for error in errors:
         print(f"::error::{error}", file=sys.stderr)
     if errors:
         return 1
-    print(f"OK manifest digests and required files: {sys.argv[1]}")
+    if all(value is not None for value in expected):
+        print(f"OK manifest identity and digests: {args.tag}")
+    else:
+        print(f"OK manifest digests only (identity unchecked): {args.tag}")
     return 0
 
 
