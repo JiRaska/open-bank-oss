@@ -11,6 +11,9 @@ import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.runner.World
+import com.openbank.standingorder.domain.model.Frequency
+import com.openbank.standingorder.domain.model.StandingOrder
+import com.openbank.standingorder.domain.model.StandingOrderStatus
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -250,6 +253,68 @@ object MoneyPathInvariants {
     }
 
     /**
+     * The standing-order execution invariant: the REAL `StandingOrder` status machine's counters
+     * must agree, per order, with what actually happened on the money path, once a step has fully
+     * settled —
+     *
+     * 1. `executionCount == confirmed + attempted failures` — the sweep claims the execution
+     *    slot BEFORE the attempt (`recordExecution` advances `nextExecutionDate` and the counter
+     *    up front, by design), so every claimed slot must have exactly one recorded outcome:
+     *    money confirmed, or a failed attempt. A claimed slot with neither is the defect class
+     *    this catches;
+     * 2. `failureCount == the machine's current failure streak` — the production consumer records
+     *    a failure through `runCatching` (`recordFailureSafely`), and a confirmed execution resets
+     *    the real `failureCount` to 0 (`confirmExecution`); the book mirrors both sides, so a
+     *    failure the machine never accepted (a gap) or a reset the machine never performed reads
+     *    as a violation, while the legitimate fail → confirm → fail streak lifecycle stays green;
+     * 3. FAILED implies the real `MAX_CONSECUTIVE_FAILURES` streak was reached, and COMPLETED
+     *    implies the lifecycle contract held (ONCE: exactly one confirmed execution; recurring:
+     *    the next execution date has moved past the end date).
+     */
+    val standingOrderCompleteness = object : Invariant {
+        override val name = "standing-order-completeness"
+        override fun check(world: World): Violation? {
+            world.standingOrders.forEach { order ->
+                val accounted = world.standingOrdersBook.confirmedCount(order.id) +
+                    world.standingOrdersBook.attemptedFailureCount(order.id)
+                if (order.executionCount != accounted) {
+                    return Violation(
+                        name,
+                        "order ${order.id} executionCount=${order.executionCount} but confirmed+failures=$accounted",
+                    )
+                }
+                if (order.failureCount != world.standingOrdersBook.machineStreak(order.id)) {
+                    return Violation(
+                        name,
+                        "order ${order.id} failureCount=${order.failureCount} but machine streak=" +
+                            world.standingOrdersBook.machineStreak(order.id),
+                    )
+                }
+                if (order.status == StandingOrderStatus.FAILED &&
+                    order.failureCount < StandingOrder.MAX_CONSECUTIVE_FAILURES
+                ) {
+                    return Violation(name, "order ${order.id} FAILED after only ${order.failureCount} failures")
+                }
+                if (order.status == StandingOrderStatus.COMPLETED) {
+                    // ONCE legitimately retries a failed single execution (recordExecution keeps
+                    // it ACTIVE so the next sweep re-picks it), so executionCount may exceed 1;
+                    // the contract that matters is exactly one CONFIRMED execution. A recurring
+                    // order completes when recordExecution moved its next date past the end date.
+                    val complete = if (order.frequency == Frequency.ONCE) {
+                        world.standingOrdersBook.confirmedCount(order.id) == 1
+                    } else {
+                        order.endDate != null && order.nextExecutionDate.isAfter(order.endDate)
+                    }
+                    if (!complete) {
+                        return Violation(name, "order ${order.id} COMPLETED but lifecycle contract unmet")
+                    }
+                }
+            }
+            return null
+        }
+    }
+
+    /**
      * ADR-0036 §B / ADR-0100 full-service adoption: the SDD collection invariant, reconciling the
      * REAL `SddMandate` lifecycle against the money-path book, once a step has fully settled:
      *
@@ -316,6 +381,7 @@ object MoneyPathInvariants {
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,
+        standingOrderCompleteness,
         sddCollectionCompleteness,
     )
 
