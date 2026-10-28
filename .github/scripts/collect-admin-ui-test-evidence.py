@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build a current Test Intelligence aggregate from trusted main CI artifacts.
 
-This stages per-component run envelopes, JUnit and Kover data into a clean checkout,
-runs the existing JS collector, then carries only cross-workflow observations not
-restaged here from the latest trusted Admin UI snapshot. Missing optional sources are
+This stages per-component runs and authoritative performance artifacts into a clean
+checkout, runs the existing JS collector, then carries only cross-workflow observations
+not restaged here from the latest trusted Admin UI snapshot. Missing optional sources are
 called out in the report; API failures and malformed present artifacts abort instead
 of looking absent.
 """
@@ -37,6 +37,11 @@ if not ENVELOPE_SPEC or not ENVELOPE_SPEC.loader:
     raise RuntimeError("Test Intelligence envelope validator is unavailable")
 ENVELOPES = importlib.util.module_from_spec(ENVELOPE_SPEC)
 ENVELOPE_SPEC.loader.exec_module(ENVELOPES)
+PERFORMANCE_SPEC = importlib.util.spec_from_file_location("admin_ui_performance_stage", HERE / "stage-admin-ui-performance.py")
+if not PERFORMANCE_SPEC or not PERFORMANCE_SPEC.loader:
+    raise RuntimeError("performance artifact helper is unavailable")
+PERFORMANCE = importlib.util.module_from_spec(PERFORMANCE_SPEC)
+PERFORMANCE_SPEC.loader.exec_module(PERFORMANCE)
 
 API_ORIGIN = "https://api.github.com"
 PER_PAGE = 100
@@ -276,7 +281,7 @@ def _newer(old: dict, current: dict, field: str = "observedAt") -> dict:
     return current if current_at >= old_at else old
 
 
-def merge_ancillary(core: dict, seed: dict | None) -> dict:
+def merge_ancillary(core: dict, seed: dict | None, *, authoritative_performance_ids=frozenset()) -> dict:
     if seed is None:
         core.setdefault("warnings", []).append("No retained trusted Admin UI aggregate was available; ancillary sources are unknown.")
         return core
@@ -285,6 +290,10 @@ def merge_ancillary(core: dict, seed: dict | None) -> dict:
     for field in SEEDED_LIST_FIELDS:
         old_rows = seed.get(field)
         current_rows = core.get(field)
+        if field == "performance" and isinstance(old_rows, list):
+            current_ids = {row.get("id") for row in current_rows or [] if isinstance(row, dict)}
+            old_rows = [row for row in old_rows if not isinstance(row, dict)
+                        or row.get("id") not in authoritative_performance_ids or row.get("id") in current_ids]
         if not isinstance(old_rows, list):
             continue
         if not isinstance(current_rows, list) or not current_rows:
@@ -316,13 +325,16 @@ def merge_ancillary(core: dict, seed: dict | None) -> dict:
             keyed.update({f"{row.get('id')}:{row.get('collectedAt')}": row for row in current_rows if isinstance(row, dict)})
             core[field] = sorted(keyed.values(), key=lambda row: (row.get("id", ""), row.get("collectedAt", "")))
         else:
-            keyed = {row.get("component", row.get("id")): row for row in old_rows if isinstance(row, dict)}
+            # Performance is per scenario: multiple scenarios can share a component (or None).
+            key_field = "id" if field == "performance" else "component"
+            keyed = {row.get(key_field, row.get("id")): row for row in old_rows if isinstance(row, dict)}
             for row in current_rows:
                 if not isinstance(row, dict):
                     continue
-                key = row.get("component", row.get("id"))
+                key = row.get(key_field, row.get("id"))
                 old = keyed.get(key)
-                keyed[key] = _newer(old, row) if old else row
+                keyed[key] = (row if field == "performance" and key in authoritative_performance_ids
+                              else _newer(old, row) if old else row)
             core[field] = list(keyed.values())
 
     # The current checkout supplies the authoritative catalogue and controls. Carry only
@@ -523,9 +535,64 @@ def api_bytes(url: str, token: str) -> bytes:
         raise CollectionError(f"GitHub artifact download failed ({status})") from exc
 
 
+def performance_authority(core: dict, staging: dict, repo_slug: str) -> set[str]:
+    """Latest trusted workflow selection overrides retained passes, including absence.
+
+    Missing rows describe collection status from workflow metadata; they are not
+    producer envelopes or measurements and carry no inherited metrics/run verdict.
+    """
+    rows = core.setdefault("performance", [])
+    keyed = {row.get("id"): row for row in rows if isinstance(row, dict)}
+    if len(keyed) != len(rows):
+        raise CollectionError("performance collector returned ambiguous scenario identities")
+    authoritative = set()
+    for source in staging["sources"]:
+        selected = {entry["scenario_id"]: entry for entry in source["selected"]}
+        missing = {entry["scenario_id"]: entry for entry in source["missing"]}
+        for entry in source["expected"]:
+            identifier = entry["scenario_id"]
+            authoritative.add(identifier)
+            row = keyed.get(identifier)
+            if row is None:
+                if identifier in selected:
+                    raise CollectionError(f"selected performance scenario is not declared: {identifier}")
+                continue  # A removed declaration must not be resurrected from a producer.
+            path = PurePosixPath(row.get("source", ""))
+            component = path.parts[0] if path.parts and path.parts[0].startswith("openbank-") else None
+            calculated = component + "-" + path.stem.removeprefix("openbank-") if component else path.stem
+            expected_component = None if (identifier, entry["component"]) in {
+                ("money-path-smoke", "openbank-money-path"), ("security-abuse-smoke", "openbank-security-abuse")
+            } else entry["component"]
+            definition_path = ((len(path.parts) == 5 and path.parts[:4] == (component, "src", "test", "k6"))
+                               if component else len(path.parts) == 3 and path.parts[:2] == ("perf", "k6"))
+            if (calculated != identifier or component != expected_component
+                    or row.get("component") != expected_component or path.suffix != ".js" or not definition_path):
+                raise CollectionError(f"performance collector scenario identity mismatch: {identifier}")
+            if identifier in selected:
+                run = row.get("run")
+                if (not isinstance(run, dict) or str(run.get("id")) != str(source["run_id"])
+                        or run.get("commit") != source["commit"] or run.get("branch") != "main"
+                        or type(run.get("attempt")) is not int or not 1 <= run["attempt"] <= source["attempt"]
+                        or run.get("url") != f"https://github.com/{repo_slug}/actions/runs/{source['run_id']}"):
+                    raise CollectionError(f"selected performance row lost verified provenance: {identifier}")
+                producer_state = selected[identifier].get("state")
+                if producer_state and row.get("state") not in ({"passed", "stale", "unknown"} if producer_state == "passed" else {producer_state}):
+                    raise CollectionError(f"selected performance row changed producer verdict: {identifier}")
+                continue
+            reason = missing.get(identifier, {}).get("reason", "latest selection has no attributable evidence")
+            for field in ("metrics", "run", "thresholdResults"):
+                row.pop(field, None)
+            row.update({"state": "unknown", "observedAt": source.get("observed_at"),
+                        "detail": f"{source['workflow']} ({source['scope']}): {reason}.",
+                        "collectionStatus": {"scope": source["scope"], "reason": reason,
+                            "workflow": source["workflow"], "runId": source["run_id"],
+                            "attempt": source["attempt"], "commit": source.get("commit")}})
+    return authoritative
+
+
 def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
             fetch_page=None, fetch_run=None, fetch_attempt=None, fetch_archive=None,
-            seed=SEED_UNSET, run_collector=None) -> dict:
+            seed=SEED_UNSET, run_collector=None, performance_stage=None) -> dict:
     components = repo_components(repo)
     if not token:
         raise CollectionError("GITHUB_TOKEN is required to read trusted CI artifacts")
@@ -600,6 +667,59 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
     created_files: list[Path] = []
     created_dirs: list[Path] = []
     absent = []
+
+    def stage_payloads(payloads):
+        targets = []
+        for relative, content in payloads.items():
+            if not isinstance(relative, str):
+                raise CollectionError("invalid evidence staging path or payload")
+            path = PurePosixPath(relative)
+            if ("\\" in relative or path.is_absolute()
+                    or not path.parts or any(part in {".", ".."} for part in relative.split("/"))
+                    or not isinstance(content, bytes)):
+                raise CollectionError("invalid evidence staging path or payload")
+            target = repo / relative
+            parent = target
+            while parent != repo:
+                if parent.is_symlink():
+                    raise CollectionError(f"refusing symlink evidence staging path: {relative}")
+                parent = parent.parent
+            if target.exists():
+                raise CollectionError(f"refusing to mix downloaded evidence with pre-existing path: {relative}")
+            targets.append((target, content))
+        for target, content in targets:
+            missing_dirs = []
+            parent = target.parent
+            while parent != repo and not parent.exists():
+                missing_dirs.append(parent)
+                parent = parent.parent
+            target.parent.mkdir(parents=True, exist_ok=True)
+            created_dirs.extend(reversed(missing_dirs))
+            with target.open("xb") as stream:
+                created_files.append(target)
+                stream.write(content)
+
+    performance_json_cache = {}
+    performance_bytes_cache = {}
+
+    def performance_json(url):
+        if url not in performance_json_cache:
+            performance_json_cache[url] = api_json(url, token)
+        return performance_json_cache[url]
+
+    def performance_bytes(url):
+        if url not in performance_bytes_cache:
+            performance_bytes_cache[url] = api_bytes(url, token)
+        return performance_bytes_cache[url]
+
+    def performance_log(job_id):
+        if type(job_id) is not int or job_id <= 0:
+            raise CollectionError("invalid performance scope job identity")
+        payload = performance_bytes(f"{API_ORIGIN}/repos/{repo_slug}/actions/jobs/{job_id}/logs")
+        if len(payload) > PERFORMANCE.MAX_JSON_BYTES:
+            raise CollectionError("performance scope log exceeds size limit")
+        return payload.decode("utf-8", errors="strict")
+
     try:
         for component, artifact_id in planned:
             if artifact_id is None:
@@ -623,23 +743,18 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
                 resolve_attempt=workflow_attempt,
                 artifact_created_at=metadata.get("created_at"),
             )
-            for relative in payloads:
-                target = repo / relative
-                if target.exists():
-                    raise CollectionError(f"refusing to mix downloaded evidence with pre-existing path: {relative}")
-            for relative, content in payloads.items():
-                target = repo / relative
-                missing_dirs = []
-                parent = target.parent
-                while parent != repo and not parent.exists():
-                    missing_dirs.append(parent)
-                    parent = parent.parent
-                target.parent.mkdir(parents=True, exist_ok=True)
-                created_dirs.extend(reversed(missing_dirs))
-                target.write_bytes(content)
-                created_files.append(target)
+            stage_payloads(payloads)
 
-        warnings = []
+        try:
+            performance = (performance_stage or PERFORMANCE.stage_performance)(
+                repo, repo_slug, performance_json, performance_bytes,
+                safe_archive_members=safe_archive_members, validate_envelope=ENVELOPES.validate,
+                fetch_log=performance_log)
+        except PERFORMANCE.StageError as exc:
+            raise CollectionError(f"performance artifact collection failed: {exc}") from exc
+        stage_payloads(performance["payloads"])
+
+        warnings = list(performance["warnings"])
         if absent:
             warnings.append("No retained trusted main run envelope was available for: " + ", ".join(absent) + ". Their execution evidence is unknown, not passed.")
         if seed_report is None:
@@ -650,7 +765,8 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
             command = ["node", str(collector), "--repo", str(repo), "--out", str(generated)]
             (run_collector or subprocess.run)(command, cwd=repo, check=True)
             core = json.loads(generated.read_text(encoding="utf-8"))
-        report = merge_ancillary(core, seed_report)
+        authoritative_ids = performance_authority(core, performance, repo_slug)
+        report = merge_ancillary(core, seed_report, authoritative_performance_ids=authoritative_ids)
         report.setdefault("warnings", []).extend(warnings)
         output.parent.mkdir(parents=True, exist_ok=True)
         # This is a transport snapshot, not a reviewed source document. Preserve
