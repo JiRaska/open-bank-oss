@@ -1318,6 +1318,9 @@ close_participants:
     billing:                                # #13167: monthly billing cycle + its fee postings
       service: openbank-billing-service
       principal: service-account-openbank-billing
+    treasury:                               # #13167: hourly deal accrual + the day's deal journals
+      service: openbank-treasury-service
+      principal: service-account-openbank-treasury
 
 money_path_services:
   - openbank-ledger-service
@@ -4951,6 +4954,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*TransactionServiceClient*.kt"
       - "src/main/kotlin/**/*LedgerClient*.kt"
       - "src/main/kotlin/**/*RiskCurveClient*.kt"  # ADR-0315 D9: m2m OIDC client to the risk engine
+      - "src/main/kotlin/**/close/LedgerCloseParticipationClient.kt"  # ADR-0342: m2m OIDC client, day-close report
       - "src/main/kotlin/**/nostro/**"
       - "src/main/kotlin/**/rest/NostroResource.kt"
       - "src/main/kotlin/**/portfolio/**"            # ADR-0337 amendment: custodian holdings store
