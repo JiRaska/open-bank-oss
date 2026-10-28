@@ -1,7 +1,7 @@
 {
   "openbank-account-service": "0.35.1",
   "openbank-admin-ui": "3.13.1",
-  "openbank-agent-service": "1.31.4",
+  "openbank-agent-service": "1.31.5",
   "openbank-aml-service": "0.13.7",
   "openbank-anacredit-service": "0.10.0",
   "openbank-ap2-service": "0.4.2",
@@ -31,7 +31,7 @@
   "openbank-governance-auditor": "0.6.6",
   "openbank-interest-service": "0.26.1",
   "openbank-kyc-service": "0.17.1",
-  "openbank-ledger-service": "1.39.0",
+  "openbank-ledger-service": "1.39.1",
   "openbank-lending-service": "0.44.1",
   "openbank-mcp-service": "0.17.6",
   "openbank-notification-service": "0.39.1",
