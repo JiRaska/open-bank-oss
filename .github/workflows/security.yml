@@ -192,7 +192,7 @@ jobs:
         include: ${{ fromJSON(needs.detect-deps.outputs.codeql_matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         if: matrix.language == 'java-kotlin'
         with:
           distribution: temurin
@@ -216,7 +216,7 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -245,7 +245,7 @@ jobs:
           python3 .github/scripts/check-codeql-compile-coverage.py \
             --root . --log "${RUNNER_TEMP:-/tmp}/codeql-build.log"
 
-      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -376,7 +376,7 @@ jobs:
         # reporting only: GitHub's installation API rate limit can reject it after a
         # clean scan, and must not turn that clean security decision into a false red.
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
@@ -385,7 +385,7 @@ jobs:
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
         # Keep reporting availability independent from the blocking IaC scan above.
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
@@ -438,7 +438,7 @@ jobs:
     if: needs.detect-deps.outputs.run_sbom == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "25"
