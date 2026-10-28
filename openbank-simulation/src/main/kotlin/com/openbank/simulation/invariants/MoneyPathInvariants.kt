@@ -445,8 +445,10 @@ object MoneyPathInvariants {
         ): Violation? {
             val window = SpendWindows.windowAt(decision.history.at)
             val relevant = decision.history.reservations.filter {
-                it.grantId == grant.id && it.amount.currency.code == decision.currency &&
-                    it.state != SpendReservationState.RELEASED && !it.createdAt.isAfter(decision.history.at)
+                it.grantId == grant.id &&
+                    it.amount.currency.code == decision.currency &&
+                    it.state != SpendReservationState.RELEASED &&
+                    !it.createdAt.isAfter(decision.history.at)
             }
             val day = relevant
                 .filter { !it.createdAt.isBefore(window.dayStart) }
@@ -456,7 +458,9 @@ object MoneyPathInvariants {
                 .fold(BigDecimal.ZERO) { total, reservation -> total + reservation.amount.amount }
             val currencyMismatch = decision.counted.withinDay.currency.code != decision.currency ||
                 decision.counted.withinMonth.currency.code != decision.currency
-            if (currencyMismatch || decision.counted.withinDay.amount.compareTo(day) != 0 ||
+            if (
+                currencyMismatch ||
+                decision.counted.withinDay.amount.compareTo(day) != 0 ||
                 decision.counted.withinMonth.amount.compareTo(month) != 0
             ) {
                 return Violation(invariantName, "grant ${grant.id} counted spend disagrees with pre-decision history")
