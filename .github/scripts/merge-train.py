@@ -1998,6 +1998,30 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
     return "published"
 
 
+def defer_recovered_main_red(gh, base: str, main_red: dict[str, str], summary: dict) -> bool:
+    """Fresh current-tip health before exceptional fix priority; never reuse planning reads.
+    Pending/missing results retain existing ancestor-red semantics. An observed healthy context
+    invalidates this plan, not the PR: the next tick reconstructs reservation and candidate order.
+    """
+    if not main_red:
+        return False
+    try:
+        with deciding():
+            current = gh.checks(base)
+        recovered = sorted(ctx for ctx in main_red if current.get(ctx) == "success")
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError):
+        reason = "current main health could not be read"
+    else:
+        if not recovered:
+            return False
+        reason = "current main recovered: " + ", ".join(recovered)
+    summary["in_flight"] = True  # suppress build as well as every later mutation this tick
+    summary["main_health_deferred"] = reason
+    log(f"::notice::{reason}; stale main-red priority discarded — next tick")
+    return True
+
+
+
 def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     """Judge every finished App carrier, then post the fast lane from live data."""
     summary: dict = {"in_flight": False, "merged": [], "culprits": [], "bisected": [], "rejected": [], "fast": [],
@@ -2015,6 +2039,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     # Read the strict lane BEFORE settling any carrier: a reservation holds train merges as well as the
     # fast lane, or main moves under the reserved head's CI and it is re-updated forever (#13456).
     base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required)
+    if defer_recovered_main_red(gh, base, main_red, summary):
+        return summary
     holder, timed_out = strict_reservation(git, base, strict, shadow,
                                            fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
                                            activity=gh.ci_activity)
@@ -2187,6 +2213,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     # below must already see it.
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
                 yield_why)
+    if summary.get("main_health_deferred"):
+        return summary
     if (holder is not None and not carrier_in_flight and not summary["updated"] and not summary["strict"]
             and train_waiting and not main_red and not any(is_carrier(p, repo) for p in gh.open_prs())
             and deferral_state(gh, git, strict, holder) == "open"):
@@ -2619,6 +2647,7 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         fixes = strict_fixes(gh, git, base, strict, main_red, cache)
         strict = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)  # stable: oldest first within
     updated = holder is not None  # main reserved (strict_reservation): no other strict-lane action while it runs
+    main_health_checked = False  # one final inventory read, shared by this strict-lane invocation
     for state, view in strict:
         n, head = view["number"], view["head_sha"]
         if holder is not None and n != holder:
@@ -2630,6 +2659,10 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         if current and state == "pending" and n in (timed_out or []):
             continue
         fix = fixes.get(n)
+        if fix and state == "green" and not main_health_checked:
+            main_health_checked = True
+            if defer_recovered_main_red(gh, base, main_red, summary):
+                return
         if current and state == "pending":
             log(f"#{n:>6} strict    up to date, CI running: main reserved for it")
             summary["in_flight"] = True
@@ -3373,6 +3406,13 @@ def self_test() -> int:
             fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
 
     retry_planner_self_test(check)
+
+    freshness = subprocess.run(
+        [sys.executable, ".github/scripts/test-merge-train-main-red-freshness.py"],
+        text=True, capture_output=True, timeout=15,
+    )
+    check("main-red freshness: actual settle/strict controller regressions", freshness.returncode == 0,
+          freshness.stdout + freshness.stderr)
 
     # ---- qualifies -----------------------------------------------------------------------
     req = ["all-green", "Gitleaks", STATUS_CONTEXT]

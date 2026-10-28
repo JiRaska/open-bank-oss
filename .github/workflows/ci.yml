@@ -457,6 +457,7 @@ jobs:
               throw exhausted();
             };
             let workflow;
+            let artifactCache;
             let poll = 0;
             while (Date.now() < deadline) {
               if (!workflow) {
@@ -464,9 +465,36 @@ jobs:
                   ...context.repo, workflow_id: 'ruleset-bypass-evidence.yml', request: {timeout}
                 })));
               }
-              const {data} = await read(timeout => github.rest.actions.listArtifactsForRepo({
-                ...context.repo, name, per_page: 100, request: {timeout}
-              }));
+              // Keep the existing exact-name, first-page (100) scope. Cache only this
+              // receiver invocation's valid response, never a snapshot or producer verdict.
+              const query = {...context.repo, name, per_page: 100};
+              const key = JSON.stringify([query.owner, query.repo, query.name, query.per_page]);
+              let response;
+              try {
+                response = await read(timeout => github.rest.actions.listArtifactsForRepo({
+                  ...query,
+                  ...(artifactCache?.key === key ? {headers: {'if-none-match': artifactCache.etag}} : {}),
+                  request: {timeout}
+                }));
+              } catch (error) {
+                if (error.status !== 304) throw error;
+                response = {status: 304};
+              }
+              if (Date.now() >= deadline) throw exhausted();
+              let data;
+              if (response.status === 304) {
+                if (!artifactCache || artifactCache.key !== key) {
+                  throw new Error('Conditional artifact response has no matching body; NOT_EVALUATED');
+                }
+                data = artifactCache.data;
+              } else {
+                data = response.data;
+                if (response.status !== 200 || !data || !Array.isArray(data.artifacts)) {
+                  throw new Error('Invalid artifact-list response; NOT_EVALUATED');
+                }
+                const etag = response.headers?.etag;
+                artifactCache = typeof etag === 'string' && etag.trim() ? {key, etag, data} : undefined;
+              }
               for (const artifact of data.artifacts) {
                 if (artifact.name !== name || artifact.expired || !artifact.workflow_run) continue;
                 const {data: run} = await read(timeout => github.rest.actions.getWorkflowRun({
