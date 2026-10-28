@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-// BFF proxy for the recorded human merges (ADR-0031 phase 3). The agent-service
+// BFF proxy for the recorded agent PR merges (ADR-0031 phase 3). The agent-service
 // owns the merge-record store; the admin-ui Control Room lists WHO merged an
 // agent's PR as governance evidence. GET only; optional ?agentId= narrows to one
 // agent (the per-agent drill-down). Mirrors the proposals proxy: the operator's

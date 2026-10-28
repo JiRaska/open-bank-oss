@@ -6,9 +6,11 @@ package com.openbank.billing.infrastructure.outbox
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.billing.application.port.out.BillingAssessmentRepository
+import com.openbank.billing.application.port.out.FeeRebillPort
 import com.openbank.billing.application.port.out.LedgerPostingPort
 import com.openbank.billing.domain.FeeJournalCommand
 import com.openbank.billing.domain.FeeReversalCommand
+import com.openbank.billing.infrastructure.scheduler.BillingCloseJobs
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
@@ -17,6 +19,8 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.reactive.messaging.MutinyEmitter
 import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import jakarta.ws.rs.WebApplicationException
 import org.apache.kafka.common.header.internals.RecordHeaders
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
@@ -43,12 +47,24 @@ import org.eclipse.microprofile.reactive.messaging.Message
  * not a reuse of an existing billing Kafka topic — there wasn't one before this ADR.
  */
 @ApplicationScoped
-class LedgerOutboxEventPublisher(
+class LedgerOutboxEventPublisher @Inject constructor(
     private val ledger: LedgerPostingPort,
     private val assessments: BillingAssessmentRepository,
     @Channel("billing-events-out") private val emitter: MutinyEmitter<String>,
     private val meters: MeterRegistry,
+    private val rebills: FeeRebillPort,
 ) : OutboxEventPublisher {
+
+    /**
+     * Test construction without a re-bill store. FAIL-CLOSED: every re-bill row is refused, so a test
+     * (or anything else) built this way can never settle a fee through `rebillOf`.
+     */
+    constructor(
+        ledger: LedgerPostingPort,
+        assessments: BillingAssessmentRepository,
+        emitter: MutinyEmitter<String>,
+        meters: MeterRegistry,
+    ) : this(ledger, assessments, emitter, meters, FeeRebillPort { _, _ -> false })
 
     private val mapper = jacksonObjectMapper().findAndRegisterModules()
 
@@ -72,8 +88,44 @@ class LedgerOutboxEventPublisher(
             description = payload.description,
             accountingClass = accountingClassOf(payload.accountingClass, payload.idempotencyKey),
         )
-        val journalId = ledger.post(command)
-        assessments.markPosted(payload.idempotencyKey, journalId)
+        // A re-bill (runbook 0033) posts under its OWN new key but settles the ORIGINAL fee row - but
+        // only when that pairing was approved and recorded. An outbox row is just text: a hand-written
+        // one naming any `rebillOf` would otherwise mark an arbitrary fee POSTED with this journal.
+        // Refused BEFORE posting, so nothing reaches the ledger; the throw leaves the row retrying to
+        // DEAD, where the dead-letter alert and runbook 0026 pick it up.
+        val rebillOf = payload.rebillOf
+        if (rebillOf != null && !rebills.isAuthorised(payload.idempotencyKey, rebillOf)) {
+            meters.counter("openbank.billing.fee.rebill.refused").increment()
+            log.warnf(
+                "re-bill row %s names %s without an approved billing_fee_rebill record - refused",
+                payload.idempotencyKey,
+                rebillOf,
+            )
+            throw UnauthorisedRebillException(payload.idempotencyKey)
+        }
+        val feeKey = rebillOf ?: payload.idempotencyKey
+        val journalId = try {
+            ledger.post(command)
+        } catch (e: WebApplicationException) {
+            if (!BillingCloseJobs.isClosedDayRejection(e)) throw e
+            refuseClosedDay(feeKey)
+            return
+        }
+        assessments.markPosted(feeKey, journalId)
+    }
+
+    /**
+     * The ledger refused the charge because its accounting day no longer accepts postings (ADR-0342
+     * D4, `409 ACCOUNTING_DAY_CLOSED`). Retrying cannot succeed — the day stays closed — so the fee is
+     * marked FAILED now instead of after the outbox exhausts its retries, and the row completes. The
+     * refusal is a close outcome, not lost: `BillingCloseParticipationScheduler` counts the cycle's
+     * FAILED fees and reports the day REFUSED, which holds the ledger's close until an operator waives
+     * it. Logged with the idempotency key only, never the account.
+     */
+    private suspend fun refuseClosedDay(idempotencyKey: String) {
+        assessments.markFailed(idempotencyKey)
+        meters.counter("openbank.billing.fee.post.closed_day_refusals").increment()
+        log.warnf("fee posting %s refused by the ledger: ACCOUNTING_DAY_CLOSED - marked FAILED", idempotencyKey)
     }
 
     private suspend fun publishReversal(entry: OutboxEntry) {
@@ -123,7 +175,7 @@ class LedgerOutboxEventPublisher(
      */
     private fun accountingClassOf(fromPayload: String?, idempotencyKey: String): String {
         if (fromPayload != null) return fromPayload
-        meters.counter("billing.fee.post.legacy_payload").increment()
+        meters.counter("openbank.billing.fee.post.legacy_payload").increment()
         log.warnf("outbox row %s predates accounting classes; posting as %s", idempotencyKey, LEGACY_FALLBACK_CLASS)
         return LEGACY_FALLBACK_CLASS
     }
@@ -139,6 +191,10 @@ class LedgerOutboxEventPublisher(
     }
 }
 
+/** A re-bill outbox row with no approved `billing_fee_rebill` record behind it (runbook 0033). */
+class UnauthorisedRebillException(rebillKey: String) :
+    IllegalStateException("re-bill $rebillKey has no approved billing_fee_rebill record")
+
 /** The `billing.fee.post-intent.v1` outbox payload shape (written by `BillingAssessmentRepositoryImpl`). */
 private data class FeePostIntentPayload(
     val schemaVersion: Int,
@@ -151,6 +207,11 @@ private data class FeePostIntentPayload(
     val description: String,
     val accountingClass: String? = null,
     val productRevisionId: String? = null,
+    /**
+     * Set only on a re-bill row (runbook 0033, `billing_fee_rebill`): the idempotency key of the fee
+     * the ledger refused into a closed day. [idempotencyKey] is then the new, recorded key.
+     */
+    val rebillOf: String? = null,
 )
 
 /** The `billing.fee.reversal-intent.v1` outbox payload shape (written by `BillingAssessmentRepositoryImpl`). */

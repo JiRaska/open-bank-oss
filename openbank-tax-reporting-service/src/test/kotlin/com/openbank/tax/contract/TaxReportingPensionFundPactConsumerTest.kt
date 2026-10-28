@@ -128,7 +128,8 @@ class TaxReportingPensionFundPactConsumerTest {
             .queryParam("periodStart", "2026-09-01").queryParam("periodEnd", "2026-09-30")
             .get(clientPath()).then().statusCode(200).extract().asString()
         val figures = mapper.readValue<FundPeriodFiguresDto>(body)
-        val adapter = PensionReturnDataAdapter(FixedSources(figures), NoCorporateFacts, NoCompanyBooks)
+        val adapter =
+            PensionReturnDataAdapter(FixedSources(figures), NoCorporateFacts, NoCompanyBooks, NoCompanyPortfolio, "CZK")
         val catalogue = CatalogueParser.parse(mapper, "statutory-returns/cz/pension-cnb.v1.json")
         listOf("PSP10-12-FUND", "PSP20-12-FUND", "PSP30-12", "PSP34-12-FUND", "PEF13-04").forEach { code ->
             val definition = catalogue.definition(code)!!

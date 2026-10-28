@@ -97,6 +97,10 @@ Cron `MandateExpiryScheduler` je **defaultně vypnutý** (`openbank.sdd.expiry.e
 - **Release** je automatický přes release-please z Conventional Commits (scope `sdd`). Needituj ručně `version.txt` / `CHANGELOG.md`. `version.txt` je aktuálně `0.2.0`; `quarkus.application.version` v `application.yaml` je `0.1.1` (známý drift — sjednotí je skill `bump` při příští změně).
 - **Flyway** běží při startu (`migrate-at-start: true`); `validate-on-migrate` je vypnuté a opakování připojení je nakonfigurováno kvůli pořadí cold-startu vůči DB.
 
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

@@ -26,6 +26,7 @@ import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { runnableModules } from './service-inventory.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -599,27 +600,15 @@ function computeGate(short, scores) {
 // Service discovery
 // ---------------------------------------------------------------------------
 /**
- * Every module the matrix scores: the `-service` modules PLUS every declared money-path one.
- *
- * The `openbank-*-service` glob alone missed openbank-sepa-payment, openbank-sepa-instant and
- * openbank-domestic-payment — three released components which rules.yaml declares money-path and
- * which move SEPA and domestic payments. They had no row at all, so every headline this collector
- * produced silently excluded them (#2364, fixed in the Python collector only; #2365).
- *
- * Deliberately NOT widened to every module carrying a governance.yaml: that is a scoping decision
- * about what the matrix covers, not a correctness fix. Mirrors prod-readiness-collector.all_services.
+ * Score the shared structural backend inventory, including suffixless and agent apps.
+ * A declared money-path module must remain visible; an inventory gap stops collection.
+ * Keep this roster identical to prod-readiness-collector.all_services.
  */
 function allServices() {
-  const out = new Set()
-  for (const entry of readdirSync(REPO).sort()) {
-    const m = entry.match(/^openbank-(.+)-service$/)
-    if (!m) continue
-    const d = path.join(REPO, entry)
-    try { if (!statSync(d).isDirectory()) continue } catch { continue }
-    out.add(m[1])
-  }
-  for (const short of moneyPath()) {
-    try { if (statSync(svcDir(short)).isDirectory()) out.add(short) } catch { /* absent module */ }
+  const out = new Set(runnableModules(REPO).map(module => module.short))
+  const missingMoney = [...moneyPath()].filter(short => !out.has(short)).sort()
+  if (missingMoney.length > 0) {
+    throw new Error(`declared money-path module(s) missing from runnable service inventory: ${missingMoney.join(', ')}`)
   }
   return [...out].sort()
 }

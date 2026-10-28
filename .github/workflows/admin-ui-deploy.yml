@@ -475,27 +475,29 @@ jobs:
             exit 1
           fi
 
-          DOWNLOADED=0
-          for index in "${!SERVICES[@]}"; do
-            svc="${SERVICES[$index]}"
+          # Inventory/provenance lookup above remains complete and serial. Only
+          # independent service output directories are staged concurrently.
+          STAGING_TMP="$(mktemp -d)"
+          trap 'rm -rf "${STAGING_TMP}"' EXIT
+          stage_service() {
+            local svc="$1" art_id="$2"
             art_name="test-intelligence-${svc}"
             # This image represents deployed main, not the newest PR candidate.
             # Keep branch provenance explicit: an unmerged artifact must never be
             # presented in the sandbox as evidence for the deployed revision.
-            art_id="${ARTIFACT_IDS[$index]:-}"
             if [ -z "${art_id}" ]; then
               echo "  ${svc}: no artifact (skip)"
-              continue
+              return 0
             fi
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
-                -L -o "/tmp/${art_name}.zip"; then
-              TMPDIR_ART="/tmp/${art_name}-extracted"
+                -L -o "${STAGING_TMP}/${art_name}.zip"; then
+              TMPDIR_ART="${STAGING_TMP}/${art_name}-extracted"
               rm -rf "${TMPDIR_ART}" && mkdir -p "${TMPDIR_ART}"
-              if ! unzip -tq "/tmp/${art_name}.zip" >/dev/null 2>&1; then
+              if ! unzip -tq "${STAGING_TMP}/${art_name}.zip" >/dev/null 2>&1; then
                 echo "  ${svc}: artifact archive is invalid; refusing incomplete Test Intelligence image" >&2
                 exit 1
               fi
-              unzip -q "/tmp/${art_name}.zip" -d "${TMPDIR_ART}"
+              unzip -q "${STAGING_TMP}/${art_name}.zip" -d "${TMPDIR_ART}"
               # actions/upload-artifact strips the uploaded directory prefix: the
               # service envelope is therefore normally `run.json` at the archive
               # root.  Keep accepting the previous nested layout too, so the UI
@@ -523,13 +525,34 @@ jobs:
                 mkdir -p "${svc}/build/reports/kover"
                 cp "${xml}" "${svc}/build/reports/kover/report.xml"
               done
-              DOWNLOADED=$((DOWNLOADED + 1))
+              touch "${STAGING_TMP}/${svc}.staged"
               echo "  ${svc}: staged"
             else
               echo "  ${svc}: artifact download failed; refusing incomplete Test Intelligence image" >&2
               exit 1
             fi
+          }
+          # Drain every worker before reporting failure. Keep accounting in the
+          # parent: background shells cannot update its counters reliably.
+          PIDS=()
+          STAGING_FAILED=0
+          drain_workers() {
+            for pid in "${PIDS[@]}"; do
+              if ! wait "${pid}"; then STAGING_FAILED=1; fi
+            done
+            PIDS=()
+          }
+          for index in "${!SERVICES[@]}"; do
+            stage_service "${SERVICES[$index]}" "${ARTIFACT_IDS[$index]:-}" &
+            PIDS+=("$!")
+            if [ "${#PIDS[@]}" -eq 4 ]; then drain_workers; fi
           done
+          drain_workers
+          if [ "${STAGING_FAILED}" -ne 0 ]; then
+            echo "::error::Test Intelligence artifact staging failed; refusing incomplete deployment snapshot"
+            exit 1
+          fi
+          DOWNLOADED=$(find "${STAGING_TMP}" -maxdepth 1 -name '*.staged' | wc -l | tr -d ' ')
           COUNT=$(find . -path "*/build/test-results/*/TEST-*.xml" | wc -l | tr -d ' ')
           RUN_COUNT=$(find . -path "*/build/test-intelligence/run.json" | wc -l | tr -d ' ')
           echo "Staged ${RUN_COUNT} run envelopes and ${COUNT} JUnit XML files from ${DOWNLOADED}/${#SERVICES[@]} services."
@@ -1116,6 +1139,32 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Prepare directly discoverable evidence seed
+        if: steps.build_admission.outputs.proceed == 'true'
+        env:
+          SOURCE_SHA: ${{ needs.deploy-source.outputs.source_sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, shutil
+          destination = pathlib.Path(os.environ['RUNNER_TEMP']) / 'test-intelligence-seed'
+          destination.mkdir()
+          shutil.copyfile('openbank-admin-ui/test-intelligence.json', destination / 'test-intelligence.json')
+          provenance = {'schemaVersion': 1, 'runId': int(os.environ['GITHUB_RUN_ID']),
+                        'attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+                        'sourceSha': os.environ['SOURCE_SHA'], 'workflowSha': os.environ['GITHUB_SHA']}
+          (destination / 'seed-provenance.json').write_text(json.dumps(provenance) + '\n')
+          PY
+
+      - name: Retain directly discoverable evidence seed
+        if: steps.build_admission.outputs.proceed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: admin-ui-test-intelligence-seed
+          overwrite: true  # reruns replace only this run's alias; immutable snapshots stay retained
+          path: ${{ runner.temp }}/test-intelligence-seed/
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Rewrite GitOps image tag
         if: steps.build_admission.outputs.proceed == 'true'
         id: rewrite
@@ -1160,7 +1209,7 @@ jobs:
       - name: Mint a GitHub App installation token
         id: app_token
         if: ${{ steps.build_admission.outputs.proceed == 'true' && steps.rewrite.outputs.changed == 'true' && env.GITOPS_APP_ID != '' }}
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}

@@ -90,16 +90,34 @@ interface ProductCatalogRestClient {
     @GET
     @Path("/revisions/{id}")
     fun getRevision(@PathParam("id") revisionId: String): Uni<RevisionDto>
+
+    /**
+     * The same revision as raw JSON, for the product-IR shadow (ADR-0352 phase 3): its `behaviour` and
+     * `irSignature` are read by [com.openbank.billing.infrastructure.adapter.RestCatalogRevisionIrPort]
+     * with a BigDecimal-preserving mapper, because a JSON number in the IR must reach the canonical hash
+     * exactly as the catalog signed it. Never called on the posting path.
+     */
+    @GET
+    @Path("/revisions/{id}")
+    fun getRevisionJson(@PathParam("id") revisionId: String): Uni<String>
 }
 
 /** The subset of a catalog `ProductRevision` billing reads (`GET /api/v2/revisions/{id}`). */
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class RevisionDto(val id: String, val state: String, val content: RevisionContentDto = RevisionContentDto())
+data class RevisionDto(
+    val id: String,
+    val state: String,
+    val content: RevisionContentDto = RevisionContentDto(),
+    // Raw nodes keep malformed optional shadow metadata from breaking legacy fee decoding.
+    val number: com.fasterxml.jackson.databind.JsonNode? = null,
+    val irSignature: com.fasterxml.jackson.databind.JsonNode? = null,
+)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class RevisionContentDto(
     val attributes: Map<String, Any?> = emptyMap(),
     val prices: List<PriceComponentDto> = emptyList(),
+    val behaviour: com.fasterxml.jackson.databind.JsonNode? = null,
 )
 
 /** One price component; [value] is an exact decimal STRING in v2, never a binary float. */
@@ -111,6 +129,8 @@ data class PriceComponentDto(
     val currency: String? = null,
     val unit: String? = null,
     val cadence: String? = null,
+    /** FEE, RATE, LIMIT or THRESHOLD (catalog #13230); absent on components authored before roles existed. */
+    val role: String? = null,
 )
 
 /** Account read — carries account PII, so the call propagates an OIDC service token. */

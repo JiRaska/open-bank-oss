@@ -12,17 +12,17 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.libs.testing.containers.PostgresTestResource
-import io.mockk.every
-import io.mockk.mockk
-import io.quarkus.security.runtime.QuarkusSecurityIdentity
+import com.openbank.productcatalog.domain.ProductIds
+import com.openbank.productcatalog.domain.ProductSeed
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
-import org.eclipse.microprofile.jwt.JsonWebToken
+import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
@@ -83,30 +83,9 @@ class ProductCatalogPactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        // Match the scoped machine caller only for its Pact; restore the operator for other consumers.
-        // Real token authentication and scope mapping are covered by CatalogPensionOidcApprovalIT.
-        val originalIdentity = testIdentityAssociation.testIdentity
-        try {
-            if (context?.consumer?.name == "openbank-pension-service") {
-                testIdentityAssociation.setTestIdentity(pensionIdentity())
-            }
+        withCatalogPactConsumerIdentity(testIdentityAssociation, context?.consumer?.name) {
             context?.verifyInteraction()
-        } finally {
-            testIdentityAssociation.setTestIdentity(originalIdentity)
         }
-    }
-
-    private fun pensionIdentity(): QuarkusSecurityIdentity {
-        val token = mockk<JsonWebToken>()
-        every { token.name } returns "service-account-openbank-pension"
-        every { token.subject } returns "pact-pension-service"
-        every { token.getClaim<String>("azp") } returns "openbank-pension"
-        every { token.getClaim<String>("preferred_username") } returns "service-account-openbank-pension"
-        return QuarkusSecurityIdentity.builder()
-            .setPrincipal(token)
-            .addRole("ROLE_API")
-            .addRole("CATALOG_SCOPE_READ")
-            .build()
     }
 
     /**
@@ -133,6 +112,20 @@ class ProductCatalogPactProviderVerificationTest {
             .then().statusCode(404)
     }
 
+    /** Assert the real seeded schedule; never replace it with consumer-shaped fixture data. */
+    @State("a product with fees exists for code CURRENT_PERSONAL")
+    fun feeBearingProductIsSeeded() {
+        val product = ProductSeed.products.single { it.code == "CURRENT_PERSONAL" }
+        val monthlyFee = product.fees.single { it.name == "Monthly Fee" }
+        val id = ProductIds.canonicalId(product.id)
+        given().accept("application/json").get("/api/v1/products/$id/fees")
+            .then().statusCode(200)
+            .body("find { it.name == 'Monthly Fee' }.type", equalTo(monthlyFee.type))
+            .body("find { it.name == 'Monthly Fee' }.amount", equalTo(monthlyFee.amount.toFloat()))
+            .body("find { it.name == 'Monthly Fee' }.currency", equalTo(monthlyFee.currency))
+            .body("find { it.name == 'Monthly Fee' }.waivable", equalTo(monthlyFee.waivable))
+    }
+
     @State("a published v1-projected deposit revision exists for billing")
     fun publishedLegacyDepositRevisionExists() = catalogFixtures.publishedLegacyDepositRevisionExists()
 
@@ -143,6 +136,39 @@ class ProductCatalogPactProviderVerificationTest {
     @State("no product exists with id 00000000-0000-0000-0000-000000000fff")
     fun unknownProductIdNotFound() {
         // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * No seeding: `ProductCatalogSeeder` persists the whole canonical catalogue from `ProductSeed`
+     * on first boot, so `list()` already returns products (`AgentCatalogReadPactConsumerTest`,
+     * the assistant's `list_products` tool). The list is a global array, so the consumer pact
+     * pins per-row shape, never count or order — nothing here needs an isolated aggregate.
+     */
+    @State("the canonical catalog products are seeded")
+    fun canonicalCatalogProductsAreSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * No seeding: `prod-001` is `SAVINGS_STANDARD` in `ProductSeed` on every boot — ACTIVE, with
+     * two seeded fees (`AgentCatalogReadPactConsumerTest`, the assistant's `get_product` /
+     * `get_product_fees` tools). Same rationale as [cardEnabledProductIsSeeded] above — reseeding
+     * would fork a second source of truth for a product the service already owns.
+     */
+    @State("a product exists with id prod-001")
+    fun pactProductIsSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * No seeding: the pact-pinned id is a random UUID never assigned by `ProductSeed`
+     * (`AgentCatalogReadPactConsumerTest`, the assistant's `get_product` 404 leg).
+     */
+    @State("no product exists with id 00000000-0000-0000-0000-000000000eee")
+    fun agentUnknownProductIdNotFound() {
+        // Assert the negative provider state before Pact replays its own 404 interaction.
+        io.restassured.RestAssured.given().get("/api/v1/products/00000000-0000-0000-0000-000000000eee")
+            .then().statusCode(404)
     }
 
     @State("trusted insurance term-life schema version 1 is installed")

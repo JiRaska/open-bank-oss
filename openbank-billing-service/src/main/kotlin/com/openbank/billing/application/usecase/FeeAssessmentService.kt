@@ -14,6 +14,9 @@ import com.openbank.billing.application.port.out.RevisionTermsUnreadableExceptio
 import com.openbank.billing.domain.AssessedFee
 import com.openbank.billing.domain.BillableFee
 import com.openbank.billing.domain.BillingAssessment
+import com.openbank.billing.domain.FeeIncomeCurrencies
+import com.openbank.billing.domain.ProductShadowInput
+import com.openbank.billing.domain.ShadowLegacyFee
 import com.openbank.libs.product.FeeContext
 import com.openbank.libs.product.WaiveReason
 import com.openbank.libs.product.WaiverEvaluator
@@ -38,14 +41,25 @@ import java.math.BigDecimal
  * [com.openbank.billing.domain.FeeJournalCommand]s (idempotently keyed).
  */
 @ApplicationScoped
-class FeeAssessmentService(
+class FeeAssessmentService @jakarta.inject.Inject constructor(
     private val accounts: AccountContextPort,
     private val revisions: ProductRevisionPort,
     private val pins: AccountRevisionPinPort,
     private val meters: MeterRegistry,
+    private val clock: java.time.Clock = java.time.Clock.systemUTC(),
 ) {
 
-    suspend fun assess(cycleId: String, accountId: String, currency: String): BillingAssessment {
+    suspend fun assess(
+        cycleId: String,
+        accountId: String,
+        currency: String,
+        scheduledCadence: String? = null,
+    ): BillingAssessment {
+        // Fail-closed (#13226): a currency the ledger has no fee-income account for would only ever 422 at
+        // the ledger and wedge its outbox row. Refuse it here, counted by reason -- never a zero charge.
+        if (!FeeIncomeCurrencies.isMapped(currency)) {
+            return skipped(cycleId, accountId, currency, "FEE_INCOME_CURRENCY_UNMAPPED")
+        }
         val billing = accounts.resolve(accountId, currency)
             ?: return skipped(cycleId, accountId, currency, "ACCOUNT_CONTEXT_UNRESOLVED")
 
@@ -65,7 +79,7 @@ class FeeAssessmentService(
             } else {
                 "PRODUCT_CATALOG_UNREACHABLE"
             }
-            log.warnf(it, "terms of revision %s for account %s unavailable: %s", pinned, accountId, reason)
+            log.warn("Revision terms unavailable; assessment skipped")
             return skipped(cycleId, accountId, currency, reason)
         }
         // A fee with no accounting class has no ledger account to land in; charging it anyway would
@@ -77,7 +91,7 @@ class FeeAssessmentService(
         if (terms.noFeeIdentityComponents > 0) {
             // AMOUNT components with no fee identity are not fees (a minimum balance, a limit). Counted per
             // assessment so a v2 product whose fees are ALL unidentified shows up, not as a zero bill alone.
-            meters.counter("billing.assessment.no_fee_identity").increment()
+            meters.counter("openbank.billing.assessment.no_fee_identity").increment()
         }
         // A product that declares fees but yields none we can charge in this currency (only other
         // currencies, or only components billing cannot price) must NOT come out as a clean zero-fee
@@ -88,18 +102,13 @@ class FeeAssessmentService(
         if (terms.droppedFeeComponents > 0) {
             // This assessment charges less than the product declares; a persistent gap must be visible to
             // an alert, which a once-per-revision counter (the revision is cached) cannot give.
-            meters.counter("billing.assessment.dropped_components").increment()
-            log.warnf(
-                "assessment %s/%s charges without %d dropped fee component(s)",
-                cycleId,
-                accountId,
-                terms.droppedFeeComponents,
-            )
+            meters.counter("openbank.billing.assessment.dropped_components").increment()
+            log.warn("Assessment has dropped fee components")
         }
         val assessed = terms.fees.map { fee ->
             assessOne(cycleId, accountId, currency, fee, billing.context, terms.revisionId, accountingClass)
         }
-        return BillingAssessment(
+        val assessment = BillingAssessment(
             cycleId = cycleId,
             accountId = accountId,
             currency = currency,
@@ -107,7 +116,30 @@ class FeeAssessmentService(
             skipReason = null,
             assessedFees = assessed,
         )
+        return assessment.copy(shadowInput = shadowInput(assessment, billing, terms, scheduledCadence))
     }
+
+    private fun shadowInput(
+        assessment: BillingAssessment,
+        billing: AccountBilling,
+        terms: com.openbank.billing.application.port.out.RevisionTerms,
+        scheduledCadence: String?,
+    ) = ProductShadowInput(
+        cycleId = assessment.cycleId,
+        accountId = assessment.accountId,
+        currency = assessment.currency,
+        productRevisionId = terms.revisionId,
+        expectedRevision = terms.shadowRevision,
+        balance = billing.context.balance,
+        monthlyTurnover = billing.context.monthlyTurnover,
+        aggregatePocketBalance = billing.context.aggregatePocketBalance,
+        segment = billing.context.segment,
+        legacyFees = assessment.assessedFees.map { ShadowLegacyFee(it.feeId, it.chargedAmount, it.waived) },
+        evaluatedAt = clock.instant(),
+        evaluationZone = clock.zone.id,
+        openedAt = billing.openedAt,
+        scheduledCadence = scheduledCadence,
+    )
 
     private sealed interface Pin {
         data class Found(val revisionId: String) : Pin
@@ -130,7 +162,7 @@ class FeeAssessmentService(
     /** The account's pinned revision, pinning it as of the account's opening on first sight. */
     private suspend fun resolvePin(accountId: String, billing: AccountBilling): Pin {
         val existing = attempt { pins.find(accountId) }.getOrElse {
-            log.warnf(it, "pin store read failed for account %s", accountId)
+            log.warn("Revision pin store read failed; assessment skipped")
             return Pin.Skip("REVISION_PIN_STORE_UNAVAILABLE")
         }
         if (existing != null) return Pin.Found(existing)
@@ -138,13 +170,13 @@ class FeeAssessmentService(
         // force the first time billing looks at it (ADR-0341 D1).
         val openedAt = billing.openedAt ?: return Pin.Skip("ACCOUNT_OPENING_UNKNOWN")
         val published = attempt { revisions.publishedRevisionIdFor(billing.productId, openedAt) }.getOrElse {
-            log.warnf(it, "catalog lookup failed for product %s", billing.productId)
+            log.warn("Catalog revision lookup failed; assessment skipped")
             return Pin.Skip("PRODUCT_CATALOG_UNREACHABLE")
         } ?: return Pin.Skip("PRODUCT_REVISION_UNRESOLVED")
         return attempt { pins.pinIfAbsent(accountId, published) }.fold(
             onSuccess = { Pin.Found(it) },
             onFailure = {
-                log.warnf(it, "pin store write failed for account %s", accountId)
+                log.warn("Revision pin store write failed; assessment skipped")
                 Pin.Skip("REVISION_PIN_STORE_UNAVAILABLE")
             },
         )
@@ -154,7 +186,7 @@ class FeeAssessmentService(
 
     /** Every skip is COUNTED by reason: a skip is a fee not charged, and must never be invisible. */
     private fun skipped(cycleId: String, accountId: String, currency: String, reason: String): BillingAssessment {
-        meters.counter("billing.assessment.skipped", "reason", reason).increment()
+        meters.counter("openbank.billing.assessment.skipped", "reason", reason).increment()
         return BillingAssessment(
             cycleId = cycleId,
             accountId = accountId,

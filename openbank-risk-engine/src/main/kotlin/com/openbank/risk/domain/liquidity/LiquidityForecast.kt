@@ -148,6 +148,8 @@ object LiquidityForecast {
         model: BehaviouralModel,
         params: LiquidityParameters,
         horizonDays: Int,
+        /** ADR-0344 D2: flows of PLANNED treasury deals — they enter this forecast and nothing else. */
+        planned: List<CashFlow> = emptyList(),
     ): LiquidityForecastResult {
         val inStock = Liquidity.hqlaInstrumentIds(positions, params)
         val flows = SnapshotCashFlowProjection.flows(
@@ -160,7 +162,15 @@ object LiquidityForecast {
         val hqla = Liquidity.compute(positions, instruments, asOf, params).currencies
             .filter { it.lcr.hqla.lines.isNotEmpty() }
             .associate { it.currency to it.lcr.hqla }
-        return forecast(flows, hqla, asOf, horizonDays)
+        val withPlanned = if (planned.isEmpty()) {
+            flows
+        } else {
+            (flows.keys + planned.map { it.currency }).associateWith { ccy ->
+                val base = flows[ccy] ?: SourcedFlows(emptyList(), emptyList())
+                base.copy(contractual = base.contractual + planned.filter { it.currency == ccy })
+            }
+        }
+        return forecast(withPlanned, hqla, asOf, horizonDays)
     }
 
     fun forecast(

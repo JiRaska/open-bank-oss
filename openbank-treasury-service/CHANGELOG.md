@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.17.1...treasury-service-v0.18.0) (2026-10-28)
+
+
+### Features
+
+* **treasury:** custodian portfolio statements and the period-end portfolio for tax reporting ([#13992](https://github.com/JiRaska/open-bank-oss/issues/13992)) ([c82147c](https://github.com/JiRaska/open-bank-oss/commit/c82147c20901a6fe7c6f5d6639f0f8cb54e82c4e))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.17.0...treasury-service-v0.17.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **treasury:** versioned deal saves, override eligibility and a reference-only editor role ([#13756](https://github.com/JiRaska/open-bank-oss/issues/13756)) ([e710754](https://github.com/JiRaska/open-bank-oss/commit/e71075488dcfb88c5deb10d426c00d27e5dfa051))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.16.0...treasury-service-v0.17.0) (2026-10-26)
+
+
+### Features
+
+* **treasury:** fixings, the market-data quality gate, IRS and FRA cash flows (ADR-0344 phase 1a) ([#13643](https://github.com/JiRaska/open-bank-oss/issues/13643)) ([f083272](https://github.com/JiRaska/open-bank-oss/commit/f083272cf895df63fa4093255be9cad5fd9b61e5))
+
+
+### Bug Fixes
+
+* **treasury:** re-check deal state under the lock before applying a fixing ([#13846](https://github.com/JiRaska/open-bank-oss/issues/13846)) ([631e0f6](https://github.com/JiRaska/open-bank-oss/commit/631e0f615de566129ebad1e28718f0206706daa6))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.15.1...treasury-service-v0.16.0) (2026-10-24)
+
+
+### Features
+
+* **treasury:** reference data and the cash-flow ledger for the five existing products (ADR-0344 phase 0) ([#13614](https://github.com/JiRaska/open-bank-oss/issues/13614)) ([42eec93](https://github.com/JiRaska/open-bank-oss/commit/42eec93ad9ee5c85728242d9b559515037391274))
+
 ## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.15.0...treasury-service-v0.15.1) (2026-10-20)
 
 

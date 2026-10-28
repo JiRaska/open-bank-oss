@@ -130,6 +130,9 @@ function cmp(a: string, b: string): number {
   }
   return 0
 }
+function isReleaseVersion(value: string | null): value is string {
+  return value !== null && /^\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?$/.test(value)
+}
 // The endoflife cycle whose label is the longest prefix of the running version
 // (cycles are "16" for Postgres, "1.17" for Vault, "11" for Grafana, …).
 function matchCycle(version: string, cycles: EolCycle[]): EolCycle | null {
@@ -155,12 +158,12 @@ export async function GET() {
   }
 
   const probeOn = inCluster()
-  // kube-state-metrics reports container images actually present on running pods.
-  // Keep this separate from the build-time GitOps image declaration below.
+  // Prometheus supplies observed running images and scoped runtime build-info metrics.
+  // Keep these separate from the build-time GitOps image declaration below.
   const liveImages = probeOn ? await getLiveSnapshot() : null
   const checkedAtMs = Date.now()
   const components = await Promise.all(snap.components.map(async c => {
-    // 1. measured running version: prefer live workload images, then an application
+    // 1. measured running version: prefer live runtime observations, then an application
     // build-info endpoint. GitOps image tags are declarations, never runtime evidence.
     let running: string | null = null
     let versionSource: string
@@ -170,13 +173,13 @@ export async function GET() {
     })
     if (imageVersions.length === 1) {
       running = imageVersions[0].version
-      versionSource = running.startsWith('sha256:')
+      versionSource = imageVersions[0].source ?? (running.startsWith('sha256:')
         ? 'prometheus-workload-image-digest'
-        : 'prometheus-workload-image'
+        : 'prometheus-workload-image')
     } else if (imageVersions.length > 1) {
-      // A rolling deployment can legitimately run more than one version. Never pick
+      // Different observed workloads can run different versions. Never pick
       // the most common one and call it "the" running version.
-      versionSource = 'mixed-running-images'
+      versionSource = 'mixed-running-workloads'
     } else if (c.versionSource === 'probe' && probeOn) {
       running = await probeVersion(c.id)
       versionSource = running ? 'build-info-probe' : 'unavailable'
@@ -212,8 +215,15 @@ export async function GET() {
 
     // recommended upgrade target: safe patch first, else the newest major
     const target = patchAvailable ? latestInCycle : (majorAvailable ? newest?.latest ?? null : null)
-    const releaseNotesUrl = c.releaseNotes && target
-      ? c.releaseNotes.replace('{version}', target)
+    const releaseVersion = isReleaseVersion(target)
+      ? target
+      : isReleaseVersion(runningVersion)
+        ? runningVersion
+        : null
+    const releaseNotesUrl = c.releaseNotes?.includes('{version}')
+      ? releaseVersion
+        ? c.releaseNotes.replaceAll('{version}', encodeURIComponent(releaseVersion))
+        : null
       : c.releaseNotes ?? null
 
     // 3. vulnerabilities

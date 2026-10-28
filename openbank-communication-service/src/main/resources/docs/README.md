@@ -18,6 +18,28 @@ Messages share the style version's existing draft, lint, review, publication and
 
 Style draft, submit, publish and retire writes use `/api/v2/personas` because requiring a draft base breaks the old write contract. Existing consumers continue reading `/api/v1/personas/{personaKey}/published` unchanged.
 
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.
+- **OPA policy decision point.** `openbank.authz.opa-pdp-producer.enabled: true` makes libs-runtime's `OpaPolicyDecisionPointProducer` supply the OPA sidecar client, configured by `opa.url`, `opa.path` and `opa.timeout-ms` (default 500 ms). It is read at build time.
+
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+### Published-copy consumer contract
+
+Customer-edge's Pact consumer test exercises the real app-copy adapter for a published
+version with locale messages and for a 404 that clears cached overrides. Communication's
+folder verifier replays the generated contract through the real HTTP server and PostgreSQL
+publication state. The separate broker verifier runs in the normal main provider-contract
+lane and publishes results for the exact provider version. Local folder replay is not broker
+publication, deployment or customer delivery evidence. Fixtures never publish live content.
+Rollback removes the test wiring together; strict reconcile must still reject missing Pact
+source evidence rather than accepting empty contracts or an absent-participant exception.
+
+Provider publication fixtures run in a dedicated Quarkus test profile with their own real
+PostgreSQL resource; they cannot advance publication versions used by the ordinary HTTP
+integration suite. Provider verification also exercises forbidden-role and unauthenticated
+reads through the real HTTP endpoint. Consumer declarations explicitly identify both Pact
+participants, so the normal scope/drift checker can discover the generated contract.

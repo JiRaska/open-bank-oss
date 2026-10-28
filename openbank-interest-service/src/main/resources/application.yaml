@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -140,11 +125,6 @@ quarkus:
     path: /api/docs
   scheduler:
     enabled: true
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -216,10 +196,11 @@ authz:
 # because ADR-0033 §E withholds only CZK interest.
 interest:
   catalog-sync:
-    # Expand safely: disabled until an environment gives the openbank-services principal catalog
-    # read access and opts into the migration. Enabling later is idempotent because receipts and the
-    # cursor commit with each snapshot.
-    enabled: ${INTEREST_CATALOG_SYNC_ENABLED:false}
+    # ADR-0341: on by default. The sync only caches immutable published revisions keyed by revision id;
+    # an account is pinned to the revision it first accrues under, so a newer revision never reprices
+    # an existing account. Needs interest's own catalog.read grant (#8481). Idempotent: receipts and
+    # the cursor commit with each snapshot. Set INTEREST_CATALOG_SYNC_ENABLED=false to switch it off.
+    enabled: ${INTEREST_CATALOG_SYNC_ENABLED:true}
     interval: ${INTEREST_CATALOG_SYNC_INTERVAL:30s}
     initial-delay: ${INTEREST_CATALOG_SYNC_INITIAL_DELAY:15s}
   ledger:

@@ -64,9 +64,8 @@ BOM="${DIR}/build/reports/bom.json"
 [ -f "$BOM" ] || echo "WARN: no SBOM at ${BOM} — image will serve /q/openbank/sbom as not_generated" >&2
 
 # 2. Bake quarkus-app/ into a runtime image. EXPOSE is cosmetic (k8s uses the
-#    Deployment containerPort); we lift it from the service Dockerfile when present.
-PORT="$(grep -oE 'EXPOSE[[:space:]]+[0-9]+' "${DIR}/Dockerfile" 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)"
-PORT="${PORT:-8080}"
+#    Deployment containerPort); it comes from quarkus.http.port via service-port.py.
+PORT="$(python3 "${REPO_ROOT}/.github/scripts/service-port.py" "${DIR}")"
 CTX="$(mktemp -d)"; trap 'rm -rf "$CTX"' EXIT
 cp -r "${QA}" "${CTX}/quarkus-app"
 # Gradle produces quarkus-app files with 600 permissions (owner-only). The container

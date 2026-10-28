@@ -8,7 +8,7 @@
 ```
 
 - **Balení:** fast-jar (nikdy uber-jar — runtime stage COPYuje `quarkus-app/`). Generický build/push: `openbank-infra/scripts/build-push-service.sh openbank-agent-service` (host-side `quarkusBuild`, ne Gradle v Dockeru).
-- **Image:** viz [`Dockerfile`](../../../../openbank-agent-service/Dockerfile) — fast-jar runtime stage.
+- **Image:** viz [`Dockerfile.deploy`](../../../../.github/workflows/Dockerfile.deploy) — fast-jar runtime stage.
 - **DB:** Flyway migrace `V1`–`V6` se aplikují při startu (fronta návrhů, kill-switch, audit outbox, merge záznamy — viz [04 — Data](./04-data.md)); obvyklé Flyway checksum/repair runbooky platí jako u jakékoliv JDBC služby.
 
 ## Konfigurace (prostředí)
@@ -90,6 +90,10 @@ Vydávaná komponenta (přítomen `version.txt`) — aktuálně `1.27.4`. Verzov
 
 Produkční REST klient AML používá pojmenovanou konfiguraci TLS `aml-authority` a listener AML služby na portu 8443, který vyžaduje klientský certifikát. Nasazení dodává klientský certifikát a svazek důvěryhodné privátní CA; vyžaduje se TLS 1.3. Pokud volání AML po nasazení selhává, zkontrolujte společně klientský certifikát a CA, produkční URL REST klienta a síťovou politiku k listeneru. Lokální vývoj a testy nadále používají HTTP fixture; úspěšný lokální HTTP test sám neprokazuje navázání TLS v nasazení.
 
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
@@ -97,3 +101,16 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ## Přepsání consumer group pro Kafka
 
 Consumer group id a offset reset pro Kafka kanály této služby nejsou v `application.yaml` nastaveny jako YAML klíče, protože SmallRye Config uvozuje klíče s tečkou a konektor je nikdy nenačte. Dodává je ConfigMap s přepsáním ve formě properties souboru, načítaný přes `QUARKUS_CONFIG_LOCATIONS`. Referenčním vzorem je kanál `party-events-in` ve službě card-issuance-service; komentáře v `application.yaml` na něj odkazují. Jde pouze o změnu dokumentace a komentářů. Žádná hodnota konfigurace ani chování za běhu se nemění.
+
+## Rekonstrukce důkazů podle pravidel pro PR
+
+Pro `codex/` zůstává povinné schválení přesného HEAD. U ostatních sloučení App lze doložit
+pozorovanou lidskou žádost pro PR jen podle výslovně prověřeného neměnného blobu pravidel z prvního
+rodiče merge commitu. Neznámý blob vyžaduje review zdroje a běžné PR, nikoli provozní výjimku.
+Důkaz má rozsah PR; nedokládá schválení SHA ani splnění všech historických kontrol. Producer před
+zápisem do `/api/v1/agent-merge-records/app-policy` vyžaduje číselnou verzi schématu 2 a příznak
+`policyPrAuthorization: true`, poté nezávisle přečte `policyAuthorization`. Staré pole
+`authorization` je pro tento důkaz null. Před doplněním historie ověřte skutečně nasazený backend,
+migraci V8 a nové UI. Zachovejte původní čas pozorování, prošetřete konflikty 409 a při rollbacku
+uchovejte důkazy. Deployment holdy uvolňujte samostatným governance PR až po doložení všech
+podmínek. Zelený běh recorderu sám neprokazuje opravu historických chybějících řádků.

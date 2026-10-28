@@ -31,6 +31,19 @@ This documentation is published directly by the service at the management endpoi
   (stub, ADR-0162), object store (Postgres BYTEA; S3 + WORM is ADR-0161), PAdES sealing (no-op; EU DSS
   is ADR-0007/0162).
 
+## Outbound rendering contract tests
+
+Three Pact consumer tests pin the data read for rendered legal documents: party legal name/address (200 and unknown-party 404), the party-scoped CURRENT account list (200 and unauthenticated 401), and product identity/name/fee rows/terms-array presence (200 and unknown-product 404). They deserialize mock responses using the production client DTOs and compare literal provider paths with the client annotations. Party address formatting is mirrored in the test; these tests do not execute a full document render or the production REST-client invocation.
+
+The test-only `pact.consumer` dependency uses the existing catalog version. A dedicated party provider state supplies a synthetic registered address without changing VoP's address-less fixture; account and product provider states remain shared existing fixtures. Six consumer test methods must execute, and folder-provider replays must separately verify all six interactions. A mock-server 401 alone is not proof of authentication enforcement. No Pact Broker, live JWT, deployed interoperability, PDF/signature output or production customer data is validated by these offline contracts. Other outbound clients remain outside these contracts; skipped tests do not count as passed contracts.
+
+
+The fourth consumer contract covers `POST /api/v1/sca/challenges/{id}/consume`: matching document hash/ceremony returns 200, a different document hash returns 409, an unknown challenge returns 404, and missing identity returns 401. It drives the real `ScaVerificationAdapter` through an anonymous client bound to the Pact mock server, checking success versus rejected verification. Folder and broker provider tests share the same synthetic COMPLETED, unconsumed DOCUMENT_SIGNING state; the separate unauthenticated provider class replays the 401 interaction. The fixture resets challenge state for each interaction: it does not independently prove that a refused consume left persisted state unburnt. These tests do not verify device signatures, production OIDC client filters, valid JWT signatures, enforced OPA or cross-party ownership denial. All four SCA interactions require actual execution counts; an absent Pact or skipped broker test is not compatibility proof.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
+
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

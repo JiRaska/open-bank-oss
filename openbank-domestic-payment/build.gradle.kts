@@ -30,8 +30,12 @@ dependencies {
     implementation(project(":openbank-libs-temporal"))
     implementation("io.temporal:temporal-sdk:1.25.1")
     implementation(project(":openbank-libs-domain"))
+    // ADR-0353: screening, AML case severity and fraud verdict, shared with aml/sanctions/fraud.
+    implementation(project(":openbank-libs-fincrime"))
     implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0319: transaction-service client GENERATED from its openapi.yaml (#13224).
+    implementation(project(":openbank-client-transaction"))
     // In-process Temporal test server for the sole-orchestrator dispatch/workflow tests (ADR-0120 Phase 6, #1917).
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")

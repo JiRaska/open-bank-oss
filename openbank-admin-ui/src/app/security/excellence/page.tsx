@@ -32,6 +32,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
 import { parseIctIncidentEnvelope, summarizeIctIncidents } from '@/lib/security/ictIncidentContract'
 import { parseSecurityEnvelope, summarizeReachable } from '@/lib/security/summary'
+import { hasSecurityObservations, isCurrentSecurityReport } from '@/lib/security/reportFreshness'
 import { parseSecurityKpis, type SecurityKpis } from '@/lib/security/kpiContract'
 import { classifySecurityKpiFreshness } from '@/lib/security/kpiFreshness'
 
@@ -116,13 +117,19 @@ async function fetchPosture(): Promise<Patch> {
   let env
   try { env = parseSecurityEnvelope(body) } catch { return unavailable('invalid_evidence') }
   if (!env.available) return unavailable(env.reason)
+  if (!isCurrentSecurityReport(env.source, env.freshness, env.scannerStatus)) {
+    return unavailable(env.freshness === 'stale' ? 'stale_snapshot' : env.freshness === 'unknown' ? 'unknown_freshness' : 'scanner_unavailable')
+  }
   const r = env.report
   const summary = summarizeReachable(r.serviceResults)
+  if (!hasSecurityObservations(summary.reachableCount)) return unavailable('no_observations')
+  const sourceNoteCs = env.source === 'ci-bundle' ? ' · CI snapshot' : ''
+  const sourceNoteEn = env.source === 'ci-bundle' ? ' · CI bundle' : ''
   return {
     status: summary.criticalCount > 0 ? 'critical' : summary.highCount > 0 ? 'degraded' : 'ok',
     score: summary.avgScore,
-    metricCs: `${summary.criticalCount} krit. / ${summary.highCount} vys. nálezů · ${summary.reachableCount}/${r.totalServices} služeb`,
-    metricEn: `${summary.criticalCount} crit. / ${summary.highCount} high findings · ${summary.reachableCount}/${r.totalServices} services`,
+    metricCs: `${summary.criticalCount} krit. / ${summary.highCount} vys. nálezů · ${summary.reachableCount}/${r.totalServices} služeb${sourceNoteCs}`,
+    metricEn: `${summary.criticalCount} crit. / ${summary.highCount} high findings · ${summary.reachableCount}/${r.totalServices} services${sourceNoteEn}`,
   }
 }
 
@@ -520,6 +527,8 @@ export default function SecurityExcellencePage() {
       case 'unreachable':  return t('Služba neodpovídá', 'Service unreachable')
       case 'invalid_evidence': return t('Neplatná evidence — skóre zadrženo', 'Invalid evidence — score withheld')
       case 'stale_snapshot': return t('Bezpečnostní KPI snímek je zastaralý', 'Security KPI snapshot is stale')
+      case 'unknown_freshness': return t('Čas reportu není známý', 'Report age is unknown')
+      case 'no_observations': return t('Sken neobsahuje dosažitelné služby', 'No services had observations in the scan')
       default:             return t('Nedostupné', 'Unavailable')
     }
   }

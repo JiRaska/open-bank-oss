@@ -40,6 +40,9 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # Advisory mutation work shares hosted capacity with required PR checks.
+      # Keep every module, but bound its simultaneous runner demand.
+      max-parallel: 2
       matrix:
         service:
           - openbank-ledger-service
@@ -107,7 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           java-version: "25"
           distribution: temurin
@@ -200,7 +203,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           java-version: "25"
           distribution: temurin
@@ -273,9 +276,10 @@ jobs:
   # audit and outbox logic lives in openbank-libs-domain / openbank-libs-runtime and previously
   # carried no pitest coverage at all, unlike the money-path services in the matrix job above.
   # This mirrors pitest-authz's init-script application (plugins DSL can't add pitest to either
-  # module without splitting the jandex classloaders) but stays advisory, like the service matrix.
+  # module without splitting the jandex classloaders). Domain stays advisory; runtime's shared
+  # init script enforces 70% and is also run by the PR library quality lane.
   pitest-libs:
-    name: pitest / libs (${{ matrix.module }}, advisory)
+    name: pitest / libs (${{ matrix.module }}, ${{ matrix.module == 'openbank-libs-runtime' && 'enforced' || 'advisory' }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -290,7 +294,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           java-version: "25"
           distribution: temurin
@@ -303,7 +307,7 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - name: Run pitest on the shared libs module (advisory)
+      - name: Run pitest with the shared module threshold
         run: |
           ./gradlew -I .github/scripts/pitest-libs-advisory.init.gradle \
             :${{ matrix.module }}:pitest

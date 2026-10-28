@@ -30,7 +30,11 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
 
     implementation(project(":openbank-libs-domain"))
+    // ADR-0344 D1: schedule generation, accrual and calendars (framework-free).
+    implementation(project(":openbank-libs-finance"))
     implementation(project(":openbank-libs-runtime"))
+    // semt.002 statement-of-holdings reader (ADR-0337 amendment): the fleet's ISO 20022 library.
+    implementation(project(":openbank-libs-iso20022"))
 
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
@@ -41,6 +45,8 @@ dependencies {
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Consumer-driven contract test for the nostro ledger reads (ADR-0315 D5, #10896).
     testImplementation(libs.pact.consumer)
+    // ADR-0337 amendment: git-pact replay of tax-reporting's portfolio pact (+ negative-auth and broker twins).
+    testImplementation(libs.pact.provider)
 }
 
 kover {
@@ -83,6 +89,8 @@ pitest {
         "com.openbank.treasury.domain.*",
         "com.openbank.treasury.application.usecase.*",
         "com.openbank.treasury.nostro.*",
+        // The golden-fixture replay (ADR-0344 D9) exercises the ledger shape end to end.
+        "com.openbank.treasury.parity.*",
     )
     // Advisory (ADR-0063): pitest.yml reports the score and warns below 70%; the Gradle task itself
     // must not fail the run, so the threshold is 0 until the score is measured and sustained.
@@ -101,4 +109,11 @@ tasks.withType<Test> {
     // allocate ("can't create byte array") and the run wedged without failing. Same per-module
     // override, and the same reasoning, as account-service.
     maxHeapSize = "2g"
+}
+
+// Shared synthetic wire fixture is test-only; it is never packaged in the service runtime.
+sourceSets {
+    test {
+        resources.srcDir(rootProject.file("openbank-libs-domain/src/test/resources/portfolio-contract"))
+    }
 }

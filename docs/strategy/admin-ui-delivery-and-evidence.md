@@ -63,6 +63,28 @@ cached projections; browsers receive neither infrastructure credentials nor
 direct store access. Evidence updates cannot change executable code or grant
 permissions. Rollback selects a compatible earlier snapshot without rebuilding.
 
+The reviewed-source content publisher keeps its existing schema-v1 key set by
+default. Cluster topology is an optional validated key, enabled only by setting
+the `ADMIN_UI_CONTENT_INCLUDE_CLUSTER_TOPOLOGY` repository variable to `true`
+after a topology-capable Admin UI image is deployed. To roll back, unset the
+variable, publish a legacy schema-v1 snapshot, verify the current selector points
+to it, then restore the older image. An older image cannot read the expanded
+snapshot while its selector is current.
+
+Refresh only datasets that consume the completed producer: CI refreshes gate
+health, readiness, Test Intelligence and content; Services CI refreshes Test
+Intelligence; Security KPI snapshot refreshes security KPIs. Test Intelligence
+needs both CI and Services CI artifacts. Pact completion is not a refresh source:
+the collector reads its retained quality report/seed, not broker verification
+freshness. Scheduled and manual `all` runs still refresh every dataset, and a
+manual dataset selection or rollback remains scoped to that dataset.
+
+The Admin UI evidence collector, dataset selector, and their exact tests are
+publisher-only inputs, so Services CI classifies only those named paths as
+inert. Unknown automation and shared build inputs keep the conservative
+service-build fallback; this avoids rebuilding the Kotlin fleet for a UI
+evidence publication change without weakening validation of service changes.
+
 **Runtime health:** collect inventory and readiness independently of slow version
 or governance enrichment. Cache and coalesce concurrent read requests with a
 bounded TTL and explicit observation time. Discovery must distinguish partial

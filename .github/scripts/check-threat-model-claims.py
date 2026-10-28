@@ -181,13 +181,9 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
     'openbank-sepa-payment|6. Change log|settleProcessingPayment':
         'no such function in the tree',
-    'openbank-settlement-service|T1|workflowRunId':
-        'settlement idempotency-key defect #6037, reported from the T1 table row (the original entry)',
     'openbank-settlement-service|T1|activityId':
         'settlement idempotency-key defect #6037, reported from the T1 table row (the original entry)',
     'openbank-settlement-service|T — Tampering|activityId':
-        'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
-    'openbank-settlement-service|T — Tampering|workflowRunId':
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
     'openbank-settlement-service|Residual risks|OpaActivityInterceptor':
         '#6055 — a control that was never built; deliberately left failing by the gate that found it',
@@ -196,8 +192,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
     'openbank-settlement-service|Residual risks|legacySettle':
         'settlement #6037 family; no such function in the tree',
     'openbank-settlement-service|Change log|activityId':
-        'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
-    'openbank-settlement-service|Change log|workflowRunId':
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
     'openbank-transaction-service|5. Residual risks / assumptions|PaymentSagaOrchestrator':
         'retired for Temporal (ADR-0120 Phase 5); survives only in KDoc that says it was removed',
@@ -469,6 +463,11 @@ def is_backend(rel: str) -> bool:
         present — the exact failure this gate exists to catch.
     """
     if rel.startswith("openbank-admin-ui/"):
+        return False
+    # Replay histories are captured wire data: activityId and other JSON fields do not
+    # implement the security controls that threat models cite. Keep test code and all
+    # production configuration in scope; only this fixture directory's JSON is excluded.
+    if "/src/test/resources/temporal/" in rel and rel.endswith(".json"):
         return False
     # A Gradle build file is tracked backend source that no `/src/` path matches, and real
     # mitigations cite it: ledger's §5 names pitest's `targetClasses`, which lives only in
@@ -1024,6 +1023,14 @@ def self_test() -> int:
     # ...but a test DOES prove the cited name exists. Without this, three real test classes were
     # reported as phantom controls on the 2026-08-20 corpus run.
     case("a test still counts for existence", is_backend("openbank-x/src/test/kotlin/Foo.kt"), True)
+    case("Temporal replay JSON is wire data, not control implementation",
+         is_backend("openbank-x/src/test/resources/temporal/legacy/history.json"), False)
+    case("Kotlin beneath the Temporal fixture directory stays in scope",
+         is_backend("openbank-x/src/test/resources/temporal/ReplayGuardTest.kt"), True)
+    case("production Temporal JSON stays in scope",
+         is_backend("openbank-x/src/main/resources/temporal/config.json"), True)
+    case("test JSON outside the Temporal fixture directory stays in scope",
+         is_backend("openbank-x/src/test/resources/contracts/control.json"), True)
     case("admin-ui counts for neither",
          is_backend("openbank-admin-ui/src/app/temporal/page.tsx"), False)
     case("service src/main is deployed", is_deployed("openbank-x/src/main/kotlin/Foo.kt"), True)
@@ -1173,6 +1180,36 @@ def self_test() -> int:
     #     so falsify it: point the deriver at a directory with no models and it must report none,
     #     rather than reporting clean about files it stopped reading.
     import tempfile
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as td:
+        fixture_root = pathlib.Path(td)
+        fixture_files = {
+            "openbank-x/src/test/resources/temporal/legacy/history.json":
+                '{"activityId":"ReplayOnlyControl"}',
+            "openbank-x/src/test/resources/temporal/ReplayGuardTest.kt":
+                "class ReplayGuardTest",
+            "openbank-x/src/main/resources/temporal/config.json":
+                '{"ProductionControl":true}',
+            "openbank-x/src/test/resources/contracts/control.json":
+                '{"OtherFixtureControl":true}',
+        }
+        for name, body in fixture_files.items():
+            path = fixture_root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+        tracked = subprocess.CompletedProcess([], 0, stdout="\n".join(fixture_files), stderr="")
+        with patch("subprocess.run", return_value=tracked):
+            fixture_corpus = Corpus(fixture_root)
+        case("replay activityId cannot satisfy a mitigation claim",
+             fixture_corpus.resolve("activityId"), False)
+        case("a name mentioned only in replay wire data cannot satisfy a claim",
+             fixture_corpus.resolve("ReplayOnlyControl"), False)
+        case("test Kotlin still satisfies an implementation citation",
+             fixture_corpus.resolve("ReplayGuardTest"), True)
+        case("production JSON still satisfies an implementation citation",
+             fixture_corpus.resolve("ProductionControl"), True)
+        case("JSON outside the approved fixture scope remains visible",
+             fixture_corpus.resolve("OtherFixtureControl"), True)
     with tempfile.TemporaryDirectory() as td:
         empty = pathlib.Path(td)
         case("an empty tree yields no subjects", subjects_all(empty), [])

@@ -6,7 +6,7 @@ import { dailyCounts, ReportTrend } from '@/components/reporting/ReportTrend'
 import { WarehouseDashboard } from '@/components/reporting/WarehouseDashboard'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { REPORT_REGISTRY, validateParams } from '@/lib/reporting/registry'
-import { clickHouseRiskLargeSettledRows } from '@/test/fixtures/clickhouse-risk-large-settled'
+import { clickHouseRiskLargeSettledRows } from '../../e2e/fixtures/clickhouse-risk-large-settled'
 
 const wrap = (child: React.ReactNode) => <LanguageProvider initialLanguage="en">{child}</LanguageProvider>
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })

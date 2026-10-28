@@ -72,6 +72,23 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 ## Runbooks
 
+### Durable outbound booking clock
+
+Acceptance into `SENT_TO_CLEARING` records the first booking-due timestamp in the same locked, revision-checked transaction as status and its outbox event, before the settlement activity. Retries preserve that timestamp and the existing `domestic-settlement-<paymentId>` key. Only a strictly matched completed transaction response with an identity permits the booking-proof timestamp and transaction identity to commit atomically with `SETTLED` and its outbox event. Generic status updates cannot clear a pending clock or certify coverage.
+
+`openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="DOMESTIC_CZK"}` reports the age of the oldest tracked pending marker across business statuses. It is a lower bound when coverage is incomplete, starts as NaN before a successful query, and is zero when the successfully queried tracked set is empty. A failed refresh retains the last durable timestamp and its age keeps increasing. `openbank_payment_booking_unknown_coverage{rail="DOMESTIC_CZK"}` separately counts rows without a start/proof whose coverage is unknown. Existing rows in every lifecycle state retain nullable unknown provenance without backfill; a generic write bypassing booking tracking also remains unknown across later terminal states. This count is conservative historical coverage, not proof that each counted row is unsettled. An empty tracked set does not establish all-clear while coverage is unknown.
+
+These clocks are separate from payment creation, clearing dispatch, refunds and the existing stranded gauge. `DomesticPaymentBookingUnsettled` alerts on it (1h, below). No historical binding, new retry key, lookup/recovery API or retention policy is introduced.
+
+
+### Unsettled internal booking outcomes
+
+`openbank_payment_unsettled_total{rail="DOMESTIC_CZK",outcome="..."}` counts unsuccessful transaction-service attempts. Its Micrometer name is `openbank.payment.unsettled`. The bounded outcomes are `mismatch`, `failed-replay`, `conflict`, `unexpected-status` and `transport-error`; five zero series are registered before any attempt. Retries count as separate attempts, not unique payments. Cancellation and matched successful responses do not increment it. `failed-replay` denotes a decoded FAILED response, not proof that this call was a replay. The metric rail label is `DOMESTIC_CZK`; the transaction request still uses `rail=DOMESTIC` and `instructionType=ONE_OFF`.
+
+Settlement requires HTTP 201, a COMPLETED transaction with an id, and a match to the submitted type, account identities, amount, currency, rail and instruction type. A failed or uncertain attempt does not advance the payment from SENT_TO_CLEARING to SETTLED. The existing provider resilience and Temporal activity policies may retry; this counter does not change those policies or count the outer exception wrapper again. Preserve `domestic-settlement-<paymentId>` during investigation: a 409 or uncertain response is not proof that no booking occurred. Establish the transaction outcome through approved reconciliation tooling before corrective action; do not rotate the key or use a new booking POST as a lookup.
+
+The attempt counter alone does not establish durable age or reconciliation. The separate tracked booking clock above adds partial durable coverage, not a public transaction lookup by idempotency key or a recovery endpoint; the age alert is below. The existing stranded-payment gauge remains unchanged and does not establish those missing guarantees. Neither a zero counter nor a successful local build proves reconciliation or deployment readiness.
+
 ### Payments stuck in RECEIVED
 
 Expected when screening returns REVIEW (potential hit ≤ 0.85) or when sanctions-service was unavailable (fail-closed). Action:
@@ -128,6 +145,23 @@ The caller attempted a transition the state machine forbids (see [03 — API](./
 
 The production AML REST client uses the named `aml-authority` TLS configuration and the AML service's client-authenticated listener on port 8443. The deployment supplies a client certificate and the private CA trust bundle; TLS 1.3 is required. If AML calls fail after rollout, check the client certificate and CA mount, the production REST-client URL, and the network policy path to that listener together. Local development and tests continue to use their HTTP fixtures; a passing local HTTP test alone does not prove the deployed TLS handshake.
 
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
+
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+### Unsettled booking alert and re-drive (#13623)
+
+`DomesticPaymentBookingUnsettled` fires when the oldest open booking clock is older than 1h (`openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`, tested by `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`). Temporal keeps retrying settlement every 5 minutes for 7 days under the same key, which heals a transient outage but never a deterministic answer. The operator remedy (query transaction-service by key, then reconcile, reverse or re-drive, including a reset of a workflow that has already failed) is `docs/runbooks/0032-payment-rail-unsettled-booking.md`.
+
+## Payment type on pacs.008 (#13663)
+
+The domestic adapter explicitly leaves the optional payment-type block absent. The EPC service
+level SEPA is not a domestic clearing-scheme code; introducing the shared library field does not
+make a domestic transfer a SEPA payment. The default no-block XML remains unchanged.
+`DomesticPaymentPriority.INSTANT` still has no corresponding scheme code on this wire: choosing
+the domestic scheme's service-level/local-instrument code remains unresolved. Do not interpret
+this compatibility decision as proof that instant priority is communicated to the scheme.

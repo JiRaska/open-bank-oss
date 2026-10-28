@@ -520,6 +520,31 @@ def migration_assertion_findings(
     return findings
 
 
+def migration_assertion_body(base: str, body: str, resolve=None) -> str | None:
+    """Read every verified carrier member's live assertion or refuse to judge it.
+
+    None means the gate must exit non-zero. An unavailable read is inconclusive;
+    an invalid carrier chain is a content failure, never an ordinary PR body.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import merge_train_carrier as carrier_lib
+
+    res = (resolve or carrier_lib.resolve)(base)
+    if res.kind == "unavailable":
+        carrier_lib.not_evaluated("api-contract", res.reason)
+        return None
+    if res.kind == "invalid":
+        print(f"::error::api-contract: invalid merge-train carrier ({res.reason}) — fail closed")
+        return None
+    if res.kind != "carrier":
+        return body
+    unread = [n for n, _, member_body in res.members if member_body is None]
+    if unread:
+        carrier_lib.not_evaluated("api-contract", "member body unreadable: " + ", ".join(f"#{n}" for n in unread))
+        return None
+    return "\n\n".join([body] + [member_body for _, _, member_body in res.members])
+
+
 def bump_satisfied(kind: str, old_v: tuple[int, int, int], new_v: tuple[int, int, int]) -> bool:
     if kind == "breaking":
         return new_v[0] > old_v[0]
@@ -716,6 +741,7 @@ def _self_test() -> int:
     failures += classification_self_test()
     failures += idempotency_hardening_self_test()
     failures += migration_assertion_self_test()
+    failures += migration_assertion_body_self_test()
     failures += touched_beyond_spec_self_test()
 
     if failures:
@@ -963,6 +989,38 @@ def migration_assertion_self_test() -> int:
         return failures
 
 
+def migration_assertion_body_self_test() -> int:
+    """Carrier assertion reads must not turn API outages into findings or passes."""
+    import contextlib
+    import io
+
+    import merge_train_carrier as carrier_lib
+
+    cases = [
+        ("ordinary PR", carrier_lib.Resolution("none"), "bot body", None),
+        ("complete carrier", carrier_lib.Resolution("carrier", members=[(1, "a" * 40, "member assertion")]),
+         "bot body\n\nmember assertion", None),
+        ("unreadable PR", carrier_lib.Resolution("unavailable", reason="PR API timed out"),
+         None, carrier_lib.NOT_EVALUATED_LINE),
+        ("unreadable member", carrier_lib.Resolution("carrier", members=[(1, "a" * 40, None)]),
+         None, carrier_lib.NOT_EVALUATED_LINE),
+        ("invalid carrier", carrier_lib.Resolution("invalid", reason="foreign commit"),
+         None, "::error::api-contract: invalid merge-train carrier"),
+    ]
+    failures = 0
+    for name, resolution, expected, marker in cases:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            got = migration_assertion_body("base", "bot body", resolve=lambda _base, res=resolution: res)
+        if got != expected or (marker is not None and marker not in output.getvalue()) or (
+                resolution.kind == "invalid" and carrier_lib.NOT_EVALUATED_LINE in output.getvalue()):
+            print(f"SELF-TEST FAIL: migration carrier {name}: body={got!r}, output={output.getvalue()!r}")
+            failures += 1
+    if not failures:
+        print("ok: carrier migration assertions fail closed for unreadable and invalid subjects")
+    return failures
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", help="git sha of the PR base (not needed with --self-test)")
@@ -1047,8 +1105,13 @@ def main() -> int:
                 entries = breaking_entries(args.oasdiff, old_path, head_path)
                 if idempotency_hardening(entries, is_money_path):
                     if os.environ.get("GITHUB_EVENT_NAME") != "push":
+                        # A merge-train carrier's body is bot text; the section lives on its members (ADR-0343).
+                        assertion_body = migration_assertion_body(args.base, os.environ.get("PR_BODY", ""))
+                        if assertion_body is None:
+                            return 1
                         findings.extend(migration_assertion_findings(
-                            os.environ.get("PR_BODY", ""), service, entries, set(changed_all),
+                            assertion_body,
+                            service, entries, set(changed_all),
                         ))
                     print(
                         f"::notice::api-contract gate: {service}: every breaking change is a newly "

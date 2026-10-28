@@ -77,17 +77,20 @@ allowed_reasons contains "compliance-card-block" if {
 # admits ROLE_API on exactly these two endpoints, and because card-issuance still runs
 # AUTHZ_ENFORCE=false a Kotlin named-caller check (CardReadCallerGuard.kt) enforces the same lists.
 # CardReadCallerGuardTest pins the Kotlin sets to these rules.
+#   customer-edge      authenticated customer list and card ownership/delegation checks
 #   delegation-service CardIssuanceRestClient.getCard  GET /cards/{id}             card.read
 #   party-service      CardServiceRestClient.listByParty GET /cards/party/{partyId} card.list
 allowed_reasons contains "service-delegation-card-read" if {
 	input.principal.type == "HUMAN"
-	machine_named("service-account-openbank-delegation")
+	some caller in {"service-account-openbank-delegation", "service-account-openbank-edge"}
+	machine_named(caller)
 	input.action == "card.read"
 }
 
 allowed_reasons contains "service-party-card-list" if {
 	input.principal.type == "HUMAN"
-	machine_named("service-account-openbank-party")
+	some caller in {"service-account-openbank-party", "service-account-openbank-edge"}
+	machine_named(caller)
 	input.action == "card.list"
 }
 

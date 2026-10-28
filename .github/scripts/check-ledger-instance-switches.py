@@ -53,6 +53,9 @@ CONTAINER = "ledger-service"
 # Schedulers that act only on the instance's OWN database and reach nothing outside it.
 # Key: "<ClassName>.<method>". A stale entry (method gone) is a finding.
 LOCAL_ONLY = {
+    "HistoryCaptureReceiptPurge.purge":
+        "deletes only expired history request metadata in the instance's own DB; no journals, "
+        "bank topics or outbound clients are touched; expiry cleanup applies to every instance",
     "JournalPartitionMaintainer.maintain":
         "creates next years' journal_entries partitions in the instance's own DB; retention is "
         "detach-only and dry-run by default (drop-enabled is checked false below)",
@@ -179,10 +182,20 @@ def check(root: pathlib.Path) -> tuple[list[str], int]:
                 topic = env.get(env_name(f"mp.messaging.outgoing.{ch}.topic"), bank_topic)
                 if topic == bank_topic:
                     findings.append(f"{where}: outgoing channel {ch} still targets the bank topic {bank_topic}")
-                lazy = env_name(f"mp.messaging.outgoing.{ch}.lazy-client")
-                if env.get(lazy, "").lower() != "true":
+                # `lazy-client=true` is NOT enough: measured against the built service it still
+                # creates the producer at boot (localhost WARN storm). Only `enabled=false` builds
+                # no client (the @Channel Emitter still injects). And the switch must be an
+                # env-backed `${NAME:true}` expression in application.yaml: a bare
+                # MP_MESSAGING_OUTGOING_<CH>_<KEY> env var for a key the yaml does not define is
+                # parsed as a channel named after its first word -> SRMSG00071 -> the pod never boots.
+                expr = str(app.get(f"mp.messaging.outgoing.{ch}.enabled", ""))
+                m = re.fullmatch(r"\$\{([A-Z0-9_]+):[^}]*\}", expr.strip())
+                if not m:
+                    findings.append(f"{where}: outgoing channel {ch} has no env-backed `enabled: ${{NAME:true}}` "
+                                    f"in application.yaml, so no instance can switch its Kafka producer off")
+                elif env.get(m.group(1), "").lower() != "false":
                     findings.append(f"{where}: outgoing channel {ch} builds a Kafka producer at boot with no "
-                                    f"bootstrap (localhost WARN storm); set {lazy}=\"true\"")
+                                    f"bootstrap (localhost WARN storm); set {m.group(1)}=\"false\"")
         if any(k.startswith("mp.messaging.outgoing.") for k in app):
             for k in ("KAFKA_BOOTSTRAP_SERVERS", "KAFKA_SSL_KEYSTORE_LOCATION", "KAFKA_SECURITY_PROTOCOL"):
                 if k in env:
@@ -212,14 +225,15 @@ _SRC = {
     "Tie.kt": 'class Tie {\n  @Scheduled(cron = "{openbank.x.tie.cron:0 0 6 * * ?}")\n  suspend fun run() {}\n}\n',
     "Part.kt": 'class JournalPartitionMaintainer {\n  @Scheduled(every = "24h")\n  suspend fun maintain() {}\n}\n',
     "Gauge.kt": 'class LedgerOutboxBacklogGauge {\n  @Scheduled(every = "10s")\n  suspend fun refresh() {}\n}\n',
+    "Receipt.kt": 'class HistoryCaptureReceiptPurge {\n  @Scheduled(every = "{openbank.ledger.history-receipt-purge-every:1m}")\n  suspend fun purge() {}\n}\n',
     "Out.kt": 'class Out(@ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false") val e: Boolean)\n',
 }
 _APP = {"openbank": {"outbox": {"dispatch-enabled": True}},
-        "mp": {"messaging": {"outgoing": {"ev-out": {"topic": "bank.topic"}}}},
+        "mp": {"messaging": {"outgoing": {"ev-out": {"topic": "bank.topic", "enabled": "${EV_OUT_ENABLED:true}"}}}},
         "quarkus": {"rest-client": {"fx": {"url": "${FX_URL:http://localhost}"}}}}
 _GOOD_ENV = {"OPENBANK_X_TIE_CRON": "off", "OPENBANK_OUTBOX_DISPATCH_ENABLED": "false",
              "MP_MESSAGING_OUTGOING_EV_OUT_TOPIC": "other.topic",
-             "MP_MESSAGING_OUTGOING_EV_OUT_LAZY_CLIENT": "true"}
+             "EV_OUT_ENABLED": "false"}
 
 
 def _fixture(tmp: pathlib.Path, src=None, env=None, app=None) -> pathlib.Path:
@@ -247,9 +261,11 @@ def self_test() -> int:
         ("new scheduler with a literal trigger", {"src": {**_SRC, "New.kt": 'class New {\n  @Scheduled(every = "1h")\n  fun go() {}\n}\n'}}, 1),
         ("new scheduler with an unset expression", {"src": {**_SRC, "New.kt": 'class New {\n  @Scheduled(cron = "{a.b.cron:0 0 * * * ?}")\n  fun go() {}\n}\n'}}, 1),
         ("bank topic kept", {"env": {k: v for k, v in _GOOD_ENV.items() if "TOPIC" not in k}}, 1),
-        ("eager kafka producer (localhost WARN storm)", {"env": {k: v for k, v in _GOOD_ENV.items() if "LAZY" not in k}}, 1),
+        ("eager kafka producer (localhost WARN storm)", {"env": {k: v for k, v in _GOOD_ENV.items() if k != "EV_OUT_ENABLED"}}, 1),
+        ("channel enabled flag not env-backed (the #13278 shape)", {"app": {**_APP, "mp": {"messaging": {"outgoing": {"ev-out": {"topic": "bank.topic"}}}}}}, 1),
         ("kafka bootstrap wired", {"env": {**_GOOD_ENV, "KAFKA_BOOTSTRAP_SERVERS": "bus:9093"}}, 1),
         ("bank REST dependency wired", {"env": {**_GOOD_ENV, "FX_URL": "http://fx"}}, 1),
+        ("stale receipt cleanup LOCAL_ONLY entry", {"src": {k: v for k, v in _SRC.items() if k != "Receipt.kt"}}, 1),
         ("stale LOCAL_ONLY entry", {"src": {k: v for k, v in _SRC.items() if k != "Gauge.kt"}}, 1),
         ("temporal worker", {"src": {**_SRC, "W.kt": "import io.temporal.worker.WorkerFactory\n"}}, 1),
     ]

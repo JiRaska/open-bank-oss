@@ -120,7 +120,9 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     // The Explorer portrait is deliberately oversized and clipped by the guide,
     // but its top (and therefore its head) must remain inside the visible banner.
     // A negative portrait top previously left only the torso visible in production.
-    const explorerGuide = page.getByLabel('Welcome to your operations cockpit')
+    const explorerGuide = main.getByLabel('Welcome to your operations cockpit')
+    await expect(explorerGuide).toHaveCount(1)
+    await expect(explorerGuide).toBeVisible()
     const guideBox = await explorerGuide.boundingBox()
     const portraitBox = await explorerGuide.locator('img').boundingBox()
     expect(guideBox).not.toBeNull()
@@ -191,7 +193,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     const main = page.locator('#main-content:visible')
     await expect(main).toHaveCount(1)
     await expect(main.locator('.stat-card')
-      .filter({ has: page.locator('.stat-label', { hasText: /^Services$/ }) })
+      .filter({ has: page.locator('.stat-label', { hasText: /^Components$/ }) })
       .locator('.stat-value').first()).toHaveText('2')
 
     // Anchor on the LABEL element with an exact-match regex: a plain `hasText: 'GO'` is a
@@ -209,7 +211,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     const [go, nogo] = [await colourOf('GO'), await colourOf('NO-GO')]
     expect(go).not.toBe(nogo)
 
-    const plain = await colourOf('Services')
+    const plain = await colourOf('Components')
     expect(plain).not.toBe(go)
   })
 

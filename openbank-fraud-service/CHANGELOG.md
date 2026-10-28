@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.17.2...fraud-service-v0.18.0) (2026-10-26)
+
+
+### Features
+
+* **fraud:** add isolated Kafka Streams velocity shadow ([#13893](https://github.com/JiRaska/open-bank-oss/issues/13893)) ([0bf57fa](https://github.com/JiRaska/open-bank-oss/commit/0bf57fab5491e931dd5e33514bb4318c242feccc))
+
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.17.1...fraud-service-v0.17.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **fraud:** share the financial-crime vocabulary in openbank-libs-fincrime ([#13770](https://github.com/JiRaska/open-bank-oss/issues/13770)) ([bc45331](https://github.com/JiRaska/open-bank-oss/commit/bc4533123a2d8b52ba0b5e3bdfefaa91a712d6f2))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.17.0...fraud-service-v0.17.1) (2026-10-22)
+
+
+### Security
+
+* **fraud:** take DELETE/TRUNCATE on fraud_threshold_set away from the app role ([#13562](https://github.com/JiRaska/open-bank-oss/issues/13562)) ([a6b2624](https://github.com/JiRaska/open-bank-oss/commit/a6b262489aca5c5edc94a71f1d895ea8ee40adeb))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.16.1...fraud-service-v0.17.0) (2026-10-21)
+
+
+### Features
+
+* **fraud:** rule money thresholds as four-eyes-activated data (ADR-0347) ([#13457](https://github.com/JiRaska/open-bank-oss/issues/13457)) ([954dabd](https://github.com/JiRaska/open-bank-oss/commit/954dabd18f465c1680b22f8bea7166670aee1553))
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.16.0...fraud-service-v0.16.1) (2026-10-14)
 
 

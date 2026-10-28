@@ -1,0 +1,51 @@
+{
+  "asOf": "2026-12-31",
+  "entity": "pension-co",
+  "currency": "CZK",
+  "sourceStatements": [
+    {
+      "safekeepingAccount": "PSCO-OWN-0001",
+      "statementUuid": "00000000-0000-4000-8000-000000000001",
+      "statementId": "CUST-PS-20261231",
+      "version": 1
+    }
+  ],
+  "positions": [
+    {
+      "instrumentClass": "GOVERNMENT_BOND",
+      "isin": "ZZ0000000016",
+      "cfi": "DBFTFB",
+      "quantity": "10000000",
+      "quantityBasis": "FACE_AMOUNT",
+      "valuation": "9875000.0000",
+      "valuationCurrency": "CZK"
+    },
+    {
+      "instrumentClass": "CORPORATE_BOND",
+      "isin": "ZZ0000000024",
+      "cfi": "DBFTFB",
+      "quantity": "5000000",
+      "quantityBasis": "FACE_AMOUNT",
+      "valuation": "5012500.0000",
+      "valuationCurrency": "CZK"
+    },
+    {
+      "instrumentClass": "EQUITY",
+      "isin": "ZZ0000000032",
+      "cfi": "ESVUFR",
+      "quantity": "1500",
+      "quantityBasis": "UNIT",
+      "valuation": "1200000.0000",
+      "valuationCurrency": "CZK"
+    },
+    {
+      "instrumentClass": "FUND_UNITS",
+      "isin": "ZZ0000000040",
+      "cfi": "CIOJEU",
+      "quantity": "12000",
+      "quantityBasis": "UNIT",
+      "valuation": "2640000.0000",
+      "valuationCurrency": "CZK"
+    }
+  ]
+}

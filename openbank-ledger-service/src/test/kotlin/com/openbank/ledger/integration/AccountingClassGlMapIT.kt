@@ -30,7 +30,7 @@ import java.util.UUID
 @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
 class AccountingClassGlMapIT {
 
-    /** (accountingClass, role, currency) -> GL code. Keep identical to treasury's `LedgerMapGolden` + billing rows. */
+    /** (accountingClass, role, currency) -> GL code. Keep identical to treasury's `LedgerMapGolden` + billing rows (V32 + V34 + V35). */
     private val golden: Map<Triple<String, String, String>, String> = (
         listOf(
             row("NOSTRO_ACCOUNT", "PRINCIPAL", "CZK", "1001"),
@@ -59,7 +59,10 @@ class AccountingClassGlMapIT {
             listOf("CZK" to "2100", "EUR" to "2101", "USD" to "2102", "GBP" to "2103").map { (ccy, code) ->
                 row(cls, "PRINCIPAL", ccy, code)
             }
-        } + row("FEE_INCOME_ACCOUNT", "FEE_INCOME", "CZK", "4003")
+        } + listOf("CZK" to "4003", "EUR" to "4004", "USD" to "4005", "GBP" to "4006").map { (ccy, code) ->
+            // V15 (CZK) + V34 (#13226): fee income is booked in the fee's own currency.
+            row("FEE_INCOME_ACCOUNT", "FEE_INCOME", ccy, code)
+        } + TREASURY_MATRIX_ROWS
         ).toMap()
 
     private fun row(accountingClass: String, role: String, currency: String, code: String) =
@@ -145,28 +148,61 @@ class AccountingClassGlMapIT {
     }
 
     @Test
-    fun `a non-CZK fee debits its own control account, and its income leg is an explicit 422 until a chart decision`() {
-        // Billing's old fixed 2100/4003 are CZK accounts and the ledger refuses a line whose currency is not
-        // the account's, so a non-CZK fee has never posted. The debit now resolves to the currency's control
-        // account; the income leg has no account to land in and says so, instead of a currency mismatch.
-        for ((ccy, id) in listOf("EUR" to "2101", "USD" to "2102", "GBP" to "2103")) {
+    fun `a non-CZK fee debits its own control account and credits its own fee-income account`() {
+        // #13226: billing's old fixed 2100/4003 are CZK accounts and the ledger refuses a line whose currency
+        // is not the account's, so a non-CZK fee never posted. V34 gives fee income a per-currency sibling.
+        for ((ccy, control, income) in listOf(
+            Triple("EUR", "2101", "4004"),
+            Triple("USD", "2102", "4005"),
+            Triple("GBP", "2103", "4006"),
+        )) {
             Given {
                 queryParam("accountingClass", "CUSTOMER_DEPOSIT_DEMAND")
                 queryParam("role", "PRINCIPAL")
                 queryParam("currency", ccy)
             } When { get("/api/v1/accounting-classes/resolve") } Then {
                 statusCode(200)
-                body("glAccountId", equalTo("a0000000-0000-0000-0000-00000000$id"))
+                body("glAccountId", equalTo("a0000000-0000-0000-0000-00000000$control"))
             }
             Given {
                 queryParam("accountingClass", "FEE_INCOME_ACCOUNT")
                 queryParam("role", "FEE_INCOME")
                 queryParam("currency", ccy)
             } When { get("/api/v1/accounting-classes/resolve") } Then {
-                statusCode(422)
-                body("error", containsString("no GL account is mapped"))
+                statusCode(200)
+                body("glAccountId", equalTo("a0000000-0000-0000-0000-00000000$income"))
             }
         }
+        // A currency the chart has no fee-income account for is still an explicit refusal, never a guess.
+        Given {
+            queryParam("accountingClass", "FEE_INCOME_ACCOUNT")
+            queryParam("role", "FEE_INCOME")
+            queryParam("currency", "CHF")
+        } When { get("/api/v1/accounting-classes/resolve") } Then {
+            statusCode(422)
+            body("error", containsString("no GL account is mapped"))
+        }
+    }
+
+    @Test
+    fun `a EUR fee journal posted by class is accepted and balanced in EUR on 2101 and 4004`() {
+        // Byte-for-byte the shape BillingJournalFactory.buildLines sends for a EUR fee (#13226).
+        val today = LocalDate.now().toString()
+        val debit = """{"accountingClass":"CUSTOMER_DEPOSIT_DEMAND","accountingRole":"PRINCIPAL","side":"DEBIT",""" +
+            """"amount":"12.50","currencyCode":"EUR","baseAmount":"12.50","baseCurrencyCode":"EUR",""" +
+            """"subAccountId":"${UUID.randomUUID()}"}"""
+        val credit = """{"accountingClass":"FEE_INCOME_ACCOUNT","accountingRole":"FEE_INCOME","side":"CREDIT",""" +
+            """"amount":"12.50","currencyCode":"EUR","baseAmount":"12.50","baseCurrencyCode":"EUR"}"""
+        val posted = post("fee-eur-${UUID.randomUUID()}", debit, credit, today)
+        assertThat(posted.getList<String>("lines.glAccountId")).containsExactly(
+            "a0000000-0000-0000-0000-000000002101",
+            "a0000000-0000-0000-0000-000000004004",
+        )
+        assertThat(posted.getList<String>("lines.side")).containsExactly("DEBIT", "CREDIT")
+        assertThat(posted.getList<Any>("lines.amount").map { java.math.BigDecimal(it.toString()) })
+            .describedAs("balanced: debit == credit, both in EUR")
+            .allSatisfy { assertThat(it).isEqualByComparingTo("12.50") }
+        assertThat(posted.getList<String>("lines.currencyCode")).containsOnly("EUR")
     }
 
     @Test
@@ -238,5 +274,92 @@ class AccountingClassGlMapIT {
             contentType("application/json")
             body(payload("neg-${UUID.randomUUID()}", a, b, date))
         } When { post("/api/v1/journals") } Then { statusCode(status) }
+    }
+
+    private companion object {
+        /** ADR-0344 D7 (V35): the treasury posting-rule matrix classes, as treasury's `LedgerMapGolden`. */
+        val TREASURY_MATRIX_ROWS: List<Pair<Triple<String, String, String>, String>> = listOf(
+            mrow("CASH_IN_TRANSIT", "PRINCIPAL", "CZK", "1690"),
+            mrow("CASH_IN_TRANSIT", "PRINCIPAL", "EUR", "1691"),
+            mrow("TREASURY_LOAN", "PRINCIPAL", "CZK", "1660"),
+            mrow("TREASURY_LOAN", "PRINCIPAL", "EUR", "1661"),
+            mrow("TREASURY_LOAN", "ACCRUED_INTEREST", "CZK", "1650"),
+            mrow("TREASURY_LOAN", "ACCRUED_INTEREST", "EUR", "1651"),
+            mrow("TREASURY_LOAN", "INTEREST_INCOME", "CZK", "4220"),
+            mrow("TREASURY_LOAN", "INTEREST_INCOME", "EUR", "4221"),
+            mrow("DEBT_SECURITY_AMORTISED_COST", "PRINCIPAL", "CZK", "1600"),
+            mrow("DEBT_SECURITY_AMORTISED_COST", "PRINCIPAL", "EUR", "1601"),
+            mrow("DEBT_SECURITY_AMORTISED_COST", "PREMIUM_DISCOUNT", "CZK", "1630"),
+            mrow("DEBT_SECURITY_AMORTISED_COST", "PREMIUM_DISCOUNT", "EUR", "1631"),
+            mrow("DEBT_SECURITY_AMORTISED_COST", "ACCRUED_INTEREST", "CZK", "1640"),
+            mrow("DEBT_SECURITY_AMORTISED_COST", "ACCRUED_INTEREST", "EUR", "1641"),
+            mrow("DEBT_SECURITY_AMORTISED_COST", "INTEREST_INCOME", "CZK", "4210"),
+            mrow("DEBT_SECURITY_AMORTISED_COST", "INTEREST_INCOME", "EUR", "4211"),
+            mrow("DEBT_SECURITY_FVOCI", "PRINCIPAL", "CZK", "1610"),
+            mrow("DEBT_SECURITY_FVOCI", "PRINCIPAL", "EUR", "1611"),
+            mrow("DEBT_SECURITY_FVOCI", "PREMIUM_DISCOUNT", "CZK", "1630"),
+            mrow("DEBT_SECURITY_FVOCI", "PREMIUM_DISCOUNT", "EUR", "1631"),
+            mrow("DEBT_SECURITY_FVOCI", "ACCRUED_INTEREST", "CZK", "1640"),
+            mrow("DEBT_SECURITY_FVOCI", "ACCRUED_INTEREST", "EUR", "1641"),
+            mrow("DEBT_SECURITY_FVOCI", "INTEREST_INCOME", "CZK", "4210"),
+            mrow("DEBT_SECURITY_FVOCI", "INTEREST_INCOME", "EUR", "4211"),
+            mrow("DEBT_SECURITY_FVTPL", "PRINCIPAL", "CZK", "1620"),
+            mrow("DEBT_SECURITY_FVTPL", "PRINCIPAL", "EUR", "1621"),
+            mrow("DEBT_SECURITY_FVTPL", "PREMIUM_DISCOUNT", "CZK", "1630"),
+            mrow("DEBT_SECURITY_FVTPL", "PREMIUM_DISCOUNT", "EUR", "1631"),
+            mrow("DEBT_SECURITY_FVTPL", "ACCRUED_INTEREST", "CZK", "1640"),
+            mrow("DEBT_SECURITY_FVTPL", "ACCRUED_INTEREST", "EUR", "1641"),
+            mrow("DEBT_SECURITY_FVTPL", "INTEREST_INCOME", "CZK", "4210"),
+            mrow("DEBT_SECURITY_FVTPL", "INTEREST_INCOME", "EUR", "4211"),
+            mrow("DEBT_SECURITY_FVOCI", "REVALUATION_RESERVE", "CZK", "3100"),
+            mrow("DEBT_SECURITY_FVOCI", "REVALUATION_RESERVE", "EUR", "3101"),
+            mrow("REPO_BORROWING", "PRINCIPAL", "CZK", "2430"),
+            mrow("REPO_BORROWING", "PRINCIPAL", "EUR", "2431"),
+            mrow("REPO_BORROWING", "ACCRUED_INTEREST", "CZK", "2420"),
+            mrow("REPO_BORROWING", "ACCRUED_INTEREST", "EUR", "2421"),
+            mrow("REPO_BORROWING", "INTEREST_EXPENSE", "CZK", "5240"),
+            mrow("REPO_BORROWING", "INTEREST_EXPENSE", "EUR", "5241"),
+            mrow("REVERSE_REPO_LENDING", "PRINCIPAL", "CZK", "1680"),
+            mrow("REVERSE_REPO_LENDING", "PRINCIPAL", "EUR", "1681"),
+            mrow("REVERSE_REPO_LENDING", "ACCRUED_INTEREST", "CZK", "1685"),
+            mrow("REVERSE_REPO_LENDING", "ACCRUED_INTEREST", "EUR", "1686"),
+            mrow("REVERSE_REPO_LENDING", "INTEREST_INCOME", "CZK", "4240"),
+            mrow("REVERSE_REPO_LENDING", "INTEREST_INCOME", "EUR", "4241"),
+            mrow("DERIVATIVE_ASSET", "FAIR_VALUE", "CZK", "1700"),
+            mrow("DERIVATIVE_ASSET", "FAIR_VALUE", "EUR", "1701"),
+            mrow("DERIVATIVE_LIABILITY", "FAIR_VALUE", "CZK", "2400"),
+            mrow("DERIVATIVE_LIABILITY", "FAIR_VALUE", "EUR", "2401"),
+            mrow("DERIVATIVE_RECEIVE_LEG", "ACCRUED_INTEREST", "CZK", "1670"),
+            mrow("DERIVATIVE_RECEIVE_LEG", "ACCRUED_INTEREST", "EUR", "1671"),
+            mrow("DERIVATIVE_RECEIVE_LEG", "INTEREST_INCOME", "CZK", "4230"),
+            mrow("DERIVATIVE_RECEIVE_LEG", "INTEREST_INCOME", "EUR", "4231"),
+            mrow("DERIVATIVE_PAY_LEG", "ACCRUED_INTEREST", "CZK", "2410"),
+            mrow("DERIVATIVE_PAY_LEG", "ACCRUED_INTEREST", "EUR", "2411"),
+            mrow("DERIVATIVE_PAY_LEG", "INTEREST_EXPENSE", "CZK", "5230"),
+            mrow("DERIVATIVE_PAY_LEG", "INTEREST_EXPENSE", "EUR", "5231"),
+            mrow("TREASURY_TRADING_RESULT", "REALISED_GAIN", "CZK", "4300"),
+            mrow("TREASURY_TRADING_RESULT", "REALISED_GAIN", "EUR", "4301"),
+            mrow("TREASURY_TRADING_RESULT", "REALISED_LOSS", "CZK", "5300"),
+            mrow("TREASURY_TRADING_RESULT", "REALISED_LOSS", "EUR", "5301"),
+            mrow("TREASURY_TRADING_RESULT", "UNREALISED_GAIN", "CZK", "4310"),
+            mrow("TREASURY_TRADING_RESULT", "UNREALISED_GAIN", "EUR", "4311"),
+            mrow("TREASURY_TRADING_RESULT", "UNREALISED_LOSS", "CZK", "5310"),
+            mrow("TREASURY_TRADING_RESULT", "UNREALISED_LOSS", "EUR", "5311"),
+            mrow("FORWARD_COMMITMENT", "MEMO", "CZK", "9000"),
+            mrow("FORWARD_COMMITMENT", "MEMO", "EUR", "9001"),
+            mrow("FORWARD_COMMITMENT", "MEMO_CONTRA", "CZK", "9100"),
+            mrow("FORWARD_COMMITMENT", "MEMO_CONTRA", "EUR", "9101"),
+            mrow("COLLATERAL_RECEIVED", "MEMO", "CZK", "9010"),
+            mrow("COLLATERAL_RECEIVED", "MEMO", "EUR", "9011"),
+            mrow("COLLATERAL_RECEIVED", "MEMO_CONTRA", "CZK", "9110"),
+            mrow("COLLATERAL_RECEIVED", "MEMO_CONTRA", "EUR", "9111"),
+            mrow("COLLATERAL_PLEDGED", "MEMO", "CZK", "9020"),
+            mrow("COLLATERAL_PLEDGED", "MEMO", "EUR", "9021"),
+            mrow("COLLATERAL_PLEDGED", "MEMO_CONTRA", "CZK", "9120"),
+            mrow("COLLATERAL_PLEDGED", "MEMO_CONTRA", "EUR", "9121"),
+        )
+
+        private fun mrow(accountingClass: String, role: String, currency: String, code: String) =
+            Triple(accountingClass, role, currency) to code
     }
 }

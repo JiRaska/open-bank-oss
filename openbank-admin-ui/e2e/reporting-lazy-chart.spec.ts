@@ -2,7 +2,7 @@
 
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
-import { clickHouseRiskLargeSettledRows } from '../src/test/fixtures/clickhouse-risk-large-settled'
+import { clickHouseRiskLargeSettledRows } from './fixtures/clickhouse-risk-large-settled'
 
 const columns = [
   { key: 'day', labelCs: 'Den', labelEn: 'Day', format: 'text' },

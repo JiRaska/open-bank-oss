@@ -205,7 +205,7 @@ class CatalogPactProviderFixtures(
         connection.prepareStatement(
             "INSERT INTO catalog_revisions " +
                 "(id, offering_id, revision_no, schema_id, schema_version, state, content, effective_from, " +
-                "effective_to, maker_id, checker_id, reason, content_hash, pension_approval_digest, " +
+                "effective_to, maker_id, checker_id, reason, content_hash, approval_digest, " +
                 "created_at, updated_at, lock_version) " +
                 "VALUES (?, ?, 1, ?, 2, 'PUBLISHED', CAST(? AS jsonb), ?, ?, ?, ?, ?, ?, ?, ?, ?, 0) " +
                 "ON CONFLICT (id) DO NOTHING",
@@ -227,7 +227,7 @@ class CatalogPactProviderFixtures(
         }
         listOf("LEGAL_COUNSEL", "PRODUCT_OWNER").forEachIndexed { index, role ->
             connection.prepareStatement(
-                "INSERT INTO pension_revision_approvals " +
+                "INSERT INTO catalog_revision_role_approvals " +
                     "(id, revision_id, role, issuer, subject, digest, reason, approved_at) " +
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
             ).use { statement ->

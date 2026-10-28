@@ -27,3 +27,7 @@ This is a **money-path service** (`rules.yaml: money_path_services`) — changes
 - **Auth:** Keycloak OIDC; write roles `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_PAYMENTS`, read adds `ROLE_VIEWER`; OPA advisory→enforce (ADR-0034)
 - **Screening gate:** synchronous sanctions screen on create, fail-closed (ADR-0032)
 - **FinOps tier:** T0 — always-on (money-path synchronous hop, ADR-0057)
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

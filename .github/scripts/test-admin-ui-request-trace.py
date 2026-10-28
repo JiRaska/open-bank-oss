@@ -135,7 +135,8 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
             run_id = int(path.rsplit("/", 1)[-1])
             workflow = ".github/workflows/verify-provider.yml" if run_id == 3000 else ".github/workflows/services-ci.yml"
             self._respond(200, json.dumps({
-                "path": workflow, "event": "push", "head_repository": {"full_name": "r"},
+                "path": workflow, "event": "push", "status": "completed",
+                "head_repository": {"full_name": "r"},
             }).encode())
             return
         query = parse_qs(urlsplit(self.path).query)

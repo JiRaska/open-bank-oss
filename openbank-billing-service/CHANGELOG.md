@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.1...billing-service-v0.17.2) (2026-10-26)
+
+
+### Security
+
+* **libs:** bind product revision signatures to the full revision identity ([#13749](https://github.com/JiRaska/open-bank-oss/issues/13749)) ([8171dfd](https://github.com/JiRaska/open-bank-oss/commit/8171dfdbf44a06ac48c058f662acdb6c26cc7b98))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.0...billing-service-v0.17.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **billing:** harden the product-IR shadow against poison rows and false agreement ([#13765](https://github.com/JiRaska/open-bank-oss/issues/13765)) ([cc37724](https://github.com/JiRaska/open-bank-oss/commit/cc377246b1072f4ee5cfeff18025f5f067b455ac))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.3...billing-service-v0.17.0) (2026-10-26)
+
+
+### Features
+
+* **billing:** day-close participant — report the monthly cycle and its fee postings (ADR-0342) ([#13709](https://github.com/JiRaska/open-bank-oss/issues/13709)) ([3290e47](https://github.com/JiRaska/open-bank-oss/commit/3290e47c6af59538d1ccc4da355630bb67343a48))
+* **billing:** product-IR shadow comparator, shadow mode only (ADR-0352 phase 3) ([#13741](https://github.com/JiRaska/open-bank-oss/issues/13741)) ([2947705](https://github.com/JiRaska/open-bank-oss/commit/2947705e724626ea6811a43fc66d40780cdcc8f7))
+
+## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.2...billing-service-v0.16.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* **billing:** book non-CZK fees on per-currency fee-income accounts ([#13606](https://github.com/JiRaska/open-bank-oss/issues/13606)) ([bfd0cb1](https://github.com/JiRaska/open-bank-oss/commit/bfd0cb17fe958b53d6d5db91ce14e2de8d5a61fe))
+
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.1...billing-service-v0.16.2) (2026-10-21)
+
+
+### Security
+
+* **billing:** redact assessment logs and isolate role tests ([#13549](https://github.com/JiRaska/open-bank-oss/issues/13549)) ([9f80e96](https://github.com/JiRaska/open-bank-oss/commit/9f80e96a47c5abf33749c8b5d7c9bd20c488e8c9))
+
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.0...billing-service-v0.16.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **customer-edge:** prefix unprefixed metrics with openbank. and gate new ones ([#13193](https://github.com/JiRaska/open-bank-oss/issues/13193)) ([ca69f24](https://github.com/JiRaska/open-bank-oss/commit/ca69f2451fee91827db7fb179bde3b4244b0455c))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.15.0...billing-service-v0.16.0) (2026-10-19)
 
 
