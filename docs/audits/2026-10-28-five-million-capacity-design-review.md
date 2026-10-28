@@ -131,6 +131,58 @@ No blanket legal retention period, mandatory TLPT for every bank, PCI exemption,
 approval or audit guarantee is inferred here. A complete production review needs the actual
 legal entity, countries, rail participation, supplier model, contracts and deployment scope.
 
+### Bank acceptance record — not issued
+
+The table above maps control areas; it is not an acceptance record. For the first bank,
+maintain one access-controlled acceptance package using the following record. Keep actual
+bank identities, deployment details, evidence locations and named approvers outside this
+public repository. This template contains no approval, waiver or completed production test.
+
+| Record field | Required content before an acceptance decision |
+|---|---|
+| Scope identity | Legal entity and supplier/operating model; Czech current-account products, channels, currencies, rails and services included; explicit exclusions and dependencies |
+| Release identity | Exact source and application image digests, SBOM/provenance, schema versions, effective configuration and topology, with collection time and collector identity |
+| Workload identity | Approved profile/version/hash, fixture ownership and isolation, intended instruction manifest, data/history distribution and approved run envelope |
+| Evidence index | For every requirement: stable control ID, artifact digest, actual run/attempt, collection time, expiry rule, private artifact location, result and limitations |
+| Ownership | Named engineering/payments/security/SRE owners, bank ICT-risk owner, DPO/legal and accountable production decision owner; dated approval/signature evidence for every profile-required owner and independent reviewer, bound to the package/scope digest |
+| Exceptions | Failed, skipped, missing, stale or inapplicable controls listed individually; applicability rationale and accountable decision, without relabelling failed qualification as a pass |
+| Decision | NOT ISSUED, GO or NO-GO for the exact deployment and scope; signed rationale, decision date and next review/expiry; approval of this document is not production approval |
+
+Each acceptance row must point to observed evidence, not only a policy, a source file, a
+tracker checkbox or an unsigned self-authored result. Record the full run denominator and
+all skipped cases. A component test may satisfy its component row but cannot satisfy an
+end-to-end, fault, recovery or capacity row. Qualification is valid for at most 30 days and is invalidated earlier by a material change
+to deployment, workload or the other bound inputs, as required by ADR-0356 D1. Retain original
+evidence according to the bank-approved record policy; qualification freshness does not
+authorize deleting it.
+
+| Acceptance row | Evidence needed | Existing work / accountable decision |
+|---|---|---|
+| Financial journey | Every intended/accepted instruction reconciles through transaction, journal, holds and rebuilt balances; duplicates, reversals, response loss and contention included | #7284; payments and ledger owners |
+| Origin and controls | Owned synthetic fixtures stay identifiable through all producers/consumers and delayed jobs; real activity cannot be excluded by an untrusted claim; authorization, SCA, sanctions and limits still execute | #4348 and #7284; security and payments owners |
+| Outbox activation | Exact candidate, atomic writer paths, claim/replay/failure proof, representative DDL/plan evidence, dispatcher quiescence, retained-worker compatibility and observed rollback | #11652 and #13888; service owners and SRE |
+| Capacity and cost | Complete ADR-0356 scenarios, raw distributions and queue/drain data, calibrated assumptions, history/skew sensitivity, generator headroom and approved cost ceiling; sandbox observations and models labelled separately | #7284 and #3348; SRE, product/payments and bank budget owner |
+| Recovery and exit | Bank-approved journey BIA/RTO/RPO, actual restore/failover boundaries, acknowledged-write reconciliation, usable-service recovery and tested provider exit/data portability | #8347; bank continuity, SRE and legal owners |
+| Security and change | Independent assessment appropriate to scope, vulnerability remediation, least privilege and key lifecycle, image/source evidence, effective protections and two money-path approvals | #13448 and existing security/change controls; security owner |
+| Operations | Effective dashboards/alerts, queue and reconciliation monitoring, on-call/escalation/training, incident classification/reporting responsibilities and exercised response | Bank ICT-risk, SRE and payments operations |
+| Data and records | Data-flow/classification inventory, controller/processor and transfer assessment, DPIA applicability decision, bank-secrecy access boundaries, record-class retention/legal holds and retrieval/disposal tests | Bank DPO, legal, compliance and accounting |
+| Product and rails | Applicable rail participation/certification, value dates/cutoffs, returns and disputes, customer terms and accounting/reporting reconciliation | Bank payments, product, accounting and legal owners |
+| Contract and authority | Service/subcontractor scope and locations, SLAs, audit/access rights, incident cooperation, support/exit obligations and the bank's final accountable decision | Bank legal/procurement and production decision owner |
+
+The operational procedure must also distinguish isolated tests from any production testing;
+any production-test instance needs its own reason, bounded duration and relevant-function
+approval, with production data/system protection. This is a control design input from
+[ICT-risk RTS Article 8](https://eur-lex.europa.eu/eli/reg_del/2024/1774/oj/eng), not permission
+to run a test. Its Article 9 supports the capacity procedure and Article 12 the log/evidence
+handling procedure. Applicability and the current legal text remain for the bank's legal
+owner to confirm with the references in section 4.
+
+Before GO, recheck the exact final deployment against this index. Missing financial,
+authorization, durability or required profile evidence blocks the corresponding acceptance;
+a narrative risk statement cannot turn it into technical qualification. External bank/rail
+approval remains necessary even after a complete technical qualification. No issue is closed
+and no new duplicate tracker is created by filling this template.
+
 ## 5. Prioritized 90-day delivery without duplicate issues
 
 Issues below were read on 2026-10-28 and were open. Their historical progress paragraphs are
