@@ -48,7 +48,6 @@ val exportCycloneDxBom = tasks.register("exportCycloneDxBom") {
 }
 cyclonedxBomTask.configure { finalizedBy(exportCycloneDxBom) }
 
-
 // Explicit deploy-build proof. Never attach to sbomAll: resolution-only inventory
 // must not assemble the fleet. This receipt covers original dependency JARs only;
 // Quarkus augmentation and image/deployment provenance remain separate evidence.
@@ -61,11 +60,13 @@ val proof = layout.buildDirectory.file("reports/library-artifacts/verification.j
 // Ordering does not add assembly to standalone CycloneDX inventory requests.
 tasks.named("cyclonedxBom") { mustRunAfter("quarkusBuild") }
 val projectArtifactIdentities = providers.provider {
-    runtimeArtifacts.get().incoming.artifacts.artifacts.mapNotNull { artifact ->
+    val incoming = runtimeArtifacts.get().incoming
+    val coordinates = incoming.resolutionResult.allComponents.associate { it.id to it.moduleVersion }
+    incoming.artifacts.artifacts.mapNotNull { artifact ->
         val component = artifact.id.componentIdentifier as? ProjectComponentIdentifier
         component?.let {
-            val producer = if (it.build.buildPath == ":") rootProject.findProject(it.projectPath) else null
-            "${it.build.buildPath}:${it.projectPath}:${producer?.group}:${producer?.version}:${artifact.id.displayName}"
+            val coordinate = checkNotNull(coordinates[it]) { "Resolved project artifact has no module coordinates: $it" }
+            "${it.build.buildPath}:${it.projectPath}:$coordinate:${artifact.id.displayName}"
         }
     }.sorted()
 }
@@ -82,7 +83,8 @@ tasks.register("verifyPackagedLibrarySbom") {
     outputs.file(proof)
     doLast {
         val receipt = proof.get().asFile
-        // A failed new verification must not leave an older successful receipt.
+        // Discard the prior receipt before executing verification. Earlier Gradle input
+        // resolution failures stop the required producer task before image staging.
         receipt.delete()
         val artifacts = runtimeArtifacts.get().incoming.artifacts.artifacts
             .mapNotNull { artifact ->

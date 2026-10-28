@@ -144,7 +144,6 @@ tasks.test {
     systemProperty("java.util.logging.manager", "org.jboss.logmanager.LogManager")
 }
 
-
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had no kover
 // plugin at all). Measured 56.7% LINE (538/949) at introduction, no filter excludes;
 // ~5 pt headroom, raise-only from here. Kover auto-wires koverVerify into check when a
