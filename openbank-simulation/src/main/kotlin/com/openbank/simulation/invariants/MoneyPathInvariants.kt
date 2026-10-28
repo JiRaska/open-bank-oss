@@ -4,12 +4,15 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.sdd.domain.lifecycle.MandateLifecycle
 import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SequenceType
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
+import com.openbank.simulation.model.DelegationSpendBook
 import com.openbank.simulation.runner.World
 import com.openbank.standingorder.domain.model.Frequency
 import com.openbank.standingorder.domain.model.StandingOrder
@@ -315,6 +318,25 @@ object MoneyPathInvariants {
     }
 
     /**
+     * ADR-0249 D3: a delegated spend that moved money must be CONFIRMED, and one that did not
+     * must be RELEASED — a reservation still RESERVED after the step settled means an exit path
+     * (decline, compensation, seeded release, confirm) was silently dropped, leaving headroom
+     * consumed forever (the leak ADR-0249's consequences section names). Same "settled"
+     * semantics as [settlementCompleteness]: checked after the scheduler drains.
+     */
+    val delegatedSpendCompleteness = object : Invariant {
+        override val name = "delegated-spend-completeness"
+        override fun check(world: World): Violation? {
+            world.spendReservations.forEach { reservation ->
+                if (reservation.state == SpendReservationState.RESERVED) {
+                    return Violation(name, "spend reservation ${reservation.id} stuck in RESERVED")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
      * ADR-0036 §B / ADR-0100 full-service adoption: the SDD collection invariant, reconciling the
      * REAL `SddMandate` lifecycle against the money-path book, once a step has fully settled:
      *
@@ -369,6 +391,87 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * ADR-0249 D3: per grant, Σ CONFIRMED reservation amounts == Σ ledger journals posted for
+     * delegated spend. A confirmation whose journal never posted inflates the delegate's counted
+     * spend without moving money; a posted journal with no confirmation spends the grantor's
+     * money while the ceiling still counts it — both are caught per grant, not fleet-wide.
+     */
+    val delegatedSpendConservation = object : Invariant {
+        override val name = "delegated-spend-conservation"
+        override fun check(world: World): Violation? {
+            world.delegationSpends.grantIds().forEach { grantId ->
+                val confirmed = world.delegationSpends.confirmedAmount(grantId)
+                val posted = world.delegationSpends.postedAmount(grantId)
+                if (confirmed.compareTo(posted) != 0) {
+                    return Violation(name, "grant $grantId confirmed=$confirmed but posted=$posted")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * ADR-0249 D3: replay every ceiling decision the scenario recorded. An ALLOWED decision must
+     * pass all three ceilings under the exact [CountedSpend] the policy was asked with
+     * (per-transaction, daily, monthly — each when the grant carries it); a REFUSED decision must
+     * breach at least one (a refusal with no breached ceiling is the check-evaluate disagreement
+     * the ADR forbids). A scenario that reserved against a stale or invented counted value fails
+     * here even when the money side still conserves.
+     */
+    val delegationCeilingIntegrity = object : Invariant {
+        override val name = "delegation-ceiling-integrity"
+        override fun check(world: World): Violation? {
+            world.delegationSpends.grantIds().forEach { grantId ->
+                val grant = world.delegationGrants.firstOrNull { it.id == grantId } ?: return@forEach
+                world.delegationSpends.decisionsFor(grantId).forEach { decision ->
+                    replayDecision(name, grant, decision)?.let { return it }
+                }
+            }
+            return null
+        }
+
+        /**
+         * Replay one recorded decision against the grant's real limits: an ALLOWED decision must
+         * pass all three ceilings under the exact [CountedSpend] the policy was asked with; a
+         * REFUSED decision must breach at least one (a refusal with no breached ceiling is the
+         * check-evaluate disagreement ADR-0249 forbids).
+         */
+        private fun replayDecision(
+            invariantName: String,
+            grant: DelegationGrant,
+            decision: DelegationSpendBook.Decision,
+        ): Violation? {
+            val breaches = mutableListOf<String>()
+            grant.perTransactionLimit?.let { limit ->
+                if (decision.amount.compareTo(limit.amount) > 0) breaches += "per-transaction"
+            }
+            grant.dailyLimit?.let { limit ->
+                if (decision.counted.withinDay.amount.add(decision.amount).compareTo(limit.amount) > 0) {
+                    breaches += "daily"
+                }
+            }
+            grant.monthlyLimit?.let { limit ->
+                if (decision.counted.withinMonth.amount.add(decision.amount).compareTo(limit.amount) > 0) {
+                    breaches += "monthly"
+                }
+            }
+            if (!decision.refused && breaches.isNotEmpty()) {
+                return Violation(
+                    invariantName,
+                    "grant ${grant.id} allowed ${decision.amount} that breaches ${breaches.joinToString()}",
+                )
+            }
+            if (decision.refused && breaches.isEmpty()) {
+                return Violation(
+                    invariantName,
+                    "grant ${grant.id} refused ${decision.amount} under recorded counted spend with no breached ceiling",
+                )
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -383,6 +486,9 @@ object MoneyPathInvariants {
         statementCloseIntegrity,
         standingOrderCompleteness,
         sddCollectionCompleteness,
+        delegatedSpendCompleteness,
+        delegatedSpendConservation,
+        delegationCeilingIntegrity,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */

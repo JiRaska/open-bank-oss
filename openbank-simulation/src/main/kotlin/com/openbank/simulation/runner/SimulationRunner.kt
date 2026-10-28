@@ -8,6 +8,7 @@ import com.openbank.simulation.engine.FaultProfile
 import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.Invariant
 import com.openbank.simulation.invariants.MoneyPathInvariants
+import com.openbank.simulation.scenario.DelegatedSpendScenario
 import com.openbank.simulation.scenario.FeeBillingScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
@@ -82,6 +83,11 @@ class SimulationRunner(
             // journals — so sddCollectionCompleteness is swept every step under the same fault
             // profile. Kept before the invariant sweep, after the per-scenario drain convention.
             SddCollectionScenario.step(world)
+            context.scheduler.drain()
+            // ADR-0249 D3 / issue #667: the delegated-spend path — real DelegationGrant lifecycle,
+            // real SpendCeilings policy, real SpendReservation state machine — sharing the fault
+            // profile and checked by the delegatedSpend*/delegationCeilingIntegrity invariants.
+            DelegatedSpendScenario.step(world)
             context.scheduler.drain()
             invariants.forEach { invariant ->
                 val violation = invariant.check(world)

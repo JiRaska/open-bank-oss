@@ -105,6 +105,13 @@ dependencies {
     // domain-only artifact or exclude the service's runtime transitive dependencies.
     implementation(project(":openbank-sdd-service"))
 
+    // ADR-0249 D3: the harness drives the REAL delegation-service domain — `DelegationGrant`
+    // (offer → accept lifecycle, capability matrix), `SpendCeilings.evaluate` (the only place the
+    // per-transaction/daily/monthly ceilings are compared) and the `SpendReservation` aggregate
+    // (RESERVED → CONFIRMED/RELEASED with its countsTowardCeilings asymmetry). The domain package
+    // is framework-free (ADR-0002), so only the domain POJOs land on the classpath.
+    implementation(project(":openbank-delegation-service"))
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
