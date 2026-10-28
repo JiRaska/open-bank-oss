@@ -454,9 +454,9 @@ object MoneyPathInvariants {
             val month = relevant
                 .filter { !it.createdAt.isBefore(window.monthStart) }
                 .fold(BigDecimal.ZERO) { total, reservation -> total + reservation.amount.amount }
-            if (decision.counted.withinDay.currency.code != decision.currency ||
-                decision.counted.withinMonth.currency.code != decision.currency ||
-                decision.counted.withinDay.amount.compareTo(day) != 0 ||
+            val currencyMismatch = decision.counted.withinDay.currency.code != decision.currency ||
+                decision.counted.withinMonth.currency.code != decision.currency
+            if (currencyMismatch || decision.counted.withinDay.amount.compareTo(day) != 0 ||
                 decision.counted.withinMonth.amount.compareTo(month) != 0
             ) {
                 return Violation(invariantName, "grant ${grant.id} counted spend disagrees with pre-decision history")
