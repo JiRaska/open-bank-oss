@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger-pension-co
   annotations:
-    openbank.tech/policy-checksum: "0e9c15e8c412cabc"
+    openbank.tech/policy-checksum: "538c5173a9b8ce07"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -939,6 +939,22 @@ data:
         role in input.principal.roles
         not principal_is_machine
         input.action == "ledger.close.draft"
+    }
+
+    # #12906: journal-approval queue reads and checker decisions are human-only. The
+    # explicit machine veto is required for reads because base operator-read-any would
+    # otherwise admit a client_credentials principal carrying ROLE_OPERATOR.
+    allowed_reasons contains "operator-journal-approval" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action in {"ledger.approval.read", "ledger.approval.decide"}
+    }
+
+    prohibited if {
+        principal_is_machine
+        input.action in {"ledger.approval.read", "ledger.approval.decide"}
     }
 
     # Year-close attestation (ledger.approve) is deliberately its OWN rule, not folded into
