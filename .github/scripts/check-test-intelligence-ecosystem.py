@@ -284,7 +284,7 @@ def admin_ui_deploy_liveness_errors(root: Path) -> list[str]:
         "name": "Mint repository read token",
         "id": "read_token",
         "if": "env.GITOPS_APP_ID != ''",
-        "uses": "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+        "uses": "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
         "with": {
             "app-id": "${{ secrets.GITOPS_APP_ID }}",
             "private-key": "${{ secrets.GITOPS_APP_PRIVATE_KEY }}",
@@ -1455,7 +1455,7 @@ def self_test() -> int:
             "      - name: Mint repository read token\n"
             "        id: read_token\n"
             "        if: env.GITOPS_APP_ID != ''\n"
-            "        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1\n"
+            "        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510\n"
             "        with:\n"
             "          app-id: ${{ secrets.GITOPS_APP_ID }}\n"
             "          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}\n"

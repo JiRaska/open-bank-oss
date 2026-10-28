@@ -106,7 +106,13 @@ class TaxReportingPensionPactConsumerTest {
         val catalogue = CatalogueParser.parse(mapper, "statutory-returns/cz/pension-cnb.v1.json")
         val definition = catalogue.definition("PSP31-04")!!
         val values = runBlocking {
-            PensionReturnDataAdapter(FixedSources(aggregates), NoCorporateFacts, NoCompanyBooks)
+            PensionReturnDataAdapter(
+                FixedSources(aggregates),
+                NoCorporateFacts,
+                NoCompanyBooks,
+                NoCompanyPortfolio,
+                "CZK",
+            )
                 .fetch(
                     catalogue,
                     definition,
