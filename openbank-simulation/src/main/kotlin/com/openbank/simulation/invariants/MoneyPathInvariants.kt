@@ -6,6 +6,7 @@ package com.openbank.simulation.invariants
 
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.SpendReservationState
+import com.openbank.delegation.domain.model.SpendWindows
 import com.openbank.sdd.domain.lifecycle.MandateLifecycle
 import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SequenceType
@@ -442,6 +443,24 @@ object MoneyPathInvariants {
             grant: DelegationGrant,
             decision: DelegationSpendBook.Decision,
         ): Violation? {
+            val window = SpendWindows.windowAt(decision.history.at)
+            val relevant = decision.history.reservations.filter {
+                it.grantId == grant.id && it.amount.currency.code == decision.currency &&
+                    it.state != SpendReservationState.RELEASED && !it.createdAt.isAfter(decision.history.at)
+            }
+            val day = relevant
+                .filter { !it.createdAt.isBefore(window.dayStart) }
+                .fold(BigDecimal.ZERO) { total, reservation -> total + reservation.amount.amount }
+            val month = relevant
+                .filter { !it.createdAt.isBefore(window.monthStart) }
+                .fold(BigDecimal.ZERO) { total, reservation -> total + reservation.amount.amount }
+            if (decision.counted.withinDay.currency.code != decision.currency ||
+                decision.counted.withinMonth.currency.code != decision.currency ||
+                decision.counted.withinDay.amount.compareTo(day) != 0 ||
+                decision.counted.withinMonth.amount.compareTo(month) != 0
+            ) {
+                return Violation(invariantName, "grant ${grant.id} counted spend disagrees with pre-decision history")
+            }
             val breaches = mutableListOf<String>()
             grant.perTransactionLimit?.let { limit ->
                 if (decision.amount.compareTo(limit.amount) > 0) breaches += "per-transaction"

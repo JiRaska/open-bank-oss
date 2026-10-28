@@ -4,16 +4,26 @@
 
 package com.openbank.simulation.scenario
 
+import com.openbank.delegation.domain.model.CountedSpend
+import com.openbank.delegation.domain.model.DelegationCapability
+import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationResourceType
+import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationState
+import com.openbank.libs.domain.money.Money
 import com.openbank.simulation.engine.FaultProfile
 import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.MoneyPathInvariants
 import com.openbank.simulation.model.AccountCurrency
+import com.openbank.simulation.model.DelegationSpendBook
 import com.openbank.simulation.runner.SimulationConfig
 import com.openbank.simulation.runner.World
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.math.BigDecimal
+import java.time.OffsetDateTime
+import java.util.UUID
 
 /**
  * ADR-0249 D3: exercises [DelegatedSpendScenario] directly against the REAL delegation-service
@@ -134,4 +144,139 @@ class DelegatedSpendScenarioTest {
         // legitimately declined/released somewhere in 100 adversarial steps.
         assertThat(confirmed + released.toBigDecimal() > BigDecimal.ZERO).isTrue()
     }
+
+    @Test
+    fun `stale counted input is rejected against actual pre-decision reservation history`() {
+        val world = newWorld()
+        val at = OffsetDateTime.parse("2026-03-15T12:00:00+01:00")
+        val grant = ceilingGrant(world, at)
+        world.delegationGrants.add(grant)
+        world.spendReservations.add(historyReservation(grant.id, "100.00", at))
+        val history = DelegationSpendBook.HistorySnapshot.capture(world, grant.id, world.currency, at)
+        world.delegationSpends.recordDecision(
+            DelegationSpendBook.Decision(
+                grant.id,
+                UUID(0L, 10L),
+                BigDecimal("50.00"),
+                CountedSpend(Money.zero(world.currency), Money.zero(world.currency)),
+                world.currency,
+                history,
+                refused = false,
+            ),
+        )
+        assertThat(MoneyPathInvariants.delegationCeilingIntegrity.check(world))
+            .withFailMessage("a policy agreeing with stale zero usage is not independent evidence")
+            .isNotNull()
+    }
+
+    @Test
+    fun `same-instant later reservation and release do not rewrite earlier decision history`() {
+        val world = newWorld()
+        val at = OffsetDateTime.parse("2026-03-15T12:00:00+01:00")
+        val grant = ceilingGrant(world, at)
+        world.delegationGrants.add(grant)
+        val prior = historyReservation(grant.id, "100.00", at)
+        world.spendReservations.add(prior)
+        val history = DelegationSpendBook.HistorySnapshot.capture(world, grant.id, world.currency, at)
+        world.spendReservations[0] = prior.release(at)
+        world.spendReservations.add(historyReservation(grant.id, "75.00", at))
+        world.delegationSpends.recordDecision(
+            DelegationSpendBook.Decision(
+                grant.id,
+                UUID(0L, 10L),
+                BigDecimal("50.00"),
+                CountedSpend(Money.of("100.00", world.currency), Money.of("100.00", world.currency)),
+                world.currency,
+                history,
+                refused = true,
+            ),
+        )
+        assertThat(MoneyPathInvariants.delegationCeilingIntegrity.check(world)).isNull()
+        assertThat(history.reservations).hasSize(1)
+        assertThat(history.reservations.single().state).isEqualTo(SpendReservationState.RESERVED)
+    }
+
+    @Test
+    fun `history reconstruction filters grant currency active state and Prague day month windows`() {
+        val world = newWorld()
+        val at = OffsetDateTime.parse("2026-03-15T12:00:00+01:00")
+        val grant = ceilingGrant(world, at).copy(
+            dailyLimit = Money.of("1000.00", world.currency),
+            monthlyLimit = Money.of("2000.00", world.currency),
+        )
+        world.delegationGrants.add(grant)
+        world.spendReservations.addAll(
+            listOf(
+                historyReservation(grant.id, "100.00", at),
+                historyReservation(grant.id, "50.00", at.minusDays(1)).confirm(at.minusDays(1)),
+                historyReservation(grant.id, "500.00", at.minusMonths(1)),
+                historyReservation(grant.id, "700.00", at, "USD"),
+                historyReservation(grant.id, "800.00", at).release(at),
+                historyReservation(grant.id, "900.00", at.plusSeconds(1)),
+                historyReservation(UUID(0L, 999L), "1000.00", at),
+            ),
+        )
+        val history = DelegationSpendBook.HistorySnapshot.capture(world, grant.id, world.currency, at)
+        assertThat(history.reservations).hasSize(5)
+        assertThat(
+            history.reservations.all {
+                it.grantId == grant.id && it.amount.currency.code == world.currency
+            },
+        ).isTrue()
+        world.delegationSpends.recordDecision(
+            DelegationSpendBook.Decision(
+                grant.id,
+                UUID(0L, 10L),
+                BigDecimal("50.00"),
+                CountedSpend(Money.of("100.00", world.currency), Money.of("150.00", world.currency)),
+                world.currency,
+                history,
+                refused = false,
+            ),
+        )
+        assertThat(MoneyPathInvariants.delegationCeilingIntegrity.check(world)).isNull()
+    }
+
+    @Test
+    fun `captured reservation values and collection cannot be rewritten by later world changes`() {
+        val world = newWorld()
+        val at = OffsetDateTime.parse("2026-03-15T12:00:00+01:00")
+        val reservation = historyReservation(UUID(0L, 5L), "100.00", at)
+        world.spendReservations.add(reservation)
+        val history = DelegationSpendBook.HistorySnapshot.capture(world, reservation.grantId, world.currency, at)
+        world.spendReservations[0] = reservation.copy(amount = Money.of("1.00", world.currency))
+        world.spendReservations.clear()
+        assertThat(history.reservations.single().amount.amount).isEqualByComparingTo("100.00")
+        assertThat(history.reservations.single().createdAt).isEqualTo(at)
+        assertThrows<UnsupportedOperationException> {
+            (history.reservations as MutableList<SpendReservation>).clear()
+        }
+    }
+
+    private fun ceilingGrant(world: World, at: OffsetDateTime): DelegationGrant = DelegationGrant(
+        id = UUID(0L, 1L),
+        grantorPartyId = UUID(0L, 2L),
+        granteePartyId = UUID(0L, 3L),
+        resourceType = DelegationResourceType.ACCOUNT,
+        resourceId = world.customerAccounts.first(),
+        capabilities = setOf(DelegationCapability.ACCOUNT_INITIATE_PAYMENT),
+        dailyLimit = Money.of("100.00", world.currency),
+        monthlyLimit = Money.of("100.00", world.currency),
+        validFrom = at.minusDays(1),
+        validTo = at.plusDays(1),
+        createdAt = at,
+        updatedAt = at,
+    )
+
+    private fun historyReservation(
+        grantId: UUID,
+        amount: String,
+        at: OffsetDateTime,
+        currency: String = "CZK",
+    ): SpendReservation = SpendReservation(
+        grantId = grantId,
+        amount = Money.of(amount, currency),
+        idempotencyKey = "history-regression",
+        createdAt = at,
+    )
 }

@@ -86,6 +86,7 @@ object DelegatedSpendScenario {
 
         // 2. The real counted spend: every reservation on this grant that still consumes
         //    headroom (RESERVED + CONFIRMED), inside the real day/month windows, same currency.
+        val history = DelegationSpendBook.HistorySnapshot.capture(world, grant.id, world.currency, now)
         val counted = countedSpend(world, grant.id, now)
         val amount = Money.of(
             BigDecimal(random.nextLong(1L, MAX_AMOUNT_MINOR)).movePointLeft(2),
@@ -97,7 +98,15 @@ object DelegatedSpendScenario {
         val decision = SpendCeilings.evaluate(grant, amount, counted, now)
         if (decision is SpendDecision.Refused) {
             world.delegationSpends.recordDecision(
-                DelegationSpendBook.Decision(grant.id, UUID(0L, 0L), amount.amount, counted, refused = true),
+                DelegationSpendBook.Decision(
+                    grant.id,
+                    UUID(0L, 0L),
+                    amount.amount,
+                    counted,
+                    world.currency,
+                    history,
+                    refused = true,
+                ),
             )
             world.audit.append("delegated spend refused on grant ${grant.id}: ${decision.reason}")
             return
@@ -114,7 +123,15 @@ object DelegatedSpendScenario {
         )
         world.spendReservations.add(reservation)
         world.delegationSpends.recordDecision(
-            DelegationSpendBook.Decision(grant.id, reservation.id, amount.amount, counted, refused = false),
+            DelegationSpendBook.Decision(
+                grant.id,
+                reservation.id,
+                amount.amount,
+                counted,
+                world.currency,
+                history,
+                refused = false,
+            ),
         )
         settleReservation(world, reservation, now)
     }

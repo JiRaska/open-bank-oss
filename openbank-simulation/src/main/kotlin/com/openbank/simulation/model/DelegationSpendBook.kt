@@ -5,7 +5,11 @@
 package com.openbank.simulation.model
 
 import com.openbank.delegation.domain.model.CountedSpend
+import com.openbank.delegation.domain.model.SpendReservation
+import com.openbank.simulation.runner.World
 import java.math.BigDecimal
+import java.time.OffsetDateTime
+import java.util.Collections
 import java.util.UUID
 
 /**
@@ -28,12 +32,32 @@ import java.util.UUID
  * must remain a refusal under the recorded counted value.
  */
 class DelegationSpendBook {
-    /** One reservation decision as the real policy saw it. */
+    /**
+     * A copied list of existing immutable domain versions, observed before the decision.
+     * SpendReservation and Money have value-only fields; World replaces versions on settle.
+     * Filtering scans the actual collection rather than trusting the policy's counted input.
+     * Defaults use 50 steps per discarded World; arbitrary steps can still retain O(n²) refs.
+     */
+    data class HistorySnapshot(val at: OffsetDateTime, val reservations: List<SpendReservation>) {
+        companion object {
+            fun capture(world: World, grantId: UUID, currency: String, at: OffsetDateTime): HistorySnapshot =
+                HistorySnapshot(
+                    at,
+                    Collections.unmodifiableList(
+                        world.spendReservations.filter { it.grantId == grantId && it.amount.currency.code == currency },
+                    ),
+                )
+        }
+    }
+
+    /** One reservation decision as the real policy saw it, with independent pre-decision history. */
     data class Decision(
         val grantId: UUID,
         val reservationId: UUID,
         val amount: BigDecimal,
         val counted: CountedSpend,
+        val currency: String,
+        val history: HistorySnapshot,
         val refused: Boolean,
     )
 
