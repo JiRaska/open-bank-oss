@@ -106,7 +106,7 @@ class DelegatedSpendScenarioTest {
     }
 
     @Test
-    fun `a seeded release returns the balance hold without posting`() {
+    fun `a seeded release returns the balance hold with zero net movement`() {
         val world = newWorld()
         val source = AccountCurrency(world.customerAccounts.first(), world.currency)
         var releasedBefore = 0

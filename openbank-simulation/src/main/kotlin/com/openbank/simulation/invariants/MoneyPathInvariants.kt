@@ -19,6 +19,7 @@ import com.openbank.simulation.runner.World
 import com.openbank.standingorder.domain.model.Frequency
 import com.openbank.standingorder.domain.model.StandingOrder
 import com.openbank.standingorder.domain.model.StandingOrderStatus
+import com.openbank.swift.domain.model.SwiftStatus
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -321,18 +322,20 @@ object MoneyPathInvariants {
     }
 
     /**
-     * ADR-0249 D3: a delegated spend that moved money must be CONFIRMED, and one that did not
-     * must be RELEASED — a reservation still RESERVED after the step settled means an exit path
-     * (decline, compensation, seeded release, confirm) was silently dropped, leaving headroom
-     * consumed forever (the leak ADR-0249's consequences section names). Same "settled"
-     * semantics as [settlementCompleteness]: checked after the scheduler drains.
+     * Outgoing-SWIFT completeness: every `SwiftMessage` the scenario created must reach a
+     * terminal status (COMPLETED / REJECTED / FAILED) once the step has settled — none may
+     * remain mid-flight in PENDING/VALIDATED/SENT, the states where a crash would leave the
+     * operator guessing whether the money left. Same "settled" semantics as
+     * [settlementCompleteness]: checked after the scheduler drains.
      */
-    val delegatedSpendCompleteness = object : Invariant {
-        override val name = "delegated-spend-completeness"
+    val swiftCompleteness = object : Invariant {
+        private val terminal = setOf(SwiftStatus.COMPLETED, SwiftStatus.REJECTED, SwiftStatus.FAILED)
+
+        override val name = "swift-completeness"
         override fun check(world: World): Violation? {
-            world.spendReservations.forEach { reservation ->
-                if (reservation.state == SpendReservationState.RESERVED) {
-                    return Violation(name, "spend reservation ${reservation.id} stuck in RESERVED")
+            world.swiftMessages.forEach { message ->
+                if (message.status !in terminal) {
+                    return Violation(name, "swift message ${message.id} stuck in ${message.status}")
                 }
             }
             return null
@@ -388,6 +391,54 @@ object MoneyPathInvariants {
                             "mandate ${mandate.id} idle past ${MandateLifecycle.IDLE_EXPIRY_MONTHS}m but still ${mandate.status}",
                         )
                     }
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Outgoing-SWIFT conservation: a COMPLETED MT103 must have posted exactly its amount, and
+     * nothing else may post under a SWIFT message id — so a message that completed without
+     * money leaving (or money that left without a completion) is caught per message, while a
+     * REJECTED (validate refused) or FAILED (compensated) message provably posted nothing.
+     */
+    val swiftMoneyConservation = object : Invariant {
+        override val name = "swift-money-conservation"
+        override fun check(world: World): Violation? {
+            world.swiftMessages.forEach { message ->
+                val posted = world.swiftBook.postedAmount(message.id)
+                if (message.status == SwiftStatus.COMPLETED) {
+                    val amount = message.amount.amount
+                    if (posted.compareTo(amount) != 0) {
+                        return Violation(name, "swift ${message.id} completed but posted=$posted amount=$amount")
+                    }
+                } else if (posted.signum() != 0) {
+                    return Violation(name, "swift ${message.id} is ${message.status} but posted=$posted")
+                }
+            }
+            world.swiftBook.postedIds().forEach { messageId ->
+                if (world.swiftMessages.none { it.id == messageId }) {
+                    return Violation(name, "posted under unknown swift message $messageId")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * ADR-0249 D3: a delegated spend that moved money must be CONFIRMED, and one that did not
+     * must be RELEASED — a reservation still RESERVED after the step settled means an exit path
+     * (decline, compensation, seeded release, confirm) was silently dropped, leaving headroom
+     * consumed forever (the leak ADR-0249's consequences section names). Same "settled"
+     * semantics as [settlementCompleteness]: checked after the scheduler drains.
+     */
+    val delegatedSpendCompleteness = object : Invariant {
+        override val name = "delegated-spend-completeness"
+        override fun check(world: World): Violation? {
+            world.spendReservations.forEach { reservation ->
+                if (reservation.state == SpendReservationState.RESERVED) {
+                    return Violation(name, "spend reservation ${reservation.id} stuck in RESERVED")
                 }
             }
             return null
@@ -548,6 +599,8 @@ object MoneyPathInvariants {
         delegatedSpendCompleteness,
         delegatedSpendConservation,
         delegationCeilingIntegrity,
+        swiftCompleteness,
+        swiftMoneyConservation,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */

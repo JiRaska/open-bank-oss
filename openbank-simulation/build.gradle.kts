@@ -108,9 +108,16 @@ dependencies {
     // ADR-0249 D3: the harness drives the REAL delegation-service domain — `DelegationGrant`
     // (offer → accept lifecycle, capability matrix), `SpendCeilings.evaluate` (the only place the
     // per-transaction/daily/monthly ceilings are compared) and the `SpendReservation` aggregate
-    // (RESERVED → CONFIRMED/RELEASED with its countsTowardCeilings asymmetry). The domain package
-    // is framework-free (ADR-0002), so only the domain POJOs land on the classpath.
+    // (RESERVED → CONFIRMED/RELEASED with its countsTowardCeilings asymmetry). These domain
+    // types are framework-free (ADR-0002); this project dependency is not a domain-only artifact
+    // and can include the service's configured runtime transitive dependencies.
     implementation(project(":openbank-delegation-service"))
+
+    // Issue #667 (E2E money-path): the harness drives the REAL swift-service domain object —
+    // `SwiftMessage` with its validate() admission gate (BIC lengths, reference, amount,
+    // charge code, value-date format) and MT103 status vocabulary — rather than a re-model of
+    // the cross-border rail. The domain package is framework-free (ADR-0002).
+    implementation(project(":openbank-swift-service"))
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
