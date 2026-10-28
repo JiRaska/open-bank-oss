@@ -170,5 +170,41 @@ class PollingEvidenceTest(unittest.TestCase):
         self.assertIn(endpoint, reads)
 
 
+class ApiRetryTest(unittest.TestCase):
+    """Transient gh api failures must be retried with backoff, not kill the gate (#14105)."""
+
+    def call(self, failures):
+        import subprocess
+        sleeps = []
+        side_effect = []
+        for _ in range(failures):
+            side_effect.append(subprocess.CalledProcessError(1, ['gh', 'api']))
+        side_effect.append('[{"jobs": []}]')
+        with patch('subprocess.check_output', side_effect=side_effect) as gh, \
+                patch.object(checker.time, 'sleep', side_effect=sleeps.append):
+            result = checker.api('repos/owner/repo/actions/runs/1/attempts/1/jobs?per_page=100')
+        return result, gh.call_count, sleeps
+
+    def test_transient_failure_is_retried_then_succeeds(self):
+        result, calls, sleeps = self.call(failures=2)
+        self.assertEqual(result, [{'jobs': []}])
+        self.assertEqual(calls, 3)
+        # Exponential backoff: 2s, then 4s.
+        self.assertEqual(sleeps, [2.0, 4.0])
+
+    def test_first_attempt_success_makes_no_sleep(self):
+        result, calls, sleeps = self.call(failures=0)
+        self.assertEqual(calls, 1)
+        self.assertEqual(sleeps, [])
+
+    def test_persistent_failure_raises_after_final_attempt(self):
+        import subprocess
+        with patch('subprocess.check_output', side_effect=subprocess.CalledProcessError(1, ['gh', 'api'])) as gh, \
+                patch.object(checker.time, 'sleep'):
+            with self.assertRaises(subprocess.CalledProcessError):
+                checker.api('repos/owner/repo/actions/runs/1/attempts/1/jobs?per_page=100')
+        self.assertEqual(gh.call_count, 4)
+
+
 if __name__ == "__main__":
     unittest.main()

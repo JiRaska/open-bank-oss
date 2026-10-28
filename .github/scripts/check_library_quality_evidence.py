@@ -40,9 +40,23 @@ def verdict(runs, head):
     return ("pending", "; ".join(pending)) if pending else ("success", "all library proofs passed on this head")
 
 
-def api(endpoint):
-    output = subprocess.check_output(["gh", "api", "--paginate", "--slurp", endpoint], text=True)
-    return json.loads(output)
+def api(endpoint, attempts=4):
+    # Transient GitHub API failures (5xx, 429/secondary rate limit) must not kill the gate:
+    # measured 2026-10-28 on PR #14105, `gh api .../attempts/1/jobs` returned non-zero inside
+    # the runner while the identical endpoint answered 200 from a workstation seconds later,
+    # reddening all-green on a fully green head twice in a row. The calls are idempotent GETs,
+    # so retry with exponential backoff; a persistent error (e.g. a real 404) still fails after
+    # the final attempt.
+    delay = 2.0
+    for remaining in range(attempts, 0, -1):
+        try:
+            output = subprocess.check_output(["gh", "api", "--paginate", "--slurp", endpoint], text=True)
+            return json.loads(output)
+        except subprocess.CalledProcessError:
+            if remaining == 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
 
 
 def main():
