@@ -32,8 +32,8 @@ test('bounded source reads reject symlinks, oversized files and escaped paths', 
     rmSync(directory, { recursive: true, force: true })
   }
 })
-test('collector publishes every current source file in a bounded, validated reviewed-source snapshot', () => {
-  const bytes = collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA })
+test('collector can publish topology in a bounded, validated reviewed-source snapshot', () => {
+  const bytes = collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA, includeClusterTopology: true })
   const snapshot = JSON.parse(bytes.toString('utf8'))
   assert.ok(bytes.byteLength < ADMIN_UI_CONTENT_MAX_BYTES)
   assert.equal(snapshot.schemaVersion, 1)
@@ -41,6 +41,8 @@ test('collector publishes every current source file in a bounded, validated revi
   assert.equal(snapshot.sourceSha, SOURCE_SHA)
   assert.ok(Number.isFinite(Date.parse(snapshot.collectedAt)))
   assert.ok(isAdminUiContentSnapshot(snapshot))
+  assert.equal(snapshot.content.clusterTopology.schema, 'openbank.cluster-topology/v1')
+  assert.equal(snapshot.content.clusterTopology.counts.namespaces, snapshot.content.clusterTopology.namespaces.length)
 
   const bpmnFiles = readdirSync(resolve(ROOT, 'openbank-admin-ui/src/content/bpmn'))
     .filter(name => name.endsWith('.yaml')).map(name => name.slice(0, -5)).sort()
@@ -57,8 +59,24 @@ test('collector publishes every current source file in a bounded, validated revi
   assert.match(snapshot.content.securityGraph.collectedAt, /^\d{4}-\d\d-\d\dT/)
 })
 
+test('schema v1 accepts older snapshots without cluster topology and rejects malformed topology when present', () => {
+  const source = JSON.parse(collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA, includeClusterTopology: true }).toString('utf8'))
+  const oldSnapshot = structuredClone(source)
+  delete oldSnapshot.content.clusterTopology
+  assert.equal(isAdminUiContentSnapshot(oldSnapshot), true)
+
+  const malformed = structuredClone(source)
+  malformed.content.clusterTopology.counts.namespaces++
+  assert.equal(isAdminUiContentSnapshot(malformed), false)
+
+  const malformedStatus = structuredClone(source)
+  malformedStatus.content.clusterTopology.securityLayers[0].status = ['live']
+  assert.equal(isAdminUiContentSnapshot(malformedStatus), false)
+})
+
 test('validator rejects mismatched provenance, malformed policy, unsafe inventory paths and oversize content', () => {
   const source = JSON.parse(collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA }).toString('utf8'))
+  assert.equal(source.content.clusterTopology, undefined, 'default publisher output stays compatible with deployed readers')
   const bad = mutate => {
     const copy = structuredClone(source)
     mutate(copy)
@@ -77,7 +95,7 @@ test('validator rejects mismatched provenance, malformed policy, unsafe inventor
 })
 
 test('validator rejects malformed generated rows and totals instead of accepting an empty or crashing dataset', () => {
-  const source = JSON.parse(collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA }).toString('utf8'))
+  const source = JSON.parse(collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA, includeClusterTopology: true }).toString('utf8'))
   const bad = mutate => {
     const copy = structuredClone(source)
     mutate(copy)
@@ -92,6 +110,14 @@ test('validator rejects malformed generated rows and totals instead of accepting
   bad(copy => { copy.content.governance.totals.withGaps++ })
   bad(copy => { copy.content.securityGraph.network.ingressRules[0].ports = 'all' })
   bad(copy => { copy.content.catalog.services = [] })
+  bad(copy => { copy.content.clusterTopology.securityLayers[0].adr = '0030' })
+  bad(copy => { copy.content.clusterTopology.securityLayers[0].detailRoute = { href: '/internal' } })
+  bad(copy => { copy.content.clusterTopology.securityLayers[0].detailRoute = '//example.test' })
+  bad(copy => { copy.content.clusterTopology.securityLayers[0].summary = { text: 'valid-looking' } })
+  bad(copy => { copy.content.clusterTopology.imageAnatomy.steps[0].adr = { ref: '0030' } })
+  bad(copy => { copy.content.clusterTopology.imageAnatomy.steps[0].detail = { text: 'valid-looking' } })
+  bad(copy => { copy.content.clusterTopology.groups[0].color = { value: '#fff' } })
+  bad(copy => { copy.content.clusterTopology.namespaces[0].role = { text: 'valid-looking' } })
 })
 
 test('collector refuses a source SHA that does not identify the checked-out tree', () => {
@@ -193,15 +219,17 @@ test('platform declaration publication is opt-in and legacy content stays valid'
 
 test('legacy, platform-only, documentation-only and combined content remain compatible', () => {
   const combined = JSON.parse(collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA,
-    includePlatformDeclarations: true, includeRepositoryDocumentation: true }))
+    includePlatformDeclarations: true, includeRepositoryDocumentation: true, includeClusterTopology: true }))
   assert.ok(combined.content.platformVersions)
   assert.ok(combined.content.repositoryDocumentation)
-  for (const [platform, documentation] of [[false, false], [true, false], [false, true], [true, true]]) {
+  assert.ok(combined.content.clusterTopology)
+  for (const [platform, documentation, cluster] of [[false, false, false], [true, false, false], [false, true, false], [true, true, false], [false, false, true], [true, false, true], [false, true, true], [true, true, true]]) {
     const payload = structuredClone(combined)
     if (!platform) delete payload.content.platformVersions
     if (!documentation) delete payload.content.repositoryDocumentation
-    assert.equal(Object.keys(payload.content).length, 8 + Number(platform) + Number(documentation))
-    assert.ok(isAdminUiContentSnapshot(payload), `platform=${platform}, documentation=${documentation}`)
+    if (!cluster) delete payload.content.clusterTopology
+    assert.equal(Object.keys(payload.content).length, 8 + Number(platform) + Number(documentation) + Number(cluster))
+    assert.ok(isAdminUiContentSnapshot(payload), `platform=${platform}, documentation=${documentation}, cluster=${cluster}`)
   }
   const invalid = structuredClone(combined)
   invalid.content.unknownDataset = {}
