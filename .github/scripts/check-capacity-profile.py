@@ -16,7 +16,7 @@ try:
     import yaml
 except ImportError:  # pragma: no cover
     print("::error::check-capacity-profile: PyYAML is required", file=sys.stderr)
-    raise SystemExit(1)
+    raise SystemExit(1) from None
 
 PROFILE = "perf/profiles/cz-current-account-5m-v1.yaml"
 SCENARIOS = "perf/scenarios.yaml"
