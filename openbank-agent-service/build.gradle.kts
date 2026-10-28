@@ -80,6 +80,61 @@ tasks.named<Copy>("processResources") {
     }
 }
 
+// Forked test JVM heap — issue #9919, observed here 2026-10-28. The same intermittent
+// kover test.ic truncation that consent-service carries (#9919) now hits this module:
+// two consecutive Services CI runs of PR #14059 failed koverVerify with
+// `Failed to load coverage data ... java.io.EOFException` and coverage 60.08% / 86.24%
+// against this floor of 87, on a change that touches no agent-service source. The
+// truncated report means the kover agent's JVM died mid-suite under the default 512m
+// forked-test heap; the 2g override is the per-module mitigation already used by
+// account-service / consent-service / kyc / domestic-payment. Not a fleet default —
+// see account-service's comment for why.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
+
+// DIAGNOSTIC, not a fix — issue #9919 (copied from consent-service, adapted for this
+// module). koverVerify intermittently reads a TRUNCATED test.ic here
+// (`Failed to load coverage data ... java.io.EOFException`), on ~10% of CI builds
+// including main, never locally. The EOF warning is also present in GREEN runs, so
+// truncation is routine and only sometimes costs enough to fail the floor. The
+// mechanism is not established, and the two live candidates need opposite fixes:
+//   (a) the test JVM exits before kover's shutdown hook finishes writing (the file is
+//       already short when Gradle moves on, and nothing writes it afterwards), or
+//   (b) something still holds and writes the file after `test` ends — a JVM that
+//       inherited the agent — so koverCachedVerify reads a file that is still growing.
+// Two readings tell them apart: size + mtime when `test` finishes, and again
+// immediately before koverCachedVerify reads it, plus any live process still carrying
+// the kover agent. (a) reads equal sizes and no agent process; (b) reads a larger
+// second size or a live agent process. Remove this block once a failing run has
+// printed both lines and #9919 has its answer.
+val koverTestIc = layout.buildDirectory.file("kover/bin-reports/test.ic")
+fun describeKoverIc(moment: String, ic: File): String {
+    // Epoch millis, not java.time: inside a build script `java` resolves to the
+    // project's java extension, so `java.time.Instant` does not compile here.
+    val state = if (ic.isFile) "size=${ic.length()} mtimeMs=${ic.lastModified()}" else "absent"
+    // Only a JVM actually carrying the agent. A bare "kover" substring also matches
+    // the Gradle and Kotlin daemons (the plugin is on their classpath), which would
+    // report (b) on every run.
+    val self = ProcessHandle.current().pid()
+    val agentJvms = ProcessHandle.allProcesses()
+        .filter { it.pid() != self }
+        .filter {
+            val cmd = it.info().commandLine().orElse("")
+            cmd.contains("-javaagent:") && cmd.contains("kover-jvm-agent")
+        }
+        .map { it.pid() }
+        .toList()
+    return "[kover-ic #9919] $moment: test.ic $state; " +
+        "live kover-agent JVMs=$agentJvms; nowMs=${System.currentTimeMillis()}"
+}
+tasks.named<Test>("test") {
+    doLast { logger.lifecycle(describeKoverIc("after test", koverTestIc.get().asFile)) }
+}
+tasks.matching { it.name == "koverCachedVerify" }.configureEach {
+    doFirst { logger.lifecycle(describeKoverIc("before koverCachedVerify", koverTestIc.get().asFile)) }
+}
+
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: was a placebo minValue = 0
 // gate that could never fail). Measured 75.8% LINE coverage (1344/1772) at
 // introduction; re-measured 87.3% on 2026-10-14. Floor 87, raise-only from here.
