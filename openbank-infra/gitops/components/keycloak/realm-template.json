@@ -1687,6 +1687,27 @@
       "secret": "__SYNTHETIC_FX_READ_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-synthetic-ledger-seed",
+      "name": "OpenBank Synthetic Journey: Ledger seed posting",
+      "description": "Synthetic identity for seeding ledger fixtures (account-overview); non-personal service account, synthetic-taint only",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "optionalClientScopes": [],
+      "secret": "__SYNTHETIC_LEDGER_SEED_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-grafana",
       "fullScopeAllowed": false,
       "name": "Grafana (observability single pane)",
@@ -2272,6 +2293,14 @@
       "enabled": true,
       "serviceAccountClientId": "openbank-synthetic-fx-read",
       "realmRoles": []
+    },
+    {
+      "username": "service-account-openbank-synthetic-ledger-seed",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-synthetic-ledger-seed",
+      "realmRoles": [
+        "ROLE_API"
+      ]
     },
     {
       "username": "service-account-openbank-mcp-service",
