@@ -16,6 +16,7 @@ import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
@@ -37,7 +38,7 @@ import java.util.UUID
  * top-level helper slipped in between would silently steal it (#3371).
  */
 @Tag(name = "Funds", description = "Segregated pension funds and NAV (ADR-0334)")
-@Path("/api/v1/funds")
+@Path("/api/v2/funds")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 class FundResource {
@@ -49,16 +50,20 @@ class FundResource {
     lateinit var navs: NavService
 
     @Inject
+    lateinit var replay: PostgresWriteReplay
+
+    @Inject
     lateinit var identity: SecurityIdentity
 
     @POST
     @Operation(summary = "Create a segregated fund")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.fund.manage")
-    suspend fun create(request: FundRequest?): Response {
-        val fund = funds.createFund(requireNotNull(request) { "request body is required" }.toDefinition())
-        return Response.status(Response.Status.CREATED).entity(fund).build()
-    }
+    suspend fun create(request: CreateFundRequest?, @HeaderParam("Idempotency-Key") key: String?): Response =
+        replay.execute(key, "/api/v2/funds", request) {
+            val fund = funds.createFund(requireNotNull(request) { "request body is required" }.toDefinition())
+            Response.status(Response.Status.CREATED).entity(fund).build()
+        }
 
     @GET
     @Operation(summary = "List funds")
@@ -75,10 +80,10 @@ class FundResource {
 
     @PUT
     @Path("/{fundId}")
-    @Operation(summary = "Amend a fund's descriptive and fee terms; ISIN and currency are immutable")
+    @Operation(summary = "Amend a fund's descriptive terms; identity, currency and revision pin are immutable")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.fund.manage", resource = "#fundId")
-    suspend fun amend(@PathParam("fundId") fundId: UUID, request: FundRequest?): Fund =
+    suspend fun amend(@PathParam("fundId") fundId: UUID, request: AmendFundRequest?): Fund =
         funds.amendFund(fundId, requireNotNull(request) { "request body is required" }.toDefinition())
 
     @DELETE
@@ -93,7 +98,11 @@ class FundResource {
     @Operation(summary = "Calculate a NAV (maker); a second person publishes it")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.nav.calculate", resource = "#fundId")
-    suspend fun calculateNav(@PathParam("fundId") fundId: UUID, request: NavCalculationDto?): Response {
+    suspend fun calculateNav(
+        @PathParam("fundId") fundId: UUID,
+        request: NavCalculationDto?,
+        @HeaderParam("Idempotency-Key") key: String?,
+    ): Response = replay.execute(key, "/api/v2/funds/$fundId/navs", request) {
         val nav = navs.calculate(
             fundId,
             requireNotNull(request) {
@@ -101,7 +110,7 @@ class FundResource {
             }.toRequest(),
             identity.actor(),
         )
-        return Response.status(Response.Status.CREATED).entity(NavResponse.from(nav)).build()
+        Response.status(Response.Status.CREATED).entity(NavResponse.from(nav)).build()
     }
 
     @GET
