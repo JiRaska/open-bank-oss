@@ -161,6 +161,43 @@ scenarios:
   qualification_scenario_ids: []
   scenario_catalog_status: no-existing-full-path-profile-scenarios
 
+sandbox_campaign:
+  evidence_class: existing-shared-sandbox-fixed-resource-observation
+  qualification_status: not-qualification
+  full_scale_5m_execution: prohibited
+  resource_boundary:
+    additional_provisioning: prohibited
+    deployment_or_rollout_mutation: prohibited
+    replica_hpa_keda_or_nodepool_mutation: prohibited
+  sequence:
+    passive_baseline_before_load: true
+    read_only_baseline_before_any_write_pilot: true
+    existing_read_scenarios_only: true
+    least_privilege_identity_verified: required
+    fixture_ownership_and_taint_verified: required
+  bounded_write_pilot:
+    status: proposed_after_baseline_and_explicit_run_approval
+    preexisting_synthetic_fixtures_only: true
+    ownership_taint_and_reconciliation_verified: required
+    arbitrary_mass_writes: prohibited
+    disable_authentication_or_policy: prohibited
+    run_envelope: frozen_and_approved_before_execution
+    numeric_stop_thresholds: pending_run_specific_approved_envelope
+  stop_conditions:
+    - unexpected-5xx-timeout-or-capacity-rejection
+    - fixture-ownership-taint-or-authentication-anomaly
+    - reconciliation-or-financial-oracle-discrepancy
+    - sustained-queue-lag-or-outbox-age-growth
+    - database-pool-lock-or-resource-saturation
+    - pod-restart-oom-pending-or-capacity-alert
+    - approved-run-envelope-limit-reached
+  evidence_separation:
+    observed_scope: existing-data-and-fixed-current-resources-only
+    modeled_scope: five-million-population-extrapolation-with-explicit-assumptions
+    model_out_of_calibration_or_slo_uncertainty: inconclusive
+    sandbox_observation_qualifies_five_million_target: false
+    all_full_profile_scenarios_claimed_executed: false
+
 latency_targets:
   normal:
     durable_instruction_acceptance:

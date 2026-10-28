@@ -67,6 +67,25 @@ to validate with the first bank's channel model. Model user think time and inter
 separately from server latency. Exercise valid authorization/SCA or a legitimate exemption;
 never disable controls to obtain a performance result.
 
+The interim campaign is limited to the existing shared sandbox and its current fixed
+resources. It must not provision resources, deploy or roll out workloads, or change replicas,
+HPA/KEDA, or NodePool settings. Collect a passive baseline before load, then run an existing
+read-only baseline first with a verified least-privilege identity and owned, tainted test
+fixtures. A later bounded write pilot may use only pre-existing synthetic fixtures after
+ownership, taint and reconciliation are verified and its bounded run envelope is frozen
+within the authorized fixture scope. Arbitrary mass writes and disabling authentication or policy are prohibited.
+Numeric stop thresholds are run-specific approval inputs, not invented by this ADR; stop on
+any approved envelope limit or the profile's listed safety/correctness signals. This interim
+campaign does not execute the five-million-client population, burst, one-year history, soak or
+fault profile, and it does not claim that all target scenarios ran.
+
+Report observed shared-sandbox behavior at existing data and fixed resources separately from
+the modeled five-million-population estimate and its assumptions. Queue, data-size and hot-key
+projections remain model outputs unless measured at representative scale. If model inputs are
+out of calibration or SLO uncertainty prevents a defensible estimate, record the result as
+inconclusive, not qualified. Neither a bounded sandbox pilot nor an extrapolation qualifies the
+full profile.
+
 ### D3 — Financial outcomes and bounded queues determine success
 
 Measure from intended arrival, including waiting/retries, to avoid coordinated omission.
@@ -191,7 +210,10 @@ Implement the proposed `capacity-qualification` gate using
 `perf/profiles/cz-current-account-5m-v1.yaml`, and an ADR-0273-compatible evidence manifest.
 The proposed workload profile is now present; the full-path scenarios, financial oracle,
 qualification checker and trusted-run evidence remain planned. The separate
-`check-capacity-profile.py` validates profile consistency only and cannot qualify capacity.
+`check-capacity-profile.py` validates profile consistency and the bounded sandbox/model
+boundary only; it cannot qualify capacity. The profile distinguishes observations collected
+on the existing fixed-resource sandbox from modeled five-million-population estimates. No
+full-scale sandbox run or complete execution of the profile's target scenarios is claimed.
 #7284 owns authenticated money-path execution; #3348 owns regression gating. Extend them instead of duplicating their trackers.
 
 Reject absent/stale/failed/skipped required runs, wrong image/config/profile hashes, missing

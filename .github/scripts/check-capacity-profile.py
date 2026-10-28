@@ -25,6 +25,7 @@ PROFILE_KEYS = {
     "qualification", "population", "business_volume", "reads", "history", "scenarios",
     "latency_targets", "outcomes", "financial_oracle", "queues", "fault_scenarios",
     "fault_campaign_contract", "fault_evidence_requirements", "evidence_contract", "commercial_targets",
+    "sandbox_campaign",
 }
 
 
@@ -86,6 +87,64 @@ def validate(root: pathlib.Path, doc) -> list[str]:
     need(doc["adr"] == "ADR-0356", "adr must be ADR-0356")
     need(doc["decision"] in ("proposed", "accepted"), "decision must be proposed or accepted")
     need(doc["enforcement"] in ("none", "advisory", "enforced"), "enforcement must be none, advisory, or enforced")
+
+    sandbox = doc["sandbox_campaign"]
+    need(isinstance(sandbox, dict), "sandbox_campaign must be a mapping")
+    if isinstance(sandbox, dict):
+        for key, expected in (
+            ("evidence_class", "existing-shared-sandbox-fixed-resource-observation"),
+            ("qualification_status", "not-qualification"),
+            ("full_scale_5m_execution", "prohibited"),
+        ):
+            need(sandbox.get(key) == expected, f"sandbox_campaign.{key} must be {expected}")
+        for field, expected_values in (
+            ("resource_boundary", {
+                "additional_provisioning": "prohibited",
+                "deployment_or_rollout_mutation": "prohibited",
+                "replica_hpa_keda_or_nodepool_mutation": "prohibited",
+            }),
+            ("sequence", {
+                "passive_baseline_before_load": True,
+                "read_only_baseline_before_any_write_pilot": True,
+                "existing_read_scenarios_only": True,
+                "least_privilege_identity_verified": "required",
+                "fixture_ownership_and_taint_verified": "required",
+            }),
+            ("bounded_write_pilot", {
+                "status": "proposed_after_baseline_and_explicit_run_approval",
+                "preexisting_synthetic_fixtures_only": True,
+                "ownership_taint_and_reconciliation_verified": "required",
+                "arbitrary_mass_writes": "prohibited",
+                "disable_authentication_or_policy": "prohibited",
+                "run_envelope": "frozen_and_approved_before_execution",
+                "numeric_stop_thresholds": "pending_run_specific_approved_envelope",
+            }),
+            ("evidence_separation", {
+                "observed_scope": "existing-data-and-fixed-current-resources-only",
+                "modeled_scope": "five-million-population-extrapolation-with-explicit-assumptions",
+                "model_out_of_calibration_or_slo_uncertainty": "inconclusive",
+                "sandbox_observation_qualifies_five_million_target": False,
+                "all_full_profile_scenarios_claimed_executed": False,
+            }),
+        ):
+            values = sandbox.get(field)
+            need(isinstance(values, dict), f"sandbox_campaign.{field} must be a mapping")
+            if isinstance(values, dict):
+                for key, expected in expected_values.items():
+                    need(values.get(key) == expected, f"sandbox_campaign.{field}.{key} must be {expected}")
+        stop_conditions = sandbox.get("stop_conditions")
+        required_stops = {
+            "unexpected-5xx-timeout-or-capacity-rejection",
+            "fixture-ownership-taint-or-authentication-anomaly",
+            "reconciliation-or-financial-oracle-discrepancy",
+            "sustained-queue-lag-or-outbox-age-growth",
+            "database-pool-lock-or-resource-saturation",
+            "pod-restart-oom-pending-or-capacity-alert",
+            "approved-run-envelope-limit-reached",
+        }
+        need(isinstance(stop_conditions, list) and all(isinstance(item, str) for item in stop_conditions)
+             and required_stops <= {item for item in stop_conditions if isinstance(item, str)},
+             "sandbox_campaign.stop_conditions must include all required stop conditions")
 
     q = doc["qualification"]
     need(isinstance(q, dict), "qualification must be a mapping")
@@ -313,6 +372,24 @@ def self_test() -> int:
         unblocked = yaml.safe_load(yaml.safe_dump(good))
         unblocked["qualification"]["pending_decisions_block_qualification"] = False
         cases.append(("pending decisions do not block", unblocked, "must be true"))
+        full_scale = yaml.safe_load(yaml.safe_dump(good))
+        full_scale["sandbox_campaign"]["full_scale_5m_execution"] = "allowed"
+        cases.append(("full-scale sandbox execution", full_scale, "full_scale_5m_execution must be prohibited"))
+        more_resources = yaml.safe_load(yaml.safe_dump(good))
+        more_resources["sandbox_campaign"]["resource_boundary"]["additional_provisioning"] = "allowed"
+        cases.append(("additional sandbox resources", more_resources, "additional_provisioning must be prohibited"))
+        mass_writes = yaml.safe_load(yaml.safe_dump(good))
+        mass_writes["sandbox_campaign"]["bounded_write_pilot"]["arbitrary_mass_writes"] = "allowed"
+        cases.append(("arbitrary shared-sandbox writes", mass_writes, "arbitrary_mass_writes must be prohibited"))
+        overclaim = yaml.safe_load(yaml.safe_dump(good))
+        overclaim["sandbox_campaign"]["evidence_separation"]["sandbox_observation_qualifies_five_million_target"] = True
+        cases.append(("sandbox result qualifies target", overclaim, "sandbox_observation_qualifies_five_million_target must be False"))
+        missing_stop = yaml.safe_load(yaml.safe_dump(good))
+        missing_stop["sandbox_campaign"]["stop_conditions"].remove("reconciliation-or-financial-oracle-discrepancy")
+        cases.append(("missing sandbox stop condition", missing_stop, "must include all required stop conditions"))
+        malformed_campaign = yaml.safe_load(yaml.safe_dump(good))
+        malformed_campaign["sandbox_campaign"]["resource_boundary"] = []
+        cases.append(("malformed sandbox policy", malformed_campaign, "sandbox_campaign.resource_boundary must be a mapping"))
         for name, doc, expected in cases:
             found = validate(root, doc)
             okay = not found if expected is None else any(expected in item for item in found)

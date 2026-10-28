@@ -7,9 +7,29 @@ it does not enforce capacity qualification. Product, payments operations, SRE, s
 risk/compliance owner must approve its executable realization and pending assumptions before
 a qualifying run. Its proposed targets must not be presented as measured SLOs.
 
+The approved interim campaign is bounded to the existing shared sandbox and its current
+fixed resources. It does not provision resources, deploy or roll out workloads, or change
+replicas, HPA/KEDA or NodePool settings. Take a passive baseline first, then use an existing
+read-only scenario with a verified least-privilege identity and owned, tainted fixtures. A
+later bounded write pilot requires pre-existing synthetic fixtures, verified ownership/taint
+and reconciliation, and an explicitly approved, frozen run envelope. Arbitrary mass writes
+and disabling authentication or policy are prohibited. Numeric stop limits must be approved
+for each run; this profile names stop conditions but invents no numeric thresholds. A run
+must stop at any approved envelope limit or listed correctness/safety signal.
+
+Record observed sandbox results only for the data and fixed resources actually present. Keep
+the five-million-population estimate, assumptions and uncertainty in a separate modeled
+section. Extrapolated queue, data-size and hot-key behavior is not observed evidence. If model
+inputs are outside calibration or SLO uncertainty cannot support a defensible estimate, report
+inconclusive rather than qualified. The current sandbox campaign does not execute the
+five-million-client population, full burst, one-year history, soak or fault matrix; it does
+not imply that all target scenarios ran or qualify the full profile.
+
 The profile links the existing `money-path-write-benchmark`, `money-path-smoke` and
 `security-abuse-smoke` entries in [`../scenarios.yaml`](../scenarios.yaml), with their definitions
-under [`../k6/`](../k6/). They are useful component baselines or negative-security checks; none
+under [`../k6/`](../k6/). The write benchmark remains local-only because it mutates account and
+ledger state; do not redirect it to the shared sandbox. These scenarios are useful component
+baselines or negative-security checks; none
 covers the full five-million-client workload, financial oracle, fault matrix or soak. The profile
 therefore leaves `qualification_scenario_ids` empty until full-path executable scenarios are
 defined and reviewed. Do not add invented scenario IDs or count the current scenarios as coverage.
