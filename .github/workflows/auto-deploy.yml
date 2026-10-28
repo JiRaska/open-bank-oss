@@ -746,11 +746,9 @@ jobs:
               echo "Using verified exact-source context fast-jar and SBOM."
               continue
             fi
-            # cyclonedxBom alongside quarkusBuild so every service's image gets its
-            # CycloneDX SBOM baked in (served live at /q/openbank/sbom by libs
-            # SbomResource). Fleet-wide via this central loop — no per-service
-            # Dockerfile edits, no separate sweep.
-            TASKS+=(":${svc}:quarkusBuild" ":${svc}:cyclonedxBom")
+            # Build then verify original library bytes against the generated SBOM.
+            # This does not replace image provenance or runtime rollout checks.
+            TASKS+=(":${svc}:verifyPackagedLibrarySbom")
           done
 
           echo "==> Building ${#TASKS[@]} service(s) via single Gradle invocation (--parallel --max-workers=4)"
@@ -804,6 +802,10 @@ jobs:
             local image="${ECR_REGISTRY}/${svc}:${TAG}"
             local ctx; ctx="$(mktemp -d)"
             trap 'rm -rf "$ctx"' RETURN
+            python3 .github/scripts/verify-packaged-library-sbom.py \
+              --sbom "${svc}/build/reports/bom.json" \
+              --receipt "${svc}/build/reports/library-artifacts/verification.json" \
+              --quarkus-app "$qa" > /dev/null || return 1
             cp -r "$qa" "${ctx}/quarkus-app"
             # Gradle sets quarkus-app/lib/ files to 600 (owner-read-only). The
             # container runs as non-root user `openbank` → ClassNotFoundException
@@ -815,10 +817,8 @@ jobs:
             # and treats zero-indented heredoc lines as invalid YAML nodes).
             cp "${GITHUB_WORKSPACE}/.github/workflows/Dockerfile.deploy" \
               "${ctx}/Dockerfile"
-            # Bake the CycloneDX SBOM (if cyclonedxBom produced one) so the running
-            # service serves it live at /q/openbank/sbom (libs SbomResource). Best-
-            # effort: a service without the report just ships without it and the
-            # endpoint returns not_generated (admin-ui falls back to the bundle).
+            # Bake the SBOM just validated against the packaged original libraries.
+            # The live endpoint serves inventory, not deployment attestation.
             if [ -f "${svc}/build/reports/bom.json" ]; then
               mkdir -p "${ctx}/sbom"
               cp "${svc}/build/reports/bom.json" "${ctx}/sbom/bom.json"

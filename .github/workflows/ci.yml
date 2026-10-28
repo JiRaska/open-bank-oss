@@ -94,6 +94,7 @@ jobs:
           python3 .github/scripts/tests/test_select_admin_ui_rbac_tests.py
           python3 .github/scripts/test-ci-ui-verdict.py
           python3 .github/scripts/test-ci-latency-report.py
+          python3 .github/scripts/test-packaged-library-sbom.py
           python3 .github/scripts/test-service-build-artifact.py
           python3 .github/scripts/test-prepare-test-priority.py
           python3 .github/scripts/test-context-deploy-handoff.py
