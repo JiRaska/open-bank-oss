@@ -73,6 +73,9 @@ source-level outbox/retention bounds, sensitivity examples and the required cali
 Its unknown coefficients and capacity conclusion remain explicit.
 The [internal CZK pilot oracle](../scripts/verify-payment-ledger.md) verifies a limited set of
 financial invariants from offline database snapshots; it is not a full-profile oracle or attestation.
+The [evidence-integrity bundle verifier](capacity-evidence.md) binds file hashes to a signed
+workflow identity and exact GitHub run attempt. Its issuer workflow and real cryptographic
+end-to-end validation remain pending; an integrity result never qualifies capacity.
 
 The ADR proposes a 30-day qualification freshness limit; evidence retention remains a separate
 policy. No profile or passing CI check alone establishes bank approval, commercial qualification,

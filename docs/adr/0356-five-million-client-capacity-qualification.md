@@ -215,6 +215,10 @@ it reconciles independently extracted transaction/ledger rows, exact amount/base
 and synthetic journal marking. It does not establish balance/hold/reversal correctness,
 trusted provenance or capacity. `perf/profiles/cz-current-account-5m-model.md` records sizing
 arithmetic and calibration limits without asserting measured coefficients. The separate
+`verify-capacity-evidence.py` implements strict content/provenance integrity checks with a
+fixed signer policy and certificate-bound run identity; its protected issuer workflow and real
+cryptographic end-to-end proof remain pending. It never evaluates financial/SLO qualification.
+The separate
 `check-capacity-profile.py` validates profile consistency and the bounded sandbox/model
 boundary only; it cannot qualify capacity. The profile distinguishes observations collected
 on the existing fixed-resource sandbox from modeled five-million-population estimates. No
