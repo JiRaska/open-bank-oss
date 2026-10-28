@@ -15,6 +15,7 @@ import com.openbank.simulation.scenario.SddCollectionScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
 import com.openbank.simulation.scenario.StandingOrderScenario
 import com.openbank.simulation.scenario.StatementCloseScenario
+import com.openbank.simulation.scenario.SwiftScenario
 
 /**
  * The seed-driven exhaustion loop (ADR-0100 Layer 2 — runner). For each seed it builds a fresh
@@ -82,6 +83,12 @@ class SimulationRunner(
             // journals — so sddCollectionCompleteness is swept every step under the same fault
             // profile. Kept before the invariant sweep, after the per-scenario drain convention.
             SddCollectionScenario.step(world)
+            context.scheduler.drain()
+            // Issue #667 (E2E money-path): the outgoing SWIFT MT103 path — real SwiftMessage
+            // validate() admission gate and PENDING→…→COMPLETED/REJECTED/FAILED lifecycle —
+            // sharing the fault profile and checked by the swiftCompleteness /
+            // swiftMoneyConservation invariants.
+            SwiftScenario.step(world)
             context.scheduler.drain()
             invariants.forEach { invariant ->
                 val violation = invariant.check(world)
