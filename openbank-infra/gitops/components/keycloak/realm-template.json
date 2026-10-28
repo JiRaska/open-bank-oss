@@ -1689,7 +1689,7 @@
     {
       "clientId": "openbank-synthetic-ledger-seed",
       "name": "OpenBank Synthetic Journey: Ledger seed posting",
-      "description": "Synthetic-only identity for seeding the account-overview k6 journey fixture (ADR-0252, #14058). Carries ROLE_API because ledger's postJournal requires it; its only permitted action is ledger.create, admitted by ledger_rest_ext.rego for exactly this principal, and the synthetic taint must arrive on the x-openbank-synthetic header (#14059).",
+      "description": "Synthetic identity for seeding ledger fixtures (account-overview); non-personal service account, synthetic-taint only",
       "enabled": true,
       "publicClient": false,
       "standardFlowEnabled": false,
