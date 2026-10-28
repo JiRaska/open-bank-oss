@@ -91,6 +91,34 @@ store, graph project, feature store, signature issue or swarm framework was crea
 P0 investigator and K0 are parallel slices; real-data training waits for trusted outcomes
 and point-in-time data. A dependency blocks its consumer, not unrelated synthetic work.
 
+## First K0 implementation slice: vocabulary revision kernel
+
+`openbank-libs-fincrime` now contains the pure `fincrime.vocabulary` contract used to
+start #13775 and #13435. `VocabularySource` is data, not a new enum: it declares the
+concept's domain/purpose, provenance, effective interval and stable codes with labels,
+meanings and optional explicit ranks. `FincrimeVocabulary.compile` validates bounded
+input, snapshots it, reuses the kernel canonical JSON/SHA-256 and exposes an exact
+`VocabularyRef(id, revision, contentHash)`. List order is not scale order. Ordered scales
+require a unique nonnegative rank for every code; unordered reasons have no ranks.
+
+Resolution requires that exact reference and an explicit decision instant. Another
+revision/hash/concept, an unknown code and an out-of-validity instant have distinct
+closed refusal outcomes. There is no name/ordinal conversion or LOW/OTHER fallback.
+The compiled snapshot cannot be changed through either the source list or its public
+entries. Synthetic AML severity and fraud reason fixtures exercise the same kernel;
+a pinned canonical golden fixes the byte/hash contract, and negative tests cover
+unknown schema, malformed Unicode, bounds, duplicates and partial/ambiguous ranks.
+
+This is a library foundation, **not completion of K0 or #13435**. No production caller,
+legacy enum, API, event, DB or FraudThresholdSet is changed. The digest proves content
+identity only: a successful compile/resolve is neither an approval nor a signature.
+Authenticated source loading, immutable revision storage, retirement/revocation,
+pack IR/evaluation, replay/diff, independent approvals/signing, SHADOW epochs and the
+`fincrime-pack-conformance` gate remain under #13775. AI/MCP adapters must consume the
+same contracts when added, without authority to approve or activate. Existing
+#13776/#10236 case work, #13777 learning and #13778 typed decisioning keep their owners.
+ADR-0354 remains delivery-status **planned**; this slice grants no activation authority.
+
 ## Evidence required before claiming completion
 
 - Pin source/schema/pack/model/prompt/input versions, approvals and activation epoch on

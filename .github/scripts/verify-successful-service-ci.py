@@ -82,8 +82,23 @@ def _iter_json_pages(
             with urlopen(request, timeout=timeout) as response:
                 body = json.loads(response.read())
                 link_header = response.headers.get("Link", "")
+        except HTTPError as exc:
+            # Request headers and response bodies may contain credentials or untrusted
+            # text. Report only the endpoint path, status and numeric quota hints.
+            endpoint = urlsplit(next_url).path
+            details = [f"HTTP {exc.code}"]
+            for header, label in (
+                ("X-RateLimit-Remaining", "rate-limit-remaining"),
+                ("X-RateLimit-Reset", "rate-limit-reset"),
+                ("Retry-After", "retry-after"),
+            ):
+                value = exc.headers.get(header) if exc.headers else None
+                if value is not None and re.fullmatch(r"[0-9]{1,12}", str(value)):
+                    details.append(f"{label}={value}")
+            raise VerificationError(
+                f"GitHub Actions API {endpoint} failed ({'; '.join(details)})"
+            ) from None
         except (
-            HTTPError,
             URLError,
             TimeoutError,
             OSError,

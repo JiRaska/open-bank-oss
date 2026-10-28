@@ -4,12 +4,21 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.sdd.domain.lifecycle.MandateLifecycle
+import com.openbank.sdd.domain.model.MandateStatus
+import com.openbank.sdd.domain.model.SequenceType
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.runner.World
+import com.openbank.standingorder.domain.model.Frequency
+import com.openbank.standingorder.domain.model.StandingOrder
+import com.openbank.standingorder.domain.model.StandingOrderStatus
+import com.openbank.swift.domain.model.SwiftStatus
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
+import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * The ADR-0100 Layer-3 invariant set for the money path. Each is a pure function of the
@@ -17,6 +26,9 @@ import java.math.BigDecimal
  * reproducible seed.
  */
 object MoneyPathInvariants {
+
+    /** The settlement date every scenario and this invariant read the virtual clock as (Europe/Prague). */
+    private val ZONE: ZoneId = ZoneId.of("Europe/Prague")
 
     /** `Σ debit == Σ credit` across the whole ledger ⇒ net movement per currency is zero. */
     val conservationOfMoney = object : Invariant {
@@ -241,6 +253,173 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * The standing-order execution invariant: the REAL `StandingOrder` status machine's counters
+     * must agree, per order, with what actually happened on the money path, once a step has fully
+     * settled —
+     *
+     * 1. `executionCount == confirmed + attempted failures` — the sweep claims the execution
+     *    slot BEFORE the attempt (`recordExecution` advances `nextExecutionDate` and the counter
+     *    up front, by design), so every claimed slot must have exactly one recorded outcome:
+     *    money confirmed, or a failed attempt. A claimed slot with neither is the defect class
+     *    this catches;
+     * 2. `failureCount == the machine's current failure streak` — the production consumer records
+     *    a failure through `runCatching` (`recordFailureSafely`), and a confirmed execution resets
+     *    the real `failureCount` to 0 (`confirmExecution`); the book mirrors both sides, so a
+     *    failure the machine never accepted (a gap) or a reset the machine never performed reads
+     *    as a violation, while the legitimate fail → confirm → fail streak lifecycle stays green;
+     * 3. FAILED implies the real `MAX_CONSECUTIVE_FAILURES` streak was reached, and COMPLETED
+     *    implies the lifecycle contract held (ONCE: exactly one confirmed execution; recurring:
+     *    the next execution date has moved past the end date).
+     */
+    val standingOrderCompleteness = object : Invariant {
+        override val name = "standing-order-completeness"
+        override fun check(world: World): Violation? {
+            world.standingOrders.forEach { order ->
+                val accounted = world.standingOrdersBook.confirmedCount(order.id) +
+                    world.standingOrdersBook.attemptedFailureCount(order.id)
+                if (order.executionCount != accounted) {
+                    return Violation(
+                        name,
+                        "order ${order.id} executionCount=${order.executionCount} but confirmed+failures=$accounted",
+                    )
+                }
+                if (order.failureCount != world.standingOrdersBook.machineStreak(order.id)) {
+                    return Violation(
+                        name,
+                        "order ${order.id} failureCount=${order.failureCount} but machine streak=" +
+                            world.standingOrdersBook.machineStreak(order.id),
+                    )
+                }
+                if (order.status == StandingOrderStatus.FAILED &&
+                    order.failureCount < StandingOrder.MAX_CONSECUTIVE_FAILURES
+                ) {
+                    return Violation(name, "order ${order.id} FAILED after only ${order.failureCount} failures")
+                }
+                if (order.status == StandingOrderStatus.COMPLETED) {
+                    // ONCE legitimately retries a failed single execution (recordExecution keeps
+                    // it ACTIVE so the next sweep re-picks it), so executionCount may exceed 1;
+                    // the contract that matters is exactly one CONFIRMED execution. A recurring
+                    // order completes when recordExecution moved its next date past the end date.
+                    val complete = if (order.frequency == Frequency.ONCE) {
+                        world.standingOrdersBook.confirmedCount(order.id) == 1
+                    } else {
+                        order.endDate != null && order.nextExecutionDate.isAfter(order.endDate)
+                    }
+                    if (!complete) {
+                        return Violation(name, "order ${order.id} COMPLETED but lifecycle contract unmet")
+                    }
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Outgoing-SWIFT completeness: every `SwiftMessage` the scenario created must reach a
+     * terminal status (COMPLETED / REJECTED / FAILED) once the step has settled — none may
+     * remain mid-flight in PENDING/VALIDATED/SENT, the states where a crash would leave the
+     * operator guessing whether the money left. Same "settled" semantics as
+     * [settlementCompleteness]: checked after the scheduler drains.
+     */
+    val swiftCompleteness = object : Invariant {
+        private val terminal = setOf(SwiftStatus.COMPLETED, SwiftStatus.REJECTED, SwiftStatus.FAILED)
+
+        override val name = "swift-completeness"
+        override fun check(world: World): Violation? {
+            world.swiftMessages.forEach { message ->
+                if (message.status !in terminal) {
+                    return Violation(name, "swift message ${message.id} stuck in ${message.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * ADR-0036 §B / ADR-0100 full-service adoption: the SDD collection invariant, reconciling the
+     * REAL `SddMandate` lifecycle against the money-path book, once a step has fully settled:
+     *
+     * 1. a mandate with a recorded collection (book side) must carry the matching stamp on the
+     *    aggregate itself (`lastCollectionDate`, and FRST advanced to RCUR by the real
+     *    `MandateLifecycle.recordCollection`) — a collection the lifecycle never recorded is the
+     *    defect class this catches, and an always-empty book would let it pass vacuously;
+     * 2. the book's last collection date must equal the mandate's own `lastCollectionDate` — the
+     *    two sides are written independently by the scenario, so drift between them means one
+     *    side lost an outcome;
+     * 3. no live (ACTIVE/SUSPENDED) mandate may be idle past the EPC 36-month auto-expiry — the
+     *    step's `expireIfIdle` precondition must actually fire, never leave a stale mandate
+     *    collectable.
+     */
+    val sddCollectionCompleteness = object : Invariant {
+        override val name = "sdd-collection-completeness"
+        override fun check(world: World): Violation? {
+            world.sddMandates.forEach { mandate ->
+                val posted = world.sddCollections.postedCollections(mandate.id)
+                // World creates mandates without prior collections; its book covers their
+                // complete simulated lifecycle. Imported history would need an explicit book
+                // baseline, never silent inference from an aggregate stamp.
+                if (posted == 0 && mandate.lastCollectionDate != null) {
+                    return Violation(name, "mandate ${mandate.id} has a lifecycle stamp but no recorded collection")
+                }
+                if (posted > 0) {
+                    if (mandate.lastCollectionDate == null) {
+                        return Violation(name, "mandate ${mandate.id} has $posted collections but no lifecycle stamp")
+                    }
+                    if (mandate.sequenceType == SequenceType.FRST) {
+                        return Violation(name, "mandate ${mandate.id} collected but still FRST")
+                    }
+                    val bookDate = world.sddCollections.lastCollectionDate(mandate.id)
+                    if (bookDate != mandate.lastCollectionDate) {
+                        return Violation(
+                            name,
+                            "mandate ${mandate.id} stamped ${mandate.lastCollectionDate} but book has $bookDate",
+                        )
+                    }
+                }
+                if (mandate.status == MandateStatus.ACTIVE || mandate.status == MandateStatus.SUSPENDED) {
+                    val asOf = LocalDate.ofInstant(world.context.clock.instant(), ZONE)
+                    if (MandateLifecycle.isIdle(MandateLifecycle.lastActivity(mandate), asOf)) {
+                        return Violation(
+                            name,
+                            "mandate ${mandate.id} idle past ${MandateLifecycle.IDLE_EXPIRY_MONTHS}m but still ${mandate.status}",
+                        )
+                    }
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Outgoing-SWIFT conservation: a COMPLETED MT103 must have posted exactly its amount, and
+     * nothing else may post under a SWIFT message id — so a message that completed without
+     * money leaving (or money that left without a completion) is caught per message, while a
+     * REJECTED (validate refused) or FAILED (compensated) message provably posted nothing.
+     */
+    val swiftMoneyConservation = object : Invariant {
+        override val name = "swift-money-conservation"
+        override fun check(world: World): Violation? {
+            world.swiftMessages.forEach { message ->
+                val posted = world.swiftBook.postedAmount(message.id)
+                if (message.status == SwiftStatus.COMPLETED) {
+                    val amount = message.amount.amount
+                    if (posted.compareTo(amount) != 0) {
+                        return Violation(name, "swift ${message.id} completed but posted=$posted amount=$amount")
+                    }
+                } else if (posted.signum() != 0) {
+                    return Violation(name, "swift ${message.id} is ${message.status} but posted=$posted")
+                }
+            }
+            world.swiftBook.postedIds().forEach { messageId ->
+                if (world.swiftMessages.none { it.id == messageId }) {
+                    return Violation(name, "posted under unknown swift message $messageId")
+                }
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -253,6 +432,10 @@ object MoneyPathInvariants {
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,
+        standingOrderCompleteness,
+        sddCollectionCompleteness,
+        swiftCompleteness,
+        swiftMoneyConservation,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */

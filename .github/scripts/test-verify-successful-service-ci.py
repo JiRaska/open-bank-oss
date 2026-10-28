@@ -12,7 +12,7 @@ import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
 SCRIPT = Path(__file__).with_name("verify-successful-service-ci.py")
@@ -161,6 +161,50 @@ class VerifySuccessfulServiceCiTest(unittest.TestCase):
             MODULE.verify_successful_service_ci(
                 SERVICE, SHA, REPOSITORY, "fixture-token", "https://api.github.test"
             )
+
+    def test_http_failure_reports_safe_status_and_quota_without_accepting_evidence(self):
+        endpoint = f"/repos/{REPOSITORY}/actions/workflows/services-ci.yml/runs"
+        for status in (401, 403, 429, 502):
+            with self.subTest(status=status):
+                error = HTTPError(
+                    "https://api.github.test" + endpoint + "?secret=query-secret",
+                    status,
+                    "reason-secret",
+                    {
+                        "X-RateLimit-Remaining": "0",
+                        "X-RateLimit-Reset": "1793217600",
+                        "Retry-After": "60",
+                        "Authorization": "header-secret",
+                    },
+                    io.BytesIO(b"body-secret"),
+                )
+                with patch.object(MODULE, "urlopen", side_effect=error) as request:
+                    with self.assertRaises(MODULE.VerificationError) as caught:
+                        MODULE._json_pages(
+                            "https://api.github.test" + endpoint + "?secret=query-secret",
+                            "fixture-token",
+                        )
+                message = str(caught.exception)
+                self.assertIn(endpoint, message)
+                self.assertIn(f"HTTP {status}", message)
+                self.assertIn("rate-limit-remaining=0", message)
+                self.assertIn("rate-limit-reset=1793217600", message)
+                self.assertIn("retry-after=60", message)
+                for secret in ("query-secret", "reason-secret", "header-secret", "body-secret", "fixture-token"):
+                    self.assertNotIn(secret, message)
+                self.assertEqual(request.call_count, 1)
+
+    def test_http_failure_omits_untrusted_quota_headers(self):
+        error = HTTPError("https://api.github.test/jobs", 403, "reason", {
+            "X-RateLimit-Remaining": "header-secret\n::error::injected",
+            "X-RateLimit-Reset": "9" * 13,
+            "Retry-After": "tomorrow",
+        }, io.BytesIO(b"body-secret"))
+        with patch.object(MODULE, "urlopen", side_effect=error):
+            with self.assertRaises(MODULE.VerificationError) as caught:
+                MODULE._json_pages("https://api.github.test/jobs", "fixture-token")
+        self.assertEqual(str(caught.exception), "GitHub Actions API /jobs failed (HTTP 403)")
+
 
     def test_pagination_cannot_send_token_to_another_origin(self):
         calls: list[str] = []

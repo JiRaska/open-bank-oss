@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.5](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.4...agent-service-v1.31.5) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ledger:** carry the synthetic taint on the CDI request context into suspended resources ([#14059](https://github.com/JiRaska/open-bank-oss/issues/14059)) ([df3ce04](https://github.com/JiRaska/open-bank-oss/commit/df3ce048f294d17a912ddbdda45f90ff41ce0fe7))
+
 ## [1.31.4](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.3...agent-service-v1.31.4) (2026-10-27)
 
 
