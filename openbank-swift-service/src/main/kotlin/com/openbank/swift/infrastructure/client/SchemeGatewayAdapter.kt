@@ -98,15 +98,25 @@ class SchemeGatewayAdapter(@RestClient private val client: ClearingSimulatorClie
         val validation = pacs009Validator.validate(pacs009)
         if (validation is Iso20022ValidationResult.Invalid) {
             throw NonConformingMessageException(
-                "non-conforming pacs.009 for payment ${transfer.paymentId}: ${validation.errors}",
+                "non-conforming pacs.009 for payment ${transfer.paymentId}",
             )
         }
         val status = try {
             statusReader.read(
                 self.submitInstitutionOnce(Pacs009InstructionMapper.routeOf(transfer.rail), pacs009),
             )
+                .also { status ->
+                    val messageId = transfer.messageId ?: InstitutionTransfer.messageIdFor(transfer)
+                    check(status.originalUetr == transfer.uetr && status.originalMessageId == messageId) {
+                        "institution transfer response identity mismatch"
+                    }
+                }
         } catch (ex: Exception) {
-            log.warnf(ex, "No readable answer for institution transfer %s; outcome unknown", transfer.paymentId)
+            log.warnf(
+                "No readable answer for institution transfer %s (%s); outcome unknown",
+                transfer.paymentId,
+                ex.javaClass.simpleName,
+            )
             throw SchemeGatewayUnavailableException(ex)
         }
         return InstitutionTransferSubmission(verdictOf(status.status), status.reasonCode, pacs009)

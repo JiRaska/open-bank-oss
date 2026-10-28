@@ -652,7 +652,7 @@ jobs:
             jq -e --arg source "$SOURCE_COMMIT" --arg workflow "${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}" \
               '.materials[0].digest.sha1 == $source and .invocation.configSource.digest.sha1 == $workflow' >/dev/null
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: |
@@ -1381,7 +1381,7 @@ jobs:
       - name: Mint a GitHub App installation token
         id: app_token
         if: env.GITOPS_APP_ID != ''
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
