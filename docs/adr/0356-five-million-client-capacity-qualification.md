@@ -208,8 +208,13 @@ production sizing promise.
 Implement the proposed `capacity-qualification` gate using
 `.github/scripts/check-capacity-qualification.py`, a profile at
 `perf/profiles/cz-current-account-5m-v1.yaml`, and an ADR-0273-compatible evidence manifest.
-The proposed workload profile is now present; the full-path scenarios, financial oracle,
-qualification checker and trusted-run evidence remain planned. The separate
+The proposed workload profile is now present; the full-path scenarios, full-profile financial
+oracle, qualification checker and trusted-run evidence remain planned. A limited offline
+internal-CZK-transfer pilot verifier is implemented in `perf/scripts/verify-payment-ledger.py`:
+it reconciles independently extracted transaction/ledger rows, exact amount/base-currency legs
+and synthetic journal marking. It does not establish balance/hold/reversal correctness,
+trusted provenance or capacity. `perf/profiles/cz-current-account-5m-model.md` records sizing
+arithmetic and calibration limits without asserting measured coefficients. The separate
 `check-capacity-profile.py` validates profile consistency and the bounded sandbox/model
 boundary only; it cannot qualify capacity. The profile distinguishes observations collected
 on the existing fixed-resource sandbox from modeled five-million-population estimates. No
