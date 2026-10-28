@@ -2246,6 +2246,12 @@ public final class com/openbank/libs/web/SyntheticTaintClientFilter : jakarta/ws
 	public fun filter (Ljakarta/ws/rs/client/ClientRequestContext;)V
 }
 
+public final class com/openbank/libs/web/SyntheticTaintContext {
+	public fun <init> ()V
+	public final fun getTainted ()Z
+	public final fun setTainted (Z)V
+}
+
 public abstract interface annotation class com/openbank/libs/web/SyntheticTaintExternalBoundary : java/lang/annotation/Annotation {
 	public abstract fun reason ()Ljava/lang/String;
 }
@@ -2256,10 +2262,13 @@ public final class com/openbank/libs/web/SyntheticTaintFilterKt {
 }
 
 public final class com/openbank/libs/web/SyntheticTaintRequestFilter : jakarta/ws/rs/container/ContainerRequestFilter {
+	public field taintContext Lcom/openbank/libs/web/SyntheticTaintContext;
 	public field trustedPrincipals Ljava/util/Optional;
 	public fun <init> ()V
 	public fun filter (Ljakarta/ws/rs/container/ContainerRequestContext;)V
+	public final fun getTaintContext ()Lcom/openbank/libs/web/SyntheticTaintContext;
 	public final fun getTrustedPrincipals ()Ljava/util/Optional;
+	public final fun setTaintContext (Lcom/openbank/libs/web/SyntheticTaintContext;)V
 	public final fun setTrustedPrincipals (Ljava/util/Optional;)V
 }
 
