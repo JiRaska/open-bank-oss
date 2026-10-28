@@ -138,6 +138,11 @@ const simulationScenarios = [
   { classname: 'com.openbank.simulation.scenario.FeeBillingScenarioTest', components: ['openbank-billing-service'], scope: 'Billing fee domain scenario (pure JVM)' },
   { classname: 'com.openbank.simulation.scenario.InterestAccrualScenarioTest', components: ['openbank-interest-service'], scope: 'Interest accrual domain scenario (pure JVM)' },
   { classname: 'com.openbank.simulation.scenario.StatementCloseScenarioTest', components: ['openbank-statement-service'], scope: 'Statement close domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest', components: ['openbank-lending-service'], scope: 'Lending ECL calibration domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.StandingOrderScenarioTest', components: ['openbank-standing-order-service'], scope: 'Standing order execution sweep domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.SddCollectionScenarioTest', components: ['openbank-sdd-service'], scope: 'SEPA direct-debit collection domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.DelegatedSpendScenarioTest', components: ['openbank-delegation-service'], scope: 'Delegated spend ceiling and reservation domain scenario (pure JVM)' },
+  { classname: 'com.openbank.simulation.scenario.SwiftScenarioTest', components: ['openbank-swift-service'], scope: 'SWIFT MT103 cross-border money-path domain scenario (pure JVM)' },
 ]
 
 async function simulationScenarioEvidence() {
