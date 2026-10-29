@@ -248,6 +248,15 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-10-28** — **Journal-approval OPA grants restored (#12906).** `ledger.approval.read` and
+  `ledger.approval.decide` now admit only HUMAN operators/admins whose principal is not a service
+  account. An explicit machine prohibition also overrides the base operator-read rule, so a
+  client-credentials identity carrying `ROLE_OPERATOR` can neither read checker queues nor decide
+  approvals. This repairs the deny-by-default outage without weakening the four-eyes boundary;
+  maker≠checker remains enforced by `ApprovalStore.decide`. Rego tests cover operator grants,
+  wrong-role denial and service-account denial for both actions. Rollback: revert the extension
+  and regenerate the bundle; approval endpoints return to deny-by-default.
+
 - **2026-10-17** — **Day-close participants (ADR-0342, #13167).** New inbound surface
   `/api/v1/ledger/accounting-days/{date}/participants`: `PUT …/{participant}` (product service
   reports RAN / SKIPPED / REFUSED for a day), `PUT …/{participant}/waiver` (operator), `GET` (read
