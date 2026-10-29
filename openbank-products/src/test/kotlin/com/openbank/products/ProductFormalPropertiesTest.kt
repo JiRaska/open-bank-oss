@@ -5,6 +5,8 @@
 package com.openbank.products
 
 import com.openbank.libs.finance.deposit.FinanceProductArithmetic
+import com.openbank.libs.product.WaiveAttribute
+import com.openbank.libs.product.WaiveOperator
 import com.openbank.libs.product.ir.AccountingClass
 import com.openbank.libs.product.ir.Action
 import com.openbank.libs.product.ir.Cadence
@@ -14,13 +16,14 @@ import com.openbank.libs.product.ir.Instruction
 import com.openbank.libs.product.ir.InstructionCanonical
 import com.openbank.libs.product.ir.IrLimits
 import com.openbank.libs.product.ir.IrVersion
+import com.openbank.libs.product.ir.Predicate
 import com.openbank.libs.product.ir.ProductClock
 import com.openbank.libs.product.ir.ProductEvaluationException
 import com.openbank.libs.product.ir.ProductEvent
 import com.openbank.libs.product.ir.ProductInterpreter
+import com.openbank.libs.product.ir.ProductMonotonicity
 import com.openbank.libs.product.ir.ProductRevisionIr
 import com.openbank.libs.product.ir.ProductState
-import com.openbank.libs.product.ir.RateType
 import com.openbank.libs.product.ir.Tier
 import com.openbank.libs.testing.product.ProductArb
 import com.openbank.libs.testing.product.assertMoneyConserved
@@ -53,8 +56,8 @@ import java.util.jar.JarFile
  *    that would exceed it is refused with [ProductEvaluationException].
  *  - PROPERTY balance-conservation: every `Post` balances per currency.
  *  - PROPERTY monotone-tiers: on the interpreter's own accrual, a reference product's marginal rate never
- *    falls from tier to tier and no revision ever accrues less for a higher balance (generated revisions:
- *    the accrual order only, their tier rates being random).
+ *    falls from tier to tier and it never accrues less for a higher balance — for every revision
+ *    [ProductMonotonicity] passes (IR v1 itself does not guarantee it; see that object).
  *  - PROPERTY determinism: the same input gives byte-identical canonical output.
  *  - PROPERTY purity: the compiled interpreter package references no clock, I/O, randomness, logging
  *    or metrics API, nor does the deposit arithmetic it delegates to, so the injected [ProductClock] is its
@@ -160,23 +163,44 @@ class ProductFormalPropertiesTest {
             .hasMessageContaining("marginal rate")
     }
 
-    // PROPERTY monotone-tiers — generated revisions: their tier rates are random by design, so the
-    // property held there is the accrual order only (never less interest for more balance), and only
-    // where neither the accrue rule nor a bonus is gated by a predicate (either may legitimately stop
-    // accruing above a balance).
+    // PROPERTY monotone-tiers — generated revisions. IR v1 does NOT make accrual monotone (a bonus or
+    // accrue rule may be gated by `BALANCE LT x`, a tier may pay less than the one below; found by this
+    // test at 3000 iterations, seed -6922326281093558709). ProductMonotonicity is the static check that
+    // says which revisions are monotone, and the property is: every revision it passes accrues no less,
+    // and no lower marginal rate per tier, for a higher balance. The check must also flag some.
     @Test
-    fun `generated revisions - interpreter accrual is non-decreasing in balance`(): Unit = runBlocking {
-        var tiered = 0
-        checkAll(PropTestConfig(iterations = 150), ProductArb.revision, ProductArb.today) { rev, day ->
-            val rule = accrueRule(rev) ?: return@checkAll
-            // A bonus predicate may read the balance (`BALANCE LT x` is a legal "bonus below x"), and such
-            // a product accrues LESS above x by design — so the IR language does not make accrual monotone;
-            // only an ungated base rate does. Found by this test at 3000 iterations (seed -6922326281093558709).
-            if (rev.interest == null || rule.whenPredicate != null || rev.interest!!.bonus != null) return@checkAll
-            if (rev.interest!!.rateType == RateType.TIERED) tiered++
-            assertMonotoneTiers(rev, day, checkRates = false)
+    fun `generated revisions - every revision the monotonicity check passes accrues monotonically`(): Unit =
+        runBlocking {
+            var passed = 0
+            var flagged = 0
+            checkAll(PropTestConfig(iterations = 300), ProductArb.revision, ProductArb.today) { rev, day ->
+                if (rev.interest == null || accrueRule(rev) == null) return@checkAll
+                if (!ProductMonotonicity.isMonotone(rev)) {
+                    flagged++
+                    return@checkAll
+                }
+                passed++
+                assertMonotoneTiers(rev, day, checkRates = true)
+            }
+            assertThat(passed).describedAs("generated revisions the check passed").isGreaterThan(0)
+            assertThat(flagged).describedAs("generated revisions the check flagged").isGreaterThan(0)
         }
-        assertThat(tiered).describedAs("generated TIERED revisions checked").isGreaterThan(0)
+
+    @Test
+    fun `reference products pass the monotonicity check, and a bonus below a balance is flagged`() {
+        assertThat(reference).allMatch { (_, rev) -> ProductMonotonicity.isMonotone(rev) }
+        // Known-negative: the shape the property test found, on a real product.
+        val rev = ReferenceProducts.savingsFixed.compile()
+        val below = Predicate.Comparison(WaiveAttribute.BALANCE, WaiveOperator.LT, BigDecimal("7000.00"))
+        val bonusBelow = rev.copy(
+            interest = rev.interest!!.copy(
+                bonus = rev.interest!!.bonus!!.copy(rate = BigDecimal("0.1000000000"), predicate = below),
+            ),
+        )
+        assertThat(ProductMonotonicity.findings(bonusBelow)).hasSize(1)
+        // ...and it really is non-monotone: 5 000 at 12.5 % accrues more than 10 000 at 2.5 %, so the accrual check fails.
+        assertThatThrownBy { assertMonotoneTiers(bonusBelow, LocalDate.of(2026, 3, 1), checkRates = false) }
+            .isInstanceOf(AssertionError::class.java)
     }
 
     // v1 arithmetic is frozen at HALF_UP (ADR-0352; IR v2 is where that may change). Two golden values

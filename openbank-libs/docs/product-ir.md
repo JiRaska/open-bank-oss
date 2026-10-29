@@ -106,3 +106,23 @@ generators and `assertMoneyConserved`. Golden scenarios live under
 | `product-ir-run-limits` | enforced | a committed IR or scenario over the schema maxima |
 | `product-ir-authoring-parity` | advisory until 2027-03-31 | a committed `ir/<name>.json` with no DSL product, or canonical DSL output that differs from the committed file |
 | `product-ir-purity` | enforced | an I/O, clock, logging or metrics import under the package, or the detekt rule not active |
+
+## Known v1 language limitation: accrual is not guaranteed monotone
+
+IR v1 does not guarantee that a higher balance accrues at least as much
+interest. Three constructs are legal in v1 and can each make accrual *fall*
+as the balance rises:
+
+- a tier whose rate is lower than the rate of the tier below it;
+- a bonus gated by a balance-reading predicate that can turn false as the
+  balance rises, such as `BALANCE LT x`, `not (BALANCE GTE x)`, an `EQ`/`NEQ`
+  comparison, or `balanceMin(window) LT x`;
+- an accrue rule whose `when` gate has the same shape.
+
+v1 semantics are frozen, so none of these is rejected. Instead,
+`ProductMonotonicity.findings(revision)` in `com.openbank.libs.product.ir`
+flags each one statically. The check is conservative: under `or` or `not` it
+flags any leaf that could fall. `ProductFormalPropertiesTest` holds the
+monotone-accrual property for every revision the check passes. `obp lint` and
+the MCP lint tool should report the same findings once the shared toolkit
+lands (#14205). Whether IR v2 forbids these constructs is tracked in #14210.

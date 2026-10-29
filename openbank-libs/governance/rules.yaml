@@ -4051,7 +4051,7 @@ product_ir_formal_properties:
     - "termination: every evaluation emits at most maxInstructionsPerEvaluation (64) instructions, and one past it is refused with ProductEvaluationException"
     - "balance conservation: every Post instruction balances per currency"
     - "monotone tiers, reference products: on the interpreter's accrual Post, the marginal rate never falls from one tier to the next, sampled at every tier edge"
-    - "monotone accrual, every revision (reference and generated, ungated accrue rule): a higher balance never accrues less; generated tier rates are random, so only the order is held there"
+    - "monotone accrual: for every revision ProductMonotonicity passes (all reference products; generated ones it passes), a higher balance never accrues less and no tier's marginal rate is lower than the one below; the check must flag some generated revisions and a known bonus-below-x revision. IR v1 itself does not guarantee monotone accrual (product-ir.md, #14210)"
     - "determinism: the same input gives byte-identical canonical instructions"
     - "purity: the compiled com.openbank.libs.product and com.openbank.libs.finance.deposit packages reference no ambient clock, I/O, randomness, logging or metrics"
     - "v1 rounding is HALF_UP, pinned by golden accrual and capitalisation values that sit exactly on a half"

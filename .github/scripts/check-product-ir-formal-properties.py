@@ -46,7 +46,7 @@ CLASS = "ProductFormalPropertiesTest"
 PROPERTIES: dict[str, list[str]] = {
     "termination": [r"IrLimits\.MAX_INSTRUCTIONS_PER_EVALUATION", r"isInstanceOf\(ProductEvaluationException::class\.java\)"],
     "balance-conservation": [r"\bassertMoneyConserved\("],
-    "monotone-tiers": [r"\bassertMonotoneTiers\(", r"\binterpreter\.evaluate\(", r"marginal rate"],
+    "monotone-tiers": [r"\bassertMonotoneTiers\(", r"\binterpreter\.evaluate\(", r"marginal rate", r"ProductMonotonicity\.isMonotone\("],
     "determinism": [r"InstructionCanonical\.write\(\w+\)\)\.isEqualTo\(InstructionCanonical\.write\("],
     "purity": [r"\bimpureReferences\(", r"java/time/Clock", r"FinanceProductArithmetic::class\.java"],
     "half-up-rounding": [r'isEqualByComparingTo\("0\.069445"\)'],
@@ -147,6 +147,7 @@ def self_test() -> int:
          good.replace("assertMoneyConserved(", "noop(") + "\n// assertMoneyConserved(out)\n")
     case("dropping the run limit is red", 1, "property termination", good.replace("IrLimits.MAX_INSTRUCTIONS_PER_EVALUATION", "Int.MAX_VALUE"))
     case("dropping the tier check is red", 1, "property monotone-tiers", good.replace("assertMonotoneTiers(", "noop("))
+    case("dropping the monotonicity precondition is red", 1, "property monotone-tiers", good.replace("ProductMonotonicity.isMonotone(", "listOf("))
     case("dropping the over-limit refusal is red", 1, "property termination",
          good.replace("isInstanceOf(ProductEvaluationException::class.java)", "isNotNull()"))
     case("dropping the finance scan is red", 1, "property purity", good.replace("FinanceProductArithmetic::class.java", "String::class.java"))
