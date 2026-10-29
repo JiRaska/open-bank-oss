@@ -197,6 +197,19 @@ class ProductInterpreterTest {
     }
 
     @Test
+    fun `an early withdrawal whose penalty would overdraw the deposit is refused, not capped`() {
+        val event =
+            ProductEvent(
+                Hook.PRE_POSTING,
+                posting = Posting(EventKind.WITHDRAWAL, PostingDirection.DEBIT, BigDecimal("1000.00")),
+            )
+        val state = IrFixtures.state("1000.00", openedOn = IrFixtures.day.minusMonths(3))
+        assertThat(
+            interpreter.evaluate(term, state, event, clock),
+        ).containsExactly(Instruction.Reject("posting.early-withdrawal", term.revisionHash, 1, "INSUFFICIENT_FUNDS"))
+    }
+
+    @Test
     fun `every outflow kind before maturity pays the penalty`() {
         for (kind in listOf(EventKind.WITHDRAWAL, EventKind.TRANSFER_OUT, EventKind.CARD_PAYMENT)) {
             val event =
@@ -216,20 +229,20 @@ class ProductInterpreterTest {
         val json = IrFixtures.termDepositJson.replace(
             "{ \"ruleId\": \"posting.early-withdrawal\", \"action\": { \"type\": \"EARLY_WITHDRAWAL_PENALTY\" } }",
             "{ \"ruleId\": \"posting.early-withdrawal\", \"action\": { \"type\": \"EARLY_WITHDRAWAL_PENALTY\" } }," +
-                "{ \"ruleId\": \"posting.no-overdraft\", \"when\": { \"type\": \"postingComparison\", \"attribu" +
-                "te\": \"PROJECTED_BALANCE\", \"operator\": \"LT\", \"threshold\": \"0.00\" }, \"action\": { \"" +
+                "{ \"ruleId\": \"posting.limit\", \"when\": { \"type\": \"postingComparison\", \"attribu" +
+                "te\": \"POSTING_AMOUNT\", \"operator\": \"GT\", \"threshold\": \"500.00\" }, \"action\": { \"" +
                 "type\": \"REJECT\", \"reasonCode\": \"INSUFFICIENT_FUNDS\" } }",
         )
         val rev = ProductIrParser.parse(json)
         val event =
             ProductEvent(
                 Hook.PRE_POSTING,
-                posting = Posting(EventKind.WITHDRAWAL, PostingDirection.DEBIT, BigDecimal("20000.00")),
+                posting = Posting(EventKind.WITHDRAWAL, PostingDirection.DEBIT, BigDecimal("1000.00")),
             )
         val out = interpreter.evaluate(rev, IrFixtures.state(openedOn = IrFixtures.day.minusMonths(3)), event, clock)
         assertThat(
             out,
-        ).containsExactly(Instruction.Reject("posting.no-overdraft", rev.revisionHash, 1, "INSUFFICIENT_FUNDS"))
+        ).containsExactly(Instruction.Reject("posting.limit", rev.revisionHash, 1, "INSUFFICIENT_FUNDS"))
     }
 
     @Test

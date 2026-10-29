@@ -154,12 +154,13 @@ p99 of 0.048 ms per golden-set op, inside the 2 ms per-`evaluate` budget. The op
 
 ### Replay findings
 
-The first replay of the reference products found three behaviours. Each was decided as follows:
+The first replay of the reference products found four behaviours. Each was decided as follows:
 
 | Finding | Decision |
 |---|---|
 | `term-deposit` had no balance rule in `prePosting`, so a withdrawal larger than the balance overdrew it | Defect, fixed in `openbank-products`: a `PROJECTED_BALANCE LT 0.00` reject (`INSUFFICIENT_FUNDS`), ordered before the early-withdrawal penalty so a refused withdrawal is never charged one |
 | The savings monthly fee can take a dormant account below zero | Accepted in IR v1. `prePosting` guards customer postings; a scheduled `CHARGE_FEE` is a contractual charge and posts in full, leaving an unarranged debit balance for servicing to collect. A partial or capped fee would need a new IR action, which is an IR v2 change and not a product edit |
+| The `PROJECTED_BALANCE` reject leaves the early-withdrawal penalty out (`balance + signed`), so a full withdrawal before maturity passed it and the 1 % penalty overdrew the deposit to -penalty | Defect, fixed in interpreter semantics: `EARLY_WITHDRAWAL_PENALTY` of kind `RATE` rejects with `INSUFFICIENT_FUNDS` when `balance - amount - penalty < 0`. Capping the penalty at the balance left was rejected, because a full withdrawal would then pay no penalty at all. IR v1 cannot express balance-minus-penalty, so the check lives in the action, not in a product rule. `FORFEITED_INTEREST_FRACTION` debits accrued interest, not the deposit, and needs no check |
 | Capitalisation rounded accrued interest HALF_UP, so `accruedInterest` could end a few tenths of a cent negative | Defect, fixed in `DepositInterest.capitalise`: it truncates (DOWN) to the posting policy's scale and the sub-cent remainder stays accrued for the next capitalisation. The bank never posts interest that has not accrued, and `accruedInterest` never goes negative. `postingRounding` still rounds penalties |
 
 ## Testing
