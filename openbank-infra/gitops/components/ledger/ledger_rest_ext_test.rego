@@ -139,6 +139,34 @@ test_operator_may_create_close_draft if {
 		with data.rules as rules_mock
 }
 
+# #12906: the four-eyes workbench is staff-only. Without these grants both actions deny
+# every caller; without the prohibition base operator-read-any still admits an M2M reader.
+test_operator_may_read_and_decide_journal_approvals if {
+	every action in {"ledger.approval.read", "ledger.approval.decide"} {
+		decision := rest.allow with input as {"principal": operator, "action": action, "resource": "approval-1"}
+			with data.rules as rules_mock
+		decision.allow == true
+		"operator-journal-approval" in rest.allowed_reasons with input as {"principal": operator, "action": action, "resource": "approval-1"}
+			with data.rules as rules_mock
+	}
+}
+
+test_service_accounts_may_not_read_or_decide_journal_approvals if {
+	every p in [edge, services_m2m] {
+		every action in {"ledger.approval.read", "ledger.approval.decide"} {
+			rest.allow == false with input as {"principal": p, "action": action, "resource": "approval-1"}
+				with data.rules as rules_mock
+		}
+	}
+}
+
+test_wrong_role_may_not_read_or_decide_journal_approvals if {
+	every action in {"ledger.approval.read", "ledger.approval.decide"} {
+		rest.allow == false with input as {"principal": no_role, "action": action, "resource": "approval-1"}
+			with data.rules as rules_mock
+	}
+}
+
 # Known-positive that the base policy and the extension are both loaded: a negative suite would
 # pass vacuously without them. operator-ledger-write is the EXTENSION's reason, so its presence
 # proves the ext; the matrix-mock wiring is proven by the edge denials flipping red under
