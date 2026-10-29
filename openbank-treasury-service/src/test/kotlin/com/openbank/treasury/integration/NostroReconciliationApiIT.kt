@@ -82,7 +82,12 @@ class NostroReconciliationApiIT {
 
         assertThat(
             ledger.queries,
-        ).contains("lines:1001:2026-09-25..2026-09-25", "balance:1001:CZK:2026-09-24", "balance:1001:CZK:2026-09-25")
+        ).contains(
+            "lines:1001:2026-09-25..2026-09-25",
+            "lines:1001:2026-09-26..2026-10-02",
+            "balance:1001:CZK:2026-09-24",
+            "balance:1001:CZK:2026-09-25",
+        )
         assertThat(entryRows(id)).isEqualTo(3)
     }
 
@@ -160,6 +165,7 @@ class NostroReconciliationApiIT {
             .body("reconciled", equalTo(true))
         assertThat(ledger.queries).containsExactly(
             "lines:1002:2026-09-24..2026-09-25",
+            "lines:1002:2026-09-26..2026-10-02",
             "balance:1002:EUR:2026-09-23",
             "balance:1002:EUR:2026-09-25",
         )

@@ -292,6 +292,7 @@ jobs:
           path: |
             openbank-admin-ui/build/test-intelligence/run.json
             openbank-admin-ui/build/test-results/**/*.xml
+            openbank-admin-ui/build/test-results/e2e/sidebar-navigation-*.json
           retention-days: 14
           overwrite: true
 
@@ -418,7 +419,7 @@ jobs:
     needs: agent-admission
     if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 65
     permissions:
       actions: read
     outputs:
@@ -433,7 +434,11 @@ jobs:
           script: |
             const path = '.github/workflows/ruleset-bypass-evidence.yml';
             const name = `ruleset-bypass-${process.env.GITHUB_RUN_ID}-a${process.env.GITHUB_RUN_ATTEMPT}`;
-            const deadline = Date.now() + 30 * 60 * 1000;
+            // GITHUB_TOKEN quota is 1000/h per REPOSITORY, shared by every job. A proven
+            // exhaustion may extend the wait to the hourly reset, never past the hard cap.
+            const started = Date.now();
+            const hardCap = started + 62 * 60 * 1000;
+            let deadline = started + 30 * 60 * 1000;
             const exhausted = () => new Error('No trusted ruleset evidence for this CI attempt; NOT_EVALUATED');
             const pause = async milliseconds => {
               const remaining = deadline - Date.now();
@@ -454,7 +459,10 @@ jobs:
                   const reset = Number(headers['x-ratelimit-reset']);
                   if (error.status !== 403 || headers['x-ratelimit-remaining'] !== '0' ||
                       !Number.isFinite(reset) || reset <= 0 || quotaRetries++ >= 3) throw error;
-                  await pause(Math.max(1000, reset * 1000 - Date.now() + 1000));
+                  const resume = Math.max(Date.now() + 1000, reset * 1000 + 1000);
+                  if (resume > hardCap) throw exhausted();
+                  deadline = Math.min(hardCap, Math.max(deadline, resume + 60 * 1000));
+                  await pause(resume - Date.now());
                 }
               }
               throw exhausted();

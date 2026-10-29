@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger-pension-co
   annotations:
-    openbank.tech/policy-checksum: "bc7f9c2c254879e1"
+    openbank.tech/policy-checksum: "0e9c15e8c412cabc"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1020,6 +1020,9 @@ data:
     	# billing holds NO ledger.create on its own identity: its journals ride the shared
     	# openbank-services principal. This is its only ledger grant (#13709 review).
     	"service-account-openbank-billing": "billing",
+    	# treasury reports on the same identity it posts journals with (service-treasury-ledger-post);
+    	# this entry adds only the report for its own participant (#13167).
+    	"service-account-openbank-treasury": "treasury",
     }
 
     allowed_reasons contains "service-close-participation" if {
@@ -1063,6 +1066,21 @@ data:
     allowed_reasons contains "service-treasury-ledger-post" if {
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-treasury")
+    	input.action == "ledger.create"
+    }
+
+    # #14058 — synthetic seed identity for the account-overview k6 journey fixture (ADR-0252).
+    # One deterministic seed posting (DEBIT 1001 Nostro / CREDIT 2100 <fixture account>) is posted
+    # through Keycloak client `openbank-synthetic-ledger-seed`, whose service account carries ROLE_API
+    # (postJournal's @RolesAllowed requires ROLE_API or ROLE_OPERATOR). This rule is its WHOLE grant:
+    # exactly ledger.create, never reverse/trigger/replay/approve/close.draft — same shape as
+    # service-interest-ledger-post. The synthetic taint must arrive on the x-openbank-synthetic header
+    # and survive the CDI suspend boundary (#14059); ledger's own application.yaml adds the principal
+    # to OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS so postJournal accepts it as a trusted synthetic source.
+    # Seed-only: it must never need ledger.reverse — a fixture reset is a new offsetting journal.
+    allowed_reasons contains "synthetic-ledger-seed-post" if {
+    	input.principal.type == "HUMAN"
+    	machine_named("service-account-openbank-synthetic-ledger-seed")
     	input.action == "ledger.create"
     }
 

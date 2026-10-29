@@ -6,8 +6,11 @@
 # PR gate during the pilot: it runs weekly on openbank-batch and on manual
 # dispatch, and its failures create issues rather than blocking merges.
 #
-# v1 scope: read-only Product Catalog and Flaky Test Hunter paths. Money-path services follow
-# only once the isolated harness and synthetic-data boundary are proven (issue #3348).
+# Scope: read-only Product Catalog and Flaky Test Hunter paths, plus the first money-path
+# READ baseline (openbank-ledger-service). The lane is GET-only against a throwaway
+# PostgreSQL, so unlike money-path writes it needs no isolated target or synthetic
+# identity. Money-path WRITE flows still wait for the isolated harness and synthetic-data
+# boundary (issue #3348).
 name: Performance gate
 
 on:
@@ -47,23 +50,41 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, pathlib, re
-          # The declared v1 scope (ADR-0243, issue #3348). Kept as a named constant so the
+          # The declared scope (ADR-0243, issue #3348). Kept as a named constant so the
           # summary can say what the run was SUPPOSED to measure, not only what it did.
-          # Both subjects are non-mutating reads booted against disposable PostgreSQL.  Keep
-          # money-path flows out of this GitHub-hosted lane until their isolated target and
-          # synthetic identities exist (perf/scenarios.yaml).
-          DECLARED = ["openbank-product-catalog", "openbank-flaky-test-hunter"]
+          # All subjects are non-mutating reads booted against disposable PostgreSQL; the
+          # ledger read baseline is a money-path READ lane — GET-only by construction, so
+          # unlike money-path writes it needs no isolated target or synthetic identity.
+          # transaction-service reads never touch Temporal: the WorkflowClient injection is
+          # lazy (fix #14076), and the boot below passes worker.enabled=false so the read
+          # lane boots with no Temporal frontend at all.
+          # Write flows stay out of this GitHub-hosted lane until that boundary is proven
+          # (perf/scenarios.yaml).
+          DECLARED = [
+              "openbank-product-catalog",
+              "openbank-flaky-test-hunter",
+              "openbank-ledger-service",
+              "openbank-balance-service",
+              "openbank-transaction-service",
+          ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
           matrix, skipped = [], []
           for svc in services:
               app = pathlib.Path(svc) / "src/main/resources/application.yaml"
-              script = pathlib.Path(svc) / "src/test/k6" / f"{svc.replace('openbank-','').replace('-service','')}-smoke.js"
+              stem = svc.replace('openbank-','').replace('-service','')
+              # A module exposes exactly one k6 lane: either its `<stem>-smoke.js` or its
+              # `<stem>-read-baseline.js` (the money-path read baselines).
+              script = next(
+                  (candidate for name in (f"{stem}-smoke.js", f"{stem}-read-baseline.js")
+                   if (candidate := pathlib.Path(svc) / "src/test/k6" / name).is_file()),
+                  None,
+              )
               if not app.is_file():
                   skipped.append((svc, "no application.yaml"))
                   continue
-              if not script.is_file():
-                  skipped.append((svc, f"no k6 script at `{script}`"))
+              if script is None:
+                  skipped.append((svc, f"no k6 script at `{stem}-smoke.js` or `{stem}-read-baseline.js`"))
                   continue
               raw = app.read_text()
               port = re.search(r"^  http:\n(?:.*\n)?\s*port:\s*(\d+)", raw, re.M)
@@ -71,7 +92,17 @@ jobs:
               if not port or not db:
                   skipped.append((svc, "cannot derive port/DB"))
                   continue
-              matrix.append({"service": svc, "port": int(port.group(1)), "db": db.group(1)})
+              # Optional read fixtures: a `<module>/src/test/k6/fixtures.sql` is loaded into
+              # the throwaway database after boot so id-scoped probes hit a real row instead
+              # of timing a 404. Modules without one get an empty string (no load step).
+              fixtures = pathlib.Path(svc) / "src/test/k6" / "fixtures.sql"
+              matrix.append({
+                  "service": svc,
+                  "port": int(port.group(1)),
+                  "db": db.group(1),
+                  "script": str(script),
+                  "fixtures": str(fixtures) if fixtures.is_file() else "",
+              })
           for svc, why in skipped:
               print(f"::warning::perf-gate: {svc} EXCLUDED — {why}")
           print(f"perf-gate: {len(matrix)} service(s); {len(skipped)} excluded")
@@ -136,6 +167,18 @@ jobs:
       SERVICE: ${{ matrix.service }}
       PORT: ${{ matrix.port }}
       DB: ${{ matrix.db }}
+      # The harness boots with OIDC and dev-mode auth DISABLED (see the quarkusDev flags
+      # below), so every @RolesAllowed/@Authorize check is bypassed and no real read
+      # identity exists yet. The read-baseline scripts fail loudly on a 401 (a rejection is
+      # not a baseline), and this placeholder keeps that tripwire armed: the day the lane
+      # grows a real least-privilege read identity it becomes a secret (perf/scenarios.yaml).
+      PERF_READ_TOKEN: "perf-ci-auth-disabled-placeholder"
+      # The fixture account id seeded by `<module>/src/test/k6/fixtures.sql` and probed by the
+      # id-scoped read baselines. One fleet-wide constant (the same id the account-overview
+      # synthetic journey uses), injected into every script; lanes that never reference it
+      # simply ignore it.
+      PERF_ACCOUNT_ID: "00000000-0000-0000-0000-0000000000c2"
+      PERF_CURRENCY: "CZK"
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
       # mutable; the digest is the executable supply-chain identity.
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
@@ -185,7 +228,23 @@ jobs:
             exit 1
           fi
 
+          # The money-path services pin an explicit `quarkus.redis.hosts` in application.yaml,
+          # which DISABLES the Redis dev-service (dev-services only start when no host is
+          # configured) — so without a throwaway Redis the Redis readiness check stays DOWN
+          # forever and the boot loop below would time out. Verified locally: readiness is
+          # DOWN on exactly this check until a Redis answers on localhost:6379.
+          echo "==> [${SERVICE}] starting throwaway redis"
+          docker rm -f perf-redis >/dev/null 2>&1 || true
+          docker run -d --name perf-redis -p 6379:6379 redis:8.0-alpine >/dev/null
+
           echo "==> [${SERVICE}] starting quarkusDev on port ${PORT}"
+          # transaction-service: with no Temporal frontend in the throwaway stack, the worker
+          # registrar must be told not to register — the WorkflowClient injection is lazy
+          # (fix #14076), so reads never dial, but an enabled worker would dial at startup.
+          EXTRA_PROPS=()
+          if [ "${SERVICE}" = "openbank-transaction-service" ]; then
+            EXTRA_PROPS=(-Dopenbank.transaction.worker.enabled=false)
+          fi
           ./gradlew ":${SERVICE}:quarkusDev" \
             -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
             -Dquarkus.datasource.reactive.url="postgresql://localhost:5432/${DB}" \
@@ -195,6 +254,7 @@ jobs:
             -Dquarkus.security.auth.enabled-in-dev-mode=false \
             -Dquarkus.management.enabled=false \
             -Dquarkus.console.basic=true \
+            "${EXTRA_PROPS[@]}" \
             --console=plain --quiet \
             > "perf-reports/${SERVICE}-boot.log" 2>&1 &
           DEV_PID=$!
@@ -216,7 +276,18 @@ jobs:
             exit 1
           fi
 
-          SCRIPT="${SERVICE}/src/test/k6/$(echo "${SERVICE}" | sed 's/^openbank-//;s/-service$//')-smoke.js"
+          # The script path was resolved in `prepare` (smoke or read-baseline — a module has
+          # exactly one lane), so the run step never re-derives a name it could get wrong.
+          SCRIPT="${{ matrix.script }}"
+
+          # Read fixtures: modules whose lane is id-scoped ship a `src/test/k6/fixtures.sql`
+          # that seeds the throwaway database now that Flyway has created the schema. Without
+          # it those probes would time a 404 — rejection evidence, not a handler baseline. A
+          # fixture that fails to apply is a misconfigured lane: fail loudly, don't measure.
+          if [ -n "${{ matrix.fixtures }}" ]; then
+            echo "==> [${SERVICE}] loading read fixtures from ${{ matrix.fixtures }}"
+            docker exec -i perf-pg psql -U openbank -d "${DB}" -v ON_ERROR_STOP=1 < "${{ matrix.fixtures }}"
+          fi
 
           # A readiness probe is not proof the PROBED route answers. This gate spent its whole
           # life measuring 401s: /q/health/ready returned 200, @Authenticated rejected every
@@ -236,6 +307,9 @@ jobs:
               --network host \
               --user "$(id -u):$(id -g)" \
               --env "BASE_URL=http://localhost:${PORT}" \
+              --env "PERF_READ_TOKEN=${PERF_READ_TOKEN}" \
+              --env "PERF_ACCOUNT_ID=${PERF_ACCOUNT_ID}" \
+              --env "PERF_CURRENCY=${PERF_CURRENCY}" \
               --volume "$PWD:/work" \
               --workdir /work \
               "${K6_IMAGE}" run \
@@ -244,7 +318,7 @@ jobs:
 
           kill "$DEV_PID" 2>/dev/null || true
           pkill -f "quarkusDev" 2>/dev/null || true
-          docker rm -f perf-pg >/dev/null 2>&1 || true
+          docker rm -f perf-pg perf-redis >/dev/null 2>&1 || true
 
       - name: Build performance Test Intelligence envelope
         if: always()
