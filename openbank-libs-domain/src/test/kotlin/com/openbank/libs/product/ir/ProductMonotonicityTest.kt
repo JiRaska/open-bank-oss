@@ -81,4 +81,32 @@ class ProductMonotonicityTest {
             .containsExactly("accrual is gated by BALANCE < 40000")
         assertThat(ProductMonotonicity.findings(rev.copy(interest = null))).isEmpty()
     }
+
+    @Test
+    fun `a projected balance below a threshold is flagged, a posting amount is not`() {
+        val projected = Predicate.PostingComparison(
+            PostingAttribute.PROJECTED_BALANCE,
+            WaiveOperator.LT,
+            BigDecimal("100"),
+        )
+        assertThat(ProductMonotonicity.findings(withBonus(projected))).extracting<String> { it.message }
+            .containsExactly("bonus is gated by PROJECTED_BALANCE < 100")
+        val rising = Predicate.PostingComparison(
+            PostingAttribute.PROJECTED_BALANCE,
+            WaiveOperator.GTE,
+            BigDecimal("100"),
+        )
+        assertThat(ProductMonotonicity.findings(withBonus(rising))).isEmpty()
+        val amount = Predicate.PostingComparison(PostingAttribute.POSTING_AMOUNT, WaiveOperator.LT, BigDecimal("100"))
+        assertThat(ProductMonotonicity.findings(withBonus(amount))).isEmpty()
+    }
+
+    @Test
+    fun `an accrue rule on any hook is checked, not only on scheduled`() {
+        val rev = IrFixtures.savings()
+        val onPost = HookRule("posting.accrue", null, balanceLt, Action.AccrueInterest)
+        val withPostingAccrual = rev.copy(hooks = rev.hooks + (Hook.POST_POSTING to listOf(onPost)))
+        assertThat(ProductMonotonicity.findings(withPostingAccrual)).extracting<String> { it.ruleId }
+            .containsExactly("posting.accrue")
+    }
 }

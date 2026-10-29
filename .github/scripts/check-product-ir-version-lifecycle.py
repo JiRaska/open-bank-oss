@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import os
 import pathlib
 import re
 import subprocess
@@ -71,9 +72,25 @@ def breaking(title: str, body: str) -> bool:
     return bool(re.match(r"^\w+(\([^)]*\))?!:", title or "")) or "BREAKING CHANGE" in (body or "")
 
 
+class BaseUnreadable(Exception):
+    """The base could not be read, which is not the same as "the file is absent there"."""
+
+
 def base_text(root: pathlib.Path, base: str) -> str | None:
-    r = subprocess.run(["git", "-C", str(root), "show", f"{base}:{IR_KT}"], capture_output=True, text=True)
-    return r.stdout if r.returncode == 0 else None
+    """ProductIr.kt at [base], None only when the base is a real commit that lacks the file.
+
+    Any other git failure (an unknown ref, a shallow clone without the base, a broken repo) raises:
+    reading it as "absent" would skip the removal rule, i.e. fail open on exactly the PR it exists for.
+    """
+    git = ["git", "-C", str(root)]
+    if subprocess.run(git + ["rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"], capture_output=True).returncode:
+        raise BaseUnreadable(f"base {base!r} is not a commit in this clone")
+    if subprocess.run(git + ["cat-file", "-e", f"{base}:{IR_KT}"], capture_output=True).returncode:
+        return None
+    r = subprocess.run(git + ["show", f"{base}:{IR_KT}"], capture_output=True, text=True)
+    if r.returncode:
+        raise BaseUnreadable(f"git show {base}:{IR_KT} failed: {r.stderr.strip()}")
+    return r.stdout
 
 
 def run(root: pathlib.Path, base: str, title: str, body: str, base_reader=base_text, event: str = "") -> int:
@@ -96,7 +113,11 @@ def run(root: pathlib.Path, base: str, title: str, body: str, base_reader=base_t
         if not (root / SCHEMA_DIR / f"v{v}.schema.json").is_file():
             findings.append(f"irVersion {v} is supported but {SCHEMA_DIR}/v{v}.schema.json does not exist")
     if base:
-        old_text = base_reader(root, base)
+        try:
+            old_text = base_reader(root, base)
+        except BaseUnreadable as e:
+            print(f"::error::{e}")
+            return 1
         if old_text is None:
             print(f"base {base}: {IR_KT} absent, nothing to compare")
         else:
@@ -171,6 +192,29 @@ def self_test() -> int:
          "BREAKING CHANGE: v1 revisions must be migrated")
     case("a pull_request without a base is red", 1, "refusing to skip the removal rule", v12, "V1", [1], event="pull_request")
     case("a push without a base is green", 0, "not evaluated", v12, "V1", [1], event="push")
+    # A real git repository and a bogus base: must fail closed, never read as "file absent". The runner
+    # may export GIT_DIR / GIT_INDEX_FILE for the outer checkout; the scratch repository must not inherit
+    # them, or every git call below lands in the real repository instead.
+    saved = {k: os.environ.pop(k) for k in list(os.environ) if k.startswith("GIT_")}
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        _fixture(root, v12, "V1", [1])
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false",
+                        "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+        ran.append("a bogus base ref fails closed")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = run(root, "no-such-ref-xyz", "", "")
+        if rc != 1 or "is not a commit" not in buf.getvalue():
+            failures.append(f"a bogus base ref fails closed: exit {rc}, output:\n{buf.getvalue()}")
+        ran.append("a real base without the file is absent, not an error")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = run(root, "HEAD", "", "")
+        if rc != 0 or "absent" not in buf.getvalue():
+            failures.append(f"a real base without the file: exit {rc}, output:\n{buf.getvalue()}")
+    os.environ.update(saved)
     case("adding a version needs no marker", 0, "OK", v12, "V1, V2", [1, 2], "V1", "feat(libs): add v2")
     for f in failures:
         print(f"SELF-TEST FAIL {f}")

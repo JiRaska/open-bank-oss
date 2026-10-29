@@ -40,7 +40,8 @@ object ProductMonotonicity {
             }
         }
         terms.bonus?.let { b -> falling(b.predicate).forEach { add(Finding(b.ruleId, "bonus is gated by $it")) } }
-        rev.hooks[Hook.SCHEDULED].orEmpty().filter { it.action == Action.AccrueInterest }.forEach { rule ->
+        // Every hook, not only `scheduled`: an accrue rule is legal wherever the schema allows one.
+        rev.hooks.values.flatten().filter { it.action == Action.AccrueInterest }.forEach { rule ->
             rule.whenPredicate?.let { p -> falling(p).forEach { add(Finding(rule.ruleId, "accrual is gated by $it")) } }
         }
     }
@@ -64,8 +65,15 @@ object ProductMonotonicity {
         is Predicate.And -> p.operands.flatMap { falling(it, positive) }
         is Predicate.Or -> p.operands.flatMap { falling(it, positive) }
         is Predicate.Not -> falling(p.operand, !positive)
-        is Predicate.PostingComparison, is Predicate.NoEvents, is Predicate.CountEvents, is Predicate.SumEvents ->
-            emptyList()
+        // The projected balance is the balance after the posting, so it rises with the balance; the
+        // posting amount does not depend on the balance at all.
+        is Predicate.PostingComparison ->
+            if (p.attribute == PostingAttribute.PROJECTED_BALANCE && !risesWith(p.operator, positive)) {
+                listOf(describe(p.attribute.name, p.operator, positive, p.threshold))
+            } else {
+                emptyList()
+            }
+        is Predicate.NoEvents, is Predicate.CountEvents, is Predicate.SumEvents -> emptyList()
     }
 
     /** True when `x <op> t` (or its negation, when not [positive]) can only go false -> true as x rises. */

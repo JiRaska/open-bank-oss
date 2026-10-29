@@ -9,6 +9,7 @@ import com.openbank.libs.product.WaiveAttribute
 import com.openbank.libs.product.WaiveOperator
 import com.openbank.libs.product.ir.AccountingClass
 import com.openbank.libs.product.ir.Action
+import com.openbank.libs.product.ir.BonusRate
 import com.openbank.libs.product.ir.Cadence
 import com.openbank.libs.product.ir.Hook
 import com.openbank.libs.product.ir.HookRule
@@ -49,8 +50,10 @@ import java.util.jar.JarFile
 
 /**
  * ADR-0352 §9 phase 6: the five formal properties of the product interpreter, held over every
- * reference product AND over generated revisions ([ProductArb.revision]) under every supported
- * `irVersion`. Gate `product-ir-formal-properties` keeps the property names below present and enabled.
+ * reference product AND over generated revisions ([ProductArb.revision]). Today both are irVersion 1,
+ * the only member of [IrVersion.SUPPORTED]; a second supported version needs its own generator here
+ * (the first test fails if a reference product leaves the supported set). Gate
+ * `product-ir-formal-properties` checks these assertions are present inside their named tests.
  *
  *  - PROPERTY termination: every evaluation stays within [IrLimits.MAX_INSTRUCTIONS_PER_EVALUATION], and one
  *    that would exceed it is refused with [ProductEvaluationException].
@@ -147,6 +150,46 @@ class ProductFormalPropertiesTest {
         }
 
     @Test
+    fun `a rising bonus gate inside a band does not distort that band's measured rate`() {
+        // Review repro: the bonus switches on at 20 000, between the [0, 50 000) band's two probe points.
+        val rev = ReferenceProducts.termDeposit.compile()
+        val terms = rev.interest!!
+        val gated = rev.copy(
+            interest = terms.copy(
+                tiers = listOf(
+                    Tier(BigDecimal("0.00"), BigDecimal("50000.00"), BigDecimal("0.03")),
+                    Tier(BigDecimal("50000.00"), null, BigDecimal("0.05")),
+                ),
+                bonus = BonusRate(
+                    "interest.bonus",
+                    BigDecimal("0.10"),
+                    Predicate.Comparison(WaiveAttribute.BALANCE, WaiveOperator.GTE, BigDecimal("20000")),
+                ),
+            ),
+        )
+        assertThat(ProductMonotonicity.isMonotone(gated)).isTrue()
+        SAMPLE_DAYS.forEach { assertMonotoneTiers(gated, it, checkRates = true) }
+    }
+
+    @Test
+    fun `the monotone-tier check rejects a 5 bp inversion in a one-unit tier`() {
+        // A width-tolerance on a measured slope would hide this; the ordering is asserted on exact rates.
+        val rev = ReferenceProducts.termDeposit.compile()
+        val narrow = rev.copy(
+            interest = rev.interest!!.copy(
+                tiers = listOf(
+                    Tier(BigDecimal("0.00"), BigDecimal("1.00"), BigDecimal("0.0300")),
+                    Tier(BigDecimal("1.00"), BigDecimal("2.00"), BigDecimal("0.0295")),
+                    Tier(BigDecimal("2.00"), null, BigDecimal("0.0300")),
+                ),
+            ),
+        )
+        assertThatThrownBy { assertMonotoneTiers(narrow, LocalDate.of(2026, 3, 1), checkRates = true) }
+            .isInstanceOf(AssertionError::class.java)
+            .hasMessageContaining("marginal rate of tier 1 vs tier 0")
+    }
+
+    @Test
     fun `the monotone-tier check rejects a revision whose upper tier pays less`() {
         // Known-negative through the real check: term-deposit with its two tier rates swapped.
         val rev = ReferenceProducts.termDeposit.compile()
@@ -217,6 +260,7 @@ class ProductFormalPropertiesTest {
             ProductEvent(Hook.SCHEDULED, tag = "CAPITALISATION"),
             clockAt(day),
         ).filterIsInstance<Instruction.Post>().flatMap { it.lines }
+        // Capitalisation of 0.125 is 0.13 under HALF_UP; HALF_EVEN would post 0.12.
         assertThat(cap).isNotEmpty().allMatch { it.amount.compareTo(BigDecimal("0.13")) == 0 }
     }
 
@@ -258,6 +302,39 @@ class ProductFormalPropertiesTest {
     }
 
     @Test
+    fun `the purity scan flags each ambient family on a sample that uses it`() {
+        // Known-positives, one per family, compiled into this test module so each reference is certain.
+        val bytes = Thread.currentThread().contextClassLoader
+            .getResourceAsStream(ImpureSample::class.java.name.replace('.', '/') + ".class")!!.use { it.readBytes() }
+        val found = impureReferences(bytes)
+        listOf(
+            "java/util/Date",
+            "java/util/Calendar",
+            "java/util/UUID.randomUUID",
+            "java/lang/Math.random",
+            "java/time/ZoneId.systemDefault",
+            "java/util/TimeZone.getDefault",
+            "java/time/Instant.now",
+            "java/lang/System",
+        ).forEach { family ->
+            assertThat(found).describedAs(family).anyMatch { it == family || it.startsWith("$family$") }
+        }
+    }
+
+    /** Deliberately impure: never called, only scanned. */
+    @Suppress("unused")
+    private object ImpureSample {
+        fun date() = java.util.Date()
+        fun calendar() = java.util.Calendar.getInstance()
+        fun uuid() = java.util.UUID.randomUUID()
+        fun random() = Math.random()
+        fun zone() = java.time.ZoneId.systemDefault()
+        fun timeZone() = java.util.TimeZone.getDefault()
+        fun now() = java.time.Instant.now()
+        fun nanos() = System.nanoTime()
+    }
+
+    @Test
     fun `the purity scan flags a class that reads the system clock`() {
         // Known-positive: this very test class calls LocalDate.of and System-free APIs only, so use a
         // JDK class that certainly reads ambient time.
@@ -269,12 +346,21 @@ class ProductFormalPropertiesTest {
     private fun accrueRule(rev: ProductRevisionIr): HookRule? =
         rev.hooks[Hook.SCHEDULED].orEmpty().firstOrNull { it.action == Action.AccrueInterest }
 
-    /** The accrual the interpreter posts for one day on [balance]: the INTEREST_EXPENSE side of its Posts. */
-    private fun interpreterAccrual(rev: ProductRevisionIr, balance: BigDecimal, day: LocalDate): BigDecimal {
+    /**
+     * The accrual the interpreter posts for one day on [balance]: the INTEREST_EXPENSE side of its Posts,
+     * restricted to [ruleId] when given (the base rate's rule, so a bonus cannot distort a band's slope).
+     */
+    private fun interpreterAccrual(
+        rev: ProductRevisionIr,
+        balance: BigDecimal,
+        day: LocalDate,
+        ruleId: String? = null,
+    ): BigDecimal {
         val tag = requireNotNull(accrueRule(rev)?.trigger) { "${rev.productCode} has no accrue rule" }
         val state = ProductState(rev.currency, balance, openedOn = day.minusYears(2))
         return interpreter.evaluate(rev, state, ProductEvent(Hook.SCHEDULED, tag = tag), clockAt(day))
             .filterIsInstance<Instruction.Post>()
+            .filter { ruleId == null || it.ruleId == ruleId }
             .flatMap { it.lines }
             .filter { it.accountingClass == AccountingClass.INTEREST_EXPENSE }
             .fold(BigDecimal.ZERO) { acc, l -> acc + l.amount }
@@ -300,32 +386,37 @@ class ProductFormalPropertiesTest {
                 .describedAs("${rev.productCode} accrual at ${hi.first} vs ${lo.first} on $day")
                 .isGreaterThanOrEqualTo(lo.second)
         }
-        // Every tier is reached: each band contributes a sampled interior pair, and its marginal rate.
-        val marginal = bands.map { t ->
+        // Every tier is reached, and the interpreter's base-rate slope inside each band matches that band's
+        // authored rate (a bonus is excluded: its own gate may switch on inside a band).
+        val measured = bands.map { t ->
             val width = (t.to ?: (t.from + BigDecimal("20000"))) - t.from
             val a = t.from + width.divide(BigDecimal(4), 2, RoundingMode.DOWN)
             val b = t.from + width.divide(BigDecimal(2), 2, RoundingMode.DOWN)
-            val slope = (
-                interpreterAccrual(
-                    rev,
-                    b,
+            val span = b - a
+            val got = interpreterAccrual(rev, b, day, terms.ruleId) - interpreterAccrual(rev, a, day, terms.ruleId)
+            if (span.signum() > 0) {
+                val want = FinanceProductArithmetic.dailyAccrual(
+                    span,
+                    t.rate,
+                    terms.dayCount,
                     day,
-                ) - interpreterAccrual(rev, a, day)
-                ).divide(b - a, 12, RoundingMode.HALF_UP)
-            // Each accrual is rounded once at scale 6, and its daily rate at scale 10.
-            val tolerance = (
-                BigDecimal(
-                    "0.000001",
-                ) + b.multiply(BigDecimal("1E-10"))
-                ).divide(b - a, 12, RoundingMode.UP)
-            slope to tolerance
+                    terms.accrualRounding,
+                )
+                // Three accruals rounded at scale 6, and daily rates rounded at scale 10 over at most b.
+                val tolerance = BigDecimal("0.0000015") + b.multiply(BigDecimal("1E-10"))
+                assertThat((got - want).abs())
+                    .describedAs("${rev.productCode} tier from ${t.from}: interpreter slope vs rate ${t.rate} on $day")
+                    .isLessThanOrEqualTo(tolerance)
+            }
+            t
         }
-        assertThat(marginal).describedAs("tiers whose marginal rate was measured").hasSize(bands.size)
+        assertThat(measured).describedAs("tiers whose marginal rate was measured").hasSize(bands.size)
         if (checkRates) {
-            marginal.zipWithNext().forEachIndexed { i, (lo, hi) ->
-                assertThat(hi.first + hi.second + lo.second)
-                    .describedAs("${rev.productCode} marginal rate of tier ${i + 1} vs tier $i on $day")
-                    .isGreaterThanOrEqualTo(lo.first)
+            // Exact ordering on the rates the slope was just tied to: no tolerance to hide an inversion.
+            bands.zipWithNext().forEachIndexed { i, (lo, hi) ->
+                assertThat(hi.rate)
+                    .describedAs("${rev.productCode} marginal rate of tier ${i + 1} vs tier $i")
+                    .isGreaterThanOrEqualTo(lo.rate)
             }
         }
     }
@@ -356,7 +447,7 @@ class ProductFormalPropertiesTest {
             FORBIDDEN_CLASSES.any { c == it || c.startsWith("$it/") || c.startsWith("$it$") }
         } +
             members.filter { (owner, name) ->
-                owner.startsWith("java/time/") && name == "now"
+                (owner.startsWith("java/time/") && name == "now") || (owner to name) in FORBIDDEN_MEMBERS
             }.map { "${it.first}.${it.second}" }
     }
 
@@ -430,6 +521,17 @@ class ProductFormalPropertiesTest {
             "java/nio/file", "java/net", "java/util/Random", "java/util/concurrent/ThreadLocalRandom",
             "java/security/SecureRandom", "kotlin/random", "kotlin/io/ConsoleKt", "kotlin/io/FilesKt",
             "java/util/logging", "org/slf4j", "org/jboss/logging", "io/micrometer", "io/opentelemetry",
+            // Legacy ambient-time types: every one of them reads the system clock or default zone.
+            "java/util/Date", "java/util/Calendar", "java/util/GregorianCalendar", "java/util/TimeZone",
+        )
+
+        /** Ambient members on otherwise-allowed types: randomness and the default zone. */
+        val FORBIDDEN_MEMBERS = setOf(
+            "java/util/UUID" to "randomUUID",
+            "java/lang/Math" to "random",
+            "java/lang/StrictMath" to "random",
+            "java/time/ZoneId" to "systemDefault",
+            "java/util/TimeZone" to "getDefault",
         )
     }
 }
