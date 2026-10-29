@@ -4,7 +4,7 @@
 
 package com.openbank.psd2.infrastructure.client
 
-import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -20,6 +20,7 @@ import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
+import java.io.InputStream
 
 data class TppAuthorizationResponse(
     val tppId: String,
@@ -58,31 +59,44 @@ class TppAuthorizationGuard @Inject constructor(@RestClient private val client: 
         if (e.response.status != Response.Status.FORBIDDEN.statusCode) throw e
         val response = e.response
         val denial = try {
-            val body = response.readEntity(JsonNode::class.java)
-            val responseTppId = body.get("tppId")
-            val authorized = body.get("authorized")
-            val roles = body.get("roles")
-            val reason = body.get("reason")
-            val validShape = body.isObject &&
-                responseTppId?.isTextual == true &&
-                authorized?.isBoolean == true &&
-                !authorized.booleanValue() &&
-                roles?.isArray == true &&
-                roles.elements().asSequence().all { it.isTextual } &&
-                (reason == null || reason.isNull || reason.isTextual)
-            if (!validShape || responseTppId.asText() != tppId) throw e
-            TppAuthorizationResponse(
-                tppId = responseTppId.asText(),
-                authorized = authorized.booleanValue(),
-                roles = roles.elements().asSequence().map { it.asText() }.toSet(),
-                reason = reason?.takeUnless { it.isNull }?.asText(),
-            )
+            parseDenial(response, tppId) ?: throw e
         } catch (_: Exception) {
             closeFailedResponse(response, e)
             throw e
         }
         response.close()
         denial
+    }
+
+    private companion object {
+        const val MAX_DENIAL_BODY_BYTES = 16 * 1024
+        val DENIAL_MAPPER = ObjectMapper()
+    }
+
+    /** Returns the denial only when the bounded body is a complete, valid `authorized:false` result for [tppId]. */
+    private fun parseDenial(response: Response, tppId: String): TppAuthorizationResponse? {
+        // Bounded read: a denial is a few hundred bytes; anything above the cap is malformed.
+        val raw = response.readEntity(InputStream::class.java).use { it.readNBytes(MAX_DENIAL_BODY_BYTES + 1) }
+        if (raw.size > MAX_DENIAL_BODY_BYTES) return null
+        val body = DENIAL_MAPPER.readTree(raw)
+        val responseTppId = body.get("tppId")
+        val authorized = body.get("authorized")
+        val roles = body.get("roles")
+        val reason = body.get("reason")
+        val validShape = body.isObject &&
+            responseTppId?.isTextual == true &&
+            authorized?.isBoolean == true &&
+            !authorized.booleanValue() &&
+            roles?.isArray == true &&
+            roles.elements().asSequence().all { it.isTextual } &&
+            (reason == null || reason.isNull || reason.isTextual)
+        if (!validShape || responseTppId.asText() != tppId) return null
+        return TppAuthorizationResponse(
+            tppId = responseTppId.asText(),
+            authorized = false,
+            roles = roles.elements().asSequence().map { it.asText() }.toSet(),
+            reason = reason?.takeUnless { it.isNull }?.asText(),
+        )
     }
 
     private fun closeFailedResponse(response: Response, original: WebApplicationException) {

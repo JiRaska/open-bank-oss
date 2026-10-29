@@ -3,7 +3,6 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.psd2.infrastructure.client
 
-import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.mockk.Runs
 import io.mockk.every
@@ -22,6 +21,8 @@ class TppAuthorizationGuardTest {
     private val objectMapper = jacksonObjectMapper()
     private val guard = TppAuthorizationGuard(client)
 
+    private fun stream(json: String): java.io.InputStream = java.io.ByteArrayInputStream(json.toByteArray())
+
     @Test
     fun `registry 403 with matching denied result becomes an authorization denial`() {
         val denied = TppAuthorizationResponse(
@@ -33,8 +34,8 @@ class TppAuthorizationGuardTest {
         val inboundResponse = mockk<Response>()
         every { inboundResponse.status } returns 403
         every { inboundResponse.statusInfo } returns Response.Status.FORBIDDEN
-        every { inboundResponse.readEntity(JsonNode::class.java) } returns
-            objectMapper.readTree(objectMapper.writeValueAsString(denied))
+        every { inboundResponse.readEntity(java.io.InputStream::class.java) } returns
+            stream(objectMapper.writeValueAsString(denied))
         every { inboundResponse.close() } just Runs
         every { client.checkAuthorization(denied.tppId, "AISP") } throws WebApplicationException(inboundResponse)
 
@@ -62,8 +63,8 @@ class TppAuthorizationGuardTest {
             every { inboundResponse.status } returns status
             every { inboundResponse.statusInfo } returns Response.Status.fromStatusCode(status)
             if (status == 403) {
-                every { inboundResponse.readEntity(JsonNode::class.java) } returns
-                    objectMapper.readTree(objectMapper.writeValueAsString(body))
+                every { inboundResponse.readEntity(java.io.InputStream::class.java) } returns
+                    stream(objectMapper.writeValueAsString(body))
                 every { inboundResponse.close() } just Runs
             }
             every { responseClient.checkAuthorization(tppId, "AISP") } throws
@@ -78,7 +79,7 @@ class TppAuthorizationGuardTest {
         val malformedResponse = mockk<Response>()
         every { malformedResponse.status } returns 403
         every { malformedResponse.statusInfo } returns Response.Status.FORBIDDEN
-        every { malformedResponse.readEntity(JsonNode::class.java) } throws
+        every { malformedResponse.readEntity(java.io.InputStream::class.java) } throws
             jakarta.ws.rs.ProcessingException("invalid body")
         every { malformedResponse.close() } just Runs
         every { malformedClient.checkAuthorization(tppId, "AISP") } throws
@@ -102,8 +103,8 @@ class TppAuthorizationGuardTest {
             val inboundResponse = mockk<Response>()
             every { inboundResponse.status } returns 403
             every { inboundResponse.statusInfo } returns Response.Status.FORBIDDEN
-            every { inboundResponse.readEntity(JsonNode::class.java) } returns
-                objectMapper.readTree(body)
+            every { inboundResponse.readEntity(java.io.InputStream::class.java) } returns
+                stream(body)
             every { inboundResponse.close() } just Runs
             every { responseClient.checkAuthorization(tppId, "AISP") } throws
                 WebApplicationException(inboundResponse)
@@ -124,7 +125,7 @@ class TppAuthorizationGuardTest {
 
         every { inboundResponse.status } returns 403
         every { inboundResponse.statusInfo } returns Response.Status.FORBIDDEN
-        every { inboundResponse.readEntity(JsonNode::class.java) } throws
+        every { inboundResponse.readEntity(java.io.InputStream::class.java) } throws
             jakarta.ws.rs.ProcessingException("synthetic malformed body")
         every { inboundResponse.close() } throws closeFailure
         val original = WebApplicationException(inboundResponse)
@@ -136,6 +137,24 @@ class TppAuthorizationGuardTest {
 
         assertThat(thrown).isSameAs(original)
         assertThat(original.suppressed).containsExactly(closeFailure)
+        verify(exactly = 1) { inboundResponse.close() }
+    }
+
+    @Test
+    fun `oversize 403 body is treated as malformed and still throws`() {
+        val tppId = "synthetic-unknown-tpp"
+        val padding = "x".repeat(20 * 1024)
+        val body = """{"tppId":"$tppId","authorized":false,"roles":[],"reason":"$padding"}"""
+        val inboundResponse = mockk<Response>()
+        val responseClient = mockk<TppRegistryRestClient>()
+        every { inboundResponse.status } returns 403
+        every { inboundResponse.statusInfo } returns Response.Status.FORBIDDEN
+        every { inboundResponse.readEntity(java.io.InputStream::class.java) } returns stream(body)
+        every { inboundResponse.close() } just Runs
+        every { responseClient.checkAuthorization(tppId, "AISP") } throws WebApplicationException(inboundResponse)
+
+        assertThatThrownBy { TppAuthorizationGuard(responseClient).requireAuthorized(tppId, "AISP") }
+            .isInstanceOf(WebApplicationException::class.java)
         verify(exactly = 1) { inboundResponse.close() }
     }
 }
