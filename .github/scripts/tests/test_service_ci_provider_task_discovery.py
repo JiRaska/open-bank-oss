@@ -30,11 +30,13 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
         workflow = yaml.safe_load((ROOT / ".github/workflows/_service-ci.yml").read_text())
         steps = workflow["jobs"]["contract"]["steps"]
         cls.stage_run = next(s["run"] for s in steps if s.get("name") == "Stage trusted Pact Broker retry helper")
-        cls.warmup_run = next(s["run"] for s in steps if s.get("name") == "Warm Gradle dependency cache (self-heal corrupted entries)")
-        cls.discovery_run = next(s["run"] for s in steps if s.get("name") == "Discover provider Pact task")
-        cls.preflight_run = next(
-            s["run"] for s in steps if s.get("name") == "Preflight Pact Broker selector/HAL response"
-        )
+        # The three steps are thin callers of extracted helpers (main's service-ci-steps layout);
+        # the helper file is the body under test, and its explicit environment is supplied by
+        # make_workspaces() exactly as the step's `env:` block supplies it.
+        helpers = ROOT / ".github/scripts/service-ci-steps"
+        cls.warmup_run = (helpers / "warm-gradle-cache.sh").read_text()
+        cls.discovery_run = (helpers / "discover-provider-task.sh").read_text()
+        cls.preflight_run = (helpers / "preflight-pact-broker.sh").read_text()
         provider_step = next(s for s in steps if s.get("name", "").startswith("Provider verification ("))
         cls.provider_run = provider_step["run"]
         cls.provider_if = provider_step["if"]
@@ -77,11 +79,16 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
         timeout_bin.mkdir()
         (timeout_bin / "timeout").write_text(FAKE_TIMEOUT)
         (timeout_bin / "timeout").chmod(0o755)
-        (historical / ".github/scripts/heal-gradle-verification-failure.sh").write_text(FAKE_HEAL)
-        (historical / ".github/scripts/heal-gradle-verification-failure.sh").chmod(0o755)
+        helper_dir = root / "service-ci-helpers"
+        helper_dir.mkdir()
+        (helper_dir / "heal-gradle-verification-failure.sh").write_text(FAKE_HEAL)
+        (helper_dir / "heal-gradle-verification-failure.sh").chmod(0o755)
         env = {
             "PATH": f"{timeout_bin}:{os.environ['PATH']}",
             "RUNNER_TEMP": str(runner_temp),
+            "SERVICE": SERVICE,
+            "SERVICE_CI_HELPERS": str(helper_dir),
+            "REQUIRE_PROVIDER_PACT_TEST": "false",
             "GITHUB_RUN_ID": "12345",
             "GITHUB_RUN_ATTEMPT": "1",
             "GITHUB_OUTPUT": str(root / "github-output"),

@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = yaml.safe_load((ROOT / ".github/workflows/_service-ci.yml").read_text())
 STEPS = WORKFLOW["jobs"]["build"]["steps"]
 BUILD = next(step for step in STEPS if step.get("name", "").startswith("Build + test"))
+# The step is a thin caller of the extracted helper; the helper file is the body under test.
+BUILD_BODY = (ROOT / ".github/scripts/service-ci-steps/build-test.sh").read_text()
 
 
 class ServiceGradleProfileTest(unittest.TestCase):
@@ -35,10 +37,10 @@ class ServiceGradleProfileTest(unittest.TestCase):
             (root / "gradlew").chmod(0o755)
             arguments = root / "args.json"
             result = subprocess.run(
-                ["bash", "-e", "-c", BUILD["run"].replace("${{ inputs.service }}", service)],
+                ["bash", "-e", "-c", BUILD_BODY],
                 cwd=root,
                 env={**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
-                     "PROFILE_TEST_ARGS": str(arguments), "PROFILE_TEST_EXIT": str(exit_code)},
+                     "SERVICE": service, "PROFILE_TEST_ARGS": str(arguments), "PROFILE_TEST_EXIT": str(exit_code)},
                 capture_output=True, text=True, timeout=10,
             )
             self.assertEqual(exit_code, result.returncode, result.stderr)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Verify real push/PR service selection, including external JVM test inputs."""
-import json,os,subprocess,tempfile,yaml
+import os,subprocess,tempfile
 from pathlib import Path
 root=Path(__file__).resolve().parents[2]
 # Exercise the extracted production selector, not its former inline workflow copy.
