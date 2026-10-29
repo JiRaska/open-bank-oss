@@ -9,10 +9,12 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.interest.application.port.out.CatalogRevisionIrPort
+import com.openbank.interest.application.port.out.CatalogRevisionMismatchException
 import com.openbank.interest.application.port.out.CatalogRevisionUnavailableException
 import com.openbank.interest.application.port.out.StoredRevisionIr
 import com.openbank.interest.infrastructure.client.ProductCatalogClient
 import com.openbank.libs.productrevision.IrSignature
+import com.openbank.libs.productrevision.RevisionIdentity
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.ProcessingException
@@ -47,6 +49,11 @@ class RestCatalogRevisionIrPort(@RestClient private val catalog: ProductCatalogC
 
     internal fun parse(revisionId: String, body: String): StoredRevisionIr {
         val root = mapper.readTree(body)
+        // The copy is stored under revisionId and trusted by that id afterwards, so the body must be that revision.
+        val answered = root.get("id")?.takeIf(JsonNode::isTextual)?.asText()
+        if (answered != revisionId) {
+            throw CatalogRevisionMismatchException("catalog answered revision $answered for $revisionId")
+        }
         val behaviour = root.path("content").get("behaviour")?.takeUnless(JsonNode::isNull)
             ?: return StoredRevisionIr(revisionId, hasIr = false, revisionHash = null, irJson = null, signature = null)
         val sig = root.get("irSignature")?.takeUnless(JsonNode::isNull)
@@ -55,9 +62,34 @@ class RestCatalogRevisionIrPort(@RestClient private val catalog: ProductCatalogC
             hasIr = true,
             revisionHash = sig?.get("revisionHash")?.asText(),
             irJson = mapper.writeValueAsString(behaviour),
+            identity = identity(revisionId, root, behaviour, sig),
+            contentHash = root.get("contentHash")?.takeIf(JsonNode::isTextual)?.asText(),
             signature = sig?.let {
                 IrSignature(it.path("keyId").asText(), it.path("algorithm").asText(), it.path("signature").asText())
             },
         )
     }
+
+    /**
+     * The full envelope identity the publish path signed (#13749), or null when any part is missing or
+     * malformed; a null identity is never trusted. Only a PUBLISHED or SUPERSEDED revision can carry one.
+     */
+    private fun identity(revisionId: String, root: JsonNode, behaviour: JsonNode, sig: JsonNode?): RevisionIdentity? =
+        runCatching {
+            require(root.path("state").asText() in setOf("PUBLISHED", "SUPERSEDED"))
+            val number = root.get("number")
+            require(number != null && number.isIntegralNumber && number.canConvertToLong())
+            val version = behaviour.get("irVersion")
+            require(version != null && version.isIntegralNumber && version.canConvertToInt())
+            val code = behaviour.get("productCode")
+            val hash = sig?.get("revisionHash")
+            require(code != null && code.isTextual && hash != null && hash.isTextual)
+            RevisionIdentity(
+                code.asText(),
+                UUID.fromString(revisionId),
+                number.longValue(),
+                version.intValue(),
+                hash.asText(),
+            )
+        }.getOrNull()
 }

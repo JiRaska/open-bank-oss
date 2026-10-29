@@ -146,11 +146,12 @@ class InterestShadowParityTest {
     }
 
     private fun legacyAccrual(a: InterestAccrual) = ShadowLegacyAccrual(
-        a.id, a.accountId, a.productId, a.currency, "r", a.accrualDate, a.balance, a.accruedAmount, decidedByPin = true,
+        a.id, a.accountId, a.productId, a.currency, "r", null,
+        a.accrualDate, a.balance, a.accruedAmount, decidedByPin = true,
     )
 
     private fun legacyCap(c: InterestCapitalization) = ShadowLegacyCapitalization(
-        c.id, c.accountId, c.productId, c.currency, "r", c.periodTo, c.totalAccrued, c.grossAmount, c.taxAmount,
+        c.id, c.accountId, c.productId, c.currency, "r", null, c.periodTo, c.totalAccrued, c.grossAmount, c.taxAmount,
     )
 
     /** One real InterestService over mocked ports, the shape InterestServiceTest uses. */
@@ -190,6 +191,7 @@ class InterestShadowParityTest {
         }
         private val ledger = mockk<LedgerPostingPort>().also {
             every { it.post(any()) } returns Uni.createFrom().item(Unit)
+            every { it.postWithReceipt(any()) } returns Uni.createFrom().item(UUID.randomUUID())
         }
         private val service = InterestService(
             configRepo, accrualRepo, capRepo, taxes, ledger, mockk<AccountDirectoryPort>(), "ACT_365", "SAVINGS",

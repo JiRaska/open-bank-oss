@@ -44,6 +44,12 @@ CREATE TABLE interest_product_revision_ir (
     key_id         VARCHAR(128),
     algorithm      VARCHAR(64),
     signature      TEXT,
+    -- The full signed envelope identity (ADR-0352 #13749) and the catalog content hash the copy reports;
+    -- the shadow trusts a copy only when that content hash equals the one recorded at pin time.
+    product_code     VARCHAR(64),
+    revision_number  BIGINT,
+    ir_version       INTEGER,
+    content_hash     CHAR(64),
     fetched_at     TIMESTAMPTZ NOT NULL,
     CHECK (has_ir OR (revision_hash IS NULL AND ir_json IS NULL AND signature IS NULL)),
     CHECK (NOT has_ir OR (revision_hash IS NOT NULL AND ir_json IS NOT NULL))

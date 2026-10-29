@@ -9,6 +9,7 @@ import com.openbank.interest.domain.shadow.ShadowLegacyCapitalization
 import com.openbank.libs.product.ir.ProductIrParser
 import com.openbank.libs.product.ir.ProductRevisionIr
 import com.openbank.libs.productrevision.HmacIrSigner
+import com.openbank.libs.productrevision.RevisionIdentity
 import java.math.BigDecimal
 import java.nio.file.Files
 import java.nio.file.Path
@@ -33,6 +34,14 @@ object ShadowFixtures {
     fun withDayCount(dayCount: String): String =
         SAVINGS_CZK.replace("\"dayCount\":\"ACT_365_FIXED\"", "\"dayCount\":\"$dayCount\"")
 
+    /** The catalog content hash the fixtures' accounts were pinned with. */
+    val CONTENT_HASH: String = "c".repeat(64)
+
+    fun identity(revisionId: String, ir: String = SAVINGS_CZK): RevisionIdentity {
+        val rev = parse(ir)
+        return RevisionIdentity(rev.productCode, UUID.fromString(revisionId), 1, rev.irVersion, rev.revisionHash)
+    }
+
     fun parse(ir: String = SAVINGS_CZK): ProductRevisionIr = ProductIrParser.parse(ir)
 
     fun accrual(
@@ -48,6 +57,7 @@ object ShadowFixtures {
         productId = "savings",
         currency = currency,
         productRevisionId = revisionId,
+        pinnedContentHash = CONTENT_HASH,
         accrualDate = date,
         balance = BigDecimal(balance),
         accruedAmount = BigDecimal(accrued),
@@ -60,6 +70,7 @@ object ShadowFixtures {
         productId = "savings",
         currency = "CZK",
         productRevisionId = UUID.randomUUID().toString(),
+        pinnedContentHash = CONTENT_HASH,
         periodTo = LocalDate.of(2028, 2, 29),
         totalAccrued = BigDecimal(totalAccrued),
         grossAmount = BigDecimal(gross),

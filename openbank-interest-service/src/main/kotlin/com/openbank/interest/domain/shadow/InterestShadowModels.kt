@@ -24,6 +24,13 @@ sealed interface ShadowLegacyDecision {
     val productId: String
     val currency: String
     val productRevisionId: String?
+
+    /**
+     * The catalog content hash interest recorded for that revision when it synced and pinned it
+     * (`catalog_interest_rate_snapshots.content_hash`), captured independently of the shadow's IR copy.
+     * The shadow trusts a copy only when the catalog reports this same content hash for it.
+     */
+    val pinnedContentHash: String?
 }
 
 /**
@@ -37,6 +44,7 @@ data class ShadowLegacyAccrual(
     override val productId: String,
     override val currency: String,
     override val productRevisionId: String?,
+    override val pinnedContentHash: String?,
     val accrualDate: LocalDate,
     val balance: BigDecimal,
     val accruedAmount: BigDecimal,
@@ -54,6 +62,7 @@ data class ShadowLegacyCapitalization(
     override val productId: String,
     override val currency: String,
     override val productRevisionId: String?,
+    override val pinnedContentHash: String?,
     val periodTo: LocalDate,
     val totalAccrued: BigDecimal,
     val grossAmount: BigDecimal,

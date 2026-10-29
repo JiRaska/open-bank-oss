@@ -71,8 +71,16 @@ class ProductShadowServiceTest {
     }
 
     private fun signed(revisionId: String, ir: String = ShadowFixtures.SAVINGS_CZK): StoredRevisionIr {
-        val hash = ShadowFixtures.parse(ir).revisionHash
-        return StoredRevisionIr(revisionId, true, hash, ir, ShadowFixtures.signer.sign(hash))
+        val identity = ShadowFixtures.identity(revisionId, ir)
+        return StoredRevisionIr(
+            revisionId,
+            true,
+            identity.revisionHash,
+            ir,
+            ShadowFixtures.signer.sign(identity),
+            identity = identity,
+            contentHash = ShadowFixtures.CONTENT_HASH,
+        )
     }
 
     private fun service(
@@ -160,6 +168,27 @@ class ProductShadowServiceTest {
             .containsExactlyInAnyOrder("NO_PIN", "NO_IR", "VERIFICATION_FAILED")
         assertThat(count(ProductShadowRecorder.NOT_COMPARABLE, "reason", "no_ir")).isEqualTo(2.0)
         assertThat(count(ProductShadowRecorder.NOT_COMPARABLE, "reason", "verification_failed")).isEqualTo(1.0)
+        assertThat(registry.find(ProductShadowRecorder.COMPARED).counter()).isNull()
+    }
+
+    @Test
+    fun `a copy that is not the account's pinned revision is never compared`() {
+        // Same revision id, valid signature over its own identity, but the catalog content hash differs from
+        // the one interest recorded when it pinned the account: another revision's terms, refused.
+        val otherContent = ShadowFixtures.accrual("250000.00", "20.547950")
+        // A copy whose envelope names another revision id, validly signed for THAT revision.
+        val otherRevision = ShadowFixtures.accrual("250000.00", "20.547950")
+        val world = World(otherContent, otherRevision)
+        drain(
+            service(world, { id ->
+                when (id) {
+                    otherContent.productRevisionId -> signed(id).copy(contentHash = "d".repeat(64))
+                    else -> signed(UUID.randomUUID().toString()).copy(revisionId = id)
+                }
+            }),
+        )
+        assertThat(world.completed.values.map { it.outcome }).containsOnly("PIN_MISMATCH")
+        assertThat(count(ProductShadowRecorder.NOT_COMPARABLE, "reason", "verification_failed")).isEqualTo(2.0)
         assertThat(registry.find(ProductShadowRecorder.COMPARED).counter()).isNull()
     }
 

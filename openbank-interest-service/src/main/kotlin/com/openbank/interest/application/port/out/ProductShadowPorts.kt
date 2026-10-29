@@ -7,6 +7,7 @@ package com.openbank.interest.application.port.out
 import com.openbank.interest.domain.shadow.ShadowLegacyDecision
 import com.openbank.interest.domain.shadow.ShadowSourceKind
 import com.openbank.libs.productrevision.IrSignature
+import com.openbank.libs.productrevision.RevisionIdentity
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -48,7 +49,10 @@ interface ShadowLegacySourcePort {
 
 /**
  * A pinned revision's product IR as interest keeps it locally (ADR-0352 §6: the consumer's own
- * immutable copy). [irJson] and [signature] are null when the revision carries no IR.
+ * immutable copy). [irJson] and [signature] are null when the revision carries no IR. [identity] is the
+ * full signed envelope identity the catalog reported (#13749), null when it was incomplete, and such a
+ * copy is never trusted. [contentHash] is the catalog's content hash of the revision, matched against
+ * the hash interest recorded when it pinned the account.
  */
 data class StoredRevisionIr(
     val revisionId: String,
@@ -56,6 +60,8 @@ data class StoredRevisionIr(
     val revisionHash: String?,
     val irJson: String?,
     val signature: IrSignature?,
+    val identity: RevisionIdentity? = null,
+    val contentHash: String? = null,
 )
 
 /** Interest's immutable local copies of revision IR, keyed by catalog revision id. */
@@ -65,6 +71,9 @@ interface RevisionIrCopyPort {
     /** Insert-if-absent; returns the stored copy (another pod's, if it won the race). */
     suspend fun store(copy: StoredRevisionIr): StoredRevisionIr
 }
+
+/** The catalog answered with a revision other than the one asked for. Never stored, never retried. */
+class CatalogRevisionMismatchException(message: String) : RuntimeException(message)
 
 class CatalogRevisionUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 

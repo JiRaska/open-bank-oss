@@ -85,6 +85,18 @@ class ProductRevisionIrEntity : PanacheEntityBase() {
     @Column(name = "signature")
     var signature: String? = null
 
+    @Column(name = "product_code")
+    var productCode: String? = null
+
+    @Column(name = "revision_number")
+    var revisionNumber: Long? = null
+
+    @Column(name = "ir_version")
+    var irVersion: Int? = null
+
+    @Column(name = "content_hash")
+    var contentHash: String? = null
+
     @Column(name = "fetched_at", nullable = false)
     lateinit var fetchedAt: Instant
 }

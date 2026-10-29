@@ -21,6 +21,7 @@ import com.openbank.interest.infrastructure.persistence.entity.InterestCapitaliz
 import com.openbank.interest.infrastructure.persistence.entity.ProductRevisionIrEntity
 import com.openbank.interest.infrastructure.persistence.entity.ProductShadowInputEntity
 import com.openbank.libs.productrevision.IrSignature
+import com.openbank.libs.productrevision.RevisionIdentity
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.PersistenceException
@@ -147,16 +148,15 @@ class ShadowLegacySourceRepositoryImpl(private val sf: Mutiny.SessionFactory) : 
     private suspend fun accrual(id: UUID): ShadowLegacyDecision? {
         val a = sf.withSession { s -> s.find(InterestAccrualEntity::class.java, id) }.awaitSuspending() ?: return null
         val pin = pin(a.accountId, a.productId, a.currency)
-        val pinnedConfig = pin?.let { revisionId ->
-            sf.withSession { s -> s.find(CatalogInterestRateSnapshotEntity::class.java, revisionId) }
-                .awaitSuspending()?.configId
-        }
+        val snapshot = pin?.let { snapshot(it) }
+        val pinnedConfig = snapshot?.configId
         return ShadowLegacyAccrual(
             sourceId = a.id,
             accountId = a.accountId,
             productId = a.productId,
             currency = a.currency,
             productRevisionId = pin?.toString(),
+            pinnedContentHash = snapshot?.contentHash,
             accrualDate = a.accrualDate,
             balance = a.balance,
             accruedAmount = a.accruedAmount,
@@ -167,18 +167,23 @@ class ShadowLegacySourceRepositoryImpl(private val sf: Mutiny.SessionFactory) : 
     private suspend fun capitalization(id: UUID): ShadowLegacyDecision? {
         val c = sf.withSession { s -> s.find(InterestCapitalizationEntity::class.java, id) }.awaitSuspending()
             ?: return null
+        val pin = pin(c.accountId, c.productId, c.currency)
         return ShadowLegacyCapitalization(
             sourceId = c.id,
             accountId = c.accountId,
             productId = c.productId,
             currency = c.currency,
-            productRevisionId = pin(c.accountId, c.productId, c.currency)?.toString(),
+            productRevisionId = pin?.toString(),
+            pinnedContentHash = pin?.let { snapshot(it)?.contentHash },
             periodTo = c.periodTo,
             totalAccrued = c.totalAccrued,
             grossAmount = c.grossAmount,
             taxAmount = c.taxAmount,
         )
     }
+
+    private suspend fun snapshot(revisionId: UUID): CatalogInterestRateSnapshotEntity? =
+        sf.withSession { s -> s.find(CatalogInterestRateSnapshotEntity::class.java, revisionId) }.awaitSuspending()
 
     private suspend fun pin(accountId: UUID, productId: String, currency: String): UUID? = sf.withSession { s ->
         s.createQuery(
@@ -208,12 +213,16 @@ class RevisionIrCopyRepositoryImpl(private val sf: Mutiny.SessionFactory, privat
             keyId = copy.signature?.keyId
             algorithm = copy.signature?.algorithm
             signature = copy.signature?.signature
+            productCode = copy.identity?.productCode
+            revisionNumber = copy.identity?.revisionNumber
+            irVersion = copy.identity?.irVersion
+            contentHash = copy.contentHash
             fetchedAt = clock.instant()
         }
         try {
             sf.withTransaction { s -> s.persist(entity) }.awaitSuspending()
         } catch (e: PersistenceException) {
-            // Another comparator stored the same immutable revision first; its row is the one.
+            // Another comparator stored the same immutable revision first; its row is the one (the caller compares).
             return find(copy.revisionId) ?: throw e
         }
         return copy
@@ -229,5 +238,9 @@ class RevisionIrCopyRepositoryImpl(private val sf: Mutiny.SessionFactory, privat
         } else {
             null
         },
+        identity = runCatching {
+            RevisionIdentity(productCode!!, revisionId, revisionNumber!!, irVersion!!, revisionHash!!)
+        }.getOrNull(),
+        contentHash = contentHash,
     )
 }

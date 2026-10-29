@@ -14,7 +14,6 @@ import com.openbank.interest.infrastructure.catalog.CatalogInterestSyncRepositor
 import com.openbank.interest.infrastructure.client.CatalogEventClientResponse
 import com.openbank.interest.infrastructure.scheduler.ProductShadowScheduler
 import com.openbank.interest.shadow.ShadowFixtures
-import com.openbank.libs.product.ir.ProductIrParser
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
@@ -77,20 +76,25 @@ internal class ProductShadowPersistenceIT {
         assertThat(outcome).isEqualTo(CatalogInterestSyncOutcome.APPLIED)
 
         val ir = ShadowFixtures.withRate(irRate).replace("\"CZK\"", "\"EUR\"")
-        val hash = ProductIrParser.parse(ir).revisionHash
-        val sig = ShadowFixtures.signer.sign(hash)
+        val identity = ShadowFixtures.identity(revisionId.toString(), ir)
+        val sig = ShadowFixtures.signer.sign(identity)
         dataSource.connection.use { c ->
             c.prepareStatement(
                 "INSERT INTO interest_product_revision_ir " +
-                    "(revision_id, has_ir, revision_hash, ir_json, key_id, algorithm, signature, fetched_at) " +
-                    "VALUES (?, true, ?, ?, ?, ?, ?, now())",
+                    "(revision_id, has_ir, revision_hash, ir_json, key_id, algorithm, signature, " +
+                    "product_code, revision_number, ir_version, content_hash, fetched_at) " +
+                    "VALUES (?, true, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())",
             ).use {
                 it.setObject(1, revisionId)
-                it.setString(2, hash)
+                it.setString(2, identity.revisionHash)
                 it.setString(3, ir)
                 it.setString(4, sig.keyId)
                 it.setString(5, sig.algorithm)
                 it.setString(6, sig.signature)
+                it.setString(7, identity.productCode)
+                it.setLong(8, identity.revisionNumber)
+                it.setInt(9, identity.irVersion)
+                it.setString(10, "c".repeat(64))
                 it.executeUpdate()
             }
         }
