@@ -229,6 +229,13 @@ public final class com/openbank/libs/fincrime/pack/CountObservation {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/openbank/libs/fincrime/pack/CountPackJson {
+	public static final field INSTANCE Lcom/openbank/libs/fincrime/pack/CountPackJson;
+	public static final field MAX_SOURCE_BYTES I
+	public final fun compile (Ljava/lang/String;Lcom/openbank/libs/fincrime/vocabulary/FincrimeVocabulary;Lcom/openbank/libs/fincrime/vocabulary/FincrimeVocabulary;)Lcom/openbank/libs/fincrime/pack/CompiledCountPack;
+	public static synthetic fun compile$default (Lcom/openbank/libs/fincrime/pack/CountPackJson;Ljava/lang/String;Lcom/openbank/libs/fincrime/vocabulary/FincrimeVocabulary;Lcom/openbank/libs/fincrime/vocabulary/FincrimeVocabulary;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CompiledCountPack;
+}
+
 public final class com/openbank/libs/fincrime/pack/CountPackReplay {
 	public static final field INSTANCE Lcom/openbank/libs/fincrime/pack/CountPackReplay;
 	public static final field MAX_CASES I

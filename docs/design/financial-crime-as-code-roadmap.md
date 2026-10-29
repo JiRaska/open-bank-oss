@@ -152,10 +152,40 @@ snapshots stay with ADR-0140/#12750. ProductState/PredicateEvaluator have produc
 semantics (including missing-as-false), so they are not reused as a crime-risk evaluator.
 No second DecisionRecord transport, revision store, approval flow or signing mechanism is
 created. No service, REST/MCP adapter, production caller, database, event or threshold writer
-changes. Wire source parsing/schema, money/window operations, authentic snapshot adapters,
-DecisionRecord integration, independent exact-hash approval/signature, activation epochs,
-replica consistency and the full conformance gate remain required under #13775. This
+changes. At that stage, source parsing/schema remained open; the next section records its
+bounded JSON adapter. Money/window operations, authentic snapshot adapters, DecisionRecord
+integration, independent exact-hash approval/signature, activation epochs, replica
+consistency and the full conformance gate remain required under #13775. This
 slice is simulation only and does not mark K0 or ADR-0354 delivery complete.
+
+## K0 source boundary: bounded JSON count packs
+
+`CountPackJson.compile` accepts a versioned JSON count source and independently supplied
+compiled vocabularies, then invokes the existing `CompiledCountPack` validator. The same
+canonical form and hash are preserved when reading the committed fraud golden or the
+synthetic AML source. These sources run actual rules and same-input behavioral replay;
+no new evaluator or source-authentication claim is introduced.
+
+The adapter rejects unknown/missing fields at every object, duplicate JSON keys, unknown
+operators/effects/verdicts, ambiguous count representations, fractional/out-of-range
+revision numbers and oversized documents. The pre-parse limit is 65,536 UTF-8 bytes;
+callers must additionally bound transport reads before constructing the string. Parsing
+reuses the kernel's framework-free `IrJson` syntax reader with its depth bound, not the
+product interpreter. COUNT values remain exact nonnegative Long decimal strings.
+
+The bundled `fincrime/count-source-v1.schema.json` describes the closed structural
+contract, including AML/fraud effect separation. Executed schema-agreement fixtures cover
+both domains and structural negatives. Compilation remains authoritative for semantic
+checks (exact vocabulary pins/codes, validity, Long range, rule identity and feature
+consistency), source size and duplicate-key rejection. JSON Schema alone is not a trust
+check. Vocabulary authoring remains typed; this slice does not introduce a vocabulary
+JSON parser or a registry.
+
+Still required under #13775: authentic source/snapshot adapters, CLI/HTTP/MCP integration,
+DecisionRecord integration, evidence-bound independent approval/signature, SHADOW epochs,
+replica consistency, real HTTP/DB/outbox/concurrency tests and the full enforced
+fincrime-pack-conformance gate. No approval, signature, activation, production caller,
+threshold writer or payment enforcement is enabled by decoding a source.
 
 ## Evidence required before claiming completion
 
