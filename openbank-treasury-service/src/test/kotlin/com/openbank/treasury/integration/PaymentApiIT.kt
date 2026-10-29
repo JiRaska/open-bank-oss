@@ -277,6 +277,16 @@ class PaymentApiIT {
             }.exceptionOrNull(),
         ).isInstanceOf(FundingExceededException::class.java)
         released = if (outcomes[0].isSuccess) payA else payB
+        // Deterministic half of the same rule, independent of which release won the race: put the
+        // committed winner on the LATER date and the refused loser on the earlier one, then retry
+        // the loser alone. Counting only value dates up to the loser's would leave the winner out
+        // and let the loser overdraw; the line counts every value date, so it is refused again.
+        val loser = if (released == payA) payB else payA
+        shiftValueDate(released, later)
+        shiftValueDate(loser, valueDate)
+        assertThatThrownBy { onContext { payments.release(UUID.fromString(loser), rita) } }
+            .isInstanceOf(FundingExceededException::class.java)
+        shiftValueDate(payA, valueDate)
         shiftValueDate(payB, valueDate)
         assertThat(count("select count(*) from treasury_payments where status = 'RAIL_NOT_SUPPORTED'")).isEqualTo(1)
     }
