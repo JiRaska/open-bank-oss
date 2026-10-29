@@ -9,9 +9,12 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.reactive.messaging.Message
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.util.concurrent.CompletableFuture
 
 class AgentAuditConsumerTest {
@@ -46,6 +49,21 @@ class AgentAuditConsumerTest {
         // exception bypasses message.nack — the stream cancels instead of handing the record
         // to the dead-letter-queue strategy (AgentAuditKafkaPersistenceIT proves the wedge).
         verify { message.nack(failure) }
+        verify(exactly = 0) { message.ack() }
+    }
+
+    @Test
+    fun `rethrows coroutine cancellation instead of nacking it`(): Unit = runBlocking {
+        val message = mockk<Message<String>>()
+        val cancelled = CancellationException("shutdown")
+        every { message.payload } returns "{}"
+        coEvery { auditConsumer.persist(any(), any()) } throws cancelled
+        every { message.nack(any()) } returns CompletableFuture.completedFuture(null)
+
+        val thrown = assertThrows<CancellationException> { consumer.consume(message) }
+
+        assertSame(cancelled, thrown)
+        verify(exactly = 0) { message.nack(any()) }
         verify(exactly = 0) { message.ack() }
     }
 }

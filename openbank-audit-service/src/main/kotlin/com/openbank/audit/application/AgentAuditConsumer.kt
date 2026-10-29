@@ -8,6 +8,7 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.reactive.messaging.Message
 
@@ -34,6 +35,9 @@ class AgentAuditConsumer {
     suspend fun consume(message: Message<String>) {
         try {
             auditConsumer.persist(message.payload)
+        } catch (cancelled: CancellationException) {
+            // Shutdown/rebalance cancellation is not a poison record: never dead-letter it.
+            throw cancelled
         } catch (failure: Exception) {
             // NACK hands the record to the connector's dead-letter-queue strategy.
             // Do not log the event body: audit payloads may contain personal or financial data.
