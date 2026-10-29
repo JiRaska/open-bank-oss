@@ -103,6 +103,24 @@ quarkus:
 
 mp:
   messaging:
+    # mTLS to Strimzi (ADR-0137). Defaults keep local dev/test PLAINTEXT; the gitops manifest sets
+    # KAFKA_* env in prod. The broker address comes from the global kafka.bootstrap.servers
+    # (KAFKA_BOOTSTRAP_SERVERS) -- a channel-level bootstrap.servers would override it (#4942).
+    connector:
+      smallrye-kafka:
+        # Nested, not dotted: SmallRye's YAML source quotes a dotted leaf key, which the Kafka
+        # connector's plain lookup never finds (see root CLAUDE.md, Kafka group.id note).
+        security:
+          protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl:
+          keystore:
+            location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+            type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+            password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+          truststore:
+            location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+            type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+            password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     outgoing:
       # `security-events-out` -> openbank.security.scan.event was removed in #4709. The channel,
       # its outbox and its topic existed for the whole life of this service with nothing ever
@@ -110,7 +128,6 @@ mp:
       # results are served from GET /api/v1/security/report, not published.
       ict-incident-outbox-out:
         connector: smallrye-kafka
-        bootstrap.servers: kafka:9092
         client.id: security-scanner-ict-${quarkus.uuid}
         topic: openbank.security.ict.incident
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
