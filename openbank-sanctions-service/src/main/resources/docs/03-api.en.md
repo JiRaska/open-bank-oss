@@ -160,7 +160,7 @@ POST /api/v1/sanctions/lists/{listType}/refresh
 Authorization: Bearer <token>
 ```
 
-`listType` ∈ `OFAC_SDN | EU_CONSOLIDATED | UN_CONSOLIDATED | HM_TREASURY | FATF_HIGH_RISK | CNB_DOMESTIC`
+`listType` ∈ `OFAC_SDN | EU_CONSOLIDATED | UN_CONSOLIDATED | HM_TREASURY | FATF_HIGH_RISK | CNB_DOMESTIC | CZ_TERRORISTS`
 
 ### Refresh all enabled lists
 
@@ -188,6 +188,7 @@ Authorization: Bearer <token>
 | `HM_TREASURY` | UK HM Treasury | UK Financial Sanctions |
 | `FATF_HIGH_RISK` | FATF | High-risk and monitored jurisdictions |
 | `CNB_DOMESTIC` | Czech Ministry of Foreign Affairs (MZV) | Czech national sanctions list (Act No. 1/2023 Coll.) |
+| `CZ_TERRORISTS` | Czech e-Sbírka | Anti-terrorism designations (Regulation No. 210/2008 Coll.), imported from official SPARQL open data |
 
 ## Error model
 
