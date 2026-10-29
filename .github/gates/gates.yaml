@@ -4598,6 +4598,9 @@ gates:
       - ".github/scripts/check-release-evidence-coverage.py"
       - ".github/scripts/release_evidence_assets.py"
       - ".github/scripts/test-release-evidence-upload.py"
+      - ".github/scripts/prepare-release-evidence.py"
+      - ".github/scripts/test-release-evidence-source.py"
+      - ".github/scripts/build-release-evidence.sh"
       - ".github/scripts/verify-release-evidence-manifest.py"
       - ".github/scripts/test-verify-release-evidence-manifest.py"
       - ".github/workflows/release-please.yml"
@@ -4605,6 +4608,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-release-evidence-coverage.py --self-test
       python3 .github/scripts/test-release-evidence-upload.py
+      python3 .github/scripts/test-release-evidence-source.py
       python3 .github/scripts/test-verify-release-evidence-manifest.py
     run: |
       python3 .github/scripts/check-release-evidence-coverage.py --enforce
