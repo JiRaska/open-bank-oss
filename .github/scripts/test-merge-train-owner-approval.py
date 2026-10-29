@@ -1,5 +1,3 @@
-import subprocess
-import re
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Negative authorization proofs for exact-head owner decisions (no network or credentials)."""
@@ -7,6 +5,8 @@ import copy
 import importlib.util
 import os
 from pathlib import Path
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
