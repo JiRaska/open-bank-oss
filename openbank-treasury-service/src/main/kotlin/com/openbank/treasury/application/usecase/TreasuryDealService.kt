@@ -81,7 +81,7 @@ import java.util.UUID
 // LongParameterList: a plain application class wired by one CDI producer; every parameter is a
 // collaborator or a deployment decision, and bundling them would only hide which is which.
 // LargeClass (#13883): the posting-intent guards live beside the lifecycle commands they guard, so
-// each command and its intent check read together; splitting them out is tracked as a refactor.
+// each command and its intent check read together; the split is tracked in #14232.
 @Suppress("TooManyFunctions", "LongParameterList", "LargeClass")
 class TreasuryDealService(
     private val deals: DealRepository,
