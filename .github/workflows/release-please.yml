@@ -418,18 +418,6 @@ jobs:
                   print("\t".join([p, comp, ver, tag, upurl]))
           PY
           echo "Released components:"; cut -f1-4 released.tsv
-          # Gradle task list for components that carry the cyclonedx plugin.
-          tasks=""
-          while IFS=$'\t' read -r -a released_fields; do
-            package_path="${released_fields[0]:-}"
-            [ -n "$package_path" ] && tasks="$tasks :$package_path:cyclonedxBom"
-          done < released.tsv
-          echo "tasks=$tasks" >> "$GITHUB_OUTPUT"
-
-      - name: Generate per-component SBOMs
-        if: steps.map.outputs.tasks != ''
-        run: ./gradlew ${{ steps.map.outputs.tasks }} --console=plain --no-daemon || true
-
       # trivy is NOT preinstalled on hosted runners — without it the non-Gradle SBOM
       # fallback below silently falls through (`command -v trivy` guard) and every
       # module without the cyclonedx plugin releases NAKED (no evidence bundle at all;
@@ -523,23 +511,10 @@ jobs:
           while IFS=$'\t' read -r p comp ver tag upurl; do
             [ -n "$p" ] || continue
             sbom_out="${tag}.cdx.json"
-            bom="$p/build/reports/bom.json"
-            if [ -f "$bom" ]; then
-              cp "$bom" "$sbom_out"
-            elif command -v trivy >/dev/null 2>&1 && trivy fs --format cyclonedx --output "$sbom_out" "$p" 2>/dev/null && [ -s "$sbom_out" ]; then
-              # Non-Gradle module (e.g. admin-ui / Next.js): no cyclonedx plugin, so derive the
-              # SBOM from the source tree (package-lock.json etc.) with trivy fs.
-              echo "::notice::$p has no gradle SBOM — generated via trivy fs"
-            else
-              echo "::error::no SBOM for $p (no gradle plugin and trivy fs produced none) — cannot verify release $tag"
-              exit 1
-            fi
-            [ -s "$sbom_out" ] || { echo "::error::empty SBOM for $tag"; exit 1; }
-            sign "$sbom_out" || { echo "::error::cosign sign-blob failed for $sbom_out"; exit 1; }
-
-            # Assemble SLSA provenance + OpenVEX + evidence manifest (references the signed SBOM).
-            bash .github/scripts/build-release-evidence.sh "$comp" "$ver" "$tag" "$p" "$sbom_out" \
-              || { echo "::error::evidence assembly failed for $tag"; exit 1; }
+            # Build from the immutable release tag, not this workflow's push checkout.
+            source_commit="$(python3 .github/scripts/prepare-release-evidence.py "$p" "$comp" "$ver" "$tag")"
+            python3 .github/scripts/prepare-release-evidence.py --check-remote "$tag" "$source_commit"
+            sign "$sbom_out"
 
             assets="$sbom_out ${sbom_out}.sig"
             for doc in "${tag}.slsa.json" "${tag}.vex.json" "${tag}.evidence.json"; do
@@ -547,6 +522,10 @@ jobs:
               sign "$doc" || { echo "::error::cosign sign-blob failed for $doc"; exit 1; }
               assets="$assets $doc ${doc}.sig"
             done
+
+            python3 .github/scripts/verify-release-evidence-manifest.py "$tag" \
+              --expected-component "$comp" --expected-version "$ver" --expected-commit "$source_commit"
+            python3 .github/scripts/prepare-release-evidence.py --check-remote "$tag" "$source_commit"
 
             if [ -z "$upurl" ]; then
               echo "::error::no upload_url for $tag — cannot attach assets"; exit 1
