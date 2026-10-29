@@ -165,6 +165,24 @@ class OwnerApprovalTest(unittest.TestCase):
             self.assertEqual("c" * 40, gh.merge(7, self.sha))
             api.assert_called_once_with("PUT", "/repos/owner/repo/pulls/7/merge", {"merge_method": "squash", "sha": self.sha})
 
+    def test_summary_ignores_non_app_statuses_and_sanitizes(self):
+        app = {"login": train.BOT_LOGIN, "id": train.BOT_ID}
+        fake = {"id": 9, "context": train.OWNER_APPROVAL_CONTEXT, "state": "success",
+                "description": "owner-approved PR #7", "creator": {"login": "mallory", "id": 1}}
+        real = {"id": 5, "context": train.OWNER_APPROVAL_CONTEXT, "state": "failure",
+                "description": "owner-revoked PR #7", "creator": app}
+        self.assertIsNone(train.owner_status_line([fake]))
+        # Right login, wrong id is not the App either.
+        self.assertIsNone(train.owner_status_line([{**fake, "creator": {"login": train.BOT_LOGIN, "id": 1}}]))
+        # A newer fake never outranks the App's older status.
+        self.assertEqual("state=failure description=owner-revoked PR #7", train.owner_status_line([fake, real]))
+        other = {**real, "id": 6, "context": "other"}
+        self.assertEqual("state=failure description=owner-revoked PR #7", train.owner_status_line([other, real]))
+        dirty = {**real, "description": "<b>x</b>\x1b[31m[l](http://e)`" + "A" * 500}
+        out = train.owner_status_line([dirty])
+        self.assertNotRegex(out, r"[<>\[\]()`\x1b]")
+        self.assertLess(len(out), 120)
+
     def test_declaration_guards_credentials_and_main_only_code(self):
         code = train.OWNER_APPROVAL_WORKFLOW.read_text()
         self.assertEqual([], train.owner_approval_declaration_errors(code))
@@ -203,6 +221,9 @@ class OwnerApprovalTest(unittest.TestCase):
         for head in ("A" * 40, "a" * 39, "a" * 41, good + "\n", "g" * 40):
             self.assertNotEqual(0, run("1", head), head)
         self.assertNotEqual(0, run("1", good, "merge"))
+        # The summary step must go through the App-only reader and fail a revoke with no App status.
+        self.assertIn("owner-status", code)
+        self.assertIn("no App status found", code)
         for unsafe in ["\n      - run: gh pr merge 1", "\n      - uses: actions/download-artifact@unsafe",
                        "\n      - run: python3 .github/unsafe.py"]:
             self.assertTrue(train.owner_approval_declaration_errors(code + unsafe))
