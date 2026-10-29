@@ -62,12 +62,14 @@ def require_validated_wrapper(producer: Path, source: Path) -> None:
             raise ValueError("release wrapper differs from the validated producer inputs")
 
 
-def prepare(root: Path, module: str, component: str, version: str, tag: str) -> str:
+def prepare(root: Path, module: str, component: str, version: str, tag: str, *, expected_commit: str | None = None) -> str:
     if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", module) is None:
         raise ValueError("invalid release module")
     if tag != f"{component}-v{version}":
         raise ValueError("release component/version does not match tag")
     commit = remote_commit(root, tag)
+    if expected_commit is not None and (re.fullmatch(r'[0-9a-f]{40}', expected_commit) is None or commit != expected_commit):
+        raise ValueError('release tag differs from approved source commit before execution')
     # Fetch only this release ref. Never rely on a stale runner's local tag.
     ref = "refs/release-evidence/" + hashlib.sha256(tag.encode()).hexdigest()
     git(root, "fetch", "--no-tags", "origin", f"+refs/tags/{tag}:{ref}")

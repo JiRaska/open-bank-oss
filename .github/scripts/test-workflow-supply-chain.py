@@ -84,6 +84,24 @@ class SupplyChainTest(unittest.TestCase):
         doc['jobs']['provenance']['uses'] = guard.SLSA.replace('v2.1.0', 'main')
         self.assertTrue(guard.findings('release-please.yml', doc))
 
+    def test_repair_slsa_exception_is_only_non_uploading_exact_provenance_job(self):
+        doc = {'permissions': {}, 'jobs': {'provenance': {
+            'uses': guard.SLSA, 'with': {'upload-assets': False}}}}
+        self.assertFalse(guard.findings('backfill-release-evidence.yml', doc))
+        for change in ('workflow', 'job', 'tag', 'path', 'upload', 'missing-upload', 'string-false', 'step'):
+            mutated = copy.deepcopy(doc)
+            name = 'backfill-release-evidence.yml'
+            job = mutated['jobs']['provenance']
+            if change == 'workflow': name = 'other.yml'
+            elif change == 'job': mutated['jobs']['other'] = mutated['jobs'].pop('provenance')
+            elif change == 'tag': job['uses'] = guard.SLSA.replace('v2.1.0', 'main')
+            elif change == 'path': job['uses'] = guard.SLSA.replace('generic_slsa3', 'other')
+            elif change == 'upload': job['with']['upload-assets'] = True
+            elif change == 'string-false': job['with']['upload-assets'] = 'false'
+            elif change == 'step': mutated['jobs']['provenance'] = {'steps': [job]}
+            else: job['with'].pop('upload-assets')
+            with self.subTest(change=change): self.assertTrue(guard.findings(name, mutated))
+
     def test_trigger_filter_regression(self):
         for name in ('main-red-watch.yml', 'admin-ui-deploy.yml'):
             self.assertTrue(guard.findings(name, {'permissions': {}, 'on': {'workflow_run': {}}, 'jobs': {}}))
