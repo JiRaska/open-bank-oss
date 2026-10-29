@@ -14,7 +14,7 @@ import zipfile
 from release_evidence_assets import expected_release_assets
 from release_evidence_repair import bind_bundle, binding_digest, identity, MAX_REPAIR_MEMBER
 from release_repair_api import ReadOnlyGitHub
-from release_repair_crypto import verify_bundle
+from release_repair_crypto import verify_bundle, COSIGN_LINUX_SHA256
 
 
 # Repair-lane-only resource bounds; oversize is rejected, never truncated/accepted.
@@ -104,11 +104,9 @@ def main():
     spec = importlib.util.spec_from_file_location('repair_prepare', Path(__file__).with_name('prepare-release-repair.py'))
     prepare = importlib.util.module_from_spec(spec); spec.loader.exec_module(prepare)
     tools = Path(env['RUNNER_TEMP']) / 'repair-verify-tools'
-    cosign = prepare.tool(tools, 'cosign', 'https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign-linux-amd64',
-        'caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708')
-    verifier = prepare.tool(tools, 'slsa-verifier', 'https://github.com/slsa-framework/slsa-verifier/releases/download/v2.7.1/slsa-verifier-linux-amd64',
-        '946dbec729094195e88ef78e1734324a27869f03e2c6bd2f61cbc06bd5350339')
-    receipt = verify_bundle(bound, files, producer, cosign=cosign, slsa_verifier=verifier,
+    cosign = prepare.tool(tools, 'cosign', 'https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-amd64',
+        COSIGN_LINUX_SHA256)
+    receipt = verify_bundle(bound, files, producer, cosign=cosign,
         artifact=metadata, artifact_archive=raw_provenance, generator_job=selected_jobs[0],
         expected_artifact_id=metadata['id'], expected_generator_job_id=selected_jobs[0]['id'])
     if receipt.binding_sha256 != binding_digest(bound):

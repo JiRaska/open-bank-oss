@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Real verification executor. No release upload or command-line apply surface."""
 import hashlib
+import base64
 import importlib.util
 import json
 import io
@@ -14,17 +15,12 @@ from release_evidence_assets import expected_release_assets
 from release_evidence_repair import VerifiedBundle, binding_digest
 from release_repair_attestation import validate_signed_manual_statement, BUILDER, validate_authenticated_payload
 
-# Published asset digests from official slsa-verifier v2.7.1 release metadata.
-VERIFIER_SHA256 = frozenset({
-    '946dbec729094195e88ef78e1734324a27869f03e2c6bd2f61cbc06bd5350339',  # linux-amd64
-    '39abfcf5f1d690c3e889ce3d2d6a8b87711424d83368511868d414e8f8bcb05c',  # darwin-arm64
-})
-# Existing cosign v2.4.3 pins; no ambient executable is trusted implicitly.
+# Published official Cosign v3.1.4 digests; no ambient executable is trusted.
 SIGNING_KEY = 'awskms:///alias/openbank-cosign-signing'
-
+COSIGN_LINUX_SHA256 = '424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa'
 COSIGN_SHA256 = frozenset({
-    'caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708',
-    'edfc761b27ced77f0f9ca288ff4fac7caa898e1e9db38f4dfdf72160cdf8e638',
+    COSIGN_LINUX_SHA256,
+    '9f9b8cd557cf2e5b3df3373a00baa005a86b02391e3e06dd0ce37b3a1533d3a4',  # darwin-arm64
 })
 
 
@@ -32,12 +28,38 @@ def pinned_binary(path, hashes):
     path = Path(path)
     if not path.is_absolute() or not path.is_file() or path.is_symlink():
         raise ValueError('trusted absolute regular executable required')
-    if hashlib.sha256(path.read_bytes()).hexdigest() not in hashes:
+    with path.open('rb') as source:
+        digest = hashlib.file_digest(source, 'sha256').hexdigest()
+    if digest not in hashes:
         raise ValueError('verification executable digest mismatch')
     return str(path)
 
 
-def verify_bundle(bound, bundle, producer, *, cosign, slsa_verifier,
+def verify_official_statement(cosign, directory, sbom_name, provenance_name, immutable_provenance):
+    """Return only the payload from the exact native bundle verified by Cosign.
+
+    No legacy representation conversion, custom trust root, or insecure fallback.
+    Certificate identity, issuer, claims, timestamp, SCT and transparency checks
+    use the official verifier's normal policy. The caller still checks all repair
+    subject/producer/run/input identities on the authenticated returned statement.
+    """
+    if (directory / provenance_name).read_bytes() != immutable_provenance:
+        raise ValueError('provenance file differs from immutable artifact')
+    subprocess.run([cosign, 'verify-blob-attestation', '--bundle', provenance_name,
+        '--certificate-identity', BUILDER, '--certificate-oidc-issuer',
+        'https://token.actions.githubusercontent.com', '--type', 'slsaprovenance02',
+        '--check-claims=true', sbom_name], cwd=directory, check=True, capture_output=True)
+    # Parse SAME immutable bytes only after the complete cryptographic check passed.
+    envelope = json.loads(immutable_provenance)
+    if envelope.get('mediaType') != 'application/vnd.dev.sigstore.bundle.v0.3+json':
+        raise ValueError('unsupported official provenance bundle format')
+    dsse = envelope.get('dsseEnvelope')
+    if not isinstance(dsse, dict) or dsse.get('payloadType') != 'application/vnd.in-toto+json':
+        raise ValueError('unsupported authenticated payload type')
+    return json.loads(base64.b64decode(dsse['payload'], validate=True))
+
+
+def verify_bundle(bound, bundle, producer, *, cosign,
                   artifact, artifact_archive, generator_job, expected_artifact_id, expected_generator_job_id):
     """Canonical metadata must come from the authenticated bound-repository API.
 
@@ -75,7 +97,6 @@ def verify_bundle(bound, bundle, producer, *, cosign, slsa_verifier,
             or generator_job['status'] != 'completed' or generator_job['conclusion'] != 'success'):
         raise ValueError('generator job is not the successful bound attempt')
     cosign = pinned_binary(cosign, COSIGN_SHA256)
-    verifier = pinned_binary(slsa_verifier, VERIFIER_SHA256)
     with tempfile.TemporaryDirectory(prefix='release-repair-verify-') as temporary:
         directory = Path(temporary)
         for name, content in bundle.items():
@@ -96,15 +117,7 @@ def verify_bundle(bound, bundle, producer, *, cosign, slsa_verifier,
         errors = module.verify(tag, directory, component, version, bound['commit'])
         if errors:
             raise ValueError('; '.join(errors))
-        command = [verifier, 'verify-artifact', tag + '.cdx.json', '--provenance-path', tag + '.cdx.json.intoto.jsonl',
-                   '--source-uri', 'github.com/' + bound['repository'], '--source-branch', 'main',
-                   '--builder-id', BUILDER, '--print-provenance']
-        inputs = {'tag': tag, 'expected_commit': bound['commit'], 'release_id': str(bound['release_id']),
-                  'workflow_revision': bound['workflow_revision'], 'operation': 'generate'}
-        for name, value in inputs.items():
-            command += ['--build-workflow-input', name + '=' + value]
-        result = subprocess.run(command, cwd=directory, check=True, capture_output=True)
-        # Only successful official-verifier output reaches the structural validator.
-        statement = json.loads(result.stdout)
+        statement = verify_official_statement(cosign, directory, tag + '.cdx.json',
+            tag + '.cdx.json.intoto.jsonl', bundle[tag + '.cdx.json.intoto.jsonl'])
         validate_authenticated_payload(statement, bound, producer)
     return VerifiedBundle(binding_digest(bound))

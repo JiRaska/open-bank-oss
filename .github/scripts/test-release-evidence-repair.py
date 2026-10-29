@@ -68,7 +68,7 @@ class RepairTests(unittest.TestCase):
 
     def test_signing_or_attestation_failure_zero_uploads(self):
         for message in ['signing', 'missing provenance', 'wrong subject', 'wrong producer']:
-            def reject(p, b): raise ValueError(message)
+            def reject(p, b, reason=message): raise ValueError(reason)
             with self.assertRaises(ValueError): apply(self.api, self.p, self.bundle, reject)
         self.assertEqual(self.api.posts, 0)
 
@@ -98,7 +98,7 @@ class RepairTests(unittest.TestCase):
     def test_false_none_and_wrong_receipts_never_authorize(self):
         for receipt in [False, None, True, VerifiedBundle('0' * 64)]:
             with self.subTest(receipt=receipt), self.assertRaises(ValueError):
-                apply(self.api, self.p, self.bundle, lambda p, b: receipt)
+                apply(self.api, self.p, self.bundle, lambda p, b, result=receipt: result)
         self.assertEqual(self.api.posts, 0)
 
     def test_persisted_binding_rejects_regenerated_bytes(self):

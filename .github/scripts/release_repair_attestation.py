@@ -2,7 +2,7 @@
 """Strict identity checks AFTER official SLSA cryptographic verification.
 
 This module has no CLI and does not authenticate arbitrary JSON. Its caller must
-supply only --print-provenance output from a successful pinned slsa-verifier run
+supply only the exact native bundle payload after successful pinned Cosign verification
 and canonical producer metadata from the bound repository's authenticated API.
 """
 BUILDER = 'https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.1.0'

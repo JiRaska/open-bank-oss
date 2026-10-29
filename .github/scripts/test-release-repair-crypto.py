@@ -3,6 +3,9 @@
 import subprocess
 import json
 import copy
+import base64
+import tempfile
+from pathlib import Path
 import io
 import hashlib
 import zipfile
@@ -11,7 +14,7 @@ from unittest.mock import patch
 
 from release_evidence_assets import expected_release_assets
 from release_evidence_repair import bind_bundle
-from release_repair_crypto import verify_bundle
+from release_repair_crypto import verify_bundle, verify_official_statement
 
 
 class CryptoFailureTests(unittest.TestCase):
@@ -30,9 +33,49 @@ class CryptoFailureTests(unittest.TestCase):
                         run_attempt=2, status='completed', conclusion='success')
 
     def invoke(self):
-        return verify_bundle(self.bound, self.bundle, getattr(self, 'producer', {}), cosign='/abs/cosign', slsa_verifier='/abs/verifier',
+        return verify_bundle(self.bound, self.bundle, getattr(self, 'producer', {}), cosign='/abs/cosign',
             artifact=self.artifact, artifact_archive=self.archive, generator_job=self.job, expected_artifact_id=31,
             expected_generator_job_id=29)
+
+    def test_native_bundle_payload_only_after_successful_exact_crypto_command(self):
+        from release_repair_attestation import BUILDER
+        statement = {'_type': 'synthetic-test-only'}
+        native = {'mediaType': 'application/vnd.dev.sigstore.bundle.v0.3+json',
+            'dsseEnvelope': {'payloadType': 'application/vnd.in-toto+json',
+                'payload': base64.b64encode(json.dumps(statement).encode()).decode()}}
+        raw = json.dumps(native).encode()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); (root / 'proof').write_bytes(raw)
+            with patch('release_repair_crypto.subprocess.run', return_value=subprocess.CompletedProcess([], 0)) as execute:
+                self.assertEqual(verify_official_statement('/pinned/cosign', root, 'sbom', 'proof', raw), statement)
+                self.assertEqual(execute.call_args.args[0], ['/pinned/cosign', 'verify-blob-attestation', '--bundle', 'proof',
+                    '--certificate-identity', BUILDER, '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
+                    '--type', 'slsaprovenance02', '--check-claims=true', 'sbom'])
+                self.assertTrue(execute.call_args.kwargs['check'])
+            with patch('release_repair_crypto.subprocess.run', side_effect=subprocess.CalledProcessError(1, 'cosign')), \
+                    patch('release_repair_crypto.json.loads') as parse:
+                with self.assertRaises(subprocess.CalledProcessError): verify_official_statement('/pinned/cosign', root, 'sbom', 'proof', raw)
+                parse.assert_not_called()
+            (root / 'proof').write_bytes(b'changed')
+            with patch('release_repair_crypto.subprocess.run') as execute, self.assertRaises(ValueError):
+                verify_official_statement('/pinned/cosign', root, 'sbom', 'proof', raw)
+            execute.assert_not_called()
+
+    def test_no_legacy_or_wrong_native_payload_fallback(self):
+        import binascii
+        variants = [
+            {'payload': 'legacy'},
+            {'mediaType': 'application/vnd.dev.sigstore.bundle.v0.2+json'},
+            {'mediaType': 'application/vnd.dev.sigstore.bundle.v0.3+json', 'dsseEnvelope': {'payloadType': 'other'}},
+            {'mediaType': 'application/vnd.dev.sigstore.bundle.v0.3+json', 'dsseEnvelope': {'payloadType': 'application/vnd.in-toto+json', 'payload': '!invalid!'}},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for native in variants:
+                raw = json.dumps(native).encode(); (root / 'proof').write_bytes(raw)
+                with self.subTest(native=native), patch('release_repair_crypto.subprocess.run', return_value=subprocess.CompletedProcess([], 0)), \
+                        self.assertRaises((ValueError, binascii.Error)):
+                    verify_official_statement('/pinned/cosign', root, 'sbom', 'proof', raw)
 
     def test_wrong_artifact_run_or_name_never_executes(self):
         for key, bad in [('id', 32), ('name', ''), ('expired', True), ('workflow_run', {'id': 20})]:

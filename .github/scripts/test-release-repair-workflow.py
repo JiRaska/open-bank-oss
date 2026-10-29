@@ -58,7 +58,6 @@ class WorkflowTests(unittest.TestCase):
 
     def test_append_only_transport_binds_release_and_refuses_redirects(self):
         from release_repair_api import AppendOnlyGitHub
-        import types
         api = AppendOnlyGitHub('example/repo', lambda tag: 'a' * 40, 3)
         response = unittest.mock.MagicMock()
         response.__enter__.return_value.status = 201
@@ -239,6 +238,41 @@ class WorkflowTests(unittest.TestCase):
         for status in ('behind', 'diverged', 'unknown'):
             with self.assertRaisesRegex(ValueError, 'not proven included'): self.plan(comparison_status=status)
             self.assertFalse((self.root / '.repair-bundle').exists())
+
+    def test_generation_uses_maintained_signer_preserving_detached_tlog_policy(self):
+        from release_repair_crypto import SIGNING_KEY, COSIGN_LINUX_SHA256
+        helper = self.root / '.github/scripts/prepare-release-evidence.py'
+        helper.write_text("def remote_commit(root, tag): return 'a' * 40\ndef prepare(*args, **kwargs): return 'a' * 40\ndef require_remote(*args): pass\n")
+        tag = self.env['REPAIR_TAG']
+        for suffix in ('.cdx.json', '.slsa.json', '.vex.json', '.evidence.json'):
+            (self.root / (tag + suffix)).write_bytes(b'unsigned-fixture')
+        class API:
+            def __init__(self, repository, resolver): self.tag_commit = resolver
+            def get(self, endpoint): return {'status': 'ahead', 'ahead_by': 1, 'behind_by': 0, 'merge_base_commit': {'sha': 'a' * 40}, 'base_commit': {'sha': 'a' * 40}}
+            def release(self, tag): return {'id': 7, 'tag_name': tag}
+            def assets(self, release_id): return []
+        def execute(command, **kwargs):
+            self.assertTrue(kwargs['check'])
+            if command[1] == 'sign-blob':
+                self.assertEqual(command[2:9], ['--yes', '--new-bundle-format=false', '--use-signing-config=false',
+                    '--tlog-upload=true', '--key', SIGNING_KEY, '--output-signature'])
+                (self.root / command[9]).write_bytes(b'detached-signature-fixture')
+            else:
+                self.assertEqual(command[1:4], ['verify-blob', '--key', SIGNING_KEY])
+                self.assertFalse(any('ignore' in arg or 'insecure' in arg for arg in command))
+        env = self.env | {'RUNNER_TEMP': str(self.root), 'GITHUB_OUTPUT': str(self.root / 'outputs')}
+        with patch.dict(os.environ, env, clear=True), patch('sys.argv', ['prepare', 'generate']), \
+                patch.object(PREPARE.Path, 'cwd', return_value=self.root), \
+                patch.object(PREPARE.subprocess, 'check_output', return_value='b' * 40), \
+                patch.object(PREPARE, 'ReadOnlyGitHub', API), patch.object(PREPARE, 'tool', return_value='/pinned/cosign') as tool, \
+                patch.object(PREPARE.subprocess, 'run', side_effect=execute) as run:
+            PREPARE.main()
+            self.assertEqual(tool.call_args.args[2], 'https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-amd64')
+            self.assertEqual(tool.call_args.args[3], COSIGN_LINUX_SHA256)
+            self.assertEqual(run.call_count, 8)
+        files = list((self.root / '.repair-bundle').iterdir())
+        self.assertEqual(len(files), 9)  # Eight bytes plus plan, before official provenance.
+        self.assertEqual(len(json.loads((self.root / '.repair-bundle/repair-plan.json').read_text())['sha256']), 8)
 
     def test_actual_plan_entrypoint_does_not_build_install_or_sign(self):
         self.plan()

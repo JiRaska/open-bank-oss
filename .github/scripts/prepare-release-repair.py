@@ -14,7 +14,7 @@ import urllib.request
 
 from release_evidence_repair import plan, require_member_size
 from release_repair_api import ReadOnlyGitHub, require_main_inclusion
-from release_repair_crypto import SIGNING_KEY
+from release_repair_crypto import SIGNING_KEY, COSIGN_LINUX_SHA256
 
 
 def tool(directory, name, url, digest):
@@ -22,7 +22,9 @@ def tool(directory, name, url, digest):
     target = directory / name
     with urllib.request.urlopen(url) as response, target.open('wb') as output:
         shutil.copyfileobj(response, output)
-    if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+    with target.open('rb') as source:
+        actual = hashlib.file_digest(source, 'sha256').hexdigest()
+    if actual != digest:
         target.unlink()
         raise ValueError('official verification tool digest mismatch')
     target.chmod(0o700)
@@ -68,11 +70,13 @@ def main():
     for suffix in ['.cdx.json', '.slsa.json', '.vex.json', '.evidence.json']:
         require_member_size((root / (request['tag'] + suffix)).stat().st_size)
     cosign = tool(Path(env['RUNNER_TEMP']) / 'repair-tools', 'cosign',
-        'https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign-linux-amd64',
-        'caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708')
+        'https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-amd64',
+        COSIGN_LINUX_SHA256)
     for suffix in ['.cdx.json', '.slsa.json', '.vex.json', '.evidence.json']:
         name = request['tag'] + suffix
-        subprocess.run([cosign, 'sign-blob', '--yes', '--key', SIGNING_KEY, '--output-signature', name + '.sig', name], check=True)
+        subprocess.run([cosign, 'sign-blob', '--yes', '--new-bundle-format=false',
+            '--use-signing-config=false', '--tlog-upload=true', '--key', SIGNING_KEY,
+            '--output-signature', name + '.sig', name], check=True)
         require_member_size((root / (name + '.sig')).stat().st_size)
         subprocess.run([cosign, 'verify-blob', '--key', SIGNING_KEY, '--signature', name + '.sig', name], check=True)
         for asset in [name, name + '.sig']:

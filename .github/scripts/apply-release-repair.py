@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Publish only an independently verified, immutable prior no-apply generation."""
-import hashlib
 import importlib.util
 import json
 import os
@@ -13,7 +12,7 @@ from release_evidence_assets import expected_release_assets
 from release_evidence_repair import apply, binding_digest
 from release_repair_api import AppendOnlyGitHub, require_main_inclusion
 from release_repair_attestation import WORKFLOW
-from release_repair_crypto import verify_bundle
+from release_repair_crypto import verify_bundle, COSIGN_LINUX_SHA256
 
 # Fixed trust closure; a changed implementation requires a fresh no-apply run.
 TRUSTED_PATHS = (
@@ -93,12 +92,10 @@ def main():
     if len(selected) != 1:
         raise ValueError('original generator job missing')
     tools = Path(env['RUNNER_TEMP']) / 'repair-apply-tools'
-    cosign = prepare.tool(tools, 'cosign', 'https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign-linux-amd64',
-        'caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708')
-    verifier = prepare.tool(tools, 'slsa-verifier', 'https://github.com/slsa-framework/slsa-verifier/releases/download/v2.7.1/slsa-verifier-linux-amd64',
-        '946dbec729094195e88ef78e1734324a27869f03e2c6bd2f61cbc06bd5350339')
+    cosign = prepare.tool(tools, 'cosign', 'https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-amd64',
+        COSIGN_LINUX_SHA256)
     def authenticate(binding, bundle):
-        return verify_bundle(binding, bundle, producer, cosign=cosign, slsa_verifier=verifier,
+        return verify_bundle(binding, bundle, producer, cosign=cosign,
             artifact=provenance, artifact_archive=provenance_archive, generator_job=selected[0],
             expected_artifact_id=receipt['provenanceArtifactId'], expected_generator_job_id=receipt['generatorJobId'])
     hashes = apply(api, bound, files, authenticate, resume=True)
