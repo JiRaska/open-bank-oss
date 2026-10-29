@@ -3,7 +3,8 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Async Event API
-  version: 2.4.0
+  # 2.4.0 -> 2.5.0 (#13179): additive minimal oversight-trigger channel and payload.
+  version: 2.5.0
   description: |
     Kafka event streams across OpenBank services.
 
@@ -258,6 +259,18 @@ channels:
         $ref: '#/components/messages/AmlCaseCreated'
       AmlCaseStatusChanged:
         $ref: '#/components/messages/AmlCaseStatusChanged'
+
+  oversight-triggers:
+    address: openbank.oversight-triggers
+    description: |
+      Minimal wake-up notifications for agent-service's immediate compliance sweep (ADR-0031 D9).
+      aml-service produces HIGH/CRITICAL case-creation triggers; sanctions-service produces
+      high-risk screening triggers. Both fan out from their durable outbox and preserve the source
+      event's `ce-id`, `ce-type` and partition key. The body deliberately excludes customer,
+      screening and match PII; the consumer needs no payload fields to start its sweep.
+    messages:
+      OversightTrigger:
+        $ref: '#/components/messages/OversightTrigger'
 
   party-events:
     address: openbank.party.events
@@ -784,6 +797,13 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/AmlCaseStatusChangedPayload'
+
+    OversightTrigger:
+      name: OversightTrigger
+      description: 'Minimal sourceService + occurredAt wake-up; source ce-id/ce-type headers are retained.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/OversightTriggerPayload'
 
     PartyEvent:
       name: PartyEvent
@@ -1610,6 +1630,18 @@ components:
           type: [string, 'null']
         matchedEntity:
           type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+
+    OversightTriggerPayload:
+      type: object
+      additionalProperties: false
+      required: [sourceService, occurredAt]
+      properties:
+        sourceService:
+          type: string
+          enum: [aml-service, sanctions-service]
         occurredAt:
           type: string
           format: date-time
