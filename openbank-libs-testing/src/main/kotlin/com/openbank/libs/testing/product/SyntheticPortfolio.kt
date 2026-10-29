@@ -2,9 +2,6 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-// Distribution shares, amount bands and day offsets are the portfolio's shape; naming each adds nothing.
-@file:Suppress("MagicNumber")
-
 package com.openbank.libs.testing.product
 
 import com.openbank.libs.product.ir.EventKind
@@ -22,6 +19,7 @@ import io.kotest.property.arbitrary.int
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
+import java.time.Month
 
 /**
  * Shape of a synthetic portfolio (ADR-0352 phase 4). [tierBoundaries] are the balances a product
@@ -60,25 +58,24 @@ object SyntheticPortfolio {
 
     /** An account generator, curried on its id so the id is positional and stable. */
     private fun account(shape: PortfolioShape): Arb<(String) -> ReplayAccount> = arbitrary {
-        val boundaryIndex = Arb.int(0, 9).bind()
-        val balance = if (shape.tierBoundaries.isNotEmpty() && boundaryIndex == 0) {
+        val onBoundary = Arb.int(1, PERCENT).bind() <= BOUNDARY_PERCENT
+        val balance = if (shape.tierBoundaries.isNotEmpty() && onBoundary) {
             val edge = shape.tierBoundaries[Arb.int(0, shape.tierBoundaries.size - 1).bind()]
-            edge + BigDecimal(Arb.int(-1, 1).bind()).movePointLeft(2)
+            edge + BigDecimal(Arb.int(-1, 1).bind()).movePointLeft(AMOUNT_SCALE)
         } else {
             balance().bind()
-        }.max(BigDecimal.ZERO).setScale(2)
-        val opensInside = Arb.int(0, 9).bind() < 2
+        }.max(BigDecimal.ZERO).setScale(AMOUNT_SCALE)
+        val opensInside = Arb.int(1, PERCENT).bind() <= OPENS_INSIDE_PERCENT
+        val onLeapDay = Arb.int(1, PERCENT).bind() <= LEAP_DAY_PERCENT
         val rangeDays = shape.from.until(shape.to).days.coerceAtLeast(0)
         val openedOn = if (opensInside) {
-            leapDayIn(shape) ?: shape.from.plusDays(Arb.int(0, rangeDays.coerceAtMost(365)).bind().toLong())
+            (if (onLeapDay) leapDayIn(shape) else null)
+                ?: shape.from.plusDays(Arb.int(0, rangeDays.coerceAtMost(DAYS_IN_YEAR)).bind().toLong())
         } else {
-            shape.from.minusDays(Arb.int(31, 2000).bind().toLong())
+            shape.from.minusDays(Arb.int(MIN_AGE_DAYS, MAX_AGE_DAYS).bind().toLong())
         }
         val pattern = Pattern.entries[Arb.int(0, Pattern.entries.size - 1).bind()]
-        val salary = Arb.bigDecimal(
-            BigDecimal("900.00"),
-            BigDecimal("6000.00"),
-        ).bind().setScale(2, RoundingMode.HALF_UP)
+        val salary = Arb.bigDecimal(SALARY_MIN, SALARY_MAX).bind().setScale(AMOUNT_SCALE, RoundingMode.HALF_UP)
         val postingSeed = Arb.int(0, Int.MAX_VALUE).bind()
         val build: (String) -> ReplayAccount = { id ->
             val start = if (openedOn.isAfter(shape.from)) openedOn else shape.from
@@ -91,18 +88,18 @@ object SyntheticPortfolio {
         build
     }
 
+    /** A balance from a skewed retail distribution: [BALANCE_BANDS] by cumulative share. */
     private fun balance(): Arb<BigDecimal> = arbitrary {
-        when (Arb.int(0, 99).bind()) {
-            in 0..34 -> Arb.bigDecimal(BigDecimal("0.00"), BigDecimal("1000.00")).bind()
-            in 35..74 -> Arb.bigDecimal(BigDecimal("1000.00"), BigDecimal("10000.00")).bind()
-            in 75..94 -> Arb.bigDecimal(BigDecimal("10000.00"), BigDecimal("100000.00")).bind()
-            else -> Arb.bigDecimal(BigDecimal("100000.00"), BigDecimal("2000000.00")).bind()
-        }.setScale(2, RoundingMode.HALF_UP)
+        val roll = Arb.int(1, PERCENT).bind()
+        val band = BALANCE_BANDS.first { roll <= it.cumulativePercent }
+        Arb.bigDecimal(band.low, band.high).bind().setScale(AMOUNT_SCALE, RoundingMode.HALF_UP)
     }
+
+    private data class Band(val cumulativePercent: Int, val low: BigDecimal, val high: BigDecimal)
 
     private fun leapDayIn(shape: PortfolioShape): LocalDate? = (shape.from.year..shape.to.year).asSequence()
         .filter { java.time.Year.isLeap(it.toLong()) }
-        .map { LocalDate.of(it, 2, 29) }
+        .map { LocalDate.of(it, Month.FEBRUARY, LEAP_DAY) }
         .firstOrNull { !it.isBefore(shape.from) && !it.isAfter(shape.to) }
 
     /** Event behaviour classes: who earns, who spends, who saves. */
@@ -149,9 +146,9 @@ object SyntheticPortfolio {
 
     /** One day in four a card payment; one in fifty of those deliberately more than the balance holds. */
     private fun spend(random: Lcg, running: BigDecimal, overdraft: Boolean): Posting? {
-        if (random.next(4) != 0) return null
-        val amount = BigDecimal(random.next(20_000) + 1).movePointLeft(2)
-        val attempt = random.next(50) == 0
+        if (random.next(SPEND_ONE_IN) != 0) return null
+        val amount = BigDecimal(random.next(SPEND_MAX_CENTS) + 1).movePointLeft(AMOUNT_SCALE)
+        val attempt = random.next(OVERDRAW_ATTEMPT_ONE_IN) == 0
         return if (attempt ||
             overdraft ||
             amount <= running
@@ -164,8 +161,8 @@ object SyntheticPortfolio {
 
     /** About one day in thirty a cash withdrawal, within the balance unless overdraft is allowed. */
     private fun withdraw(random: Lcg, running: BigDecimal, overdraft: Boolean): Posting? {
-        if (random.next(30) != 0) return null
-        val amount = BigDecimal(random.next(50_000) + 1).movePointLeft(2)
+        if (random.next(WITHDRAW_ONE_IN) != 0) return null
+        val amount = BigDecimal(random.next(WITHDRAW_MAX_CENTS) + 1).movePointLeft(AMOUNT_SCALE)
         return if (overdraft ||
             amount <= running
         ) {
@@ -177,11 +174,46 @@ object SyntheticPortfolio {
 
     /** A linear-congruential sequence: cheap for a multi-year stream and a pure function of its seed. */
     private class Lcg(seed: Int) {
-        private var state = seed.toLong() and 0x7fffffffL
+        private var state = seed.toLong() and MASK
 
         fun next(bound: Int): Int {
-            state = (state * 1_103_515_245L + 12_345L) and 0x7fffffffL
+            state = (state * MULTIPLIER + INCREMENT) and MASK
             return (state % bound).toInt()
         }
+
+        private companion object {
+            // The classic ANSI C constants, modulo 2^31.
+            const val MULTIPLIER = 1_103_515_245L
+            const val INCREMENT = 12_345L
+            const val MASK = 0x7fffffffL
+        }
     }
+
+    private const val PERCENT = 100
+    private const val SMALL_UP_TO = 35
+    private const val MID_UP_TO = 75
+    private const val UPPER_UP_TO = 95
+    private const val BOUNDARY_PERCENT = 10
+    private const val OPENS_INSIDE_PERCENT = 20
+    private const val LEAP_DAY_PERCENT = 10
+    private const val AMOUNT_SCALE = 2
+    private const val DAYS_IN_YEAR = 365
+    private const val MIN_AGE_DAYS = 31
+    private const val MAX_AGE_DAYS = 2000
+    private const val LEAP_DAY = 29
+    private const val SPEND_ONE_IN = 4
+    private const val SPEND_MAX_CENTS = 20_000
+    private const val OVERDRAW_ATTEMPT_ONE_IN = 50
+    private const val WITHDRAW_ONE_IN = 30
+    private const val WITHDRAW_MAX_CENTS = 50_000
+    private val SALARY_MIN = BigDecimal("900.00")
+    private val SALARY_MAX = BigDecimal("6000.00")
+
+    /** 35 % under 1 000, 40 % to 10 000, 20 % to 100 000, a 5 % tail to 2 000 000. */
+    private val BALANCE_BANDS = listOf(
+        Band(SMALL_UP_TO, BigDecimal("0.00"), BigDecimal("1000.00")),
+        Band(MID_UP_TO, BigDecimal("1000.00"), BigDecimal("10000.00")),
+        Band(UPPER_UP_TO, BigDecimal("10000.00"), BigDecimal("100000.00")),
+        Band(PERCENT, BigDecimal("100000.00"), BigDecimal("2000000.00")),
+    )
 }

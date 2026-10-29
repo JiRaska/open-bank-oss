@@ -89,7 +89,6 @@ class ProductBehaviourDiffBench {
         const val GOLDEN = "/product-golden/savings-bonus-predicate-event-window.json"
 
         /** The golden savings revision with its base rate replaced. */
-        @Suppress("UNCHECKED_CAST")
         fun revision(rate: String): ProductRevisionIr {
             val text = checkNotNull(
                 ProductBehaviourDiffBench::class.java.getResourceAsStream(
@@ -97,9 +96,12 @@ class ProductBehaviourDiffBench {
                 ),
             )
                 .readBytes().toString(Charsets.UTF_8)
-            val tree = (IrJson.parse(text) as Map<String, Any?>)["revision"] as Map<String, Any?>
-            val interest = tree["interest"] as Map<String, Any?>
+            val tree = (IrJson.parse(text).obj())["revision"].obj()
+            val interest = tree["interest"].obj()
             return ProductIrParser.fromTree(tree + ("interest" to interest + ("rate" to rate)))
         }
     }
 }
+
+/** Typed views of a parsed JSON tree, checked per key instead of an unchecked cast. */
+private fun Any?.obj(): Map<String, Any?> = (this as Map<*, *>).entries.associate { (k, v) -> k as String to v }

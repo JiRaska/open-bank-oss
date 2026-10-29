@@ -36,8 +36,7 @@ class ProductBacktestTest {
     private fun plus25bp(): ProductRevisionIr {
         val tree = ReferenceProducts.savingsFixed.tree
 
-        @Suppress("UNCHECKED_CAST")
-        val interest = tree["interest"] as Map<String, Any?>
+        val interest = tree["interest"].obj()
         val rate = BigDecimal(interest["rate"].toString()) + BigDecimal("0.0025")
         return ProductIrParser.fromTree(tree + ("interest" to interest + ("rate" to rate.toPlainString())))
     }
@@ -68,8 +67,7 @@ class ProductBacktestTest {
 
         val d = diff.diff(revA, revB, portfolio, range)
 
-        @Suppress("UNCHECKED_CAST")
-        val rows = (d.tree["aggregate"] as Map<String, Any?>)["posted"] as List<Map<String, Any?>>
+        val rows = d.tree["aggregate"].obj()["posted"].rows()
         assertThat(rows.map { "${it["ruleId"]}/${it["accountingClass"]}" })
             .containsExactly("interest.base/ACCRUED_INTEREST_PAYABLE", "interest.base/INTEREST_EXPENSE")
         val reported = BigDecimal(rows.first()["deltaNet"] as String)
@@ -99,15 +97,13 @@ class ProductBacktestTest {
         println("DETERMINISM sha256 run1=$h1 run2=$h2 bytes=${again.length}")
         assertThat(h2).isEqualTo(h1)
 
-        @Suppress("UNCHECKED_CAST")
-        val rows = (first.tree["aggregate"] as Map<String, Any?>)["posted"] as List<Map<String, Any?>>
+        val rows = first.tree["aggregate"].obj()["posted"].rows()
         val base = rows.single {
             it["ruleId"] == "interest.base" && it["accountingClass"] == "ACCRUED_INTEREST_PAYABLE"
         }
         assertThat(BigDecimal(base["deltaNet"] as String)).isPositive()
         assertThat((first.tree["portfolio"] as Map<*, *>)["seed"]).isEqualTo("2027")
-        @Suppress("UNCHECKED_CAST")
-        val conservation = first.tree["conservation"] as Map<String, Map<String, Any?>>
+        val conservation = first.tree["conservation"].obj().mapValues { it.value.obj() }
         assertThat(conservation.values).allMatch { it["conserved"] == true }
     }
 
@@ -117,3 +113,8 @@ class ProductBacktestTest {
         return SyntheticPortfolio.generate(2027L, 150, shape) to range
     }
 }
+
+/** Typed views of a parsed JSON tree, checked per key instead of an unchecked cast. */
+private fun Any?.obj(): Map<String, Any?> = (this as Map<*, *>).entries.associate { (k, v) -> k as String to v }
+
+private fun Any?.rows(): List<Map<String, Any?>> = (this as List<*>).map { it.obj() }

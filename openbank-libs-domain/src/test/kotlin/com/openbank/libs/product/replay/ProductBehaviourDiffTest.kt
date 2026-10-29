@@ -34,11 +34,9 @@ class ProductBehaviourDiffTest {
     private val year = ReplayRange(from, LocalDate.of(2028, 12, 31), ZoneOffset.UTC)
 
     private fun withRate(base: String, rate: String): ProductRevisionIr {
-        @Suppress("UNCHECKED_CAST")
-        val tree = IrJson.parse(base) as Map<String, Any?>
+        val tree = IrJson.parse(base).obj()
 
-        @Suppress("UNCHECKED_CAST")
-        val interest = tree["interest"] as Map<String, Any?>
+        val interest = tree["interest"].obj()
         return ProductIrParser.fromTree(tree + ("interest" to interest + ("rate" to rate)))
     }
 
@@ -77,8 +75,7 @@ class ProductBehaviourDiffTest {
         assertThat(d.tree["accounts"] as List<*>).isEmpty()
         assertThat(d.tree["signChanged"] as List<*>).isEmpty()
         assertThat(d.tree["thresholdCrossed"] as List<*>).isEmpty()
-        @Suppress("UNCHECKED_CAST")
-        val aggregate = d.tree["aggregate"] as Map<String, Any?>
+        val aggregate = d.tree["aggregate"].obj()
         assertThat(aggregate["posted"] as List<*>).isEmpty()
         assertThat(aggregate["instructionCounts"] as List<*>).isEmpty()
         assertThat(d.a.conserved).isTrue()
@@ -106,8 +103,7 @@ class ProductBehaviourDiffTest {
         val expected = (BigDecimal("3650.00") + BigDecimal("36500.00")) * BigDecimal("0.0025") /
             BigDecimal(365) * BigDecimal(30)
 
-        @Suppress("UNCHECKED_CAST")
-        val rows = (d.tree["aggregate"] as Map<String, Any?>)["posted"] as List<Map<String, Any?>>
+        val rows = d.tree["aggregate"].obj()["posted"].rows()
         assertThat(rows.map { it["ruleId"] to it["accountingClass"] }).containsExactly(
             "interest.base" to "ACCRUED_INTEREST_PAYABLE",
             "interest.base" to "INTEREST_EXPENSE",
@@ -214,11 +210,9 @@ class ProductBehaviourDiffTest {
 
     @Test
     fun `quarterly and annual schedules fire at period ends and on-event never`() {
-        @Suppress("UNCHECKED_CAST")
-        val tree = IrJson.parse(IrFixtures.savingsJson) as Map<String, Any?>
+        val tree = IrJson.parse(IrFixtures.savingsJson).obj()
 
-        @Suppress("UNCHECKED_CAST")
-        val hooks = tree["hooks"] as Map<String, Any?>
+        val hooks = tree["hooks"].obj()
         fun sched(id: String, tag: String, cadence: Cadence) = mapOf(
             "ruleId" to id,
             "action" to mapOf("type" to "SCHEDULE", "hook" to "scheduled", "tag" to tag, "cadence" to cadence.name),
@@ -291,3 +285,8 @@ class ProductBehaviourDiffTest {
         assertThat(ReplayListener.NONE.onDayEnd(from)).isEqualTo(Unit)
     }
 }
+
+/** Typed views of a parsed JSON tree, checked per key instead of an unchecked cast. */
+private fun Any?.obj(): Map<String, Any?> = (this as Map<*, *>).entries.associate { (k, v) -> k as String to v }
+
+private fun Any?.rows(): List<Map<String, Any?>> = (this as List<*>).map { it.obj() }
