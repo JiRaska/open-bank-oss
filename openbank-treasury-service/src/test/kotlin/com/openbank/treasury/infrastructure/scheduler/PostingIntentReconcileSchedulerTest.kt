@@ -51,6 +51,12 @@ class PostingIntentReconcileSchedulerTest {
     }
 
     @Test
+    fun `the applied-after-close counter is exposed at 0 from boot, before any late journal`() {
+        scheduler(enabled = false)
+        assertThat(registry.get("openbank.treasury.posting_intents.applied_after_close").counter().count()).isZero()
+    }
+
+    @Test
     fun `unreadable evidence is -1, and a switched-off reconciler still observes`(): Unit = runBlocking {
         coEvery { intents.summary() } throws IllegalStateException("database down")
         scheduler(enabled = false).run()

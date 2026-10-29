@@ -114,6 +114,7 @@ class InterestAccrualScheduler(
             if (closedDay > 0) "$closedDay ${TreasuryCloseJobs.REASON_DAY_CLOSED}" else null,
             if (otherFailed > 0) "$otherFailed ${TreasuryCloseJobs.REASON_DEAL_FAILED}" else null,
             if (r.unassessed > 0) "${r.unassessed} ${TreasuryCloseJobs.REASON_ACCRUAL_UNFINISHED}" else null,
+            if (r.deferred > 0) "${r.deferred} ${TreasuryCloseJobs.REASON_ACCRUAL_DEFERRED}" else null,
         )
         TreasuryCloseJobs.record(
             closeJobRuns,
@@ -121,7 +122,9 @@ class InterestAccrualScheduler(
             asOf,
             TreasuryCloseJobs.ACCRUAL,
             items = r.deals,
-            refused = r.failures.size + r.unassessed,
+            // #13883: a deferred deal is assessed for liveness and healing (the pass did all it could),
+            // but in the DAY report it is unaccrued, so the day is not reported RAN without it.
+            refused = r.failures.size + r.unassessed + r.deferred,
             reason = reasons.joinToString("; ").ifBlank { null },
         ).awaitSuspending()
     }

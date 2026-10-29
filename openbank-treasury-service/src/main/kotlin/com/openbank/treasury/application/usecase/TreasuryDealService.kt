@@ -406,15 +406,18 @@ class TreasuryDealService(
         check(deal.product.legacy || deal.state != DealState.SETTLED) {
             "a settled ${deal.product} deal is changed by a correction (ADR-0344 D7), not reversed"
         }
+        // The journals this reversal offsets. Re-checked once its intent exists (which stops any
+        // further accrual): one posted in between would be left unreversed, so it is refused instead.
+        val seen = deals.journals(deal.id)
         val accrued = if (deal.state == DealState.SETTLED) accruedSoFar(deal) else BigDecimal.ZERO
         val ref = PostingRules.reversal(reversed, deal.state, accrued)
             ?.let {
                 postIntended(
-                    pinToPostedAccounts(deal, it, deals.journals(deal.id)),
+                    pinToPostedAccounts(deal, it, seen),
                     bankToday(),
                     "treasury ${deal.product} reversal",
                     Intended(PostingIntentAction.REVERSE, actor, key, reason),
-                )
+                ) { intent -> requireNoJournalSince(deal.id, seen, intent) }
             }
         val event = DealEvent(
             DealReversed.EVENT_TYPE,
@@ -593,27 +596,31 @@ class TreasuryDealService(
         deadline: Instant = Instant.MAX,
     ): AccrualProgress {
         if (!deal.product.legacy) return AccrualProgress(0, true)
-        // #13883 review: a deal with an open settle/mature/reverse intent is not accrued further. A
-        // reversal resumed later re-posts its key and the ledger keeps the ORIGINAL journal, which
-        // offsets only the accruals that existed when it was decided; a newer accrual would be left
-        // unreversed.
+        // #13883 review: a deal is not accrued while a reversal or maturity of it may already hold a
+        // journal in the ledger: an OPEN intent of any kind, or a reversal/maturity intent an
+        // operator CLOSED (the ledger may have its journal although the deal still reads SETTLED).
+        // A re-issue re-posts the same key and the ledger keeps the ORIGINAL journal, which offsets
+        // only the accruals that existed when it was decided; a newer accrual would never be offset.
+        // The deal stays deferred until that command is re-issued and completes.
         //
-        // The deferral is scoped to THIS deal: it is counted as assessed-and-deferred and the pass
-        // still completes, so every other deal accrues, liveness and healing are unaffected, and no
-        // day is REFUSED for it. Whole-pass refusal is not what the day-close contract needs: the
-        // open intent already holds its own value day, and the deferred days are either never owed
-        // (the reversal or maturity completes, and neither path accrues past its decision; reverse()
-        // never catches up accruals) or, if the intent is closed and the deal stays SETTLED, posted
-        // by a later pass valued on their own days, which the late-journal path re-reports
-        // (openbank.treasury.close.late_journals). Counted in AccrualRun.deferred and logged.
-        if (intents.openFor(deal.id).isNotEmpty()) {
-            log.log(System.Logger.Level.INFO, "deal {0}: accrual deferred, a posting intent is open", deal.id)
-            return AccrualProgress(0, complete = true, deferred = true)
-        }
+        // Scope: THIS deal only. Every other deal accrues and the pass completes, so liveness and
+        // healing are unaffected. In the DAY report the deferred deal counts as unaccrued
+        // (InterestAccrualScheduler adds AccrualRun.deferred to the refusals), so a day is never
+        // reported RAN without it. Checked again before EVERY day (a reversal can be decided while a
+        // long catch-up runs); reverse() re-checks the journals once its intent exists.
         var day = (lastAccrued(deal) ?: deal.valueDate).plusDays(1)
         var posted = 0
         while (!day.isAfter(through)) {
             if (clock.instant().isAfter(deadline)) return AccrualProgress(posted, false)
+            if (intents.blocksAccrual(deal.id)) {
+                log.log(
+                    System.Logger.Level.INFO,
+                    "deal {0}: accrual deferred from {1}, a posting intent may hold a journal",
+                    deal.id,
+                    day,
+                )
+                return AccrualProgress(posted, complete = true, deferred = true)
+            }
             PostingRules.accrual(deal, day)?.let { spec ->
                 post(spec, day, "treasury ${deal.product} accrual $day")
                 posted++
@@ -711,6 +718,7 @@ class TreasuryDealService(
         valueDate: LocalDate,
         description: String,
         intended: Intended,
+        beforePost: suspend (PostingIntent) -> Unit = {},
     ): LedgerJournalRef {
         val intent = intents.open(
             PostingIntent(
@@ -730,6 +738,7 @@ class TreasuryDealService(
             return deals.journals(spec.dealId).firstOrNull { it.idempotencyKey == spec.idempotencyKey }
                 ?: error("posting intent ${spec.idempotencyKey} is COMPLETED but its journal is not recorded")
         }
+        beforePost(intent)
         return try {
             post(spec, intent.valueDate, description)
         } catch (e: Exception) {
@@ -830,6 +839,22 @@ class TreasuryDealService(
 
     private fun describe(e: Throwable): String =
         "${e.javaClass.simpleName}: ${e.message.orEmpty()}".take(MAX_ERROR_LENGTH)
+
+    /**
+     * #14220 review: a journal recorded for the deal after the reversal read [seen] and before its
+     * intent existed (an accrual pass already past its per-day check). The reversal would not offset
+     * it, so it does not post. A fresh intent is closed REFUSED (nothing reached the ledger; re-issue
+     * the reversal); a resumed one stays OPEN for an operator, since an earlier attempt may have posted.
+     */
+    private suspend fun requireNoJournalSince(dealId: UUID, seen: List<LedgerJournalRef>, intent: PostingIntent) {
+        val known = seen.map { it.idempotencyKey }.toSet()
+        val since = deals.journals(dealId).filter { it.idempotencyKey !in known }
+        if (since.isEmpty()) return
+        val reason = "journal(s) ${since.joinToString { it.idempotencyKey }} recorded while the reversal was " +
+            "being decided; re-issue the reversal"
+        if (intent.fresh) intents.refuse(intent.idempotencyKey, reason)
+        throw com.openbank.treasury.application.port.out.DealChangedException(reason)
+    }
 
     private suspend fun limitCheck(deal: Deal): LimitCheck {
         val cp = counterparties.findById(deal.counterpartyId) ?: throw UnknownCounterpartyException(deal.counterpartyId)

@@ -145,6 +145,7 @@ class PostingIntentReconcileIT {
         raceId = draftAndSubmit("4322.00")
         closeId = draftAndSubmit("4323.00")
         lateId = draftAndSubmit("4324.00")
+        closedReversalId = draftAndSubmit("4325.00")
     }
 
     @Test
@@ -288,7 +289,11 @@ class PostingIntentReconcileIT {
         val key = "treasury:$lateId:settled"
         action(lateId, "approve").then().statusCode(200)
         action(lateId, "confirm").then().statusCode(200)
-        val before = meters.find("openbank.treasury.posting_intents.applied_after_close").counter()?.count() ?: 0.0
+        // Registered at 0 at boot: increase() cannot alert on a series born at 1.
+        val counter = meters.find("openbank.treasury.posting_intents.applied_after_close").counter()
+        assertThat(counter).describedAs("exposed before any late journal").isNotNull()
+        val before = counter!!.count()
+        assertThat(before).isZero()
         // The close lands while this very settle is between the ledger's answer and its local commit.
         ledger.afterCommit = {
             jdbcUpdate(
@@ -313,6 +318,41 @@ class PostingIntentReconcileIT {
         assertThat(late).containsExactly("CLOSED_BY_OPERATOR")
         assertThat(meters.find("openbank.treasury.posting_intents.applied_after_close").counter()!!.count())
             .isEqualTo(before + 1)
+    }
+
+    @Test
+    @Order(13)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `13 - an operator-closed reversal whose journal the ledger holds keeps the deal from accruing`() {
+        val id = closedReversalId
+        val key = "treasury:$id:reversed"
+        action(id, "approve").then().statusCode(200)
+        action(id, "confirm").then().statusCode(200)
+        action(id, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
+        ledger.loseNextResponse = true
+        given().contentType("application/json").header("Idempotency-Key", UUID.randomUUID().toString())
+            .body("""{"reason":"wrong rate"}""")
+            .`when`().post("/api/v1/treasury/deals/$id/reverse").then().statusCode(500)
+        assertThat(ledger.journals.keys).describedAs("the ledger holds the reversal").contains(key)
+        // An operator closes it: the hold is released, the deal still reads SETTLED.
+        jdbcUpdate(
+            "update deal_posting_intent set status = 'CLOSED_BY_OPERATOR', closed_by = 'olga.operator' where idempotency_key = ?",
+            key,
+        )
+        assertThat(state(id)).isEqualTo("SETTLED")
+
+        val run = onContext { deals.accrueInterest(today.plusDays(3)) }
+        assertThat(run.deferred).isGreaterThanOrEqualTo(1)
+        val accruals = jdbc { c ->
+            c.prepareStatement("select count(*) from deal_journals where deal_id = ? and event = 'ACCRUED'").use { ps ->
+                ps.setObject(1, UUID.fromString(id))
+                ps.executeQuery().use { rs ->
+                    rs.next()
+                    rs.getInt(1)
+                }
+            }
+        }
+        assertThat(accruals).describedAs("no interest the ledger-side reversal would never offset").isZero()
     }
 
     private fun backdate(key: String) = jdbcUpdate(
@@ -436,5 +476,6 @@ class PostingIntentReconcileIT {
         lateinit var raceId: String
         lateinit var closeId: String
         lateinit var lateId: String
+        lateinit var closedReversalId: String
     }
 }

@@ -156,6 +156,13 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
             .resultList
     }.awaitSuspending().map { it.toIntent() }
 
+    override suspend fun blocksAccrual(dealId: UUID): Boolean = sf.withSession { s ->
+        s.createNativeQuery<Any>(
+            "SELECT 1 FROM deal_posting_intent WHERE deal_id = ?1 AND (status = 'OPEN' OR " +
+                "(status = 'CLOSED_BY_OPERATOR' AND action IN ('REVERSE', 'MATURE'))) LIMIT 1",
+        ).setParameter(1, dealId).resultList
+    }.awaitSuspending().isNotEmpty()
+
     override suspend fun summary(): OpenIntentSummary = sf.withSession { s ->
         s.createNativeQuery<Array<Any?>>(
             "SELECT count(*), min(created_at) FROM deal_posting_intent WHERE status = 'OPEN'",

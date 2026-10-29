@@ -221,6 +221,14 @@ interface PostingIntentPort {
     /** OPEN intents of one deal. */
     suspend fun openFor(dealId: UUID): List<PostingIntent>
 
+    /**
+     * True while the deal must not accrue (#14220 review): it has an OPEN intent, or a reversal or
+     * maturity intent an operator CLOSED. A closed one may have a journal in the ledger that
+     * treasury never applied (the deal still reads SETTLED); accruing past it would post interest
+     * no reversal offsets. The deal stays deferred until the command is re-issued and completes.
+     */
+    suspend fun blocksAccrual(dealId: UUID): Boolean
+
     suspend fun summary(): OpenIntentSummary
 
     /**
@@ -244,6 +252,7 @@ interface PostingIntentPort {
             override suspend fun escalate(key: String, reason: String) = Unit
             override suspend fun claimOpen(cutoff: Instant, lease: Duration, limit: Int) = emptyList<PostingIntent>()
             override suspend fun openFor(dealId: UUID) = emptyList<PostingIntent>()
+            override suspend fun blocksAccrual(dealId: UUID) = false
             override suspend fun summary() = OpenIntentSummary(0, null)
             override suspend fun closeByOperator(key: String, actor: Actor, reason: String, createdBefore: Instant) =
                 PostingIntentCloseOutcome.NOT_OPEN

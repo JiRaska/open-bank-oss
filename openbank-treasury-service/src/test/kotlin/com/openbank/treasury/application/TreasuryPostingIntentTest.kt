@@ -459,6 +459,51 @@ class TreasuryPostingIntentTest {
         }
 
     @Test
+    fun `an operator-closed reversal keeps the deal from accruing until the reversal is re-issued`(): Unit =
+        runBlocking {
+            val b = book()
+            service.settle(b.id, DealFixtures.approver)
+            ledger.loseAnswerFor = b.id // the ledger holds the reversal; treasury never applies it
+            assertThatThrownBy { runBlocking { service.reverse(b.id, "wrong rate", DealFixtures.approver) } }
+            later(Duration.ofMinutes(5))
+            assertThat(service.closePostingIntent(b.id, PostingEvent.REVERSED, "investigating", operator))
+                .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+            assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.SETTLED)
+            val run = service.accrueInterest(monday.plusDays(3))
+            assertThat(run.deferred).isEqualTo(1)
+            assertThat(deals.journals.filter { it.event == PostingEvent.ACCRUED }).isEmpty()
+            // The re-issue completes the reversal with the ledger's original journal; nothing to accrue after.
+            assertThat(service.reverse(b.id, "wrong rate", DealFixtures.approver).state).isEqualTo(DealState.REVERSED)
+        }
+
+    @Test
+    fun `a journal recorded while a reversal is being decided stops the reversal before the ledger`(): Unit =
+        runBlocking {
+            val b = book()
+            service.settle(b.id, DealFixtures.approver)
+            // An accrual pass already past its per-day check records a journal just as the reversal opens its intent.
+            intents.onOpen = {
+                intents.onOpen = {}
+                deals.recordJournal(
+                    com.openbank.treasury.application.port.out.LedgerJournalRef(
+                        b.id,
+                        PostingEvent.ACCRUED,
+                        "treasury:${b.id}:accrued:${monday.plusDays(1)}",
+                        java.util.UUID.randomUUID(),
+                        clock.instant(),
+                        valueDate = monday.plusDays(1),
+                    ),
+                )
+            }
+            assertThatThrownBy { runBlocking { service.reverse(b.id, "wrong rate", DealFixtures.approver) } }
+                .isInstanceOf(com.openbank.treasury.application.port.out.DealChangedException::class.java)
+            val key = intents.rows.values.single { it.first.event == PostingEvent.REVERSED }.first.idempotencyKey
+            assertThat(ledger.posted.map { it.idempotencyKey }).doesNotContain(key)
+            assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.REFUSED)
+            assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.SETTLED)
+        }
+
+    @Test
     fun `maturity records and completes its intent`(): Unit = runBlocking {
         val b = book()
         service.settle(b.id, DealFixtures.approver)

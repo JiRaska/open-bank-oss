@@ -49,6 +49,7 @@ import com.openbank.treasury.infrastructure.persistence.entity.DealCommandEntity
 import com.openbank.treasury.infrastructure.persistence.entity.DealEntity
 import com.openbank.treasury.infrastructure.persistence.entity.DealJournalEntity
 import com.openbank.treasury.infrastructure.persistence.entity.DealTransitionEntity
+import com.openbank.treasury.infrastructure.persistence.intent.PostingIntentMetrics
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
@@ -261,7 +262,7 @@ class DealRepositoryImpl(
             }
             .invoke { late ->
                 if (late > 0) {
-                    meters.counter(APPLIED_AFTER_CLOSE_METRIC).increment(late.toDouble())
+                    meters.counter(PostingIntentMetrics.APPLIED_AFTER_CLOSE).increment(late.toDouble())
                     log.errorf(
                         "posting intent %s was closed but its journal was applied afterwards; " +
                             "re-report its value day",
@@ -645,9 +646,6 @@ class DealRepositoryImpl(
                 "RETURNING idempotency_key, value_date, actor_id) " +
                 "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, value_date) " +
                 "SELECT idempotency_key, ?1, 'COMPLETED', actor_id, value_date FROM u"
-
-        /** Alerted on by `TreasuryPostingIntentJournalAfterClose`. */
-        const val APPLIED_AFTER_CLOSE_METRIC = "openbank.treasury.posting_intents.applied_after_close"
 
         const val APPLIED_AFTER_CLOSE_SQL =
             "INSERT INTO deal_posting_intent_history " +

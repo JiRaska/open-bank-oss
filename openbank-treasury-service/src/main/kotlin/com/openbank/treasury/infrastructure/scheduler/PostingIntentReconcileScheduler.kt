@@ -8,6 +8,7 @@ import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.application.port.out.PostingIntentPort
+import com.openbank.treasury.infrastructure.persistence.intent.PostingIntentMetrics
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.StartupEvent
@@ -59,6 +60,9 @@ class PostingIntentReconcileScheduler(
             .description("OPEN treasury posting intents (-1: unreadable)").register(meterRegistry)
         Gauge.builder(OLDEST_GAUGE, oldestAgeSeconds) { it.get().toDouble() }
             .description("Age of the oldest OPEN treasury posting intent (-1: unreadable)").register(meterRegistry)
+        // Exposed at 0 from boot: increase() over a counter born at 1 is 0, so a lazily created
+        // counter would never alert on its first occurrence in a pod.
+        meterRegistry.counter(PostingIntentMetrics.APPLIED_AFTER_CLOSE)
         if (enabled) liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
     }
 

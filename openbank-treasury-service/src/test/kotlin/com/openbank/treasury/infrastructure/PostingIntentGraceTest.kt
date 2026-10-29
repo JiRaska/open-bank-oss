@@ -17,6 +17,17 @@ class PostingIntentGraceTest {
     }
 
     @Test
+    fun `the boot observer refuses a misconfigured grace`() {
+        val check = PostingIntentGraceCheck(Duration.ofSeconds(10), 2000, 5000)
+        assertThatThrownBy { check.onStart(io.mockk.mockk(relaxed = true)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatCode {
+            PostingIntentGraceCheck(Duration.ofMinutes(2), 2000, 5000).onStart(io.mockk.mockk(relaxed = true))
+        }
+            .doesNotThrowAnyException()
+    }
+
+    @Test
     fun `a grace inside four ledger calls refuses to start`() {
         assertThatThrownBy { requireGraceAboveLedgerTimeout(Duration.ofSeconds(20), 2000, 5000) }
             .isInstanceOf(IllegalArgumentException::class.java)

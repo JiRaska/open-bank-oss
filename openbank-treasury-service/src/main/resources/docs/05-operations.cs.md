@@ -120,10 +120,13 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   Jménem uloženého aktéra obnoví záměr jen mladší než `max-resume-age` (4 h, podle stáří, ne podle
   kalendáře: den hodnoty si záměr nese sám). Starší eskaluje: zůstane otevřený, drží svůj den a už
   se znovu nezabírá, takže eskalované záměry nemohou vyhladovět ty obnovitelné. Dokud má obchod
-  otevřený záměr, akruál přeskočí JEN tento obchod (počítá se jako odložený; ostatní obchody se
-  rozliší a průchod doběhne), takže obnovené storno vyrovná přesně to, proti čemu bylo rozhodnuto. Kódované `409 ACCOUNTING_DAY_CLOSED` ledgeru uzavře záměr jako
+  otevřený záměr, nebo operátorem uzavřený záměr storna či splatnosti (jeho žurnál může být v ledgeru,
+  ač obchod vypadá jako SETTLED), akruál přeskočí JEN tento obchod a ověřuje to před každým dnem:
+  ostatní obchody se rozliší a průchod doběhne, ale denní report odložený obchod počítá jako
+  nerozlišený (REFUSED) až do zopakování příkazu. Storno, které najde žurnál zapsaný až po přečtení
+  žurnálů obchodu, neúčtuje (409; zopakujte ho). Kódované `409 ACCOUNTING_DAY_CLOSED` ledgeru uzavře záměr jako
   REFUSED (žurnál neexistuje), je-li záměr čerstvý nebo starší než grace; každé jiné selhání ho nechá
-  otevřený. Služba odmítne start, pokud grace není aspoň čtyřnásobkem jednoho volání ledgeru
+  otevřený. Pod odmítne nastartovat, pokud grace není aspoň čtyřnásobkem jednoho volání ledgeru
   (connect + read timeout, bez opakování).
 - **Uvízlý záměr.** `TreasuryPostingIntentStuck` se spustí, když je nejstarší otevřený záměr starší
   než 20 minut (gauge `openbank.treasury.posting_intents.open` a `.oldest_age_seconds`, -1 když je

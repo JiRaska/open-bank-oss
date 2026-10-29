@@ -93,15 +93,8 @@ class TreasuryServiceProducer {
         intentGrace: java.time.Duration,
         @ConfigProperty(name = "openbank.treasury.posting-intent.claim-batch", defaultValue = "100")
         claimBatch: Int,
-        @ConfigProperty(name = "quarkus.rest-client.ledger-service.connect-timeout", defaultValue = "2000")
-        ledgerConnectMs: Long,
-        @ConfigProperty(name = "quarkus.rest-client.ledger-service.read-timeout", defaultValue = "5000")
-        ledgerReadMs: Long,
     ): TreasuryDealUseCase {
-        // #13883: an intent older than the grace counts as having no attempt in flight (a coded ledger
-        // refusal then proves absence; an operator may close it). That holds only while one ledger
-        // call, connect plus read (the client has no retry), ends well inside the grace.
-        requireGraceAboveLedgerTimeout(intentGrace, ledgerConnectMs, ledgerReadMs)
+        // The grace's bound against the ledger timeouts is checked at BOOT by PostingIntentGraceCheck.
         return TreasuryDealService(
             deals,
             counterparties,
@@ -222,17 +215,3 @@ class TreasuryServiceProducer {
         clock,
     )
 }
-
-/**
- * #13883: the posting-intent grace must exceed one whole ledger call by a wide margin, or an intent
- * past the grace could still have its own request in flight. Refuses to start otherwise.
- */
-internal fun requireGraceAboveLedgerTimeout(grace: java.time.Duration, connectMs: Long, readMs: Long) {
-    val call = java.time.Duration.ofMillis(connectMs + readMs)
-    require(grace >= call.multipliedBy(GRACE_TO_LEDGER_CALL_FACTOR)) {
-        "openbank.treasury.posting-intent.grace ($grace) must be at least $GRACE_TO_LEDGER_CALL_FACTOR x the " +
-            "ledger client's connect + read timeout ($call)"
-    }
-}
-
-private const val GRACE_TO_LEDGER_CALL_FACTOR = 4L

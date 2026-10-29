@@ -127,12 +127,15 @@ admits under `ledger.close.participate` for this participant only.
   the original journal. It resumes an intent as its stored actor only while it is younger than
   `max-resume-age` (4h, by age, not the calendar: the intent already pins its value day). An older
   one is escalated: it stays OPEN and holding its day, and is never claimed again, so escalated
-  intents cannot starve resumable ones. While a deal has an open intent the accrual skips THAT deal
-  only (counted as deferred; every other deal accrues and the pass completes), so a resumed reversal
-  still offsets exactly what it was decided against.
+  intents cannot starve resumable ones. While a deal has an open intent, or a reversal or maturity
+  intent an operator closed (its journal may be in the ledger although the deal reads SETTLED), the
+  accrual skips THAT deal only, re-checking before every day: every other deal accrues and the pass
+  completes, while the day report counts the deferred deal as unaccrued (REFUSED, `deferred by an open
+  or operator-closed posting intent`) until the command is re-issued. A reversal that finds a journal
+  recorded after it read the deal's journals does not post (409; re-issue it).
   The ledger's coded `409 ACCOUNTING_DAY_CLOSED` closes an intent REFUSED (no journal exists) when the
-  intent is fresh or older than the grace; every other failure leaves it OPEN. The service refuses to
-  start unless the grace is at least four times one ledger call (connect + read timeout, no retry).
+  intent is fresh or older than the grace; every other failure leaves it OPEN. The pod refuses to
+  boot unless the grace is at least four times one ledger call (connect + read timeout, no retry).
 - **A stuck intent.** `TreasuryPostingIntentStuck` fires when the oldest open intent is over 20
   minutes old (gauges `openbank.treasury.posting_intents.open` and `.oldest_age_seconds`, -1 when
   unreadable; promtool-tested). Read `last_error` on the row. Either re-issue the deal command through

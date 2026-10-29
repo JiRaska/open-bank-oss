@@ -99,7 +99,11 @@ internal class InMemoryIntents : PostingIntentPort {
         history += listOf(key, transition, actor, reason, rows.getValue(key).first.valueDate)
     }
 
+    /** Runs before every open (a test races a concurrent write in here). */
+    var onOpen: suspend () -> Unit = {}
+
     override suspend fun open(intent: PostingIntent): PostingIntent {
+        onOpen()
         val key = intent.idempotencyKey
         val existing = rows[key]
         // As the real store: a new or REFUSED key takes this attempt whole (fresh).
@@ -144,6 +148,17 @@ internal class InMemoryIntents : PostingIntentPort {
 
     override suspend fun openFor(dealId: UUID) =
         rows.values.filter { it.second == Status.OPEN && it.first.dealId == dealId }.map { it.first }
+
+    override suspend fun blocksAccrual(dealId: UUID) = rows.values.any { (i, st) ->
+        i.dealId == dealId &&
+            (
+                st == Status.OPEN ||
+                    (
+                        st == Status.CLOSED_BY_OPERATOR &&
+                            i.action != com.openbank.treasury.application.port.out.PostingIntentAction.SETTLE
+                        )
+                )
+    }
 
     override suspend fun summary() = rows.values.filter { it.second == Status.OPEN }
         .let { open -> OpenIntentSummary(open.size, open.minOfOrNull { it.first.createdAt }) }
