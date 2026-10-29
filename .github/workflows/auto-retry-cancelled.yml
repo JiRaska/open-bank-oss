@@ -110,7 +110,9 @@ name: Auto-retry spot-killed CI runs
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Every 10 min, not 5: each tick spends >=3 REST calls of the 1,000/h repository quota, and
+    # the 30-min short window still overlaps three ticks. Retry latency +5 min worst case.
+    - cron: "*/10 * * * *"
     - cron: "7 * * * *" # bounded catch-up for long-running workflows
   workflow_dispatch:
     inputs:
