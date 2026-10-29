@@ -4042,6 +4042,33 @@ product_ir_authoring_parity:
   target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the MCP/Studio authoring paths (phases 5-6) are in scope
   ci_producer: ".github/scripts/check-product-ir-authoring-parity.py"
 
+product_ir_formal_properties:
+  # ADR-0352 §9 phase 6: formal properties of the pure interpreter, as property-based tests in CI
+  # over every reference product and over generated revisions (ProductArb).
+  detect: ["openbank-products/src/test/kotlin/com/openbank/products/ProductFormalPropertiesTest.kt"]
+  require:
+    - "termination: every evaluation emits at most maxInstructionsPerEvaluation (64) instructions"
+    - "balance conservation: every Post instruction balances per currency"
+    - "monotone tiers: a higher balance never gets a lower tier rate, nor a lower daily accrual"
+    - "determinism: the same input gives byte-identical canonical instructions"
+    - "purity: the compiled com.openbank.libs.product package references no ambient clock, I/O, randomness, logging or metrics"
+  gate: product-ir-formal-properties
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144
+  ci_producer: ".github/scripts/check-product-ir-formal-properties.py"
+
+product_ir_version_lifecycle:
+  # ADR-0352 §1/§9 phase 6: a published revision is pinned to its irVersion and each schema is immutable.
+  detect: ["openbank-libs-domain/src/main/kotlin/com/openbank/libs/product/ir/ProductIr.kt"]
+  require:
+    - "IrVersion.SUPPORTED holds at most two versions"
+    - "every supported version has product-ir/v<N>.schema.json"
+    - "removing a supported version carries a breaking-change marker (`!:` title or BREAKING CHANGE body)"
+  gate: product-ir-version-lifecycle
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144
+  ci_producer: ".github/scripts/check-product-ir-version-lifecycle.py"
+
 realm_devci_artifact_parity:
   detect: [
     "openbank-infra/gitops/components/keycloak/*realm-template*.json",
