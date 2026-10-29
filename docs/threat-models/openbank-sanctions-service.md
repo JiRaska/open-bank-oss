@@ -84,8 +84,8 @@ TLS. Domain layer (`SanctionsEntry`, `SanctionsList` models) has zero framework 
 ## 4. Key invariants (must never regress)
 
 - **Every registered `SanctionsList.sourceUrl` is a real, authoritative, publicly-documented feed**
-  (OFAC Treasury XML, OpenSanctions `targets.simple.csv` bulk exports, or the CNB migration-seeded
-  exception) — never a placeholder or invented URL. Changing a `source_url` is an operator action
+  (OFAC Treasury XML, OpenSanctions `targets.simple.csv` bulk exports, or official e-Sbírka SPARQL
+  open data) — never a placeholder or invented URL. Changing a `source_url` is an operator action
   gated by `ROLE_OPERATOR`/`ROLE_ADMIN`.
 - **The scheduled refresh path must actually invoke the real importer** for every due, enabled
   list — a stub or no-op here silently blinds the fleet's screening data with no error surfaced
@@ -100,6 +100,10 @@ TLS. Domain layer (`SanctionsEntry`, `SanctionsList` models) has zero framework 
 - The Czech national list (`CNB_DOMESTIC`, kept by MZV under Act No. 1/2023 Coll.) is imported
   from the OpenSanctions `cz_national_sanctions` mirror like the other CSV feeds (#10757); the V6
   demo rows are retired by the first import's reconciliation sweep.
+- `CZ_TERRORISTS` is a separate legal regime under Regulation No. 210/2008 Coll. Its only source
+  is official e-Sbírka SPARQL open data, not the commercially licensed OpenSanctions mirror. The
+  parser validates every designated fragment before the first upsert; a malformed or duplicate
+  target resolves to `FAILED_KEPT_EXISTING` and cannot trigger reconciliation deletion.
 
 ## 5. Open items / follow-ups
 

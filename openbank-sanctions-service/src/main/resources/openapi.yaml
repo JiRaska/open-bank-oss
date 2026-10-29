@@ -8,7 +8,8 @@ info:
   # ApprovalResponse (makerId, createdAt). No breaking change.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 2.2.0
+  # 2.2.0 -> 2.3.0 (#10760): additive CZ_TERRORISTS list value; no removed or changed operation.
+  version: 2.3.0
   # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
   # required the whole external-feed fan-out to finish inside the request, which was the defect.
   # oasdiff classifies 200 -> 202 as breaking, and a breaking change here means a new URL major:
@@ -474,6 +475,7 @@ components:
               - FATF_HIGH_RISK
               - PEP_GLOBAL
               - CNB_DOMESTIC
+              - CZ_TERRORISTS
 
     ReviewCommand:
       type: object
@@ -534,7 +536,7 @@ components:
           type: array
           items:
             type: string
-            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC, CZ_TERRORISTS]
         reviewedBy:
           type: string
           nullable: true
@@ -554,7 +556,7 @@ components:
       properties:
         listType:
           type: string
-          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC, CZ_TERRORISTS]
         matchType:
           type: string
           enum: [EXACT, FUZZY, PHONETIC, ALIAS]

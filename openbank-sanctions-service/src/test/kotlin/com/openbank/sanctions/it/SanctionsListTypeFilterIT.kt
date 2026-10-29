@@ -89,5 +89,5 @@ class SanctionsListTypeFilterIT {
 }
 
 private object SanctionsListTypeCount {
-    const val ALL = 7
+    const val ALL = 8
 }
