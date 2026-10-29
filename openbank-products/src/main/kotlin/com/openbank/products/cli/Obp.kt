@@ -17,14 +17,15 @@ import com.openbank.libs.product.ir.ProductRevisionIr
 import com.openbank.libs.product.toolkit.ProductToolkit
 import com.openbank.libs.productrevision.HmacIrSigner
 import com.openbank.libs.productrevision.RevisionIdentity
+import com.openbank.libs.security.EgressDeniedException
+import com.openbank.libs.security.EgressPolicy
+import com.openbank.libs.security.EgressRequest
+import com.openbank.libs.security.SafeHttpClient
 import com.openbank.libs.testing.product.GoldenScenarioRunner
 import com.openbank.products.catalog.ReferenceProducts
 import com.openbank.products.dsl.ProductDefinition
 import com.openbank.products.golden.ProductGoldens
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
@@ -403,27 +404,33 @@ object Obp {
         return executeProposal(base, plan, out, err)
     }
 
-    /** The only network call obp makes: POST one DRAFT revision. The bearer token comes from OBP_TOKEN, never argv. */
+    /**
+     * The only network call obp makes: POST one DRAFT revision through [SafeHttpClient] (ADR-0320),
+     * whose egress allowlist is exactly the catalog host the operator named. https only; plain http
+     * is allowed for `localhost` alone. The bearer token comes from OBP_TOKEN, never argv.
+     */
     private fun executeProposal(base: String, plan: Map<String, Any?>, out: Appendable, err: Appendable): Int {
-        val uri = runCatching { URI.create(base.trimEnd('/') + plan["path"]) }
-            .getOrElse { usageError("--catalog-url is not a valid URL") }
-        if (uri.scheme != "https" && uri.host !in LOOPBACK) usageError("--catalog-url must be https (or loopback)")
-        val request = HttpRequest.newBuilder(uri)
-            .header("Content-Type", "application/json")
-            .apply {
-                System.getenv("OBP_TOKEN")?.takeIf { it.isNotBlank() }?.let { header("Authorization", "Bearer $it") }
-            }
-            .POST(HttpRequest.BodyPublishers.ofString(CanonicalJson.write(plan["body"])))
-            .build()
+        val url = base.trimEnd('/') + plan["path"]
+        val uri = runCatching { URI.create(url) }.getOrElse { usageError("--catalog-url is not a valid URL") }
+        val host = uri.host ?: usageError("--catalog-url has no host")
+        val local = host == LOCALHOST
+        if (uri.scheme != "https" && !local) usageError("--catalog-url must be https (or http://localhost)")
+        val port = if (uri.port > 0) ":${uri.port}" else ""
+        val policy = EgressPolicy.fromConfig(listOf(if (local) "$host$port;http;private" else "$host$port"))
+        val headers = buildMap {
+            put("Content-Type", "application/json")
+            System.getenv("OBP_TOKEN")?.takeIf { it.isNotBlank() }?.let { put("Authorization", "Bearer $it") }
+        }
+        val body = CanonicalJson.write(plan["body"]).toByteArray(Charsets.UTF_8)
         val response = try {
-            HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+            SafeHttpClient(policy).send(EgressRequest("POST", url, headers, body))
+        } catch (e: EgressDeniedException) {
+            return refuse("propose", "egress refused: ${e.decision}", err)
         } catch (e: java.io.IOException) {
             return refuse("propose", "catalog unreachable: ${e.message}", err)
         }
-        val created = response.statusCode() == HTTP_CREATED
-        val report = mapOf("ok" to created, "executed" to true, "status" to response.statusCode(), "publishes" to false)
-        if (!created) return refuse("propose", "catalog answered ${response.statusCode()}", err)
-        emit(out, report)
+        if (response.status != HTTP_CREATED) return refuse("propose", "catalog answered ${response.status}", err)
+        emit(out, mapOf("ok" to true, "executed" to true, "status" to response.status, "publishes" to false))
         return EXIT_OK
     }
 
@@ -433,7 +440,7 @@ object Obp {
     private const val TEST_KEY_DOMAIN = "openbank.obp.offline-test-key.v1"
     private const val HTTP_CREATED = 201
     private val KEY_NAME = Regex("^[a-z0-9][a-z0-9-]{0,62}$")
-    private val LOOPBACK = setOf("localhost", "127.0.0.1", "[::1]")
+    private const val LOCALHOST = "localhost"
 
     private fun usageError(message: String): Nothing = throw CliUsageException(message)
 

@@ -267,7 +267,7 @@ class ObpCliTest {
         assertThat(run(*base, "--execute").first).isEqualTo(Obp.EXIT_USAGE)
         assertThat(run(*base, "--execute", "--catalog-url", "http://catalog.example").first).isEqualTo(Obp.EXIT_USAGE)
         // An unreachable loopback catalog is a refusal, not a crash.
-        assertThat(run(*base, "--execute", "--catalog-url", "http://127.0.0.1:9").first).isEqualTo(Obp.EXIT_REFUSED)
+        assertThat(run(*base, "--execute", "--catalog-url", "http://localhost:9").first).isEqualTo(Obp.EXIT_REFUSED)
 
         val (code, out, _) = run(*base)
         assertThat(code).isEqualTo(Obp.EXIT_OK)
