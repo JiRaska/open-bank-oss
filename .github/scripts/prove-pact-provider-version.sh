@@ -18,7 +18,7 @@
 #    states were reviewed and run on main against the very code the broker result attests to.
 #    Why a whole subtree and not a file list: new @State handlers routinely arrive with new
 #    seed helpers in sibling files (#11071, #11113), so a one-file allowlist cannot compile.
-# 2. NAMED-FIXTURE OVERLAY. When mode 1 is refused, Ledger, Balance and Account may
+# 2. NAMED-FIXTURE OVERLAY. When mode 1 is refused, Ledger, Balance, Account and Party may
 #    replace one broker-state fixture; Transaction also takes its named seed helper from F —
 #    the narrower overlay imports only the fixed reviewed paths below; runtime stays P. It is
 #    kept because mode 1 does not subsume it: mode 1 refuses whenever ANY production input moved,
@@ -41,6 +41,8 @@ ACCOUNT_FIXTURE='openbank-account-service/src/test/kotlin/com/openbank/account/c
 TRANSACTION_SERVICE='openbank-transaction-service'
 TRANSACTION_FIXTURE='openbank-transaction-service/src/test/kotlin/com/openbank/transaction/contract/TransactionPactProviderVerificationTest.kt'
 TRANSACTION_SEED='openbank-transaction-service/src/test/kotlin/com/openbank/transaction/contract/PactTransactionSeed.kt'
+PARTY_SERVICE='openbank-party-service'
+PARTY_FIXTURE='openbank-party-service/src/test/kotlin/com/openbank/party/contract/PartyEventPactProviderVerificationTest.kt'
 
 refuse() { printf 'REFUSE\t%s\n' "$1" >&2; exit 1; }
 commit_exists() { git rev-parse -q --verify "$1^{commit}" >/dev/null 2>&1; }
@@ -97,6 +99,7 @@ prepare_overlay() {
     "$BALANCE_SERVICE") approved_fixtures=("$BALANCE_FIXTURE") ;;
     "$ACCOUNT_SERVICE") approved_fixtures=("$ACCOUNT_FIXTURE") ;;
     "$TRANSACTION_SERVICE") approved_fixtures=("$TRANSACTION_FIXTURE" "$TRANSACTION_SEED") ;;
+    "$PARTY_SERVICE") approved_fixtures=("$PARTY_FIXTURE") ;;
   esac
   [ "$provider" = "$(canonical_commit "$provider")" ] \
     || refuse "provider version must be a canonical 40-character SHA"
@@ -149,12 +152,13 @@ selftest() {
     git config user.email selftest@example.invalid
     git config user.name selftest
     git config commit.gpgsign false
-    mkdir -p "$(dirname "$LEDGER_FIXTURE")" "$(dirname "$BALANCE_FIXTURE")" "$(dirname "$ACCOUNT_FIXTURE")" "$(dirname "$TRANSACTION_FIXTURE")" openbank-balance-service/src/main openbank-ledger-service/src/main/resources \
+    mkdir -p "$(dirname "$LEDGER_FIXTURE")" "$(dirname "$BALANCE_FIXTURE")" "$(dirname "$ACCOUNT_FIXTURE")" "$(dirname "$TRANSACTION_FIXTURE")" "$(dirname "$PARTY_FIXTURE")" openbank-balance-service/src/main openbank-ledger-service/src/main/resources \
       openbank-libs-domain/src/main pacts .github/workflows config
     printf 'old fixture\n' > "$LEDGER_FIXTURE"
     printf 'old balance fixture\n' > "$BALANCE_FIXTURE"
     printf 'old account fixture\n' > "$ACCOUNT_FIXTURE"
     printf 'old transaction fixture\n' > "$TRANSACTION_FIXTURE"
+    printf 'old party fixture\n' > "$PARTY_FIXTURE"
     printf 'provider runtime P\n' > openbank-ledger-service/src/main/Ledger.kt
     printf 'balance runtime P\n' > openbank-balance-service/src/main/Balance.kt
     printf 'provider config P\n' > openbank-ledger-service/src/main/resources/application.yaml
@@ -165,7 +169,7 @@ selftest() {
       > .github/workflows/auto-deploy.yml
     printf 'config P\n' > config/detekt.yml
     printf 'plugins {}\n' > openbank-ledger-service/build.gradle.kts
-    git add openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-libs-domain pacts .github config
+    git add openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-party-service openbank-libs-domain pacts .github config
     git commit -qm provider
   ) || { echo 'selftest FAIL: fixture setup failed' >&2; return 1; }
   provider="$(git -C "$tmp" rev-parse HEAD)"
@@ -180,6 +184,7 @@ selftest() {
     printf 'approved balance fixture F\n' > "$BALANCE_FIXTURE"
     printf 'approved account fixture F\n' > "$ACCOUNT_FIXTURE"
     printf 'approved transaction fixture F\n' > "$TRANSACTION_FIXTURE"
+    printf 'approved party fixture F\n' > "$PARTY_FIXTURE"
     printf 'new transaction seed F\n' > "$TRANSACTION_SEED"
     printf 'runtime F must not enter P\n' > openbank-ledger-service/src/main/Ledger.kt
     printf 'balance runtime F must not enter P\n' > openbank-balance-service/src/main/Balance.kt
@@ -187,7 +192,7 @@ selftest() {
     printf 'libs F must not enter P\n' > openbank-libs-domain/src/main/Domain.kt
     printf 'workflow F must not enter P\n' > .github/workflows/provider.yml
     printf 'config F must not enter P\n' > config/detekt.yml
-    git add openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-libs-domain pacts .github config
+    git add openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-party-service openbank-libs-domain pacts .github config
     git commit -qm fixture
   )
   fixture="$(git -C "$tmp" rev-parse HEAD)"
@@ -210,11 +215,14 @@ selftest() {
   missing="$(git -C "$tmp" rev-parse HEAD)"
   rm "$tmp/$TRANSACTION_SEED"
   ln -s /tmp/not-a-fixture "$tmp/$TRANSACTION_SEED"
-  git -C "$tmp" add "$TRANSACTION_SEED"
+  rm "$tmp/$PARTY_FIXTURE"
+  ln -s /tmp/not-a-fixture "$tmp/$PARTY_FIXTURE"
+  git -C "$tmp" add "$TRANSACTION_SEED" "$PARTY_FIXTURE"
   git -C "$tmp" commit -qm bad-seed
   bad_seed="$(git -C "$tmp" rev-parse HEAD)"
   rm "$tmp/$TRANSACTION_SEED"
-  git -C "$tmp" add "$TRANSACTION_SEED"
+  rm "$tmp/$PARTY_FIXTURE"
+  git -C "$tmp" add "$TRANSACTION_SEED" "$PARTY_FIXTURE"
   git -C "$tmp" commit -qm missing-seed
   missing_seed="$(git -C "$tmp" rev-parse HEAD)"
   git -C "$tmp" checkout -q "$provider"
@@ -252,6 +260,19 @@ selftest() {
   expect 'approved Account fixture' pass --prepare-overlay "$ACCOUNT_SERVICE" "$provider" "$fixture" main
   [ "$(git -C "$tmp" diff --name-only)" = "$ACCOUNT_FIXTURE" ] \
     || { echo 'selftest FAIL: Account overlay changed paths outside its fixture' >&2; fail=1; }
+  git -C "$tmp" checkout -f -q "$provider"
+  expect 'approved Party fixture' pass --prepare-overlay "$PARTY_SERVICE" "$provider" "$fixture" main
+  [ "$(<"$tmp/$PARTY_FIXTURE")" = 'approved party fixture F' ] \
+    || { echo 'selftest FAIL: Party fixture not overlaid' >&2; fail=1; }
+  [ "$(git -C "$tmp" diff --name-only)" = "$PARTY_FIXTURE" ] \
+    || { echo 'selftest FAIL: Party overlay changed paths outside its fixture' >&2; fail=1; }
+  [ "$(git -C "$tmp" rev-parse HEAD)" = "$provider" ] \
+    || { echo 'selftest FAIL: Party overlay moved provider HEAD' >&2; fail=1; }
+  git -C "$tmp" checkout -f -q "$provider"
+  expect 'symlink Party fixture is denied' fail --prepare-overlay "$PARTY_SERVICE" "$provider" "$bad_seed" main
+  expect 'missing Party fixture is denied' fail --prepare-overlay "$PARTY_SERVICE" "$provider" "$missing_seed" main
+  [ -z "$(git -C "$tmp" diff --name-only)$(git -C "$tmp" ls-files --others --exclude-standard)" ] \
+    || { echo 'selftest FAIL: refused Party overlay changed provider tree' >&2; fail=1; }
   git -C "$tmp" checkout -f -q "$provider"
   expect 'approved Transaction bundle' pass --prepare-overlay "$TRANSACTION_SERVICE" "$provider" "$fixture" main
   [ "$(git -C "$tmp" diff --name-only)" = "$TRANSACTION_FIXTURE" ] \
@@ -339,7 +360,7 @@ selftest() {
     echo 'selftest FAIL: workflow does not preserve a trusted proof runner outside the P checkout' >&2
     fail=1
   fi
-  [ "$fail" -eq 0 ] && echo 'selftest OK: equivalent-tree overlay takes F test tree wholesale (changed/added/deleted) and only it; src/main, libs, version.txt, symlink and reversed ancestry refuse; Named Ledger, Balance, Account and Transaction fixture fallbacks preserve P runtime, pacts, libs and workflow; wrong provider, ancestry, symlink and missing fixture reject; short SHA/ref canonicalize; trusted runner + equivalence stay outside P.'
+  [ "$fail" -eq 0 ] && echo 'selftest OK: equivalent-tree overlay takes F test tree wholesale (changed/added/deleted) and only it; src/main, libs, version.txt, symlink and reversed ancestry refuse; Named Ledger, Balance, Account, Transaction and Party fixture fallbacks preserve P runtime, pacts, libs and workflow; wrong provider, ancestry, symlink and missing fixture reject; short SHA/ref canonicalize; trusted runner + equivalence stay outside P.'
   return "$fail"
 }
 
