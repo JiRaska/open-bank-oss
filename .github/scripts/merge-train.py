@@ -1656,8 +1656,22 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
             # Every open PR gets a decision line: a disarmed or draft PR used to be filtered out in
             # silence, so a settle log with no line for a PR could not say whether it was ever seen.
             log(f"#{p['number']:>6} skip      {'draft' if p.get('draft') else 'auto-merge not armed'}")
-    if armed:
-        git("fetch", "-q", "origin", *[f"+{gh.head_refspec(p['number'])}:refs/merge-train/pr-{p['number']}" for p in armed])
+    def spec(p: dict) -> str:
+        return f"+{gh.head_refspec(p['number'])}:refs/merge-train/pr-{p['number']}"
+    if armed and git("fetch", "-q", "origin", *[spec(p) for p in armed], check=False).returncode != 0:
+        # One unfetchable head (GitHub sometimes never creates refs/pull/<n>/head) fails the whole
+        # batch. Find it by asking the remote which refs exist — ls-remote runs no PR code — drop
+        # it fail-closed (never a candidate, never green), and fetch the rest strictly.
+        fetchable = []
+        for p in armed:
+            ref = gh.head_refspec(p["number"])
+            if git("ls-remote", "--exit-code", "origin", ref, check=False).returncode == 0:
+                fetchable.append(p)
+            else:
+                log(f"#{p['number']:>6} skip      head ref {ref} not fetchable — waits for a push")
+        armed = fetchable
+        if armed:
+            git("fetch", "-q", "origin", *[spec(p) for p in armed])
     out: list[Member] = []
     apps: dict[int, dict] = {}
     for p in armed:
@@ -4185,6 +4199,24 @@ def self_test() -> int:
                 rej = exc
             check("gate code + symlink: forced past qualifies, publish rejects it as the member's fault (bisect)",
                   rej is not None and rej.member_fault and "symlink" in str(rej), str(rej))
+            reset()
+
+            # A PR whose head ref GitHub never created (refs/pull/<n>/head absent although the branch
+            # exists) made the ONE batched fetch exit 128 and crashed every settle tick, so nothing
+            # merged. It must be skipped — never a candidate, never green — and the rest still ride.
+            open_only("p1", "p2")
+            real_refspec = gh.head_refspec
+            gh.head_refspec = lambda n: "refs/pull/2/head" if n == 2 else real_refspec(n)
+            try:
+                crash = ""
+                try:
+                    cands, _apps = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0, Untrainable(SYN_INVENTORY))
+                except subprocess.CalledProcessError as exc:
+                    cands, crash = [], f"crashed: {exc}"
+            finally:
+                gh.head_refspec = real_refspec
+            check("unfetchable head ref: that PR is skipped, the tick survives, the others stay candidates",
+                  not crash and [m.number for m in cands] == [1], crash or str([m.number for m in cands]))
             reset()
 
             # Review: during regeneration the generators see MAIN's copy of gate code (as of
