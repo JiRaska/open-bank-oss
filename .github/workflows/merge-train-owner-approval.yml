@@ -28,15 +28,19 @@ permissions:
   contents: read
 
 # Serialize owner decisions separately from untrusted PR verification runs.
-# The group is keyed per decision subject: GitHub keeps ONE pending run per group, so a
-# shared group silently cancelled 4 of 7 back-to-back approvals for different PRs.
-# Per PR the single pending slot still serialises: the newest pending decision for the
-# same PR replaces an older pending one, so the last decision dispatched is always the
-# last one to run (approve then revoke ends revoked; revoke then approve ends approved).
-# A revoke cannot be lost behind an approve dispatched BEFORE it. The status is written
-# to that PR's own head commit, so different PRs never write the same status.
+# The group is keyed per decision subject AND per actor/ref: GitHub keeps ONE pending run
+# per group and evaluates the group before any job `if`, so anyone with write access can
+# dispatch a run that is rejected later as non-owner yet, while pending, would REPLACE the
+# owner's pending revoke in a shared group. Including the actor means a non-owner run can
+# never share, and so never cancel, an owner group. Different PRs never share a group
+# (4 of 7 back-to-back approvals were silently cancelled with one shared group).
+# Per owner+PR the single pending slot still serialises: the newest pending decision
+# replaces an older pending one, so the last decision dispatched is the last to run.
+# The status is written to that PR's own head commit, so PRs never write the same status.
+# Residual risk: a run cancelled while still PENDING never executes at all, so the owner
+# must confirm a revoke landed by reading the status printed in the run summary.
 concurrency:
-  group: merge-train-owner-approval-${{ github.event_name }}-${{ inputs.pr || github.ref }}
+  group: merge-train-owner-approval-${{ github.event_name }}-${{ github.ref }}-${{ github.actor }}-${{ inputs.pr }}
   cancel-in-progress: false
 
 jobs:
@@ -56,6 +60,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Validate decision inputs (fail closed, before anything else)
+        env:
+          OWNER_PR: ${{ inputs.pr }}
+          OWNER_HEAD: ${{ inputs.head }}
+          OWNER_DECISION: ${{ inputs.decision }}
+        run: |
+          set -euo pipefail
+          [[ "$OWNER_PR" =~ ^[1-9][0-9]*$ ]] || { echo "::error::pr must match ^[1-9][0-9]*$"; exit 1; }
+          [[ "$OWNER_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head must be a full lowercase 40-hex SHA"; exit 1; }
+          [[ "$OWNER_DECISION" == approve || "$OWNER_DECISION" == revoke ]] || { echo "::error::bad decision"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
@@ -67,6 +81,16 @@ jobs:
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+      - name: Revoke first (any non-success App status revokes; approval is only the exact success text)
+        if: inputs.decision == 'revoke'
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          OWNER_PR: ${{ inputs.pr }}
+          OWNER_HEAD: ${{ inputs.head }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$OWNER_HEAD" -f state=failure \
+            -f context=merge-train/owner-approval -f description="owner-revoked PR #$OWNER_PR" >/dev/null
       - name: Record exact-head owner decision (no PR code)
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
@@ -81,3 +105,15 @@ jobs:
           git -c core.hooksPath=/dev/null show HEAD:.github/scripts/merge-train.py > "$RUNNER_TEMP/merge-train-owner-approval.py"
           python3 -I -S "$RUNNER_TEMP/merge-train-owner-approval.py" owner-approval \
             --repo "$GITHUB_REPOSITORY" --pr "$OWNER_PR" --head "$OWNER_HEAD" --decision "$OWNER_DECISION"
+      - name: Print the status that was written
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          OWNER_HEAD: ${{ inputs.head }}
+        run: |
+          {
+            echo "### merge-train/owner-approval on ${OWNER_HEAD}"
+            gh api "repos/$GITHUB_REPOSITORY/commits/$OWNER_HEAD/statuses" \
+              --jq '[.[] | select(.context=="merge-train/owner-approval")][0] | "state=\(.state) description=\(.description)"' \
+              || echo "could not read status; confirm it manually"
+          } >> "$GITHUB_STEP_SUMMARY"

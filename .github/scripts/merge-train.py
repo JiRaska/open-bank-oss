@@ -2734,12 +2734,17 @@ def owner_approval_declaration_errors(text: str) -> list[str]:
             "show HEAD:.github/scripts/merge-train.py", "python3 -I -S", '" owner-approval',
             '--pr "$OWNER_PR" --head "$OWNER_HEAD" --decision "$OWNER_DECISION"']
     errors = [f"owner approval writer missing {needle}" for needle in must if needle not in sec]
-    if "group: merge-train-owner-approval-${{ github.event_name }}-${{ inputs.pr || github.ref }}" not in code or "cancel-in-progress: false" not in code:
+    if "group: merge-train-owner-approval-${{ github.event_name }}-${{ github.ref }}-${{ github.actor }}-${{ inputs.pr }}" not in code or "cancel-in-progress: false" not in code:
         errors.append("owner decisions must serialize separately from untrusted PR verification")
     if sec.count("actions/checkout@") != 1 or sec.count("ref: main") != 1:
         errors.append("owner approval writer must check out main exactly once")
-    if sec.count("run:") != 1:
-        errors.append("owner approval writer must have only its isolated decision command")
+    for needle in (r"^[1-9][0-9]*$", r"^[0-9a-f]{40}$"):
+        if needle not in sec:
+            errors.append(f"owner approval writer must validate inputs with {needle}")
+    if sec.index("Validate decision inputs") > sec.index("actions/checkout@"):
+        errors.append("owner approval input validation must run before anything else")
+    if sec.count("run:") != 4:
+        errors.append("owner approval writer must have only validation, revoke-first, decision and summary commands")
     for forbidden in ("github.head_ref", "github.event.", "download-artifact", "gh pr merge", "gh pr review",
                       "contents: write", "statuses: write", "pull_request_target:"):
         if forbidden in code:
