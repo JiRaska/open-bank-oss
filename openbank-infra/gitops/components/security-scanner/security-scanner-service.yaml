@@ -87,8 +87,11 @@ spec:
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: KAFKA_SECURITY_PROTOCOL
               value: SSL
-            # V6/V7 applied, outbox empty, and ACLs Ready in sandbox (#4942).
-            # Roll back by setting false; incident writes remain durable.
+            # Enables the ict_incident_outbox relay: the dispatcher publishes pending rows to Kafka.
+            # Safe only once the V6/V7 migrations have created the outbox schema and the
+            # KafkaUser ACLs (kafka-security-scanner-mtls.yaml) grant Write on the incident
+            # topic; otherwise the broker denies the publish.
+            # Rollback: set false. Incident writes remain durable in ict_incident_outbox.
             - name: OPENBANK_OUTBOX_DISPATCH_ENABLED
               value: "true"
             - name: KAFKA_SSL_KEYSTORE_LOCATION
