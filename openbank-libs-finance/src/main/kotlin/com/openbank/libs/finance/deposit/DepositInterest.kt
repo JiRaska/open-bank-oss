@@ -9,7 +9,6 @@ import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.product.ir.Tier
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.LocalDate
 
 /**
@@ -75,17 +74,12 @@ object DepositInterest {
         }
     }
 
-    /**
-     * The amount a capitalisation posts from [accrued]: truncated (DOWN) to [policy]'s scale for the
-     * currency, never rounded up. The sub-unit remainder stays accrued and is posted by a later
-     * capitalisation, so the bank never pays interest that has not yet accrued and `accruedInterest`
-     * never goes negative (ADR-0352 phase 4 replay finding).
-     */
+    /** The amount a capitalisation posts from [accrued]: rounded to the currency under [policy]. */
     fun capitalise(
         accrued: BigDecimal,
         currency: CurrencyCode,
         policy: RoundingPolicy = RoundingPolicy.LEDGER_POSTING,
-    ): BigDecimal = accrued.setScale(policy.scaleFor(currency), RoundingMode.DOWN)
+    ): BigDecimal = policy.round(accrued, currency)
 
     /** A penalty expressed as [rate] of [amount], rounded to the currency under [policy]. */
     fun penaltyByRate(

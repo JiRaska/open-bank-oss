@@ -93,6 +93,10 @@ class ProductShadowBook(private val dropLineEvery: Int = 0) : ReplayListener {
     fun deposit(account: String, currency: String): BigDecimal =
         positions[Position(AccountingClass.CUSTOMER_DEPOSIT, account, currency)]?.negate() ?: BigDecimal.ZERO
 
+    /** The customer's accrued-interest-payable position, credit-positive: interest owed but not yet posted. */
+    fun accruedPayable(account: String, currency: String): BigDecimal =
+        positions[Position(AccountingClass.ACCRUED_INTEREST_PAYABLE, account, currency)]?.negate() ?: BigDecimal.ZERO
+
     fun violations(): List<String> = violations.toList()
 
     /** Debit-positive signed amount per position. [dropLineEvery] > 0 loses every n-th line: the harness's own negative case. */

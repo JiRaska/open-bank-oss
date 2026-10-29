@@ -89,6 +89,8 @@ round away.
 | `no-negative-balance` | no day-end balance below the product's overdraft floor (0, or -500.00 for the current account) |
 | `monotone-tier` | a larger balance never accrues less interest on the same day, tier edges included |
 | `bounded-termination` | evaluations stay within the replay's structural bound |
+| `accrued-closure-reconciles` | per account, opening + accrued − capitalised − other debits equals the book's accrued-interest-payable position |
+| `capitalisation-residue-bounded` | no capitalisation leaves more than 0.005 either way on accrued interest payable (the IR v1 HALF_UP limitation `v1-capitalisation-residue`, reported in `limitations`, not read as a pass) |
 
 `ProductReplayScenarioTest` has two sides, like the scenarios above. A book that drops a line
 fails `shadow-trial-balance`. A floor tighter than the product's fails `no-negative-balance`. A
@@ -98,9 +100,9 @@ delta equals one computed independently in the test, and that identical revision
 diff.
 
 The first run found that the reference term deposit could be overdrawn (now refused by a
-`prePosting` reject, so `term-deposit` carries no `knownViolations`), that capitalisation could
-leave `accruedInterest` slightly negative (now truncated), and that a scheduled savings fee can
-take a dormant account below zero (accepted in IR v1). The decisions are recorded in
+`prePosting` reject, so `term-deposit` carries no `knownViolations`), that HALF_UP capitalisation
+can leave `accruedInterest` a sub-cent negative (unchanged in IR v1, bounded and named; #14210), and that a scheduled savings
+fee can take a dormant account below zero (accepted in IR v1, #14207). The decisions are recorded in
 `openbank-libs/docs/product-ir.md` under "Replay findings".
 
 ## Run it

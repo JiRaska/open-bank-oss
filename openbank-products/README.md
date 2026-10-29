@@ -21,8 +21,7 @@ the `obp` CLI. A released component (`version.txt`): every product change is a r
 `publish-ir` (four-eyes action `catalog.publish-ir`), proposing is ADR-0352 phase 5.
 
 The reference term deposit refuses any posting that would take it below zero, as savings does.
-Capitalisation truncates to the cent and carries the remainder. A scheduled savings fee still posts
-in full on a dormant account (accepted in IR v1). See "Replay findings" in
+A scheduled savings fee still posts in full on a dormant account (accepted in IR v1, #14207). See "Replay findings" in
 `openbank-libs/docs/product-ir.md`.
 
 Everything runs offline against the one pure interpreter in `openbank-libs-domain`; output is
