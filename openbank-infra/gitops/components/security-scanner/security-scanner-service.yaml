@@ -87,10 +87,10 @@ spec:
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: KAFKA_SECURITY_PROTOCOL
               value: SSL
-            # Migration safety: V6/V7 and broker ACL evidence must be present before enabling the relay.
-            # Incident writes remain durable in ict_incident_outbox while this is false.
+            # V6/V7 applied, outbox empty, and ACLs Ready in sandbox (#4942).
+            # Roll back by setting false; incident writes remain durable.
             - name: OPENBANK_OUTBOX_DISPATCH_ENABLED
-              value: "false"
+              value: "true"
             - name: KAFKA_SSL_KEYSTORE_LOCATION
               value: /mnt/kafka-keystore/user.p12
             - name: KAFKA_SSL_KEYSTORE_TYPE

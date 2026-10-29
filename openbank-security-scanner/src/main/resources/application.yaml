@@ -118,8 +118,8 @@ mp:
 
 openbank:
   outbox:
-    # Outbox delivery is part of the service contract. Production may override this to false only
-    # during the documented schema/broker activation gate; the GitOps rollout currently does so.
+    # Outbox delivery is part of the service contract. The GitOps manifest also sets it true
+    # (#4942); IctIncidentRelayDeployedConfigTest pins both.
     dispatch-enabled: true
     poll-interval: 5s
     initial-delay: 5s
