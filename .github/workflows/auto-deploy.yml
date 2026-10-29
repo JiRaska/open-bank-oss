@@ -1244,22 +1244,6 @@ jobs:
           cp .github/scripts/can-i-deploy-gate.sh "$RUNNER_TEMP/can-i-deploy-gate.sh"
           git checkout --detach "$SOURCE_COMMIT"
 
-      # Source evidence shares GITHUB_TOKEN's repository quota with other workflows.
-      # Use the existing App's separate quota, scoped to read-only evidence in this repo.
-      # Request contents:read only: the GitOps App installation is not granted actions:read,
-      # and asking for it fails the mint ("permissions requested are not granted", #13587).
-      # The repo is public, so its Actions run/job reads need no extra permission on this token.
-      - name: Mint a read-only source evidence token
-        id: source_evidence_token
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true'))
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          app-id: ${{ secrets.GITOPS_APP_ID }}
-          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: read
-
       # The pact CLI runs natively on the ARC runner pod (which resolves the broker's
       # cluster DNS); the pact-cli docker image would run in dind and could not. The
       # standalone ships a linux arm64 build for the Graviton runner.
@@ -1282,7 +1266,10 @@ jobs:
           # Reconcile must prove the exact main Services CI attempt that produced each Pact
           # source before it can ask the Broker or mutate GitOps image pins.
           RECONCILE_SOURCE_REQUIRED: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true') }}
-          GH_TOKEN: ${{ steps.source_evidence_token.outputs.token || github.token }}
+          # github.token (the job grants actions: read) reads the Services CI
+          # runs/jobs evidence. The GitOps App installation lacks actions:read, so an App token
+          # cannot read them (#13587); the shared GITHUB_TOKEN quota is accepted by owner decision.
+          GH_TOKEN: ${{ github.token }}
           # A ${{ }} expression is substituted by the runner before the shell sees it, so it
           # cannot survive extraction into a script — these three move to the environment.
           # SERVICES stays out of any concurrency.group: interpolating a fleet-sized list into
