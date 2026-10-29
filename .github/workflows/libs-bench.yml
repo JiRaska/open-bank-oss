@@ -3,8 +3,10 @@
 #
 # Gated: gc.alloc.rate.norm (B/op) against openbank-libs-benchmarks/alloc-baseline.json, by
 #        .github/scripts/check-bench-alloc-baseline.py (enforced; rules.yaml:
-#        libs_bench_alloc_baseline). Allocation per op is a property of the code.
-# Never gated: ns/op. It is a property of the runner; the JSON is uploaded for reading only.
+#        libs_bench_alloc_baseline). Explicitly unstable allocation kernels remain report-only.
+# Also gated: ProductInterpreter sampled p99 against its ADR-0352 absolute budget.
+# Other wall-clock results are report-only and require comparable runners; they are not
+# production request latency or throughput evidence.
 #
 # The required Services CI all-green gate checks these exact-head results on applicable PRs.
 
