@@ -13,13 +13,13 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 GROUP = ["--rerun", "--tests", "*.contract.*PactConsumerTest"]
-ALL = [":openbank-a-service:test", *GROUP, ":openbank-b-service:test", *GROUP, ":openbank-c-service:test", *GROUP]
+ALL = [":openbank-a-service:consumerPactTest", *GROUP, ":openbank-b-service:consumerPactTest", *GROUP, ":openbank-c-service:consumerPactTest", *GROUP]
 
 
 class SelectTest(unittest.TestCase):
     def test_selects_only_listed_modules_in_derived_order(self):
         self.assertEqual(MODULE.select_args(ALL, ["openbank-c-service", "openbank-a-service"]),
-                         [":openbank-a-service:test", *GROUP, ":openbank-c-service:test", *GROUP])
+                         [":openbank-a-service:consumerPactTest", *GROUP, ":openbank-c-service:consumerPactTest", *GROUP])
 
     def test_module_without_consumer_test_selects_nothing(self):
         self.assertEqual(MODULE.select_args(ALL, ["openbank-z-service"]), [])
