@@ -20,17 +20,66 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.supervisorScope
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
 import java.util.stream.Stream
+import java.util.logging.Logger as JulLogger
 
 class OutboxSentRetentionJobTest {
 
     private val now = Instant.parse("2026-10-03T03:17:00Z")
     private val registry = SimpleMeterRegistry()
+
+    // Log capture (same idiom as AuditEventPublisherTest): jboss-logmanager is the test JVM's
+    // LogManager here, so the JUL logger named after the class's org.jboss.logging category is the
+    // same underlying node the production code logs to. The once-vs-always log branches in
+    // purgeAll are security-adjacent telemetry (a silent purge must be distinguishable from a
+    // purge that did nothing), so these tests pin the formatted line, not just the metric.
+    private val julLogger = JulLogger.getLogger("com.openbank.libs.persistence.outbox.OutboxSentRetentionJob")
+    private val captured = ConcurrentLinkedQueue<LogRecord>()
+    private var originalLevel: Level? = null
+    private var originalUseParentHandlers = true
+    private val handler = object : Handler() {
+        override fun publish(record: LogRecord) {
+            captured += record
+        }
+        override fun flush() = Unit
+        override fun close() = Unit
+    }
+
+    @BeforeEach
+    fun attachHandler() {
+        originalLevel = julLogger.level
+        originalUseParentHandlers = julLogger.useParentHandlers
+        captured.clear()
+        julLogger.level = Level.ALL
+        julLogger.useParentHandlers = false
+        julLogger.addHandler(handler)
+    }
+
+    @AfterEach
+    fun detachHandler() {
+        julLogger.removeHandler(handler)
+        julLogger.level = originalLevel
+        julLogger.useParentHandlers = originalUseParentHandlers
+    }
+
+    /** Joins captured records; falls back to manual String.format when the backend hands back
+     * the raw printf format with parameters attached (same either-way assertion as
+     * AuditEventPublisherTest). */
+    private fun loggedText(): String = captured.joinToString(" | ") {
+        val params = it.parameters
+        if (params.isNullOrEmpty()) it.message ?: "" else String.format(it.message, *params)
+    }
 
     private class Target(
         override val retentionLabel: String,
@@ -264,6 +313,38 @@ class OutboxSentRetentionJobTest {
         assertThat(a.seen).isNull()
         assertThat(successRecorded()).isNull()
     }
+
+    @Test
+    fun `a purge that deletes rows says so, a quiet purge stays silent`(): Unit = runBlocking {
+        val noisy = Target("noisy", rows = 3)
+        val quiet = Target("quiet", rows = 0)
+        val j = job(noisy, quiet)
+        j.registerLiveness(StartupEvent())
+
+        j.purgeAll(now)
+
+        // count > 0 guard: the mutant that logs when nothing was purged (negated or >=
+        // boundary) prints a line naming the quiet target and fails here.
+        assertThat(loggedText())
+            .contains("outbox.retention.purged service=noisy count=3")
+            .doesNotContain("service=quiet")
+    }
+
+    @Test
+    fun `a bounded run at the cap warns that older rows may remain, a run below the cap does not`(): Unit =
+        runBlocking {
+            val full = Target("full", rows = 201) // batchSize 2 * maxBatches 100 -> cap at 200
+            val j = job(full)
+            j.registerLiveness(StartupEvent())
+
+            j.purgeAll(now)
+            assertThat(loggedText()).contains("outbox.retention.cap_reached service=full")
+
+            captured.clear()
+            j.purgeAll(now.plusSeconds(86_400)) // one row remains: below the cap
+            // capReached guard: the mutant that warns when the cap was NOT reached fails here.
+            assertThat(loggedText()).doesNotContain("outbox.retention.cap_reached")
+        }
 }
 
 class PanacheOutboxRetentionLabelTest {

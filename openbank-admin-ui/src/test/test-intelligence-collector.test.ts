@@ -1098,6 +1098,50 @@ capabilities:
     expect(report.components.find(component => component.component === 'openbank-interest-service')?.evidence).toEqual([])
   })
 
+  it('projects the cross-border and delegated-spend simulation scenarios to their services', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-simulation-new-scenarios-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    const mapped = [
+      ['com.openbank.simulation.scenario.DelegatedSpendScenarioTest', 2, ['openbank-delegation-service']],
+      ['com.openbank.simulation.scenario.SwiftScenarioTest', 4, ['openbank-swift-service']],
+      ['com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest', 7, ['openbank-lending-service']],
+      ['com.openbank.simulation.scenario.StandingOrderScenarioTest', 3, ['openbank-standing-order-service']],
+      ['com.openbank.simulation.scenario.SddCollectionScenarioTest', 4, ['openbank-sdd-service']],
+    ] as const
+    for (const [, , services] of mapped) for (const service of services) {
+      write(repo, `${service}/version.txt`, '1.0.0\n')
+    }
+    const run = { id: '40672119609', attempt: 1, commit: '1c10811abc12', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/40672119609', observedAt: '2026-10-28T11:00:00Z' }
+    const totalCases = mapped.reduce((sum, [, count]) => sum + count, 0)
+    write(repo, 'openbank-simulation/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 1, run, component: 'openbank-simulation',
+      suites: [{ kind: 'simulation', state: 'passed', discovered: totalCases, executed: totalCases, passed: totalCases, failed: 0, skipped: 0, errors: 0, durationMs: 2000 }],
+      testCases: mapped.flatMap(([classname, count]) => Array.from({ length: count }, (_, index) => ({
+        kind: 'simulation', classname, name: `case ${index}`, state: 'passed',
+      }))),
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    for (const [classname, count] of mapped) {
+      const cases = Array.from({ length: count }, (_, index) => `<testcase classname="${classname}" name="case ${index}" time="0.1"/>`).join('')
+      write(repo, `openbank-simulation/build/test-results/test/TEST-${classname}.xml`,
+        `<testsuite name="${classname}" tests="${count}" failures="0" errors="0" skipped="0">${cases}</testsuite>`)
+    }
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const byComponent = new Map(report.components.map(component => [component.component, component]))
+    for (const [classname, count, services] of mapped) for (const service of services) {
+      expect(byComponent.get(service)?.evidence).toEqual([expect.objectContaining({
+        kind: 'simulation', state: 'passed', source: `JUnit:test/TEST-${classname}.xml`,
+        counts: expect.objectContaining({ discovered: count, passed: count }),
+        detail: expect.stringContaining(classname),
+        run: expect.objectContaining({ id: run.id, commit: run.commit, url: run.url }),
+      })])
+    }
+  })
+
   it('keeps verdicts but omits outbound provenance from an untrusted run host', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-untrusted-run-'))
     dirs.push(repo)

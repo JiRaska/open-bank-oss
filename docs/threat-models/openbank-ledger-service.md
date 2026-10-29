@@ -743,3 +743,33 @@ set) apply equally to the new `ledger.approval.decide` action.
 - Copied facts are linked to every opening/window source. Source erasure invalidates copies; detached sources make reads unavailable and the existing partition lifecycle purges the raw copies. No independent retention extension or legal-hold override is authorized. These controls require real concurrent PostgreSQL, source-deletion and partition-lifecycle tests before delivery; no local/hosted PASS is claimed by this note.
 - Snapshot capture and its idempotent result binding commit in the same PostgreSQL transaction. The binding frames the operation and authenticated caller/key scope, stores digests rather than the request or a financial response, and expires after the existing 86,400-second lifetime without replay renewal. Replays revalidate the retained source-linked manifest. Erasure clears its foreign-key reference and subsequent replay is 410, never a new capture under the unexpired key. An explicit EMPTY result stores only its original opaque identifier, observation instant and database-view metadata, so source erasure cannot be mistaken for an empty financial history. These digests and identifiers are not claimed to be anonymous.
 - Expired replay metadata is removed on access and by minute maintenance; physical cleanup can lag during an outage. This metadata has no independent financial response body in Redis. A contending or failed transaction rolls back both copied facts and replay binding; loss of the HTTP response after commit must replay the original result. Real HTTP/PostgreSQL erasure, contention, rollback and response-loss regressions must verify these claims before delivery.
+
+### Synthetic taint request carrier (#4348, #14058, #14059)
+
+- **Classification integrity:** a false synthetic flag can include canary activity in real-only
+  ledger views; an unjustified true flag can exclude real activity. Fail-to-real rejects untrusted
+  self-exclusion but is not a universally safe accounting fallback for a trusted canary.
+- **Trust boundary:** `SyntheticTaintRequestFilter` retains the authenticated service-account
+  check and exact trusted-principals allowlist before accepting the header. It copies the decision
+  to the JAX-RS request property and `SyntheticTaintContext`; neither is caller-authoritative.
+  Ledger RBAC and OPA authorization remain unchanged. No principal, role, grant or trust-list
+  activation is introduced by the carrier change.
+- **Request lifecycle:** the CDI request holder starts false, and accepted and declined paths both
+  write it. `LedgerResource` uses OR with the legacy property, so either true value wins; an
+  inactive CDI context is not an absent-holder fallback. Isolation and propagation across
+  suspension are correctness obligations, not guarantees established by naming the scope.
+- **Evidence and residual risk:** `SyntheticLedgerDimensionIT` checks real HTTP, persisted flags,
+  untrusted taint and population views; `SyntheticTaintFilterTest` checks filter decisions with
+  manually created holders. The original four HTTP tests also passed with the CDI read removed.
+  The extended HTTP profile removes the request property only after the real trust decision and
+  checks actual journal rows. A bounded asynchronous barrier overlaps trusted and ordinary POSTs
+  before either ledger read, followed by a fresh ordinary POST. The five-test HTTP/JDBC run passed; removing only
+  the CDI read fails both the sequential and concurrent synthetic-row assertions. This establishes
+  the CDI read's role under controlled property loss, not the older image's loss mechanism or an
+  absent-holder fallback. Test claims and advisory OPA do not verify production token signatures
+  or enforced authorization. Issue #14058 still requires separate deployed acceptance.
+- **Privacy and rollback:** the new carrier contains only the existing decision Boolean; it adds
+  no identifier, credential, log field or retention store. Reverting it restores property-only
+  reads and may restore false-real classification. Existing journal flags are not rewritten.
+  Dedicated caller provisioning and trusted-principals configuration are separate work (#14060);
+  live canary seeding and deployed acceptance remain separate operational decisions.

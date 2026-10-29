@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.0.0...transaction-service-v2.0.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **transaction:** dial Temporal lazily so reads boot without a frontend ([#14076](https://github.com/JiRaska/open-bank-oss/issues/14076)) ([98e0a1c](https://github.com/JiRaska/open-bank-oss/commit/98e0a1ca988b97e1a566657092b295575adbd69b))
+
 ## [2.0.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.30.2...transaction-service-v2.0.0) (2026-10-26)
 
 
