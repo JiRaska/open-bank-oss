@@ -55,6 +55,9 @@ jobs:
           # All subjects are non-mutating reads booted against disposable PostgreSQL; the
           # ledger read baseline is a money-path READ lane — GET-only by construction, so
           # unlike money-path writes it needs no isolated target or synthetic identity.
+          # transaction-service reads never touch Temporal: the WorkflowClient injection is
+          # lazy (fix #14076), and the boot below passes worker.enabled=false so the read
+          # lane boots with no Temporal frontend at all.
           # Write flows stay out of this GitHub-hosted lane until that boundary is proven
           # (perf/scenarios.yaml).
           DECLARED = [
@@ -62,6 +65,7 @@ jobs:
               "openbank-flaky-test-hunter",
               "openbank-ledger-service",
               "openbank-balance-service",
+              "openbank-transaction-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -234,6 +238,13 @@ jobs:
           docker run -d --name perf-redis -p 6379:6379 redis:8.0-alpine >/dev/null
 
           echo "==> [${SERVICE}] starting quarkusDev on port ${PORT}"
+          # transaction-service: with no Temporal frontend in the throwaway stack, the worker
+          # registrar must be told not to register — the WorkflowClient injection is lazy
+          # (fix #14076), so reads never dial, but an enabled worker would dial at startup.
+          EXTRA_PROPS=()
+          if [ "${SERVICE}" = "openbank-transaction-service" ]; then
+            EXTRA_PROPS=(-Dopenbank.transaction.worker.enabled=false)
+          fi
           ./gradlew ":${SERVICE}:quarkusDev" \
             -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
             -Dquarkus.datasource.reactive.url="postgresql://localhost:5432/${DB}" \
@@ -243,6 +254,7 @@ jobs:
             -Dquarkus.security.auth.enabled-in-dev-mode=false \
             -Dquarkus.management.enabled=false \
             -Dquarkus.console.basic=true \
+            "${EXTRA_PROPS[@]}" \
             --console=plain --quiet \
             > "perf-reports/${SERVICE}-boot.log" 2>&1 &
           DEV_PID=$!
