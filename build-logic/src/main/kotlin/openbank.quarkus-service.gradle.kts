@@ -314,6 +314,17 @@ tasks.withType<Test>().configureEach {
     systemProperty("quarkus.http.test-port", "0")
     systemProperty("quarkus.http.test-ssl-port", "0")
     systemProperty("quarkus.management.test-port", "0")
+    // Optional context-service pilot: Quarkus keeps its primary resource/profile grouping.
+    // The hint only changes secondary class order; test discovery and method order stay intact.
+    val priorityFile = providers.environmentVariable("OPENBANK_TEST_PRIORITY_FILE").orNull
+        ?.let { file(it) }?.takeIf { it.isFile }
+    if (project.name == "openbank-context-service" && name == "test" && priorityFile != null) {
+        inputs.file(priorityFile).withPropertyName("testClassPriority")
+            .withPathSensitivity(PathSensitivity.NONE)
+        systemProperty("quarkus.test.class-orderer", "com.openbank.libs.testing.evidence.HistoryClassOrderer")
+        systemProperty("openbank.test.priority-file", priorityFile.absolutePath)
+        systemProperty("openbank.test.priority-component", project.name)
+    }
     // Testcontainers Docker endpoint. Inherit the ambient DOCKER_HOST (the ephemeral
     // ARC dind pod exposes the daemon on the unix socket, ADR-0053; a dev workstation
     // sets its own) and fall back to the standard unix socket. The previous hard pin
@@ -461,12 +472,49 @@ val providerPactTest =
 // able to run WITHOUT it, so it never becomes an input the hosted "build" job pays for. Invoke it
 // explicitly: `./gradlew :service:providerPactTest -Dpactbroker.url=...`.
 
-tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
+// CycloneDX 2.x declares its destination as one @OutputDirectory. Give it its own
+// directory so it cannot claim Kover's verify.err or other report producers.
+val cyclonedxBomTask = tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setIncludeConfigs(listOf("runtimeClasspath"))
     setSkipConfigs(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
     setProjectType("application")
     setSchemaVersion("1.5")
+    setDestination(layout.buildDirectory.dir("reports/cyclonedx").get().asFile)
 }
+
+// Existing image/release consumers use reports/bom.{json,xml}. Export only those
+// exact files; a Copy task targeting reports/ would reintroduce directory ownership.
+val exportCycloneDxBom = tasks.register("exportCycloneDxBom") {
+    dependsOn(cyclonedxBomTask)
+    inputs.dir(cyclonedxBomTask.flatMap { it.destination }).withPropertyName("sbomDirectory")
+    inputs.property("outputFormat", cyclonedxBomTask.flatMap { it.outputFormat })
+    inputs.property("outputName", cyclonedxBomTask.flatMap { it.outputName })
+    outputs.files(layout.buildDirectory.file("reports/bom.json"), layout.buildDirectory.file("reports/bom.xml"))
+    onlyIf {
+        val producer = cyclonedxBomTask.get()
+        producer.enabled && runCatching { producer.state.rethrowFailure() }.isSuccess &&
+            (producer.state.didWork || producer.state.upToDate)
+    }
+    doLast {
+        val producer = cyclonedxBomTask.get()
+        val formats = when (producer.outputFormat.get()) {
+            "all" -> setOf("json", "xml")
+            else -> setOf(producer.outputFormat.get())
+        }
+        for (format in listOf("json", "xml")) {
+            val target = layout.buildDirectory.file("reports/bom.$format").get().asFile
+            if (format in formats) {
+                val source = producer.destination.get().resolve("${producer.outputName.get()}.$format")
+                check(source.isFile) { "CycloneDX did not produce the enabled $format SBOM" }
+                target.parentFile.mkdirs()
+                source.copyTo(target, overwrite = true)
+            } else {
+                target.delete()
+            }
+        }
+    }
+}
+cyclonedxBomTask.configure { finalizedBy(exportCycloneDxBom) }
 
 // Reproducible archives (issue #8355, OpenSSF Silver build_reproducible): jar entries carry
 // mtimes by default, so two builds of the SAME commit differ byte-for-byte and no supply-chain
@@ -488,6 +536,11 @@ tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
 // measured and a Testcontainers-heavy integration suite can still publish its evidence.
 kover {
     currentProject {
+        sources {
+            // This separate compilation contains only provider-verification tests from
+            // src/test/kotlin; it must not enter the service production coverage denominator.
+            excludedSourceSets.add("providerPactTest")
+        }
         instrumentation {
             excludedClasses.add("org.testcontainers.*")
             // Kover otherwise wires every Test task into koverVerify. The ordinary `test`

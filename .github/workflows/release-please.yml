@@ -71,7 +71,7 @@ jobs:
       # quietly produces a release queue that can never drain.
       - name: Mint a GitHub App installation token
         id: app_token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
@@ -395,7 +395,7 @@ jobs:
       RP_OUTPUTS: ${{ needs.release-please.outputs.rp_outputs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "25"
@@ -433,18 +433,6 @@ jobs:
                   print("\t".join([p, comp, ver, tag, upurl]))
           PY
           echo "Released components:"; cut -f1-4 released.tsv
-          # Gradle task list for components that carry the cyclonedx plugin.
-          tasks=""
-          while IFS=$'\t' read -r -a released_fields; do
-            package_path="${released_fields[0]:-}"
-            [ -n "$package_path" ] && tasks="$tasks :$package_path:cyclonedxBom"
-          done < released.tsv
-          echo "tasks=$tasks" >> "$GITHUB_OUTPUT"
-
-      - name: Generate per-component SBOMs
-        if: steps.map.outputs.tasks != ''
-        run: ./gradlew ${{ steps.map.outputs.tasks }} --console=plain --no-daemon || true
-
       # trivy is NOT preinstalled on hosted runners — without it the non-Gradle SBOM
       # fallback below silently falls through (`command -v trivy` guard) and every
       # module without the cyclonedx plugin releases NAKED (no evidence bundle at all;
@@ -538,23 +526,10 @@ jobs:
           while IFS=$'\t' read -r p comp ver tag upurl; do
             [ -n "$p" ] || continue
             sbom_out="${tag}.cdx.json"
-            bom="$p/build/reports/bom.json"
-            if [ -f "$bom" ]; then
-              cp "$bom" "$sbom_out"
-            elif command -v trivy >/dev/null 2>&1 && trivy fs --format cyclonedx --output "$sbom_out" "$p" 2>/dev/null && [ -s "$sbom_out" ]; then
-              # Non-Gradle module (e.g. admin-ui / Next.js): no cyclonedx plugin, so derive the
-              # SBOM from the source tree (package-lock.json etc.) with trivy fs.
-              echo "::notice::$p has no gradle SBOM — generated via trivy fs"
-            else
-              echo "::error::no SBOM for $p (no gradle plugin and trivy fs produced none) — cannot verify release $tag"
-              exit 1
-            fi
-            [ -s "$sbom_out" ] || { echo "::error::empty SBOM for $tag"; exit 1; }
-            sign "$sbom_out" || { echo "::error::cosign sign-blob failed for $sbom_out"; exit 1; }
-
-            # Assemble SLSA provenance + OpenVEX + evidence manifest (references the signed SBOM).
-            bash .github/scripts/build-release-evidence.sh "$comp" "$ver" "$tag" "$p" "$sbom_out" \
-              || { echo "::error::evidence assembly failed for $tag"; exit 1; }
+            # Build from the immutable release tag, not this workflow's push checkout.
+            source_commit="$(python3 .github/scripts/prepare-release-evidence.py "$p" "$comp" "$ver" "$tag")"
+            python3 .github/scripts/prepare-release-evidence.py --check-remote "$tag" "$source_commit"
+            sign "$sbom_out"
 
             assets="$sbom_out ${sbom_out}.sig"
             for doc in "${tag}.slsa.json" "${tag}.vex.json" "${tag}.evidence.json"; do
@@ -562,6 +537,10 @@ jobs:
               sign "$doc" || { echo "::error::cosign sign-blob failed for $doc"; exit 1; }
               assets="$assets $doc ${doc}.sig"
             done
+
+            python3 .github/scripts/verify-release-evidence-manifest.py "$tag" \
+              --expected-component "$comp" --expected-version "$ver" --expected-commit "$source_commit"
+            python3 .github/scripts/prepare-release-evidence.py --check-remote "$tag" "$source_commit"
 
             if [ -z "$upurl" ]; then
               echo "::error::no upload_url for $tag — cannot attach assets"; exit 1

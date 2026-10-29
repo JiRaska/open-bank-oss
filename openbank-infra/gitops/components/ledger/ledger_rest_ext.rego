@@ -210,6 +210,29 @@ allowed_reasons contains "service-lending-ledger-post" if {
 	input.action == "ledger.create"
 }
 
+# ── ledger.close.participate: day-close participation reports (ADR-0342 D2, #13167) ─────────
+# PUT /api/v1/ledger/accounting-days/{date}/participants/{participant} authorizes as its OWN
+# action, never ledger.create, so reporting a day does not need (or grant) a journal-create grant.
+# Each machine account may report for exactly ONE participant: the resource is the participant
+# name from the path, and the use case additionally checks the verified caller against
+# openbank.ledger.close.participants.<name>.principal. A new participant adds one map entry here
+# and its test; nothing else reaches this action (no staff role, no shared client).
+close_participant_accounts := {
+	"service-account-openbank-interest": "interest",
+	"service-account-openbank-lending": "lending",
+	# billing holds NO ledger.create on its own identity: its journals ride the shared
+	# openbank-services principal. This is its only ledger grant (#13709 review).
+	"service-account-openbank-billing": "billing",
+}
+
+allowed_reasons contains "service-close-participation" if {
+	input.principal.type == "HUMAN"
+	input.action == "ledger.close.participate"
+	some account, participant in close_participant_accounts
+	machine_named(account)
+	input.resource == participant
+}
+
 allowed_reasons contains "service-clearing-ledger-post" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-clearing")
@@ -243,6 +266,21 @@ allowed_reasons contains "service-settlement-ledger-post" if {
 allowed_reasons contains "service-treasury-ledger-post" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-treasury")
+	input.action == "ledger.create"
+}
+
+# #14058 — synthetic seed identity for the account-overview k6 journey fixture (ADR-0252).
+# One deterministic seed posting (DEBIT 1001 Nostro / CREDIT 2100 <fixture account>) is posted
+# through Keycloak client `openbank-synthetic-ledger-seed`, whose service account carries ROLE_API
+# (postJournal's @RolesAllowed requires ROLE_API or ROLE_OPERATOR). This rule is its WHOLE grant:
+# exactly ledger.create, never reverse/trigger/replay/approve/close.draft — same shape as
+# service-interest-ledger-post. The synthetic taint must arrive on the x-openbank-synthetic header
+# and survive the CDI suspend boundary (#14059); ledger's own application.yaml adds the principal
+# to OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS so postJournal accepts it as a trusted synthetic source.
+# Seed-only: it must never need ledger.reverse — a fixture reset is a new offsetting journal.
+allowed_reasons contains "synthetic-ledger-seed-post" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-synthetic-ledger-seed")
 	input.action == "ledger.create"
 }
 

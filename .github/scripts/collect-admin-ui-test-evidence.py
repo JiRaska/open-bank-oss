@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build a current Test Intelligence aggregate from trusted main CI artifacts.
 
-This stages per-component run envelopes, JUnit and Kover data into a clean checkout,
-runs the existing JS collector, then carries only cross-workflow observations not
-restaged here from the latest trusted Admin UI snapshot. Missing optional sources are
+This stages per-component runs and authoritative performance artifacts into a clean
+checkout, runs the existing JS collector, then carries only cross-workflow observations
+not restaged here from the latest trusted Admin UI snapshot. Missing optional sources are
 called out in the report; API failures and malformed present artifacts abort instead
 of looking absent.
 """
@@ -37,6 +37,11 @@ if not ENVELOPE_SPEC or not ENVELOPE_SPEC.loader:
     raise RuntimeError("Test Intelligence envelope validator is unavailable")
 ENVELOPES = importlib.util.module_from_spec(ENVELOPE_SPEC)
 ENVELOPE_SPEC.loader.exec_module(ENVELOPES)
+PERFORMANCE_SPEC = importlib.util.spec_from_file_location("admin_ui_performance_stage", HERE / "stage-admin-ui-performance.py")
+if not PERFORMANCE_SPEC or not PERFORMANCE_SPEC.loader:
+    raise RuntimeError("performance artifact helper is unavailable")
+PERFORMANCE = importlib.util.module_from_spec(PERFORMANCE_SPEC)
+PERFORMANCE_SPEC.loader.exec_module(PERFORMANCE)
 
 API_ORIGIN = "https://api.github.com"
 PER_PAGE = 100
@@ -44,6 +49,7 @@ MAX_ARCHIVE_MEMBERS = 20_000
 MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
 MAX_MEMBER_BYTES = 64 * 1024 * 1024
 SNAPSHOT_PREFIX = "test-intelligence-snapshot-"
+SEED_ALIAS = "admin-ui-test-intelligence-seed"
 SEEDED_LIST_FIELDS = ("mutations", "performance", "performanceHistory", "history", "runHistory", "testCases")
 COMPONENT = re.compile(r"openbank-[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 SHA = re.compile(r"[0-9a-f]{7,40}\Z")
@@ -275,7 +281,7 @@ def _newer(old: dict, current: dict, field: str = "observedAt") -> dict:
     return current if current_at >= old_at else old
 
 
-def merge_ancillary(core: dict, seed: dict | None) -> dict:
+def merge_ancillary(core: dict, seed: dict | None, *, authoritative_performance_ids=frozenset()) -> dict:
     if seed is None:
         core.setdefault("warnings", []).append("No retained trusted Admin UI aggregate was available; ancillary sources are unknown.")
         return core
@@ -284,6 +290,10 @@ def merge_ancillary(core: dict, seed: dict | None) -> dict:
     for field in SEEDED_LIST_FIELDS:
         old_rows = seed.get(field)
         current_rows = core.get(field)
+        if field == "performance" and isinstance(old_rows, list):
+            current_ids = {row.get("id") for row in current_rows or [] if isinstance(row, dict)}
+            old_rows = [row for row in old_rows if not isinstance(row, dict)
+                        or row.get("id") not in authoritative_performance_ids or row.get("id") in current_ids]
         if not isinstance(old_rows, list):
             continue
         if not isinstance(current_rows, list) or not current_rows:
@@ -315,13 +325,16 @@ def merge_ancillary(core: dict, seed: dict | None) -> dict:
             keyed.update({f"{row.get('id')}:{row.get('collectedAt')}": row for row in current_rows if isinstance(row, dict)})
             core[field] = sorted(keyed.values(), key=lambda row: (row.get("id", ""), row.get("collectedAt", "")))
         else:
-            keyed = {row.get("component", row.get("id")): row for row in old_rows if isinstance(row, dict)}
+            # Performance is per scenario: multiple scenarios can share a component (or None).
+            key_field = "id" if field == "performance" else "component"
+            keyed = {row.get(key_field, row.get("id")): row for row in old_rows if isinstance(row, dict)}
             for row in current_rows:
                 if not isinstance(row, dict):
                     continue
-                key = row.get("component", row.get("id"))
+                key = row.get(key_field, row.get("id"))
                 old = keyed.get(key)
-                keyed[key] = _newer(old, row) if old else row
+                keyed[key] = (row if field == "performance" and key in authoritative_performance_ids
+                              else _newer(old, row) if old else row)
             core[field] = list(keyed.values())
 
     # The current checkout supplies the authoritative catalogue and controls. Carry only
@@ -374,8 +387,101 @@ def merge_ancillary(core: dict, seed: dict | None) -> dict:
     return core
 
 
+def aggregate_report(archive: bytes, *, named_seed: bool = False) -> tuple[dict, dict | None]:
+    """Read the original report unchanged; the alias adds a producer-only sidecar."""
+    try:
+        entries = safe_archive_members(archive)
+        with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+            reports = [(info, path) for info, path in entries if path.name == "test-intelligence.json"]
+            if len(reports) != 1:
+                raise CollectionError("aggregate snapshot artifact must contain exactly one test-intelligence.json")
+            report = json.loads(zipped.read(reports[0][0]))
+            provenance = None
+            if named_seed:
+                files = {str(path): info for info, path in entries if not info.is_dir()}
+                if set(files) != {"test-intelligence.json", "seed-provenance.json"}:
+                    raise CollectionError("named aggregate must contain report and provenance only")
+                provenance = json.loads(zipped.read(files["seed-provenance.json"]))
+    except (zipfile.BadZipFile, json.JSONDecodeError, ValueError) as exc:
+        if isinstance(exc, CollectionError):
+            raise
+        raise CollectionError("aggregate snapshot archive is corrupt") from exc
+    if (not isinstance(report, dict) or report.get("schemaVersion") != 1
+            or not isinstance(report.get("components"), list) or not isinstance(report.get("totals"), dict)):
+        raise CollectionError("aggregate snapshot schema is incomplete")
+    return report, provenance
+
+
+def named_aggregate(repo_slug: str, token: str) -> tuple[bool, dict | None]:
+    """One complete exact-name inventory; absent or expired aliases permit legacy lookup."""
+    query = urlencode({"name": SEED_ALIAS, "per_page": PER_PAGE})
+    listing = api_json(f"{API_ORIGIN}/repos/{repo_slug}/actions/artifacts?{query}", token)
+    artifacts, total = listing.get("artifacts"), listing.get("total_count")
+    if (not isinstance(artifacts, list) or type(total) is not int or total < 0
+            or len(artifacts) != total or total > PER_PAGE):
+        raise CollectionError("named aggregate inventory is incomplete or invalid")
+    if not artifacts:
+        return False, None
+    identities = set()
+    for artifact in artifacts:
+        if (not isinstance(artifact, dict) or artifact.get("name") != SEED_ALIAS
+                or type(artifact.get("id")) is not int or artifact["id"] <= 0
+                or artifact["id"] in identities or _timestamp(artifact.get("created_at")) is None
+                or type(artifact.get("expired")) is not bool):
+            raise CollectionError("named aggregate artifact identity is invalid or ambiguous")
+        identities.add(artifact["id"])
+    ordered = sorted(artifacts, key=lambda item: (_timestamp(item["created_at"]), item["id"]), reverse=True)
+    seen_runs = set()
+    for artifact in ordered:
+        producer = artifact.get("workflow_run")
+        run_id = producer.get("id") if isinstance(producer, dict) else None
+        if (type(run_id) is not int or run_id <= 0 or run_id in seen_runs
+                or producer.get("head_branch") != "main"
+                or not isinstance(producer.get("head_sha"), str)
+                or re.fullmatch(r"[0-9a-f]{40}", producer["head_sha"]) is None):
+            raise CollectionError("named aggregate producer is invalid or ambiguous")
+        seen_runs.add(run_id)
+    # The short-lived alias can remain listed after expiry. Its immutable snapshot
+    # has longer retention; only a complete, structurally valid all-expired
+    # inventory authorizes that legacy lookup. Unknown expiration is never absence.
+    if all(artifact["expired"] for artifact in ordered):
+        return False, None
+    for artifact in ordered:
+        if artifact["expired"]:
+            continue
+        producer = artifact["workflow_run"]
+        run_id = producer["id"]
+        run = api_json(f"{API_ORIGIN}/repos/{repo_slug}/actions/runs/{run_id}", token)
+        if (not trusted_deploy_run(run, repo_slug) or run.get("status") != "completed"
+                or run.get("conclusion") != "success"):
+            continue
+        if (type(run.get("id")) is not int or run["id"] != run_id
+                or type(run.get("run_attempt")) is not int or run["run_attempt"] <= 0
+                or producer.get("head_sha") != run["head_sha"] or producer.get("head_branch") != "main"):
+            raise CollectionError("named aggregate producer identity mismatch")
+        raw = api_bytes(f"{API_ORIGIN}/repos/{repo_slug}/actions/artifacts/{artifact['id']}/zip", token)
+        report, provenance = aggregate_report(raw, named_seed=True)
+        if (not isinstance(provenance, dict) or set(provenance) != {"schemaVersion", "runId", "attempt", "sourceSha", "workflowSha"}
+                or type(provenance.get("schemaVersion")) is not int or provenance["schemaVersion"] != 1
+                or type(provenance.get("runId")) is not int or provenance["runId"] != run_id
+                or type(provenance.get("attempt")) is not int or provenance["attempt"] != run["run_attempt"]
+                or provenance.get("workflowSha") != run["head_sha"]
+                or not isinstance(provenance.get("sourceSha"), str)
+                or re.fullmatch(r"[0-9a-f]{40}", provenance["sourceSha"]) is None):
+            raise CollectionError("named aggregate attempt/source provenance mismatch")
+        started, collected, created, updated = (_timestamp(run.get("run_started_at")),
+            _timestamp(report.get("collectedAt")), _timestamp(artifact.get("created_at")), _timestamp(run.get("updated_at")))
+        if not all((started, collected, created, updated)) or not started <= collected <= created <= updated:
+            raise CollectionError("named aggregate attempt timestamps are invalid or inconsistent")
+        return True, report
+    raise CollectionError("named aggregate exists but no successful trusted unexpired producer is available")
+
+
 def latest_aggregate(repo_slug: str, token: str) -> dict | None:
-    """Return the latest safely published aggregate, or None when the source is absent."""
+    """Prefer the bounded alias; retain legacy discovery only during migration."""
+    present, report = named_aggregate(repo_slug, token)
+    if present:
+        return report
     workflow_url = f"{API_ORIGIN}/repos/{repo_slug}/actions/workflows/admin-ui-deploy.yml/runs?branch=main&status=success&per_page={PER_PAGE}"
     runs = api_json(workflow_url, token).get("workflow_runs")
     if not isinstance(runs, list):
@@ -405,20 +511,7 @@ def latest_aggregate(repo_slug: str, token: str) -> dict | None:
             raise CollectionError("aggregate snapshot artifact has no valid id")
         archive_url = f"{API_ORIGIN}/repos/{repo_slug}/actions/artifacts/{artifact_id}/zip"
         archive = api_bytes(archive_url, token)
-        try:
-            with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
-                entries = safe_archive_members(archive)
-                reports = [(info, path) for info, path in entries if path.name == "test-intelligence.json"]
-                if len(reports) != 1:
-                    raise CollectionError("aggregate snapshot artifact must contain exactly one test-intelligence.json")
-                report = json.loads(zipped.read(reports[0][0]))
-        except (zipfile.BadZipFile, json.JSONDecodeError, ValueError) as exc:
-            if isinstance(exc, CollectionError):
-                raise
-            raise CollectionError("aggregate snapshot archive is corrupt") from exc
-        if (not isinstance(report, dict) or report.get("schemaVersion") != 1
-                or not isinstance(report.get("components"), list) or not isinstance(report.get("totals"), dict)):
-            raise CollectionError("aggregate snapshot schema is incomplete")
+        report, _ = aggregate_report(archive)
         return report
     return None
 
@@ -442,9 +535,64 @@ def api_bytes(url: str, token: str) -> bytes:
         raise CollectionError(f"GitHub artifact download failed ({status})") from exc
 
 
+def performance_authority(core: dict, staging: dict, repo_slug: str) -> set[str]:
+    """Latest trusted workflow selection overrides retained passes, including absence.
+
+    Missing rows describe collection status from workflow metadata; they are not
+    producer envelopes or measurements and carry no inherited metrics/run verdict.
+    """
+    rows = core.setdefault("performance", [])
+    keyed = {row.get("id"): row for row in rows if isinstance(row, dict)}
+    if len(keyed) != len(rows):
+        raise CollectionError("performance collector returned ambiguous scenario identities")
+    authoritative = set()
+    for source in staging["sources"]:
+        selected = {entry["scenario_id"]: entry for entry in source["selected"]}
+        missing = {entry["scenario_id"]: entry for entry in source["missing"]}
+        for entry in source["expected"]:
+            identifier = entry["scenario_id"]
+            authoritative.add(identifier)
+            row = keyed.get(identifier)
+            if row is None:
+                if identifier in selected:
+                    raise CollectionError(f"selected performance scenario is not declared: {identifier}")
+                continue  # A removed declaration must not be resurrected from a producer.
+            path = PurePosixPath(row.get("source", ""))
+            component = path.parts[0] if path.parts and path.parts[0].startswith("openbank-") else None
+            calculated = component + "-" + path.stem.removeprefix("openbank-") if component else path.stem
+            expected_component = None if (identifier, entry["component"]) in {
+                ("money-path-smoke", "openbank-money-path"), ("security-abuse-smoke", "openbank-security-abuse")
+            } else entry["component"]
+            definition_path = ((len(path.parts) == 5 and path.parts[:4] == (component, "src", "test", "k6"))
+                               if component else len(path.parts) == 3 and path.parts[:2] == ("perf", "k6"))
+            if (calculated != identifier or component != expected_component
+                    or row.get("component") != expected_component or path.suffix != ".js" or not definition_path):
+                raise CollectionError(f"performance collector scenario identity mismatch: {identifier}")
+            if identifier in selected:
+                run = row.get("run")
+                if (not isinstance(run, dict) or str(run.get("id")) != str(source["run_id"])
+                        or run.get("commit") != source["commit"] or run.get("branch") != "main"
+                        or type(run.get("attempt")) is not int or not 1 <= run["attempt"] <= source["attempt"]
+                        or run.get("url") != f"https://github.com/{repo_slug}/actions/runs/{source['run_id']}"):
+                    raise CollectionError(f"selected performance row lost verified provenance: {identifier}")
+                producer_state = selected[identifier].get("state")
+                if producer_state and row.get("state") not in ({"passed", "stale", "unknown"} if producer_state == "passed" else {producer_state}):
+                    raise CollectionError(f"selected performance row changed producer verdict: {identifier}")
+                continue
+            reason = missing.get(identifier, {}).get("reason", "latest selection has no attributable evidence")
+            for field in ("metrics", "run", "thresholdResults"):
+                row.pop(field, None)
+            row.update({"state": "unknown", "observedAt": source.get("observed_at"),
+                        "detail": f"{source['workflow']} ({source['scope']}): {reason}.",
+                        "collectionStatus": {"scope": source["scope"], "reason": reason,
+                            "workflow": source["workflow"], "runId": source["run_id"],
+                            "attempt": source["attempt"], "commit": source.get("commit")}})
+    return authoritative
+
+
 def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
             fetch_page=None, fetch_run=None, fetch_attempt=None, fetch_archive=None,
-            seed=SEED_UNSET, run_collector=None) -> dict:
+            seed=SEED_UNSET, run_collector=None, performance_stage=None) -> dict:
     components = repo_components(repo)
     if not token:
         raise CollectionError("GITHUB_TOKEN is required to read trusted CI artifacts")
@@ -519,6 +667,59 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
     created_files: list[Path] = []
     created_dirs: list[Path] = []
     absent = []
+
+    def stage_payloads(payloads):
+        targets = []
+        for relative, content in payloads.items():
+            if not isinstance(relative, str):
+                raise CollectionError("invalid evidence staging path or payload")
+            path = PurePosixPath(relative)
+            if ("\\" in relative or path.is_absolute()
+                    or not path.parts or any(part in {".", ".."} for part in relative.split("/"))
+                    or not isinstance(content, bytes)):
+                raise CollectionError("invalid evidence staging path or payload")
+            target = repo / relative
+            parent = target
+            while parent != repo:
+                if parent.is_symlink():
+                    raise CollectionError(f"refusing symlink evidence staging path: {relative}")
+                parent = parent.parent
+            if target.exists():
+                raise CollectionError(f"refusing to mix downloaded evidence with pre-existing path: {relative}")
+            targets.append((target, content))
+        for target, content in targets:
+            missing_dirs = []
+            parent = target.parent
+            while parent != repo and not parent.exists():
+                missing_dirs.append(parent)
+                parent = parent.parent
+            target.parent.mkdir(parents=True, exist_ok=True)
+            created_dirs.extend(reversed(missing_dirs))
+            with target.open("xb") as stream:
+                created_files.append(target)
+                stream.write(content)
+
+    performance_json_cache = {}
+    performance_bytes_cache = {}
+
+    def performance_json(url):
+        if url not in performance_json_cache:
+            performance_json_cache[url] = api_json(url, token)
+        return performance_json_cache[url]
+
+    def performance_bytes(url):
+        if url not in performance_bytes_cache:
+            performance_bytes_cache[url] = api_bytes(url, token)
+        return performance_bytes_cache[url]
+
+    def performance_log(job_id):
+        if type(job_id) is not int or job_id <= 0:
+            raise CollectionError("invalid performance scope job identity")
+        payload = performance_bytes(f"{API_ORIGIN}/repos/{repo_slug}/actions/jobs/{job_id}/logs")
+        if len(payload) > PERFORMANCE.MAX_JSON_BYTES:
+            raise CollectionError("performance scope log exceeds size limit")
+        return payload.decode("utf-8", errors="strict")
+
     try:
         for component, artifact_id in planned:
             if artifact_id is None:
@@ -542,23 +743,18 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
                 resolve_attempt=workflow_attempt,
                 artifact_created_at=metadata.get("created_at"),
             )
-            for relative in payloads:
-                target = repo / relative
-                if target.exists():
-                    raise CollectionError(f"refusing to mix downloaded evidence with pre-existing path: {relative}")
-            for relative, content in payloads.items():
-                target = repo / relative
-                missing_dirs = []
-                parent = target.parent
-                while parent != repo and not parent.exists():
-                    missing_dirs.append(parent)
-                    parent = parent.parent
-                target.parent.mkdir(parents=True, exist_ok=True)
-                created_dirs.extend(reversed(missing_dirs))
-                target.write_bytes(content)
-                created_files.append(target)
+            stage_payloads(payloads)
 
-        warnings = []
+        try:
+            performance = (performance_stage or PERFORMANCE.stage_performance)(
+                repo, repo_slug, performance_json, performance_bytes,
+                safe_archive_members=safe_archive_members, validate_envelope=ENVELOPES.validate,
+                fetch_log=performance_log)
+        except PERFORMANCE.StageError as exc:
+            raise CollectionError(f"performance artifact collection failed: {exc}") from exc
+        stage_payloads(performance["payloads"])
+
+        warnings = list(performance["warnings"])
         if absent:
             warnings.append("No retained trusted main run envelope was available for: " + ", ".join(absent) + ". Their execution evidence is unknown, not passed.")
         if seed_report is None:
@@ -569,7 +765,8 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
             command = ["node", str(collector), "--repo", str(repo), "--out", str(generated)]
             (run_collector or subprocess.run)(command, cwd=repo, check=True)
             core = json.loads(generated.read_text(encoding="utf-8"))
-        report = merge_ancillary(core, seed_report)
+        authoritative_ids = performance_authority(core, performance, repo_slug)
+        report = merge_ancillary(core, seed_report, authoritative_performance_ids=authoritative_ids)
         report.setdefault("warnings", []).extend(warnings)
         output.parent.mkdir(parents=True, exist_ok=True)
         # This is a transport snapshot, not a reviewed source document. Preserve

@@ -26,9 +26,20 @@ GRADLE_PROFILE_ARGS=()
 case "$SERVICE" in
   openbank-lending-service|openbank-pension-service) GRADLE_PROFILE_ARGS=(--profile) ;;
 esac
+# The pilot uses deployment's native runner and augmentation properties. Other service
+# builds retain their existing recipe. SBOM and application come from one Gradle graph.
+deploy_tasks=()
+deploy_options=()
+if [ "${DEPLOY_ARTIFACT_PILOT:-false}" = true ]; then
+  [ "$SERVICE" = openbank-context-service ] || { echo 'Invalid deployment artifact pilot' >&2; exit 1; }
+  export ANALYTICS_SINK_TYPE=clickhouse AGENT_SVID_NONCE_STORE=redis
+  deploy_tasks+=(":${SERVICE}:cyclonedxBom")
+  deploy_options+=(-Dquarkus.package.jar.type=fast-jar)
+fi
 # Cache healing replays this command only if verification fails before
 # the first Gradle task; tests and build outputs are never replayed.
 bash .github/scripts/retry-testcontainers-ebusy.sh -- \
   bash .github/scripts/retry-gradle-verification-cache.sh -- \
-  ./gradlew "${GRADLE_PROFILE_ARGS[@]}" --configure-on-demand :"${SERVICE}":build --build-cache --console=plain --stacktrace \
+  ./gradlew "${GRADLE_PROFILE_ARGS[@]}" --configure-on-demand :"${SERVICE}":build "${deploy_tasks[@]}" --build-cache --console=plain --stacktrace \
+  "${deploy_options[@]}" \
   -Dquarkus.smallrye-openapi.store-schema-directory="build/openapi-generated"

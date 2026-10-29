@@ -7,6 +7,7 @@ flowchart LR
   Service[Quarkus služba] --> Runtime[openbank-libs-runtime]
   Runtime --> Domain[openbank-libs-domain]
   Finance[openbank-libs-finance] --> Domain
+  Fincrime[openbank-libs-fincrime]
   Legacy[openbank-libs kompatibilitní zastřešení] --> Runtime
   Legacy --> Domain
   Runtime --> DocsResource[DocsResource /q/openbank/docs]
@@ -25,6 +26,8 @@ Samotný `openbank-libs` nemá běžící endpoint. Jeho kořenová složka `doc
 ## Build a kompatibilita
 
 Kořenový build používá Gradle subprojekty. Služby zpravidla deklarují `implementation(project(":openbank-libs-runtime"))`, starší konzumenti mohou používat zastřešující modul. Autoritativní verze závislostí jsou v `openbank-libs/gradle/libs.versions.toml`; Gradle konvence v `build-logic/src/main/kotlin/`. Release verze každé služby je v jejím `version.txt`.
+
+Sdílené knihovny a služby používají Quarkus **3.40.1.1 LTS** ze stejného katalogu. Frameworkové závislosti runtime, testovacích a Temporal adaptérů zachovávají dosavadní rozsah závislostí; doménové jádro zůstává bez frameworku. Sdílená Micrometer API používají platformní verzi **1.17.1**. Bezpečnostní přepisy verzí musí zachovat alespoň opravené verze platformy. [Postup upgradu a rollbacku](../../docs/runbooks/quarkus-lts-upgrade.md) popisuje kontroly kompatibility a podmínky nasazení.
 
 ## Čtyři oči: shrnutí schvalované operace
 
@@ -47,3 +50,12 @@ Kořenový build používá Gradle subprojekty. Služby zpravidla deklarují `im
 ## Trace kontext outboxu
 
 `PanacheOutboxEntityTraced` (libs-runtime) rozšiřuje entitu outboxu v2 o nullable sloupec `trace_context` s W3C `traceparent`, který při zápisu řádku zachytí `TraceparentCapture`. `OutboxEntry.traceparent` ho přenese do dispatcheru a `OutboxKafkaHeaders` ho vydá jako Kafka hlavičku `traceparent`. Služba ho přebírá dobrovolně spolu s migrací `ALTER TABLE ... ADD COLUMN trace_context TEXT`; základy v1 a v2 se nemění, protože namapovaný sloupec, který tabulka nemá, shodí každý SELECT.
+
+## Slovník kanálu vlastních převodů banky (ADR-0344, fáze 1b)
+
+`openbank-libs-iso20022` drží slovník kanálu vlastních převodů banky, aby jej swift-service i treasury pojmenovávaly stejně:
+- `InstitutionTransferRail` je CERTIS, TARGET2 nebo SWIFT, každý se svou měnou a kódem clearingového systému pro pacs.009.
+- `InstitutionTransferStatus` je životní cyklus převodu. Publikují se jen ACCEPTED, SENT, SETTLED a REJECTED (kontrakt 9.2).
+- Builder a reader pro pacs.009 validují proti přiloženému XSD `pacs.009.001.08`.
+
+Sdílená tabulka `TopicProducers` v `openbank-libs-domain` přiřazuje topik `openbank.swift.institution-transfers` službě swift-service. Podle ní audit-service označuje záznamy, které z tohoto topiku čte.

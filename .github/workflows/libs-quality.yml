@@ -4,9 +4,22 @@ name: Libs compatibility and recovery
 on:
   pull_request:
     paths:
+      - ".github/scripts/pitest-libs-advisory.init.gradle"
+      - ".github/workflows/pitest.yml"
       - "openbank-libs*/**"
       - "fuzz/**"
+      - ".clusterfuzzlite/**"
+      - ".github/workflows/services-ci.yml"
       - ".github/workflows/libs-quality.yml"
+      - ".github/workflows/libs-bench.yml"
+      - ".github/workflows/cflite-pr.yml"
+      - ".github/scripts/library_quality_scope.py"
+      - ".github/scripts/test_library_quality_scope.py"
+      - ".github/scripts/check_library_quality_evidence.py"
+      - ".github/scripts/test_library_quality_evidence.py"
+      - ".github/scripts/check-bench-alloc-baseline.py"
+      - ".github/scripts/test_bench_ratchet.py"
+
   workflow_dispatch: {}
 
 permissions:
@@ -23,7 +36,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           java-version: "25"
           distribution: temurin
@@ -32,14 +45,13 @@ jobs:
           cache-read-only: true
       - name: Build every library with ABI, coverage, recovery and old-consumer proofs
         run: |
-          ./gradlew \
-            :openbank-libs-domain:build :openbank-libs-domain:koverVerify \
-            :openbank-libs-runtime:build :openbank-libs-runtime:koverVerify \
-            :openbank-libs-lending:build :openbank-libs-lending:koverVerify \
-            :openbank-libs-iso20022:build :openbank-libs-iso20022:koverVerify \
-            :openbank-libs-temporal:build :openbank-libs-temporal:koverVerify \
-            :openbank-libs-testing:build :openbank-libs-testing:koverVerify \
-            --continue --console=plain
+          python3 .github/scripts/test_bench_ratchet.py
+          python3 .github/scripts/test_library_quality_scope.py
+          python3 .github/scripts/library_quality_scope.py > /tmp/library-proof-tasks
+          mapfile -t proof_tasks < /tmp/library-proof-tasks
+          ./gradlew "${proof_tasks[@]}" --continue --console=plain
+      - name: Enforce runtime mutation floor with unchanged targets
+        run: ./gradlew -I .github/scripts/pitest-libs-advisory.init.gradle :openbank-libs-runtime:pitest --console=plain
       - name: Exercise the fuzz oracle on its corpus and deterministic mutations
         run: ./gradlew -p fuzz/ossfuzz test --console=plain
       - name: Upload compatibility and recovery evidence
@@ -50,5 +62,6 @@ jobs:
           path: |
             openbank-libs-*/build/test-results/test/*.xml
             fuzz/ossfuzz/build/test-results/test/*.xml
+            openbank-libs-runtime/build/reports/pitest/mutations.xml
           if-no-files-found: error
           retention-days: 30

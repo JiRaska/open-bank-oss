@@ -103,6 +103,15 @@ existing liquidity tests and `RiskLiquidityApiIT` are updated.
 
 The risk engine consumes `openbank.fx.cnb-policy-rate.published` into its local policy-rate fact table. A redelivery is idempotent on instrument and effective date; a revised rate updates the stored fact. The minimum-reserves endpoint derives its result from a tied-out snapshot and the reserve ratio and remuneration effective on that run's as-of date. Missing facts produce `424 NOT_EVALUABLE` with a reason instead of a default numeric rate; an unknown run remains 404 and an untied run remains 409. The analysis is calculated on read and is not persisted as a separate result.
 
+## Treasury book valuation (ADR-0344 D8)
+
+The engine values the bank's own treasury book from a snapshot: `GET /snapshots/{id}/valuation`,
+`/sensitivity`, `/var` and `/fx-position`, plus `POST /pricing` for a single quote. Only booked
+ACTUAL deals are valued; planned and hypothetical deals are ignored. A booked deal whose legs cannot
+be built is reported as a data gap, never dropped silently. Pricing, sensitivity and VaR requests are
+bounded in size. Treasury reads the snapshot list and valuations under its own machine identity; no
+other service-account is granted these reads.
+
 ## Build-time wiring
 
 - **OPA policy decision point.** `openbank.authz.opa-pdp-producer.enabled: true` makes libs-runtime's `OpaPolicyDecisionPointProducer` supply the OPA sidecar client, configured by `opa.url`, `opa.path` and `opa.timeout-ms` (default 500 ms). It is read at build time.

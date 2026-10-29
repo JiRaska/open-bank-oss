@@ -39,3 +39,27 @@ Add a KYC consumer pact for the literal POST path and body, covering 201, 409, a
 ## Rollout and rollback
 
 Roll out the durable event/migration first, then deploy the adapter disabled by default, exercise Pact and a sandbox coordinator, and enable only after the operator-task and retry metrics are observed. Rollback disables the adapter and leaves the durable failure rows for replay; never delete them or mark the KYC trigger successful.
+
+## Response mapper and retry boundary (#13225)
+
+The default REST-client mapper throws for HTTP errors before the adapter's status
+classifier can run. Deterministic 4xx except 429 are recovered inside the existing
+retry boundary as status-only responses: 409 remains `AlreadyExists`, and 400/403
+remain `Rejected`, with one request. The original provider response is closed;
+its body, URL, exception message and cause are not copied into the outcome.
+429/5xx retain a status-only exception and the existing bounded retry budget.
+Transport/resilience failures retain only the exception class name in their detail.
+Normal and normalized responses are closed after classification.
+
+Local regression evidence uses the real REST client and injected CDI self proxy:
+201/409/400/403 require one request each, while default-mapper 429/503 require
+three attempts. A test-only circuit-breaker override isolates retry counts from
+cross-case breaker state; it is not breaker validation. The fixture uses isolated
+infrastructure and a synthetic provider, not live OAuth, coordinator persistence,
+operator state/outbox delivery or deployment proof. No production rollout flag,
+authentication, request fields, global mapper setting or retry budget changes.
+A custom mapper returning raw 429/503 responses still reaches the existing status
+classifier directly; these notes do not promise retries on that separate path.
+Revert restores the misclassified deterministic-error retry path and former detail
+format; no schema or credential rollback is needed. No historical PII leak is
+established by this regression.

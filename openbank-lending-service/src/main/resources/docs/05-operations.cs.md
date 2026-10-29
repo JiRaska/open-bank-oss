@@ -29,6 +29,8 @@
 
 `LENDING_LEDGER_BACKEND` je **build-time** (`@IfBuildProperty`): vybírá adaptér při sestavení image, ne za běhu.
 
+Zpoždění před prvním plánovaným obnovením compliance balíčků určuje `lending.compliance.refresh-initial-delay` (výchozí `10s`).
+
 ## Porty & probes
 
 - **App:** `8126`. **Management:** `8086`, root-path `/q` (`quarkus.management.enabled=true`).
@@ -129,3 +131,40 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Účast na uzávěrce dne (ADR-0342, #13167)
+
+Lending hlásí každý dokončený účetní den (pražský čas) do ledger-service jako účastník `lending`
+(`LendingCloseParticipationScheduler`, každou hodinu v :40; `lending.close.report-cron`, zpětné okno
+`lending.close.lookback-days`, výchozí 3). Podkladem je `lending_close_job_run` (V28): jeden řádek na
+den a úlohu (`accrual`, `provisioning`).
+
+- Obě úlohy proběhly, nic nebylo odmítnuto a deníky opravných položek jsou doručeny: RAN.
+- Úloha neproběhla, právě běží nebo deníky opravných položek čekají v outboxu: zatím se nehlásí nic,
+  ledger den drží.
+- Odmítnutí `409 ACCOUNTING_DAY_CLOSED`, selhání, neúplné pokrytí, DEAD řádek outboxu nebo běh
+  zkrácený dávkovým limitem i po vyčerpání rozpočtu: REFUSED s pevnou kategorií.
+- Značka běhu starší než drain-budget × (lookback + 1) + 30 min (výchozí 70 min): REFUSED `pass started and never completed`; další běh výpočtu úroků ten den dopočítá a zapíše jako RAN.
+- Oba intervaly vypnuté (`off`): SKIPPED.
+
+Výpočet úroků zpracovává zkrácené dávky v rámci rozpočtu (`drain-budget` PT10M, `max-drain-rounds`
+100) a každý běh nejprve dopočítá dřívější dny v okně, které zůstaly REFUSED kvůli zkrácení, a zapíše
+je jako RAN. Den ve stavu REFUSED drží uzávěrku do pozdějšího RAN nebo výjimky operátora v ledgeru.
+Hlášení po uzavření dne se uloží jako `late` a den nepohne.
+
+### Trvalé potvrzení časového rozlišení (#13708)
+
+Před voláním ledgeru uloží `lending_accrual_progress` (V28) úplný datovaný požadavek splátky,
+deterministickou referenci a identitu transakce. Opakování použije stejný požadavek včetně původního
+data a GL účtů, nikoli dnešní hodiny či účtový rozvrh. Potvrzuje jej pouze odpověď POSTED se shodnou
+identitou transakce a datem zápisu. Odmítnutí uzavřeného dne zůstává viditelné; tentýž idempotency klíč
+se nikdy nepřesměruje na jiné datum.
+
+Jediná lokální DB transakce dokončí záměr, označí splátku, uloží existující outbox událost
+`loan.interest_accrued` a zvýší počet položek pracovního dne a journalů skutečného dne potvrzení.
+Selhání další splátky neztratí již potvrzený prefix. Potvrzení ledgeru následované lokálním rollbackem
+ponechá záměr čekající; přesné opakování jej může jednou dokončit. Čekající záměr brání RAN.
+Výmaz nevyřešeného záměru sleduje životní cyklus splátky a zachová pouze agregovanou nejistotu
+`unreconciled` dotčených pracovních/požadovaných dnů, kterou úspěšný běh nesmaže. Dispozici řeší
+existující řízené dorovnání či waiver v ledgeru. Nevzniká zákaznický tombstone ani nová retenční lhůta.
+Rollback zachová tabulky V28 i čekající důkazy; návrat kódu nedokazuje, že vzdálený zápis nenastal.

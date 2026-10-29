@@ -27,6 +27,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    // ADR-0353: the financial-crime published language, declared once for producers and rails.
+    implementation(project(":openbank-libs-fincrime"))
     implementation(project(":openbank-libs-runtime"))
     implementation(libs.quarkus.scheduler)
     // #3413: account -> party lookup for the resolution sweep (sweep-only; never on the
@@ -48,6 +50,9 @@ dependencies {
     // Pact provider verification (issue #2255, C3): fx-service is a consumer of
     // POST /api/v1/aml/cases. @TestSecurity supplies the operator role Pact replays with.
     testImplementation(libs.pact.provider)
+    // Pact consumer: AmlAccountOwnershipPactConsumerTest pins the party-resolution read
+    // against account-service (GET /api/v1/accounts/{id}, issue #3413 sweep).
+    testImplementation(libs.pact.consumer)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.quarkus.test.security.oidc)
 }

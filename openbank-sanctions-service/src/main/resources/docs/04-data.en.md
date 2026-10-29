@@ -124,3 +124,9 @@ Lawful basis for processing: **Legal obligation** (Art. 6(1)(c) GDPR) + **AML Di
 - Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
 - Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
 - Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.
+
+## JSONB screening payload retrieval
+
+The `sanctions_checks` columns `aliases`, `identifiers`, `matches` and `checked_lists` remain JSONB with their existing defaults and NOT NULL constraints. The persistence entity keeps JSON text in Kotlin: SQL reads cast these columns to text, while writes cast the bound text to JSONB. The intermediate text cast on writes prevents a JSON document from being stored as a quoted JSON string. Database JSON validation remains in place; no payload-column type migration is required.
+
+This mapping lets list, check-by-id and pending reads retrieve populated arrays and objects without changing the response fields or screening decisions. A real-PostgreSQL regression covers existing JSONB rows, reactive insert and update/reload with changed payloads, nullable metadata, malformed-JSON rejection and missing-id404. Positive HTTP tests use a test identity and do not prove production JWT or policy enforcement.

@@ -36,10 +36,12 @@ permissions:
 jobs:
   build:
     name: ${{ inputs.service }} (build)
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && inputs.ref == '' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 45
     permissions:
       contents: read
+      actions: read
     env:
       GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
       LANG: C.UTF-8
@@ -90,7 +92,7 @@ jobs:
         \    echo \"::warning::could not raise fs.aio-max-nr (currently ${cur}); parallel Testcontainers may exhaust the AIO\
         \ pool on this runner (no passwordless sudo?)\"\n  fi\nelse\n  echo \"fs.aio-max-nr already ${cur} (>= 1048576)\"\n\
         fi\n"
-    - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+    - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
       with:
         distribution: temurin
         java-version: '21
@@ -105,10 +107,41 @@ jobs:
         cache-disabled: false
         cache-read-only: true
         gradle-home-cache-strict-match: false
+    - name: Prepare optional context test ordering
+      if: inputs.service == 'openbank-context-service' && inputs.ref == ''
+      timeout-minutes: 1
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: "python3 .github/scripts/prepare-test-priority.py \\\n  --repo \"$GITHUB_REPOSITORY\" --component openbank-context-service\
+        \ \\\n  --out \"$RUNNER_TEMP/context-test-priority.json\"\necho \"OPENBANK_TEST_PRIORITY_FILE=$RUNNER_TEMP/context-test-priority.json\"\
+        \ >> \"$GITHUB_ENV\"\n"
     - name: Build + test (:${{ inputs.service }})
       env:
         SERVICE: ${{ inputs.service }}
+        DEPLOY_ARTIFACT_PILOT: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref
+          == 'refs/heads/main' && inputs.ref == '' }}
       run: bash -e "$SERVICE_CI_HELPERS/build-test.sh"
+    - name: Package verified context deployment build
+      id: deploy_bundle
+      continue-on-error: true
+      if: inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+        inputs.ref == ''
+      env:
+        ANALYTICS_SINK_TYPE: clickhouse
+        AGENT_SVID_NONCE_STORE: redis
+      run: "python3 .github/scripts/service-build-artifact.py pack \\\n  --service openbank-context-service --sha \"$GITHUB_SHA\"\
+        \ \\\n  --run-id \"$GITHUB_RUN_ID\" --attempt \"$GITHUB_RUN_ATTEMPT\" \\\n  --out \"$RUNNER_TEMP/deploy-build\"\n"
+    - name: Retain verified context deployment build
+      if: steps.deploy_bundle.outcome == 'success'
+      continue-on-error: true
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      with:
+        name: service-build-openbank-context-service-${{ github.sha }}-a${{ github.run_attempt }}
+        path: ${{ runner.temp }}/deploy-build/deploy-build.zip
+        if-no-files-found: error
+        retention-days: 1
+        compression-level: 0
     - name: Explain a Docker registry pull failure (diagnostic)
       if: failure()
       run: "python3 .github/scripts/check-testcontainers-registry-failure.py \\\n  --service \"${{ inputs.service }}\"\n"
@@ -119,9 +152,9 @@ jobs:
         \ \\\n  --enforce\n"
     - name: Generate Kover XML report
       continue-on-error: true
-      run: timeout --kill-after=10s 600s ./gradlew --no-daemon --configure-on-demand :${{ inputs.service }}:koverXmlReport
-        --exclude-task :${{ inputs.service }}:test --exclude-task :${{ inputs.service }}:providerPactTest --exclude-task :${{
-        inputs.service }}:quarkusIntTest --exclude-task :${{ inputs.service }}:testNative --build-cache --console=plain -Dquarkus.smallrye-openapi.store-schema-directory=build/openapi-generated
+      env:
+        SERVICE: ${{ inputs.service }}
+      run: timeout --kill-after=10s 600s bash -e "$SERVICE_CI_HELPERS/render-coverage-report.sh"
     - name: Build Test Intelligence run envelope
       if: always()
       continue-on-error: true

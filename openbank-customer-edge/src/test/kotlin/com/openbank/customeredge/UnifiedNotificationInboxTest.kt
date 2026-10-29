@@ -410,10 +410,25 @@ class UnifiedNotificationInboxTest {
             Response.status(503).build()
         }
         val resolver = ActingForResolver(upstream, mapper, Clock.systemUTC(), "http://party", true)
-        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(100)
-        assertThatThrownBy { resolver.profilesOfStrict(human, deadline) }
+        val deadline = TimeUnit.MILLISECONDS.toNanos(100)
+        assertThatThrownBy { resolver.profilesOfStrict(human, deadline) { TimeUnit.MILLISECONDS.toNanos(40) } }
             .isInstanceOf(ServiceUnavailableException::class.java)
-        assertThat(timeoutMs).isBetween(1, 100)
+        assertThat(timeoutMs).isEqualTo(60)
+        verify(exactly = 1) { upstream.get(any(), human.toString(), 60) }
+    }
+
+    @Test
+    fun `expired mandate inventory budget never starts an upstream read`() {
+        for (elapsedMs in listOf(100L, 101L)) {
+            val upstream = mockk<UpstreamClient>()
+            val resolver = ActingForResolver(upstream, mapper, Clock.systemUTC(), "http://party", true)
+            val deadline = TimeUnit.MILLISECONDS.toNanos(100)
+            assertThatThrownBy {
+                resolver.profilesOfStrict(human, deadline) { TimeUnit.MILLISECONDS.toNanos(elapsedMs) }
+            }
+                .isInstanceOf(ServiceUnavailableException::class.java)
+            verify(exactly = 0) { upstream.get(any(), any(), any()) }
+        }
     }
 
     private fun resource(upstream: UpstreamClient, resolver: ActingForResolver = mockk()): CustomerEdgeResource {

@@ -40,9 +40,11 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
-    // Pact consumer: AgentBalanceHoldsPactConsumerTest pins the get_balance_holds read tool
-    // against balance-service — the contract test for the GET /{accountId}/holds endpoint this
-    // PR adds (ADR-0063).
+    // Pact consumers pin balance-holds, sanctions and SEPA Instant read tools against their
+    // providers (AgentBalanceHoldsPactConsumerTest, AgentSanctionsReadPactConsumerTest and
+    // AgentSepaInstantReadPactConsumerTest, ADR-0063).
+    // Pact consumers also cover account/transaction, FX, AML, Catalog and Ledger read tools.
+    // They drive read-adapter dispatch through mock-server clients, not live OIDC.
     testImplementation(libs.pact.consumer)
     // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
     // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.
@@ -55,6 +57,12 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Standalone V6 -> V7 migration test runs outside Quarkus' isolated Flyway classloader.
+    testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
+    // OpenAPI 3.1 uses JSON Schema 2020-12; prove null unions with the fleet's existing validator.
+    testImplementation("com.networknt:json-schema-validator:1.5.9") {
+        exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
+    }
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
 }
 
@@ -70,6 +78,61 @@ tasks.named<Copy>("processResources") {
         include("system.v3.md", "catalog-review.v1.md")
         into("governance-prompts/ui-assistant")
     }
+}
+
+// Forked test JVM heap — issue #9919, observed here 2026-10-28. The same intermittent
+// kover test.ic truncation that consent-service carries (#9919) now hits this module:
+// two consecutive Services CI runs of PR #14059 failed koverVerify with
+// `Failed to load coverage data ... java.io.EOFException` and coverage 60.08% / 86.24%
+// against this floor of 87, on a change that touches no agent-service source. The
+// incomplete report does not establish whether the JVM exited early, ran out of memory, or a
+// writer remained active. The 2g override is a per-module mitigation already used by
+// account-service / consent-service / kyc / domestic-payment. Not a fleet default —
+// see account-service's comment for why.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
+
+// DIAGNOSTIC, not a fix — issue #9919 (copied from consent-service, adapted for this
+// module). koverVerify intermittently reads a TRUNCATED test.ic here
+// (`Failed to load coverage data ... java.io.EOFException`), on ~10% of CI builds
+// including main, never locally. The EOF warning is also present in GREEN runs, so
+// truncation is routine and only sometimes costs enough to fail the floor. The
+// mechanism is not established, and the two live candidates need opposite fixes:
+//   (a) the test JVM exits before kover's shutdown hook finishes writing (the file is
+//       already short when Gradle moves on, and nothing writes it afterwards), or
+//   (b) something still holds and writes the file after `test` ends — a JVM that
+//       inherited the agent — so koverCachedVerify reads a file that is still growing.
+// Two readings help investigate them: size + mtime when `test` finishes, and again
+// immediately before koverCachedVerify reads it, plus any live process still carrying
+// the kover agent. Equal readings or a visible agent process are diagnostic clues, not proof
+// of a single mechanism or an out-of-memory exit. Remove this block once a failing run has
+// printed both lines and #9919 has its answer.
+val koverTestIc = layout.buildDirectory.file("kover/bin-reports/test.ic")
+fun describeKoverIc(moment: String, ic: File): String {
+    // Epoch millis, not java.time: inside a build script `java` resolves to the
+    // project's java extension, so `java.time.Instant` does not compile here.
+    val state = if (ic.isFile) "size=${ic.length()} mtimeMs=${ic.lastModified()}" else "absent"
+    // Only a JVM actually carrying the agent. A bare "kover" substring also matches
+    // the Gradle and Kotlin daemons (the plugin is on their classpath), which would
+    // report (b) on every run.
+    val self = ProcessHandle.current().pid()
+    val agentJvms = ProcessHandle.allProcesses()
+        .filter { it.pid() != self }
+        .filter {
+            val cmd = it.info().commandLine().orElse("")
+            cmd.contains("-javaagent:") && cmd.contains("kover-jvm-agent")
+        }
+        .map { it.pid() }
+        .toList()
+    return "[kover-ic #9919] $moment: test.ic $state; " +
+        "live kover-agent JVMs=$agentJvms; nowMs=${System.currentTimeMillis()}"
+}
+tasks.named<Test>("test") {
+    doLast { logger.lifecycle(describeKoverIc("after test", koverTestIc.get().asFile)) }
+}
+tasks.matching { it.name == "koverCachedVerify" }.configureEach {
+    doFirst { logger.lifecycle(describeKoverIc("before koverCachedVerify", koverTestIc.get().asFile)) }
 }
 
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: was a placebo minValue = 0

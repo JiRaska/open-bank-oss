@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import re
 import shlex
@@ -864,13 +865,46 @@ echo "SERVICE_CI_HELPERS=$helper_dir" >> "$GITHUB_ENV"'''
         return ''
 
 
-def bounded_kover_report(workflow: str) -> bool:
+def bounded_kover_report(workflow: str, root: Path | None = None) -> bool:
     # Configuration scoping changes Gradle startup, never the timeout contract.
-    return re.search(
+    if re.search(
         r"timeout --kill-after=10s 600s ./gradlew --no-daemon "
         r"(?:--configure-on-demand )?:\$\{\{ inputs\.service \}\}:koverXmlReport(?:\s|$)",
         workflow,
-    ) is not None
+    ) is not None:
+        return True
+    if root is None:
+        return False
+    try:
+        document = yaml.load(workflow, Loader=CapabilityLoader)
+        steps = document['jobs']['build']['steps']
+        reports = [step for step in steps if step.get('name') == 'Generate Kover XML report']
+        if len(reports) != 1:
+            return False
+        report = reports[0]
+        expected = 'timeout --kill-after=10s 600s bash -e "$SERVICE_CI_HELPERS/render-coverage-report.sh"'
+        if (report.get('run', '').strip() != expected or report.get('shell') is not None
+                or 'if' in report or report.get('continue-on-error') is not True
+                or report.get('env', {}).get('SERVICE') != '${{ inputs.service }}'):
+            return False
+        # The observer resolver already proves the closed staging recipe and trusted checkout.
+        build = next(step for step in steps if step.get('name') == 'Build + test (:${{ inputs.service }})')
+        if (build.get('run') != 'bash -e "$SERVICE_CI_HELPERS/build-test.sh"'
+                or steps.index(report) <= steps.index(build)
+                or not service_ci_observer_source(root, workflow)):
+            return False
+        helper = root / '.github/scripts/service-ci-steps/render-coverage-report.sh'
+        relative = helper.relative_to(root)
+        if (not helper.is_file() or any(root.joinpath(*relative.parts[:i]).is_symlink()
+                                       for i in range(1, len(relative.parts) + 1))):
+            return False
+        # Closed, independently reviewed body: shell text inside heredocs or after an exit
+        # cannot attest execution. Intentional helper changes require renewed body review.
+        return hashlib.sha256(helper.read_bytes()).hexdigest() == (
+            '2186b9c579e58fef1eb0874d7de97598b8d6fdbf145d8b3f02eedb15e369424d'
+        )
+    except (KeyError, TypeError, AttributeError, ValueError, OSError, StopIteration, yaml.YAMLError):
+        return False
 
 
 def admin_collector_source(root: Path) -> str:
@@ -957,7 +991,7 @@ def check(root: Path) -> list[str]:
     for needle in ('docker events', '--filter type=container', '--filter event=start', '--filter event=die'):
         if needle not in observer:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
-    if not bounded_kover_report(workflow):
+    if not bounded_kover_report(workflow, root):
         errors.append("Kover evidence is not bounded with the money-path-safe timeout")
     immutable_envelope_artifact = workflow.partition("Retain immutable Test Intelligence run envelope")[2].partition(
         "Upload coverage to Codecov"

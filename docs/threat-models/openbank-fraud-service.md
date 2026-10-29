@@ -16,6 +16,29 @@ referenced from ADR-0084.
   ADR-0065 (customer edge — device/IP context source), ADR-0067 (feature flags, four-eyes
   on money-path flips), ADR-0077 (DomainMetrics), ADR-0009 (Postgres-per-service)
 
+## Kafka Streams shadow amendment (2026-10-25, #13888)
+
+The opt-in velocity projection adds a Kafka source → local RocksDB/changelog →
+versioned shadow-topic boundary. It is disabled by default and no verdict or Redis
+feature-store adapter consumes its output. A dedicated TLS identity can read the
+transaction-initiated source and write only shadow/internal topics. Internal topics
+are pre-created; Delete is scoped to the one repartition topic for consumed-record
+cleanup. The identity has no Create grant or write permission on the source.
+
+The parser checks event type, identifiers, synthetic markers and business event time
+before advancing stream time. Original source coordinates survive account
+repartition; bounded event-ID state handles outbox redelivery separately from Kafka
+transactional offset/state/output commits. Broker-backed tests exercise fresh-state
+restoration and redelivery under read-committed observation. These are implementation
+proofs, not a claim of human security review or production rollout.
+
+Residual risks: CPU, heap, native memory and disk remain shared with the service;
+degraded shadow metrics do not provide process isolation. Promotion requires measured
+resource budgets. Account-derived output, changelogs and local state inherit the
+retention/erasure obligations in ADR-0118. Bucket snapshots cannot answer arbitrary
+historical point-in-time feature queries and must not be wired into a verdict until
+the separate serving design and parity evidence are reviewed (ADR-0140 amendment).
+
 ## 0. Phase-1 posture (read first)
 
 This is a **skeleton**. The rule engine holds a single deterministic **always-ALLOW** baseline
@@ -119,6 +142,9 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 - Money thresholds are **data** (ADR-0347): no money literal in `domain/rules`; the engine takes
   the active `FraudThresholdSet` as an argument; only an EXECUTED set approved by a principal other
   than its proposer is ever read; no active set ⇒ REVIEW, never ALLOW.
+- The verdict type is shared with the rails (`openbank-libs-fincrime`, ADR-0353); its
+  consumer-only `UNKNOWN` is **never rendered by a rule nor emitted on the wire** — `RuleHit`
+  rejects it and `POST /api/v1/fraud/score` answers 500 rather than put it in a response.
 - Once DomainMetrics is added, verdict labels are **low-cardinality and PII-free** (the closed
   `verdict` set only; never account/party/amount/id — ADR-0077).
 
@@ -148,6 +174,12 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 
 ## 6. Change log
 
+- **2026-10-24** — **Verdict type moved to `openbank-libs-fincrime` (ADR-0353, #13439).** The
+  four rails mirrored `FraudVerdict` with an extra consumer-side `UNKNOWN`; there is now one type
+  for producer and consumers. Wire values unchanged (`ALLOW/CHALLENGE/REVIEW/DECLINE`). New
+  fail-closed guards: a rule cannot render `UNKNOWN`, and the score response refuses to emit it, so
+  no rail can receive from this service a value it was told never to trust. Rollback: revert the
+  PR; no data or contract change.
 - **2026-10-21** — **Least privilege on `fraud_threshold_set`** (V10, follow-up to #13457). V9's
   trailing `GRANT ALL ON ALL TABLES IN SCHEMA public TO openbank` was a no-op (the app role owns
   the database), but it left the owner able to DELETE/TRUNCATE the threshold-set audit record.

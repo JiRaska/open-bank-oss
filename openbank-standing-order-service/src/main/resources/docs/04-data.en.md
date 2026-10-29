@@ -47,6 +47,14 @@ erDiagram
   }
 ```
 
+## Failed transition and outbox
+
+On the third consecutive execution failure, `failure_count = 3` and status `FAILED` are
+persisted in the same transaction as the `standing-order.failed.v1` outbox row. If the outbox
+insert fails, the status and failure count roll back together; no failure event is committed.
+The PostgreSQL regression reloads the committed count and compares transaction IDs, and
+forces an outbox insert failure to verify rollback before a successful retry.
+
 ## Migrations
 
 Flyway, immutable historical scripts, forward-only (`migrate-at-start: true`):

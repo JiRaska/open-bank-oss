@@ -66,24 +66,16 @@ set -euo pipefail
 # ── ancestry ────────────────────────────────────────────────────────────────────────────────────
 # Extract the 40-hex commit a deploy branch pins. Anything else yields "" and is treated as unknown.
 sha_of_branch() {
-  local sha="${1#"$2"}" run
-  # auto-deploy isolates candidates by producer run (#13460): `<sha>-run<digits>`. Strip exactly
-  # that suffix; anything else after the sha leaves the remainder non-hex, so it stays unknown.
-  case "$sha" in
-    *-run*)
-      run="${sha##*-run}"
-      case "$run" in
-        ''|*[!0-9]*) printf ''; return ;;
-      esac
-      sha="${sha%-run"$run"}"
-      ;;
+  local sha
+  case "$1" in
+    "$2"*) sha="${1#"$2"}" ;;
+    *) return 0 ;;
   esac
-  # 40 hex characters exactly. A truncated, suffixed or hand-cut branch name yields "" (unknown),
-  # and unknown must never mean "close it" — that was the pre-#6231 behaviour.
-  case "$sha" in
-    *[!0-9a-f]*) printf '' ;;
-    *) if [ "${#sha}" -eq 40 ]; then printf '%s' "$sha"; else printf ''; fi ;;
-  esac
+  # The workflow adds a positive run ID for unique carrier branches. It does not change the
+  # pinned source commit. Preserve legacy names; every other suffix remains unknown.
+  if [[ "$sha" =~ ^([0-9a-f]{40})(-run[1-9][0-9]*)?$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
 }
 
 # Ask GitHub how `head` relates to `base`: ahead | behind | identical | diverged.
@@ -240,8 +232,15 @@ diff_deploy_holds() {
 import sys, yaml
 def held(path):
     with open(path) as f:
-        doc = yaml.safe_load(f) or {}
-    services = ((doc.get("deploy_holds") or {}).get("services")) or {}
+        doc = yaml.safe_load(f)
+    # Fail closed: an empty body parses to None, which would read as "no holds".
+    if not isinstance(doc, dict) or not doc:
+        raise SystemExit("rules.yaml is empty or not a mapping: " + path)
+    if "deploy_holds" not in doc or not isinstance(doc["deploy_holds"], dict):
+        raise SystemExit("deploy_holds missing or not a map: " + path)
+    services = doc["deploy_holds"].get("services")
+    if services is None:
+        services = {}
     if not isinstance(services, dict):
         raise SystemExit("deploy_holds.services is not a map")
     return set(services)
@@ -1034,6 +1033,51 @@ HOOK
   fi
   rm -rf "$bigd"
 
+  # case 48b — platform-independent E2BIG guard: the hold check must receive FILE PATHS whose
+  # content is the fetched rules.yaml, never the content in argv/env (Linux caps one string at
+  # 128 KiB, macOS does not, so a size-based test cannot see a revert there).
+  local fk fkd fkrc
+  fkd="$(mktemp -d)"
+  mkdir "$fkd/bin"
+  cat >"$fkd/bin/gh" <<'GHSTUB'
+#!/bin/bash
+case "$*" in
+  *"pr view"*) echo 0123456789012345678901234567890123456789 ;;
+  *) printf 'deploy_holds:\n  services: {}\n' ;;
+esac
+GHSTUB
+  cat >"$fkd/py" <<'PYSTUB'
+#!/bin/bash
+# stub python3: records whether its two trailing args are readable files holding a mapping doc
+shift 2
+[ -f "$1" ] && [ -f "$2" ] && grep -q '^deploy_holds:' "$1" && grep -q '^deploy_holds:' "$2" && exit 0
+echo "hold check got non-file args" >&2; exit 97
+PYSTUB
+  chmod +x "$fkd/bin/gh" "$fkd/py"
+  # shellcheck disable=SC2031
+  ( export PATH="$fkd/bin:$PATH" REPO=fixture/repo DEPLOY_HOLD_PYTHON="$fkd/py"; unmigrated_branch_holds 1 ) >/dev/null 2>&1 && fkrc=0 || fkrc=$?
+  if [ "$fkrc" -ne 0 ]; then
+    echo "SELF-TEST FAIL case 48b: hold check was not invoked with readable rules.yaml file paths; rc=$fkrc"; ok=1
+  else
+    echo "self-test case 48b OK (hold check invoked with file paths)"
+  fi
+  # case 48c — empty body and malformed YAML must be non-zero (fail closed), not "no holds".
+  for fk in empty malformed scalar nodeploy_holds; do
+    case "$fk" in
+      empty) : >"$fkd/a.yaml" ;;
+      malformed) printf 'deploy_holds: [unclosed\n  - : :\n' >"$fkd/a.yaml" ;;
+      scalar) printf 'just a string\n' >"$fkd/a.yaml" ;;
+      nodeploy_holds) printf 'other: 1\n' >"$fkd/a.yaml" ;;
+    esac
+    printf 'deploy_holds:\n  services: {}\n' >"$fkd/b.yaml"
+    diff_deploy_holds "$fkd/a.yaml" "$fkd/b.yaml" >/dev/null 2>&1 && fkrc=0 || fkrc=$?
+    [ "$fkrc" -ne 0 ] || { echo "SELF-TEST FAIL case 48c: $fk branch rules.yaml read as no-holds (rc=0)"; ok=1; }
+    diff_deploy_holds "$fkd/b.yaml" "$fkd/a.yaml" >/dev/null 2>&1 && fkrc=0 || fkrc=$?
+    [ "$fkrc" -ne 0 ] || { echo "SELF-TEST FAIL case 48c: $fk main rules.yaml read as no-holds (rc=0)"; ok=1; }
+  done
+  echo "self-test case 48c checked (empty/malformed/scalar/no deploy_holds -> non-zero)"
+  rm -rf "$fkd"
+
   # case 29 — producer-run isolation (#13460) suffixes every branch with `-run<id>`. The sha must
   # still parse, or KEEP_SHA is empty and every run classifies every predecessor SKIP — measured on
   # main: `closed=0 skipped=24` with "could not read a commit sha off" on each run. A malformed
@@ -1050,6 +1094,21 @@ HOOK
       echo "self-test case 29 OK (run-suffixed branches parse; malformed suffixes stay unknown)"
     fi
   fi
+
+  # Reconcile source branches require an exact producer prefix, full source SHA and
+  # canonical positive run ID. Preserve main's owner-hold/no-copy cases above.
+  local bad_branch
+  for bad_branch in "$NEW" "wrong-$NEW-run1" "$P${NEW:0:39}-run1" "$P$NEW-run" \
+      "$P$NEW-runx" "$P$NEW-run0" "$P$NEW-run01" "$P$NEW-run-1" "$P$NEW-run1-extra"; do
+    if [ -n "$(sha_of_branch "$bad_branch" "$P")" ]; then
+      echo "SELF-TEST FAIL reconcile parser: unsupported branch format was accepted"; ok=1
+    fi
+  done
+  if [ "$(sha_of_branch "$P$NEW" "$P")" != "$NEW" ] || \
+      [ "$(sha_of_branch "$P$NEW-run39500952309" "$P")" != "$NEW" ]; then
+    echo "SELF-TEST FAIL reconcile parser: canonical or legacy source format stopped working"; ok=1
+  fi
+  echo "self-test reconcile parser checked (strict prefix, complete SHA, canonical positive run ID, legacy preserved)"
 
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"

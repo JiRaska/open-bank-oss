@@ -28,9 +28,13 @@ deploy_holds:
       reason: "The consolidated deployment proposes an analytics-sink image that is not covered by an existing durable hold"
       release_condition: "The owner approves the exact image and rollout window after registry publication, provenance and signature, vulnerability scan, applicable contracts, and sandbox runtime capability are verified; remove this hold only in a separately reviewed change."
     openbank-transaction-service:
-      issue: "#13231"
-      reason: "V22 requires an owner-controlled maintenance rollout before card ledger posting re-drive."
-      release_condition: "The maintenance owner approves the exact target image and deployment window, the writer and retry barrier is active, and duplicate-key reconciliation, bounded lock wait and rollback plans are accepted."
+      all_of:
+      - issue: "#13231"
+        reason: "V22 requires an owner-controlled maintenance rollout before card ledger posting re-drive."
+        release_condition: "The maintenance owner approves the exact target image and deployment window, the writer and retry barrier is active, and duplicate-key reconciliation, bounded lock wait and rollback plans are accepted."
+      - issue: "#13888"
+        reason: "Temporal SDK 1.40 requires retained versioned workers and an API-only rollout; the existing mixed worker image substitution is unsafe."
+        release_condition: "Retain the original immutable SDK 1.25 worker, verify old-history migration and versioned workflow/activity pollers on the deployed server, prepare API replicas with their worker disabled, and approve routing rollback with both worker versions retained. Remove only this condition in a separately reviewed change after recording environment evidence."
     openbank-card-processing-service:
       issue: "#13231"
       reason: "Automatic ledger posting re-drive must wait for verified provider-wide idempotency protection."
@@ -51,9 +55,6 @@ deploy_holds:
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-balance-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
@@ -197,9 +198,6 @@ deploy_holds:
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-sepa-instant:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
@@ -456,6 +454,16 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2027-03-26"   # ADR-0318: enforce once the money-path baseline is empty
     ci_producer: ".github/scripts/check-money-rounding-inline.py"
+  treasury_parity_fixtures:
+    detect: ["openbank-treasury-service/src/test/resources/parity/*.json — the ADR-0344 D9 golden fixtures"]
+    require:
+      - "the fixture format holds (required keys, ISO dates, decimal strings, product in the closed list)"
+      - "every DELIVERED treasury product type has at least one fixture; ids are unique"
+      - "an independent-oracle fixture's expected block equals the Python oracle's output (never hand-edited)"
+    gate: treasury-parity-fixtures
+    enforced: enforce                   # ADR-0344 D9: the Kotlin replay test consumes the fixtures
+    enforced_since: "2026-10-22"
+    ci_producer: ".github/scripts/check-treasury-parity-fixtures.py"
   outbox_conformance_it_present:
     detect: ["openbank-*/src/main/**/*.kt extending AbstractOutboxDispatcher (supertype, comments stripped)"]
     require:
@@ -857,6 +865,8 @@ change_requirements:
     consumer_allowlist:
       - topic: "openbank.oversight-triggers"
         reason: "agent-service's OversightEventConsumer (ADR-0031 D9 phase 2, channel disabled by default via AGENT_OVERSIGHT_KAFKA_ENABLED) is built; its producers (aml-service, sanctions-service, per the KafkaTopic comment) are not. The 30-minute scheduler sweep covers the gap meanwhile. TRACKING (2026-10-17, #13168): #13179."
+      - topic: "openbank.treasury.payments"
+        reason: "ADR-0344 split of #13413: swift-service's TreasuryPaymentReleasedConsumer and audit-service's subscription land first (bank-own transfer rail slice); the treasury-service producer arrives with the market-and-payments slice, which MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-10-23, #13698): #13698."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
@@ -1302,6 +1312,12 @@ close_participants:
     interest:
       service: openbank-interest-service
       principal: service-account-openbank-interest
+    lending:                                # #13167: accrual + provisioning passes
+      service: openbank-lending-service
+      principal: service-account-openbank-lending
+    billing:                                # #13167: monthly billing cycle + its fee postings
+      service: openbank-billing-service
+      principal: service-account-openbank-billing
 
 money_path_services:
   - openbank-ledger-service
@@ -2037,6 +2053,7 @@ provenance:
   #   b) multi-stage Dockerfile: cyclonedxBom in the JDK build stage → COPY --from=build bom.json into runtime stage
   # Non-compliant: any `RUN ./gradlew` or `RUN cyclonedxBom` in the RUNTIME (non-build) stage.
   gate: provenance
+  ci_producer: ".github/scripts/check-fleet-release-evidence.py"
   # Rollout state of the deploy-time provenance gate (ADR-0030 D4), staged like the OPA-authz
   # (ADR-0034) and image-signature gates: ADVISORY now — per-release evidence bundles
   # (SBOM+SLSA+VEX+manifest) are produced, KMS-cosign-signed and independently verifiable
@@ -2045,43 +2062,18 @@ provenance:
   # only when ALL enforce_criteria below hold. (A blind flip would outage deploys of
   # uncovered services; cf. the #770 image-signature Enforce revert.)
   enforced: advisory
-  # Moved 2026-09-30 -> 2027-03-31 (#11685): criteria 1 and 4 need producers that do not
-  # exist yet (fleet-coverage evidence check; a provenance gate) — waiting cannot meet them.
+  # Issue #11685: observe fleet coverage and a clean window before graduation.
   target_enforce_date: "2027-03-31"   # ADR-0144
-  # MEASURED 2026-09-05, criterion by criterion. Two of the four already hold and this record
-  # said neither did; the other two cannot be met by waiting, because nothing measures them.
-  #
-  #   1. every service's latest release carries a green evidence bundle — NOT MEASURED, and
-  #      not measurABLE as things stand: verify-release-evidence.yml verifies ONE tag per week
-  #      (schedule default: "the newest release"). The 2026-08-31 run verified exactly
-  #      fx-service-v0.14.1. A weekly single-tag check never becomes a fleet statement, however
-  #      long it runs. Fleet coverage needs a different producer.
-  #   2. fleet-attestation green — SATISFIED. Locally the script exits 2 (0 verified, 64 could
-  #      not be checked) purely because cosign/KMS are absent, and it says so itself: "Exit 2 =
-  #      'could not run', NOT a verdict." In CI it prints
-  #      "FLEET ATTESTATION GATE: PASS — every declared openbank-* image is attested"
-  #      (run 33952524397). Do not read the local exit code as a fleet verdict.
-  #   3. kyverno SBOM-attestation rule Audit -> Enforce — ALREADY DONE, and this line describing
-  #      it as "one line once criteria 1-2 hold" is two months stale. Live in the cluster:
-  #      `kubectl get clusterpolicy verify-openbank-image-sbom-attestation` reported Enforce,
-  #      Ready, age 60d (since #11437 the ImageValidatingPolicy
-  #      verify-openbank-image-sbom-attestation-cel, validationActions [Deny]).
-  #   4. "the advisory gate has run clean for an observation window" — THE GATE DOES NOT EXIST.
-  #      `provenance` appears in no entry of .github/gates/gates.yaml and no workflow invokes a
-  #      provenance checker. A condition on the behaviour of a gate that was never built has no
-  #      truth value; it cannot be satisfied by waiting. Same shape as the finops_tiers gap
-  #      (#8799), one level up: there rules.yaml named a gate missing from the manifest, here it
-  #      predicates graduation on one that was never named at all.
-  #
-  # So the honest state is 2 of 4 met, 1 unmeasurable with today's producers, and 1 vacuous.
-  # 2026-09-30 cannot be met by waiting; it needs a fleet-coverage producer for criterion 1 and
-  # either a real gate or a rewritten criterion 4.
-  blocked_on: "measured 2026-09-05: criteria 2 (fleet-attestation, PASSES in CI run 33952524397)
-    and 3 (kyverno rule live in Enforce, Ready 60d) ALREADY HOLD — this record said neither did.
-    Criterion 1 is not measurable as things stand (verify-release-evidence.yml checks one tag per
-    week, not fleet coverage), and criterion 4 is vacuous: no `provenance` gate exists in
-    gates.yaml or any workflow, so 'the advisory gate has run clean' has no subject. The date
-    needs a fleet-coverage producer and a rewritten or implemented criterion 4, not more time."
+  # The advisory provenance gate inventories latest stable releases. PRs validate the
+  # local denominator without claiming remote coverage; main and the scheduled verifier
+  # observe live metadata. The verifier checks manifest identity, digests and KMS signatures.
+  # Official generator attestations are required assets, not cryptographically verified here.
+  # Local negative controls prove refusal behavior, not a clean hosted fleet observation.
+  # Historical evidence for criteria 2 and 3 must be revalidated at graduation; adding
+  # the missing producer does not establish either current deployment state or readiness.
+  blocked_on: "Fleet inventory and verification producers are implemented; successful hosted
+    cryptographic verification for every non-exempt latest release and a clean observation
+    window remain required. Revalidate fleet attestation and admission policy at graduation."
   enforce_criteria:
     - "every deployable service's latest release carries a verify-release-evidence-green bundle (admin-ui excepted until it has a non-Gradle SBOM source)"
     - "the fleet-attestation gate passes: .github/scripts/check-fleet-attestations.sh is GREEN against origin/main (see fleet_attestation_gate below) -- this is a HARD precondition, not a judgement call"
@@ -2275,7 +2267,7 @@ architecture:
   # baseline-ratcheted — grandfathered violations burn down as touched, any NEW
   # framework reference fails CI. Scope is every per-service */domain/* package PLUS
   # the whole openbank-libs-domain module and its ADR-0317 context modules
-  # (openbank-libs-lending, openbank-libs-iso20022, openbank-libs-finance); openbank-libs-runtime is module-exempt
+  # (openbank-libs-lending, openbank-libs-iso20022, openbank-libs-finance, openbank-libs-fincrime); openbank-libs-runtime is module-exempt
   # (shares the domain package string for its JPA converters but IS the framework
   # side of the ADR-0122 split). Both an `import` and a fully-qualified reference
   # count — #3670 hid `jakarta.interceptor.InterceptorBinding` in the second form,
@@ -3854,18 +3846,23 @@ authz:
     # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
     # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
     # service's own *_rest_ext.rego with `not principal_is_machine` (the verified input.principal.service_account flag).
-    # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
-    # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+    # The risk-engine curve-set list reuses `.read` (resource ""). The snapshot LIST and the
+    # per-snapshot VALUATION carry their own actions (risk.snapshot.list, risk.valuation.read,
+    # ADR-0344 D8) so a named machine can be granted exactly those two paths and nothing else. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
     # here on purpose: every treasury action, the reads included, is granted in
     # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
     # treasury depends on this matrix.
     ROLE_RISK:
       grant:
         - risk.snapshot.read
+        - risk.snapshot.list
+        - risk.valuation.read
         - risk.curve-set.read
     ROLE_FINANCE:
       grant:
         - risk.snapshot.read
+        - risk.snapshot.list
+        - risk.valuation.read
         - risk.curve-set.read
 
 # PROMOTED TO A TOP-LEVEL KEY (2026-08-07). rest.rego reads this as
@@ -4074,14 +4071,11 @@ libs_bench_alloc_baseline:
   require:
     - "every @Benchmark has an entry in alloc-baseline.json and every entry has a @Benchmark (scope derived, both directions)"
     - "B/op from a JMH run (-f 1 -wi 3 -i 3 -prof gc, SerialGC, -Xmx512m) stays within max(5 %, 16 B) above the baseline"
-    - "the baseline is written by check-bench-alloc-baseline.py --write-baseline from a run, never typed by hand"
+    - "the baseline is generated from JMH by check-bench-alloc-baseline.py --write-baseline or --ratchet-baseline, never typed by hand; a selective ratchet cannot raise an existing budget"
     - "a benchmark whose B/op is bimodal across forks (the JIT decides it) is listed in the script's UNSTABLE table with the measurement: it runs and is reported, never compared; a stale UNSTABLE entry is a finding"
   gate: libs-bench-alloc-baseline
   baseline: "openbank-libs-benchmarks/alloc-baseline.json"
-  # ADVISORY first: the comparison is new and its tolerance is a first setting measured on one
-  # machine; enforce once it has run on hosted runners without a false finding.
-  enforced: advisory
-  target_enforce_date: "2026-12-15"   # ADR-0144; matches the gate's review_after
+  enforced: enforced
   ci_producer: ".github/scripts/check-bench-alloc-baseline.py"
 
 product_ir_determinism:
@@ -4650,6 +4644,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/com/openbank/billing/infrastructure/adapter/LegacyRevisionBridge.kt"
       - "src/main/kotlin/com/openbank/billing/infrastructure/client/BillingRestClients.kt"
+      - "src/main/kotlin/com/openbank/billing/infrastructure/client/LedgerCloseParticipationClient.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
@@ -4826,6 +4821,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/CreditOfferGateAdapters.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerCloseParticipationClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/ProductCatalogLoanProfileAdapter.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
@@ -4933,8 +4929,12 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*RiskCurveClient*.kt"  # ADR-0315 D9: m2m OIDC client to the risk engine
       - "src/main/kotlin/**/nostro/**"
       - "src/main/kotlin/**/rest/NostroResource.kt"
+      - "src/main/kotlin/**/portfolio/**"            # ADR-0337 amendment: custodian holdings store
+      - "src/main/kotlin/**/rest/PortfolioResource.kt"  # semt.002 upload (sha256 evidence) + portfolio read
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/**/domain/model/Legs.kt"  # ADR-0344 D4: the leg-spec SHA-256 decides whether an override survives regeneration
+      - "src/main/kotlin/**/domain/marketdata/**"  # ADR-0344 D5: observation provenance hashes behind every fixed rate
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"

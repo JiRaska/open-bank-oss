@@ -33,11 +33,11 @@ dependencies {
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
-    // ADR-0120 Phase 1: Temporal-backed payment orchestration (flag-gated, default off). Inline
-    // version matching openbank-settlement-service so enabling it stays path-scoped to this service.
+    // ADR-0120: Temporal-backed payment orchestration. SDK and test environment versions
+    // come from the shared catalog; worker enablement remains controlled by service config.
     // Shared TemporalConfig + TemporalClientProducer (ADR-0209 D1, #2572).
     implementation(project(":openbank-libs-temporal"))
-    implementation("io.temporal:temporal-sdk:1.25.1")
+    implementation(libs.temporal.sdk)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
@@ -58,8 +58,9 @@ dependencies {
     // a machine-readable marker only after its span/attribute assertions pass.
     testImplementation(project(":openbank-libs-testing"))
     // ADR-0120 Phase 1: in-memory Temporal test environment for the payment workflow tests.
-    testImplementation("io.temporal:temporal-testing:1.25.1")
-    testImplementation("io.grpc:grpc-inprocess:1.68.1")
+    testImplementation("org.awaitility:awaitility") // Quarkus BOM; bounded real-server routing assertions.
+    testImplementation(libs.temporal.testing)
+    testImplementation(libs.grpc.inprocess)
 }
 
 kover {
@@ -152,3 +153,39 @@ pitest {
     threads = 4
     excludedClasses = setOf("com.openbank.transaction.domain.*Kt")
 }
+
+// Isolated old SDK runtime demonstrates the compatibility boundary, not SDK rollback safety.
+val temporalLegacyRuntime by configurations.creating {
+    isCanBeConsumed = false
+    val original = configurations.testRuntimeClasspath.get()
+    extendsFrom(original)
+    attributes {
+        original.attributes.keySet().forEach { key ->
+            @Suppress("UNCHECKED_CAST")
+            val typed = key as Attribute<Any>
+            attribute(typed, requireNotNull(original.attributes.getAttribute(typed)))
+        }
+    }
+    resolutionStrategy.eachDependency {
+        if (requested.group == "io.temporal") useVersion("1.25.1")
+    }
+}
+
+val temporalLegacyReplay by tasks.registering(Test::class) {
+    description = "Verify original history replay and explicit rejection of modern SDK flags on SDK 1.25.1"
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().output + sourceSets.main.get().output + temporalLegacyRuntime
+    filter { includeTestsMatching("*PaymentWorkflowReplayTest") }
+    systemProperty("openbank.payment.replay.expected-sdk", "1.25.1")
+    shouldRunAfter(tasks.test)
+}
+
+val retainedWorkerManifestTest by tasks.registering(Exec::class) {
+    description = "Validate retained worker selectors, image immutability and isolation"
+    group = "verification"
+    workingDir(projectDir)
+    commandLine("python3", "-m", "unittest", "discover", "-s", "deploy", "-p", "test_*.py")
+}
+
+tasks.check { dependsOn(temporalLegacyReplay, retainedWorkerManifestTest) }

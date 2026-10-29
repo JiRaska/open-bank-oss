@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.39.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.39.0...ledger-service-v1.39.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ledger:** carry the synthetic taint on the CDI request context into suspended resources ([#14059](https://github.com/JiRaska/open-bank-oss/issues/14059)) ([df3ce04](https://github.com/JiRaska/open-bank-oss/commit/df3ce048f294d17a912ddbdda45f90ff41ce0fe7))
+
+## [1.39.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.38.0...ledger-service-v1.39.0) (2026-10-26)
+
+
+### Features
+
+* **customer-edge:** add measured runtime resilience pilots ([#13891](https://github.com/JiRaska/open-bank-oss/issues/13891)) ([c0c19be](https://github.com/JiRaska/open-bank-oss/commit/c0c19be26b70b4d06433138e1f5f5016db31888b))
+
+
+### Bug Fixes
+
+* **ledger:** capture source-linked journal history snapshots with idempotent capture ([#13763](https://github.com/JiRaska/open-bank-oss/issues/13763)) ([c7d103c](https://github.com/JiRaska/open-bank-oss/commit/c7d103c9f9482c8725af567a770a2ad1cf5f5cad))
+
+## [1.38.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.37.2...ledger-service-v1.38.0) (2026-10-26)
+
+
+### Features
+
+* **billing:** day-close participant — report the monthly cycle and its fee postings (ADR-0342) ([#13709](https://github.com/JiRaska/open-bank-oss/issues/13709)) ([3290e47](https://github.com/JiRaska/open-bank-oss/commit/3290e47c6af59538d1ccc4da355630bb67343a48))
+* **ledger:** treasury instrument accounts and accounting-class roles; shared schedule and rail vocabularies ([#13697](https://github.com/JiRaska/open-bank-oss/issues/13697)) ([0e044c8](https://github.com/JiRaska/open-bank-oss/commit/0e044c83945eb9d5d46e7860fed4f1c8d9bd9b83))
+* **lending:** day-close participant — report accrual and provisioning per accounting day (ADR-0342) ([#13708](https://github.com/JiRaska/open-bank-oss/issues/13708)) ([bde7d38](https://github.com/JiRaska/open-bank-oss/commit/bde7d3842a8e2272b0d2ce15ea726b7927a5645b))
+
 ## [1.37.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.37.1...ledger-service-v1.37.2) (2026-10-23)
 
 

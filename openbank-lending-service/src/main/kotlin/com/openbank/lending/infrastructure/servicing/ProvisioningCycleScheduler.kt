@@ -5,8 +5,11 @@
 package com.openbank.lending.infrastructure.servicing
 
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
+import com.openbank.lending.application.port.out.CloseJobRunPort
 import com.openbank.lending.application.port.out.ProvisioningCoverageRepository
 import com.openbank.lending.application.port.out.ProvisioningCycleRunRepository
+import com.openbank.lending.domain.model.ProvisioningRunOutcome
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.Gauge
@@ -53,6 +56,7 @@ class ProvisioningCycleScheduler(
     private val coverage: ProvisioningCoverageRepository,
     private val runs: ProvisioningCycleRunRepository,
     private val registry: MeterRegistry?,
+    private val closeJobRuns: CloseJobRunPort,
 ) {
     // Explicit @Inject constructor: MeterRegistry is optional (absent in slim test slices), and with
     // two constructors and no annotation ArC registers no bean at all — the trap documented on
@@ -67,6 +71,7 @@ class ProvisioningCycleScheduler(
         coverage: ProvisioningCoverageRepository,
         runs: ProvisioningCycleRunRepository,
         registryInstance: Instance<MeterRegistry>,
+        closeJobRuns: CloseJobRunPort,
     ) : this(
         cycle,
         batchSize,
@@ -75,6 +80,7 @@ class ProvisioningCycleScheduler(
         coverage,
         runs,
         if (registryInstance.isResolvable) registryInstance.get() else null,
+        closeJobRuns,
     )
 
     private val log = Logger.getLogger(ProvisioningCycleScheduler::class.java)
@@ -157,11 +163,14 @@ class ProvisioningCycleScheduler(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     fun runProvisioningPass(): Uni<Void> = Panache.withSession {
-        val asOf = LocalDate.now(clock)
+        // The Prague accounting day (ADR-0207): the reporting date and the day-close evidence agree.
+        val asOf = AccountingClock.bank(clock).today()
         val period = asOf.format(periodFormat)
-        // Commit the start BEFORE any loan-level transaction. An abrupt stop leaves durable RUNNING
-        // evidence; a later date cannot certify that earlier reporting date as complete.
-        runs.markStarted(asOf, OffsetDateTime.now(clock))
+        // In-flight marker first (ADR-0342): while it stands the reporter does not report this day.
+        LendingCloseJobs.markStarted(closeJobRuns, clock, asOf, LendingCloseJobs.PROVISIONING)
+            // Commit the start BEFORE any loan-level transaction. An abrupt stop leaves durable RUNNING
+            // evidence; a later date cannot certify that earlier reporting date as complete.
+            .flatMap { runs.markStarted(asOf, OffsetDateTime.now(clock)) }
             .flatMap { attemptId ->
                 runs.countUnresolvedBefore(asOf)
                     .invoke { unresolved ->
@@ -180,17 +189,59 @@ class ProvisioningCycleScheduler(
                                     outcome.journalsQueued,
                                 )
                             }
-                            .flatMap { publishCoverage(period) }
-                            .flatMap { missing ->
+                            // The outcome travels down the chain with the coverage count: no bean field
+                            // to go stale between passes.
+                            .flatMap { outcome -> publishCoverage(period).map { missing -> outcome to missing } }
+                            .flatMap { (outcome, missing) ->
                                 runs.markResult(asOf, attemptId, missing, OffsetDateTime.now(clock))
-                                    .replaceWith(missing)
+                                    .replaceWith(outcome to missing)
                             }
-                            .map { missing -> missing == 0L && unresolved == 0L }
+                            .call { (outcome, missing) -> recordCloseEvidence(asOf, outcome, missing) }
+                            .map { (_, missing) -> missing == 0L && unresolved == 0L }
                     }
             }
             .invoke { complete -> if (complete) liveness?.recordSuccess() }
             .onFailure().invoke { e -> log.error("IFRS 9 provisioning cycle failed", e) }
+            .onFailure().call { _ ->
+                LendingCloseJobs.record(
+                    closeJobRuns,
+                    clock,
+                    asOf,
+                    LendingCloseJobs.PROVISIONING,
+                    items = 0,
+                    journals = 0,
+                    refused = 1,
+                    reason = LendingCloseJobs.REASON_PROVISIONING_FAILED,
+                )
+            }
             .replaceWithVoid()
+    }
+
+    /**
+     * Day-close evidence (ADR-0342 D1). The allowance journals this pass queues are dispatched by the
+     * outbox, not booked here, so the run records `journalsPosted = 0` and loans assessed as items;
+     * [LendingCloseParticipationScheduler] adds the day's allowance journals once the outbox has
+     * delivered them, and does not report the day while any is still pending. A pass that leaves
+     * eligible exposures unprovisioned, or whose coverage could not be counted, cannot certify the day:
+     * it is recorded REFUSED with the shortfall, which holds the ledger's close until a complete pass
+     * (or an operator waiver) replaces it.
+     */
+    private fun recordCloseEvidence(asOf: LocalDate, outcome: ProvisioningRunOutcome, missing: Long?): Uni<Unit> {
+        val incomplete = missing == null || missing > 0
+        return LendingCloseJobs.record(
+            closeJobRuns,
+            clock,
+            asOf,
+            LendingCloseJobs.PROVISIONING,
+            items = outcome.loansAssessed,
+            journals = 0,
+            refused = if (incomplete) (missing ?: 1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() else 0,
+            reason = when {
+                missing == null -> LendingCloseJobs.REASON_PROVISIONING_UNCOUNTED
+                missing > 0 -> LendingCloseJobs.REASON_PROVISIONING_INCOMPLETE
+                else -> null
+            },
+        )
     }
 
     private companion object {

@@ -5,6 +5,7 @@
 package com.openbank.productcatalog.signing
 
 import com.openbank.libs.productrevision.IrSigningException
+import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.productcatalog.infrastructure.signing.IrSignerProducer
 import com.openbank.productcatalog.infrastructure.signing.IrSigningMode
 import io.quarkus.runtime.LaunchMode
@@ -12,6 +13,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.util.Optional
+import java.util.UUID
 
 /** The signing mode cannot put a forgeable signer into a production launch (review finding B1). */
 class IrSigningModeTest {
@@ -35,13 +37,13 @@ class IrSigningModeTest {
 
     @Test
     fun `disabled signs nothing, and hmac without a secret is refused instead of using a default`() {
-        assertThatThrownBy { producer("disabled", Optional.empty()).irSigner().sign("a".repeat(64)) }
+        assertThatThrownBy { producer("disabled", Optional.empty()).irSigner().sign(IDENTITY) }
             .isInstanceOf(IrSigningException::class.java)
             .hasMessageContaining("disabled")
         assertThatThrownBy { producer("hmac", Optional.empty()).irSigner() }
             .hasMessageContaining("needs openbank.catalog.ir-signing.hmac-secret")
         val signer = producer("hmac", Optional.of("unit-test-secret-not-for-production")).irSigner()
-        val signed = signer.sign("a".repeat(64))
+        val signed = signer.sign(IDENTITY)
         assertThat(signed.algorithm).isEqualTo("hmac-sha256")
     }
 
@@ -54,4 +56,14 @@ class IrSigningModeTest {
         role = "product-catalog-ir-signing",
         saTokenPath = "/nonexistent",
     )
+
+    private companion object {
+        val IDENTITY = RevisionIdentity(
+            "SAV-FIXED",
+            UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            1,
+            1,
+            "a".repeat(64),
+        )
+    }
 }

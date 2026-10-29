@@ -97,12 +97,14 @@ jobs:
   # the git-pact (@PactFolder) classes run unconditionally, same as before.
   build:
     name: ${{ inputs.service }} (build)
-    runs-on: ubuntu-latest
+    # The main-only context pilot produces the exact native platform used by deployment.
+    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 45
     # This job executes pull-request code.  Keep the OIDC token unavailable even though the
     # trusted contract job below needs it for the private ECR pull-through cache.
     permissions:
       contents: read
+      actions: read  # optional class-order hints from trusted main evidence
     env:
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
       # Force a UTF-8 locale so the JVM's sun.jnu.encoding (the *filename* charset,
@@ -194,7 +196,7 @@ jobs:
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
       # lets Gradle's toolchain resolution pick the right one with zero Foojay
       # downloads at build time (faster, fewer billed minutes).
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: |
@@ -231,10 +233,49 @@ jobs:
       #   openbank-interest-service/openbank-interest-service/build/openapi-generated/openapi.yaml
       # With the path corrected, that one service alone yields "2 request schema(s) compared,
       # 21 finding(s)". Keep this relative to the subproject.
+      - name: Prepare optional context test ordering
+        if: inputs.service == 'openbank-context-service' && inputs.ref == ''
+        timeout-minutes: 1
+        continue-on-error: true  # history is optional; a failed fetch keeps the full default suite
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/prepare-test-priority.py \
+            --repo "$GITHUB_REPOSITORY" --component openbank-context-service \
+            --out "$RUNNER_TEMP/context-test-priority.json"
+          echo "OPENBANK_TEST_PRIORITY_FILE=$RUNNER_TEMP/context-test-priority.json" >> "$GITHUB_ENV"
+
       - name: Build + test (:${{ inputs.service }})
         env:
           SERVICE: ${{ inputs.service }}
+          DEPLOY_ARTIFACT_PILOT: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' }}
         run: bash -e "$SERVICE_CI_HELPERS/build-test.sh"
+
+      - name: Package verified context deployment build
+        id: deploy_bundle
+        # Optional cache production runs AFTER the mandatory build/test/SBOM task graph.
+        # A failure here cannot hide a build failure; the consumer performs its normal build.
+        continue-on-error: true
+        if: inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == ''
+        env:
+          ANALYTICS_SINK_TYPE: clickhouse
+          AGENT_SVID_NONCE_STORE: redis
+        run: |
+          python3 .github/scripts/service-build-artifact.py pack \
+            --service openbank-context-service --sha "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --out "$RUNNER_TEMP/deploy-build"
+
+      - name: Retain verified context deployment build
+        if: steps.deploy_bundle.outcome == 'success'
+        continue-on-error: true  # upload availability is not a correctness gate
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: service-build-openbank-context-service-${{ github.sha }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/deploy-build/deploy-build.zip
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
       # A Docker Hub pull failure surfaces as NAMED TEST FAILURES, ~900 lines above the actual
       # cause, so the reader goes hunting for a test bug that is not there. Diagnostic only:
@@ -274,7 +315,9 @@ jobs:
         # Account's real Testcontainers suite needs more than the old three-minute limit:
         # preserve its money-path coverage proof while retaining a firm ten-minute ceiling.
         # Test execution belongs to the enforcing build above; this step only renders it.
-        run: timeout --kill-after=10s 600s ./gradlew --no-daemon --configure-on-demand :${{ inputs.service }}:koverXmlReport --exclude-task :${{ inputs.service }}:test --exclude-task :${{ inputs.service }}:providerPactTest --exclude-task :${{ inputs.service }}:quarkusIntTest --exclude-task :${{ inputs.service }}:testNative --build-cache --console=plain -Dquarkus.smallrye-openapi.store-schema-directory=build/openapi-generated
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: timeout --kill-after=10s 600s bash -e "$SERVICE_CI_HELPERS/render-coverage-report.sh"
 
       # The envelope is built even after a failing suite. A missing envelope is not a
       # passing zero: the projection renders it as absent evidence. The collector only
@@ -611,7 +654,7 @@ jobs:
           ECR_LOGIN_OUTCOME: ${{ steps.ecr_login.outcome }}
         run: bash -e "$SERVICE_CI_HELPERS/prewarm-images.sh"
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: |

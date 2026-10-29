@@ -21,19 +21,39 @@ Open `http://127.0.0.1:8766`. Check the homepage, TestFlight form, demo dialogs,
 - `platform.html`: capability navigation and the **complete** repository module inventory.
   The marked catalog section is generated; never edit it by hand.
 - `labs.html`: shared banking kernel overview, with links to the corresponding library modules.
+- `product-as-code.html`, `controls-as-code.html`, `ai-as-code.html`: Bank as Code stories using the existing site identity. `bank-as-code.css` is scoped to `.bac`; the homepage hero, app and forms retain their original styles.
+- `bank-as-code.js`: local illustrations only. Product rates update a simple annual example; control and AI journeys animate explanatory scenarios without contacting services or performing approvals. Reduced motion completes journeys immediately.
 - `catalog.js`: local search only. All modules are readable without JavaScript.
 - `main.js`: existing demo modal and TestFlight integration, plus a hash entry point for
   opening the sandbox instructions from Labs.
 - `classic.html`, `classic.css`: previous homepage, visibly historical and excluded from indexing.
   Old links to `platform.html` now reach the current platform page.
-- `assets/app-screen-current.png`: current app screenshot supplied for the redesigned page, used without changing pixels. The previous `app-screen.png` remains on `classic.html`.
-- `assets/agent-control-room.webp`: lossless encoding of the supplied presentation's
-  actual admin capture (slide 13, image14.png). It is a **recorded demo view**, not telemetry.
-- `assets/ob-mark-complete.svg`: complete web mark based on the previously cropped OB mark.
-- `assets/openbank-labs-kernel.jpg`: original OpenBank Labs artwork from the linked post.
-- `assets/agent-crew.webp`: original artwork copied from the admin portal.
-- `assets/explorers-hero.webp`: new AI-generated illustration using the supplied lion,
-  lioness and bot references. It contains no product UI.
+- `assets/app-iphone-20261024.png` and `assets/app-cards-lipa.png`: authentic app HOME
+  and CARDS screens rendered with existing synthetic demo data in an iPhone 16 / iOS 26.5
+  Simulator on 25 October 2026, in English/light mode. The historical HOME filename is
+  retained; actual capture instants, source/fixture hashes and image hashes are recorded
+  in the provenance manifest. Original PNGs are copied byte-for-byte, without image edits
+  or manual branding replacement. These are not physical-device/customer screenshots.
+  Actual clock and animation frames are recorded, without a reproducibility claim.
+  Both HOME references include a query key derived from the PNG SHA-256, so a returning
+  browser requests the new image instead of reusing the still-fresh previous URL.
+  The deploy script separately revalidates HTML and invalidates the CDN; CDN invalidation
+  does not clear a visitor's browser cache.
+- `assets/lipa-{mark,lockup-light,lockup-dark,icon}.svg`: approved vector exports from
+  the app's `design-system/brand/lipa`. The icon PNGs and root `favicon.ico` derive from
+  that same master. Do not redraw the symbol or typeset a substitute wordmark.
+- `assets/explorers-lipa.webp`, `assets/labs-kernel-lipa.webp`: original scenes edited
+  with built-in imagegen to replace brand emblems; characters, diagram text and composition retained.
+- `assets/lipa-provenance.json`: source, image edit prompt and checked SHA-256 hashes.
+- `assets/agent-control-room.webp`: unchanged actual admin capture from slide 13 of the
+  supplied presentation; explicitly a recorded demonstration, not current telemetry.
+- `assets/agent-crew.webp`: original artwork copied from the admin portal, without old bank marks.
+
+Brand releases must inspect all four HTML entry points, favicon/Apple icons, footer,
+Open Graph images, clothing emblems and embedded app views. Use versioned asset names
+and CSS URLs so returning visitors receive the same identity. The header animation
+remains once-only with a static reduced-motion/autoplay fallback. The historical page
+retains its historical content and layout while using the current identity.
 
 The presentation is `OpenBank_Bank_Accidentally_final2.pptx`. It is a visual source,
 not a source of current metrics. No third-party banking logos or presentation credentials
@@ -47,7 +67,7 @@ uses Node and `yaml`), then run:
 ```sh
 python3 openbank-infra/web/generate-public-catalog.py
 python3 openbank-infra/web/generate-public-catalog.py --check
-node --test openbank-infra/web/tests/landing.test.cjs
+node --test openbank-infra/web/tests/*.test.cjs
 ```
 
 The updater invokes `openbank-admin-ui/scripts/generate-catalog.mjs`; it does not create

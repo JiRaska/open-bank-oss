@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.0.0...transaction-service-v2.0.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **transaction:** dial Temporal lazily so reads boot without a frontend ([#14076](https://github.com/JiRaska/open-bank-oss/issues/14076)) ([98e0a1c](https://github.com/JiRaska/open-bank-oss/commit/98e0a1ca988b97e1a566657092b295575adbd69b))
+
+## [2.0.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.30.2...transaction-service-v2.0.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **transaction:** SDK 1.40 payment workers require versioning and immutable build identity. Prepare retained workers and disable workers on API replicas before rollout; the independent deployment hold preserves this ordering. SDK downgrade is not routing rollback.
+
+### Features
+
+* **transaction:** pin payment workflows to retained workers ([#13890](https://github.com/JiRaska/open-bank-oss/issues/13890)) ([15165dc](https://github.com/JiRaska/open-bank-oss/commit/15165dc8435139b5800be51d0ee6ecef069d4bc4))
+
 ## [1.30.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.30.1...transaction-service-v1.30.2) (2026-10-19)
 
 

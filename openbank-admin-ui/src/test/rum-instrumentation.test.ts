@@ -1,7 +1,9 @@
-import { InMemorySpanExporter, SimpleSpanProcessor, type ReadableSpan } from '@opentelemetry/sdk-trace-web'
+import { context, propagation, trace } from '@opentelemetry/api'
+import { InMemorySpanExporter, SimpleSpanProcessor, type ReadableSpan } from '@opentelemetry/sdk-trace'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createRumProvider,
+  initRum,
   looksLikeIdentifier,
   recordWebVital,
   recordScreenView,
@@ -20,7 +22,7 @@ function exportScreen(pathname: string) {
   const exporter = new InMemorySpanExporter()
   const provider = createRumProvider(
     { userAgent: IPHONE_UA, appVersion: '1.2.3' },
-    new SimpleSpanProcessor(exporter),
+    new SimpleSpanProcessor({ exporter }),
   )
   recordScreenView(pathname, provider.getTracer(RUM_SERVICE_NAME))
   return exporter.getFinishedSpans() as ReadableSpan[]
@@ -34,7 +36,7 @@ function exportWebVital(
   const exporter = new InMemorySpanExporter()
   const provider = createRumProvider(
     { userAgent: IPHONE_UA, appVersion: '1.2.3' },
-    new SimpleSpanProcessor(exporter),
+    new SimpleSpanProcessor({ exporter }),
   )
   recordWebVital({
     name,
@@ -49,11 +51,37 @@ function exportWebVital(
 
 afterEach(() => {
   resetRumForTests()
+  trace.disable()
+  context.disable()
+  propagation.disable()
   delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
   vi.unstubAllGlobals()
 })
 
 describe('authenticated Admin UI browser RUM', () => {
+  it('registers the SDK, active context and W3C propagation with the global API', async () => {
+    const exporter = new InMemorySpanExporter()
+    const provider = initRum(
+      { userAgent: IPHONE_UA, appVersion: '1.2.3' },
+      new SimpleSpanProcessor({ exporter }),
+    )
+    const span = trace.getTracer(RUM_SERVICE_NAME).startSpan('registered-browser-span')
+    const carrier: Record<string, string> = {}
+    const baggage = propagation.createBaggage({ 'test-marker': { value: 'synthetic' } })
+    const active = propagation.setBaggage(trace.setSpan(context.active(), span), baggage)
+
+    context.with(active, () => {
+      expect(trace.getSpan(context.active())).toBe(span)
+      propagation.inject(context.active(), carrier)
+    })
+    expect(trace.getSpan(context.active())).toBeUndefined()
+    expect(carrier.traceparent).toBe(`00-${span.spanContext().traceId}-${span.spanContext().spanId}-01`)
+    expect(carrier.baggage).toBe('test-marker=synthetic')
+    span.end()
+    expect(exporter.getFinishedSpans().map(exported => exported.name)).toEqual(['registered-browser-span'])
+    await provider.shutdown()
+  })
+
   it('exports screen and resource attributes instead of merely configuring a tracer', () => {
     const [span] = exportScreen('/payments/sepa')
     expect(span.name).toBe('screen./payments/sepa')
