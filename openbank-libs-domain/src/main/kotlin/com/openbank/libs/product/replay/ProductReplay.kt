@@ -179,7 +179,7 @@ class ProductReplay(private val interpreter: ProductInterpreter) {
             listener: ReplayListener,
         ): List<Instruction> {
             evaluations++
-            val out = interpreter.evaluate(revision, state, event, clock)
+            val out = effective(interpreter.evaluate(revision, state, event, clock))
             for (i in out) record(i)
             if (out.none { it is Instruction.Reject }) {
                 state = ProductStateTransition.apply(state, out, on)
@@ -252,6 +252,15 @@ class ProductReplay(private val interpreter: ProductInterpreter) {
     }
 
     companion object {
+        /**
+         * What an evaluation actually did: a batch containing a `Reject` did not happen, so only its
+         * rejects count — no `Post` moves money and no `Schedule` registers. `ProductInterpreter`
+         * already returns the rejects alone from a rejected evaluation (ADR-0352 §2); this holds the
+         * replay to it by construction instead of trusting it.
+         */
+        fun effective(out: List<Instruction>): List<Instruction> =
+            if (out.any { it is Instruction.Reject }) out.filterIsInstance<Instruction.Reject>() else out
+
         fun kindOf(i: Instruction): String = when (i) {
             is Instruction.Post -> "POST"
             is Instruction.Reject -> "REJECT"

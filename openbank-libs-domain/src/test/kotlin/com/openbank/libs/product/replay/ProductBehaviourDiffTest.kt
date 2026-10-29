@@ -9,14 +9,18 @@ import com.networknt.schema.JsonSchemaFactory
 import com.networknt.schema.SpecVersion
 import com.openbank.libs.audit.AuditChain
 import com.openbank.libs.product.ir.AccountEvent
+import com.openbank.libs.product.ir.AccountingClass
 import com.openbank.libs.product.ir.BalanceSample
 import com.openbank.libs.product.ir.Cadence
 import com.openbank.libs.product.ir.EventKind
+import com.openbank.libs.product.ir.Hook
 import com.openbank.libs.product.ir.Instruction
 import com.openbank.libs.product.ir.IrFixtures
 import com.openbank.libs.product.ir.IrJson
 import com.openbank.libs.product.ir.Posting
 import com.openbank.libs.product.ir.PostingDirection
+import com.openbank.libs.product.ir.PostingLine
+import com.openbank.libs.product.ir.ProductEvent
 import com.openbank.libs.product.ir.ProductIrParser
 import com.openbank.libs.product.ir.ProductRevisionIr
 import com.openbank.libs.product.ir.ProductState
@@ -266,6 +270,57 @@ class ProductBehaviourDiffTest {
         val pruned = replay.run(rev, ReplayPortfolio(listOf(old)), year)
         val kept = replay.run(rev, ReplayPortfolio(listOf(old)), year, historyDays = ReplayLimits.MAX_DAYS.toInt())
         assertThat(pruned.accounts.single().posted).isEqualTo(kept.accounts.single().posted)
+    }
+
+    @Test
+    fun `a rejected batch counts its Reject only, never a Post or Schedule beside it`() {
+        // ProductInterpreter itself returns only the rejects of a rejected evaluation, so IR v1 cannot
+        // deliver this mixed batch to the replay; the replay holds the rule anyway.
+        val post = Instruction.Post(
+            "fee.posting",
+            "h",
+            1,
+            listOf(
+                PostingLine(AccountingClass.CUSTOMER_DEPOSIT, PostingDirection.DEBIT, BigDecimal.ONE, "EUR"),
+                PostingLine(AccountingClass.FEE_INCOME, PostingDirection.CREDIT, BigDecimal.ONE, "EUR"),
+            ),
+            "fee",
+        )
+        val schedule = Instruction.Schedule("open.s", "h", 1, Hook.SCHEDULED, "X", Cadence.DAILY, null)
+        val reject = Instruction.Reject("posting.no-overdraft", "h", 1, "INSUFFICIENT_FUNDS")
+        assertThat(ProductReplay.effective(listOf(post, schedule, reject))).containsExactly(reject)
+        assertThat(ProductReplay.effective(listOf(post, schedule))).containsExactly(post, schedule)
+        // And the real interpreter, asked to overdraw, returns the reject alone.
+        val out = IrFixtures.interpreter.evaluate(
+            IrFixtures.savings(),
+            IrFixtures.state(balance = "10.00"),
+            ProductEvent(
+                Hook.PRE_POSTING,
+                posting = Posting(EventKind.WITHDRAWAL, PostingDirection.DEBIT, BigDecimal("50.00")),
+            ),
+            IrFixtures.clock,
+        )
+        assertThat(out).allMatch { it is Instruction.Reject }.isNotEmpty
+    }
+
+    @Test
+    fun `a run that does not conserve money is never identical and is marked invalid`() {
+        val rev = IrFixtures.savings()
+        val good = ProductReplay(IrFixtures.interpreter).run(rev, portfolio, year)
+        val broken = good.copy(
+            conservation = java.util.TreeMap(mapOf("EUR" to Movement(BigDecimal.ONE, BigDecimal.ZERO))),
+        )
+        val d = diff.render(broken, broken, portfolio, year, DiffOptions())
+        assertThat(d.valid).isFalse()
+        assertThat(d.identical).isFalse()
+        val schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
+            .getSchema(checkNotNull(javaClass.getResourceAsStream("/product-ir/behaviour-diff.v1.schema.json")))
+        val mapper = ObjectMapper()
+        assertThat(schema.validate(mapper.readTree(d.canonicalJson))).isEmpty()
+        val lying = mapper.readTree(d.canonicalJson) as com.fasterxml.jackson.databind.node.ObjectNode
+        lying.put("identical", true)
+        assertThat(schema.validate(lying)).isNotEmpty()
+        assertThat(diff.diff(rev, rev, portfolio, year).valid).isTrue()
     }
 
     @Test

@@ -109,7 +109,8 @@ its schedules. Every day after that it runs the customer postings (`prePosting`,
 itself if not rejected, then `postPosting`) and then the schedules that fall due. `MONTHLY` runs
 on the last day of the month, `QUARTERLY` on a quarter's last day, `ANNUALLY` on 31 December and
 `AT_MATURITY` once. `ProductStateTransition` moves the state between evaluations, exactly as in
-the golden runner. History older than the longest predicate window either revision reads is
+the golden runner. An evaluation that rejects counts its `Reject` only, never a `Post` or
+`Schedule` from the same batch. History older than the longest predicate window either revision reads is
 dropped, because no predicate can see it. A run is bounded by `ReplayLimits.MAX_DAYS` and the
 interpreter's per-evaluation cap.
 
@@ -127,7 +128,8 @@ closed objects, closed enums, local `$ref` only):
 | `schema` | `openbank.product-behaviour-diff.v1` |
 | `revisionA`, `revisionB` | `productCode`, `revisionHash`, `irVersion` |
 | `range`, `portfolio` | the calendar, the account count and the generator `seed` (a string, or null for recorded history) |
-| `identical` | true when no account and no aggregate bucket differs |
+| `valid` | both runs conserved money. `false` means an interpreter defect, and `obp` and Studio must treat the whole diff as an error |
+| `identical` | `valid`, and no account or aggregate bucket differs. Never true when `valid` is false |
 | `aggregate.posted` | per `ruleId` × accounting class: debit, credit and net under each revision, and `deltaNet` |
 | `aggregate.instructionCounts` | per `ruleId` × instruction kind: counts under each revision |
 | `aggregate.outcome` | net customer-deposit movement the product caused (interest, fees, penalties) |

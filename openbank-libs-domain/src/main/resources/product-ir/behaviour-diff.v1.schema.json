@@ -5,7 +5,9 @@
   "description": "ADR-0352 phase 4: output of com.openbank.libs.product.replay.ProductBehaviourDiff, the revision-vs-revision backtest behind `obp diff --behavioural` and the Studio approval panel. ADR-0258 trusted profile: additionalProperties false everywhere, closed enums, local $ref only, no scripts, no defaults. Canonical JSON: keys sorted, no whitespace; every amount is a fixed-scale decimal string (scale 12). Rows list only buckets whose two sides differ; accounts lists only accounts with a differing row.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "revisionA", "revisionB", "range", "portfolio", "materialityThreshold", "identical", "changedAccounts", "aggregate", "signChanged", "thresholdCrossed", "accounts", "conservation"],
+  "required": ["schema", "revisionA", "revisionB", "range", "portfolio", "materialityThreshold", "valid", "identical", "changedAccounts", "aggregate", "signChanged", "thresholdCrossed", "accounts", "conservation"],
+  "if": { "properties": { "valid": { "const": false } } },
+  "then": { "properties": { "identical": { "const": false } } },
   "properties": {
     "schema": { "const": "openbank.product-behaviour-diff.v1" },
     "revisionA": { "$ref": "#/$defs/revision" },
@@ -31,7 +33,8 @@
       }
     },
     "materialityThreshold": { "$ref": "#/$defs/amount" },
-    "identical": { "type": "boolean" },
+    "valid": { "description": "Both revisions conserved money. false is an interpreter defect: a consumer (obp, Studio) must treat the whole diff as an error.", "type": "boolean" },
+    "identical": { "description": "valid and no row differs; never true when valid is false.", "type": "boolean" },
     "changedAccounts": { "type": "integer", "minimum": 0 },
     "aggregate": {
       "type": "object",
