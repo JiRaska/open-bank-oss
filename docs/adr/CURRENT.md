@@ -361,7 +361,7 @@ _Also tagged `audit`: 0023 0031 0047 0068 0086 0117 0118 0164 0214 0223 0306 030
 
 - **[0080](0080-pentest-remediation-p0-p2.md)** · Pentest remediation (admin.open-bank.tech) — P0/P1/P2 · `partial` · Pentest findings are remediated by root cause in P0/P1/P2 order: auth-gate the disclosure endpoints, cut the ui-assistant charter to least privilege and enforce it in-process, then fix session, logout and CSP.
 - **[0146](0146-incident-response-and-security-operations-framework.md)** · Incident response and security-operations framework · `partial` · Adopt a four-tier P1-P4 incident severity model with a recorded escalation path; every P1/P2 opens an auditable ICT register entry that starts and stops the RTO clock, and key ceremonies get annually rehearsed runbooks.
-- **[0357](0357-edge-deception-layer-decoy-paths-on-the-shared-gateway.md)** · Edge deception layer: decoy paths on the shared gateway, alerted from the access log _(proposed)_ · `partial` · Deception moves to the shared edge: Envoy Gateway answers decoy paths itself and a Loki rule alerts on hits from the access log, so a honey endpoint needs no service config; a gate keeps route and rule paired.
+- **[0357](0357-deception-and-detection-validation-programme.md)** · Deception and detection-validation programme: edge decoys, honeytokens, timed drills _(proposed)_ · `partial` · Deception is a layered programme on existing telemetry: edge decoys, then cloud and cluster honeytokens whose any use is an alert, each mapped to ATT&CK, gated as wired and powerless, and proven by a timed drill. Under 1 USD/month.
 
 _Also tagged `security-ops`: 0030 0047 0056 0070 0079 0081 0099 0121 0124 0132 0135 0137 0206 0225 0231_
 
@@ -391,13 +391,13 @@ _Also tagged `gitops`: 0010 0027 0060 0098 0277 0324 0357_
 - **[0027](0027-cloud-agnostic-in-cluster-substrate.md)** · Cloud-agnostic, in-cluster OSS substrate (GitOps + OpenTofu) · `shipped` · Everything stateful runs in-cluster on OSS operators on EKS with no FaaS in the money path; OpenTofu provisions the substrate, ArgoCD app-of-apps deploys it, and compute is arm64 Graviton Spot-first via Karpenter.
 - **[0079](0079-infra-lifecycle-and-vulnerability-intelligence.md)** · Infrastructure lifecycle & vulnerability intelligence · `shipped` · The Infrastructure page becomes a lifecycle and vulnerability cockpit: detected running versions, endoflife.date lifecycle data, Grype CVE snapshots and a derived urgency badge, with gaps shown honestly rather than guessed.
 
-_Also tagged `infrastructure`: 0007 0010 0054 0058 0060 0161 0174 0175_
+_Also tagged `infrastructure`: 0007 0010 0054 0058 0060 0161 0174 0175 0357_
 
 ## networking
 
 - **[0324](0324-replace-retired-ingress-nginx-with-gateway-api-on-envoy-gateway.md)** · Replace retired ingress-nginx with Gateway API on Envoy Gateway _(proposed)_ · `planned` · ingress-nginx is archived upstream with no further fixes; the edge moves to Gateway API served by Envoy Gateway behind the same single NLB, host by host, and ingress-nginx is removed at the end.
 
-_Also tagged `networking`: 0051 0058 0081 0093 0234 0357_
+_Also tagged `networking`: 0051 0058 0081 0093 0234_
 
 ## database
 
