@@ -100,7 +100,21 @@ class NostroReconciliationService(
         val nostro = requireNotNull(ledger.nostroAccounts().values.firstOrNull { it.glCode == stored.glCode }) {
             "${stored.glCode} is not a nostro account in the ledger's accounting class map"
         }
-        val lines = ledger.nostroLines(nostro, statement.firstDate, statement.lastDate)
+        // Lines are reconciled by VALUE date (#13882): a late settlement is booked in the ledger's open
+        // day after the period but valued inside it, so the entry days just after the period are read
+        // too and only lines valued inside the period are kept; a line booked inside the period but
+        // valued outside it belongs to another statement.
+        val lines = (
+            ledger.nostroLines(nostro, statement.firstDate, statement.lastDate) +
+                ledger.nostroLines(
+                    nostro,
+                    statement.lastDate.plusDays(1),
+                    statement.lastDate.plusDays(LATE_BOOKING_WINDOW_DAYS),
+                )
+            ).filter {
+            !it.reconciledDate.isBefore(statement.firstDate) &&
+                !it.reconciledDate.isAfter(statement.lastDate)
+        }
         val opening = ledger.accountBalance(stored.glCode, statement.currency, statement.openingDate)
         val closing = ledger.accountBalance(stored.glCode, statement.currency, statement.statementDate)
         val stated = opening != null && closing != null
@@ -112,5 +126,10 @@ class NostroReconciliationService(
             ledgerClosingBalance = if (stated) closing else null,
             balanceNotStated = if (stated) null else "ledger does not hold GL account ${stored.glCode}",
         )
+    }
+
+    private companion object {
+        /** How many entry days after the period a late, back-valued booking is looked for. */
+        const val LATE_BOOKING_WINDOW_DAYS = 7L
     }
 }
