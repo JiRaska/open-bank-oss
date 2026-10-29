@@ -119,6 +119,44 @@ same contracts when added, without authority to approve or activate. Existing
 #13776/#10236 case work, #13777 learning and #13778 typed decisioning keep their owners.
 ADR-0354 remains delivery-status **planned**; this slice grants no activation authority.
 
+## Next K0 slice: bounded count IR, evaluation and behavioral replay
+
+`fincrime.pack` adds a deliberately small, framework-free authoring/compiler/evaluator
+path in the same library. `CountPackSource` pins its domain, purpose, validity, vocabulary
+revisions and COUNT feature contracts. Compilation snapshots at most 64 flat
+`COUNT_AT_LEAST` instructions, rejects unknown output codes and conflicting feature pins,
+and produces canonical bytes/hash with the existing kernel codec. Counts are exact Long
+values serialized as decimal strings; no money, floating-point scoring, recursive graph,
+runtime script or implicit aggregation is introduced. AML triage uses an ordered data
+scale; fraud uses the existing executable FraudVerdict. Domain and refusal enums describe
+interpreter behavior, never new business taxonomies.
+
+Evaluation requires the exact pack reference, explicit time and bounded observations with
+observed/available timestamps. Missing, stale, future, malformed or wrongly pinned input
+produces `Incomplete` even if another rule matched. A real zero is distinct from missing.
+Successful results include the pack reference, time, canonical input hash, actual rule
+count and findings carrying exact reason/severity vocabulary pins. Empty findings is not
+an ALLOW or a clean-case assertion. Inputs and hashes assert content identity; they do not
+authenticate their source or establish availability-time provenance by themselves.
+
+`CountPackReplay` runs the same evaluator on identical snapshots for baseline/candidate
+of the same pack/domain/purpose, rejecting empty or oversized corpora and duplicate case
+identities. Per-case differences retain both artifact references and results, including incomplete outcomes.
+Metadata-only revision changes do not masquerade as changed findings; changing a pinned
+vocabulary meaning remains visible in findings. Synthetic AML/fraud boundary scenarios,
+independent canonical golden/hash and negative tests exercise this slice.
+
+Reuse is explicit: FincrimeVocabulary, FraudVerdict and canonical hashing remain their
+existing owners. This is not another feature store: feature materialization/real-data
+snapshots stay with ADR-0140/#12750. ProductState/PredicateEvaluator have product-specific
+semantics (including missing-as-false), so they are not reused as a crime-risk evaluator.
+No second DecisionRecord transport, revision store, approval flow or signing mechanism is
+created. No service, REST/MCP adapter, production caller, database, event or threshold writer
+changes. Wire source parsing/schema, money/window operations, authentic snapshot adapters,
+DecisionRecord integration, independent exact-hash approval/signature, activation epochs,
+replica consistency and the full conformance gate remain required under #13775. This
+slice is simulation only and does not mark K0 or ADR-0354 delivery complete.
+
 ## Evidence required before claiming completion
 
 - Pin source/schema/pack/model/prompt/input versions, approvals and activation epoch on

@@ -87,6 +87,263 @@ public final class com/openbank/libs/fincrime/ScreeningRole : java/lang/Enum {
 	public static fun values ()[Lcom/openbank/libs/fincrime/ScreeningRole;
 }
 
+public final class com/openbank/libs/fincrime/pack/CompiledCountPack {
+	public static final field Companion Lcom/openbank/libs/fincrime/pack/CompiledCountPack$Companion;
+	public static final field MAX_AGE_SECONDS J
+	public static final field MAX_RULES I
+	public final fun evaluate (Lcom/openbank/libs/fincrime/pack/PackRef;Ljava/time/Instant;Ljava/util/List;)Lcom/openbank/libs/fincrime/pack/CountEvaluation;
+	public final fun getCanonicalJson ()Ljava/lang/String;
+	public final fun getDomain ()Lcom/openbank/libs/fincrime/pack/PackDomain;
+	public final fun getPurpose ()Ljava/lang/String;
+	public final fun getReference ()Lcom/openbank/libs/fincrime/pack/PackRef;
+}
+
+public final class com/openbank/libs/fincrime/pack/CompiledCountPack$Companion {
+	public final fun compile (Lcom/openbank/libs/fincrime/pack/CountPackSource;Lcom/openbank/libs/fincrime/vocabulary/FincrimeVocabulary;Lcom/openbank/libs/fincrime/vocabulary/FincrimeVocabulary;)Lcom/openbank/libs/fincrime/pack/CompiledCountPack;
+	public static synthetic fun compile$default (Lcom/openbank/libs/fincrime/pack/CompiledCountPack$Companion;Lcom/openbank/libs/fincrime/pack/CountPackSource;Lcom/openbank/libs/fincrime/vocabulary/FincrimeVocabulary;Lcom/openbank/libs/fincrime/vocabulary/FincrimeVocabulary;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CompiledCountPack;
+}
+
+public abstract interface class com/openbank/libs/fincrime/pack/CountEffect {
+}
+
+public final class com/openbank/libs/fincrime/pack/CountEffect$AmlTriage : com/openbank/libs/fincrime/pack/CountEffect {
+	public fun <init> (Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;)V
+	public final fun component1 ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;
+	public final fun copy (Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;)Lcom/openbank/libs/fincrime/pack/CountEffect$AmlTriage;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountEffect$AmlTriage;Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountEffect$AmlTriage;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getSeverity ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountEffect$FraudAssessment : com/openbank/libs/fincrime/pack/CountEffect {
+	public fun <init> (Lcom/openbank/libs/fincrime/FraudVerdict;)V
+	public final fun component1 ()Lcom/openbank/libs/fincrime/FraudVerdict;
+	public final fun copy (Lcom/openbank/libs/fincrime/FraudVerdict;)Lcom/openbank/libs/fincrime/pack/CountEffect$FraudAssessment;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountEffect$FraudAssessment;Lcom/openbank/libs/fincrime/FraudVerdict;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountEffect$FraudAssessment;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getVerdict ()Lcom/openbank/libs/fincrime/FraudVerdict;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/openbank/libs/fincrime/pack/CountEvaluation {
+}
+
+public final class com/openbank/libs/fincrime/pack/CountEvaluation$Evaluated : com/openbank/libs/fincrime/pack/CountEvaluation {
+	public fun <init> (Lcom/openbank/libs/fincrime/pack/PackRef;Ljava/time/Instant;Ljava/lang/String;ILjava/util/List;)V
+	public final fun component1 ()Lcom/openbank/libs/fincrime/pack/PackRef;
+	public final fun component2 ()Ljava/time/Instant;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()I
+	public final fun component5 ()Ljava/util/List;
+	public final fun copy (Lcom/openbank/libs/fincrime/pack/PackRef;Ljava/time/Instant;Ljava/lang/String;ILjava/util/List;)Lcom/openbank/libs/fincrime/pack/CountEvaluation$Evaluated;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountEvaluation$Evaluated;Lcom/openbank/libs/fincrime/pack/PackRef;Ljava/time/Instant;Ljava/lang/String;ILjava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountEvaluation$Evaluated;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAt ()Ljava/time/Instant;
+	public final fun getEvaluatedRules ()I
+	public final fun getFindings ()Ljava/util/List;
+	public final fun getInputHash ()Ljava/lang/String;
+	public final fun getPack ()Lcom/openbank/libs/fincrime/pack/PackRef;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountEvaluation$Incomplete : com/openbank/libs/fincrime/pack/CountEvaluation {
+	public fun <init> (Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;Ljava/lang/String;)V
+	public synthetic fun <init> (Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;Ljava/lang/String;)Lcom/openbank/libs/fincrime/pack/CountEvaluation$Incomplete;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountEvaluation$Incomplete;Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountEvaluation$Incomplete;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFailure ()Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;
+	public final fun getFeatureId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountEvaluationFailure : java/lang/Enum {
+	public static final field FEATURE_REVISION_MISMATCH Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;
+	public static final field FEATURE_UNAVAILABLE Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;
+	public static final field INVALID_INPUT Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;
+	public static final field MISSING_FEATURE Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;
+	public static final field OUTSIDE_VALIDITY Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;
+	public static final field REVISION_MISMATCH Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;
+	public static final field STALE_FEATURE Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;
+	public static final field VOCABULARY_UNAVAILABLE Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;
+	public static fun values ()[Lcom/openbank/libs/fincrime/pack/CountEvaluationFailure;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountFeatureRef {
+	public fun <init> (Ljava/lang/String;ILjava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;ILjava/lang/String;)Lcom/openbank/libs/fincrime/pack/CountFeatureRef;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountFeatureRef;Ljava/lang/String;ILjava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountFeatureRef;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getContentHash ()Ljava/lang/String;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getRevision ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountFinding {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;Lcom/openbank/libs/fincrime/pack/CountEffect;Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;
+	public final fun component3 ()Lcom/openbank/libs/fincrime/pack/CountEffect;
+	public final fun component4 ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;
+	public final fun component5 ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;Lcom/openbank/libs/fincrime/pack/CountEffect;Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;)Lcom/openbank/libs/fincrime/pack/CountFinding;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountFinding;Ljava/lang/String;Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;Lcom/openbank/libs/fincrime/pack/CountEffect;Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountFinding;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEffect ()Lcom/openbank/libs/fincrime/pack/CountEffect;
+	public final fun getReason ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;
+	public final fun getReasonVocabulary ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;
+	public final fun getRuleId ()Ljava/lang/String;
+	public final fun getSeverityVocabulary ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountObservation {
+	public fun <init> (Lcom/openbank/libs/fincrime/pack/CountFeatureRef;JLjava/time/Instant;Ljava/time/Instant;)V
+	public final fun component1 ()Lcom/openbank/libs/fincrime/pack/CountFeatureRef;
+	public final fun component2 ()J
+	public final fun component3 ()Ljava/time/Instant;
+	public final fun component4 ()Ljava/time/Instant;
+	public final fun copy (Lcom/openbank/libs/fincrime/pack/CountFeatureRef;JLjava/time/Instant;Ljava/time/Instant;)Lcom/openbank/libs/fincrime/pack/CountObservation;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountObservation;Lcom/openbank/libs/fincrime/pack/CountFeatureRef;JLjava/time/Instant;Ljava/time/Instant;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountObservation;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAvailableAt ()Ljava/time/Instant;
+	public final fun getObservedAt ()Ljava/time/Instant;
+	public final fun getReference ()Lcom/openbank/libs/fincrime/pack/CountFeatureRef;
+	public final fun getValue ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountPackReplay {
+	public static final field INSTANCE Lcom/openbank/libs/fincrime/pack/CountPackReplay;
+	public static final field MAX_CASES I
+	public final fun compare (Lcom/openbank/libs/fincrime/pack/CompiledCountPack;Lcom/openbank/libs/fincrime/pack/CompiledCountPack;Ljava/util/List;)Ljava/util/List;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountPackSource {
+	public fun <init> (ILjava/lang/String;ILcom/openbank/libs/fincrime/pack/PackDomain;Ljava/lang/String;Ljava/time/Instant;Ljava/time/Instant;Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;Ljava/util/List;)V
+	public final fun component1 ()I
+	public final fun component10 ()Ljava/util/List;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()Lcom/openbank/libs/fincrime/pack/PackDomain;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/time/Instant;
+	public final fun component7 ()Ljava/time/Instant;
+	public final fun component8 ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;
+	public final fun component9 ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;
+	public final fun copy (ILjava/lang/String;ILcom/openbank/libs/fincrime/pack/PackDomain;Ljava/lang/String;Ljava/time/Instant;Ljava/time/Instant;Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;Ljava/util/List;)Lcom/openbank/libs/fincrime/pack/CountPackSource;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountPackSource;ILjava/lang/String;ILcom/openbank/libs/fincrime/pack/PackDomain;Ljava/lang/String;Ljava/time/Instant;Ljava/time/Instant;Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountPackSource;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDomain ()Lcom/openbank/libs/fincrime/pack/PackDomain;
+	public final fun getEffectiveFrom ()Ljava/time/Instant;
+	public final fun getEffectiveUntil ()Ljava/time/Instant;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getPurpose ()Ljava/lang/String;
+	public final fun getReasons ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;
+	public final fun getRevision ()I
+	public final fun getRules ()Ljava/util/List;
+	public final fun getSchemaVersion ()I
+	public final fun getSeverities ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountReplayCase {
+	public fun <init> (Ljava/lang/String;Ljava/time/Instant;Ljava/util/List;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/time/Instant;
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Ljava/time/Instant;Ljava/util/List;)Lcom/openbank/libs/fincrime/pack/CountReplayCase;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountReplayCase;Ljava/lang/String;Ljava/time/Instant;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountReplayCase;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAt ()Ljava/time/Instant;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getObservations ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountReplayDifference {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/fincrime/pack/PackRef;Lcom/openbank/libs/fincrime/pack/PackRef;Lcom/openbank/libs/fincrime/pack/CountEvaluation;Lcom/openbank/libs/fincrime/pack/CountEvaluation;Z)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/fincrime/pack/PackRef;
+	public final fun component3 ()Lcom/openbank/libs/fincrime/pack/PackRef;
+	public final fun component4 ()Lcom/openbank/libs/fincrime/pack/CountEvaluation;
+	public final fun component5 ()Lcom/openbank/libs/fincrime/pack/CountEvaluation;
+	public final fun component6 ()Z
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/fincrime/pack/PackRef;Lcom/openbank/libs/fincrime/pack/PackRef;Lcom/openbank/libs/fincrime/pack/CountEvaluation;Lcom/openbank/libs/fincrime/pack/CountEvaluation;Z)Lcom/openbank/libs/fincrime/pack/CountReplayDifference;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountReplayDifference;Ljava/lang/String;Lcom/openbank/libs/fincrime/pack/PackRef;Lcom/openbank/libs/fincrime/pack/PackRef;Lcom/openbank/libs/fincrime/pack/CountEvaluation;Lcom/openbank/libs/fincrime/pack/CountEvaluation;ZILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountReplayDifference;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBaseline ()Lcom/openbank/libs/fincrime/pack/CountEvaluation;
+	public final fun getBaselinePack ()Lcom/openbank/libs/fincrime/pack/PackRef;
+	public final fun getBehaviorChanged ()Z
+	public final fun getCandidate ()Lcom/openbank/libs/fincrime/pack/CountEvaluation;
+	public final fun getCandidatePack ()Lcom/openbank/libs/fincrime/pack/PackRef;
+	public final fun getCaseId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountRule {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/fincrime/pack/CountFeatureRef;JJLcom/openbank/libs/fincrime/vocabulary/VocabularyCode;Lcom/openbank/libs/fincrime/pack/CountEffect;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/fincrime/pack/CountFeatureRef;
+	public final fun component3 ()J
+	public final fun component4 ()J
+	public final fun component5 ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;
+	public final fun component6 ()Lcom/openbank/libs/fincrime/pack/CountEffect;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/fincrime/pack/CountFeatureRef;JJLcom/openbank/libs/fincrime/vocabulary/VocabularyCode;Lcom/openbank/libs/fincrime/pack/CountEffect;)Lcom/openbank/libs/fincrime/pack/CountRule;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountRule;Ljava/lang/String;Lcom/openbank/libs/fincrime/pack/CountFeatureRef;JJLcom/openbank/libs/fincrime/vocabulary/VocabularyCode;Lcom/openbank/libs/fincrime/pack/CountEffect;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountRule;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEffect ()Lcom/openbank/libs/fincrime/pack/CountEffect;
+	public final fun getFeature ()Lcom/openbank/libs/fincrime/pack/CountFeatureRef;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getMaxAgeSeconds ()J
+	public final fun getMinimum ()J
+	public final fun getReason ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/PackDomain : java/lang/Enum {
+	public static final field AML Lcom/openbank/libs/fincrime/pack/PackDomain;
+	public static final field FRAUD Lcom/openbank/libs/fincrime/pack/PackDomain;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/fincrime/pack/PackDomain;
+	public static fun values ()[Lcom/openbank/libs/fincrime/pack/PackDomain;
+}
+
+public final class com/openbank/libs/fincrime/pack/PackRef {
+	public fun <init> (Ljava/lang/String;ILjava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;ILjava/lang/String;)Lcom/openbank/libs/fincrime/pack/PackRef;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/PackRef;Ljava/lang/String;ILjava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/PackRef;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getContentHash ()Ljava/lang/String;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getRevision ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class com/openbank/libs/fincrime/vocabulary/FincrimeVocabulary {
 	public static final field Companion Lcom/openbank/libs/fincrime/vocabulary/FincrimeVocabulary$Companion;
 	public static final field MAX_ENTRIES I
@@ -95,7 +352,9 @@ public final class com/openbank/libs/fincrime/vocabulary/FincrimeVocabulary {
 	public static final field MAX_PROVENANCE_LENGTH I
 	public static final field SCHEMA_VERSION I
 	public final fun getCanonicalJson ()Ljava/lang/String;
+	public final fun getDomain ()Ljava/lang/String;
 	public final fun getEntries ()Ljava/util/List;
+	public final fun getPurpose ()Ljava/lang/String;
 	public final fun getReference ()Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;
 	public final fun resolve (Lcom/openbank/libs/fincrime/vocabulary/VocabularyRef;Lcom/openbank/libs/fincrime/vocabulary/VocabularyCode;Ljava/time/Instant;)Lcom/openbank/libs/fincrime/vocabulary/VocabularyResolution;
 }
