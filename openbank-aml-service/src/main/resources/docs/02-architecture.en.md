@@ -172,3 +172,7 @@ sequenceDiagram
 ## Shared case severity (ADR-0353)
 
 `AmlRiskLevel` is a typealias of `AmlCaseSeverity` from `openbank-libs-fincrime`, the one declaration the payment rails also use when they open a case. The values (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) and the `aml_cases.risk_level` column are unchanged. The scale rates the alert, not the customer: the customer risk rating is kyc-service's and is never derived from it.
+
+## Account-service read (ADR-0319)
+
+The party-resolution sweep reads `GET /api/v1/accounts/{accountId}` through the client generated from account-service's own `openapi.yaml` (`openbank-client-account`), via its `AccountClient` facade. A 404 resolves to no owner silently; any other failure is logged and also resolves to no owner, so the row is retried on the next sweep.
