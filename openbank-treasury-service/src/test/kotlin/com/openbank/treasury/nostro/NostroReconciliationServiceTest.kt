@@ -73,6 +73,7 @@ class NostroReconciliationServiceTest {
 
         assertThat(ledger.queries).containsExactly(
             "lines:1002:2026-09-24..2026-09-25",
+            "lines:1002:2026-09-26..2026-10-02",
             "balance:1002:EUR:2026-09-23",
             "balance:1002:EUR:2026-09-25",
         )
@@ -105,6 +106,7 @@ class NostroReconciliationServiceTest {
 
         assertThat(ledger.queries).containsExactly(
             "lines:1001:2026-09-25..2026-09-25",
+            "lines:1001:2026-09-26..2026-10-02",
             "balance:1001:CZK:2026-09-24",
             "balance:1001:CZK:2026-09-25",
         )
@@ -112,6 +114,32 @@ class NostroReconciliationServiceTest {
         assertThat(r.ledgerOpeningBalance).isEqualByComparingTo("1000000.00")
         assertThat(r.closingDifference).isEqualByComparingTo("5042.00")
         assertThat(r.reconciled).isFalse()
+    }
+
+    // #13882: a late settlement is booked in the ledger's open day and valued on its economic day.
+    @Test
+    fun `a late settlement booked days after its value date reconciles like an on-time one`() = runBlocking<Unit> {
+        val onTime = NostroFixtures.ledgerLines()
+        onTime.forEach { ledger.lines += "1001" to it }
+        val id = stored(NostroFixtures.xml()).id
+        val baseline = service.reconcile(id)
+
+        ledger.lines.clear()
+        val late = onTime.map {
+            if (it.description?.contains("settled") == true) {
+                it.copy(entryDate = NostroFixtures.DATE.plusDays(2), valueDate = NostroFixtures.DATE)
+            } else {
+                it
+            }
+        }
+        late.forEach { ledger.lines += "1001" to it }
+        val r = service.reconcile(id)
+
+        assertThat(r.matches.map { it.line.lineId to it.type })
+            .containsExactlyInAnyOrderElementsOf(baseline.matches.map { it.line.lineId to it.type })
+        assertThat(r.unmatchedLedgerLines).isEqualTo(baseline.unmatchedLedgerLines)
+        assertThat(r.unmatchedStatementEntries).isEqualTo(baseline.unmatchedStatementEntries)
+        assertThat(r.matches.map { it.line.description }).anyMatch { it?.contains("settled") == true }
     }
 
     @Test
@@ -150,6 +178,7 @@ class NostroReconciliationServiceTest {
 
             assertThat(ledger.queries).containsExactly(
                 "lines:1001:2026-09-21..2026-09-25",
+                "lines:1001:2026-09-26..2026-10-02",
                 "balance:1001:CZK:2026-09-20",
                 "balance:1001:CZK:2026-09-25",
             )
@@ -172,6 +201,7 @@ class NostroReconciliationServiceTest {
 
             assertThat(ledger.queries).containsExactly(
                 "lines:1001:2026-09-25..2026-09-25",
+                "lines:1001:2026-09-26..2026-10-02",
                 "balance:1001:CZK:2026-09-24",
                 "balance:1001:CZK:2026-09-25",
             )

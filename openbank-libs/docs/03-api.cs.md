@@ -4,6 +4,15 @@ Sdílená doménová API jsou v `openbank-libs-domain`; adaptéry Quarkus a HTTP
 
 Jak služby konzumují každý balíček libs. Příklady jsou zkrácené ale spustitelné.
 
+## Původ zadavatele při schvalování čtyř očí
+
+Čekající schválení rozlišuje ověřené agenty a konkrétní servisní účty od osob.
+`HUMAN` a `CUSTOMER_PARTY` vyžadují ověřený token osoby; příznaky klientských přihlašovacích
+údajů, chybějící nebo nečitelné údaje osoby a identity bez JWT se zaznamenají jako `UNKNOWN`.
+Zobrazované jméno ani zákaznická role samy původ osoby neprokazují. Klasifikace mění pouze
+záznam schválení; stávající typy principálů a vyhodnocení rolí v politikách zůstávají stejné.
+
+
 ## domain/money — Money + CurrencyCode
 
 ```kotlin
