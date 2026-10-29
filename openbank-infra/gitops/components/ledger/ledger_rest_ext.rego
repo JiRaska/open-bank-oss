@@ -144,6 +144,22 @@ allowed_reasons contains "operator-ledger-close-draft" if {
     input.action == "ledger.close.draft"
 }
 
+# #12906: journal-approval queue reads and checker decisions are human-only. The
+# explicit machine veto is required for reads because base operator-read-any would
+# otherwise admit a client_credentials principal carrying ROLE_OPERATOR.
+allowed_reasons contains "operator-journal-approval" if {
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    role in input.principal.roles
+    not principal_is_machine
+    input.action in {"ledger.approval.read", "ledger.approval.decide"}
+}
+
+prohibited if {
+    principal_is_machine
+    input.action in {"ledger.approval.read", "ledger.approval.decide"}
+}
+
 # Year-close attestation (ledger.approve) is deliberately its OWN rule, not folded into
 # operator-ledger-write above: it is a statutory close event (ADR-0078 D5), not a routine
 # posting, and unlike create/reverse it must NEVER be reachable by any SERVICE principal —
