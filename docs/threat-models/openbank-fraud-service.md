@@ -118,7 +118,7 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 | R1 | Scoring decision | **Repudiation** — dispute over what verdict was returned for a payment | Every decision persisted immutably (`fraud_scores`: request context + verdict + `score` + `reasons` + `rule_version` + `threshold_set_version` + `created_at`); threshold-set rows record maker, checker, times, reason and content hash | Wire signed audit / evidence bundle (ADR-0029) — *planned* |
 | I1 | Verdict reasons | **Information disclosure** — reason codes / score leak the rule logic to an attacker probing the boundary | Reason strings are coarse, non-PII (`baseline-allow`); endpoint role-gated to service/operator/admin, never customer-facing; customer-safe decline reason mapping is a surface concern | Reason-code taxonomy reviewed as Phase-2 rules land — *open* |
 | I3 | Analyst review queue | **Information disclosure** — automated callers read staff investigation material | The fraud-specific policy prohibits machine principals on `fraud.review.read`, using the phase-two verified service-account classifier (absent or invalid markers are not staff). Human operator, administrator and compliance access remains subject to existing staff grants. Scoring and other services' read policies are unchanged | Policy source and generated bundle are covered by allow/deny regressions; deployment and runtime enforcement require separate verification |
-| I2 | Metrics / persisted columns | **Information disclosure** — high-cardinality labels or audit columns enable per-customer inference / leak PII | DomainMetrics deferred (Phase 1) — when added (#850 follow-up), `openbank_fraud_scores_total` is tagged **only** by `verdict` (a closed 4-value set), never account/party/amount (ADR-0077 cardinality contract). `account_id`/`counterparty_id` live in row columns (access-controlled), not metric labels. `/q/metrics` is cluster-internal | Low — verdict tag is bounded |
+| I2 | Metrics / persisted columns | **Information disclosure / DoS** — high-cardinality labels enable per-customer inference, PII leakage or TSDB exhaustion | `openbank_fraud_scores_total` is tagged by `verdict` (a closed 4-value set) and `rail`, which `FraudMetricsAdapter` bounds to the five verified caller values plus `unknown`; arbitrary request strings never become labels. No account/party/amount is a metric label (ADR-0077). `account_id`/`counterparty_id` live only in access-controlled row columns. `/q/metrics` is cluster-internal | Low — both label domains are bounded and regression-tested |
 | D1 | Scoring path | **DoS** — flood of `/score` calls, or a slow rule set, starves the payment hot path | Reactive non-blocking stack; per-service k8s limits; latency budget p99 ≤ 150 ms (ADR-0084); **fail-open** flag bounds caller blast radius if the scorer is slow/unavailable | Gateway rate-limiting — infra scope; load test before enforce phase |
 | E1 | Roles | **Elevation** — a read/operator role obtains a privileged action | Single endpoint, no privilege tiers within it yet; deny-by-default once OPA enforce is on (ADR-0034) | OPA still advisory — *open* |
 | S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — fraud reuses the shared `openbank-services` Keycloak confidential client / shared Vault key (like the rest of the fleet). Compromise of that one key mints tokens accepted across services. | Secret Vault-projected (never in git/state); confidential (not public) client; endpoint additionally requires a service/operator/admin role | **Shared-credential blast radius accepted for sandbox only.** Dedicated Vault path + per-service Keycloak client = hardening before prod. **Prod go-live requires the second money-path approver to sign off this residual** (ADR-0030). — *open* |
@@ -145,8 +145,9 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 - The verdict type is shared with the rails (`openbank-libs-fincrime`, ADR-0353); its
   consumer-only `UNKNOWN` is **never rendered by a rule nor emitted on the wire** — `RuleHit`
   rejects it and `POST /api/v1/fraud/score` answers 500 rather than put it in a response.
-- Once DomainMetrics is added, verdict labels are **low-cardinality and PII-free** (the closed
-  `verdict` set only; never account/party/amount/id — ADR-0077).
+- Fraud score labels are **low-cardinality and PII-free**: `verdict` is a closed set and `rail`
+  is a five-value allow-list plus `unknown`; never account/party/amount/id or raw caller text
+  (ADR-0077).
 
 ## 5. Open items / follow-ups
 
@@ -154,8 +155,6 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   yet a control. Phase 2 (real velocity/behavioural rules + signal-plane aggregates) and surface
   wiring (shadow → challenge → enforce, ADR-0084 §4) close this. Until then `fraud-monitoring` is
   honestly `partial`.
-- **DomainMetrics deferred (#850 Phase 1 follow-up):** `openbank_fraud_scores_total{verdict}` —
-  deferred to avoid an openbank-libs fleet rebuild; add when libs next ships.
 - **Surface integration not yet built:** no gitops/ArgoCD manifest, no payment-surface call. The
   service is inert; deployment is a separate follow-up.
 - **Dedicated OIDC credential (S2):** provision a per-service Vault path + dedicated confidential
@@ -174,6 +173,13 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 
 ## 6. Change log
 
+- **2026-10-28** — **Bounded the fraud-score `rail` label (#12920).** The API remains compatible
+  and still accepts any non-blank rail string, but `FraudMetricsAdapter` now emits only the five
+  verified caller rails (`SEPA`, `SEPA_INSTANT`, `DOMESTIC`, `FX`, `CARD`) and buckets every other
+  value as `unknown`. This removes caller-controlled Prometheus cardinality without changing the
+  persisted request or verdict. Regression coverage collapses 26 distinct hostile/unknown values
+  into one series and preserves known-rail counters. Rollback: revert; raw caller-controlled label
+  cardinality returns.
 - **2026-10-24** — **Verdict type moved to `openbank-libs-fincrime` (ADR-0353, #13439).** The
   four rails mirrored `FraudVerdict` with an extra consumer-side `UNKNOWN`; there is now one type
   for producer and consumers. Wire values unchanged (`ALLOW/CHALLENGE/REVIEW/DECLINE`). New

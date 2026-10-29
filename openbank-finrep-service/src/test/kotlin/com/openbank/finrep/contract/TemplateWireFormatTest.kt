@@ -178,7 +178,7 @@ class TemplateWireFormatTest {
     }
 
     @Test
-    fun `the XBRL CSV preflight is blocked only by unverified datapoint ids when the trial balance agrees`() {
+    fun `the XBRL CSV preflight is ready when the trial balance agrees and datapoint ids are verified`() {
         val json = getJson("/api/v1/finrep/templates/F01.01/xbrl-csv/preflight", LocalDate.of(2026, 6, 30))
 
         assertThat(json.keys).containsExactlyInAnyOrder(
@@ -195,12 +195,11 @@ class TemplateWireFormatTest {
         assertThat(json["reportingFrameworkVersion"]).isEqualTo("4.2")
         assertThat(json["dpmVersion"]).isEqualTo("4.2.1")
         assertThat(json["taxonomyVersion"]).isEqualTo("4.2.0.0")
-        // F01.01 always emits r0030, whose datapoint id is unverified (#13603): never submission-ready.
-        assertThat(json["state"]).isEqualTo("BLOCKED")
+        assertThat(json["state"]).isEqualTo("READY_FOR_RENDERING")
 
         @Suppress("UNCHECKED_CAST")
         val blockers = json["blockers"] as List<Map<*, *>>
-        assertThat(blockers.map { it["code"] }).containsExactly("UNVERIFIED_DATAPOINT_ID")
+        assertThat(blockers).isEmpty()
     }
 
     @Test

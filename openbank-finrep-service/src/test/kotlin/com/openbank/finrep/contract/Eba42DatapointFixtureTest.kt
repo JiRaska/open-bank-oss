@@ -33,6 +33,8 @@ class Eba42DatapointFixtureTest {
         assertThat(EbaReportingFramework42.TAXONOMY_VERSION).isEqualTo(fixture["taxonomyVersion"].asText())
         assertThat(fixture["taxonomyPackageSha256"].asText())
             .isEqualTo("0bf9e33720de1472e809417999cfd29e4b5eadb31750c7770622e502590bbdd0")
+        assertThat(fixture["annotatedTemplatesSha256"].asText())
+            .isEqualTo("e022598f9f98408d6920555a90c899bea5a1a2519b696703c232526a45b7cc07")
         assertThat(fixture["supportedFacts"]).hasSize(36)
         assertThat(fixture["supportedFacts"].map { it["meaning"].asText() })
             .contains("TOTAL ASSETS", "TOTAL LIABILITIES", "TOTAL EQUITY", "PROFIT OR LOSS FOR THE YEAR")
@@ -58,6 +60,18 @@ class Eba42DatapointFixtureTest {
         }
 
         assertThat(actual).containsExactlyElementsOf(expected)
+    }
+
+    @Test
+    fun `all emitted datapoint ids are verified against the annotated workbook`() {
+        val ids = fixture["supportedFacts"].associate {
+            Triple(it["templateId"].asText(), it["rowRef"].asText(), it["colRef"].asText()) to it["datapointId"].asInt()
+        }
+
+        assertThat(ids[Triple("F01.01", "r0030", "c0010")]).isEqualTo(32237)
+        assertThat(ids[Triple("F01.02", "r0130", "c0010")]).isEqualTo(11437)
+        assertThat(ids[Triple("F01.02", "r0150", "c0010")]).isEqualTo(11485)
+        assertThat(EbaReportingFramework42.UNVERIFIED_DATAPOINT_CELLS).isEmpty()
     }
 
     @Test
