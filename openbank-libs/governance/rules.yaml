@@ -134,17 +134,6 @@ deploy_holds:
       - issue: "#13173"
         reason: "Default-on catalog rate sync and V19/V20 account revision pinning require an owner-approved first deployment."
         release_condition: "The owner approves the exact interest image and deployment window after accepting V19/V20 backfill semantics, verifying catalog access, and defining rollback that preserves account revision pins."
-    openbank-ledger-service:
-      all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
-      - issue: '#13167'
-        reason: 'Day-close participation V33 and its API require owner-controlled first image delivery.'
-        release_condition: 'The owner approves the exact ledger image and deployment window, accepts V33 schema and audit-history retention, and verifies ledger-interest participant API and authorization compatibility. Bank participation remains shadow and pension-company participation remains off; enforcement, replay and financial operations require separate approval.'
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-lending-service:
       all_of:
       - issue: '#13304'
