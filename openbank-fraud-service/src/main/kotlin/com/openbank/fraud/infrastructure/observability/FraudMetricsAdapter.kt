@@ -40,7 +40,7 @@ class FraudMetricsAdapter(private val registry: MeterRegistry?) : FraudMetricsPo
             Counter.builder("openbank.fraud.scores")
                 .tag("service", SERVICE)
                 .tag("verdict", verdict.name)
-                .tag("rail", rail)
+                .tag("rail", rail.takeIf { it in KNOWN_RAILS } ?: UNKNOWN_RAIL)
                 .register(r)
                 .increment()
         }
@@ -76,5 +76,10 @@ class FraudMetricsAdapter(private val registry: MeterRegistry?) : FraudMetricsPo
 
     companion object {
         private const val SERVICE = "fraud"
+        private const val UNKNOWN_RAIL = "unknown"
+
+        // Keep this bounded to rails with verified in-repo fraud-scoring callers. The request
+        // remains free-form for API compatibility, but must never control Prometheus cardinality.
+        private val KNOWN_RAILS = setOf("SEPA", "SEPA_INSTANT", "DOMESTIC", "FX", "CARD")
     }
 }
