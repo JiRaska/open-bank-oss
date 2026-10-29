@@ -463,7 +463,11 @@ class McpToolRegistry {
             when {
                 toolName == "flip_feature_flag" -> flipFeatureFlag(args, actorId)
                 toolName == "draft_ticket" -> succeed(toolName, actorId, draftTicket(args, actorId))
-                toolName in ProductAuthoringTools.READ_TOOLS -> succeedText(toolName, actorId, productRead(toolName, args))
+                toolName in ProductAuthoringTools.READ_TOOLS -> succeedText(
+                    toolName,
+                    actorId,
+                    productRead(toolName, args),
+                )
                 toolName == ProductAuthoringTools.PROPOSE -> succeed(toolName, actorId, proposeProduct(args, actorId))
                 // Every remaining registered tool is a downstream READ; the adapter owns which
                 // service it reaches and how the arguments marshal onto that call.

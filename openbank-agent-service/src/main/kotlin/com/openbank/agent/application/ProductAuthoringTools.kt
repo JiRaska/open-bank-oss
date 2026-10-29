@@ -103,9 +103,8 @@ object ProductAuthoringTools {
         return text
     }
 
-    private fun required(args: JsonNode, field: String): String =
-        args[field]?.asText()?.takeIf { it.isNotBlank() }
-            ?: throw IllegalArgumentException("Required field '$field' is missing or blank")
+    private fun required(args: JsonNode, field: String): String = args[field]?.asText()?.takeIf { it.isNotBlank() }
+        ?: throw IllegalArgumentException("Required field '$field' is missing or blank")
 
     private fun optionalInstant(args: JsonNode, field: String): Instant? =
         args[field]?.asText()?.takeIf { it.isNotBlank() }?.let {

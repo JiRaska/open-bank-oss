@@ -82,20 +82,22 @@ object ProductToolkit {
         from: Instant? = null,
         to: Instant? = null,
     ): Map<String, Any?> {
-        val root = obj(IrJson.parse(portfolioJson), "portfolio")
+        val root = PortfolioFixture.obj(IrJson.parse(portfolioJson), "portfolio")
         val zone = ZoneId.of(root["zone"] as? String ?: "UTC")
         val interpreter = ProductInterpreter(arithmetic)
-        val accounts = list(root["accounts"]).map { obj(it, "account") }
+        val accounts = PortfolioFixture.list(root["accounts"]).map { PortfolioFixture.obj(it, "account") }
         val replayed = accounts.map { account ->
-            var state = state(obj(account["state"], "state"))
-            val steps = list(account["steps"]).map { obj(it, "step") }
-                .filter { s -> Instant.parse(s.getValue("at") as String).let { inWindow(it, from, to) } }
+            var state = PortfolioFixture.state(PortfolioFixture.obj(account["state"], "state"))
+            val steps = PortfolioFixture.list(account["steps"]).map { PortfolioFixture.obj(it, "step") }
+                .filter { s ->
+                    Instant.parse(s.getValue("at") as String).let { PortfolioFixture.inWindow(it, from, to) }
+                }
                 .map { s ->
                     val at = Instant.parse(s.getValue("at") as String)
-                    val event = event(s)
+                    val event = PortfolioFixture.event(s)
                     val clock = ProductClock(at, zone)
                     val out = interpreter.evaluate(rev, state, event, clock)
-                    state = advance(state, out, event, clock.today())
+                    state = PortfolioFixture.advance(state, out, event, clock.today())
                     mapOf("at" to at.toString(), "instructions" to out.map { InstructionCanonical.tree(it) })
                 }
             mapOf("account" to account["id"], "steps" to steps)
@@ -134,7 +136,7 @@ object ProductToolkit {
         instructionJson: String,
         sourceOf: (String) -> String? = { null },
     ): Map<String, Any?> {
-        val instruction = obj(IrJson.parse(instructionJson), "instruction")
+        val instruction = PortfolioFixture.obj(IrJson.parse(instructionJson), "instruction")
         val ruleId = instruction["ruleId"] as? String
             ?: return mapOf("ok" to false, "message" to "instruction carries no ruleId")
         val hash = instruction["revisionHash"] as? String
@@ -145,7 +147,7 @@ object ProductToolkit {
                 "message" to "instruction was emitted by revision $hash, not ${rev.revisionHash}",
             )
         }
-        return explainRule(rev, ruleId, sourceOf) + ("instructionKind" to instruction["kind"])
+        return explainRule(rev, ruleId, sourceOf) + ("instructionKind" to instruction["type"])
     }
 
     /**
@@ -177,7 +179,7 @@ object ProductToolkit {
             when (node) {
                 is Map<*, *> -> {
                     (node["ruleId"] as? String)?.let { out.putIfAbsent(it, path.ifEmpty { "/" }) }
-                    node.forEach { (k, v) -> walk(v, "$path/${pointerEscape(k as String)}") }
+                    node.forEach { (k, v) -> walk(v, "$path/${(k as String).replace("~", "~0").replace("/", "~1")}") }
                 }
                 is List<*> -> node.forEachIndexed { i, v -> walk(v, "$path/$i") }
                 else -> Unit
@@ -190,12 +192,16 @@ object ProductToolkit {
     /** Writes a toolkit result the way every surface prints it. */
     fun write(tree: Map<String, Any?>): String = CanonicalJson.write(tree)
 
-    private fun pointerEscape(s: String) = s.replace("~", "~0").replace("/", "~1")
+    private val UUID_PATTERN = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+}
 
-    private fun inWindow(at: Instant, from: Instant?, to: Instant?): Boolean =
+/** The portfolio-fixture grammar (the golden scenario's state and step shape) and the replay step. */
+internal object PortfolioFixture {
+
+    fun inWindow(at: Instant, from: Instant?, to: Instant?): Boolean =
         (from == null || !at.isBefore(from)) && (to == null || at.isBefore(to))
 
-    private fun advance(state: ProductState, out: List<Instruction>, event: ProductEvent, today: LocalDate): ProductState {
+    fun advance(state: ProductState, out: List<Instruction>, event: ProductEvent, today: LocalDate): ProductState {
         var next = ProductStateTransition.apply(state, out, today)
         val posting = event.posting
         val rejected = out.any { it is Instruction.Reject }
@@ -206,10 +212,10 @@ object ProductToolkit {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun obj(v: Any?, what: String): Map<String, Any?> =
+    fun obj(v: Any?, what: String): Map<String, Any?> =
         v as? Map<String, Any?> ?: throw IllegalArgumentException("$what must be a JSON object")
 
-    private fun list(v: Any?): List<Any?> = v as? List<Any?> ?: emptyList()
+    fun list(v: Any?): List<Any?> = v as? List<Any?> ?: emptyList()
 
     private fun dec(v: Any?): BigDecimal = when (v) {
         is BigDecimal -> v
@@ -218,7 +224,7 @@ object ProductToolkit {
         else -> throw IllegalArgumentException("not a decimal: $v")
     }
 
-    private fun state(t: Map<String, Any?>): ProductState = ProductState(
+    fun state(t: Map<String, Any?>): ProductState = ProductState(
         currency = t.getValue("currency") as String,
         balance = dec(t["balance"]),
         accruedInterest = dec(t["accruedInterest"]),
@@ -240,7 +246,7 @@ object ProductToolkit {
             .entries.associate { (k, v) -> k as String to dec(v) },
     )
 
-    private fun event(t: Map<String, Any?>): ProductEvent {
+    fun event(t: Map<String, Any?>): ProductEvent {
         val hook = ProductIrParser.HOOK_KEYS[t["hook"]]
             ?: throw IllegalArgumentException("unknown hook '${t["hook"]}'")
         val posting = (t["posting"] as? Map<*, *>)?.let {
@@ -258,6 +264,4 @@ object ProductToolkit {
             newValue = t["newValue"]?.let { dec(it) },
         )
     }
-
-    private val UUID_PATTERN = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 }

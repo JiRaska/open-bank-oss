@@ -45,12 +45,19 @@ class ProductAuthoringToolsTest {
     }
     private val ir = ReferenceProducts.savingsFixed.canonicalJson()
 
-    private fun call(tool: String, vararg fields: Pair<String, String>) =
-        registry.call(tool, mapper.createObjectNode().apply { fields.forEach { (k, v) -> put(k, v) } }, "product-author")
+    private fun call(tool: String, vararg fields: Pair<String, String>) = registry.call(
+        tool,
+        mapper.createObjectNode().apply {
+            fields.forEach { (k, v) -> put(k, v) }
+        },
+        "product-author",
+    )
 
     @Test
     fun `no registered MCP tool name carries publish, sign or approve`() {
-        val offending = registry.tools.map { it.name }.filter { ProductAuthoringTools.FORBIDDEN_VERBS.containsMatchIn(it) }
+        val offending = registry.tools.map {
+            it.name
+        }.filter { ProductAuthoringTools.FORBIDDEN_VERBS.containsMatchIn(it) }
         assertThat(offending).isEmpty()
         // Negative control: the matcher does catch the names it exists to keep out.
         assertThat(
@@ -111,7 +118,9 @@ class ProductAuthoringToolsTest {
         assertThat(call("product_simulate", "ir" to ir, "portfolio" to portfolio, "from" to "yesterday").isError)
             .isTrue()
 
-        val explained = mapper.readTree(call("product_explain", "ir" to ir, "ruleId" to "scheduled.fee").content.first().text)
+        val explained = mapper.readTree(
+            call("product_explain", "ir" to ir, "ruleId" to "scheduled.fee").content.first().text,
+        )
         assertThat(explained["ok"].asBoolean()).isTrue()
         assertThat(explained["irPath"].asText()).startsWith("/")
         assertThat(call("product_explain", "ir" to ir).isError).isTrue()
@@ -127,8 +136,14 @@ class ProductAuthoringToolsTest {
             proposedBy = "product-author", proposedAt = Instant.now(), state = ProposalState.PROPOSED,
             decidedBy = null, decidedAt = null, decisionReason = null, modelId = null, correlationId = null,
         )
-        val bad = call("product_propose", "ir" to ir, "offeringId" to "not-a-uuid", "schemaId" to "deposit",
-            "schemaVersion" to "1", "rationale" to "x")
+        val bad = call(
+            "product_propose",
+            "ir" to ir,
+            "offeringId" to "not-a-uuid",
+            "schemaId" to "deposit",
+            "schemaVersion" to "1",
+            "rationale" to "x",
+        )
         assertThat(bad.isError).isTrue()
         verify(exactly = 0) { proposals.create(any(), any(), any(), any(), any(), any(), any()) }
 

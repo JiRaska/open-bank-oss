@@ -5,10 +5,10 @@
 package com.openbank.products
 
 import com.openbank.libs.product.ir.IrJson
-import com.openbank.products.catalog.ReferenceProducts
 import com.openbank.libs.productrevision.HmacIrSigner
 import com.openbank.libs.productrevision.IrSignature
 import com.openbank.libs.productrevision.RevisionIdentity
+import com.openbank.products.catalog.ReferenceProducts
 import com.openbank.products.cli.Obp
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -154,8 +154,14 @@ class ObpCliTest {
             .isEqualTo(Obp.EXIT_USAGE)
         assertThat(
             run(
-                "simulate", "savings-fixed", "--portfolio", portfolio,
-                "--from", "2026-02-01T00:00:00Z", "--to", "2026-01-01T00:00:00Z",
+                "simulate",
+                "savings-fixed",
+                "--portfolio",
+                portfolio,
+                "--from",
+                "2026-02-01T00:00:00Z",
+                "--to",
+                "2026-01-01T00:00:00Z",
             ).first,
         ).isEqualTo(Obp.EXIT_USAGE)
 
@@ -163,7 +169,12 @@ class ObpCliTest {
         assertThat(code).isEqualTo(Obp.EXIT_OK)
         assertThat(out).contains("\"ruleId\":\"scheduled.fee\"", ReferenceProducts.savingsFixed.compile().revisionHash)
         val (_, windowed, _) = run(
-            "simulate", "savings-fixed", "--portfolio", portfolio, "--to", "2026-01-06T00:00:00Z",
+            "simulate",
+            "savings-fixed",
+            "--portfolio",
+            portfolio,
+            "--to",
+            "2026-01-06T00:00:00Z",
         )
         assertThat(windowed).doesNotContain("scheduled.fee")
     }
@@ -191,7 +202,16 @@ class ObpCliTest {
     fun `sign refuses anything but an offline test key, then produces a verifiable identity-bound signature`() {
         val id = "00000000-0000-0000-0000-0000000000a1"
         for (ref in listOf("vault:transit/products", "test:../etc/passwd", "test:", "TEST:x")) {
-            val (code, out, err) = run("sign", "savings-fixed", "--key-ref", ref, "--revision-id", id, "--revision-number", "1")
+            val (code, out, err) = run(
+                "sign",
+                "savings-fixed",
+                "--key-ref",
+                ref,
+                "--revision-id",
+                id,
+                "--revision-number",
+                "1",
+            )
             assertThat(code).describedAs(ref).isEqualTo(Obp.EXIT_REFUSED)
             assertThat(out).isEmpty()
             assertThat(json(err)["refused"].toString()).contains("offline test key")
@@ -201,7 +221,8 @@ class ObpCliTest {
             run("sign", "savings-fixed", "--key-ref", "test:dev", "--revision-id", "x", "--revision-number", "1").first,
         ).isEqualTo(Obp.EXIT_USAGE)
 
-        val args = arrayOf("sign", "savings-fixed", "--key-ref", "test:dev", "--revision-id", id, "--revision-number", "3")
+        val args =
+            arrayOf("sign", "savings-fixed", "--key-ref", "test:dev", "--revision-id", id, "--revision-number", "3")
         val (code, out, _) = run(*args)
         assertThat(code).isEqualTo(Obp.EXIT_OK)
         assertThat(out).isEqualTo(run(*args).second)
@@ -222,11 +243,26 @@ class ObpCliTest {
     fun `propose validates its arguments, plans a DRAFT without --execute and never publishes`() {
         assertThat(run("propose", "savings-fixed").first).isEqualTo(Obp.EXIT_USAGE)
         assertThat(
-            run("propose", "savings-fixed", "--offering", "nope", "--schema-id", "deposit", "--schema-version", "1").first,
+            run(
+                "propose",
+                "savings-fixed",
+                "--offering",
+                "nope",
+                "--schema-id",
+                "deposit",
+                "--schema-version",
+                "1",
+            ).first,
         ).isEqualTo(Obp.EXIT_USAGE)
         val base = arrayOf(
-            "propose", "savings-fixed", "--offering", "00000000-0000-0000-0000-0000000000a1",
-            "--schema-id", "deposit", "--schema-version", "1",
+            "propose",
+            "savings-fixed",
+            "--offering",
+            "00000000-0000-0000-0000-0000000000a1",
+            "--schema-id",
+            "deposit",
+            "--schema-version",
+            "1",
         )
         assertThat(run(*base, "--execute").first).isEqualTo(Obp.EXIT_USAGE)
         assertThat(run(*base, "--execute", "--catalog-url", "http://catalog.example").first).isEqualTo(Obp.EXIT_USAGE)
@@ -251,8 +287,14 @@ class ObpCliTest {
             arrayOf("simulate", "savings-fixed", "--portfolio", portfolio),
             arrayOf("explain", "savings-fixed", "--rule", "interest.base"),
             arrayOf(
-                "propose", "savings-fixed", "--offering", "00000000-0000-0000-0000-0000000000a1",
-                "--schema-id", "deposit", "--schema-version", "1",
+                "propose",
+                "savings-fixed",
+                "--offering",
+                "00000000-0000-0000-0000-0000000000a1",
+                "--schema-id",
+                "deposit",
+                "--schema-version",
+                "1",
             ),
         )
         for (c in commands) assertThat(run(*c)).describedAs(c.joinToString(" ")).isEqualTo(run(*c))

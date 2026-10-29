@@ -4363,6 +4363,37 @@ public final class com/openbank/libs/product/ir/Window {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/openbank/libs/product/toolkit/ProductToolkit {
+	public static final field INSTANCE Lcom/openbank/libs/product/toolkit/ProductToolkit;
+	public final fun compile (Lcom/openbank/libs/product/ir/ProductRevisionIr;)Lcom/openbank/libs/product/toolkit/ProductToolkit$Compiled;
+	public final fun compile (Ljava/lang/String;)Lcom/openbank/libs/product/toolkit/ProductToolkit$Compiled;
+	public final fun explainInstruction (Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ljava/util/Map;
+	public static synthetic fun explainInstruction$default (Lcom/openbank/libs/product/toolkit/ProductToolkit;Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/lang/String;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/Map;
+	public final fun explainRule (Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ljava/util/Map;
+	public static synthetic fun explainRule$default (Lcom/openbank/libs/product/toolkit/ProductToolkit;Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/lang/String;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/Map;
+	public final fun lint (Ljava/lang/String;)Ljava/util/Map;
+	public final fun lintOk (Lcom/openbank/libs/product/ir/ProductRevisionIr;)Ljava/util/Map;
+	public final fun proposalPlan (Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/lang/String;Ljava/util/Map;)Ljava/util/Map;
+	public final fun ruleIdPaths (Lcom/openbank/libs/product/ir/ProductRevisionIr;)Ljava/util/Map;
+	public final fun simulate (Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/lang/String;Lcom/openbank/libs/product/ir/ProductArithmetic;Ljava/time/Instant;Ljava/time/Instant;)Ljava/util/Map;
+	public static synthetic fun simulate$default (Lcom/openbank/libs/product/toolkit/ProductToolkit;Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/lang/String;Lcom/openbank/libs/product/ir/ProductArithmetic;Ljava/time/Instant;Ljava/time/Instant;ILjava/lang/Object;)Ljava/util/Map;
+	public final fun write (Ljava/util/Map;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/toolkit/ProductToolkit$Compiled {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/product/toolkit/ProductToolkit$Compiled;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/toolkit/ProductToolkit$Compiled;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/product/toolkit/ProductToolkit$Compiled;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCanonicalJson ()Ljava/lang/String;
+	public final fun getRevisionHash ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+	public final fun tree ()Ljava/util/Map;
+}
+
 public final class com/openbank/libs/reasoning/ReasoningGraph {
 	public static final field Companion Lcom/openbank/libs/reasoning/ReasoningGraph$Companion;
 	public static final field DEFAULT_MAX_STEPS I

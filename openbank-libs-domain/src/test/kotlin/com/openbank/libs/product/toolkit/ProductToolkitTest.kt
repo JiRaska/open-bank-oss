@@ -65,8 +65,10 @@ class ProductToolkitTest {
     @Test
     fun `simulate replays steps inside the window only and is byte-deterministic`() {
         val all = ProductToolkit.write(ProductToolkit.simulate(rev, portfolio, IrFixtures.StubArithmetic))
-        assertThat(all).contains("\"ruleId\":\"scheduled.accrue\"", rev.revisionHash)
-        assertThat(all).isEqualTo(ProductToolkit.write(ProductToolkit.simulate(rev, portfolio, IrFixtures.StubArithmetic)))
+        assertThat(all).contains("\"ruleId\":\"interest.base\"", rev.revisionHash)
+        assertThat(
+            all,
+        ).isEqualTo(ProductToolkit.write(ProductToolkit.simulate(rev, portfolio, IrFixtures.StubArithmetic)))
         val window = ProductToolkit.simulate(
             rev,
             portfolio,
@@ -74,6 +76,7 @@ class ProductToolkitTest {
             from = Instant.parse("2026-02-01T00:00:00Z"),
             to = Instant.parse("2026-03-01T00:00:00Z"),
         )
+
         @Suppress("UNCHECKED_CAST")
         val steps = ((window["accounts"] as List<Map<String, Any?>>).single()["steps"] as List<*>)
         assertThat(steps).hasSize(1)
@@ -83,7 +86,9 @@ class ProductToolkitTest {
     fun `explain refuses an unknown rule and a foreign instruction, maps a known one to its IR pointer`() {
         assertThat(ProductToolkit.explainRule(rev, "no.such.rule")["ok"]).isEqualTo(false)
         val foreign = """{"ruleId":"scheduled.fee","revisionHash":"${"0".repeat(64)}","kind":"POST"}"""
-        assertThat(ProductToolkit.explainInstruction(rev, foreign)["message"].toString()).contains("not ${rev.revisionHash}")
+        assertThat(
+            ProductToolkit.explainInstruction(rev, foreign)["message"].toString(),
+        ).contains("not ${rev.revisionHash}")
         assertThat(ProductToolkit.explainInstruction(rev, "{}")["ok"]).isEqualTo(false)
 
         val hit = ProductToolkit.explainRule(rev, "scheduled.fee") { "Dsl.kt:7" }

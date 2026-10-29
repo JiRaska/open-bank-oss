@@ -55,7 +55,11 @@ class ProductIrAuthoringParityTest {
                 val cliBytes = cliLines.first()
                 val cliHash = (IrJson.parse(cliLines.last()) as Map<*, *>)["revisionHash"]
 
-                val mcp = registry.call("product_compile", mapper.createObjectNode().put("ir", fixture), "product-author")
+                val mcp = registry.call(
+                    "product_compile",
+                    mapper.createObjectNode().put("ir", fixture),
+                    "product-author",
+                )
                 assertThat(mcp.isError).isFalse()
                 val mcpTree = IrJson.parse(mcp.content.first().text) as Map<*, *>
                 val mcpBytes = CanonicalJson.write(mcpTree["ir"])

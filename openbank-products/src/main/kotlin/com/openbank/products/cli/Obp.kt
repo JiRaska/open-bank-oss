@@ -8,28 +8,28 @@
 package com.openbank.products.cli
 
 import com.openbank.libs.audit.CanonicalJson
+import com.openbank.libs.finance.deposit.FinanceProductArithmetic
 import com.openbank.libs.product.ir.IrJson
 import com.openbank.libs.product.ir.ProductIrCanonical
 import com.openbank.libs.product.ir.ProductIrParser
 import com.openbank.libs.product.ir.ProductIrValidationException
 import com.openbank.libs.product.ir.ProductRevisionIr
 import com.openbank.libs.product.toolkit.ProductToolkit
-import com.openbank.libs.finance.deposit.FinanceProductArithmetic
 import com.openbank.libs.productrevision.HmacIrSigner
 import com.openbank.libs.productrevision.RevisionIdentity
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.security.MessageDigest
-import java.time.Instant
-import java.util.UUID
 import com.openbank.libs.testing.product.GoldenScenarioRunner
 import com.openbank.products.catalog.ReferenceProducts
 import com.openbank.products.dsl.ProductDefinition
 import com.openbank.products.golden.ProductGoldens
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.MessageDigest
+import java.time.Instant
+import java.util.UUID
 import kotlin.system.exitProcess
 
 /**
@@ -251,7 +251,11 @@ object Obp {
             args.firstOrNull()?.takeUnless { it.startsWith("--") } ?: throw CliUsageException("explain needs a ruleId")
         val rule = option(args, "--rule")
         val instruction = option(args, "--instruction")
-        if (rule == null && instruction == null) return explainAcrossProducts(subject, option(args, "--product"), out, err)
+        if (rule == null &&
+            instruction == null
+        ) {
+            return explainAcrossProducts(subject, option(args, "--product"), out, err)
+        }
         val rev = loadRevision(subject)
         val sources = ReferenceProducts.byName(subject)?.sources.orEmpty()
         val sourceOf = { id: String -> sources[id]?.toString() }
@@ -406,7 +410,9 @@ object Obp {
         if (uri.scheme != "https" && uri.host !in LOOPBACK) usageError("--catalog-url must be https (or loopback)")
         val request = HttpRequest.newBuilder(uri)
             .header("Content-Type", "application/json")
-            .apply { System.getenv("OBP_TOKEN")?.takeIf { it.isNotBlank() }?.let { header("Authorization", "Bearer $it") } }
+            .apply {
+                System.getenv("OBP_TOKEN")?.takeIf { it.isNotBlank() }?.let { header("Authorization", "Bearer $it") }
+            }
             .POST(HttpRequest.BodyPublishers.ofString(CanonicalJson.write(plan["body"])))
             .build()
         val response = try {
