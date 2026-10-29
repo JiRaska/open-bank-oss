@@ -4,6 +4,8 @@
 
 package com.openbank.simulation.runner
 
+import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.sdd.domain.model.SddMandate
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.settlement.domain.model.Settlement
@@ -14,6 +16,7 @@ import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.BalanceStore
 import com.openbank.simulation.model.BillingFeeLedger
+import com.openbank.simulation.model.DelegationSpendBook
 import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
 import com.openbank.simulation.model.SddCollectionBook
@@ -87,6 +90,14 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // Framework-free domain (ADR-0002), same convention as sepaPayments/settlements above.
     val sddMandates = mutableListOf<SddMandate>()
     val sddCollections = SddCollectionBook()
+
+    // ADR-0249 D3: the delegated-spend invariants' state — the REAL `DelegationGrant` aggregates
+    // and `SpendReservation`s driven by DelegatedSpendScenario, plus the per-grant book of
+    // ceiling decisions and confirmed/posted amounts that the conservation and ceiling
+    // invariants replay. Empty (trivially satisfied) otherwise.
+    val delegationGrants = mutableListOf<DelegationGrant>()
+    val spendReservations = mutableListOf<SpendReservation>()
+    val delegationSpends = DelegationSpendBook()
 
     // The SWIFT rail's invariant state: the REAL `SwiftMessage` objects driven by
     // SwiftScenario (its validate() admission gate and PENDING→…→COMPLETED/REJECTED/FAILED
