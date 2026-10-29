@@ -169,10 +169,14 @@ class OwnerApprovalTest(unittest.TestCase):
         for needle in ["github.actor == github.repository_owner", "github.triggering_actor == github.repository_owner",
                        "github.run_attempt == 1", "github.ref == 'refs/heads/main'", "ref: main",
                        "python3 -I -S", "persist-credentials: false",
-                       "group: merge-train-owner-approval-${{ github.event_name }}-${{ github.ref }}",
+                       "group: merge-train-owner-approval-${{ github.event_name }}-${{ inputs.pr || github.ref }}",
                        "cancel-in-progress: false"]:
             with self.subTest(needle=needle):
                 self.assertTrue(train.owner_approval_declaration_errors(code.replace(needle, "removed")))
+        # Negative: the old shared group (one pending slot for ALL PRs) must fail the check.
+        shared = code.replace("${{ inputs.pr || github.ref }}", "${{ github.ref }}")
+        self.assertNotEqual(code, shared)
+        self.assertTrue(train.owner_approval_declaration_errors(shared))
         for unsafe in ["\n      - run: gh pr merge 1", "\n      - uses: actions/download-artifact@unsafe",
                        "\n      - run: python3 .github/unsafe.py"]:
             self.assertTrue(train.owner_approval_declaration_errors(code + unsafe))

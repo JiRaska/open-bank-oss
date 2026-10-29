@@ -28,8 +28,15 @@ permissions:
   contents: read
 
 # Serialize owner decisions separately from untrusted PR verification runs.
+# The group is keyed per decision subject: GitHub keeps ONE pending run per group, so a
+# shared group silently cancelled 4 of 7 back-to-back approvals for different PRs.
+# Per PR the single pending slot still serialises: the newest pending decision for the
+# same PR replaces an older pending one, so the last decision dispatched is always the
+# last one to run (approve then revoke ends revoked; revoke then approve ends approved).
+# A revoke cannot be lost behind an approve dispatched BEFORE it. The status is written
+# to that PR's own head commit, so different PRs never write the same status.
 concurrency:
-  group: merge-train-owner-approval-${{ github.event_name }}-${{ github.ref }}
+  group: merge-train-owner-approval-${{ github.event_name }}-${{ inputs.pr || github.ref }}
   cancel-in-progress: false
 
 jobs:
