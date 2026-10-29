@@ -107,6 +107,22 @@ class CreditExposureTest {
         ),
     )
 
+    private fun repo(cash: String, nominal: String, dirtyPrice: String?) = deal(
+        ProductType.REPO,
+        listOf(
+            leg(PayReceive.PAY, "CZK", cash, start.plusDays(14), LegRate.fixed(BigDecimal("3.45")))
+                .copy(accrualFrequency = Frequency.Zero, paymentFrequency = Frequency.Zero),
+        ),
+        DealHeader(
+            collateral = CollateralTerms(
+                "CZ0001005243",
+                BigDecimal(nominal),
+                BigDecimal.ZERO,
+                dirtyPrice?.let(::BigDecimal),
+            ),
+        ),
+    )
+
     @Test
     fun `an IRS consumes notional x factor by residual maturity, and one that would exceed the line is refused`() {
         // 2y residual -> the <=5y bucket, 1.0 %.
@@ -180,19 +196,75 @@ class CreditExposureTest {
 
     @Test
     fun `a fully collateralised reverse repo consumes about nothing, an under-collateralised one the gap`() {
-        // 50 M nominal at 101.125 = 50.5625 M, less the stricter 10 % haircut = 45.50625 M of cover.
+        // 50 M nominal at the bank's 101.125 = 50.5625 M, less the stricter 10 % haircut = 45.50625 M of cover.
         assertThat(CreditExposure.of(reverseRepo("45000000.00", "50000000.00", "101.125"), trade, seededCreditTerms))
             .isEqualByComparingTo("0.00")
         assertThat(CreditExposure.of(reverseRepo("49045625.00", "50000000.00", "101.125"), trade, seededCreditTerms))
             .isEqualByComparingTo("3539375.00")
-        // An unpriced collateral is no cover at all.
+        // A deal that states no price of its own is measured on the bank's price.
         assertThat(CreditExposure.of(reverseRepo("49045625.00", "50000000.00", null), trade, seededCreditTerms))
-            .isEqualByComparingTo("49045625.00")
+            .isEqualByComparingTo("3539375.00")
         assertThatThrownBy {
             CreditExposure.of(reverseRepo("45000000.00", "50000000.00", "101.125"), trade, CreditTerms.NONE)
         }
             .isInstanceOf(CreditMeasureMissingException::class.java)
             .extracting("code").isEqualTo("COLLATERAL_HAIRCUT_MISSING")
+    }
+
+    @Test
+    fun `collateral the bank has no price for is refused, never valued at zero`() {
+        val unpriced = seededCreditTerms.copy(collateralPrice = null)
+        listOf(
+            reverseRepo("49045625.00", "50000000.00", "101.125"),
+            repo("40000000.00", "50000000.00", "101.125"),
+            repo("40000000.00", "50000000.00", null),
+        ).forEach { d ->
+            assertThatThrownBy { CreditExposure.of(d, trade, unpriced) }
+                .isInstanceOf(CreditMeasureMissingException::class.java)
+                .extracting("code").isEqualTo("COLLATERAL_PRICE_MISSING")
+        }
+        // A price for another ISIN is no price for this one.
+        val otherIsin = seededCreditTerms.copy(
+            collateralPrice = seededCreditTerms.collateralPrice!!.copy(isin = "CZ0001004600"),
+        )
+        assertThatThrownBy { CreditExposure.of(repo("40000000.00", "50000000.00", null), trade, otherIsin) }
+            .extracting("code").isEqualTo("COLLATERAL_PRICE_MISSING")
+        // A repo with no collateral at all cannot be measured either.
+        val bare = deal(
+            ProductType.REPO,
+            listOf(
+                leg(PayReceive.PAY, "CZK", "40000000.00", start.plusDays(14), LegRate.fixed(BigDecimal("3.45")))
+                    .copy(accrualFrequency = Frequency.Zero, paymentFrequency = Frequency.Zero),
+            ),
+        )
+        assertThatThrownBy { CreditExposure.of(bare, trade, seededCreditTerms) }
+            .extracting("code").isEqualTo("COLLATERAL_PRICE_MISSING")
+    }
+
+    @Test
+    fun `an inflated deal price is refused, so a dealer cannot raise the cover and shrink the exposure`() {
+        // 103.00 is 1.85 % above the bank's 101.125, outside the 0.5 % tolerance.
+        assertThatThrownBy {
+            CreditExposure.of(reverseRepo("49045625.00", "50000000.00", "103.00"), trade, seededCreditTerms)
+        }
+            .isInstanceOf(CreditMeasureMissingException::class.java)
+            .extracting("code").isEqualTo("COLLATERAL_PRICE_OUT_OF_TOLERANCE")
+        // With no tolerance record effective, only the bank's own price is accepted.
+        val noTolerance = seededCreditTerms.copy(priceTolerancePercent = null)
+        assertThatThrownBy {
+            CreditExposure.of(reverseRepo("49045625.00", "50000000.00", "101.13"), trade, noTolerance)
+        }
+            .extracting("code").isEqualTo("COLLATERAL_PRICE_OUT_OF_TOLERANCE")
+    }
+
+    @Test
+    fun `a deal price within tolerance is accepted and the exposure is measured on the bank's price`() {
+        // 101.50 is 0.37 % above 101.125: accepted, but the cover is still 50 M x 101.125 x 90 %.
+        assertThat(CreditExposure.of(reverseRepo("49045625.00", "50000000.00", "101.50"), trade, seededCreditTerms))
+            .isEqualByComparingTo("3539375.00")
+        // A repo delivers 50.5625 M (the bank's price, not 50.75 M at the deal's) against 40 M received.
+        assertThat(CreditExposure.of(repo("40000000.00", "50000000.00", "101.50"), trade, seededCreditTerms))
+            .isEqualByComparingTo("10562500.00")
     }
 
     @Test

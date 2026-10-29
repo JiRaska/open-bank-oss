@@ -87,6 +87,7 @@ class TreasuryServiceProducer {
         schedules: ScheduleService,
         references: ReferenceRepository,
         cashFlows: CashFlowRepository,
+        marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
     ): TreasuryDealUseCase = TreasuryDealService(
         deals,
         counterparties,
@@ -104,7 +105,7 @@ class TreasuryServiceProducer {
         ProductMandate(references, productLimits.toPolicy(), clock)::policy,
         cashFlows,
         BookCategories(references, clock)::of,
-        com.openbank.treasury.application.usecase.CreditTermsSource(references)::on,
+        com.openbank.treasury.application.usecase.CreditTermsSource(references, marketData)::on,
     )
 
     /** ADR-0344 D3/D4: reference validation and schedule generation through openbank-libs-finance. */

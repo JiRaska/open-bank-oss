@@ -58,8 +58,24 @@ data class CollateralHaircut(val isin: String, val haircutPercent: BigDecimal) {
     }
 }
 
-/** The credit-measurement reference data effective on a deal's trade date. */
-data class CreditTerms(val factors: List<ConversionFactor>, val haircuts: List<CollateralHaircut>) {
+/**
+ * The bank's own price of a collateral security, percent of nominal (dirty), from an ACTIVE
+ * four-eyes market-data observation keyed by the ISIN (ADR-0344 D5) — never the deal's own figure.
+ */
+data class CollateralPrice(val isin: String, val date: LocalDate, val dirtyPricePercent: BigDecimal)
+
+/**
+ * The credit-measurement reference data effective on a deal's trade date. [collateralPrice] is the
+ * independent price of the deal's collateral, [priceTolerancePercent] how far a price the deal was
+ * struck at may sit from it (`limit-settings` field `collateralPriceTolerancePercent`); null means no
+ * record is effective, and then a deal price is accepted only when it equals the independent one.
+ */
+data class CreditTerms(
+    val factors: List<ConversionFactor>,
+    val haircuts: List<CollateralHaircut>,
+    val collateralPrice: CollateralPrice? = null,
+    val priceTolerancePercent: BigDecimal? = null,
+) {
     companion object {
         val NONE = CreditTerms(emptyList(), emptyList())
     }
@@ -67,7 +83,9 @@ data class CreditTerms(val factors: List<ConversionFactor>, val haircuts: List<C
 
 /**
  * A deal cannot be measured against its credit line because a reference record it needs is not
- * effective (422 CONVERSION_FACTOR_MISSING / COLLATERAL_HAIRCUT_MISSING). Never a zero exposure.
+ * effective (422 CONVERSION_FACTOR_MISSING / COLLATERAL_HAIRCUT_MISSING / COLLATERAL_PRICE_MISSING), or
+ * the price the deal states for its collateral is too far from the bank's own (422
+ * COLLATERAL_PRICE_OUT_OF_TOLERANCE). Never a zero exposure.
  */
 class CreditMeasureMissingException(val code: String, message: String) : RuntimeException(message)
 
@@ -81,6 +99,8 @@ object CreditExposure {
     private const val PERCENT = 100L
     private const val YEARS_SCALE = 6
     private val HUNDRED = BigDecimal.valueOf(PERCENT)
+    const val PRICE_MISSING = "COLLATERAL_PRICE_MISSING"
+    const val PRICE_OUT_OF_TOLERANCE = "COLLATERAL_PRICE_OUT_OF_TOLERANCE"
 
     fun limitCurrency(product: ProductType, currency: String): String =
         if (product in CreditMeasure.CZK_LINE_PRODUCTS) Deal.CZK else currency
@@ -91,7 +111,7 @@ object CreditExposure {
         CreditMeasure.FX_SPOT_CZK -> checkNotNull(deal.fx) { "an FX spot carries its CZK leg" }.counterAmount
         CreditMeasure.CONVERSION_FACTOR -> percentOf(notional(deal), factor(deal, asOf, terms))
         CreditMeasure.REVERSE_REPO_GAP -> (deal.principal - haircutCollateral(deal, terms)).max(BigDecimal.ZERO)
-        CreditMeasure.REPO_GAP -> (collateralValue(deal) - deal.principal).max(BigDecimal.ZERO)
+        CreditMeasure.REPO_GAP -> (collateralValue(deal, terms) - deal.principal).max(BigDecimal.ZERO)
     }.setScale(2, RoundingMode.HALF_UP)
 
     /** The notional the factor applies to, in the line currency: the CZK leg of an FX derivative. */
@@ -126,15 +146,43 @@ object CreditExposure {
     private fun within(residual: YearFraction, maxYears: BigDecimal): Boolean =
         BigDecimal(residual.numerator) <= maxYears.multiply(BigDecimal(residual.denominator))
 
-    /** Collateral at its dirty price; an unpriced collateral counts as nothing (never as cover). */
-    private fun collateralValue(deal: Deal): BigDecimal {
-        val c = deal.header.collateral ?: return BigDecimal.ZERO
-        val price = c.dirtyPrice ?: return BigDecimal.ZERO
+    /**
+     * Collateral at the bank's own dirty price ([CreditTerms.collateralPrice]). A repo without
+     * collateral, or a collateral the bank has no price for, is refused — valued at zero it would
+     * make a repo consume nothing. The price the deal was struck at is only checked against the
+     * bank's: a dealer cannot raise the cover (and shrink the exposure) by stating a higher one.
+     */
+    private fun collateralValue(deal: Deal, terms: CreditTerms): BigDecimal {
+        val c = deal.header.collateral ?: refuse(
+            PRICE_MISSING,
+            "a ${deal.product} deal names no collateral, so its credit exposure cannot be measured",
+        )
+        val independent = terms.collateralPrice?.takeIf { it.isin == c.securityIsin }
+            ?: refuse(
+                PRICE_MISSING,
+                "no ACTIVE market-data price for collateral ${c.securityIsin} is effective on ${deal.tradeDate}",
+            )
+        val price = independent.dirtyPricePercent
+        c.dirtyPrice?.let { stated ->
+            val tolerance = terms.priceTolerancePercent ?: BigDecimal.ZERO
+            val deviationPercent =
+                (stated - price).abs().multiply(HUNDRED).divide(price, YEARS_SCALE, RoundingMode.HALF_UP)
+            if (deviationPercent > tolerance) {
+                refuse(
+                    PRICE_OUT_OF_TOLERANCE,
+                    "collateral ${c.securityIsin} is stated at $stated, $deviationPercent % from the bank's price " +
+                        "$price of ${independent.date} (tolerance $tolerance %)",
+                )
+            }
+        }
         return percentOf(c.nominal, price)
     }
 
     private fun haircutCollateral(deal: Deal, terms: CreditTerms): BigDecimal {
-        val c = deal.header.collateral ?: return BigDecimal.ZERO
+        val c = deal.header.collateral ?: throw CreditMeasureMissingException(
+            PRICE_MISSING,
+            "a ${deal.product} deal names no collateral, so its credit exposure cannot be measured",
+        )
         val reference = (
             terms.haircuts.firstOrNull { it.isin == c.securityIsin }
                 ?: terms.haircuts.firstOrNull { it.isin == CollateralHaircut.ANY }
@@ -145,8 +193,10 @@ object CreditExposure {
             )
         // The stricter of the bank's haircut and the one the deal was struck with.
         val haircut = reference.max(c.haircutPercent)
-        return percentOf(collateralValue(deal), HUNDRED - haircut)
+        return percentOf(collateralValue(deal, terms), HUNDRED - haircut)
     }
+
+    private fun refuse(code: String, message: String): Nothing = throw CreditMeasureMissingException(code, message)
 
     private fun percentOf(amount: BigDecimal, percent: BigDecimal): BigDecimal =
         amount.multiply(percent).divide(HUNDRED, 2, RoundingMode.HALF_UP)

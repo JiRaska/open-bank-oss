@@ -108,7 +108,8 @@ class TreasuryDealService(
      * ADR-0315 D4: the conversion factors and collateral haircuts effective on a date (reference
      * data). Without them a derivative or a collateralised repo is refused, never measured as zero.
      */
-    private val creditTerms: suspend (asOf: LocalDate) -> CreditTerms = { CreditTerms.NONE },
+    private val creditTerms: suspend (asOf: LocalDate, collateralIsin: String?) -> CreditTerms =
+        { _, _ -> CreditTerms.NONE },
 ) : TreasuryDealUseCase {
 
     private suspend fun policy(): ProductLimitPolicy = mandate?.invoke() ?: productLimits
@@ -673,7 +674,8 @@ class TreasuryDealService(
     private suspend fun limitCheck(deal: Deal): LimitCheck {
         val cp = counterparties.findById(deal.counterpartyId) ?: throw UnknownCounterpartyException(deal.counterpartyId)
         // One measure for the pre-trade check and the locked line query (which sums the stored figure).
-        val dealAmount = CreditExposure.of(deal, deal.tradeDate, creditTerms(deal.tradeDate))
+        val terms = creditTerms(deal.tradeDate, deal.header.collateral?.securityIsin)
+        val dealAmount = CreditExposure.of(deal, deal.tradeDate, terms)
         val consumes = CreditMeasure.of(deal.product) != CreditMeasure.NONE
         val exposure = if (consumes) deals.exposure(cp.id, deal.limitCurrency, deal.id) else BigDecimal.ZERO
         return LimitCheck.of(cp, deal, exposure, dealAmount)

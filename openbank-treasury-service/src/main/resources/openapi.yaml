@@ -59,7 +59,10 @@ info:
   #         matures through the posting-rule matrix (GET /posting-rules). Every product with
   #         counterparty credit risk consumes its line by CreditExposure (derivatives |notional| x a
   #         conversion factor, repos net of the collateral haircut): 422 CONVERSION_FACTOR_MISSING /
-  #         COLLATERAL_HAIRCUT_MISSING when the measure has no effective record. GET
+  #         COLLATERAL_HAIRCUT_MISSING / COLLATERAL_PRICE_MISSING when the measure has no effective
+  #         record or no ACTIVE market-data price of the collateral ISIN, and
+  #         COLLATERAL_PRICE_OUT_OF_TOLERANCE when the deal's own collateral price is too far from it
+  #         (collateral is always valued at the bank's price, never the deal's). GET
   #         /day-completion/{date}, close-of-day position snapshots (/positions/close-of-day,
   #         ROLE_TREASURY_BACK_OFFICE) and saved blotter filters (/views/deal-filters).
   version: 1.23.0
@@ -247,8 +250,10 @@ paths:
         '422':
           description: >-
             PRODUCT_LIMIT_BREACHED — the deal is outside its product limit (ADR-0315 D4);
-            CONVERSION_FACTOR_MISSING / COLLATERAL_HAIRCUT_MISSING — a derivative or repo whose credit
-            measure has no effective reference record; LIMIT_BREACHED — the line moved past the
+            CONVERSION_FACTOR_MISSING / COLLATERAL_HAIRCUT_MISSING / COLLATERAL_PRICE_MISSING — a
+            derivative or repo whose credit measure has no effective reference record or collateral
+            price; COLLATERAL_PRICE_OUT_OF_TOLERANCE — the deal's collateral price is outside the
+            tolerance of the bank's own; LIMIT_BREACHED — the line moved past the
             vetted headroom before the locked write
           content:
             application/json:
@@ -274,8 +279,10 @@ paths:
             limit, not covered by a senior override; also when the line moved past the vetted headroom
             before the locked write), PRODUCT_LIMIT_BREACHED (the deal is outside its product limit as
             declared NOW — re-checked at approval; not overridable), or CONVERSION_FACTOR_MISSING /
-            COLLATERAL_HAIRCUT_MISSING (a derivative or repo whose credit measure has no effective
-            reference record: refused, never measured as zero)
+            COLLATERAL_HAIRCUT_MISSING / COLLATERAL_PRICE_MISSING (a derivative or repo whose credit
+            measure has no effective reference record or collateral price: refused, never measured as
+            zero), or COLLATERAL_PRICE_OUT_OF_TOLERANCE (the deal's collateral price is outside the
+            tolerance of the bank's own)
           content:
             application/json:
               schema:
@@ -1797,7 +1804,8 @@ components:
             FOUR_EYES_VIOLATION, LIMIT_BREACHED, PRODUCT_LIMIT_BREACHED, ACTOR_NOT_PERMITTED,
             INVALID_STATE, NOT_FOUND, REFERENCE_NOT_EFFECTIVE, REFERENCE_BACKDATED, SENIOR_APPROVAL_REQUIRED, SCHEDULE_ENGINE_UNAVAILABLE,
             DEAL_CHANGED, FLOW_NOT_OVERRIDABLE, FLOW_ALREADY_IN_PAYMENT, FLOW_CHANGED,
-            CONVERSION_FACTOR_MISSING, COLLATERAL_HAIRCUT_MISSING
+            CONVERSION_FACTOR_MISSING, COLLATERAL_HAIRCUT_MISSING, COLLATERAL_PRICE_MISSING,
+            COLLATERAL_PRICE_OUT_OF_TOLERANCE
         message:
           type: [string, 'null']
         breaches:

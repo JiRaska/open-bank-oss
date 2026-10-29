@@ -7,6 +7,7 @@ package com.openbank.treasury.domain
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.CollateralHaircut
+import com.openbank.treasury.domain.model.CollateralPrice
 import com.openbank.treasury.domain.model.ConversionFactor
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
@@ -120,6 +121,9 @@ object DealFixtures {
             )
         },
         haircuts = listOf(CollateralHaircut(CollateralHaircut.ANY, BigDecimal(10))),
+        // The bank's own four-eyes price of the test collateral, and a 0.5 % tolerance for a deal price.
+        collateralPrice = CollateralPrice("CZ0001005243", MONDAY, BigDecimal("101.125")),
+        priceTolerancePercent = BigDecimal("0.5"),
     )
 
     fun withinLimit(deal: Deal) =
