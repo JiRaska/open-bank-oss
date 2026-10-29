@@ -16,7 +16,10 @@ Three rules, read from `IrVersion.SUPPORTED` in ProductIr.kt (the set the parser
 
 Prints SUBJECTS=<number of supported versions>.
 
-Usage: check-product-ir-version-lifecycle.py [--root DIR] [--base REF] [--title T] [--body B] | --self-test
+On a pull_request (--event pull_request) an empty --base FAILS: the removal rule would otherwise be
+skipped silently on exactly the event it exists for. On a push to main there is no PR and no base.
+
+Usage: check-product-ir-version-lifecycle.py [--root DIR] [--base REF] [--title T] [--body B] [--event E] | --self-test
 """
 
 from __future__ import annotations
@@ -73,7 +76,7 @@ def base_text(root: pathlib.Path, base: str) -> str | None:
     return r.stdout if r.returncode == 0 else None
 
 
-def run(root: pathlib.Path, base: str, title: str, body: str, base_reader=base_text) -> int:
+def run(root: pathlib.Path, base: str, title: str, body: str, base_reader=base_text, event: str = "") -> int:
     path = root / IR_KT
     if not path.is_file():
         print(f"::error::{IR_KT} not found")
@@ -105,8 +108,10 @@ def run(root: pathlib.Path, base: str, title: str, body: str, base_reader=base_t
                 )
             elif removed:
                 print(f"irVersion {removed} removed, declared breaking")
+    elif event == "pull_request":
+        findings.append("pull_request with no --base: refusing to skip the removal rule (PR_DIFF_BASE unset)")
     else:
-        print("no --base: the removal rule is not evaluated on this run")
+        print("no --base: the removal rule is not evaluated on this run (not a pull_request)")
     for f in findings:
         print(f"::error::{f}")
     if not findings:
@@ -133,7 +138,10 @@ def self_test() -> int:
     v12 = "    const val V1: Int = 1\n    const val V2: Int = 2"
     v123 = v12 + "\n    const val V3: Int = 3"
 
-    def case(label, want, text, consts, members, schemas, base_members=None, title="", body=""):
+    ran = []
+
+    def case(label, want, text, consts, members, schemas, base_members=None, title="", body="", event=""):
+        ran.append(label)
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             _fixture(root, consts, members, schemas)
@@ -145,7 +153,7 @@ def self_test() -> int:
                 reader = lambda _r, _b: old  # noqa: E731
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                rc = run(root, "base" if reader else "", title, body, reader or base_text)
+                rc = run(root, "base" if reader else "", title, body, reader or base_text, event=event)
             out = buf.getvalue()
             if rc != want or text not in out:
                 failures.append(f"{label}: exit {rc} (want {want}), output:\n{out}")
@@ -161,10 +169,12 @@ def self_test() -> int:
     case("removal with a ! title is green", 0, "declared breaking", v12, "V2", [2], "V1, V2", "feat(libs)!: drop v1")
     case("removal with BREAKING CHANGE body is green", 0, "declared breaking", v12, "V2", [2], "V1, V2", "feat(libs): x",
          "BREAKING CHANGE: v1 revisions must be migrated")
+    case("a pull_request without a base is red", 1, "refusing to skip the removal rule", v12, "V1", [1], event="pull_request")
+    case("a push without a base is green", 0, "not evaluated", v12, "V1", [1], event="push")
     case("adding a version needs no marker", 0, "OK", v12, "V1, V2", [1, 2], "V1", "feat(libs): add v2")
     for f in failures:
         print(f"SELF-TEST FAIL {f}")
-    print(f"self-test: {11 - len(failures)}/11 passed")
+    print(f"self-test: {len(ran) - len(failures)}/{len(ran)} passed")
     return 1 if failures else 0
 
 
@@ -174,11 +184,12 @@ def main() -> int:
     ap.add_argument("--base", default="")
     ap.add_argument("--title", default="")
     ap.add_argument("--body", default="")
+    ap.add_argument("--event", default="", help="GITHUB_EVENT_NAME; on pull_request an empty --base is a failure")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
-    return run(pathlib.Path(args.root), args.base, args.title, args.body)
+    return run(pathlib.Path(args.root), args.base, args.title, args.body, event=args.event)
 
 
 if __name__ == "__main__":

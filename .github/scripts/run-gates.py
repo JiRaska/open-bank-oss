@@ -120,6 +120,7 @@ CI_ONLY_ENV = (
     "GITHUB_WORKSPACE",
     "PR_BODY",
     "PR_NUMBER",
+    "PR_TITLE",
 )
 
 

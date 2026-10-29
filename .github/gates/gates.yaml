@@ -7243,19 +7243,19 @@ gates:
       python3 .github/scripts/check-product-ir-purity.py --root .
 
   # ADR-0352 §9 phase 6 — formal guarantees. Two gates, both advisory at introduction (ADR-0144):
-  #   product-ir-formal-properties  ProductFormalPropertiesTest (openbank-products) asserts the five
-  #                                 properties (termination, balance conservation, monotone tiers,
-  #                                 determinism, purity) over every reference product and generated
-  #                                 revisions; this half keeps it present, enabled and unnarrowed.
+  #   product-ir-formal-properties  ProductFormalPropertiesTest (openbank-products, module CI lane)
+  #                                 asserts the five properties (termination, balance conservation,
+  #                                 monotone tiers, determinism, purity) and the v1 HALF_UP pin; this
+  #                                 gate only checks those assertions are present, enabled, unnarrowed.
   #   product-ir-version-lifecycle  at most two irVersions supported, each with its schema, and a
   #                                 removal only under a breaking-change marker.
   - id: product-ir-formal-properties
-    name: "product interpreter formal properties are asserted over every reference and generated revision (ADR-0352, advisory)"
+    name: "product interpreter formal-property assertions are present, enabled and unnarrowed (ADR-0352, advisory)"
     group: kotlin
     mode: advisory
     rationale: "A property test that is deleted, @Disabled or narrowed to a hand-picked list reads like a passing one; the JVM half runs in the module CI lane, this half keeps its scope and assertions present."
     review_after: "2027-04-30"
-    verified: "2026-10-29 — 5 properties found in the comment-stripped test; dropping any one assertion, moving it into a comment, @Disabled, narrowing ReferenceProducts.all or ProductArb.revision, and a build exclude each turn it red (--self-test, 13 cases). JVM half: each property was broken in the test and the test went red"
+    verified: "2026-10-29 — PRESENCE only: 6 assertion groups (5 properties + the HALF_UP pin) found in the comment-stripped test; dropping any one, moving it into a comment, @Disabled, narrowing ReferenceProducts.all or ProductArb.revision, and a build exclude each turn it red (--self-test, 16 cases). The JVM half was falsified separately: an unbalanced Post, a removed limit guard, System.nanoTime() in the interpreter and in DepositInterest, a falling tier and HALF_EVEN accrual each turn ProductFormalPropertiesTest red"
     budget_seconds: 10
     min_subjects: 5   # five properties at introduction (2026-10-29)
     selftest: python3 .github/scripts/check-product-ir-formal-properties.py --self-test
@@ -7270,7 +7270,7 @@ gates:
     mode: advisory
     rationale: "A published revision is pinned to its irVersion; dropping that version from IrVersion.SUPPORTED makes every such revision fail to load, so the removal must be visible as breaking and the set must stay small enough to test both members."
     review_after: "2027-04-30"
-    verified: "2026-10-29 — SUPPORTED=[1] on the real tree; three versions, a version without its schema, an empty set, an unresolvable member and a removal without `!:`/BREAKING CHANGE each turn it red (--self-test, 11 cases); setOf(V1, 2, 3) in a copy of the real ProductIr.kt is red"
+    verified: "2026-10-29 — SUPPORTED=[1] on the real tree; three versions, a version without its schema, an empty set, an unresolvable member and a removal without `!:`/BREAKING CHANGE and a pull_request with no base each turn it red (--self-test, 13 cases); setOf(V1, 2, 3) in a copy of the real ProductIr.kt is red"
     budget_seconds: 10
     min_subjects: 1   # one supported irVersion at introduction (2026-10-29)
     needs_base: optional
@@ -7279,7 +7279,7 @@ gates:
     selftest_inputs: [".github/scripts/check-product-ir-version-lifecycle.py"]
     run: |
       python3 .github/scripts/check-product-ir-version-lifecycle.py --root . \
-        --base "${PR_DIFF_BASE:-}" --title "${PR_TITLE:-}" --body "${PR_BODY:-}"
+        --base "${PR_DIFF_BASE:-}" --title "${PR_TITLE:-}" --body "${PR_BODY:-}" --event "${GITHUB_EVENT_NAME:-}"
 
 
   - id: dr-restore-orchestration
