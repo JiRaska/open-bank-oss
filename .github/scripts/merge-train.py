@@ -1658,17 +1658,28 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
             log(f"#{p['number']:>6} skip      {'draft' if p.get('draft') else 'auto-merge not armed'}")
     def spec(p: dict) -> str:
         return f"+{gh.head_refspec(p['number'])}:refs/merge-train/pr-{p['number']}"
-    if armed and git("fetch", "-q", "origin", *[spec(p) for p in armed], check=False).returncode != 0:
+    batch = git("fetch", "-q", "origin", *[spec(p) for p in armed], check=False) if armed else None
+    if batch is not None and batch.returncode != 0:
         # One unfetchable head (GitHub sometimes never creates refs/pull/<n>/head) fails the whole
-        # batch. Find it by asking the remote which refs exist — ls-remote runs no PR code — drop
-        # it fail-closed (never a candidate, never green), and fetch the rest strictly.
-        fetchable = []
+        # batch. Ask the remote which refs exist — ls-remote runs no PR code. Fail-closed on every
+        # other outcome: rc 2 is the only "no such ref" answer; any other rc (network, auth) raises,
+        # and a batch failure with no ref found absent re-raises the fetch error, so an outage can
+        # never read as an empty candidate list.
+        fetchable, absent = [], 0
         for p in armed:
             ref = gh.head_refspec(p["number"])
-            if git("ls-remote", "--exit-code", "origin", ref, check=False).returncode == 0:
+            probe = git("ls-remote", "--exit-code", "origin", ref, check=False)
+            if probe.returncode == 0:
                 fetchable.append(p)
-            else:
+            elif probe.returncode == 2:
+                absent += 1
                 log(f"#{p['number']:>6} skip      head ref {ref} not fetchable — waits for a push")
+            else:
+                raise subprocess.CalledProcessError(probe.returncode, ["git", "ls-remote", "origin", ref],
+                                                    probe.stdout, probe.stderr)
+        if not absent:
+            raise subprocess.CalledProcessError(batch.returncode, ["git", "fetch", "origin", "<armed heads>"],
+                                                batch.stdout, batch.stderr)
         armed = fetchable
         if armed:
             git("fetch", "-q", "origin", *[spec(p) for p in armed])
@@ -4218,6 +4229,50 @@ def self_test() -> int:
             check("unfetchable head ref: that PR is skipped, the tick survives, the others stay candidates",
                   not crash and [m.number for m in cands] == [1], crash or str([m.number for m in cands]))
             reset()
+
+            # Fail-closed negatives for that fallback: a transient ls-remote failure (rc 128, not
+            # rc 2 "no such ref") and a batch failure with every ref present must RAISE — an outage
+            # must never read as "nothing to merge" with exit 0.
+            def injected(real, fail):
+                def g(*a, check=True, **kw):
+                    r = fail(a)
+                    if r is None:
+                        return real(*a, check=check, **kw)
+                    if check and r.returncode != 0:
+                        raise subprocess.CalledProcessError(r.returncode, list(a), r.stdout, r.stderr)
+                    return r
+                return g
+
+            def boom(rc):
+                return subprocess.CompletedProcess([], rc, "", "fatal: unable to access remote")
+
+            def nth_fetch_fails(which, ls=None):
+                seen = []
+                def f(a):
+                    if a[0] == "fetch":
+                        seen.append(1)
+                        return boom(128) if len(seen) in which else None
+                    if a[0] == "ls-remote" and ls and a[-1] in ls:
+                        return boom(ls[a[-1]])
+                    return None
+                return f
+
+            for label, fail in [
+                ("ls-remote rc 128 (transient) raises, never drops the PR",
+                 nth_fetch_fails({1}, {"refs/heads/p2": 128})),
+                ("batch fetch failed with every ref present re-raises the fetch error",
+                 nth_fetch_fails({1})),
+                ("a ref present (rc 0) but the strict refetch failing raises",
+                 nth_fetch_fails({1, 2}, {"refs/heads/p2": 2}))]:
+                open_only("p1", "p2")
+                raised = False
+                try:
+                    cands, _apps = live_candidates(gh, injected(Git(clone("settle")), fail), "o/r", gh.required(), base0,
+                                                   Untrainable(SYN_INVENTORY))
+                except subprocess.CalledProcessError:
+                    raised, cands = True, []
+                check(f"unfetchable head ref: {label}", raised, str([m.number for m in cands]))
+                reset()
 
             # Review: during regeneration the generators see MAIN's copy of gate code (as of
             # generators), and the member's copy is back in the tree before anything is committed.
