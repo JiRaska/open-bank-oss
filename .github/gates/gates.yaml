@@ -1418,7 +1418,7 @@ gates:
     name: "every honeytoken is wired to a tripwire and holds no permission (ADR-0357, enforced)"
     group: gitops
     mode: enforced
-    budget_seconds: 30  # YAML + HCL text scan; measured under 2s locally incl. self-test
+    budget_seconds: 60  # byte-prefiltered YAML + HCL scan; first version took 44s on a hosted runner (2026-10-29)
     rationale: >-
       The honey ServiceAccount in arc-runners and the canary IAM key are only safe because they
       are powerless, and only useful because a tripwire names them. Neither property is visible

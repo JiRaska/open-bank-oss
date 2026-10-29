@@ -64,9 +64,25 @@ def _blocks(text: str) -> list[tuple[str, str, str]]:
     return out
 
 
+def _candidates(gitops: Path, needle: str):
+    """Files that can possibly matter, by a byte search before any YAML parse.
+
+    Parsing every manifest in gitops twice per scan, six scans per self-test, cost 44s on a
+    hosted runner (budget 30s). A file that does not contain the needle cannot declare a honey
+    SA or a binding, so skipping it changes no verdict, only the time.
+    """
+    raw = needle.encode()
+    for path in sorted(gitops.rglob("*.yaml")):
+        try:
+            if raw in path.read_bytes():
+                yield path
+        except OSError:
+            continue
+
+
 def honey_sas(gitops: Path) -> set[tuple[str, str]]:
     found = set()
-    for path in sorted(gitops.rglob("*.yaml")):
+    for path in _candidates(gitops, LABEL):
         try:
             docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
         except yaml.YAMLError:
@@ -81,7 +97,7 @@ def honey_sas(gitops: Path) -> set[tuple[str, str]]:
 
 def bound_subjects(gitops: Path) -> set[tuple[str, str]]:
     found = set()
-    for path in sorted(gitops.rglob("*.yaml")):
+    for path in _candidates(gitops, "Binding"):
         try:
             docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
         except yaml.YAMLError:
