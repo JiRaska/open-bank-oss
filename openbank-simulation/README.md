@@ -97,6 +97,12 @@ reference savings product against a +25 bp revision. It checks that the reported
 delta equals one computed independently in the test, and that identical revisions give an empty
 diff.
 
+The first run found that the reference term deposit could be overdrawn (now refused by a
+`prePosting` reject, so `term-deposit` carries no `knownViolations`), that capitalisation could
+leave `accruedInterest` slightly negative (now truncated), and that a scheduled savings fee can
+take a dormant account below zero (accepted in IR v1). The decisions are recorded in
+`openbank-libs/docs/product-ir.md` under "Replay findings".
+
 ## Run it
 
 ```bash

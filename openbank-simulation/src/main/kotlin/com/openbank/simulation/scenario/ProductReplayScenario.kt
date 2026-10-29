@@ -78,10 +78,7 @@ object ProductReplayScenario {
         ReferenceCase("savings-fixed", BigDecimal.ZERO),
         // ReferenceProducts.currentAccount's arranged overdraft: postings may take it to -500.00.
         ReferenceCase("current-account", BigDecimal("-500.00")),
-        // The reference term deposit's only prePosting rule is the early-withdrawal penalty; nothing
-        // refuses a withdrawal larger than the balance, so a customer can overdraw it. Found by this
-        // scenario; the fix is a product change in openbank-products, not a harness change.
-        ReferenceCase("term-deposit", BigDecimal.ZERO, knownViolations = setOf("no-negative-balance")),
+        ReferenceCase("term-deposit", BigDecimal.ZERO),
     )
 
     private val SIMULATION_SIGNING_SECRET: ByteArray = "openbank-simulation-product-replay-key".toByteArray()

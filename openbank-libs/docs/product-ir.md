@@ -152,6 +152,16 @@ three iterations took 3.3, 3.4 and 4.2 s, a mean of 3.6 s and about 5 µs per ev
 p99 of 0.048 ms per golden-set op, inside the 2 ms per-`evaluate` budget. The op allocates about
 5.4 GB, recorded in `alloc-baseline.json`.
 
+### Replay findings
+
+The first replay of the reference products found three behaviours. Each was decided as follows:
+
+| Finding | Decision |
+|---|---|
+| `term-deposit` had no balance rule in `prePosting`, so a withdrawal larger than the balance overdrew it | Defect, fixed in `openbank-products`: a `PROJECTED_BALANCE LT 0.00` reject (`INSUFFICIENT_FUNDS`), ordered before the early-withdrawal penalty so a refused withdrawal is never charged one |
+| The savings monthly fee can take a dormant account below zero | Accepted in IR v1. `prePosting` guards customer postings; a scheduled `CHARGE_FEE` is a contractual charge and posts in full, leaving an unarranged debit balance for servicing to collect. A partial or capped fee would need a new IR action, which is an IR v2 change and not a product edit |
+| Capitalisation rounded accrued interest HALF_UP, so `accruedInterest` could end a few tenths of a cent negative | Defect, fixed in `DepositInterest.capitalise`: it truncates (DOWN) to the posting policy's scale and the sub-cent remainder stays accrued for the next capitalisation. The bank never posts interest that has not accrued, and `accruedInterest` never goes negative. `postingRounding` still rounds penalties |
+
 ## Testing
 
 openbank-libs-testing holds the golden-scenario runner, `ProductArb` property

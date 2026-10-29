@@ -1,6 +1,6 @@
 {
   "name": "term-deposit-reference",
-  "description": "TERM-DEPOSIT-12M on 10 000 EUR opened 2026-01-01: maturity is scheduled for 2027-01-01, one day of the 2 % band at ACT/360 accrues 0.555556, a 1000 withdrawal before maturity pays a 1 % penalty of 10.00, maturity capitalises the accrued 0.56, and a withdrawal after maturity carries no penalty.",
+  "description": "TERM-DEPOSIT-12M on 10 000 EUR opened 2026-01-01: maturity is scheduled for 2027-01-01, one day of the 2 % band at ACT/360 accrues 0.555556, a withdrawal of 10 000.01 is refused as INSUFFICIENT_FUNDS with no penalty, a 1000 withdrawal before maturity pays a 1 % penalty of 10.00, maturity capitalises the accrued 0.555556 truncated to 0.55 (the remainder stays accrued), and a withdrawal after maturity carries no penalty.",
   "revision": {
     "irVersion": 1,
     "productCode": "TERM-DEPOSIT-12M",
@@ -57,6 +57,19 @@
         }
       ],
       "prePosting": [
+        {
+          "ruleId": "posting.no-overdraft",
+          "when": {
+            "type": "postingComparison",
+            "attribute": "PROJECTED_BALANCE",
+            "operator": "LT",
+            "threshold": "0.00"
+          },
+          "action": {
+            "type": "REJECT",
+            "reasonCode": "INSUFFICIENT_FUNDS"
+          }
+        },
         {
           "ruleId": "posting.early-withdrawal",
           "action": {
@@ -144,6 +157,23 @@
       ]
     },
     {
+      "at": "2026-06-01T09:00:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "WITHDRAWAL",
+        "direction": "DEBIT",
+        "amount": "10000.01"
+      },
+      "expected": [
+        {
+          "type": "REJECT",
+          "ruleId": "posting.no-overdraft",
+          "irVersion": 1,
+          "reasonCode": "INSUFFICIENT_FUNDS"
+        }
+      ]
+    },
+    {
       "at": "2026-06-01T10:00:00Z",
       "hook": "prePosting",
       "posting": {
@@ -188,13 +218,13 @@
             {
               "accountingClass": "ACCRUED_INTEREST_PAYABLE",
               "direction": "DEBIT",
-              "amount": "0.56",
+              "amount": "0.55",
               "currency": "EUR"
             },
             {
               "accountingClass": "CUSTOMER_DEPOSIT",
               "direction": "CREDIT",
-              "amount": "0.56",
+              "amount": "0.55",
               "currency": "EUR"
             }
           ]
