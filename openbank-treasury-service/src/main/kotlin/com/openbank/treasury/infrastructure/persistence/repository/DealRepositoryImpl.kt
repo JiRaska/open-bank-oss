@@ -138,6 +138,8 @@ class DealRepositoryImpl(
     private val cashFlows: CashFlowPanacheRepository,
     private val overrideRepo: CashFlowOverridePanacheRepository,
     private val conflictRepo: CashFlowConflictPanacheRepository,
+    /** #13883: counts journals applied after their posting intent was closed. */
+    private val meters: io.micrometer.core.instrument.MeterRegistry,
 ) : DealRepository,
     DealReferenceLookup,
     PanacheRepository<DealEntity> {
@@ -259,6 +261,7 @@ class DealRepositoryImpl(
             }
             .invoke { late ->
                 if (late > 0) {
+                    meters.counter(APPLIED_AFTER_CLOSE_METRIC).increment(late.toDouble())
                     log.errorf(
                         "posting intent %s was closed but its journal was applied afterwards; " +
                             "re-report its value day",
@@ -643,8 +646,12 @@ class DealRepositoryImpl(
                 "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, value_date) " +
                 "SELECT idempotency_key, ?1, 'COMPLETED', actor_id, value_date FROM u"
 
+        /** Alerted on by `TreasuryPostingIntentJournalAfterClose`. */
+        const val APPLIED_AFTER_CLOSE_METRIC = "openbank.treasury.posting_intents.applied_after_close"
+
         const val APPLIED_AFTER_CLOSE_SQL =
-            "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, reason, value_date) " +
+            "INSERT INTO deal_posting_intent_history " +
+                "(idempotency_key, at, transition, actor_id, prior_status, value_date) " +
                 "SELECT idempotency_key, ?1, 'JOURNAL_APPLIED_AFTER_CLOSE', actor_id, status, value_date " +
                 "FROM deal_posting_intent WHERE idempotency_key = ?2 AND status IN ('CLOSED_BY_OPERATOR', 'REFUSED')"
     }

@@ -45,8 +45,10 @@ CREATE INDEX idx_deal_posting_intent_claimable ON deal_posting_intent (created_a
 
 -- Append-only history of every intent transition (opened, reopened, refused, closed by an operator,
 -- completed): who, when, why. Rows are written in the same statement as the transition they record
--- (a data-modifying CTE), and the trigger below refuses any UPDATE or DELETE, so a reopen or a later
--- close can never erase an earlier operator decision.
+-- (a data-modifying CTE), and the triggers below refuse UPDATE, DELETE and TRUNCATE, so a reopen or a
+-- later close by the APPLICATION can never erase an earlier operator decision. They do not bind the
+-- table's owner, who can disable a trigger: this protects the record from the service's own code
+-- paths, not from a database administrator (that is the database's access control and its audit).
 -- Rollback: as for deal_posting_intent; drop the trigger and function with the table.
 CREATE TABLE deal_posting_intent_history (
     id              BIGSERIAL     PRIMARY KEY,
@@ -57,6 +59,9 @@ CREATE TABLE deal_posting_intent_history (
                      'COMPLETED', 'JOURNAL_APPLIED_AFTER_CLOSE')),
     actor_id        VARCHAR(255),
     reason          TEXT,
+    -- JOURNAL_APPLIED_AFTER_CLOSE only: the status the intent was closed with (REFUSED or
+    -- CLOSED_BY_OPERATOR), which the late journal did NOT overwrite.
+    prior_status    VARCHAR(24),
     value_date      DATE          NOT NULL
 );
 
@@ -71,3 +76,7 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER deal_posting_intent_history_no_rewrite
     BEFORE UPDATE OR DELETE ON deal_posting_intent_history
     FOR EACH ROW EXECUTE FUNCTION deal_posting_intent_history_append_only();
+
+CREATE TRIGGER deal_posting_intent_history_no_truncate
+    BEFORE TRUNCATE ON deal_posting_intent_history
+    FOR EACH STATEMENT EXECUTE FUNCTION deal_posting_intent_history_append_only();

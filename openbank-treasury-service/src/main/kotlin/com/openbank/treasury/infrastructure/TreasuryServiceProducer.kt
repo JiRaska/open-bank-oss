@@ -93,29 +93,39 @@ class TreasuryServiceProducer {
         intentGrace: java.time.Duration,
         @ConfigProperty(name = "openbank.treasury.posting-intent.claim-batch", defaultValue = "100")
         claimBatch: Int,
-    ): TreasuryDealUseCase = TreasuryDealService(
-        deals,
-        counterparties,
-        ledger,
-        objectMapper,
-        clock,
-        // #10896: treasury has no fx-service client yet, so there is no mid to compare with. Enabling
-        // the check without one flags EVERY FX spot deal "mid unavailable" — loud, not silent.
-        FxMidRatePort.NONE,
-        FxRateTolerance(rateCheckEnabled, tolerancePercent),
-        confirmationRequired,
-        quotes,
-        productLimits.toPolicy(),
-        schedules,
-        ProductMandate(references, productLimits.toPolicy(), clock)::policy,
-        // ADR-0342 (#13882): a journal first recorded for a day that has already ended.
-        { event -> meters.counter("openbank.treasury.close.late_journals", "event", event.name).increment() },
-        // #13883: settle, mature and reverse record a posting intent before contacting the ledger.
-        intents,
-        maxResumeAge,
-        intentGrace,
-        claimBatch,
-    )
+        @ConfigProperty(name = "quarkus.rest-client.ledger-service.connect-timeout", defaultValue = "2000")
+        ledgerConnectMs: Long,
+        @ConfigProperty(name = "quarkus.rest-client.ledger-service.read-timeout", defaultValue = "5000")
+        ledgerReadMs: Long,
+    ): TreasuryDealUseCase {
+        // #13883: an intent older than the grace counts as having no attempt in flight (a coded ledger
+        // refusal then proves absence; an operator may close it). That holds only while one ledger
+        // call, connect plus read (the client has no retry), ends well inside the grace.
+        requireGraceAboveLedgerTimeout(intentGrace, ledgerConnectMs, ledgerReadMs)
+        return TreasuryDealService(
+            deals,
+            counterparties,
+            ledger,
+            objectMapper,
+            clock,
+            // #10896: treasury has no fx-service client yet, so there is no mid to compare with. Enabling
+            // the check without one flags EVERY FX spot deal "mid unavailable" — loud, not silent.
+            FxMidRatePort.NONE,
+            FxRateTolerance(rateCheckEnabled, tolerancePercent),
+            confirmationRequired,
+            quotes,
+            productLimits.toPolicy(),
+            schedules,
+            ProductMandate(references, productLimits.toPolicy(), clock)::policy,
+            // ADR-0342 (#13882): a journal first recorded for a day that has already ended.
+            { event -> meters.counter("openbank.treasury.close.late_journals", "event", event.name).increment() },
+            // #13883: settle, mature and reverse record a posting intent before contacting the ledger.
+            intents,
+            maxResumeAge,
+            intentGrace,
+            claimBatch,
+        )
+    }
 
     /** ADR-0344 D3/D4: reference validation and schedule generation through openbank-libs-finance. */
     @Produces
@@ -212,3 +222,17 @@ class TreasuryServiceProducer {
         clock,
     )
 }
+
+/**
+ * #13883: the posting-intent grace must exceed one whole ledger call by a wide margin, or an intent
+ * past the grace could still have its own request in flight. Refuses to start otherwise.
+ */
+internal fun requireGraceAboveLedgerTimeout(grace: java.time.Duration, connectMs: Long, readMs: Long) {
+    val call = java.time.Duration.ofMillis(connectMs + readMs)
+    require(grace >= call.multipliedBy(GRACE_TO_LEDGER_CALL_FACTOR)) {
+        "openbank.treasury.posting-intent.grace ($grace) must be at least $GRACE_TO_LEDGER_CALL_FACTOR x the " +
+            "ledger client's connect + read timeout ($call)"
+    }
+}
+
+private const val GRACE_TO_LEDGER_CALL_FACTOR = 4L

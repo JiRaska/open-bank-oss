@@ -179,6 +179,9 @@ data class PostingIntent(
     val fresh: Boolean = false,
 )
 
+/** What an operator's close did (#13883): closed it, found none OPEN, or found it still in flight. */
+enum class PostingIntentCloseOutcome { CLOSED, NOT_OPEN, IN_FLIGHT }
+
 /** OPEN intents at a glance, for the gauges: how many, and since when the oldest has waited. */
 data class OpenIntentSummary(val count: Int, val oldestCreatedAt: Instant?)
 
@@ -222,10 +225,15 @@ interface PostingIntentPort {
 
     /**
      * An operator closes an OPEN intent that cannot complete: CLOSED_BY_OPERATOR, with who and why
-     * recorded on the row and appended to its history. False when no OPEN intent has [key], or when
-     * it may still be in flight: created at or after [createdBefore], or under a live claim.
+     * recorded on the row and appended to its history. NOT_OPEN when no OPEN intent has [key];
+     * IN_FLIGHT when it may still be posting: created at or after [createdBefore], or under a live claim.
      */
-    suspend fun closeByOperator(key: String, actor: Actor, reason: String, createdBefore: Instant): Boolean
+    suspend fun closeByOperator(
+        key: String,
+        actor: Actor,
+        reason: String,
+        createdBefore: Instant,
+    ): PostingIntentCloseOutcome
 
     companion object {
         /** No intent store: the pre-#13883 behaviour. Unit tests of the lifecycle alone only. */
@@ -238,7 +246,7 @@ interface PostingIntentPort {
             override suspend fun openFor(dealId: UUID) = emptyList<PostingIntent>()
             override suspend fun summary() = OpenIntentSummary(0, null)
             override suspend fun closeByOperator(key: String, actor: Actor, reason: String, createdBefore: Instant) =
-                false
+                PostingIntentCloseOutcome.NOT_OPEN
         }
     }
 }

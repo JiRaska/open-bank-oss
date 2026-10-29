@@ -127,10 +127,12 @@ admits under `ledger.close.participate` for this participant only.
   the original journal. It resumes an intent as its stored actor only while it is younger than
   `max-resume-age` (4h, by age, not the calendar: the intent already pins its value day). An older
   one is escalated: it stays OPEN and holding its day, and is never claimed again, so escalated
-  intents cannot starve resumable ones. While a deal has an open intent the accrual skips it and
-  reports it unassessed, so a resumed reversal still offsets exactly what it was decided against.
+  intents cannot starve resumable ones. While a deal has an open intent the accrual skips THAT deal
+  only (counted as deferred; every other deal accrues and the pass completes), so a resumed reversal
+  still offsets exactly what it was decided against.
   The ledger's coded `409 ACCOUNTING_DAY_CLOSED` closes an intent REFUSED (no journal exists) when the
-  intent is fresh or older than the grace; every other failure leaves it OPEN.
+  intent is fresh or older than the grace; every other failure leaves it OPEN. The service refuses to
+  start unless the grace is at least four times one ledger call (connect + read timeout, no retry).
 - **A stuck intent.** `TreasuryPostingIntentStuck` fires when the oldest open intent is over 20
   minutes old (gauges `openbank.treasury.posting_intents.open` and `.oldest_age_seconds`, -1 when
   unreadable; promtool-tested). Read `last_error` on the row. Either re-issue the deal command through
@@ -139,10 +141,14 @@ admits under `ledger.close.participate` for this participant only.
   `{"event": "SETTLED|MATURED|REVERSED", "reason": "..."}`. That needs the OPA action
   `treasury.posting-intent.close` (approvers, never an agent), a person, and four eyes: not the
   posting's own actor nor the deal's approver. An intent younger than the grace or under a live
-  reconciler claim cannot be closed. The close sets CLOSED_BY_OPERATOR (who and why stay on the row)
-  and releases the hold. A journal may still exist, so a later re-issue reopens the intent with its
-  FIRST value day. Every transition is appended to `deal_posting_intent_history`, which refuses
-  UPDATE and DELETE; a journal that lands after a close is recorded there as
-  `JOURNAL_APPLIED_AFTER_CLOSE` (and logged as an error), never written over the close.
+  reconciler claim answers 409 `POSTING_IN_FLIGHT` (retry later); 404 means none is open. The close
+  sets CLOSED_BY_OPERATOR (who and why stay on the row) and releases the hold. A journal may still
+  exist, so a later re-issue reopens the intent with its FIRST value day; it becomes the re-issuer's
+  decision (their actor and time), so the grace and four eyes apply to it afresh. Every transition is
+  appended to `deal_posting_intent_history`, whose triggers refuse UPDATE, DELETE and TRUNCATE from
+  the service (not from the table owner, who can disable a trigger). A journal that lands after a
+  close is recorded there as `JOURNAL_APPLIED_AFTER_CLOSE` with the prior status, counted in
+  `openbank.treasury.posting_intents.applied_after_close`, alerted on
+  (`TreasuryPostingIntentJournalAfterClose`: re-report that value day) and never written over the close.
 - **Operating it.** Under `shadow` mode the ledger only counts a hold. Under `enforce` an operator
   reviews a REFUSED day and waives it on the ledger's day-end page.

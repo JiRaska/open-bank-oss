@@ -12,6 +12,7 @@ import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.OpenIntentSummary
 import com.openbank.treasury.application.port.out.PostedJournal
 import com.openbank.treasury.application.port.out.PostingIntent
+import com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
 import com.openbank.treasury.application.port.out.PostingIntentPort
 import com.openbank.treasury.application.port.out.PostingIntentStatus
 import com.openbank.treasury.domain.model.Actor
@@ -108,8 +109,10 @@ internal class InMemoryIntents : PostingIntentPort {
             return stored(key).copy(fresh = true)
         }
         if (existing.second == Status.CLOSED_BY_OPERATOR) {
-            // A journal may exist: reopened NOT fresh, keeping its first value day.
-            rows[key] = existing.first to Status.OPEN
+            // A journal may exist: reopened NOT fresh, keeping its first value day; the re-issuer's
+            // decision (actor, time) and no longer escalated.
+            rows[key] = existing.first.copy(actor = intent.actor, createdAt = intent.createdAt) to Status.OPEN
+            escalated -= key
             record(key, "REOPENED_AFTER_OPERATOR_CLOSE", intent.actor.id, null)
         }
         return stored(key)
@@ -145,13 +148,19 @@ internal class InMemoryIntents : PostingIntentPort {
     override suspend fun summary() = rows.values.filter { it.second == Status.OPEN }
         .let { open -> OpenIntentSummary(open.size, open.minOfOrNull { it.first.createdAt }) }
 
-    override suspend fun closeByOperator(key: String, actor: Actor, reason: String, createdBefore: Instant): Boolean {
-        val row = rows[key]?.takeIf { it.second == Status.OPEN && it.first.createdAt.isBefore(createdBefore) }
-            ?: return false
+    override suspend fun closeByOperator(
+        key: String,
+        actor: Actor,
+        reason: String,
+        createdBefore: Instant,
+    ): PostingIntentCloseOutcome {
+        val open = rows[key]?.takeIf { it.second == Status.OPEN } ?: return PostingIntentCloseOutcome.NOT_OPEN
+        val row =
+            open.takeIf { it.first.createdAt.isBefore(createdBefore) } ?: return PostingIntentCloseOutcome.IN_FLIGHT
         rows[key] = row.first to Status.CLOSED_BY_OPERATOR
         closedBy[key] = actor.id
         record(key, "CLOSED_BY_OPERATOR", actor.id, reason)
-        return true
+        return PostingIntentCloseOutcome.CLOSED
     }
 
     fun complete(key: String) {

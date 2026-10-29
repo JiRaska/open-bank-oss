@@ -78,7 +78,9 @@ class PostingIntentReconcileScheduler(
                 meterRegistry.counter(METRIC, "outcome", "completed").increment(r.completed.toDouble())
                 meterRegistry.counter(METRIC, "outcome", "failed").increment(r.failures.size.toDouble())
                 meterRegistry.counter(METRIC, "outcome", "escalated").increment(r.escalated.toDouble())
-                r.failures.forEach { log.error("posting intent could not be completed; it stays open", it) }
+                r.failures.forEach {
+                    log.error("posting intent could not be completed this pass; see its status and last_error", it)
+                }
                 if (r.escalated > 0) {
                     log.warnf("%d posting intent(s) escalated to an operator; they stay open", r.escalated)
                 }

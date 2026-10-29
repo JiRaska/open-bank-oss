@@ -12,6 +12,7 @@ import com.openbank.treasury.application.port.`in`.DraftDealCommand
 import com.openbank.treasury.application.port.`in`.TreasuryCalendarEvent
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.application.port.`in`.TreasuryEventType
+import com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealState
@@ -400,7 +401,8 @@ class TreasuryResource {
      * that cannot complete, releasing its day's close hold. Its own OPA action
      * (`treasury.posting-intent.close`, approvers only, never an agent); the domain refuses a
      * non-person and, four eyes, the posting's own actor and the deal's approver (422). Who and why
-     * are recorded on the intent and appended to its history. 404 when no OPEN intent exists.
+     * are recorded on the intent and appended to its history. 404 when no OPEN intent exists; 409
+     * POSTING_IN_FLIGHT when it may still be posting (younger than the grace, or claimed).
      */
     @POST
     @Path("/deals/{id}/posting-intent/close")
@@ -412,12 +414,20 @@ class TreasuryResource {
         val event = requireNotNull(request.event) { "event is required" }
         require(event in CLOSABLE_EVENTS) { "event must be one of $CLOSABLE_EVENTS" }
         val reason = requireNotNull(request.reason) { "reason is required" }
-        val closed = deals.closePostingIntent(id, PostingEvent.valueOf(event), reason, actor())
-        return if (closed) {
-            Response.noContent().build()
-        } else {
-            Response.status(Response.Status.NOT_FOUND)
+        return when (deals.closePostingIntent(id, PostingEvent.valueOf(event), reason, actor())) {
+            PostingIntentCloseOutcome.CLOSED -> Response.noContent().build()
+            PostingIntentCloseOutcome.NOT_OPEN -> Response.status(Response.Status.NOT_FOUND)
                 .entity(mapOf("error" to "NOT_FOUND", "message" to "no open posting intent for $event on deal $id"))
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+            PostingIntentCloseOutcome.IN_FLIGHT -> Response.status(Response.Status.CONFLICT)
+                .entity(
+                    mapOf(
+                        "error" to "POSTING_IN_FLIGHT",
+                        "message" to "the $event posting on deal $id may still be in flight (younger than the " +
+                            "grace period, or claimed by the reconciler); retry in a few minutes",
+                    ),
+                )
                 .type(MediaType.APPLICATION_JSON)
                 .build()
         }

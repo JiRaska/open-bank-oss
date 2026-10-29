@@ -120,10 +120,11 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   Jménem uloženého aktéra obnoví záměr jen mladší než `max-resume-age` (4 h, podle stáří, ne podle
   kalendáře: den hodnoty si záměr nese sám). Starší eskaluje: zůstane otevřený, drží svůj den a už
   se znovu nezabírá, takže eskalované záměry nemohou vyhladovět ty obnovitelné. Dokud má obchod
-  otevřený záměr, akruál ho přeskočí a vykáže jako neposouzený, takže obnovené storno vyrovná přesně
-  to, proti čemu bylo rozhodnuto. Kódované `409 ACCOUNTING_DAY_CLOSED` ledgeru uzavře záměr jako
+  otevřený záměr, akruál přeskočí JEN tento obchod (počítá se jako odložený; ostatní obchody se
+  rozliší a průchod doběhne), takže obnovené storno vyrovná přesně to, proti čemu bylo rozhodnuto. Kódované `409 ACCOUNTING_DAY_CLOSED` ledgeru uzavře záměr jako
   REFUSED (žurnál neexistuje), je-li záměr čerstvý nebo starší než grace; každé jiné selhání ho nechá
-  otevřený.
+  otevřený. Služba odmítne start, pokud grace není aspoň čtyřnásobkem jednoho volání ledgeru
+  (connect + read timeout, bez opakování).
 - **Uvízlý záměr.** `TreasuryPostingIntentStuck` se spustí, když je nejstarší otevřený záměr starší
   než 20 minut (gauge `openbank.treasury.posting_intents.open` a `.oldest_age_seconds`, -1 když je
   nelze přečíst; ověřeno promtoolem). Přečtěte `last_error` na řádku. Buď příkaz obchodu zopakujte přes
@@ -131,10 +132,15 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   `POST /api/v1/treasury/deals/{id}/posting-intent/close` s
   `{"event": "SETTLED|MATURED|REVERSED", "reason": "..."}`. Vyžaduje akci OPA
   `treasury.posting-intent.close` (schvalovatelé, nikdy agent), osobu a čtyři oči: ne aktéra záměru ani
-  schvalovatele obchodu. Záměr mladší než grace nebo zabraný reconcilerem uzavřít nelze. Uzavření
-  nastaví CLOSED_BY_OPERATOR (kdo a proč zůstává na řádku) a uvolní pozdržení dne. Žurnál přesto může
-  existovat, takže pozdější zopakování záměr znovu otevře s PRVNÍM dnem hodnoty. Každý přechod se
-  připíše do `deal_posting_intent_history`, která odmítá UPDATE i DELETE; žurnál, který dorazí po
-  uzavření, se tam zapíše jako `JOURNAL_APPLIED_AFTER_CLOSE` (a zaloguje jako chyba), nikdy přes něj.
+  schvalovatele obchodu. Záměr mladší než grace nebo zabraný reconcilerem vrátí 409
+  `POSTING_IN_FLIGHT` (zkuste později); 404 znamená, že otevřený není. Uzavření nastaví
+  CLOSED_BY_OPERATOR (kdo a proč zůstává na řádku) a uvolní pozdržení dne. Žurnál přesto může
+  existovat, takže pozdější zopakování záměr znovu otevře s PRVNÍM dnem hodnoty; stane se rozhodnutím
+  toho, kdo ho zopakoval (jeho aktér a čas), takže grace i čtyři oči platí znovu. Každý přechod se
+  připíše do `deal_posting_intent_history`, jejíž triggery odmítají UPDATE, DELETE i TRUNCATE ze
+  služby (ne od vlastníka tabulky, který trigger může vypnout). Žurnál, který dorazí po uzavření, se
+  tam zapíše jako `JOURNAL_APPLIED_AFTER_CLOSE` s předchozím stavem, započítá do
+  `openbank.treasury.posting_intents.applied_after_close`, spustí alert
+  (`TreasuryPostingIntentJournalAfterClose`: znovu nahlaste ten den hodnoty) a nikdy se nepřepíše přes uzavření.
 - **Provoz.** V režimu `shadow` ledger pozdržení jen počítá. V režimu `enforce` operátor den REFUSED
   posoudí a na stránce konce dne v ledgeru mu udělí výjimku (waiver).

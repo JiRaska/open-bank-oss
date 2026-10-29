@@ -29,6 +29,7 @@ import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.PostingIntent
 import com.openbank.treasury.application.port.out.PostingIntentAction
+import com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
 import com.openbank.treasury.application.port.out.PostingIntentPort
 import com.openbank.treasury.application.port.out.PostingIntentStatus
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
@@ -552,6 +553,7 @@ class TreasuryDealService(
         var journals = 0
         var assessed = 0
         var unassessed = 0
+        var deferred = 0
         val failures = mutableListOf<Throwable>()
         for (d in settled) {
             if (clock.instant().isAfter(deadline)) {
@@ -563,14 +565,21 @@ class TreasuryDealService(
                     journals += progress.posted
                     // A deal whose day loop hit the deadline is left for the next pass, not assessed.
                     if (progress.complete) assessed++ else unassessed++
+                    if (progress.deferred) deferred++
                 }
                 .onFailure { failures += it }
         }
-        return AccrualRun(journals = journals, failures = failures, deals = assessed, unassessed = unassessed)
+        return AccrualRun(
+            journals = journals,
+            failures = failures,
+            deals = assessed,
+            unassessed = unassessed,
+            deferred = deferred,
+        )
     }
 
     /** Journals one deal's accrual posted, and whether it reached its target day before the deadline. */
-    private data class AccrualProgress(val posted: Int, val complete: Boolean)
+    private data class AccrualProgress(val posted: Int, val complete: Boolean, val deferred: Boolean = false)
 
     /**
      * Post each day after the last accrued one, up to and including [through], checking [deadline]
@@ -587,11 +596,19 @@ class TreasuryDealService(
         // #13883 review: a deal with an open settle/mature/reverse intent is not accrued further. A
         // reversal resumed later re-posts its key and the ledger keeps the ORIGINAL journal, which
         // offsets only the accruals that existed when it was decided; a newer accrual would be left
-        // unreversed. The deal is reported UNASSESSED (not complete), so the pass is not RAN for it;
-        // the open intent holds the day too, and the next pass after it completes catches up.
+        // unreversed.
+        //
+        // The deferral is scoped to THIS deal: it is counted as assessed-and-deferred and the pass
+        // still completes, so every other deal accrues, liveness and healing are unaffected, and no
+        // day is REFUSED for it. Whole-pass refusal is not what the day-close contract needs: the
+        // open intent already holds its own value day, and the deferred days are either never owed
+        // (the reversal or maturity completes, and neither path accrues past its decision; reverse()
+        // never catches up accruals) or, if the intent is closed and the deal stays SETTLED, posted
+        // by a later pass valued on their own days, which the late-journal path re-reports
+        // (openbank.treasury.close.late_journals). Counted in AccrualRun.deferred and logged.
         if (intents.openFor(deal.id).isNotEmpty()) {
             log.log(System.Logger.Level.INFO, "deal {0}: accrual deferred, a posting intent is open", deal.id)
-            return AccrualProgress(0, false)
+            return AccrualProgress(0, complete = true, deferred = true)
         }
         var day = (lastAccrued(deal) ?: deal.valueDate).plusDays(1)
         var posted = 0
@@ -766,14 +783,20 @@ class TreasuryDealService(
     private fun resumable(intent: PostingIntent): Boolean =
         !intent.createdAt.plus(maxResumeAge).isBefore(clock.instant())
 
-    override suspend fun closePostingIntent(dealId: UUID, event: PostingEvent, reason: String, actor: Actor): Boolean {
+    override suspend fun closePostingIntent(
+        dealId: UUID,
+        event: PostingEvent,
+        reason: String,
+        actor: Actor,
+    ): PostingIntentCloseOutcome {
         require(reason.isNotBlank()) { "a reason is required to close a posting intent" }
         if (actor.type != com.openbank.treasury.domain.model.ActorType.HUMAN) {
             throw com.openbank.treasury.domain.model.ActorNotPermittedException(
                 "only a person may close a posting intent",
             )
         }
-        val intent = intents.openFor(dealId).firstOrNull { it.event == event } ?: return false
+        val intent = intents.openFor(dealId).firstOrNull { it.event == event }
+            ?: return PostingIntentCloseOutcome.NOT_OPEN
         // Segregation of duties (#14220 review): the person who decided the posting, and the approver
         // who booked the deal, may not also release the posting's day-close hold.
         if (actor.id == intent.actor.id || actor.id == load(dealId).approvedBy?.id) {
@@ -782,7 +805,7 @@ class TreasuryDealService(
             )
         }
         // Not while its own command or a reconciler may still be posting it: younger than the grace,
-        // or under a live claim, the close is refused (false) rather than raced.
+        // or under a live claim, the close is refused (IN_FLIGHT) rather than raced.
         return intents.closeByOperator(intent.idempotencyKey, actor, reason, clock.instant().minus(grace))
     }
 

@@ -7,6 +7,7 @@ package com.openbank.treasury.infrastructure.persistence.intent
 import com.openbank.treasury.application.port.out.OpenIntentSummary
 import com.openbank.treasury.application.port.out.PostingIntent
 import com.openbank.treasury.application.port.out.PostingIntentAction
+import com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
 import com.openbank.treasury.application.port.out.PostingIntentPort
 import com.openbank.treasury.application.port.out.PostingIntentStatus
 import com.openbank.treasury.domain.model.Actor
@@ -49,7 +50,14 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
                             Uni.createFrom().item(true)
                         } else {
                             // After an operator close a journal may exist: reopen, NOT fresh, first day kept.
-                            native(s, REOPEN_CLOSED_SQL, intent.idempotencyKey, utc(intent.createdAt), intent.actor.id)
+                            native(
+                                s,
+                                REOPEN_CLOSED_SQL,
+                                intent.idempotencyKey,
+                                utc(intent.createdAt),
+                                intent.actor.id,
+                                intent.actor.type.name,
+                            )
                                 .map { false }
                         }
                     }
@@ -99,8 +107,22 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
         )
     }
 
-    override suspend fun closeByOperator(key: String, actor: Actor, reason: String, createdBefore: Instant): Boolean =
-        update(CLOSE_SQL, utc(clock.instant()), actor.id, reason, key, utc(createdBefore)) == 1
+    override suspend fun closeByOperator(
+        key: String,
+        actor: Actor,
+        reason: String,
+        createdBefore: Instant,
+    ): PostingIntentCloseOutcome {
+        if (update(CLOSE_SQL, utc(clock.instant()), actor.id, reason, key, utc(createdBefore)) == 1) {
+            return PostingIntentCloseOutcome.CLOSED
+        }
+        val stillOpen = sf.withSession { s ->
+            s.createNativeQuery<Any>("SELECT 1 FROM deal_posting_intent WHERE idempotency_key = ?1 AND status = 'OPEN'")
+                .setParameter(1, key)
+                .resultList
+        }.awaitSuspending().isNotEmpty()
+        return if (stillOpen) PostingIntentCloseOutcome.IN_FLIGHT else PostingIntentCloseOutcome.NOT_OPEN
+    }
 
     private suspend fun update(sql: String, vararg params: Any?): Int =
         sf.withTransaction { s -> native(s, sql, *params) }.awaitSuspending()
@@ -205,10 +227,12 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
                 "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, value_date) " +
                 "SELECT idempotency_key, ?10, 'REOPENED', ?6, value_date FROM u"
 
-        // A re-issue after an operator close: OPEN again with its FIRST value day and everything else
-        // kept, closed_by/close_reason included (the history holds every close).
+        // A re-issue after an operator close: OPEN again with its FIRST value day (a journal may exist),
+        // closed_by/close_reason kept (the history holds every close). It is a new decision by the
+        // re-issuer: their actor and time (so the grace and four eyes apply to them), not escalated.
         const val REOPEN_CLOSED_SQL =
-            "WITH u AS (UPDATE deal_posting_intent SET status = 'OPEN', closed_at = NULL " +
+            "WITH u AS (UPDATE deal_posting_intent SET status = 'OPEN', closed_at = NULL, created_at = ?2, " +
+                "actor_id = ?3, actor_type = ?4, escalated_at = NULL, claim_token = NULL, claimed_until = NULL " +
                 "WHERE idempotency_key = ?1 AND status = 'CLOSED_BY_OPERATOR' RETURNING idempotency_key, value_date) " +
                 "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, value_date) " +
                 "SELECT idempotency_key, ?2, 'REOPENED_AFTER_OPERATOR_CLOSE', ?3, value_date FROM u"

@@ -62,6 +62,9 @@ class PostingIntentReconcileIT {
     @Inject
     lateinit var evidence: TreasuryCloseEvidencePort
 
+    @Inject
+    lateinit var meters: io.micrometer.core.instrument.MeterRegistry
+
     private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
 
     private fun <T> onContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
@@ -141,6 +144,7 @@ class PostingIntentReconcileIT {
     fun `5 - a dealer drafts two more placements`() {
         raceId = draftAndSubmit("4322.00")
         closeId = draftAndSubmit("4323.00")
+        lateId = draftAndSubmit("4324.00")
     }
 
     @Test
@@ -228,13 +232,13 @@ class PostingIntentReconcileIT {
         close(closeId, "SETTLED", "").then().statusCode(400)
         // In flight: younger than the grace, or under a live reconciler claim - refused, not raced.
         jdbcUpdate("update deal_posting_intent set created_at = now() where idempotency_key = ?", key)
-        close(closeId, "SETTLED", "too soon").then().statusCode(404)
+        close(closeId, "SETTLED", "too soon").then().statusCode(409).body("error", equalTo("POSTING_IN_FLIGHT"))
         backdate(key)
         jdbcUpdate(
             "update deal_posting_intent set claimed_until = now() + interval '10 minutes' where idempotency_key = ?",
             key,
         )
-        close(closeId, "SETTLED", "claimed").then().statusCode(404)
+        close(closeId, "SETTLED", "claimed").then().statusCode(409).body("error", equalTo("POSTING_IN_FLIGHT"))
         jdbcUpdate("update deal_posting_intent set claimed_until = null where idempotency_key = ?", key)
 
         close(closeId, "SETTLED", "ledger confirmed to hold no journal").then().statusCode(204)
@@ -246,12 +250,16 @@ class PostingIntentReconcileIT {
             listOf("CLOSED_BY_OPERATOR", "olga.operator", "ledger confirmed to hold no journal"),
         )
         close(closeId, "SETTLED", "again").then().statusCode(404)
-        // The history refuses to be rewritten or erased.
+        // The history refuses to be rewritten, erased or truncated.
         assertThatThrownBy {
             jdbcUpdate("update deal_posting_intent_history set reason = 'x' where idempotency_key = ?", key)
         }
             .hasMessageContaining("append-only")
         assertThatThrownBy { jdbcUpdate("delete from deal_posting_intent_history where idempotency_key = ?", key) }
+            .hasMessageContaining("append-only")
+        assertThatThrownBy {
+            jdbc { c -> c.createStatement().use { it.execute("truncate deal_posting_intent_history") } }
+        }
             .hasMessageContaining("append-only")
     }
 
@@ -270,6 +278,41 @@ class PostingIntentReconcileIT {
             "COMPLETED",
         )
         assertThat(ledger.calls.filter { it == key }).describedAs("re-posted under the same key").hasSize(2)
+        assertThat(history(key)[2]).isEqualTo(listOf("REOPENED_AFTER_OPERATOR_CLOSE", "adam.approver", null))
+    }
+
+    @Test
+    @Order(12)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `12 - a journal applied after its intent was closed is recorded beside the close, counted, never over it`() {
+        val key = "treasury:$lateId:settled"
+        action(lateId, "approve").then().statusCode(200)
+        action(lateId, "confirm").then().statusCode(200)
+        val before = meters.find("openbank.treasury.posting_intents.applied_after_close").counter()?.count() ?: 0.0
+        // The close lands while this very settle is between the ledger's answer and its local commit.
+        ledger.afterCommit = {
+            jdbcUpdate(
+                "update deal_posting_intent set status = 'CLOSED_BY_OPERATOR', closed_by = 'olga.operator', " +
+                    "close_reason = 'raced' where idempotency_key = ?",
+                key,
+            )
+        }
+        action(lateId, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
+        assertThat(closedRow(key)).describedAs("the close is not overwritten").isEqualTo(
+            "CLOSED_BY_OPERATOR" to "olga.operator",
+        )
+        val late = jdbc { c ->
+            c.prepareStatement(
+                "select prior_status from deal_posting_intent_history " +
+                    "where idempotency_key = ? and transition = 'JOURNAL_APPLIED_AFTER_CLOSE'",
+            ).use { ps ->
+                ps.setString(1, key)
+                ps.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getString(1) else null }.toList() }
+            }
+        }
+        assertThat(late).containsExactly("CLOSED_BY_OPERATOR")
+        assertThat(meters.find("openbank.treasury.posting_intents.applied_after_close").counter()!!.count())
+            .isEqualTo(before + 1)
     }
 
     private fun backdate(key: String) = jdbcUpdate(
@@ -392,5 +435,6 @@ class PostingIntentReconcileIT {
         lateinit var dealId: String
         lateinit var raceId: String
         lateinit var closeId: String
+        lateinit var lateId: String
     }
 }

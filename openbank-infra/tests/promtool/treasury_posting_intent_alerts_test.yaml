@@ -61,3 +61,65 @@ tests:
       - eval_time: 11m
         alertname: TreasuryPostingIntentEvidenceUnavailable
         exp_alerts: []
+
+  # `for: 5m` is part of the contract: above the threshold for 4m and then cleared must NOT fire;
+  # held for 6m must.
+  - interval: 1m
+    name: "over the threshold for only 4 minutes does NOT fire TreasuryPostingIntentStuck"
+    input_series:
+      - series: 'openbank_treasury_posting_intents_oldest_age_seconds{pod="treasury-0"}'
+        values: "1500 1560 1620 1680 0 0 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TreasuryPostingIntentStuck
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: TreasuryPostingIntentStuck
+        exp_alerts: []
+
+  - interval: 1m
+    name: "over the threshold for 6 minutes fires TreasuryPostingIntentStuck"
+    input_series:
+      - series: 'openbank_treasury_posting_intents_oldest_age_seconds{pod="treasury-0"}'
+        values: "1500+60x10"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TreasuryPostingIntentStuck
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: TreasuryPostingIntentStuck
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: "A treasury posting intent has stayed open for over 20 minutes"
+              description: "treasury-service decided a settle, mature or reverse posting that has not been applied. The ledger may hold its journal and treasury's day-close report for the value day is held. Read last_error on the open deal_posting_intent row: re-issue the deal command through the API (it re-posts under the same key and completes the intent), or close the intent with a reason once the ledger is confirmed to hold no journal under its key."
+
+  - interval: 1m
+    name: "a journal applied after a close fires TreasuryPostingIntentJournalAfterClose"
+    input_series:
+      - series: 'openbank_treasury_posting_intents_applied_after_close_total{pod="treasury-0"}'
+        values: "0 0 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TreasuryPostingIntentJournalAfterClose
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              subject_period: continuous
+              summary: "A treasury journal was applied after its posting intent was closed"
+              description: "treasury-service applied a settle, mature or reverse journal whose posting intent had already been closed (by an operator, or as refused). The close released that value day's close hold, so the day may have been reported short. Find the JOURNAL_APPLIED_AFTER_CLOSE row in deal_posting_intent_history and re-report the day."
+
+  - interval: 1m
+    name: "no late journal does NOT fire TreasuryPostingIntentJournalAfterClose"
+    input_series:
+      - series: 'openbank_treasury_posting_intents_applied_after_close_total{pod="treasury-0"}'
+        values: "0+0x10"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: TreasuryPostingIntentJournalAfterClose
+        exp_alerts: []
+

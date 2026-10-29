@@ -11,6 +11,7 @@ import com.openbank.treasury.application.port.`in`.DraftDealCommand
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
+import com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
 import com.openbank.treasury.application.usecase.TreasuryDealService
 import com.openbank.treasury.domain.DealFixtures
 import com.openbank.treasury.domain.model.Deal
@@ -193,9 +194,10 @@ class TreasuryPostingIntentTest {
             // A later accrual pass leaves the deal alone: the ledger's reversal offsets only what existed.
             val deferred = service.accrueInterest(monday.plusDays(2))
             assertThat(deals.journals.count { it.event == PostingEvent.ACCRUED }).isEqualTo(accrualsBefore)
-            // Reported unassessed, not assessed: the pass is not complete for this deal.
-            assertThat(deferred.unassessed).isEqualTo(1)
-            assertThat(deferred.deals).isZero()
+            // Deferred for THIS deal only: the pass still completes (nothing unassessed, no failure).
+            assertThat(deferred.deferred).isEqualTo(1)
+            assertThat(deferred.unassessed).isZero()
+            assertThat(deferred.failures).isEmpty()
             later(Duration.ofMinutes(5))
 
             assertThat(service.reconcilePostingIntents(clock.instant()).completed).isEqualTo(1)
@@ -242,8 +244,12 @@ class TreasuryPostingIntentTest {
             val key = settlementKey(b)
             assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.OPEN)
             later(Duration.ofMinutes(5))
-            assertThat(service.closePostingIntent(b.id, PostingEvent.MATURED, "nothing there", operator)).isFalse()
-            assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "ledger holds none", operator)).isTrue()
+            assertThat(
+                service.closePostingIntent(b.id, PostingEvent.MATURED, "nothing there", operator),
+            ).isEqualTo(PostingIntentCloseOutcome.NOT_OPEN)
+            assertThat(
+                service.closePostingIntent(b.id, PostingEvent.SETTLED, "ledger holds none", operator),
+            ).isEqualTo(PostingIntentCloseOutcome.CLOSED)
             assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.CLOSED_BY_OPERATOR)
             assertThat(intents.closedBy[key]).isEqualTo(operator.id)
         }
@@ -259,7 +265,9 @@ class TreasuryPostingIntentTest {
             runBlocking { service.closePostingIntent(b.id, PostingEvent.SETTLED, "approver", DealFixtures.approver) }
         }.isInstanceOf(com.openbank.treasury.domain.model.FourEyesViolationException::class.java)
         later(Duration.ofMinutes(5))
-        assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "third person", operator)).isTrue()
+        assertThat(
+            service.closePostingIntent(b.id, PostingEvent.SETTLED, "third person", operator),
+        ).isEqualTo(PostingIntentCloseOutcome.CLOSED)
     }
 
     @Test
@@ -271,7 +279,9 @@ class TreasuryPostingIntentTest {
             assertThatThrownBy { runBlocking { service.reverse(b.id, "wrong rate", DealFixtures.approver) } }
             val key = intents.rows.values.single { it.first.event == PostingEvent.REVERSED }.first.idempotencyKey
             later(Duration.ofMinutes(5))
-            assertThat(service.closePostingIntent(b.id, PostingEvent.REVERSED, "investigating", operator)).isTrue()
+            assertThat(
+                service.closePostingIntent(b.id, PostingEvent.REVERSED, "investigating", operator),
+            ).isEqualTo(PostingIntentCloseOutcome.CLOSED)
 
             later(Duration.ofDays(1))
             // The ledger may hold the first attempt's journal: the re-issue asks for that one, day included.
@@ -374,9 +384,13 @@ class TreasuryPostingIntentTest {
         assertThatThrownBy {
             runBlocking { service.settle(b.id, com.openbank.treasury.domain.model.Actor.SIMULATED_MARKET) }
         }
-        assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "too soon", operator)).isFalse()
+        assertThat(
+            service.closePostingIntent(b.id, PostingEvent.SETTLED, "too soon", operator),
+        ).isEqualTo(PostingIntentCloseOutcome.IN_FLIGHT)
         later(Duration.ofMinutes(5))
-        assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "after the grace", operator)).isTrue()
+        assertThat(
+            service.closePostingIntent(b.id, PostingEvent.SETTLED, "after the grace", operator),
+        ).isEqualTo(PostingIntentCloseOutcome.CLOSED)
     }
 
     @Test
@@ -387,12 +401,62 @@ class TreasuryPostingIntentTest {
         assertThatThrownBy { runBlocking { service.settle(b.id, market) } }
         val key = settlementKey(b)
         later(Duration.ofMinutes(5))
-        assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "racing", operator)).isTrue()
+        assertThat(
+            service.closePostingIntent(b.id, PostingEvent.SETTLED, "racing", operator),
+        ).isEqualTo(PostingIntentCloseOutcome.CLOSED)
         intents.complete(key) // the in-flight command's commit landing after the close
         assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.CLOSED_BY_OPERATOR)
         assertThat(intents.history.filter { it[0] == key }.map { it[1] })
             .containsExactly("OPENED", "CLOSED_BY_OPERATOR", "JOURNAL_APPLIED_AFTER_CLOSE")
     }
+
+    @Test
+    fun `an open intent defers only its own deal - every other deal accrues and the pass completes`(): Unit =
+        runBlocking {
+            val blocked = book()
+            val other = book()
+            service.settle(blocked.id, DealFixtures.approver)
+            service.settle(other.id, DealFixtures.approver)
+            later(Duration.ofDays(1))
+            ledger.loseAnswerFor = blocked.id
+            assertThatThrownBy { runBlocking { service.reverse(blocked.id, "wrong rate", DealFixtures.approver) } }
+            val run = service.accrueInterest(monday.plusDays(1))
+            assertThat(run.deferred).isEqualTo(1)
+            assertThat(run.unassessed).isZero()
+            assertThat(run.failures).isEmpty()
+            assertThat(run.deals).isEqualTo(2)
+            assertThat(deals.journals.filter { it.event == PostingEvent.ACCRUED }.map { it.dealId }.toSet())
+                .containsExactly(other.id)
+        }
+
+    @Test
+    fun `a re-issue after a close is the re-issuer's decision - in flight it cannot be closed, nor by them`(): Unit =
+        runBlocking {
+            val b = book()
+            val market = com.openbank.treasury.domain.model.Actor.SIMULATED_MARKET
+            ledger.loseAnswerFor = b.id
+            assertThatThrownBy { runBlocking { service.settle(b.id, market) } }
+            later(Duration.ofMinutes(5))
+            assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "first close", operator))
+                .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+            // The operator re-issues it and the answer is lost again: the intent is theirs, and fresh in time.
+            ledger.loseAnswerFor = b.id
+            assertThatThrownBy { runBlocking { service.settle(b.id, operator) } }
+            val key = settlementKey(b)
+            assertThat(intents.rows.getValue(key).first.actor).isEqualTo(operator)
+            val thirdPerson = com.openbank.treasury.domain.model.Actor(
+                "pavel.backoffice",
+                com.openbank.treasury.domain.model.ActorType.HUMAN,
+            )
+            assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "racing the re-issue", thirdPerson))
+                .isEqualTo(PostingIntentCloseOutcome.IN_FLIGHT)
+            later(Duration.ofMinutes(5))
+            assertThatThrownBy {
+                runBlocking { service.closePostingIntent(b.id, PostingEvent.SETTLED, "my own re-issue", operator) }
+            }.isInstanceOf(com.openbank.treasury.domain.model.FourEyesViolationException::class.java)
+            assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "after the grace", thirdPerson))
+                .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+        }
 
     @Test
     fun `maturity records and completes its intent`(): Unit = runBlocking {

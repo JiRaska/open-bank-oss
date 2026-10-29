@@ -144,7 +144,14 @@ fun interface TreasuryQuoteUseCase {
  * pass because its deadline passed (ADR-0342 day-close evidence: a pass that left deals behind cannot
  * report its day complete).
  */
-data class AccrualRun(val journals: Int, val failures: List<Throwable>, val deals: Int = 0, val unassessed: Int = 0)
+data class AccrualRun(
+    val journals: Int,
+    val failures: List<Throwable>,
+    val deals: Int = 0,
+    val unassessed: Int = 0,
+    /** #13883: deals skipped because a posting intent is open on them (counted in [deals] as assessed). */
+    val deferred: Int = 0,
+)
 
 /**
  * One reconciler pass over open posting intents (#13883): completed; failed (still open, with their
@@ -225,7 +232,7 @@ interface TreasuryDealUseCase {
         event: com.openbank.treasury.domain.model.PostingEvent,
         reason: String,
         actor: Actor,
-    ): Boolean
+    ): com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
 }
 
 interface NostroReconciliationUseCase {

@@ -43,3 +43,19 @@ spec:
             description: >-
               treasury-service cannot count its open posting intents. Check its database; an absent
               count cannot establish that every decided posting was applied.
+        - alert: TreasuryPostingIntentJournalAfterClose
+          # A close released a day hold, and the journal it was about then landed after all: the day
+          # it was valued on may have been reported without it. Event-driven, not a scheduled job's
+          # output, so the 1h window only keeps one occurrence visible long enough to page.
+          expr: sum(increase(openbank_treasury_posting_intents_applied_after_close_total[1h])) > 0
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            subject_period: continuous
+            summary: "A treasury journal was applied after its posting intent was closed"
+            description: >-
+              treasury-service applied a settle, mature or reverse journal whose posting intent had
+              already been closed (by an operator, or as refused). The close released that value
+              day's close hold, so the day may have been reported short. Find the
+              JOURNAL_APPLIED_AFTER_CLOSE row in deal_posting_intent_history and re-report the day.

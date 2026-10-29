@@ -442,6 +442,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            POSTING_IN_FLIGHT. The intent may still be posting (younger than the grace period, or
+            claimed by the reconciler); retry later.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: FOUR_EYES_VIOLATION (the posting's own actor or the deal's approver)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/v1/treasury/counterparties:
     get:

@@ -82,6 +82,9 @@ class InterestAccrualScheduler(
                 if (r.failures.isEmpty() && r.unassessed == 0) liveness?.recordSuccess()
                 if (r.journals > 0) log.infof("interest accrual posted %d journal(s)", r.journals)
                 if (r.unassessed > 0) log.warnf("interest accrual pass budget spent: %d deal(s) left", r.unassessed)
+                if (r.deferred > 0) {
+                    log.infof("interest accrual deferred %d deal(s) with an open posting intent (#13883)", r.deferred)
+                }
                 recordEvidence(asOf, r)
                 if (r.failures.isEmpty() && r.unassessed == 0) healEarlierDays(asOf)
             }
