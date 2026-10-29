@@ -72,6 +72,7 @@ class NostroReconciliationServiceTest {
         val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
 
         assertThat(ledger.queries).containsExactly(
+            "lines:1002:2026-09-17..2026-09-23",
             "lines:1002:2026-09-24..2026-09-25",
             "lines:1002:2026-09-26..2026-10-02",
             "balance:1002:EUR:2026-09-23",
@@ -105,6 +106,7 @@ class NostroReconciliationServiceTest {
         val r = service.reconcile(stored(NostroFixtures.xml()).id)
 
         assertThat(ledger.queries).containsExactly(
+            "lines:1001:2026-09-18..2026-09-24",
             "lines:1001:2026-09-25..2026-09-25",
             "lines:1001:2026-09-26..2026-10-02",
             "balance:1001:CZK:2026-09-24",
@@ -204,6 +206,59 @@ class NostroReconciliationServiceTest {
     }
 
     @Test
+    fun `a forward-valued CREDIT entered in the period is added back to the closing balance`() = runBlocking<Unit> {
+        NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+        ledger.lines += "1002" to NostroFixtures.line(
+            "400.00",
+            com.openbank.treasury.domain.model.Side.CREDIT,
+            currency = "EUR",
+        ).copy(valueDate = LocalDate.parse("2026-09-26"))
+        eurBalances("50000.00", "57100.00")
+        val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
+
+        assertThat(r.ledgerClosingBalance).isEqualByComparingTo("57500.00")
+        assertThat(r.reconciled).isTrue()
+    }
+
+    @Test
+    fun `a line entered before the period and valued after it shifts neither balance into a break`() =
+        runBlocking<Unit> {
+            NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+            // Entered 2026-09-20 (in both entry-dated balances), valued 2026-09-28 (in neither).
+            ledger.lines += "1002" to NostroFixtures.line(
+                "700.00",
+                com.openbank.treasury.domain.model.Side.DEBIT,
+                date = LocalDate.parse("2026-09-20"),
+                currency = "EUR",
+            ).copy(valueDate = LocalDate.parse("2026-09-28"))
+            eurBalances("50700.00", "58200.00")
+            val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
+
+            assertThat(r.ledgerOpeningBalance).isEqualByComparingTo("50000.00")
+            assertThat(r.ledgerClosingBalance).isEqualByComparingTo("57500.00")
+            assertThat(r.unmatchedLedgerLines).isEmpty()
+            assertThat(r.reconciled).isTrue()
+        }
+
+    @Test
+    fun `a line in another currency on the nostro GL never shifts the native balance`() = runBlocking<Unit> {
+        val (maturity, placement) = NostroFixtures.eurLedgerLines()
+        ledger.lines += "1002" to maturity
+        ledger.lines += "1002" to placement
+        // A late-entered CZK line on the same GL: not part of the EUR balance the ledger answers.
+        ledger.lines += "1002" to NostroFixtures.line(
+            "9999.00",
+            com.openbank.treasury.domain.model.Side.DEBIT,
+            date = LocalDate.parse("2026-09-27"),
+        ).copy(valueDate = LocalDate.parse("2026-09-25"))
+        eurBalances("50000.00", "57500.00")
+        val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
+
+        assertThat(r.ledgerClosingBalance).isEqualByComparingTo("57500.00")
+        assertThat(r.closingDifference).isEqualByComparingTo("0")
+    }
+
+    @Test
     fun `a real closing difference survives the value-date adjustment`() = runBlocking<Unit> {
         val (maturity, placement) = NostroFixtures.eurLedgerLines()
         ledger.lines += "1002" to maturity
@@ -253,6 +308,7 @@ class NostroReconciliationServiceTest {
             val r = service.reconcile(stored(xml).id)
 
             assertThat(ledger.queries).containsExactly(
+                "lines:1001:2026-09-14..2026-09-20",
                 "lines:1001:2026-09-21..2026-09-25",
                 "lines:1001:2026-09-26..2026-10-02",
                 "balance:1001:CZK:2026-09-20",
@@ -276,6 +332,7 @@ class NostroReconciliationServiceTest {
             val r = service.reconcile(stored(NostroFixtures.xml()).id)
 
             assertThat(ledger.queries).containsExactly(
+                "lines:1001:2026-09-18..2026-09-24",
                 "lines:1001:2026-09-25..2026-09-25",
                 "lines:1001:2026-09-26..2026-10-02",
                 "balance:1001:CZK:2026-09-24",
