@@ -254,6 +254,17 @@ openbank:
       # Hourly and idempotent per day, so a missed pass is caught up by the next one.
       enabled: ${OPENBANK_TREASURY_ACCRUAL_ENABLED:true}
       interval: 1h
+      # ADR-0342: a pass stops starting deals once this is spent (the rest accrue next pass, and the
+      # day is recorded REFUSED until a complete pass). The day-close reporter's stale threshold for
+      # the in-flight marker is DERIVED from it (TreasuryCloseJobs.staleAfter = budget + 30m), never
+      # configured separately.
+      pass-budget: PT20M
+    close:
+      # ADR-0342 day-close participation (TreasuryCloseParticipationScheduler): every hour, in
+      # Europe/Prague, re-offer the last lookback-days completed accounting days to the ledger as
+      # participant `treasury`, on treasury's own m2m identity (ledger.close.participate).
+      report-cron: "0 40 * * * ?"
+      lookback-days: 3
     fx-spot:
       rate-check:
         # #10896: flag (never block) an FX spot deal whose dealer-entered rate deviates from
@@ -370,3 +381,7 @@ authz:
         enabled: false
       accrual:
         enabled: false
+      close:
+        # A valid cron that never fires (scheduler-cron-syntax refuses 'off'); the CronIT profile
+        # switches it to every second.
+        report-cron: "0 0 0 1 1 ? 2099"
