@@ -32,18 +32,12 @@ internal class UnifiedNotificationInbox(
 ) {
     private data class Item(val node: ObjectNode, val createdAt: Instant)
     private data class PartyPage(val items: List<Item>, val total: Long, val unread: Long)
-    private data class Deadline(val expiresAtNanos: Long, val nanoTime: () -> Long) {
-        fun remainingNanos(): Long = (expiresAtNanos - nanoTime()).coerceAtLeast(0)
-    }
 
-    fun list(parties: List<UUID>, limit: Int): Response = listWithClock(parties, limit, nanoTime)
-
-    /** Uses an injectable monotonic source for deterministic deadline tests. */
-    internal fun listWithClock(parties: List<UUID>, limit: Int, nanoTime: () -> Long): Response {
+    fun list(parties: List<UUID>, limit: Int): Response {
         // Synthetic taint lives in request-thread MDC/baggage. Keep those reads on the caller
         // thread so the existing UpstreamClient propagates the trusted taint to every service.
         val synthetic = currentRequestIsSynthetic()
-        val deadline = Deadline(nanoTime() + aggregateTimeoutNanos, nanoTime)
+        val deadline = nanoTime() + aggregateTimeoutNanos
         val futures = mutableListOf<Future<PartyPage>>()
         return try {
             val pages = if (synthetic) {
@@ -51,7 +45,7 @@ internal class UnifiedNotificationInbox(
             } else {
                 concurrentPages(parties, limit, deadline, futures)
             }
-            require(deadline.remainingNanos() > 0) { "Notification aggregate deadline exceeded" }
+            require(remaining(deadline) > 0) { "Notification aggregate deadline exceeded" }
             val ordered = pages.flatMap { it.items }.sortedWith(
                 compareByDescending<Item> { it.createdAt }
                     .thenByDescending { it.node.path("id").asText() },
@@ -79,16 +73,16 @@ internal class UnifiedNotificationInbox(
             .entity(mapOf("code" to "NOTIFICATIONS_UNAVAILABLE")).build()
     }
 
-    private fun syntheticPages(parties: List<UUID>, limit: Int, deadline: Deadline): List<PartyPage> =
+    private fun syntheticPages(parties: List<UUID>, limit: Int, deadline: Long): List<PartyPage> =
         parties.map { party ->
-            require(deadline.remainingNanos() > 0) { "Notification aggregate deadline exceeded" }
+            require(remaining(deadline) > 0) { "Notification aggregate deadline exceeded" }
             fetchBounded(party, limit, deadline, true)
         }
 
     private fun concurrentPages(
         parties: List<UUID>,
         limit: Int,
-        deadline: Deadline,
+        deadline: Long,
         futures: MutableList<Future<PartyPage>>,
     ): List<PartyPage> {
         val completion = ExecutorCompletionService<PartyPage>(workers)
@@ -98,7 +92,7 @@ internal class UnifiedNotificationInbox(
             submitNext(pending, limit, deadline, futures, completion)
         }
         repeat(parties.size) {
-            val completed = completion.poll(deadline.remainingNanos(), TimeUnit.NANOSECONDS)
+            val completed = completion.poll(remaining(deadline), TimeUnit.NANOSECONDS)
                 ?: error("Notification aggregate deadline exceeded")
             pages += completed.get()
             submitNext(pending, limit, deadline, futures, completion)
@@ -109,14 +103,14 @@ internal class UnifiedNotificationInbox(
     private fun submitNext(
         pending: Iterator<UUID>,
         limit: Int,
-        deadline: Deadline,
+        deadline: Long,
         futures: MutableList<Future<PartyPage>>,
         completion: ExecutorCompletionService<PartyPage>,
     ) {
         if (!pending.hasNext()) return
         val party = pending.next()
         while (true) {
-            require(deadline.remainingNanos() > 0) { "Notification aggregate deadline exceeded" }
+            require(remaining(deadline) > 0) { "Notification aggregate deadline exceeded" }
             try {
                 futures += completion.submit { fetchBounded(party, limit, deadline, false) }
                 return
@@ -128,28 +122,24 @@ internal class UnifiedNotificationInbox(
         }
     }
 
-    private fun fetchBounded(party: UUID, limit: Int, deadline: Deadline, synthetic: Boolean): PartyPage {
-        if (!upstreamPermits.tryAcquire(deadline.remainingNanos(), TimeUnit.NANOSECONDS)) {
+    private fun fetchBounded(party: UUID, limit: Int, deadline: Long, synthetic: Boolean): PartyPage {
+        if (!upstreamPermits.tryAcquire(remaining(deadline), TimeUnit.NANOSECONDS)) {
             error("Notification aggregate deadline exceeded")
         }
         return try {
-            require(deadline.remainingNanos() > 0) { "Notification aggregate deadline exceeded" }
+            require(remaining(deadline) > 0) { "Notification aggregate deadline exceeded" }
             fetch(party, limit, deadline, synthetic)
         } finally {
             upstreamPermits.release()
         }
     }
 
-    private fun fetch(party: UUID, limit: Int, deadline: Deadline, synthetic: Boolean): PartyPage {
+    private fun fetch(party: UUID, limit: Int, deadline: Long, synthetic: Boolean): PartyPage {
         val url = "$serviceUrl/api/v1/notifications?partyId=$party&page=0&size=$limit"
         val response = if (synthetic) {
             // Synthetic taint is thread-local, so these reads stay on the caller. The HTTP
             // timeout shrinks with the remaining aggregate budget to avoid sequential waves.
-            upstream.get(
-                url,
-                party.toString(),
-                TimeUnit.NANOSECONDS.toMillis(deadline.remainingNanos()).coerceAtLeast(1),
-            )
+            upstream.get(url, party.toString(), TimeUnit.NANOSECONDS.toMillis(remaining(deadline)).coerceAtLeast(1))
         } else {
             upstream.get(url, party.toString())
         }
@@ -167,6 +157,8 @@ internal class UnifiedNotificationInbox(
         }
         return PartyPage(items, page.path("total").asLong(), page.path("unreadCount").asLong())
     }
+
+    private fun remaining(deadline: Long): Long = (deadline - nanoTime()).coerceAtLeast(0)
 
     private companion object {
         const val MAX_CONCURRENT_FEEDS = 16

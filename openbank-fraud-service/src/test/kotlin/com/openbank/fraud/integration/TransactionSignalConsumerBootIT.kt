@@ -54,7 +54,7 @@ import java.util.UUID
  * effective group id directly, not merely by absence of a crash).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisRedpandaTestResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(PostgresRedisRedpandaTestResource::class)
 class TransactionSignalConsumerBootIT {
 
     @Test
