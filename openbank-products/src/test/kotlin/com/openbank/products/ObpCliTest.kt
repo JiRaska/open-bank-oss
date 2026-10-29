@@ -4,7 +4,11 @@
 
 package com.openbank.products
 
+import com.openbank.libs.domain.money.RoundingPolicy
+import com.openbank.libs.finance.deposit.FinanceProductArithmetic
+import com.openbank.libs.product.ir.IrDayCount
 import com.openbank.libs.product.ir.IrJson
+import com.openbank.libs.product.ir.ProductArithmetic
 import com.openbank.libs.productrevision.HmacIrSigner
 import com.openbank.libs.productrevision.IrSignature
 import com.openbank.libs.productrevision.RevisionIdentity
@@ -13,8 +17,10 @@ import com.openbank.products.cli.Obp
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import java.math.BigDecimal
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.LocalDate
 import java.util.UUID
 
 /** `obp` prints canonical JSON, exits as documented, and refuses what only the publish path may do. */
@@ -327,6 +333,50 @@ class ObpCliTest {
         assertInputError("simulate", "savings-fixed", "--portfolio", noAt.toString())
         assertInputError("simulate", "savings-fixed", "--portfolio", badAt.toString())
         assertInputError("explain", "savings-fixed", "--instruction", "[1,2]")
+    }
+
+    @Test
+    fun `an exception thrown during evaluation is an internal error (70) with a stack trace, not bad input`() {
+        val failing = object : ProductArithmetic by FinanceProductArithmetic {
+            override fun dailyAccrual(
+                balance: BigDecimal,
+                annualRate: BigDecimal,
+                dayCount: IrDayCount,
+                date: LocalDate,
+                accrualRounding: RoundingPolicy,
+            ): BigDecimal = throw IllegalArgumentException("synthetic interpreter defect")
+        }
+        val portfolio = Path.of("portfolios", "savings-sample.json").toString()
+        Obp.arithmetic = failing
+        try {
+            val (code, out, err) = run("simulate", "savings-fixed", "--portfolio", portfolio)
+            assertThat(code).isEqualTo(Obp.EXIT_INTERNAL)
+            assertThat(out).isEmpty()
+            assertThat(err).contains("internal error", "synthetic interpreter defect", "\tat ")
+            assertThat(err).doesNotContain("inputError")
+        } finally {
+            Obp.arithmetic = FinanceProductArithmetic
+        }
+        assertThat(run("simulate", "savings-fixed", "--portfolio", portfolio).first).isEqualTo(Obp.EXIT_OK)
+    }
+
+    @Test
+    fun `compile of a file prints raw canonical IR by default and the MCP-shaped report under --json`(
+        @TempDir dir: Path,
+    ) {
+        val file = dir.resolve("draft.json")
+        Files.writeString(file, ReferenceProducts.savingsFixed.canonicalJson())
+        val (code, out, err) = run("compile", file.toString())
+        assertThat(code).isEqualTo(Obp.EXIT_OK)
+        // `obp compile x.json > ir.json` must write an IR document, which lint accepts.
+        assertThat(out.trimEnd()).isEqualTo(ReferenceProducts.savingsFixed.canonicalJson())
+        assertThat(json(err)["revisionHash"]).isEqualTo(ReferenceProducts.savingsFixed.compile().revisionHash)
+        val roundTrip = dir.resolve("ir.json").also { Files.writeString(it, out) }
+        assertThat(run("lint", roundTrip.toString()).first).isEqualTo(Obp.EXIT_OK)
+
+        val (wrapped, wrappedOut, _) = run("compile", file.toString(), "--json")
+        assertThat(wrapped).isEqualTo(Obp.EXIT_OK)
+        assertThat(json(wrappedOut).keys).containsExactlyInAnyOrder("ok", "revisionHash", "ir")
     }
 
     @Test

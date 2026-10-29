@@ -10,10 +10,12 @@ package com.openbank.products.cli
 import com.openbank.libs.audit.CanonicalJson
 import com.openbank.libs.finance.deposit.FinanceProductArithmetic
 import com.openbank.libs.product.ir.IrJson
+import com.openbank.libs.product.ir.ProductArithmetic
 import com.openbank.libs.product.ir.ProductIrCanonical
 import com.openbank.libs.product.ir.ProductIrParser
 import com.openbank.libs.product.ir.ProductIrValidationException
 import com.openbank.libs.product.ir.ProductRevisionIr
+import com.openbank.libs.product.toolkit.ProductInputException
 import com.openbank.libs.product.toolkit.ProductToolkit
 import com.openbank.libs.productrevision.HmacIrSigner
 import com.openbank.libs.productrevision.RevisionIdentity
@@ -60,7 +62,8 @@ import kotlin.system.exitProcess
  * Exit codes: [EXIT_OK] 0 success · [EXIT_FAILURE] 1 the subject is invalid / a check failed ·
  * [EXIT_REFUSED] 2 the command refuses (a non-test signing key) · [EXIT_USAGE] 64 bad arguments ·
  * [EXIT_INPUT] 65 an input file or JSON argument is missing or malformed (portfolio, instruction) ·
- * [EXIT_UNAVAILABLE] 69 `propose --execute`: the catalog was unreachable or did not answer 201.
+ * [EXIT_UNAVAILABLE] 69 `propose --execute`: the catalog was unreachable or did not answer 201 ·
+ * [EXIT_INTERNAL] 70 a defect: an exception thrown during evaluation, printed with its stack trace.
  */
 object Obp {
 
@@ -70,6 +73,10 @@ object Obp {
     const val EXIT_USAGE = 64
     const val EXIT_INPUT = 65
     const val EXIT_UNAVAILABLE = 69
+    const val EXIT_INTERNAL = 70
+
+    /** The arithmetic `simulate` evaluates with; a seam so a test can make evaluation itself fail. */
+    internal var arithmetic: ProductArithmetic = FinanceProductArithmetic
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -80,24 +87,32 @@ object Obp {
     @Suppress("ReturnCount")
     fun run(args: List<String>, out: Appendable, err: Appendable): Int {
         if (args.isEmpty()) return usage(err)
-        return try {
-            dispatch(args[0], args.drop(1), out, err)
-        } catch (e: ProductIrValidationException) {
+        return runCatching { dispatch(args[0], args.drop(1), out, err) }.getOrElse { failure(it, err) }
+    }
+
+    /**
+     * Maps a failure to its documented exit code. Only the three typed failures are the caller's
+     * fault (invalid IR, bad arguments, malformed input); anything else was thrown during evaluation
+     * and is a DEFECT — exit 70 with the stack trace, never disguised as bad input.
+     */
+    private fun failure(e: Throwable, err: Appendable): Int = when (e) {
+        is ProductIrValidationException -> {
             emit(err, ProductToolkit.problems(e))
             EXIT_FAILURE
-        } catch (e: CliUsageException) {
+        }
+        is CliUsageException -> {
             err.appendLine("obp: ${e.message}")
             EXIT_USAGE
-        } catch (e: java.io.IOException) {
-            inputError(err, "cannot read ${e.message}")
-        } catch (e: java.time.format.DateTimeParseException) {
-            inputError(err, "not an ISO-8601 instant: ${e.parsedString}")
-        } catch (e: IllegalArgumentException) {
-            inputError(err, e.message ?: "malformed input")
-        } catch (e: NoSuchElementException) {
-            inputError(err, e.message ?: "a required field is missing")
-        } catch (e: ClassCastException) {
-            inputError(err, "a field has the wrong JSON type: ${e.message}")
+        }
+        is CliInputException, is ProductInputException -> {
+            emit(err, mapOf("ok" to false, "inputError" to e.message))
+            EXIT_INPUT
+        }
+        is Error -> throw e
+        else -> {
+            err.appendLine("obp: internal error (a defect in obp or the interpreter, not in your input): $e")
+            err.appendLine(e.stackTraceToString())
+            EXIT_INTERNAL
         }
     }
 
@@ -111,12 +126,6 @@ object Obp {
         "sign" -> sign(rest, out, err)
         "propose" -> propose(rest, out, err)
         else -> usage(err)
-    }
-
-    /** One canonical line on stderr, never a stack trace: the input, not the subject, is wrong. */
-    private fun inputError(err: Appendable, message: String): Int {
-        emit(err, mapOf("ok" to false, "inputError" to message))
-        return EXIT_INPUT
     }
 
     private fun usage(err: Appendable): Int {
@@ -148,7 +157,7 @@ object Obp {
     /** A path to an IR document, or the name of a reference product compiled from the DSL. */
     private fun loadRevision(target: String): ProductRevisionIr {
         val path = Path.of(target)
-        if (Files.isRegularFile(path)) return ProductIrParser.parse(Files.readString(path))
+        if (Files.isRegularFile(path)) return ProductIrParser.parse(readInput(path, "IR file"))
         return ReferenceProducts.byName(target)?.compile()
             ?: throw CliUsageException(
                 "'$target' is neither a file nor a reference product (${ReferenceProducts.all.map {
@@ -164,8 +173,15 @@ object Obp {
         val outDir = option(args, "--out")?.let { Path.of(it) }
         val check = "--check" in args
         if (ReferenceProducts.byName(name) == null && name != "all" && Files.isRegularFile(Path.of(name))) {
-            // The exact report the MCP `product_compile` tool returns (gate product-ir-authoring-parity).
-            emit(out, ProductToolkit.compile(Files.readString(Path.of(name))).tree())
+            val compiled = ProductToolkit.compile(readInput(Path.of(name), "IR file"))
+            if ("--json" in args) {
+                // The exact report the MCP `product_compile` tool returns (gate product-ir-authoring-parity).
+                emit(out, compiled.tree())
+            } else {
+                // Raw canonical IR on stdout, so `obp compile x.json > ir.json` writes an IR document.
+                out.appendLine(compiled.canonicalJson)
+                emit(err, mapOf("ok" to true, "revisionHash" to compiled.revisionHash))
+            }
             return EXIT_OK
         }
         val products = if (name == "all") {
@@ -249,7 +265,7 @@ object Obp {
         if (problem != null) usageError(problem)
         val a = loadRevision(files[0])
         val b = loadRevision(files[1])
-        val report = BehaviouralDiff.run(a, b, Files.readString(Path.of(portfolio!!)))
+        val report = BehaviouralDiff.run(a, b, readInput(Path.of(portfolio!!), "portfolio"))
         emit(out, report)
         if (report["changedRules"] !=
             0
@@ -325,8 +341,8 @@ object Obp {
         if (from != null && to != null && !from.isBefore(to)) usageError("--from must be before --to")
         val report = ProductToolkit.simulate(
             loadRevision(target),
-            Files.readString(Path.of(portfolio)),
-            FinanceProductArithmetic,
+            readInput(Path.of(portfolio), "portfolio"),
+            arithmetic,
             from,
             to,
         )
@@ -460,6 +476,12 @@ object Obp {
     private val KEY_NAME = Regex("^[a-z0-9][a-z0-9-]{0,62}$")
     private const val LOCALHOST = "localhost"
 
+    private fun readInput(path: Path, what: String): String = try {
+        Files.readString(path)
+    } catch (e: java.io.IOException) {
+        throw CliInputException("cannot read $what '$path': ${e.message ?: e::class.simpleName}", e)
+    }
+
     private fun usageError(message: String): Nothing = throw CliUsageException(message)
 
     private fun option(args: List<String>, name: String): String? {
@@ -476,3 +498,6 @@ object Obp {
 }
 
 class CliUsageException(message: String) : RuntimeException(message)
+
+/** A file obp was pointed at cannot be read (exit 65, like a malformed input). */
+class CliInputException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)

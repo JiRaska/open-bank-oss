@@ -60,11 +60,30 @@ class ProductToolkitTest {
             .isInstanceOf(IllegalArgumentException::class.java)
         // Malformed JSON is an argument error, never mistaken for an invalid revision.
         assertThatThrownBy { ProductToolkit.simulate(rev, "{not json", IrFixtures.StubArithmetic) }
-            .isExactlyInstanceOf(IllegalArgumentException::class.java)
+            .isExactlyInstanceOf(ProductInputException::class.java)
             .hasMessageContaining("portfolio is not valid JSON")
         val badHook = portfolio.replace("\"scheduled\"", "\"nope\"")
         assertThatThrownBy { ProductToolkit.simulate(rev, badHook, IrFixtures.StubArithmetic) }
+            .isInstanceOf(ProductInputException::class.java)
             .hasMessageContaining("unknown hook")
+        // A missing field is input, too — not a NoSuchElementException leaking out of the parser.
+        assertThatThrownBy {
+            ProductToolkit.simulate(rev, portfolio.replace("\"at\"", "\"when\""), IrFixtures.StubArithmetic)
+        }
+            .isInstanceOf(ProductInputException::class.java)
+        // An arithmetic (evaluation) failure is NOT an input error: it surfaces as itself.
+        val broken = object : com.openbank.libs.product.ir.ProductArithmetic by IrFixtures.StubArithmetic {
+            override fun dailyAccrual(
+                balance: java.math.BigDecimal,
+                annualRate: java.math.BigDecimal,
+                dayCount: com.openbank.libs.product.ir.IrDayCount,
+                date: java.time.LocalDate,
+                accrualRounding: com.openbank.libs.domain.money.RoundingPolicy,
+            ): java.math.BigDecimal = throw IllegalArgumentException("interpreter defect")
+        }
+        assertThatThrownBy { ProductToolkit.simulate(rev, portfolio, broken) }
+            .isNotInstanceOf(ProductInputException::class.java)
+            .hasMessage("interpreter defect")
     }
 
     @Test

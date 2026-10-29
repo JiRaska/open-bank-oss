@@ -84,10 +84,22 @@ class ProductIrAuthoringParityTest {
                 val bad = dir.resolve("bad.json").also { Files.writeString(it, broken) }
                 val ruleId = ProductToolkit.ruleIdPaths(product.compile()).keys.first()
 
-                same("compile", cli("compile", file.toString()), mcp("product_compile") { put("ir", fixture) })
+                val mcpCompile = mcp("product_compile") { put("ir", fixture) }
+                same("compile --json", cli("compile", file.toString(), "--json"), mcpCompile)
+                // Default `obp compile <file>` prints the raw canonical IR: exactly the MCP report's `ir` slice.
+                val raw = StringBuilder().also { Obp.run(listOf("compile", file.toString()), it, StringBuilder()) }
+                    .toString().trimEnd()
+                assertThat(mcpCompile.second)
+                    .isEqualTo("{\"ir\":$raw,\"ok\":true,\"revisionHash\":\"${product.compile().revisionHash}\"}")
                 same("lint", cli("lint", file.toString()), mcp("product_lint") { put("ir", fixture) })
                 same("lint invalid", cli("lint", bad.toString()), mcp("product_lint") { put("ir", broken) })
-                same("compile invalid", cli("compile", bad.toString()), mcp("product_compile") { put("ir", broken) })
+                same(
+                    "compile invalid",
+                    cli("compile", bad.toString(), "--json"),
+                    mcp("product_compile") {
+                        put("ir", broken)
+                    },
+                )
                 same(
                     "simulate",
                     cli("simulate", file.toString(), "--portfolio", portfolio.toString()),

@@ -86,25 +86,19 @@ object ProductToolkit {
         from: Instant? = null,
         to: Instant? = null,
     ): Map<String, Any?> {
-        val root = PortfolioFixture.obj(PortfolioFixture.json(portfolioJson, "portfolio"), "portfolio")
-        val zone = ZoneId.of(root["zone"] as? String ?: "UTC")
+        // Parse the whole fixture first, so a malformed input is a ProductInputException and anything
+        // thrown below comes from evaluation — a defect, never reported as bad input.
+        val portfolio = PortfolioFixture.parse(portfolioJson)
         val interpreter = ProductInterpreter(arithmetic)
-        val accounts = PortfolioFixture.list(root["accounts"]).map { PortfolioFixture.obj(it, "account") }
-        val replayed = accounts.map { account ->
-            var state = PortfolioFixture.state(PortfolioFixture.obj(account["state"], "state"))
-            val steps = PortfolioFixture.list(account["steps"]).map { PortfolioFixture.obj(it, "step") }
-                .filter { s ->
-                    Instant.parse(s.getValue("at") as String).let { PortfolioFixture.inWindow(it, from, to) }
-                }
-                .map { s ->
-                    val at = Instant.parse(s.getValue("at") as String)
-                    val event = PortfolioFixture.event(s)
-                    val clock = ProductClock(at, zone)
-                    val out = interpreter.evaluate(rev, state, event, clock)
-                    state = PortfolioFixture.advance(state, out, event, clock.today())
-                    mapOf("at" to at.toString(), "instructions" to out.map { InstructionCanonical.tree(it) })
-                }
-            mapOf("account" to account["id"], "steps" to steps)
+        val replayed = portfolio.accounts.map { account ->
+            var state = account.state
+            val steps = account.steps.filter { PortfolioReplay.inWindow(it.at, from, to) }.map { step ->
+                val clock = ProductClock(step.at, portfolio.zone)
+                val out = interpreter.evaluate(rev, state, step.event, clock)
+                state = PortfolioReplay.advance(state, out, step.event, clock.today())
+                mapOf("at" to step.at.toString(), "instructions" to out.map { InstructionCanonical.tree(it) })
+            }
+            mapOf("account" to account.id, "steps" to steps)
         }
         return mapOf(
             "ok" to true,
@@ -140,7 +134,7 @@ object ProductToolkit {
         instructionJson: String,
         sourceOf: (String) -> String? = { null },
     ): Map<String, Any?> {
-        val instruction = PortfolioFixture.obj(PortfolioFixture.json(instructionJson, "instruction"), "instruction")
+        val instruction = PortfolioFixture.instruction(instructionJson)
         val ruleId = instruction["ruleId"] as? String
             ?: return mapOf("ok" to false, "message" to "instruction carries no ruleId")
         val hash = instruction["revisionHash"] as? String
@@ -196,37 +190,67 @@ object ProductToolkit {
     private val UUID_PATTERN = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 }
 
-/** The portfolio-fixture grammar (the golden scenario's state and step shape) and the replay step. */
+/**
+ * A user-supplied input (portfolio fixture, instruction) is missing a field, has the wrong JSON type
+ * or is not JSON at all. Distinct from [ProductIrValidationException] (the revision is invalid) and
+ * from anything thrown during evaluation (a defect), so every surface can tell the three apart.
+ */
+class ProductInputException(message: String, cause: Throwable? = null) : IllegalArgumentException(message, cause)
+
+/** The portfolio-fixture grammar: the golden scenario's state and step shape. */
 internal object PortfolioFixture {
+
+    data class Step(val at: Instant, val event: ProductEvent)
+
+    data class Account(val id: Any?, val state: ProductState, val steps: List<Step>)
+
+    data class Portfolio(val zone: ZoneId, val accounts: List<Account>)
+
+    /** The whole fixture, or a [ProductInputException] naming what is wrong — never a partial parse. */
+    fun parse(portfolioJson: String): Portfolio = input("portfolio") {
+        val root = obj(json(portfolioJson, "portfolio"), "portfolio")
+        Portfolio(
+            ZoneId.of(root["zone"] as? String ?: "UTC"),
+            list(root["accounts"]).map { obj(it, "account") }.map { account ->
+                Account(
+                    account["id"],
+                    state(obj(account["state"], "state")),
+                    list(account["steps"]).map { obj(it, "step") }.map {
+                        Step(Instant.parse(it.getValue("at") as String), event(it))
+                    },
+                )
+            },
+        )
+    }
+
+    /** One parsed instruction object, or a [ProductInputException]. */
+    fun instruction(text: String): Map<String, Any?> =
+        input("instruction") { obj(json(text, "instruction"), "instruction") }
+
+    /** Maps any failure while READING a user input to [ProductInputException]; Errors propagate. */
+    private fun <T> input(what: String, parse: () -> T): T = runCatching(parse).getOrElse { e ->
+        when (e) {
+            is ProductInputException -> throw e
+            is Error -> throw e
+            else -> throw ProductInputException("$what: ${e.message ?: e::class.simpleName}", e)
+        }
+    }
 
     /**
      * Parses a non-IR JSON argument. A syntax error is an argument error ([IllegalArgumentException]),
      * not an invalid revision, so it never reads as a [ProductIrValidationException] about the IR.
      */
-    fun json(text: String, what: String): Any? = try {
+    private fun json(text: String, what: String): Any? = try {
         IrJson.parse(text)
     } catch (e: ProductIrValidationException) {
-        throw IllegalArgumentException("$what is not valid JSON: ${e.problems.first().message}", e)
-    }
-
-    fun inWindow(at: Instant, from: Instant?, to: Instant?): Boolean =
-        (from == null || !at.isBefore(from)) && (to == null || at.isBefore(to))
-
-    fun advance(state: ProductState, out: List<Instruction>, event: ProductEvent, today: LocalDate): ProductState {
-        var next = ProductStateTransition.apply(state, out, today)
-        val posting = event.posting
-        val rejected = out.any { it is Instruction.Reject }
-        if (posting != null && event.hook == Hook.PRE_POSTING && !rejected) {
-            next = ProductStateTransition.applyPosting(next, posting, today)
-        }
-        return next
+        throw ProductInputException("$what is not valid JSON: ${e.problems.first().message}", e)
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun obj(v: Any?, what: String): Map<String, Any?> =
-        v as? Map<String, Any?> ?: throw IllegalArgumentException("$what must be a JSON object")
+    private fun obj(v: Any?, what: String): Map<String, Any?> =
+        v as? Map<String, Any?> ?: throw ProductInputException("$what must be a JSON object")
 
-    fun list(v: Any?): List<Any?> = v as? List<Any?> ?: emptyList()
+    private fun list(v: Any?): List<Any?> = v as? List<Any?> ?: emptyList()
 
     private fun dec(v: Any?): BigDecimal = when (v) {
         is BigDecimal -> v
@@ -235,7 +259,7 @@ internal object PortfolioFixture {
         else -> throw IllegalArgumentException("not a decimal: $v")
     }
 
-    fun state(t: Map<String, Any?>): ProductState = ProductState(
+    private fun state(t: Map<String, Any?>): ProductState = ProductState(
         currency = t.getValue("currency") as String,
         balance = dec(t["balance"]),
         accruedInterest = dec(t["accruedInterest"]),
@@ -257,7 +281,7 @@ internal object PortfolioFixture {
             .entries.associate { (k, v) -> k as String to dec(v) },
     )
 
-    fun event(t: Map<String, Any?>): ProductEvent {
+    private fun event(t: Map<String, Any?>): ProductEvent {
         val hook = ProductIrParser.HOOK_KEYS[t["hook"]]
             ?: throw IllegalArgumentException("unknown hook '${t["hook"]}'")
         val posting = (t["posting"] as? Map<*, *>)?.let {
@@ -274,5 +298,22 @@ internal object PortfolioFixture {
             parameter = t["parameter"] as? String,
             newValue = t["newValue"]?.let { dec(it) },
         )
+    }
+}
+
+/** The replay step between fixture steps: the window filter and the shared state transition. */
+internal object PortfolioReplay {
+
+    fun inWindow(at: Instant, from: Instant?, to: Instant?): Boolean =
+        (from == null || !at.isBefore(from)) && (to == null || at.isBefore(to))
+
+    fun advance(state: ProductState, out: List<Instruction>, event: ProductEvent, today: LocalDate): ProductState {
+        var next = ProductStateTransition.apply(state, out, today)
+        val posting = event.posting
+        val rejected = out.any { it is Instruction.Reject }
+        if (posting != null && event.hook == Hook.PRE_POSTING && !rejected) {
+            next = ProductStateTransition.applyPosting(next, posting, today)
+        }
+        return next
     }
 }

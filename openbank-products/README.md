@@ -13,7 +13,8 @@ the `obp` CLI. A released component (`version.txt`): every product change is a r
 ./gradlew :openbank-products:run --args="lint savings-fixed"                 # schema + run limits + ruleId uniqueness
 ./gradlew :openbank-products:run --args="compile all --out ir"               # DSL -> canonical IR (commit the result)
 ./gradlew :openbank-products:run --args="compile all --check"                # red when ir/ drifts from the DSL
-./gradlew :openbank-products:run --args="compile my-draft.json"              # canonical bytes + revisionHash of a file
+./gradlew :openbank-products:run --args="compile my-draft.json"              # raw canonical IR on stdout, revisionHash on stderr
+./gradlew :openbank-products:run --args="compile my-draft.json --json"       # {ok, revisionHash, ir}: the MCP product_compile report
 ./gradlew :openbank-products:run --args="test"                               # golden scenarios, shared runner
 ./gradlew :openbank-products:run --args="simulate savings-fixed --portfolio portfolios/savings-sample.json --from 2026-01-01T00:00:00Z --to 2026-02-01T00:00:00Z"
 ./gradlew :openbank-products:run --args="explain savings-fixed --rule scheduled.fee"
@@ -31,8 +32,9 @@ the `obp` CLI. A released component (`version.txt`): every product change is a r
 | 64 | usage error |
 | 65 | an input file or JSON argument (portfolio, instruction) is missing or malformed — one canonical `{"ok":false,"inputError":…}` line on stderr |
 | 69 | `propose --execute`: the catalog was unreachable, egress was refused, or it did not answer 201 |
+| 70 | internal error: an exception thrown during evaluation — a defect in obp or the interpreter, printed with its stack trace, never reported as bad input |
 
-Failure output is one canonical JSON line on stderr. For `lint`, `compile`, `simulate` and
+Failure output is one canonical JSON line on stderr. For `lint`, `compile --json`, `simulate` and
 `explain` it is byte-identical to the text the matching MCP tool returns, and the MCP result carries
 `isError = true` exactly when obp exits non-zero.
 
