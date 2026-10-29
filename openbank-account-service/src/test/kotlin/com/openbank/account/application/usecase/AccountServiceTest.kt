@@ -91,7 +91,7 @@ class AccountServiceTest {
             val iban = Iban.of("CZ6508000000192000145399")
             val command = openAccountCommand()
 
-            coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+            coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
             every { ibanGenerator.generate(command.currency) } returns iban
             coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
             coEvery { accountRepository.existsByIban(iban) } returns false
@@ -144,7 +144,7 @@ class AccountServiceTest {
         val command = openAccountCommand()
 
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns true
 
@@ -257,7 +257,7 @@ class AccountServiceTest {
         val command = openAccountCommand(legalName = "Sanctioned Person")
 
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns
             SanctionsScreenResult("HIT", 0.98, "Sanctioned Person")
 
         assertThatThrownBy { runBlocking { service.openAccount(command) } }
@@ -273,7 +273,7 @@ class AccountServiceTest {
         val command = openAccountCommand(legalName = "Fuzzy Match Person")
 
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns
             SanctionsScreenResult("REVIEW", 0.72, "Fuzzy Match Person")
 
         assertThatThrownBy { runBlocking { service.openAccount(command) } }
@@ -293,7 +293,7 @@ class AccountServiceTest {
         val command = openAccountCommand(legalName = "Fuzzy Match Person")
 
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns
             SanctionsScreenResult(status, 0.72, "Fuzzy Match Person")
 
         assertThatThrownBy { runBlocking { service.openAccount(command) } }
@@ -310,7 +310,7 @@ class AccountServiceTest {
         val command = openAccountCommand(legalName = "Cleared Customer")
 
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen("Cleared Customer", any()) } returns
+        coEvery { sanctionsScreening.screen("Cleared Customer", any(), any()) } returns
             SanctionsScreenResult("WHITELISTED", 0.9, "Cleared Customer")
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
@@ -326,7 +326,7 @@ class AccountServiceTest {
         val command = openAccountCommand(legalName = "Test Customer")
 
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } throws
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } throws
             AccountScreeningUnavailableException(RuntimeException("timeout"))
 
         assertThatThrownBy { runBlocking { service.openAccount(command) } }
@@ -342,7 +342,8 @@ class AccountServiceTest {
         val command = openAccountCommand(legalName = "Clean Customer")
 
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen("Clean Customer", any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen("Clean Customer", any(), any()) } returns
+            SanctionsScreenResult("CLEAR", 0.0, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
         coEvery { accountRepository.saveNewAccount(any(), any(), any(), any()) } answers { firstArg() }
@@ -352,7 +353,30 @@ class AccountServiceTest {
         val result = service.openAccount(command)
 
         assertThat(result.status).isEqualTo(AccountStatus.ACTIVE)
-        coVerify(exactly = 1) { sanctionsScreening.screen("Clean Customer", any()) }
+        coVerify(exactly = 1) { sanctionsScreening.screen("Clean Customer", any(), any()) }
+    }
+
+    @Test
+    fun `openAccount passes party identity separately from the per-attempt screening key`(): Unit = runBlocking {
+        val iban = Iban.of("CZ6508000000192000145399")
+        val command = openAccountCommand(legalName = "Clean Customer")
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        every { ibanGenerator.generate(command.currency) } returns iban
+        coEvery { accountRepository.existsByIban(iban) } returns false
+        coEvery { accountRepository.saveNewAccount(any(), any(), any(), any()) } answers { firstArg() }
+        coEvery { balancePort.initialize(any(), any(), any()) } returns Unit
+        coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
+
+        service.openAccount(command)
+
+        coVerify(exactly = 1) {
+            sanctionsScreening.screen(
+                command.legalName,
+                "account-open:${command.partyId}:${command.idempotencyKey}",
+                command.partyId.toString(),
+            )
+        }
     }
 
     @Test
@@ -362,7 +386,8 @@ class AccountServiceTest {
         val savedSlot = slot<Account>()
 
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen("Alice Example", any()) } returns SanctionsScreenResult("CLEAR", 0.05, null)
+        coEvery { sanctionsScreening.screen("Alice Example", any(), any()) } returns
+            SanctionsScreenResult("CLEAR", 0.05, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
         coEvery { accountRepository.saveNewAccount(capture(savedSlot), any(), any(), any()) } answers { firstArg() }
@@ -381,7 +406,7 @@ class AccountServiceTest {
     fun `openAccount refuses a product that product-catalog confirms does not exist`() {
         val command = openAccountCommand()
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         coEvery { productCatalog.findById(command.productId) } returns ProductLookupResult.NotFound
 
         assertThatThrownBy { runBlocking { service.openAccount(command) } }
@@ -395,7 +420,7 @@ class AccountServiceTest {
     fun `openAccount refuses a product that is not ACTIVE`() {
         val command = openAccountCommand()
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         coEvery { productCatalog.findById(command.productId) } returns
             ProductLookupResult.Found(CatalogProduct(command.productId, "SAVINGS_STANDARD", "DRAFT", "CZK"))
 
@@ -411,7 +436,7 @@ class AccountServiceTest {
         val iban = Iban.of("CZ6508000000192000145399")
         val command = openAccountCommand()
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         coEvery { productCatalog.findById(command.productId) } returns
             ProductLookupResult.Found(CatalogProduct(command.productId, "SAVINGS_STANDARD", "ACTIVE", "CZK"))
         every { ibanGenerator.generate(command.currency) } returns iban
@@ -428,7 +453,7 @@ class AccountServiceTest {
     fun `openAccount refuses a confirmed product currency mismatch`() {
         val command = openAccountCommand()
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         coEvery { productCatalog.findById(command.productId) } returns
             ProductLookupResult.Found(CatalogProduct(command.productId, "SAVINGS_STANDARD", "ACTIVE", "EUR"))
 
@@ -444,7 +469,7 @@ class AccountServiceTest {
         val iban = Iban.of("CZ6508000000192000145399")
         val command = openAccountCommand()
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         coEvery { productCatalog.findById(command.productId) } returns ProductLookupResult.Unavailable
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
@@ -460,7 +485,7 @@ class AccountServiceTest {
     fun `open account counts accountCreated with product type and currency`(): Unit = runBlocking {
         val iban = Iban.of("CZ6508000000192000145399")
         val command = openAccountCommand()
-        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { accountRepository.existsByIban(iban) } returns false
@@ -601,7 +626,7 @@ class AccountServiceTest {
         // an IllegalArgumentException (400 at the REST layer), before any screening or persist.
         val command = openAccountCommand().copy(accountType = AccountType.TERM_DEPOSIT)
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
 
         assertThatThrownBy {
             runBlocking { service.openAccount(command) }
@@ -618,7 +643,7 @@ class AccountServiceTest {
             termsUrl = "https://docs.example/td-2026-01.pdf",
             termsEffectiveFrom = java.time.LocalDate.parse("2026-01-01"),
         )
-        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { accountRepository.existsByIban(iban) } returns false
