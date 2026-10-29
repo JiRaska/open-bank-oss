@@ -36,6 +36,13 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # Oversight wake-up: high-risk outbox events fan out a minimal, non-PII trigger (ADR-0031 D9)
+      - resource:
+          type: topic
+          name: openbank.oversight-triggers
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
 ---
 # ── ExternalSecret: sanctions-service keystore ───────────────────────────
 # Projects the Strimzi-minted per-user keystore (user.p12 + user.password)

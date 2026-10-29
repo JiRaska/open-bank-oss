@@ -57,8 +57,8 @@ quarkus:
     # #10486: the welcome-bonus credit (transaction.create) no longer rides the shared openbank-services principal. The
     # money-path rest-clients select this NAMED client (@OidcClientFilter("m2m") /
     # @NamedOidcClient("m2m")), so their token's principal is service-account-openbank-account
-    # (ROLE_API only), granted by identity in the upstream's OPA rego. Every other rest-client
-    # stays on the default (shared) client above until its own edge is migrated.
+    # (ROLE_API plus the catalog:read scope), granted by identity in upstream OPA.
+    # Product and published-revision reads also select this named client.
     m2m:
       auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
       client-id: openbank-account
