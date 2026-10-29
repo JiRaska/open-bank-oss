@@ -139,19 +139,136 @@ class TreasuryPostingIntentTest {
     }
 
     @Test
-    fun `a reversal resumed on a later day posts the journal valued on the day it was decided`(): Unit = runBlocking {
+    fun `an intent from an earlier business day is escalated, and an operator's re-issue completes it`(): Unit =
+        runBlocking {
+            val b = book()
+            service.settle(b.id, DealFixtures.approver)
+            ledger.loseAnswerFor = b.id
+            assertThatThrownBy { runBlocking { service.reverse(b.id, "wrong counterparty", DealFixtures.approver) } }
+            later(Duration.ofDays(1))
+            // Not resumed as the stored actor: their authority may have lapsed since.
+            val run = service.reconcilePostingIntents(clock.instant())
+            assertThat(run.completed).isZero()
+            assertThat(run.escalated).isEqualTo(1)
+            val key = intents.rows.values.single { it.first.event == PostingEvent.REVERSED }.first.idempotencyKey
+            assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.OPEN)
+            assertThat(intents.rows.getValue(key).first.lastError).startsWith("escalated")
+            assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.SETTLED)
+
+            // An operator re-issues the command through the (authorised) API path: same key, first day.
+            assertThat(service.reverse(b.id, "wrong counterparty", DealFixtures.approver).state)
+                .isEqualTo(DealState.REVERSED)
+            val reversal = deals.journals.single { it.event == PostingEvent.REVERSED }
+            assertThat(reversal.valueDate).isEqualTo(monday)
+            assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.COMPLETED)
+        }
+
+    @Test
+    fun `an intent older than the resume window on the same day is escalated too`(): Unit = runBlocking {
+        val b = book()
+        ledger.loseAnswerFor = b.id
+        assertThatThrownBy { runBlocking { service.settle(b.id, DealFixtures.approver) } }
+        later(Duration.ofHours(5)) // 09:00 -> 14:00 UTC, same Prague day, past the 4h window
+        val run = service.reconcilePostingIntents(clock.instant())
+        assertThat(run.escalated).isEqualTo(1)
+        assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.BOOKED)
+    }
+
+    @Test
+    fun `no accrual while a reversal intent is open - the resumed reversal announces the original journal`(): Unit =
+        runBlocking {
+            val b = book()
+            service.settle(b.id, DealFixtures.approver)
+            later(Duration.ofDays(1))
+            service.accrueInterest(monday.plusDays(1))
+            val accrualsBefore = deals.journals.count { it.event == PostingEvent.ACCRUED }
+            ledger.loseAnswerFor = b.id
+            assertThatThrownBy { runBlocking { service.reverse(b.id, "wrong rate", DealFixtures.approver) } }
+            val key = intents.rows.values.single { it.first.event == PostingEvent.REVERSED }.first.idempotencyKey
+            val originalLines = ledger.posted.first { it.idempotencyKey == key }.lines
+
+            // A later accrual pass leaves the deal alone: the ledger's reversal offsets only what existed.
+            service.accrueInterest(monday.plusDays(2))
+            assertThat(deals.journals.count { it.event == PostingEvent.ACCRUED }).isEqualTo(accrualsBefore)
+            later(Duration.ofMinutes(5))
+
+            assertThat(service.reconcilePostingIntents(clock.instant()).completed).isEqualTo(1)
+            // Re-posted with the same lines, and the event carries the ledger's original journal id.
+            assertThat(ledger.posted.last { it.idempotencyKey == key }.lines).isEqualTo(originalLines)
+            val reversedEvent = deals.events.last { it.eventType.contains("reversed") }
+            assertThat(reversedEvent.payload).contains(java.util.UUID.nameUUIDFromBytes(key.toByteArray()).toString())
+            assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.REVERSED)
+        }
+
+    @Test
+    fun `a COMPLETED intent answers with its recorded journal and never calls the ledger again`(): Unit = runBlocking {
+        val b = book()
+        val settled = service.settle(b.id, DealFixtures.approver)
+        val key = settlementKey(b)
+        val calls = ledger.posted.size
+        // A stale copy of the deal (as a replayed command computed from an old read would see it).
+        deals.rows[b.id] = b
+        service.settle(b.id, DealFixtures.approver)
+        assertThat(ledger.posted).hasSize(calls)
+        assertThat(deals.journals.filter { it.idempotencyKey == key }).hasSize(1)
+        assertThat(settled.state).isEqualTo(DealState.SETTLED)
+    }
+
+    @Test
+    fun `an operator closes an open intent with a reason - a person only, an absent one is false`(): Unit =
+        runBlocking {
+            val b = book()
+            ledger.loseAnswerFor = b.id
+            assertThatThrownBy { runBlocking { service.settle(b.id, DealFixtures.approver) } }
+            val agent = com.openbank.treasury.domain.model.Actor.fromPrincipalName("agent:treasury-drafter")
+            assertThatThrownBy {
+                runBlocking { service.closePostingIntent(b.id, PostingEvent.SETTLED, "no journal", agent) }
+            }.isInstanceOf(com.openbank.treasury.domain.model.ActorNotPermittedException::class.java)
+            assertThat(service.closePostingIntent(b.id, PostingEvent.MATURED, "nothing there", DealFixtures.approver))
+                .isFalse()
+            assertThat(
+                service.closePostingIntent(b.id, PostingEvent.SETTLED, "ledger holds none", DealFixtures.approver),
+            )
+                .isTrue()
+            val key = settlementKey(b)
+            assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.REFUSED)
+            assertThat(intents.closedBy[key]).isEqualTo(DealFixtures.approver.id)
+            assertThat(intents.rows.getValue(key).first.lastError).contains("ledger holds none")
+        }
+
+    @Test
+    fun `a reversal refused on one day and retried the next posts under the retry's day`(): Unit = runBlocking {
         val b = book()
         service.settle(b.id, DealFixtures.approver)
-        ledger.loseAnswerFor = b.id
-        assertThatThrownBy { runBlocking { service.reverse(b.id, "wrong counterparty", DealFixtures.approver) } }
+        ledger.refuseFor = b.id
+        assertThatThrownBy { runBlocking { service.reverse(b.id, "first try", DealFixtures.approver) } }
+            .isInstanceOf(LedgerRefused::class.java)
+        val key = intents.rows.values.single { it.first.event == PostingEvent.REVERSED }.first.idempotencyKey
+        assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.REFUSED)
+
+        ledger.refuseFor = null
         later(Duration.ofDays(1))
-        assertThat(service.reconcilePostingIntents(clock.instant()).completed).isEqualTo(1)
-        assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.REVERSED)
-        val reversal = deals.journals.single { it.event == PostingEvent.REVERSED }
-        assertThat(reversal.valueDate).isEqualTo(monday)
-        val intent = intents.rows.getValue(reversal.idempotencyKey)
-        assertThat(intent.second).isEqualTo(InMemoryIntents.Status.COMPLETED)
-        assertThat(intent.first.reason).isEqualTo("wrong counterparty")
+        assertThat(service.reverse(b.id, "second try", DealFixtures.approver).state).isEqualTo(DealState.REVERSED)
+        // The refused attempt left no journal, so nothing pins the first day: the retry's own day is posted.
+        assertThat(deals.journals.single { it.idempotencyKey == key }.valueDate).isEqualTo(monday.plusDays(1))
+        assertThat(ledger.entryDates.getValue(key)).isEqualTo(monday.plusDays(1))
+        assertThat(intents.rows.getValue(key).first.reason).isEqualTo("second try")
+    }
+
+    @Test
+    fun `a refusal on a resumed intent never closes it - an earlier attempt may have posted`(): Unit = runBlocking {
+        val b = book()
+        ledger.loseAnswerFor = b.id
+        assertThatThrownBy { runBlocking { service.settle(b.id, DealFixtures.approver) } }
+        ledger.refuseFor = b.id
+        later(Duration.ofMinutes(5))
+        val run = service.reconcilePostingIntents(clock.instant())
+        assertThat(run.failures).hasSize(1)
+        assertThat(intents.status(settlementKey(b))).isEqualTo(InMemoryIntents.Status.OPEN)
+        // Nor does a client retry of the same command close it.
+        assertThatThrownBy { runBlocking { service.settle(b.id, DealFixtures.approver) } }
+            .isInstanceOf(LedgerRefused::class.java)
+        assertThat(intents.status(settlementKey(b))).isEqualTo(InMemoryIntents.Status.OPEN)
     }
 
     @Test

@@ -146,8 +146,11 @@ fun interface TreasuryQuoteUseCase {
  */
 data class AccrualRun(val journals: Int, val failures: List<Throwable>, val deals: Int = 0, val unassessed: Int = 0)
 
-/** One reconciler pass over open posting intents (#13883): completed, and those still open with their causes. */
-data class IntentReconciliation(val completed: Int, val failures: List<Throwable>)
+/**
+ * One reconciler pass over open posting intents (#13883): completed; failed (still open, with their
+ * causes); escalated (too old to resume as the stored actor, left OPEN for an operator).
+ */
+data class IntentReconciliation(val completed: Int, val failures: List<Throwable>, val escalated: Int = 0)
 
 @Suppress("TooManyFunctions")
 interface TreasuryDealUseCase {
@@ -210,6 +213,18 @@ interface TreasuryDealUseCase {
      * journal. A failure is recorded on the intent, which stays open and keeps holding its day.
      */
     suspend fun reconcilePostingIntents(olderThan: Instant): IntentReconciliation
+
+    /**
+     * #13883: an operator closes the OPEN posting intent of [dealId]'s [event] that cannot complete
+     * (REFUSED, who and why recorded), releasing its day's close hold. Only a person may; the caller
+     * asserts the ledger holds no journal under its key, or that the deal is corrected separately.
+     */
+    suspend fun closePostingIntent(
+        dealId: UUID,
+        event: com.openbank.treasury.domain.model.PostingEvent,
+        reason: String,
+        actor: Actor,
+    ): Boolean
 }
 
 interface NostroReconciliationUseCase {

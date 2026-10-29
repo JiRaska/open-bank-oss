@@ -117,7 +117,24 @@ admits under `ledger.close.participate` for this participant only.
 - **Recorded before committed.** Settle, mature and reverse record the journal in its own transaction
   as soon as the ledger accepts it, before the deal's state change commits. If that commit rolls back,
   the journal is still counted, but the day is held until its lifecycle transition commits. A retry posts under the same idempotency key, gets the original journal
-  back, and finds it recorded. The remaining window is a crash between the ledger's answer and that
-  write; the intent-first follow-up is tracked separately.
+  back, and finds it recorded.
+- **Posting intents (#13883).** Before contacting the ledger, settle, mature and reverse write a
+  `deal_posting_intent` row (V27) keyed by the journal's idempotency key. The deal save completes it in
+  the transaction of the state change. An OPEN intent means the ledger may hold a journal treasury has
+  not applied, so it holds its value day. `PostingIntentReconcileScheduler` (every 5 minutes) claims
+  intents older than `openbank.treasury.posting-intent.grace` (`FOR UPDATE SKIP LOCKED` plus a lease,
+  so two pods never resume one) and re-runs the command under the same key; the ledger answers with
+  the original journal. It resumes only intents from the same Prague business day and younger than
+  `max-resume-age` (4h), as the stored actor; anything older is escalated and stays OPEN. While a deal
+  has an open intent the accrual skips it, so a resumed reversal still offsets exactly what it was
+  decided against. Only the ledger's coded `409 ACCOUNTING_DAY_CLOSED` on a first attempt closes an
+  intent REFUSED; every other failure leaves it OPEN.
+- **A stuck intent.** `TreasuryPostingIntentStuck` fires when the oldest open intent is over 20
+  minutes old (gauges `openbank.treasury.posting_intents.open` and `.oldest_age_seconds`, -1 when
+  unreadable). Read `last_error` on the row. Either re-issue the deal command through the API, which
+  re-posts under the same key and completes the intent, or, once the ledger is confirmed to hold no
+  journal under the key, close it: `POST /api/v1/treasury/deals/{id}/posting-intent/close` with
+  `{"event": "SETTLED|MATURED|REVERSED", "reason": "..."}`. That needs the authority to reverse the
+  deal and a person; who closed it and why are recorded on the row, and the day's hold is released.
 - **Operating it.** Under `shadow` mode the ledger only counts a hold. Under `enforce` an operator
   reviews a REFUSED day and waives it on the ledger's day-end page.

@@ -4,15 +4,20 @@
 
 package com.openbank.treasury.infrastructure.persistence.intent
 
+import com.openbank.treasury.application.port.out.OpenIntentSummary
 import com.openbank.treasury.application.port.out.PostingIntent
 import com.openbank.treasury.application.port.out.PostingIntentAction
 import com.openbank.treasury.application.port.out.PostingIntentPort
+import com.openbank.treasury.application.port.out.PostingIntentStatus
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.PostingEvent
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import org.hibernate.reactive.mutiny.Mutiny
+import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -25,57 +30,107 @@ import java.util.UUID
  * stores the state change and the journal.
  */
 @ApplicationScoped
-class PostingIntentRepository(private val sf: Mutiny.SessionFactory) : PostingIntentPort {
+@Suppress("TooManyFunctions")
+class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val clock: Clock) : PostingIntentPort {
 
+    /**
+     * Insert, else reopen a REFUSED row as this caller's attempt (new value day, actor, reason, command
+     * key and creation time: a refused post left no journal), else keep the OPEN/COMPLETED row as it
+     * stands. Both writes are single atomic statements, so two racing callers cannot both be fresh.
+     */
     override suspend fun open(intent: PostingIntent): PostingIntent = sf.withTransaction { s ->
-        s.createNativeQuery<Int>(OPEN_SQL)
-            .setParameter(P_KEY, intent.idempotencyKey)
-            .setParameter(P_DEAL, intent.dealId)
-            .setParameter(P_EVENT, intent.event.name)
-            .setParameter(P_ACTION, intent.action.name)
-            .setParameter(P_VALUE_DATE, intent.valueDate)
-            .setParameter(P_ACTOR_ID, intent.actor.id)
-            .setParameter(P_ACTOR_TYPE, intent.actor.type.name)
-            .setParameter(P_REASON, intent.reason)
-            .setParameter(P_COMMAND, intent.commandKey)
-            .setParameter(P_CREATED, utc(intent.createdAt))
-            .executeUpdate()
-            .flatMap {
+        write(s, INSERT_SQL, intent)
+            .flatMap { inserted ->
+                if (inserted == 1) {
+                    Uni.createFrom().item(true)
+                } else {
+                    write(s, REOPEN_SQL, intent).map { it == 1 }
+                }
+            }
+            .flatMap { fresh ->
                 s.createNativeQuery<Array<Any?>>("$SELECT_SQL WHERE idempotency_key = ?1")
                     .setParameter(1, intent.idempotencyKey)
                     .singleResult
+                    .map { it.toIntent().copy(fresh = fresh) }
             }
-    }.awaitSuspending().toIntent()
+    }.awaitSuspending()
+
+    private fun write(s: Mutiny.Session, sql: String, intent: PostingIntent): Uni<Int> = s.createNativeQuery<Int>(sql)
+        .setParameter(P_KEY, intent.idempotencyKey)
+        .setParameter(P_DEAL, intent.dealId)
+        .setParameter(P_EVENT, intent.event.name)
+        .setParameter(P_ACTION, intent.action.name)
+        .setParameter(P_VALUE_DATE, intent.valueDate)
+        .setParameter(P_ACTOR_ID, intent.actor.id)
+        .setParameter(P_ACTOR_TYPE, intent.actor.type.name)
+        .setParameter(P_REASON, intent.reason)
+        .setParameter(P_COMMAND, intent.commandKey)
+        .setParameter(P_CREATED, utc(intent.createdAt))
+        .executeUpdate()
 
     override suspend fun refuse(key: String, reason: String) {
-        sf.withTransaction { s ->
-            s.createNativeQuery<Int>(
-                "UPDATE deal_posting_intent SET status = 'REFUSED', closed_at = now(), last_error = ?1 " +
-                    "WHERE idempotency_key = ?2 AND status = 'OPEN'",
-            )
-                .setParameter(1, reason)
-                .setParameter(2, key)
-                .executeUpdate()
-        }.awaitSuspending()
+        update(
+            "UPDATE deal_posting_intent SET status = 'REFUSED', closed_at = ?1, last_error = ?2, " +
+                "claim_token = NULL, claimed_until = NULL WHERE idempotency_key = ?3 AND status = 'OPEN'",
+            utc(clock.instant()),
+            reason,
+            key,
+        )
     }
 
     override suspend fun failed(key: String, error: String) {
-        sf.withTransaction { s ->
-            s.createNativeQuery<Int>(
-                "UPDATE deal_posting_intent SET attempts = attempts + 1, last_error = ?1 " +
-                    "WHERE idempotency_key = ?2 AND status = 'OPEN'",
-            )
-                .setParameter(1, error)
-                .setParameter(2, key)
-                .executeUpdate()
-        }.awaitSuspending()
+        update(
+            "UPDATE deal_posting_intent SET attempts = attempts + 1, last_error = ?1, " +
+                "claim_token = NULL, claimed_until = NULL WHERE idempotency_key = ?2 AND status = 'OPEN'",
+            error,
+            key,
+        )
     }
 
-    override suspend fun openBefore(cutoff: Instant): List<PostingIntent> = sf.withSession { s ->
-        s.createNativeQuery<Array<Any?>>("$SELECT_SQL WHERE status = 'OPEN' AND created_at < ?1 ORDER BY created_at")
-            .setParameter(1, utc(cutoff))
+    override suspend fun closeByOperator(key: String, actor: Actor, reason: String): Boolean = update(
+        "UPDATE deal_posting_intent SET status = 'REFUSED', closed_at = ?1, closed_by = ?2, last_error = ?3, " +
+            "claim_token = NULL, claimed_until = NULL WHERE idempotency_key = ?4 AND status = 'OPEN'",
+        utc(clock.instant()),
+        actor.id,
+        "closed by operator: $reason",
+        key,
+    ) == 1
+
+    private suspend fun update(sql: String, vararg params: Any?): Int = sf.withTransaction { s ->
+        params.foldIndexed(s.createNativeQuery<Int>(sql)) { i, q, v -> q.setParameter(i + 1, v) }.executeUpdate()
+    }.awaitSuspending()
+
+    /**
+     * One statement: the inner SELECT locks the candidate rows `FOR UPDATE SKIP LOCKED` (a row another
+     * pass is claiming right now is skipped, not waited for), and the UPDATE stamps them with this
+     * pass's token and lease. A lease that lapsed (a pod died mid-pass) makes the row claimable again.
+     */
+    override suspend fun claimOpen(cutoff: Instant, lease: Duration, limit: Int): List<PostingIntent> {
+        val token = UUID.randomUUID()
+        val now = clock.instant()
+        return sf.withTransaction { s ->
+            listOf(token, utc(now.plus(lease)), utc(cutoff), utc(now), limit)
+                .foldIndexed(s.createNativeQuery<Int>(CLAIM_SQL)) { i, q, v -> q.setParameter(i + 1, v) }
+                .executeUpdate()
+                .flatMap {
+                    s.createNativeQuery<Array<Any?>>("$SELECT_SQL WHERE claim_token = ?1 ORDER BY created_at")
+                        .setParameter(1, token)
+                        .resultList
+                }
+        }.awaitSuspending().map { it.toIntent() }
+    }
+
+    override suspend fun openFor(dealId: UUID): List<PostingIntent> = sf.withSession { s ->
+        s.createNativeQuery<Array<Any?>>("$SELECT_SQL WHERE deal_id = ?1 AND status = 'OPEN' ORDER BY created_at")
+            .setParameter(1, dealId)
             .resultList
     }.awaitSuspending().map { it.toIntent() }
+
+    override suspend fun summary(): OpenIntentSummary = sf.withSession { s ->
+        s.createNativeQuery<Array<Any?>>(
+            "SELECT count(*), min(created_at) FROM deal_posting_intent WHERE status = 'OPEN'",
+        ).singleResult
+    }.awaitSuspending().let { OpenIntentSummary((it[0] as Number).toInt(), it[1]?.let(::asInstant)) }
 
     private fun utc(at: Instant) = OffsetDateTime.ofInstant(at, ZoneOffset.UTC)
 
@@ -93,6 +148,7 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory) : PostingIn
         createdAt = asInstant(this[9]),
         attempts = (this[10] as Number).toInt(),
         lastError = this[11] as? String,
+        status = PostingIntentStatus.valueOf(this[12] as String),
     )
 
     private fun asDate(value: Any?): LocalDate = when (value) {
@@ -120,18 +176,27 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory) : PostingIn
         const val P_COMMAND = 9
         const val P_CREATED = 10
 
-        // A retry of a REFUSED post reopens it as a fresh attempt by its new caller; an OPEN or
-        // COMPLETED one is kept as it stands. The value day is never changed, so every attempt asks the ledger for the same journal.
-        const val OPEN_SQL =
+        const val INSERT_SQL =
             "INSERT INTO deal_posting_intent (idempotency_key, deal_id, event, action, value_date, actor_id, " +
                 "actor_type, reason, command_key, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) " +
-                "ON CONFLICT (idempotency_key) DO UPDATE SET status = 'OPEN', closed_at = NULL, " +
-                "actor_id = EXCLUDED.actor_id, actor_type = EXCLUDED.actor_type, reason = EXCLUDED.reason, " +
-                "command_key = EXCLUDED.command_key, created_at = EXCLUDED.created_at " +
-                "WHERE deal_posting_intent.status = 'REFUSED'"
+                "ON CONFLICT (idempotency_key) DO NOTHING"
+
+        // Only a REFUSED row is reopened, and it takes everything from the new attempt, its value day
+        // included. An OPEN row keeps its first attempt's value day: that attempt may have posted.
+        const val REOPEN_SQL =
+            "UPDATE deal_posting_intent SET status = 'OPEN', closed_at = NULL, closed_by = NULL, " +
+                "last_error = NULL, attempts = 0, deal_id = ?2, event = ?3, action = ?4, value_date = ?5, " +
+                "actor_id = ?6, actor_type = ?7, reason = ?8, command_key = ?9, created_at = ?10 " +
+                "WHERE idempotency_key = ?1 AND status = 'REFUSED'"
+
+        const val CLAIM_SQL =
+            "UPDATE deal_posting_intent SET claim_token = ?1, claimed_until = ?2 WHERE idempotency_key IN (" +
+                "SELECT idempotency_key FROM deal_posting_intent WHERE status = 'OPEN' AND created_at < ?3 " +
+                "AND (claimed_until IS NULL OR claimed_until < ?4) ORDER BY created_at LIMIT ?5 " +
+                "FOR UPDATE SKIP LOCKED)"
 
         const val SELECT_SQL =
             "SELECT idempotency_key, deal_id, event, action, value_date, actor_id, actor_type, reason, " +
-                "command_key, created_at, attempts, last_error FROM deal_posting_intent"
+                "command_key, created_at, attempts, last_error, status FROM deal_posting_intent"
     }
 }

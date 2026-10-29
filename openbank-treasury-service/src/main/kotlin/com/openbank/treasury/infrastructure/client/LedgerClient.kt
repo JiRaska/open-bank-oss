@@ -12,6 +12,7 @@ import com.openbank.treasury.application.port.out.PostedJournal
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.ResolvedAccount
 import com.openbank.treasury.domain.model.Side
+import com.openbank.treasury.infrastructure.close.TreasuryCloseJobs
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -141,16 +142,14 @@ class LedgerPostingAdapter @Inject constructor(
     }
 
     /**
-     * #13883: a 4xx answer means the ledger refused the request and created no journal, EXCEPT 408
-     * (timeout), 409 (a conflict, possibly on the key itself: a journal may exist), 425 and 429
-     * (retry later). Anything else, including no answer at all, is not a definitive refusal.
+     * #13883 (#14220 review): definitive ONLY for the ledger's coded `409 ACCOUNTING_DAY_CLOSED`, which
+     * `LedgerService.postJournalInternal` raises after its idempotency replay check found no journal
+     * under the key. Every other answer is unknown: a bare status (400/401/403/404, a gateway's 4xx)
+     * says nothing about the key, and the ledger's other post refusals (GL validation 422, frozen or
+     * closed period 409) carry no error code to tell them from a proxy's. The journal API has no
+     * lookup by idempotency key, so absence cannot be confirmed any other way.
      */
-    override fun isDefinitiveRefusal(failure: Throwable): Boolean {
-        val status = generateSequence(failure) { it.cause }.take(MAX_CAUSE_DEPTH)
-            .filterIsInstance<jakarta.ws.rs.WebApplicationException>()
-            .firstOrNull()?.response?.status ?: return false
-        return status in CLIENT_ERRORS && status !in RETRYABLE_CLIENT_ERRORS
-    }
+    override fun isDefinitiveRefusal(failure: Throwable): Boolean = TreasuryCloseJobs.isClosedDayRejection(failure)
 
     /**
      * Where each leg landed, from the ledger's own answer (on an idempotent replay: the ORIGINAL
@@ -168,11 +167,5 @@ class LedgerPostingAdapter @Inject constructor(
     companion object {
         /** Stable actor id the ledger records for treasury postings (the human approver is on the deal). */
         val SYSTEM_ACTOR: UUID = UUID.nameUUIDFromBytes("openbank-treasury-service".toByteArray())
-
-        private const val MAX_CAUSE_DEPTH = 8
-        private val CLIENT_ERRORS = 400..499
-
-        /** 408 Request Timeout, 409 Conflict, 425 Too Early, 429 Too Many Requests. */
-        private val RETRYABLE_CLIENT_ERRORS = setOf(408, 409, 425, 429)
     }
 }

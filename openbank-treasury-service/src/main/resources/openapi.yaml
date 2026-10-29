@@ -55,7 +55,7 @@ info:
   #         /portfolio/statements (custodian semt.002; a correction supersedes, the prior version is
   #         kept), GET /portfolio/statements?date= (the version trail) and GET
   #         /portfolio/period-end?date= (tax-reporting's PSP 34-12 PS source; 409 when no statement).
-  version: 1.22.0
+  version: 1.23.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -403,6 +403,41 @@ paths:
         '409': { $ref: '#/components/responses/InvalidState' }
         '422':
           description: FOUR_EYES_VIOLATION (the creator may not reverse their own deal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/treasury/deals/{id}/posting-intent/close:
+    post:
+      tags: [Treasury]
+      operationId: closePostingIntent
+      summary: Close a deal's open posting intent that cannot complete (operator, audited)
+      description: >-
+        #13883. Settle, mature and reverse record a posting intent before posting to the ledger; an
+        OPEN intent holds its value day's close report. When it cannot complete, an operator closes
+        it with a reason (recorded with who closed it), which releases the hold. Same authority as
+        reversing the deal, and a person only.
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClosePostingIntentRequest'
+      responses:
+        '204':
+          description: The intent was closed
+        '400':
+          description: Missing or invalid event or reason
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: No OPEN posting intent for that event on the deal
           content:
             application/json:
               schema:
@@ -1807,6 +1842,12 @@ components:
           type: [string, 'null']
           maxLength: 200
           description: The counterparty's confirmation reference, recorded on the deal's timeline.
+    ClosePostingIntentRequest:
+      type: object
+      required: [event, reason]
+      properties:
+        event: { type: string, enum: [SETTLED, MATURED, REVERSED] }
+        reason: { type: string, minLength: 1 }
     ReasonRequest:
       type: object
       required: [reason]

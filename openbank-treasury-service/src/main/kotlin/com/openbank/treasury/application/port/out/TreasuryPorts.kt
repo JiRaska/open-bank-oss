@@ -16,6 +16,7 @@ import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ResolvedAccount
 import io.smallrye.mutiny.Uni
 import java.math.BigDecimal
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -136,16 +137,19 @@ interface LedgerPostingPort {
     suspend fun post(spec: JournalSpec, valueDate: LocalDate, description: String): PostedJournal
 
     /**
-     * True only when [failure] (thrown by [post]) is the ledger DEFINITIVELY refusing the post, so no
-     * journal exists under the key (#13883): the posting intent is then closed REFUSED instead of
-     * holding its day. Anything unknown (timeout, 5xx, a conflict on the key) is false: the ledger
-     * may hold the journal, and the intent stays open for the reconciler.
+     * True only when [failure] (thrown by [post]) is an EXPLICIT ledger business refusal raised after
+     * the ledger's idempotency replay check found no journal under the key (#13883). Anything else
+     * (no answer, 5xx, 400/401/403/404, a 4xx without a known ledger error code) is unknown and
+     * false: the ledger may hold the journal, and the intent stays open.
      */
     fun isDefinitiveRefusal(failure: Throwable): Boolean = false
 }
 
 /** The lifecycle command a posting intent belongs to (#13883). */
 enum class PostingIntentAction { SETTLE, MATURE, REVERSE }
+
+/** OPEN = decided and not applied; COMPLETED = applied with its state change; REFUSED = closed with no journal. */
+enum class PostingIntentStatus { OPEN, COMPLETED, REFUSED }
 
 /**
  * A ledger post treasury decided to make (#13883), written BEFORE the ledger is contacted and keyed
@@ -163,35 +167,64 @@ data class PostingIntent(
     val createdAt: Instant,
     val attempts: Int = 0,
     val lastError: String? = null,
+    val status: PostingIntentStatus = PostingIntentStatus.OPEN,
+    /**
+     * True when THIS call created the intent or reopened a REFUSED one, i.e. no earlier attempt of it
+     * can have reached the ledger. Only a fresh intent may be closed REFUSED on a ledger refusal.
+     */
+    val fresh: Boolean = false,
 )
+
+/** OPEN intents at a glance, for the gauges: how many, and since when the oldest has waited. */
+data class OpenIntentSummary(val count: Int, val oldestCreatedAt: Instant?)
 
 /**
  * Posting intents (#13883). An intent is COMPLETED by [DealRepository.save] in the transaction that
  * stores the journal and the state change; while it is OPEN it holds its value day's close report.
  */
+@Suppress("TooManyFunctions")
 interface PostingIntentPort {
     /**
-     * Records [intent] if its key has none yet, or reopens one closed REFUSED; returns the stored
-     * intent. Its value day is the FIRST attempt's, so a retry on a later day posts the same journal.
+     * Records [intent] if its key has none yet, or reopens one closed REFUSED as a new attempt by
+     * this caller (its value day included: a refused post left no journal); returns the stored intent
+     * with [PostingIntent.fresh] set. An OPEN or COMPLETED intent is returned as stored and NOT fresh:
+     * its value day is the first attempt's, so a retry on a later day asks for the same journal.
      */
     suspend fun open(intent: PostingIntent): PostingIntent
 
-    /** The ledger definitively refused the post: closes the intent, which no longer holds its day. */
+    /** The ledger's coded refusal of a fresh intent: closes it, and it no longer holds its day. */
     suspend fun refuse(key: String, reason: String)
 
-    /** A reconciliation attempt failed: counted, with its cause; the intent stays open. */
+    /** A reconciliation attempt failed or was escalated: counted with its cause, claim released, still OPEN. */
     suspend fun failed(key: String, error: String)
 
-    /** Every OPEN intent created before [cutoff], oldest first. */
-    suspend fun openBefore(cutoff: Instant): List<PostingIntent>
+    /**
+     * Claims OPEN intents created before [cutoff] that no live claim holds, oldest first, at most
+     * [limit], leasing them for [lease] (`FOR UPDATE SKIP LOCKED`): two reconcilers never take one row.
+     */
+    suspend fun claimOpen(cutoff: Instant, lease: Duration, limit: Int): List<PostingIntent>
+
+    /** OPEN intents of one deal. */
+    suspend fun openFor(dealId: UUID): List<PostingIntent>
+
+    suspend fun summary(): OpenIntentSummary
+
+    /**
+     * An operator closes an OPEN intent that cannot complete: REFUSED, with who and why recorded.
+     * False when no OPEN intent has [key].
+     */
+    suspend fun closeByOperator(key: String, actor: Actor, reason: String): Boolean
 
     companion object {
         /** No intent store: the pre-#13883 behaviour. Unit tests of the lifecycle alone only. */
         val NONE = object : PostingIntentPort {
-            override suspend fun open(intent: PostingIntent) = intent
+            override suspend fun open(intent: PostingIntent) = intent.copy(fresh = true)
             override suspend fun refuse(key: String, reason: String) = Unit
             override suspend fun failed(key: String, error: String) = Unit
-            override suspend fun openBefore(cutoff: Instant) = emptyList<PostingIntent>()
+            override suspend fun claimOpen(cutoff: Instant, lease: Duration, limit: Int) = emptyList<PostingIntent>()
+            override suspend fun openFor(dealId: UUID) = emptyList<PostingIntent>()
+            override suspend fun summary() = OpenIntentSummary(0, null)
+            override suspend fun closeByOperator(key: String, actor: Actor, reason: String) = false
         }
     }
 }

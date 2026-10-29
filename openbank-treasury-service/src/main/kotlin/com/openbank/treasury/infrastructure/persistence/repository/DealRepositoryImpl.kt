@@ -618,7 +618,8 @@ class DealRepositoryImpl(
         val LEGS_TYPE = object : TypeReference<List<LegSpec>>() {}
 
         const val COMPLETE_INTENT_SQL =
-            "UPDATE deal_posting_intent SET status = 'COMPLETED', closed_at = ?1, last_error = NULL " +
+            "UPDATE deal_posting_intent SET status = 'COMPLETED', closed_at = ?1, last_error = NULL, " +
+                "claim_token = NULL, claimed_until = NULL " +
                 "WHERE idempotency_key = ?2 AND status <> 'COMPLETED'"
     }
 }

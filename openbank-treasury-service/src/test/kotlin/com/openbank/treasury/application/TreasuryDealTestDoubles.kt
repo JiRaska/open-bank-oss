@@ -9,15 +9,19 @@ import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
+import com.openbank.treasury.application.port.out.OpenIntentSummary
 import com.openbank.treasury.application.port.out.PostedJournal
 import com.openbank.treasury.application.port.out.PostingIntent
 import com.openbank.treasury.application.port.out.PostingIntentPort
+import com.openbank.treasury.application.port.out.PostingIntentStatus
+import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.PostingLine
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.ResolvedAccount
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -78,16 +82,22 @@ internal class InMemoryIntents : PostingIntentPort {
     enum class Status { OPEN, COMPLETED, REFUSED }
 
     val rows = linkedMapOf<String, Pair<PostingIntent, Status>>()
+    val closedBy = mutableMapOf<String, String>()
 
     fun status(key: String) = rows[key]?.second
 
+    private fun stored(key: String) = rows.getValue(key).let { (i, st) ->
+        i.copy(status = PostingIntentStatus.valueOf(st.name))
+    }
+
     override suspend fun open(intent: PostingIntent): PostingIntent {
         val existing = rows[intent.idempotencyKey]
+        // As the real store: a new or REFUSED key takes this attempt whole (fresh); OPEN/COMPLETED is kept.
         if (existing == null || existing.second == Status.REFUSED) {
-            val kept = existing?.first?.valueDate ?: intent.valueDate
-            rows[intent.idempotencyKey] = intent.copy(valueDate = kept) to Status.OPEN
+            rows[intent.idempotencyKey] = intent.copy(fresh = false) to Status.OPEN
+            return stored(intent.idempotencyKey).copy(fresh = true)
         }
-        return rows.getValue(intent.idempotencyKey).first
+        return stored(intent.idempotencyKey)
     }
 
     override suspend fun refuse(key: String, reason: String) {
@@ -103,8 +113,22 @@ internal class InMemoryIntents : PostingIntentPort {
         }
     }
 
-    override suspend fun openBefore(cutoff: Instant) =
-        rows.values.filter { it.second == Status.OPEN && it.first.createdAt.isBefore(cutoff) }.map { it.first }
+    override suspend fun claimOpen(cutoff: Instant, lease: Duration, limit: Int) = rows.values.filter {
+        it.second == Status.OPEN && it.first.createdAt.isBefore(cutoff)
+    }.take(limit).map { it.first }
+
+    override suspend fun openFor(dealId: UUID) =
+        rows.values.filter { it.second == Status.OPEN && it.first.dealId == dealId }.map { it.first }
+
+    override suspend fun summary() = rows.values.filter { it.second == Status.OPEN }
+        .let { open -> OpenIntentSummary(open.size, open.minOfOrNull { it.first.createdAt }) }
+
+    override suspend fun closeByOperator(key: String, actor: Actor, reason: String): Boolean {
+        val row = rows[key]?.takeIf { it.second == Status.OPEN } ?: return false
+        rows[key] = row.first.copy(lastError = "closed by operator: $reason") to Status.REFUSED
+        closedBy[key] = actor.id
+        return true
+    }
 
     fun complete(key: String) {
         rows[key]?.let { rows[key] = it.first to Status.COMPLETED }

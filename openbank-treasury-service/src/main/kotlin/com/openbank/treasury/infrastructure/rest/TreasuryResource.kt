@@ -16,6 +16,7 @@ import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxTerms
+import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
@@ -394,6 +395,33 @@ class TreasuryResource {
         deals.reverse(id, requireNotNull(request.reason) { "reason is required" }, actor(), requireKey(key))
             .let { view(id) }
 
+    /**
+     * #13883: an operator closes the OPEN posting intent of a deal's settlement, maturity or reversal
+     * that cannot complete, releasing its day's close hold. Same authority as reversing the deal; a
+     * person only (the domain refuses any other actor); who and why are recorded on the intent.
+     * 404 when no OPEN intent exists for that event.
+     */
+    @POST
+    @Path("/deals/{id}/posting-intent/close")
+    @RolesAllowed(APPROVER)
+    @Operation(summary = "Close a deal's open posting intent that cannot complete (operator, audited)")
+    @Authorize(action = "treasury.deal.reverse", resource = "#id")
+    suspend fun closePostingIntent(@PathParam("id") id: UUID, request: ClosePostingIntentRequest?): Response {
+        requireNotNull(request) { "a request body is required" }
+        val event = requireNotNull(request.event) { "event is required" }
+        require(event in CLOSABLE_EVENTS) { "event must be one of $CLOSABLE_EVENTS" }
+        val reason = requireNotNull(request.reason) { "reason is required" }
+        val closed = deals.closePostingIntent(id, PostingEvent.valueOf(event), reason, actor())
+        return if (closed) {
+            Response.noContent().build()
+        } else {
+            Response.status(Response.Status.NOT_FOUND)
+                .entity(mapOf("error" to "NOT_FOUND", "message" to "no open posting intent for $event on deal $id"))
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+        }
+    }
+
     @GET
     @Path("/counterparties")
     @Operation(summary = "Counterparty limits with current exposure and headroom per currency")
@@ -445,3 +473,6 @@ const val BACK_OFFICE = "ROLE_TREASURY_BACK_OFFICE"
  * term author (the domain), never an AI agent, and no other treasury role releases.
  */
 const val PAYMENT_RELEASER = "ROLE_TREASURY_PAYMENT_RELEASER"
+
+/** The lifecycle events that record a posting intent (#13883). */
+private val CLOSABLE_EVENTS = setOf("SETTLED", "MATURED", "REVERSED")

@@ -30,6 +30,7 @@ import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.PostingIntent
 import com.openbank.treasury.application.port.out.PostingIntentAction
 import com.openbank.treasury.application.port.out.PostingIntentPort
+import com.openbank.treasury.application.port.out.PostingIntentStatus
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.CashFlowGenerated
@@ -56,8 +57,10 @@ import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
 import java.math.BigDecimal
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -104,6 +107,13 @@ class TreasuryDealService(
     private val lateJournals: LateJournalMeter = LateJournalMeter.NONE,
     /** #13883: posting intents. [PostingIntentPort.NONE] only in unit tests of the lifecycle alone. */
     private val intents: PostingIntentPort = PostingIntentPort.NONE,
+    /**
+     * #13883 review: the reconciler resumes a command as its stored actor only while that is still
+     * the actor's own recent decision, created on the same Prague business day and no older than
+     * this. Anything older is escalated to an operator, who re-issues the command through the API
+     * (authorised afresh) or closes the intent.
+     */
+    private val maxResumeAge: Duration = Duration.ofHours(DEFAULT_MAX_RESUME_HOURS),
 ) : TreasuryDealUseCase {
 
     private suspend fun policy(): ProductLimitPolicy = mandate?.invoke() ?: productLimits
@@ -566,6 +576,11 @@ class TreasuryDealService(
         deadline: Instant = Instant.MAX,
     ): AccrualProgress {
         if (!deal.product.legacy) return AccrualProgress(0, true)
+        // #13883 review: a deal with an open settle/mature/reverse intent is not accrued further. A
+        // reversal resumed later re-posts its key and the ledger keeps the ORIGINAL journal, which
+        // offsets only the accruals that existed when it was decided; a newer accrual would be left
+        // unreversed. The open intent holds the day; the next pass after it completes catches up.
+        if (intents.openFor(deal.id).isNotEmpty()) return AccrualProgress(0, true)
         var day = (lastAccrued(deal) ?: deal.valueDate).plusDays(1)
         var posted = 0
         while (!day.isAfter(through)) {
@@ -655,9 +670,11 @@ class TreasuryDealService(
     /**
      * #13883: records the posting intent BEFORE the ledger is contacted, then posts under its key. The
      * intent's value day is the first attempt's, so a retry on a later day (a reversal is valued on
-     * the day it is made) asks for the very journal the first attempt may have created. A definitive
-     * refusal by the ledger closes the intent REFUSED (no journal exists); any other failure leaves it
-     * open, because the ledger may hold the journal. [DealRepository.save] completes it.
+     * the day it is made) asks for the very journal the first attempt may have created. Only an
+     * explicit ledger business refusal of a FRESH intent (no earlier attempt can have reached the
+     * ledger) closes it REFUSED; any other failure, and every failure of a resumed intent (the
+     * reconciler, a client retry), leaves it open, because the ledger may hold the journal.
+     * [DealRepository.save] completes it.
      */
     @Suppress("TooGenericExceptionCaught") // classified, recorded and rethrown unchanged
     private suspend fun postIntended(
@@ -679,18 +696,29 @@ class TreasuryDealService(
                 createdAt = clock.instant(),
             ),
         )
+        if (intent.status == PostingIntentStatus.COMPLETED) {
+            // Applied already: answer with the recorded journal, never contact the ledger again.
+            return deals.journals(spec.dealId).firstOrNull { it.idempotencyKey == spec.idempotencyKey }
+                ?: error("posting intent ${spec.idempotencyKey} is COMPLETED but its journal is not recorded")
+        }
         return try {
             post(spec, intent.valueDate, description)
         } catch (e: Exception) {
-            if (ledger.isDefinitiveRefusal(e)) intents.refuse(spec.idempotencyKey, describe(e))
+            if (intent.fresh && ledger.isDefinitiveRefusal(e)) intents.refuse(spec.idempotencyKey, describe(e))
             throw e
         }
     }
 
     override suspend fun reconcilePostingIntents(olderThan: Instant): IntentReconciliation {
         var completed = 0
+        var escalated = 0
         val failures = mutableListOf<Throwable>()
-        for (intent in intents.openBefore(olderThan)) {
+        for (intent in intents.claimOpen(olderThan, CLAIM_LEASE, CLAIM_BATCH)) {
+            if (!resumable(intent)) {
+                escalated++
+                intents.failed(intent.idempotencyKey, ESCALATED)
+                continue
+            }
             runCatching { resume(intent) }
                 .onSuccess { completed++ }
                 .onFailure { e ->
@@ -699,7 +727,26 @@ class TreasuryDealService(
                     intents.failed(intent.idempotencyKey, describe(e))
                 }
         }
-        return IntentReconciliation(completed, failures)
+        return IntentReconciliation(completed, failures, escalated)
+    }
+
+    /** Same Prague business day as the decision, and within [maxResumeAge] of it. */
+    private fun resumable(intent: PostingIntent): Boolean {
+        val now = clock.instant()
+        val bank = AccountingClock.bank(clock)
+        val createdDay = AccountingClock.bank(Clock.fixed(intent.createdAt, ZoneOffset.UTC)).today()
+        return createdDay == bank.today() && !intent.createdAt.plus(maxResumeAge).isBefore(now)
+    }
+
+    override suspend fun closePostingIntent(dealId: UUID, event: PostingEvent, reason: String, actor: Actor): Boolean {
+        require(reason.isNotBlank()) { "a reason is required to close a posting intent" }
+        if (actor.type != com.openbank.treasury.domain.model.ActorType.HUMAN) {
+            throw com.openbank.treasury.domain.model.ActorNotPermittedException(
+                "only a person may close a posting intent",
+            )
+        }
+        val intent = intents.openFor(dealId).firstOrNull { it.event == event } ?: return false
+        return intents.closeByOperator(intent.idempotencyKey, actor, reason)
     }
 
     /**
@@ -760,6 +807,11 @@ class TreasuryDealService(
         const val NOT_DELIVERED = "product %s is not delivered yet (ADR-0344 delivery phases)"
         const val MAX_KEY_LENGTH = 128
         const val MAX_ERROR_LENGTH = 1000
+        const val DEFAULT_MAX_RESUME_HOURS = 4L
+        const val CLAIM_BATCH = 100
+        val CLAIM_LEASE: Duration = Duration.ofMinutes(10)
+        const val ESCALATED = "escalated: too old to resume as the stored actor; " +
+            "re-issue the command through the API or close the intent"
 
         /** Cash has moved: what an ACTUAL position counts. */
         val ACTUAL_STATES = setOf(DealState.SETTLED, DealState.MATURED)

@@ -32,6 +32,9 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.Executors
 
 /**
  * #13883 on real Postgres: the flow dies between the ledger's commit and treasury's local commit
@@ -131,6 +134,109 @@ class PostingIntentReconcileIT {
         assertThat(intentXmin(key)).isEqualTo(dealXmin())
     }
 
+    @Test
+    @Order(5)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `5 - a dealer drafts two more placements`() {
+        raceId = draftAndSubmit("4322.00")
+        closeId = draftAndSubmit("4323.00")
+    }
+
+    @Test
+    @Order(6)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `6 - both lose the ledger's answer after commit`() {
+        for (id in listOf(raceId, closeId)) {
+            action(id, "approve").then().statusCode(200)
+            action(id, "confirm").then().statusCode(200)
+            ledger.loseNextResponse = true
+            action(id, "settle").then().statusCode(500)
+            assertThat(intent("treasury:$id:settled").first).isEqualTo("OPEN")
+        }
+    }
+
+    @Test
+    @Order(9)
+    fun `9 - two reconcilers racing resume the intent exactly once`() {
+        val key = "treasury:$raceId:settled"
+        val barrier = CyclicBarrier(2)
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            val runs = (1..2).map {
+                pool.submit(
+                    Callable {
+                        barrier.await()
+                        reconcile(Instant.now().plusSeconds(1))
+                    },
+                )
+            }.map { it.get() }
+            assertThat(state(raceId)).isEqualTo("SETTLED")
+            assertThat(intent(key).first).isEqualTo("COMPLETED")
+            assertThat(ledger.calls.filter { it == key })
+                .describedAs("the settle call plus ONE resume: the second reconciler skipped the claimed row")
+                .hasSize(2)
+            assertThat(runs.sumOf { it.failures.size }).describedAs("no false error from the loser").isZero()
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    @Order(7)
+    @TestSecurity(user = "agent:treasury-drafter", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `7 - an AI agent cannot close a posting intent`() {
+        close(closeId, "SETTLED", "agent tries").then().statusCode(403)
+        assertThat(intent("treasury:$closeId:settled").first).isEqualTo("OPEN")
+    }
+
+    @Test
+    @Order(8)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `8 - an approver closes it with a reason, recorded, and a second close finds nothing`() {
+        close(closeId, "SETTLED", "").then().statusCode(400)
+        close(closeId, "SETTLED", "ledger confirmed to hold no journal").then().statusCode(204)
+        val row = closedRow("treasury:$closeId:settled")
+        assertThat(row.first).isEqualTo("REFUSED")
+        assertThat(row.second).isEqualTo("adam.approver")
+        close(closeId, "SETTLED", "again").then().statusCode(404)
+    }
+
+    private fun close(id: String, event: String, reason: String) = given()
+        .contentType("application/json")
+        .body("""{"event":"$event","reason":"$reason"}""")
+        .`when`().post("/api/v1/treasury/deals/$id/posting-intent/close")
+
+    private fun draftAndSubmit(principal: String): String {
+        val id: String = given().contentType("application/json").header("Idempotency-Key", UUID.randomUUID().toString())
+            .body(
+                """{"product":"MM_PLACEMENT","counterpartyId":"SIMBK-A","currency":"CZK","principal":$principal,
+                "rate":4.25,"valueDate":"$today","maturityDate":"${today.plusDays(30)}"}""",
+            )
+            .`when`().post("/api/v1/treasury/deals").then().statusCode(201).extract().path("dealId")
+        action(id, "submit").then().statusCode(200)
+        return id
+    }
+
+    private fun state(id: String): String = jdbc { c ->
+        c.prepareStatement("select state from deals where deal_id = ?").use { ps ->
+            ps.setObject(1, UUID.fromString(id))
+            ps.executeQuery().use { rs ->
+                rs.next()
+                rs.getString(1)
+            }
+        }
+    }
+
+    private fun closedRow(key: String): Pair<String, String?> = jdbc { c ->
+        c.prepareStatement("select status, closed_by from deal_posting_intent where idempotency_key = ?").use { ps ->
+            ps.setString(1, key)
+            ps.executeQuery().use { rs ->
+                rs.next()
+                rs.getString(1) to rs.getString(2)
+            }
+        }
+    }
+
     private fun reconcile(olderThan: Instant): IntentReconciliation =
         onContext { deals.reconcilePostingIntents(olderThan) }
 
@@ -189,5 +295,7 @@ class PostingIntentReconcileIT {
 
     companion object {
         lateinit var dealId: String
+        lateinit var raceId: String
+        lateinit var closeId: String
     }
 }

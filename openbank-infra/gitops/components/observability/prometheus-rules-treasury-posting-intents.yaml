@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+# #13883: treasury posting intents. settle/mature/reverse record an intent before posting a journal to
+# the ledger; an OPEN intent is a journal the ledger may hold that treasury has not applied, and it
+# holds its value day's close report. The reconciler completes intents within its resume window; one
+# it escalates (too old, an earlier business day) or cannot complete stays OPEN until an operator
+# re-issues the command or closes it (POST /api/v1/treasury/deals/{id}/posting-intent/close). The
+# pod is Ready and the reconciler tick succeeds meanwhile, so these gauges are the only signal.
+# Picked up by the Prometheus operator automatically, same as every PrometheusRule here.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-treasury-posting-intent-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.treasury.posting-intents
+      rules:
+        - alert: TreasuryPostingIntentStuck
+          # Grace (2m) + three 5-minute reconciler ticks: a crash-recovered intent completes well inside it.
+          expr: max(openbank_treasury_posting_intents_oldest_age_seconds) > 1200
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "A treasury posting intent has stayed open for over 20 minutes"
+            description: >-
+              treasury-service decided a settle, mature or reverse posting that has not been applied.
+              The ledger may hold its journal and treasury's day-close report for the value day is held.
+              Read last_error on the open deal_posting_intent row: re-issue the deal command through
+              the API (it re-posts under the same key and completes the intent), or close the intent
+              with a reason once the ledger is confirmed to hold no journal under its key.
+        - alert: TreasuryPostingIntentEvidenceUnavailable
+          expr: min(openbank_treasury_posting_intents_open) < 0
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Treasury posting intent evidence is unavailable"
+            description: >-
+              treasury-service cannot count its open posting intents. Check its database; an absent
+              count cannot establish that every decided posting was applied.
