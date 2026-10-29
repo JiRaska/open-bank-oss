@@ -6,6 +6,7 @@ package com.openbank.treasury.application.port.out
 
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
+import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CurveSetView
 import com.openbank.treasury.domain.model.Deal
@@ -133,6 +134,66 @@ interface LedgerPostingPort {
      * legs were ORIGINALLY resolved to.
      */
     suspend fun post(spec: JournalSpec, valueDate: LocalDate, description: String): PostedJournal
+
+    /**
+     * True only when [failure] (thrown by [post]) is the ledger DEFINITIVELY refusing the post, so no
+     * journal exists under the key (#13883): the posting intent is then closed REFUSED instead of
+     * holding its day. Anything unknown (timeout, 5xx, a conflict on the key) is false: the ledger
+     * may hold the journal, and the intent stays open for the reconciler.
+     */
+    fun isDefinitiveRefusal(failure: Throwable): Boolean = false
+}
+
+/** The lifecycle command a posting intent belongs to (#13883). */
+enum class PostingIntentAction { SETTLE, MATURE, REVERSE }
+
+/**
+ * A ledger post treasury decided to make (#13883), written BEFORE the ledger is contacted and keyed
+ * by the journal's idempotency key. It carries what the reconciler needs to re-run the command.
+ */
+data class PostingIntent(
+    val idempotencyKey: String,
+    val dealId: UUID,
+    val event: PostingEvent,
+    val action: PostingIntentAction,
+    val valueDate: LocalDate,
+    val actor: Actor,
+    val reason: String? = null,
+    val commandKey: String? = null,
+    val createdAt: Instant,
+    val attempts: Int = 0,
+    val lastError: String? = null,
+)
+
+/**
+ * Posting intents (#13883). An intent is COMPLETED by [DealRepository.save] in the transaction that
+ * stores the journal and the state change; while it is OPEN it holds its value day's close report.
+ */
+interface PostingIntentPort {
+    /**
+     * Records [intent] if its key has none yet, or reopens one closed REFUSED; returns the stored
+     * intent. Its value day is the FIRST attempt's, so a retry on a later day posts the same journal.
+     */
+    suspend fun open(intent: PostingIntent): PostingIntent
+
+    /** The ledger definitively refused the post: closes the intent, which no longer holds its day. */
+    suspend fun refuse(key: String, reason: String)
+
+    /** A reconciliation attempt failed: counted, with its cause; the intent stays open. */
+    suspend fun failed(key: String, error: String)
+
+    /** Every OPEN intent created before [cutoff], oldest first. */
+    suspend fun openBefore(cutoff: Instant): List<PostingIntent>
+
+    companion object {
+        /** No intent store: the pre-#13883 behaviour. Unit tests of the lifecycle alone only. */
+        val NONE = object : PostingIntentPort {
+            override suspend fun open(intent: PostingIntent) = intent
+            override suspend fun refuse(key: String, reason: String) = Unit
+            override suspend fun failed(key: String, error: String) = Unit
+            override suspend fun openBefore(cutoff: Instant) = emptyList<PostingIntent>()
+        }
+    }
 }
 
 /**

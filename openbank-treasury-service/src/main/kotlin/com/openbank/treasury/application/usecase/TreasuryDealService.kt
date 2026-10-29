@@ -12,6 +12,7 @@ import com.openbank.treasury.application.port.`in`.CounterpartyExposure
 import com.openbank.treasury.application.port.`in`.CurrencyPosition
 import com.openbank.treasury.application.port.`in`.DealView
 import com.openbank.treasury.application.port.`in`.DraftDealCommand
+import com.openbank.treasury.application.port.`in`.IntentReconciliation
 import com.openbank.treasury.application.port.`in`.PositionBasis
 import com.openbank.treasury.application.port.`in`.PositionReport
 import com.openbank.treasury.application.port.`in`.SimulatedMarketRun
@@ -26,6 +27,9 @@ import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LateJournalMeter
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
+import com.openbank.treasury.application.port.out.PostingIntent
+import com.openbank.treasury.application.port.out.PostingIntentAction
+import com.openbank.treasury.application.port.out.PostingIntentPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.CashFlowGenerated
@@ -57,11 +61,13 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * Deal lifecycle orchestration. Posting order is deliberate: the ledger journal is posted FIRST
- * (idempotent on `treasury:<dealId>:<event>`), and only then are the state change, the journal
- * reference and the outbox event committed together. A crash between the two leaves the deal in
- * its old state with the journal already in the ledger; the retry re-posts under the same key,
- * the ledger returns the ORIGINAL entry, and the state change commits — never a double posting.
+ * Deal lifecycle orchestration. Posting order is deliberate and intent-first (#13883): settle,
+ * mature and reverse first record a posting INTENT (keyed `treasury:<dealId>:<event>`, the journal's
+ * idempotency key), then post the journal, and only then commit the state change, the journal
+ * reference, the outbox event and the intent's completion together. A crash between the ledger's
+ * answer and that commit leaves an OPEN intent: it holds its value day's close report, and
+ * [reconcilePostingIntents] re-runs the command under the same key — the ledger returns the
+ * ORIGINAL entry and the state change commits — never a double posting.
  * Nothing posts before BOOKED: only settle / mature / reverse-from-SETTLED call the ledger.
  *
  * [confirmationRequired] (`openbank.treasury.confirmation.required`, default true, ADR-0315 D2):
@@ -96,6 +102,8 @@ class TreasuryDealService(
     private val mandate: (suspend () -> ProductLimitPolicy)? = null,
     /** ADR-0342: counts first-recorded journals valued on a day that has already ended. */
     private val lateJournals: LateJournalMeter = LateJournalMeter.NONE,
+    /** #13883: posting intents. [PostingIntentPort.NONE] only in unit tests of the lifecycle alone. */
+    private val intents: PostingIntentPort = PostingIntentPort.NONE,
 ) : TreasuryDealUseCase {
 
     private suspend fun policy(): ProductLimitPolicy = mandate?.invoke() ?: productLimits
@@ -312,7 +320,12 @@ class TreasuryDealService(
         val deal = load(dealId)
         val settled = deal.settle(actor, bankToday(), clock.instant(), confirmationRequired)
         check(settled.product.legacy) { NOT_DELIVERED.format(settled.product) }
-        val ref = post(PostingRules.settlement(settled), settled.valueDate, "treasury ${settled.product} settlement")
+        val ref = postIntended(
+            PostingRules.settlement(settled),
+            settled.valueDate,
+            "treasury ${settled.product} settlement",
+            Intended(PostingIntentAction.SETTLE, actor, key),
+        )
         val event = DealEvent(
             DealSettled.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -342,10 +355,11 @@ class TreasuryDealService(
         // accrued account instead of booking the whole interest to income in one amount.
         accrueThrough(deal, deal.maturityDate)
         check(matured.product.legacy) { NOT_DELIVERED.format(matured.product) }
-        val ref = post(
+        val ref = postIntended(
             PostingRules.maturity(matured, accruedSoFar(deal)),
             matured.maturityDate,
             "treasury ${matured.product} maturity",
+            Intended(PostingIntentAction.MATURE, actor, key),
         )
         val event = DealEvent(
             DealMatured.EVENT_TYPE,
@@ -376,10 +390,11 @@ class TreasuryDealService(
         val accrued = if (deal.state == DealState.SETTLED) accruedSoFar(deal) else BigDecimal.ZERO
         val ref = PostingRules.reversal(reversed, deal.state, accrued)
             ?.let {
-                post(
+                postIntended(
                     pinToPostedAccounts(deal, it, deals.journals(deal.id)),
                     bankToday(),
                     "treasury ${deal.product} reversal",
+                    Intended(PostingIntentAction.REVERSE, actor, key, reason),
                 )
             }
         val event = DealEvent(
@@ -629,6 +644,86 @@ class TreasuryDealService(
         return ref
     }
 
+    /** The command a lifecycle post belongs to, as its posting intent records it. */
+    private data class Intended(
+        val action: PostingIntentAction,
+        val actor: Actor,
+        val commandKey: String?,
+        val reason: String? = null,
+    )
+
+    /**
+     * #13883: records the posting intent BEFORE the ledger is contacted, then posts under its key. The
+     * intent's value day is the first attempt's, so a retry on a later day (a reversal is valued on
+     * the day it is made) asks for the very journal the first attempt may have created. A definitive
+     * refusal by the ledger closes the intent REFUSED (no journal exists); any other failure leaves it
+     * open, because the ledger may hold the journal. [DealRepository.save] completes it.
+     */
+    @Suppress("TooGenericExceptionCaught") // classified, recorded and rethrown unchanged
+    private suspend fun postIntended(
+        spec: JournalSpec,
+        valueDate: LocalDate,
+        description: String,
+        intended: Intended,
+    ): LedgerJournalRef {
+        val intent = intents.open(
+            PostingIntent(
+                idempotencyKey = spec.idempotencyKey,
+                dealId = spec.dealId,
+                event = spec.event,
+                action = intended.action,
+                valueDate = valueDate,
+                actor = intended.actor,
+                reason = intended.reason,
+                commandKey = intended.commandKey,
+                createdAt = clock.instant(),
+            ),
+        )
+        return try {
+            post(spec, intent.valueDate, description)
+        } catch (e: Exception) {
+            if (ledger.isDefinitiveRefusal(e)) intents.refuse(spec.idempotencyKey, describe(e))
+            throw e
+        }
+    }
+
+    override suspend fun reconcilePostingIntents(olderThan: Instant): IntentReconciliation {
+        var completed = 0
+        val failures = mutableListOf<Throwable>()
+        for (intent in intents.openBefore(olderThan)) {
+            runCatching { resume(intent) }
+                .onSuccess { completed++ }
+                .onFailure { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    failures += e
+                    intents.failed(intent.idempotencyKey, describe(e))
+                }
+        }
+        return IntentReconciliation(completed, failures)
+    }
+
+    /**
+     * Re-runs the intent's command as its original actor and client key. The domain transition is
+     * evaluated afresh: if the deal can no longer take it, the command fails, the failure is recorded
+     * and the intent keeps holding its day for an operator, never closed on a guess.
+     */
+    private suspend fun resume(intent: PostingIntent): Deal = when (intent.action) {
+        PostingIntentAction.SETTLE -> settle(intent.dealId, intent.actor, intent.commandKey)
+        PostingIntentAction.MATURE -> mature(intent.dealId, intent.actor, intent.commandKey)
+        PostingIntentAction.REVERSE ->
+            reverse(
+                intent.dealId,
+                requireNotNull(intent.reason) {
+                    "reversal intent without a reason"
+                },
+                intent.actor,
+                intent.commandKey,
+            )
+    }
+
+    private fun describe(e: Throwable): String =
+        "${e.javaClass.simpleName}: ${e.message.orEmpty()}".take(MAX_ERROR_LENGTH)
+
     private suspend fun limitCheck(deal: Deal): LimitCheck {
         val cp = counterparties.findById(deal.counterpartyId) ?: throw UnknownCounterpartyException(deal.counterpartyId)
         val consumes = deal.product.isAsset || deal.product == ProductType.FX_SPOT
@@ -664,6 +759,7 @@ class TreasuryDealService(
     private companion object {
         const val NOT_DELIVERED = "product %s is not delivered yet (ADR-0344 delivery phases)"
         const val MAX_KEY_LENGTH = 128
+        const val MAX_ERROR_LENGTH = 1000
 
         /** Cash has moved: what an ACTUAL position counts. */
         val ACTUAL_STATES = setOf(DealState.SETTLED, DealState.MATURED)

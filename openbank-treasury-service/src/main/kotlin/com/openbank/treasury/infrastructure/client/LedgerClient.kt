@@ -141,6 +141,18 @@ class LedgerPostingAdapter @Inject constructor(
     }
 
     /**
+     * #13883: a 4xx answer means the ledger refused the request and created no journal, EXCEPT 408
+     * (timeout), 409 (a conflict, possibly on the key itself: a journal may exist), 425 and 429
+     * (retry later). Anything else, including no answer at all, is not a definitive refusal.
+     */
+    override fun isDefinitiveRefusal(failure: Throwable): Boolean {
+        val status = generateSequence(failure) { it.cause }.take(MAX_CAUSE_DEPTH)
+            .filterIsInstance<jakarta.ws.rs.WebApplicationException>()
+            .firstOrNull()?.response?.status ?: return false
+        return status in CLIENT_ERRORS && status !in RETRYABLE_CLIENT_ERRORS
+    }
+
+    /**
      * Where each leg landed, from the ledger's own answer (on an idempotent replay: the ORIGINAL
      * entry's accounts). Legs come back in `sequence` order, which is the order they were sent.
      * A count mismatch records nothing rather than guessing a pairing.
@@ -156,5 +168,11 @@ class LedgerPostingAdapter @Inject constructor(
     companion object {
         /** Stable actor id the ledger records for treasury postings (the human approver is on the deal). */
         val SYSTEM_ACTOR: UUID = UUID.nameUUIDFromBytes("openbank-treasury-service".toByteArray())
+
+        private const val MAX_CAUSE_DEPTH = 8
+        private val CLIENT_ERRORS = 400..499
+
+        /** 408 Request Timeout, 409 Conflict, 425 Too Early, 429 Too Many Requests. */
+        private val RETRYABLE_CLIENT_ERRORS = setOf(408, 409, 425, 429)
     }
 }

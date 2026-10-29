@@ -259,6 +259,13 @@ openbank:
       # the in-flight marker is DERIVED from it (TreasuryCloseJobs.staleAfter = budget + 30m), never
       # configured separately.
       pass-budget: PT20M
+    posting-intent:
+      # #13883: re-run settle/mature/reverse posts whose intent is still OPEN (a crash between the
+      # ledger's answer and the local commit) under the same journal key. Intents younger than grace
+      # are left to the command still in flight.
+      reconcile-enabled: ${OPENBANK_TREASURY_POSTING_INTENT_RECONCILE_ENABLED:true}
+      reconcile-cron: "0 */5 * * * ?"
+      grace: PT2M
     close:
       # ADR-0342 day-close participation (TreasuryCloseParticipationScheduler): every hour, in
       # Europe/Prague, re-offer the last lookback-days completed accounting days to the ledger as
@@ -381,6 +388,9 @@ authz:
         enabled: false
       accrual:
         enabled: false
+      posting-intent:
+        # Tests drive reconcilePostingIntents directly; the cron never fires.
+        reconcile-cron: "0 0 0 1 1 ? 2099"
       close:
         # A valid cron that never fires (scheduler-cron-syntax refuses 'off'); the CronIT profile
         # switches it to every second.

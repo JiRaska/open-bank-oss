@@ -86,6 +86,7 @@ class TreasuryServiceProducer {
         schedules: ScheduleService,
         references: ReferenceRepository,
         meters: io.micrometer.core.instrument.MeterRegistry,
+        intents: com.openbank.treasury.application.port.out.PostingIntentPort,
     ): TreasuryDealUseCase = TreasuryDealService(
         deals,
         counterparties,
@@ -103,6 +104,8 @@ class TreasuryServiceProducer {
         ProductMandate(references, productLimits.toPolicy(), clock)::policy,
         // ADR-0342 (#13882): a journal first recorded for a day that has already ended.
         { event -> meters.counter("openbank.treasury.close.late_journals", "event", event.name).increment() },
+        // #13883: settle, mature and reverse record a posting intent before contacting the ledger.
+        intents,
     )
 
     /** ADR-0344 D3/D4: reference validation and schedule generation through openbank-libs-finance. */

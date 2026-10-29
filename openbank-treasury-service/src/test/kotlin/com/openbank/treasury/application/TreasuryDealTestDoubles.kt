@@ -10,12 +10,15 @@ import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.PostedJournal
+import com.openbank.treasury.application.port.out.PostingIntent
+import com.openbank.treasury.application.port.out.PostingIntentPort
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.PostingLine
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.ResolvedAccount
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -24,6 +27,15 @@ internal class RecordingLedger : LedgerPostingPort {
     val posted = mutableListOf<JournalSpec>()
     val entryDates = mutableMapOf<String, LocalDate>()
     var failFor: UUID? = null
+
+    /** The ledger answers 422 for this deal: a definitive refusal, no journal created. */
+    var refuseFor: UUID? = null
+
+    /** The ledger commits this deal's next journal and the answer is lost (the process dies). */
+    var loseAnswerFor: UUID? = null
+
+    /** Called before every post with its key (a test checks the intent is already recorded). */
+    var beforePost: (String) -> Unit = {}
 
     /** Runs after every accepted post (a test advances its clock here). */
     var onPost: () -> Unit = {}
@@ -40,8 +52,14 @@ internal class RecordingLedger : LedgerPostingPort {
     )
 
     override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): PostedJournal {
+        beforePost(spec.idempotencyKey)
         if (spec.dealId == failFor) error("ledger unavailable")
+        if (spec.dealId == refuseFor) throw LedgerRefused("422 the ledger refused ${spec.idempotencyKey}")
         posted += spec
+        if (spec.dealId == loseAnswerFor) {
+            loseAnswerFor = null
+            error("simulated: the ledger committed ${spec.idempotencyKey} and the answer was lost")
+        }
         entryDates[spec.idempotencyKey] = entryDate
         onPost()
         return PostedJournal(
@@ -49,9 +67,51 @@ internal class RecordingLedger : LedgerPostingPort {
             spec.lines.map { ResolvedAccount(it.accountingClass, it.role, it.currency, resolve(it)) },
         )
     }
+
+    override fun isDefinitiveRefusal(failure: Throwable) = failure is LedgerRefused
 }
 
-internal class InMemoryDeals : DealRepository {
+internal class LedgerRefused(message: String) : RuntimeException(message)
+
+/** #13883: posting intents in memory; [InMemoryDeals.save] completes one as the real save does. */
+internal class InMemoryIntents : PostingIntentPort {
+    enum class Status { OPEN, COMPLETED, REFUSED }
+
+    val rows = linkedMapOf<String, Pair<PostingIntent, Status>>()
+
+    fun status(key: String) = rows[key]?.second
+
+    override suspend fun open(intent: PostingIntent): PostingIntent {
+        val existing = rows[intent.idempotencyKey]
+        if (existing == null || existing.second == Status.REFUSED) {
+            val kept = existing?.first?.valueDate ?: intent.valueDate
+            rows[intent.idempotencyKey] = intent.copy(valueDate = kept) to Status.OPEN
+        }
+        return rows.getValue(intent.idempotencyKey).first
+    }
+
+    override suspend fun refuse(key: String, reason: String) {
+        rows[key]?.takeIf { it.second == Status.OPEN }?.let {
+            rows[key] =
+                it.first.copy(lastError = reason) to Status.REFUSED
+        }
+    }
+
+    override suspend fun failed(key: String, error: String) {
+        rows[key]?.takeIf { it.second == Status.OPEN }?.let {
+            rows[key] = it.first.copy(attempts = it.first.attempts + 1, lastError = error) to Status.OPEN
+        }
+    }
+
+    override suspend fun openBefore(cutoff: Instant) =
+        rows.values.filter { it.second == Status.OPEN && it.first.createdAt.isBefore(cutoff) }.map { it.first }
+
+    fun complete(key: String) {
+        rows[key]?.let { rows[key] = it.first to Status.COMPLETED }
+    }
+}
+
+internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : DealRepository {
     val rows = linkedMapOf<UUID, Deal>()
     val journals = mutableListOf<LedgerJournalRef>()
     val events = mutableListOf<DealEvent>()
@@ -76,6 +136,7 @@ internal class InMemoryDeals : DealRepository {
             error("simulated: the state-change transaction rolled back")
         }
         rows[deal.id] = deal
+        journal?.let { intents?.complete(it.idempotencyKey) }
         journal?.let { recordJournal(it) } // the real save skips a journal already recorded by key
         event?.let { events += it }
         events += extraEvents

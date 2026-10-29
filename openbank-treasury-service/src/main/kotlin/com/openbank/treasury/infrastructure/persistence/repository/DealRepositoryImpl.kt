@@ -60,6 +60,8 @@ import jakarta.persistence.PersistenceException
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 @ApplicationScoped
@@ -203,15 +205,7 @@ class DealRepositoryImpl(
                 persisted
                     .flatMap { transitions.count("dealId", deal.id) }
                     .flatMap { stored -> appendTransitions(deal, stored.toInt()) }
-                    // The service records a journal in its own transaction the moment the ledger
-                    // accepts it (#13882 review); here it is written only if that did not happen.
-                    .flatMap {
-                        journal?.let { j ->
-                            journals.count("idempotencyKey", j.idempotencyKey).flatMap { n ->
-                                if (n == 0L) persistJournal(j) else Uni.createFrom().voidItem()
-                            }
-                        } ?: Uni.createFrom().voidItem()
-                    }
+                    .flatMap { journal?.let { applyJournal(it) } ?: Uni.createFrom().voidItem() }
                     .flatMap { command?.let { persistCommand(it) } ?: Uni.createFrom().voidItem() }
                     .flatMap { versionRow(deal, actor) }
                     .flatMap { schedule?.let { scheduleRows(it) } ?: Uni.createFrom().voidItem() }
@@ -236,6 +230,24 @@ class DealRepositoryImpl(
         }.awaitSuspending()
         return deal.copy(rowVersion = storedVersion)
     }
+
+    /**
+     * The service records a journal in its own transaction the moment the ledger accepts it (#13882
+     * review); here it is written only if that did not happen. #13883: the posting intent completes in
+     * THIS transaction, with the state change and the journal it announced, so an open intent always
+     * means "not applied".
+     */
+    private fun applyJournal(j: LedgerJournalRef): Uni<Void> =
+        journals.count("idempotencyKey", j.idempotencyKey).flatMap { n ->
+            if (n == 0L) persistJournal(j) else Uni.createFrom().voidItem()
+        }.flatMap { completeIntent(j.idempotencyKey) }
+
+    private fun completeIntent(key: String): Uni<Void> = Panache.getSession().flatMap { session ->
+        session.createNativeQuery<Int>(COMPLETE_INTENT_SQL)
+            .setParameter(1, OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))
+            .setParameter(2, key)
+            .executeUpdate()
+    }.replaceWithVoid()
 
     /** One `deal_versions` row per terms version; the schedule columns follow the latest generation. */
     private fun versionRow(deal: Deal, actor: String): Uni<Void> =
@@ -604,5 +616,9 @@ class DealRepositoryImpl(
         val POSTABLE_PRODUCT_NAMES = ProductType.entries.filter { it.legacy }.map { it.name }
 
         val LEGS_TYPE = object : TypeReference<List<LegSpec>>() {}
+
+        const val COMPLETE_INTENT_SQL =
+            "UPDATE deal_posting_intent SET status = 'COMPLETED', closed_at = ?1, last_error = NULL " +
+                "WHERE idempotency_key = ?2 AND status <> 'COMPLETED'"
     }
 }

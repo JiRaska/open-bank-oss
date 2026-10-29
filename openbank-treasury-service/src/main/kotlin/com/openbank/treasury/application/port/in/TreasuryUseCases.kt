@@ -146,6 +146,9 @@ fun interface TreasuryQuoteUseCase {
  */
 data class AccrualRun(val journals: Int, val failures: List<Throwable>, val deals: Int = 0, val unassessed: Int = 0)
 
+/** One reconciler pass over open posting intents (#13883): completed, and those still open with their causes. */
+data class IntentReconciliation(val completed: Int, val failures: List<Throwable>)
+
 @Suppress("TooManyFunctions")
 interface TreasuryDealUseCase {
     /**
@@ -199,6 +202,14 @@ interface TreasuryDealUseCase {
      * still running from one that died (ADR-0342, `TreasuryCloseJobs.staleAfter`).
      */
     suspend fun accrueInterest(asOf: LocalDate, deadline: Instant): AccrualRun
+
+    /**
+     * #13883: re-runs the command of every posting intent still OPEN that was created before
+     * [olderThan], under its original journal key (the ledger answers with the original journal),
+     * so a crash between the ledger's answer and treasury's commit is completed without a second
+     * journal. A failure is recorded on the intent, which stays open and keeps holding its day.
+     */
+    suspend fun reconcilePostingIntents(olderThan: Instant): IntentReconciliation
 }
 
 interface NostroReconciliationUseCase {

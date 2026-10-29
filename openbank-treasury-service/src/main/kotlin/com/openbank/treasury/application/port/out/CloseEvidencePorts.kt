@@ -61,6 +61,11 @@ data class DayJournalPostings(
     val lastSettlementAt: Instant? = null,
     /** Acknowledged lifecycle journals whose matching state transition has not committed. */
     val unapplied: Int = 0,
+    /**
+     * #13883: OPEN posting intents valued on this day. The ledger may hold their journals while
+     * treasury has not recorded or applied them, so the day's count cannot be trusted yet.
+     */
+    val openIntents: Int = 0,
 )
 
 /** Read side of [DayJournalPostings]. */
