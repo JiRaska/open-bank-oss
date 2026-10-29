@@ -104,7 +104,7 @@ class ProductShadowServiceTest {
 
     private fun count(name: String, vararg tags: String) = registry.find(name).tags(*tags).counter()?.count() ?: 0.0
 
-    private fun drain(svc: ProductShadowService) = runBlocking {
+    private fun drain(svc: ProductShadowService): Int = runBlocking {
         svc.intake(lookbackDays = 35, limit = 100)
         svc.runOnce(100)
     }
