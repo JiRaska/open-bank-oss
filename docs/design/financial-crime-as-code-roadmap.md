@@ -91,6 +91,102 @@ store, graph project, feature store, signature issue or swarm framework was crea
 P0 investigator and K0 are parallel slices; real-data training waits for trusted outcomes
 and point-in-time data. A dependency blocks its consumer, not unrelated synthetic work.
 
+## First K0 implementation slice: vocabulary revision kernel
+
+`openbank-libs-fincrime` now contains the pure `fincrime.vocabulary` contract used to
+start #13775 and #13435. `VocabularySource` is data, not a new enum: it declares the
+concept's domain/purpose, provenance, effective interval and stable codes with labels,
+meanings and optional explicit ranks. `FincrimeVocabulary.compile` validates bounded
+input, snapshots it, reuses the kernel canonical JSON/SHA-256 and exposes an exact
+`VocabularyRef(id, revision, contentHash)`. List order is not scale order. Ordered scales
+require a unique nonnegative rank for every code; unordered reasons have no ranks.
+
+Resolution requires that exact reference and an explicit decision instant. Another
+revision/hash/concept, an unknown code and an out-of-validity instant have distinct
+closed refusal outcomes. There is no name/ordinal conversion or LOW/OTHER fallback.
+The compiled snapshot cannot be changed through either the source list or its public
+entries. Synthetic AML severity and fraud reason fixtures exercise the same kernel;
+a pinned canonical golden fixes the byte/hash contract, and negative tests cover
+unknown schema, malformed Unicode, bounds, duplicates and partial/ambiguous ranks.
+
+This is a library foundation, **not completion of K0 or #13435**. No production caller,
+legacy enum, API, event, DB or FraudThresholdSet is changed. The digest proves content
+identity only: a successful compile/resolve is neither an approval nor a signature.
+Authenticated source loading, immutable revision storage, retirement/revocation,
+pack IR/evaluation, replay/diff, independent approvals/signing, SHADOW epochs and the
+`fincrime-pack-conformance` gate remain under #13775. AI/MCP adapters must consume the
+same contracts when added, without authority to approve or activate. Existing
+#13776/#10236 case work, #13777 learning and #13778 typed decisioning keep their owners.
+ADR-0354 remains delivery-status **planned**; this slice grants no activation authority.
+
+## Next K0 slice: bounded count IR, evaluation and behavioral replay
+
+`fincrime.pack` adds a deliberately small, framework-free authoring/compiler/evaluator
+path in the same library. `CountPackSource` pins its domain, purpose, validity, vocabulary
+revisions and COUNT feature contracts. Compilation snapshots at most 64 flat
+`COUNT_AT_LEAST` instructions, rejects unknown output codes and conflicting feature pins,
+and produces canonical bytes/hash with the existing kernel codec. Counts are exact Long
+values serialized as decimal strings; no money, floating-point scoring, recursive graph,
+runtime script or implicit aggregation is introduced. AML triage uses an ordered data
+scale; fraud uses the existing executable FraudVerdict. Domain and refusal enums describe
+interpreter behavior, never new business taxonomies.
+
+Evaluation requires the exact pack reference, explicit time and bounded observations with
+observed/available timestamps. Missing, stale, future, malformed or wrongly pinned input
+produces `Incomplete` even if another rule matched. A real zero is distinct from missing.
+Successful results include the pack reference, time, canonical input hash, actual rule
+count and findings carrying exact reason/severity vocabulary pins. Empty findings is not
+an ALLOW or a clean-case assertion. Inputs and hashes assert content identity; they do not
+authenticate their source or establish availability-time provenance by themselves.
+
+`CountPackReplay` runs the same evaluator on identical snapshots for baseline/candidate
+of the same pack/domain/purpose, rejecting empty or oversized corpora and duplicate case
+identities. Per-case differences retain both artifact references and results, including incomplete outcomes.
+Metadata-only revision changes do not masquerade as changed findings; changing a pinned
+vocabulary meaning remains visible in findings. Synthetic AML/fraud boundary scenarios,
+independent canonical golden/hash and negative tests exercise this slice.
+
+Reuse is explicit: FincrimeVocabulary, FraudVerdict and canonical hashing remain their
+existing owners. This is not another feature store: feature materialization/real-data
+snapshots stay with ADR-0140/#12750. ProductState/PredicateEvaluator have product-specific
+semantics (including missing-as-false), so they are not reused as a crime-risk evaluator.
+No second DecisionRecord transport, revision store, approval flow or signing mechanism is
+created. No service, REST/MCP adapter, production caller, database, event or threshold writer
+changes. At that stage, source parsing/schema remained open; the next section records its
+bounded JSON adapter. Money/window operations, authentic snapshot adapters, DecisionRecord
+integration, independent exact-hash approval/signature, activation epochs, replica
+consistency and the full conformance gate remain required under #13775. This
+slice is simulation only and does not mark K0 or ADR-0354 delivery complete.
+
+## K0 source boundary: bounded JSON count packs
+
+`CountPackJson.compile` accepts a versioned JSON count source and independently supplied
+compiled vocabularies, then invokes the existing `CompiledCountPack` validator. The same
+canonical form and hash are preserved when reading the committed fraud golden or the
+synthetic AML source. These sources run actual rules and same-input behavioral replay;
+no new evaluator or source-authentication claim is introduced.
+
+The adapter rejects unknown/missing fields at every object, duplicate JSON keys, unknown
+operators/effects/verdicts, ambiguous count representations, fractional/out-of-range
+revision numbers and oversized documents. The pre-parse limit is 65,536 UTF-8 bytes;
+callers must additionally bound transport reads before constructing the string. Parsing
+reuses the kernel's framework-free `IrJson` syntax reader with its depth bound, not the
+product interpreter. COUNT values remain exact nonnegative Long decimal strings.
+
+The bundled `fincrime/count-source-v1.schema.json` describes the closed structural
+contract, including AML/fraud effect separation. Executed schema-agreement fixtures cover
+both domains and structural negatives. Compilation remains authoritative for semantic
+checks (exact vocabulary pins/codes, validity, Long range, rule identity and feature
+consistency), source size and duplicate-key rejection. JSON Schema alone is not a trust
+check. Vocabulary authoring remains typed; this slice does not introduce a vocabulary
+JSON parser or a registry.
+
+Still required under #13775: authentic source/snapshot adapters, CLI/HTTP/MCP integration,
+DecisionRecord integration, evidence-bound independent approval/signature, SHADOW epochs,
+replica consistency, real HTTP/DB/outbox/concurrency tests and the full enforced
+fincrime-pack-conformance gate. No approval, signature, activation, production caller,
+threshold writer or payment enforcement is enabled by decoding a source.
+
 ## Evidence required before claiming completion
 
 - Pin source/schema/pack/model/prompt/input versions, approvals and activation epoch on
