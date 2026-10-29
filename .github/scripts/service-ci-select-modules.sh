@@ -134,6 +134,10 @@ select_modules() {
              && ! grep -qE '(^| )openbank-client-transaction( |$)' <<< " $CHANGED "; then
             CHANGED="$CHANGED openbank-client-transaction"
           fi
+          if grep -qE '(^| )openbank-account-service( |$)' <<< " $CHANGED " \
+             && ! grep -qE '(^| )openbank-client-account( |$)' <<< " $CHANGED "; then
+            CHANGED="$CHANGED openbank-client-account"
+          fi
           # Recipe-only change -> one canary (same as the PR path).
           if [ -z "${CHANGED// /}" ] \
              && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-select-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
@@ -280,6 +284,10 @@ select_modules() {
       if grep -qE '(^| )openbank-transaction-service( |$)' <<< " $CHANGED " \
          && ! grep -qE '(^| )openbank-client-transaction( |$)' <<< " $CHANGED "; then
         CHANGED="$CHANGED openbank-client-transaction"
+      fi
+      if grep -qE '(^| )openbank-account-service( |$)' <<< " $CHANGED " \
+         && ! grep -qE '(^| )openbank-client-account( |$)' <<< " $CHANGED "; then
+        CHANGED="$CHANGED openbank-client-account"
       fi
       # Tests reading OTHER modules' trees escape the fan-out above (#10010 -> #11513).
       # Derived from test sources; rationale in the script header.
