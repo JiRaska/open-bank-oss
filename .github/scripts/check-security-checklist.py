@@ -130,12 +130,24 @@ PCI_FIELD = re.compile(
 )
 
 
+# Paths whose lines can NAME a card service but cannot CARRY cardholder data: CI workflow files
+# (generated job identifiers such as `build_*_openbank_card_issuance_service`, #14183). Only
+# application source, config, migrations and schemas are scanned; those are everything else.
+NON_DATA_PATHS = re.compile(r"^\.github/workflows/")
+
+
+def pci_signal(changed_lines: list[tuple[str, str]]) -> bool:
+    """True if any changed line in a file that can carry cardholder data matches PCI_FIELD."""
+    return any(PCI_FIELD.search(line) for path, line in changed_lines
+               if not NON_DATA_PATHS.match(path))
+
+
 def negative_pci_exception(text: str, files: list[str], changed_lines: list[tuple[str, str]],
                            declaration_changed: bool) -> bool:
     """Accept a specific negative PCI attestation only without PCI signals on either diff side."""
     match = PCI_NEGATIVE.fullmatch(text.strip())
     if (not match or declaration_changed or any(CARDHOLDER.search(f) for f in files) or
-            any(PCI_FIELD.search(line) for _, line in changed_lines)):
+            pci_signal(changed_lines)):
         return False
     reason = match.group("reason").strip()
     return len(reason) >= 20 and reason.lower() not in {"n/a", "not applicable", "none"}
@@ -380,9 +392,7 @@ def decide(files: list[str], touched: list[str], added: list[tuple[str, str]],
                         f"file in the diff matches a {what} path pattern")
     # A sensitive field can be added to a generically named file outside the declared cardholder
     # globs. Do not let the normal declared-path auto-answer return before examining both diff sides.
-    if any(CARDHOLDER.search(f) for f in files) or any(
-        PCI_FIELD.search(line) for _, line in added + (removed or [])
-    ):
+    if any(CARDHOLDER.search(f) for f in files) or pci_signal(added + (removed or [])):
         ans["cardholder"] = None
     return ans
 
@@ -844,6 +854,14 @@ def self_test() -> int:
         ("added cardholderdata field", negative, [], [("src/main/X.kt", "val cardholderdata: String")], [], False, False),
         ("removed cardholderdata column", negative, [], [], [("src/main/V3.sql", "  cardholderdata text,")], False, False),
         ("changed declaration", negative, [], [], [], True, False),
+        # #14183: generated CI job ids that merely name the card services are not card fields.
+        ("CI job ids naming card services", negative, [], [(".github/workflows/services-ci.yml",
+         "  build_a1b2_openbank_card_issuance_service:\n    needs: [build_c3_openbank_card_processing_service]")],
+         [], False, True),
+        ("Kotlin val cardNumber", negative, [], [("openbank-x/src/main/X.kt", "val cardNumber: String")], [], False, False),
+        ("Kotlin val pan", negative, [], [("openbank-x/src/main/X.kt", "val pan: String")], [], False, False),
+        ("SQL cvv column", negative, [], [("openbank-x/src/main/resources/db/migration/V9.sql", "  cvv varchar(4),")], [], False, False),
+        ("YAML card.pan key", negative, [], [("openbank-x/src/main/resources/application.yaml", "card.pan: foo")], [], False, False),
     ]:
         if negative_pci_exception(text, files, added + removed, changed) != accepted:
             print(f"self-test FAIL: {label} PCI exception"); bad += 1
