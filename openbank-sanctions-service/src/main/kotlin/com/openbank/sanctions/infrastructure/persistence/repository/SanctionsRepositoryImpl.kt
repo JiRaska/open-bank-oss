@@ -169,6 +169,9 @@ class SanctionsRepositoryImpl(private val outboxRepo: SanctionsOutboxRepository)
         Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain()
     override suspend fun findByIdempotencyKey(key: String) =
         Panache.withSession { find("idempotencyKey", key).firstResult() }.awaitSuspending()?.toDomain()
+    override suspend fun findWhitelistsForSubject(subjectId: String): List<SanctionsCheck> = Panache.withSession {
+        find("subjectId = ?1 and status = ?2", subjectId, SanctionsCheckStatus.WHITELISTED).list()
+    }.awaitSuspending().map { it.toDomain() }
     override suspend fun findByStatus(status: SanctionsCheckStatus) =
         Panache.withSession { find("status", status).list() }.awaitSuspending().map { it.toDomain() }
     override suspend fun listChecks(): List<SanctionsCheck> =
