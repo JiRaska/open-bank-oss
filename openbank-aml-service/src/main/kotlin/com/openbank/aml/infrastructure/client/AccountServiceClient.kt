@@ -17,6 +17,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Config-keyed (`quarkus.rest-client.account-service.*`) so the deployment supplies the URL and,
@@ -57,6 +58,9 @@ class AccountServiceClient(@RestClient client: AccountServiceRestClient) {
     } catch (ex: AccountHttpException) {
         log.warnf(ex, "[party-resolution] lookup for account %s failed with HTTP %d", accountId, ex.status)
         null
+    } catch (ex: CancellationException) {
+        // Cancellation of the sweep's coroutine is not a lookup failure: never swallow it into `null`.
+        throw ex
     } catch (ex: Exception) {
         log.warnf(ex, "[party-resolution] lookup for account %s failed", accountId)
         null

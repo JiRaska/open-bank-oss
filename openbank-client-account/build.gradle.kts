@@ -102,6 +102,11 @@ dependencies {
     compileOnly("jakarta.ws.rs:jakarta.ws.rs-api")
     compileOnly("jakarta.annotation:jakarta.annotation-api")
     compileOnly("com.fasterxml.jackson.core:jackson-annotations")
+    // AccountClient binds bodies with its OWN ObjectMapper (unknown enum values -> null, scoped to this
+    // client, never the consumer's global mapper). Consumers already carry these at runtime.
+    compileOnly("com.fasterxml.jackson.core:jackson-databind")
+    compileOnly(libs.jackson.module.kotlin)
+    compileOnly(libs.jackson.datatype.jsr310)
     compileOnly("io.smallrye.reactive:mutiny")
 
     testImplementation(enforcedPlatform(libs.quarkus.bom))

@@ -7,6 +7,7 @@ package com.openbank.clients.account
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.clients.account.model.AccountResponse
 import com.sun.net.httpserver.HttpServer
 import io.mockk.every
 import io.mockk.mockk
@@ -77,6 +78,25 @@ class AccountClientOutcomeTest {
 
         assertThat(found.account.id).isEqualTo(id)
         assertThat(found.account.partyId).isEqualTo(party)
+    }
+
+    @Test
+    fun `a status value the generated enum does not know still yields Found`() {
+        val party = UUID.randomUUID()
+        body = """{"id":"${UUID.randomUUID()}","partyId":"$party","status":"SOME_FUTURE_STATUS","newField":true}"""
+
+        val found = lookup() as AccountLookup.Found
+
+        assertThat(found.account.partyId).isEqualTo(party)
+        assertThat(found.account.status).isNull()
+    }
+
+    @Test
+    fun `the tolerance is scoped to this client - a default mapper still rejects the unknown status`() {
+        val strict = jacksonObjectMapper().registerModule(JavaTimeModule())
+        assertThatThrownBy {
+            strict.readValue("""{"status":"SOME_FUTURE_STATUS"}""", AccountResponse::class.java)
+        }.isInstanceOf(com.fasterxml.jackson.databind.exc.InvalidFormatException::class.java)
     }
 
     @Test

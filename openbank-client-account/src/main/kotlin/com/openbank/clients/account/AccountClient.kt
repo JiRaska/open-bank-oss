@@ -4,11 +4,16 @@
 
 package com.openbank.clients.account
 
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.clients.account.api.AccountsApi
 import com.openbank.clients.account.model.AccountResponse
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
+import java.io.InputStream
 import java.util.UUID
 
 /**
@@ -93,10 +98,27 @@ class AccountClient(private val api: AccountsApi) {
             }
         }
 
+        /**
+         * This client's OWN mapper, deliberately not the consumer's global one. A status value account-service
+         * adds before its spec (and so this generated enum) catches up binds as `null` instead of failing the
+         * whole read: for VoP that keeps a real 2xx a `Found`, rather than a "failure" that trips retry and the
+         * circuit breaker. Unknown properties are tolerated for the same reason.
+         */
+        internal val mapper: ObjectMapper = jacksonObjectMapper()
+            .registerModule(JavaTimeModule())
+            .enable(DeserializationFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+
         @Suppress("TooGenericExceptionCaught")
         private fun readAccount(response: Response, status: Int): AccountResponse {
             val account = try {
-                if (response.hasEntity()) response.readEntity(AccountResponse::class.java) else null
+                if (response.hasEntity()) {
+                    response.readEntity(InputStream::class.java).use {
+                        mapper.readValue(it, AccountResponse::class.java)
+                    }
+                } else {
+                    null
+                }
             } catch (e: Exception) {
                 throw AccountBodyException(status, e)
             }
