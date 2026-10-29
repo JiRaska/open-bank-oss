@@ -386,6 +386,57 @@ class PolicyEvidenceTests(unittest.TestCase):
                 old.recorder.verify_stored(payload, stored)
 
 
+    def historical_6d202_policy(self, parent, *, suffix=b''):
+        # Public canonical first-parent source for #13904.
+        # This fixture is parsed as data only: never import or execute the controller.
+        raw = gzip.decompress(Path(__file__).with_name('fixtures').joinpath(
+            'merge-policy-6d20261e.py.gz').read_bytes()) + suffix
+        sha = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+        if not suffix:
+            self.assertEqual(sha, '6d20261e47cf64d423ac251e236f70e88db61461')
+        github = PolicyGitHub()
+        github.responses[f'/git/commits/{old.MERGE}']['parents'] = [{'sha': parent}]
+        github.responses[f'/compare/{parent}...main'] = {
+            'status': 'ahead', 'base_commit': {'sha': parent}, 'merge_base_commit': {'sha': parent}}
+        github.responses[f'/git/commits/{parent}'] = {'sha': parent, 'tree': {'sha': ROOT}}
+        github.responses[f'/git/trees/{SCRIPTS}']['tree'][0]['sha'] = sha
+        github.responses[f'/git/blobs/{sha}'] = {
+            'sha': sha, 'size': len(raw), 'encoding': 'base64',
+            'content': base64.b64encode(raw).decode(),
+        }
+        return github
+
+
+    def test_reviewed_6d202_first_parents_keep_executor_and_pr_intent_separate(self):
+        for historical_pr, parent in [(13904, '15165dc8435139b5800be51d0ee6ecef069d4bc4')]:
+            with self.subTest(historical_pr=historical_pr):
+                github = self.historical_6d202_policy(parent)
+                result = proof.app_authorization(copy.deepcopy(github.pull), old.REPO, github)
+                self.assertNotIn('authorization', result)
+                self.assertEqual(result['mergedById'], old.BOT['id'])
+                self.assertEqual(result['policyAuthorization']['approvedById'], old.OWNER['id'])
+                self.assertEqual(result['policyAuthorization']['policyCommitSha'], parent)
+                self.assertEqual(result['policyAuthorization']['policyBlobSha'],
+                                 '6d20261e47cf64d423ac251e236f70e88db61461')
+                self.assertEqual(result['policyAuthorization']['kind'], 'POLICY_PR_AUTO_MERGE')
+                self.assertEqual(result['policyAuthorization']['scope'], 'PR')
+
+
+    def test_reviewed_6d202_policy_cannot_downgrade_codex_exact_head(self):
+        github = self.historical_6d202_policy(PARENT)
+        github.pull['head']['ref'] = 'codex/audit'
+        with self.assertRaises(ValueError):
+            proof.app_authorization(copy.deepcopy(github.pull), old.REPO, github)
+        self.assertFalse(any('/git/' in path for path in github.calls))
+
+
+    def test_unreviewed_nearby_6d202_source_is_rejected(self):
+        github = self.historical_6d202_policy(PARENT, suffix=b'\n# Unreviewed source revision.\n')
+        with self.assertRaisesRegex(ValueError, 'unreviewed immutable policy blob'):
+            proof.app_authorization(copy.deepcopy(github.pull), old.REPO, github)
+
+
+
 if __name__ == '__main__':
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(PolicyEvidenceTests)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
