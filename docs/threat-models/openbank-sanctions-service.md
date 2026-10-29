@@ -100,6 +100,10 @@ TLS. Domain layer (`SanctionsEntry`, `SanctionsList` models) has zero framework 
 - The Czech national list (`CNB_DOMESTIC`, kept by MZV under Act No. 1/2023 Coll.) is imported
   from the OpenSanctions `cz_national_sanctions` mirror like the other CSV feeds (#10757); the V6
   demo rows are retired by the first import's reconciliation sweep.
+- High-risk screening events may fan out to `openbank.oversight-triggers` only through the durable
+  outbox and only as a minimal `sourceService` + `occurredAt` wake-up. Screened names, identifiers,
+  match details and list data must never be copied to that topic; original ce-id/ce-type headers
+  retain correlation and retry identity (ADR-0031 D9, #13179).
 
 ## 5. Open items / follow-ups
 
