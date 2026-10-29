@@ -182,11 +182,12 @@ class DealRepositoryImpl(
         command: CommandKey?,
         schedule: ScheduleWrite?,
         extraEvents: List<DealEvent>,
+        withdrawPayments: Boolean,
         limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
     ): Deal {
         val actor = deal.history.lastOrNull()?.actor?.id ?: deal.createdBy.id
         val storedVersion = Panache.withTransaction {
-            val row = lockedRow(deal.id, limitGuard)
+            val row = lockedRow(deal.id, withdrawPayments, limitGuard)
             row.flatMap { existing ->
                 if (existing != null && existing.rowVersion != deal.rowVersion) {
                     throw DealChangedException(
@@ -232,14 +233,19 @@ class DealRepositoryImpl(
 
     /**
      * The deal row, ALWAYS locked for a whole-row save (so the version comparison in [save] judges
-     * the row as it stands and no concurrent save can interleave), plus the limit line when the
-     * change consumes one. Lock order everywhere: the deal row, then the limit line, so two writes
+     * the row as it stands and no concurrent save can interleave); under that lock, when the change
+     * ends the deal's payable life, its payments are withdrawn (or the change refused); plus the
+     * limit line when the change consumes one. Lock order everywhere: the deal row, then the limit line, so two writes
      * on one line never deadlock.
      */
     private fun lockedRow(
         dealId: UUID,
+        withdrawPayments: Boolean,
         limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
     ): Uni<DealEntity?> = find("dealId", dealId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
+        .flatMap { locked ->
+            if (withdrawPayments) withdraw(dealId).map { locked } else Uni.createFrom().item(locked)
+        }
         .flatMap { locked ->
             limitGuard?.let { g ->
                 Panache.getSession().flatMap { exposureUnderLock(it, dealId, g) }.map { locked }
@@ -284,6 +290,67 @@ class DealRepositoryImpl(
         "legs" to deal.legs,
         "header" to deal.header.copy(confirmationsSent = emptyList()),
     )
+
+    /**
+     * Under the deal lock: refuse while a payment of the deal is released; else cancel its PROPOSED
+     * payments with scoped, version-bumped updates, free exactly their flows, drop their links and
+     * record the status event — all in the caller's transaction.
+     */
+    private fun withdraw(dealId: java.util.UUID): Uni<Void> = Panache.getSession().flatMap { session ->
+        val like = "%$dealId%"
+        session.createNativeQuery<Any>(
+            "select cast(payment_id as varchar) from treasury_payments where deal_ids like :d and status in (:released)",
+        ).setParameter("d", like).setParameter("released", RELEASED_STATUSES).resultList.flatMap { released ->
+            released.firstOrNull()?.let {
+                throw com.openbank.treasury.domain.payment.DealHasReleasedPaymentException(
+                    dealId,
+                    java.util.UUID.fromString(it.toString()),
+                )
+            }
+            session.createNativeQuery<Any>(
+                "select cast(payment_id as varchar) from treasury_payments where deal_ids like :d and status = 'PROPOSED' for update",
+            ).setParameter("d", like).resultList
+        }.flatMap { proposed ->
+            cancelProposed(session, dealId, proposed.map { java.util.UUID.fromString(it.toString()) })
+        }
+    }
+
+    /** Cancel each PROPOSED payment (scoped, guarded on its status), free its flows, record the event. */
+    private fun cancelProposed(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        dealId: java.util.UUID,
+        pids: List<java.util.UUID>,
+    ): Uni<Void> = pids.fold(Uni.createFrom().voidItem()) { chain, pid ->
+        chain.flatMap {
+            session.createNativeQuery<Any>(
+                "update deal_cash_flows set payment_id = null, row_version = row_version + 1 where payment_id = :p",
+            ).setParameter("p", pid.toString()).executeUpdate()
+        }.flatMap {
+            session.createNativeQuery<Any>("delete from treasury_payment_flows where payment_id = :p")
+                .setParameter("p", pid).executeUpdate()
+        }.flatMap {
+            session.createNativeQuery<Any>(
+                "update treasury_payments set status = 'CANCELLED', status_reason = :r where payment_id = :p and status = 'PROPOSED'",
+            ).setParameter("r", "deal $dealId changed").setParameter("p", pid).executeUpdate()
+        }.flatMap { n ->
+            check(n == 1) { "payment $pid changed while its deal was being changed" }
+            outbox.persistInTransaction(
+                OutboxMessage(
+                    aggregateId = pid,
+                    eventType = "treasury.payment.status-changed.v1",
+                    payload = objectMapper.writeValueAsString(
+                        mapOf(
+                            "paymentId" to pid,
+                            "status" to "CANCELLED",
+                            "reason" to "deal $dealId changed",
+                            "occurredAt" to clock.instant(),
+                        ),
+                    ),
+                    createdAt = clock.instant(),
+                ),
+            )
+        }
+    }
 
     private fun scheduleRows(s: ScheduleWrite): Uni<Void> {
         val flows = s.flows.map { CashFlowEntity().fill(it) }
@@ -623,6 +690,9 @@ class DealRepositoryImpl(
     }
 
     private companion object {
+        /** Derived from [PaymentStatus.BLOCKING_DEAL_CHANGE] — never a second literal list. */
+        val RELEASED_STATUSES = com.openbank.treasury.domain.payment.PaymentStatus.BLOCKING_DEAL_CHANGE_NAMES
+
         /** Derived from [Deal.LIMIT_CONSUMING_STATES] — never a second, independently-typed literal list. */
         val LIMIT_CONSUMING_STATE_NAMES = Deal.LIMIT_CONSUMING_STATES.map { it.name }
 

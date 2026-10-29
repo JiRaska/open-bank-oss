@@ -40,9 +40,8 @@ internal fun CashFlowEntity.fill(f: CashFlow) = apply {
     originalAmount = f.originalAmount
     overrideId = f.overrideId
     // Deliberately NOT written here: paymentId and the fixing provenance (fixingSource,
-    // fixingSha256, fixedAt). Each has its own narrow, guarded UPDATE (FixingFlowRepositoryImpl;
-    // the payment chain, a later ADR-0344 phase, owns paymentId) so a writer holding a stale copy
-    // of the row can never erase them.
+    // fixingSha256, fixedAt). Each has its own narrow, guarded UPDATE (FixingFlowRepositoryImpl,
+    // PaymentRepositoryImpl) so a writer holding a stale copy of the row can never erase them.
 }
 
 internal fun CashFlowEntity.toDomain() = CashFlow(

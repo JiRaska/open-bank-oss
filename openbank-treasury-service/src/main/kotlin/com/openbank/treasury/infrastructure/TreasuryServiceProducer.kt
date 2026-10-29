@@ -88,6 +88,7 @@ class TreasuryServiceProducer {
         references: ReferenceRepository,
         cashFlows: CashFlowRepository,
         marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
+        payments: com.openbank.treasury.application.usecase.PaymentService,
     ): TreasuryDealUseCase = TreasuryDealService(
         deals,
         counterparties,
@@ -106,6 +107,7 @@ class TreasuryServiceProducer {
         cashFlows,
         BookCategories(references, clock)::of,
         com.openbank.treasury.application.usecase.CreditTermsSource(references, marketData)::on,
+        paymentGuard = { id -> payments.guardDealChange(id) },
     )
 
     /** ADR-0344 D3/D4: reference validation and schedule generation through openbank-libs-finance. */
@@ -168,7 +170,81 @@ class TreasuryServiceProducer {
         ledger: LedgerReadPort,
         config: NostroConfig,
         clock: Clock,
-    ): NostroReconciliationUseCase = NostroReconciliationService(statements, ledger, config.accounts(), clock)
+        payments: com.openbank.treasury.application.usecase.PaymentService,
+    ): NostroReconciliationUseCase = NostroReconciliationService(statements, ledger, config.accounts(), clock) {
+            ccy,
+            amount,
+            date,
+            ref,
+            who,
+        ->
+        payments.matchIncoming(ccy, amount, date, ref, who)
+    }
+
+    /** ADR-0344 D6: the deal-to-payment chain. */
+    @Produces
+    @ApplicationScoped
+    @Suppress("LongParameterList")
+    fun paymentService(
+        payments: com.openbank.treasury.application.port.out.PaymentRepository,
+        deals: DealRepository,
+        cashFlows: CashFlowRepository,
+        references: ReferenceRepository,
+        ledger: LedgerReadPort,
+        dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository,
+        objectMapper: ObjectMapper,
+        clock: Clock,
+        meterRegistry: io.micrometer.core.instrument.MeterRegistry,
+        @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "openbank.treasury.payments.cut-off-window-days",
+            defaultValue = "2",
+        )
+        window: Long,
+        @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "openbank.treasury.payments.own-bic",
+            defaultValue = com.openbank.treasury.application.usecase.PaymentService.DEFAULT_OWN_BIC,
+        )
+        ownBic: String,
+        counterparties: CounterpartyRepository,
+        dealUseCase:
+        jakarta.enterprise.inject.Instance<com.openbank.treasury.application.port.`in`.TreasuryDealUseCase>,
+    ): com.openbank.treasury.application.usecase.PaymentService =
+        com.openbank.treasury.application.usecase.PaymentService(
+            payments,
+            deals,
+            cashFlows,
+            references,
+            ledger,
+            dayCompletion,
+            objectMapper,
+            clock,
+            window,
+            onFundingExceeded = { ccy ->
+                meterRegistry.counter("openbank.treasury.funding.exceeded", "currency", ccy).increment()
+            },
+            onParkedMatch = { meterRegistry.counter("openbank.treasury.payments.match.parked").increment() },
+            ownBic = ownBic,
+            // Step 2 (ADR-0344 D7): a SENT payment's flows post their PAYMENT journals now, so the
+            // ledger balance itself carries the outflow. Resolved lazily (the deal use case depends
+            // on this bean for its payment guard).
+            postOutflow = { p ->
+                p.dealIds.sumOf { dealUseCase.get().postOutflow(it, p.valueDate) }
+            },
+            onOutflowFailed = { id, e ->
+                meterRegistry.counter("openbank.treasury.payments.outflow.failed").increment()
+                org.jboss.logging.Logger.getLogger("com.openbank.treasury.payments")
+                    .warnf(
+                        "outflow journals of payment %s not posted yet (retried by replay / daily run): %s",
+                        id,
+                        e.message,
+                    )
+            },
+            counterparty = { id ->
+                counterparties.findById(id)?.let {
+                    com.openbank.treasury.application.usecase.CounterpartyIdentity(it.name, it.synthetic)
+                }
+            },
+        )
 
     /** ADR-0337 amendment: the custodian's period-end statement of holdings (`openbank.treasury.portfolio`). */
     @Produces

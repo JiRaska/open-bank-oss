@@ -65,7 +65,13 @@ info:
   #         (collateral is always valued at the bank's price, never the deal's). GET
   #         /day-completion/{date}, close-of-day position snapshots (/positions/close-of-day,
   #         ROLE_TREASURY_BACK_OFFICE) and saved blotter filters (/views/deal-filters).
-  version: 1.23.0
+  # 1.24.0: additive — ADR-0344 D6 own-account payments: GET /payments, POST /payments/propose,
+  #         /payments/{id}/release (ROLE_TREASURY_PAYMENT_RELEASER only; never a term author of a
+  #         netted deal or flow), /cancel and /resolve (from RAIL_NOT_SUPPORTED or FAILED only).
+  #         Contract 8.5 internal rate sheets (/market-data/internal-rate-sheets, four-eyes).
+  #         CashFlow.paymentId is the flow's live payment. 409 PAYMENT_RELEASED / PAYMENT_STALE /
+  #         PAYMENT_IN_FLIGHT / SSI_CHANGED / RATE_SHEET_STALE, 422 FUNDING_EXCEEDED.
+  version: 1.24.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -1649,6 +1655,184 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/treasury/market-data/internal-rate-sheets:
+    get:
+      tags: [Treasury]
+      operationId: listRateSheets
+      summary: Internal rate sheets the bank publishes, newest first (contract 8.5)
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, ACTIVE, REJECTED, SUPERSEDED] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: The sheets
+          content:
+            application/json:
+              schema: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/RateSheet' } }
+    post:
+      tags: [Treasury]
+      operationId: proposeRateSheet
+      summary: Propose a rate sheet (back office) — PENDING until a different human approves it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, effectiveFrom, rates]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+                effectiveFrom: { type: string, format: date }
+                rates:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [label, value]
+                    properties:
+                      label: { type: string, minLength: 1, maxLength: 64 }
+                      value: { type: number, minimum: -100, maximum: 100, description: Percent, at most 6 decimals }
+      responses:
+        '201':
+          description: The PENDING sheet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateSheet' }
+        '400':
+          description: A bad name, date or rate
+  /api/v1/treasury/market-data/internal-rate-sheets/{id}/approve:
+    post:
+      tags: [Treasury]
+      operationId: approveRateSheet
+      summary: Approve a rate sheet (four-eyes, never its proposer or an AI agent); supersedes the ACTIVE sheet of the same name
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The ACTIVE sheet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateSheet' }
+        '404':
+          description: No such sheet
+        '409':
+          description: RATE_SHEET_STALE — no longer PENDING
+        '422':
+          description: FOUR_EYES_VIOLATION (an AI or machine principal is 403 ACTOR_NOT_PERMITTED)
+  /api/v1/treasury/market-data/internal-rate-sheets/{id}/reject:
+    post:
+      tags: [Treasury]
+      operationId: rejectRateSheet
+      summary: Reject a rate sheet with a reason (four-eyes)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200':
+          description: The REJECTED sheet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateSheet' }
+        '409':
+          description: RATE_SHEET_STALE — no longer PENDING
+
+  /api/v1/treasury/payments:
+    get:
+      tags: [Treasury]
+      operationId: listPayments
+      summary: Own-account payments with a value date in from..to (ADR-0344 D6)
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: status, in: query, required: false, schema: { $ref: '#/components/schemas/PaymentStatus' } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 5000, default: 500 } }
+      responses:
+        '200': { description: Payments, content: { application/json: { schema: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/Payment' } } } } }
+
+  /api/v1/treasury/payments/{id}:
+    get:
+      tags: [Treasury]
+      operationId: getPayment
+      summary: One payment
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The payment, content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '404': { description: No such payment }
+
+  /api/v1/treasury/payments/propose:
+    post:
+      tags: [Treasury]
+      operationId: proposePayments
+      summary: Propose payments for the FIXED flows inside the cut-off window (netted per agreement, addressed from the SSI)
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200': { description: The proposal run, content: { application/json: { schema: { type: object } } } }
+
+  /api/v1/treasury/payments/{id}/release:
+    post:
+      tags: [Treasury]
+      operationId: releasePayment
+      summary: >-
+        Release a PROPOSED payment (ROLE_TREASURY_PAYMENT_RELEASER only; never a netted deal's creator or term
+        author nor an override proposer or approver of a netted flow; never an AI agent). Refused 422
+        FUNDING_EXCEEDED when the funding account would go negative on the value date, net of released
+        payments. Contract 9: the release writes the rail instruction to the outbox in the same
+        transaction (status RELEASED); the rail's status events move it to SENT / SETTLED / FAILED.
+        An SSI from which no institution-transfer rail follows ends it RAIL_NOT_SUPPORTED.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Released (RELEASED or RAIL_NOT_SUPPORTED), content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '403': { description: Not a human payment releaser }
+        '409': { description: Not PROPOSED }
+        '422': { description: FOUR_EYES_VIOLATION or FUNDING_EXCEEDED }
+
+  /api/v1/treasury/payments/{id}/cancel:
+    post:
+      tags: [Treasury]
+      operationId: cancelPayment
+      summary: Cancel a PROPOSED payment (its flows become proposable again); a released payment is never cancelled
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, maxLength: 500 } } } } }
+      responses:
+        '200': { description: CANCELLED, content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '409': { description: Not PROPOSED }
+
+  /api/v1/treasury/payments/{id}/resolve:
+    post:
+      tags: [Treasury]
+      operationId: resolvePayment
+      summary: Resolve a RAIL_NOT_SUPPORTED or FAILED payment MANUALLY_SETTLED or RETURNED (an approver who is neither its releaser nor a term author); its flows stay linked
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome, reason]
+              properties:
+                outcome: { type: string, enum: [MANUALLY_SETTLED, RETURNED] }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: Resolved, content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '409': { description: 'PAYMENT_IN_FLIGHT (RELEASED or SENT: the rail still reports its outcome, resolve once it is FAILED) or INVALID_STATE (not RAIL_NOT_SUPPORTED or FAILED)' }
+        '422': { description: FOUR_EYES_VIOLATION }
 
 components:
   securitySchemes:
@@ -1805,7 +1989,8 @@ components:
             INVALID_STATE, NOT_FOUND, REFERENCE_NOT_EFFECTIVE, REFERENCE_BACKDATED, SENIOR_APPROVAL_REQUIRED, SCHEDULE_ENGINE_UNAVAILABLE,
             DEAL_CHANGED, FLOW_NOT_OVERRIDABLE, FLOW_ALREADY_IN_PAYMENT, FLOW_CHANGED,
             CONVERSION_FACTOR_MISSING, COLLATERAL_HAIRCUT_MISSING, COLLATERAL_PRICE_MISSING,
-            COLLATERAL_PRICE_OUT_OF_TOLERANCE
+            COLLATERAL_PRICE_OUT_OF_TOLERANCE, PAYMENT_RELEASED, PAYMENT_STALE, PAYMENT_IN_FLIGHT,
+            SSI_CHANGED, FUNDING_EXCEEDED, RATE_SHEET_STALE
         message:
           type: [string, 'null']
         breaches:
@@ -2909,3 +3094,46 @@ components:
         sha256: {type: string}
         uploadedBy: {type: string}
         uploadedAt: {type: string, format: date-time}
+    RateSheet:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        effectiveFrom: { type: string, format: date }
+        status: { type: string, enum: [PENDING, ACTIVE, REJECTED, SUPERSEDED] }
+        rates:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              value: { type: number }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        decisionReason: { type: string, nullable: true }
+    PaymentStatus:
+      type: string
+      enum: [PROPOSED, RELEASED, SENT, SETTLED, FAILED, CANCELLED, RAIL_NOT_SUPPORTED, MANUALLY_SETTLED, RETURNED]
+    Payment:
+      type: object
+      properties:
+        paymentId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/PaymentStatus' }
+        direction: { type: string, enum: [IN, OUT] }
+        counterpartyId: { type: string }
+        currency: { type: string }
+        amount: { type: number }
+        valueDate: { type: string, format: date }
+        rail: { type: [string, 'null'], enum: [CERTIS, SEPA, TARGET2, SWIFT, null] }
+        ssi: { type: [object, 'null'] }
+        nettedFlowIds: { type: array, maxItems: 500, items: { type: string, format: uuid } }
+        dealIds: { type: array, maxItems: 500, items: { type: string, format: uuid } }
+        idempotencyKey: { type: string }
+        railReference: { type: [string, 'null'] }
+        transferRail: { type: [string, 'null'], enum: [CERTIS, TARGET2, SWIFT, null], description: "Contract 9.1: the institution-transfer rail chosen at release." }
+        releasedBy: { type: [string, 'null'] }
+        statusReason: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }

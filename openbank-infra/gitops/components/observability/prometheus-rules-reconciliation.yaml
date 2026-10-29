@@ -66,3 +66,43 @@ spec:
               threshold. A break is never auto-posted: investigate each one on the admin-ui nostro
               page (or GET /api/v1/treasury/nostro/{iban}/breaks) and resolve it with the
               correspondent or by a ledger booking through the normal deal lifecycle.
+
+    # #12115 / ADR-0344 D6: a payment release was refused because the funding (nostro) account
+    # would go negative as of the value date, net of same-day released treasury payments. The
+    # payment stays PROPOSED; nothing left the bank. Fires on any refusal in the last 15 minutes.
+    - name: openbank.treasury.funding
+      rules:
+        - alert: TreasuryFundingExceeded
+          expr: sum by (currency) (increase(openbank_treasury_funding_exceeded_total[15m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            # Each refusal is an on-demand release, not a periodic job: the window follows real traffic.
+            subject_period: continuous
+            summary: "A treasury payment release was refused: funding account would go negative"
+            description: >-
+              treasury-service refused to release an outgoing payment in {{ $labels.currency }}
+              because the funding nostro account would be negative on the value date. Fund the
+              account (or move the payment) and release it again; GET /api/v1/treasury/payments
+              lists the PROPOSED payments.
+
+    # ADR-0344 D6: the institution-transfer rail reported a status (SENT / SETTLED / REJECTED) for a
+    # payment a human had already resolved MANUALLY_SETTLED or RETURNED. The rail and the manual
+    # resolution disagree about whether money moved; the status was NOT applied and sits in the
+    # channel's DLQ. Fires on any such conflict in the last 15 minutes.
+    - name: openbank.treasury.payment-rail-conflict
+      rules:
+        - alert: TreasuryPaymentRailConflict
+          expr: sum by (status) (increase(openbank_treasury_payment_rail_conflict_total[15m])) > 0
+          labels:
+            severity: critical
+          annotations:
+            # Each conflict is a rail delivery, not a periodic job: the window follows real traffic.
+            subject_period: continuous
+            summary: "A rail status contradicts a manually resolved treasury payment"
+            description: >-
+              treasury-service received a rail status {{ $labels.status }} for a payment a human
+              had already resolved MANUALLY_SETTLED or RETURNED. It was not applied and is parked
+              in openbank.dlq.treasury.institution-transfer-status-in. Establish with the
+              correspondent whether the money moved, correct the resolution through a reviewed
+              change, then replay or discard the record.

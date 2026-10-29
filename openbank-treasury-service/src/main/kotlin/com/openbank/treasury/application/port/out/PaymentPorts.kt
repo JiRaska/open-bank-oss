@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.treasury.application.port.out
+
+import com.openbank.treasury.domain.cashflow.CashFlow
+import com.openbank.treasury.domain.payment.Payment
+import com.openbank.treasury.domain.payment.PaymentStatus
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
+
+class PaymentNotFoundException(id: UUID) : NoSuchElementException("payment $id not found")
+
+/** ADR-0344 D6: own-account payments and the flows they settle. */
+interface PaymentRepository {
+    /**
+     * Insert a PROPOSED payment linking its flows ([prior] null; a flow already linked to a payment
+     * refuses the whole insert), or store a status change (row locked, must still hold [prior]); with
+     * the outbox [event] and, for SETTLED, the flows moved to SETTLED — all in ONE transaction.
+     */
+    suspend fun save(payment: Payment, prior: PaymentStatus?, event: DealEvent?, settleFlows: Boolean = false)
+
+    suspend fun find(paymentId: UUID): Payment?
+
+    suspend fun findByKey(idempotencyKey: String): Payment?
+
+    suspend fun list(status: PaymentStatus?, from: LocalDate, to: LocalDate, limit: Int): List<Payment>
+
+    /**
+     * PROPOSED -> RELEASED under the funding check, serialised per funding LINE: inside ONE
+     * transaction it takes a transaction-scoped advisory lock on [fundingKey] (account, currency —
+     * no value date), recomputes the unbooked outgoing total of that line on EVERY value date, calls
+     * [fundingCheck] with it (which throws to refuse), then stores the release and its [events] —
+     * the status change and, for a payment handed to a rail, `treasury.payment.released.v1`
+     * (contract 9) — all in that one transaction.
+     */
+    suspend fun saveRelease(
+        payment: Payment,
+        events: List<DealEvent>,
+        fundingKey: String,
+        fundingCheck: (pendingOut: BigDecimal) -> Unit,
+    )
+
+    /** Every payment that settles a flow of [dealId]. */
+    suspend fun forDeal(dealId: UUID): List<Payment>
+
+    /** Σ of released-but-unsettled (RELEASED, SENT, RAIL_NOT_SUPPORTED) outgoing payments in [currency] on [valueDate]. */
+    suspend fun pendingOut(currency: String, valueDate: LocalDate): BigDecimal
+
+    /** Expected receipts (IN, PROPOSED) of exactly [amount] in [currency] on [valueDate]. */
+    suspend fun expectedIn(currency: String, amount: BigDecimal, valueDate: LocalDate): List<Payment>
+
+    /** Latest-schedule FIXED flows of live ACTUAL deals paid in [from]..[to] and not yet on a payment. */
+    suspend fun unpaidFixedFlows(from: LocalDate, to: LocalDate): List<CashFlow>
+}

@@ -415,3 +415,87 @@ test_position_close_is_a_back_office_write if {
 	}
 	allowed(back_office, "treasury.position.close")
 }
+
+# --- ADR-0344 D5 fixings and market data: must-DENY first ---
+
+test_market_data_proposer_cannot_approve_and_approver_cannot_propose if {
+	not allowed(back_office, "treasury.marketdata.approve")
+	not allowed(approver, "treasury.marketdata.import")
+	not allowed(approver, "treasury.fixing.manual")
+	not allowed(dealer, "treasury.marketdata.import")
+	allowed(back_office, "treasury.marketdata.import")
+	allowed(back_office, "treasury.fixing.manual")
+	allowed(back_office, "treasury.fixing.run")
+	allowed(approver, "treasury.marketdata.approve")
+	allowed(senior, "treasury.marketdata.approve")
+}
+
+test_market_data_machines_and_agents_get_nothing if {
+	every p in [shared_sa, renamed_sa, agent, nobody] {
+		not allowed(p, "treasury.marketdata.import")
+		not allowed(p, "treasury.marketdata.approve")
+		not allowed(p, "treasury.fixing.manual")
+		not allowed(p, "treasury.fixing.run")
+	}
+}
+
+test_staff_read_fixings_and_market_data if {
+	allowed(dealer, "treasury.fixing.read")
+	allowed(approver, "treasury.marketdata.read")
+	not allowed(agent, "treasury.marketdata.read")
+}
+
+# --- ADR-0344 D6 payments: must-DENY first ---
+
+releaser := {"service_account": false, "type": "HUMAN", "id": "releaser-1", "roles": ["ROLE_TREASURY_PAYMENT_RELEASER"]}
+
+test_only_the_payment_releaser_releases if {
+	every p in [dealer, approver, senior, admin, back_office, editor, nobody] {
+		not allowed(p, "treasury.payment.release")
+	}
+	allowed(releaser, "treasury.payment.release")
+	not allowed(releaser, "treasury.payment.propose")
+	not allowed(releaser, "treasury.payment.cancel")
+}
+
+test_payment_machines_and_agents_get_nothing if {
+	agent_releaser := {"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_TREASURY_PAYMENT_RELEASER"]}
+	every p in [shared_sa, renamed_sa, agent, agent_releaser] {
+		not allowed(p, "treasury.payment.release")
+		not allowed(p, "treasury.payment.propose")
+		not allowed(p, "treasury.payment.cancel")
+	}
+}
+
+test_back_office_proposes_and_cancels_payments if {
+	allowed(back_office, "treasury.payment.propose")
+	allowed(back_office, "treasury.payment.cancel")
+	allowed(approver, "treasury.payment.cancel")
+	not allowed(approver, "treasury.payment.propose")
+	allowed(releaser, "treasury.payment.read")
+}
+
+test_only_approvers_resolve_a_released_payment if {
+	every p in [releaser, back_office, dealer, admin, agent, shared_sa] {
+		not allowed(p, "treasury.payment.resolve")
+	}
+	allowed(approver, "treasury.payment.resolve")
+	allowed(senior, "treasury.payment.resolve")
+}
+
+# Least privilege holds for the new reads too: the reference editor reaches none of them, and the
+# payment releaser reads only payments and writes nothing but the release itself.
+test_reference_editor_reads_no_fixings_market_data_or_payments if {
+	every a in {"treasury.fixing.read", "treasury.marketdata.read", "treasury.payment.read"} {
+		not allowed(editor, a)
+	}
+	every a in {
+		"treasury.marketdata.import", "treasury.marketdata.approve", "treasury.fixing.manual",
+		"treasury.fixing.run", "treasury.payment.resolve", "treasury.deal.draft", "treasury.deal.approve",
+	} {
+		not allowed(releaser, a)
+	}
+	every a in (reads | {"treasury.fixing.read", "treasury.marketdata.read", "treasury.reference.read", "treasury.cashflow.read"}) {
+		not allowed(releaser, a)
+	}
+}

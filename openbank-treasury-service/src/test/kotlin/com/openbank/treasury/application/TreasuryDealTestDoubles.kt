@@ -63,6 +63,7 @@ internal class InMemoryDeals : DealRepository {
         command: CommandKey?,
         schedule: com.openbank.treasury.application.port.out.ScheduleWrite?,
         extraEvents: List<DealEvent>,
+        withdrawPayments: Boolean,
         limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
     ): Deal {
         limitGuard?.let { g ->

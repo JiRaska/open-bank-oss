@@ -110,6 +110,11 @@ class TreasuryDealService(
      */
     private val creditTerms: suspend (asOf: LocalDate, collateralIsin: String?) -> CreditTerms =
         { _, _ -> CreditTerms.NONE },
+    /**
+     * ADR-0344 D6: runs before a deal is cancelled or reversed: blocks the change while a payment
+     * of the deal is released, withdraws its PROPOSED payments.
+     */
+    private val paymentGuard: (suspend (dealId: UUID) -> Unit)? = null,
 ) : TreasuryDealUseCase {
 
     private suspend fun policy(): ProductLimitPolicy = mandate?.invoke() ?: productLimits
@@ -300,7 +305,7 @@ class TreasuryDealService(
         // Domain transition (authorisation, state) FIRST; the payment withdrawal happens in the save's
         // transaction under the deal lock, so a refused or failed cancel withdraws nothing.
         val cancelled = load(dealId).cancel(actor, clock.instant())
-        return deals.save(cancelled, command = cmd(key, CANCEL, dealId))
+        return deals.save(cancelled, command = cmd(key, CANCEL, dealId), withdrawPayments = paymentGuard != null)
     }
 
     override suspend fun confirm(dealId: UUID, reference: String?, actor: Actor, key: String?): Deal {
@@ -395,6 +400,9 @@ class TreasuryDealService(
         key?.let { k -> replay(k, REVERSE, dealId)?.let { return it } }
         val deal = load(dealId)
         val reversed = deal.reverse(actor, reason, clock.instant())
+        // Read-only pre-check before the reversal journal is posted (no side effect); the binding
+        // check and the withdrawal run again under the deal lock in the save's transaction.
+        paymentGuard?.invoke(dealId)
         check(deal.product.legacy || deal.state != DealState.SETTLED) {
             "a settled ${deal.product} deal is changed by a correction (ADR-0344 D7), not reversed"
         }
@@ -426,7 +434,7 @@ class TreasuryDealService(
                 ),
             ),
         )
-        return deals.save(reversed, ref, event, cmd(key, REVERSE, dealId))
+        return deals.save(reversed, ref, event, cmd(key, REVERSE, dealId), withdrawPayments = paymentGuard != null)
     }
 
     override suspend fun sendConfirmation(
@@ -545,6 +553,12 @@ class TreasuryDealService(
             journals = outcomes.sumOf { it.getOrDefault(0) },
             failures = outcomes.mapNotNull { it.exceptionOrNull() },
         )
+    }
+
+    override suspend fun postOutflow(dealId: UUID, through: LocalDate): Int {
+        val deal = load(dealId)
+        if (deal.product.legacy || deal.state != DealState.SETTLED) return 0
+        return matrixAccrueAndPay(deal, minOf(through, deal.maturityDate))
     }
 
     /** Post each day after the last accrued one, up to and including [through]. Returns journals posted. */

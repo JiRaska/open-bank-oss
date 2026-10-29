@@ -154,8 +154,41 @@ class ExceptionMappers {
         error(Response.Status.CONFLICT.statusCode, "FLOW_ALREADY_IN_PAYMENT", e.message)
 
     @ServerExceptionMapper
+    fun dealHasReleasedPayment(e: com.openbank.treasury.domain.payment.DealHasReleasedPaymentException): Response =
+        error(Response.Status.CONFLICT.statusCode, "PAYMENT_RELEASED", e.message)
+
+    @ServerExceptionMapper
+    fun rateSheetNotFound(e: com.openbank.treasury.infrastructure.marketdata.RateSheetNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun rateSheetStale(e: com.openbank.treasury.infrastructure.marketdata.RateSheetStaleException): Response =
+        error(Response.Status.CONFLICT.statusCode, "RATE_SHEET_STALE", e.message)
+
+    @ServerExceptionMapper
+    fun paymentStale(e: com.openbank.treasury.domain.payment.PaymentStaleException): Response =
+        error(Response.Status.CONFLICT.statusCode, "PAYMENT_STALE", e.message)
+
+    /** A RELEASED / SENT payment is still with the rail: resolution waits for its terminal status. */
+    @ServerExceptionMapper
+    fun paymentInFlight(e: com.openbank.treasury.domain.payment.PaymentInFlightException): Response =
+        error(Response.Status.CONFLICT.statusCode, "PAYMENT_IN_FLIGHT", e.message)
+
+    @ServerExceptionMapper
+    fun ssiChanged(e: com.openbank.treasury.domain.payment.SsiChangedException): Response =
+        error(Response.Status.CONFLICT.statusCode, "SSI_CHANGED", e.message)
+
+    @ServerExceptionMapper
     fun flowConflict(e: com.openbank.treasury.application.port.out.CashFlowConflictException): Response =
         error(Response.Status.CONFLICT.statusCode, "FLOW_CHANGED", e.message)
+
+    @ServerExceptionMapper
+    fun paymentNotFound(e: com.openbank.treasury.application.port.out.PaymentNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun fundingExceeded(e: com.openbank.treasury.domain.payment.FundingExceededException): Response =
+        error(UNPROCESSABLE, "FUNDING_EXCEEDED", e.message)
 
     @ServerExceptionMapper
     fun notPermitted(e: ActorNotPermittedException): Response =

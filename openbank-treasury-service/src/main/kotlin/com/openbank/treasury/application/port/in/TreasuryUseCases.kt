@@ -186,6 +186,15 @@ interface TreasuryDealUseCase {
     /** Post every missing daily accrual of every SETTLED deal up to [asOf] (capped at maturity). */
     suspend fun accrueInterest(asOf: LocalDate): AccrualRun
 
+    /**
+     * ADR-0344 D7 outflow: post, through the posting matrix, the accruals and the PAYMENT journals of
+     * every flow of [dealId] paid on or before [through] (a SENT/SETTLED payment's value date). The
+     * keys are the same `treasury:<dealId>:payment:<flowId>` the daily run uses, so whichever posts
+     * first wins and the other is a ledger replay. A legacy product or a deal not SETTLED posts
+     * nothing. Returns the journals posted.
+     */
+    suspend fun postOutflow(dealId: java.util.UUID, through: LocalDate): Int = 0
+
     /** ADR-0344 D7: the posting-rule matrix, every product (versioned data). */
     fun postingRules(): List<com.openbank.treasury.domain.model.PostingRule> =
         com.openbank.treasury.domain.model.PostingMatrix.rules
