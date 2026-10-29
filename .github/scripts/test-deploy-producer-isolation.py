@@ -19,6 +19,22 @@ class ProducerIsolationTests(unittest.TestCase):
         cls.workflow = yaml.safe_load((ROOT / '.github/workflows/auto-deploy.yml').read_text())
         cls.steps = cls.workflow['jobs']['gitops-pr']['steps']
 
+    def test_reconcile_source_evidence_uses_repository_scoped_read_only_app_token(self):
+        steps = self.workflow['jobs']['can-i-deploy']['steps']
+        token = next(step for step in steps if step.get('id') == 'source_evidence_token')
+        self.assertEqual(token['uses'], 'actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510')
+        self.assertEqual(token['if'], "github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true'))")
+        configuration = token['with']
+        self.assertEqual(configuration['owner'], '${{ github.repository_owner }}')
+        self.assertEqual(configuration['repositories'], '${{ github.event.repository.name }}')
+        permissions = {key: value for key, value in configuration.items() if key.startswith('permission-')}
+        self.assertEqual(permissions, {'permission-actions': 'read', 'permission-contents': 'read'})
+        self.assertNotEqual(configuration.get('skip-token-revoke'), True)
+        gate = next(step for step in steps if step.get('name') == 'can-i-deploy (per changed service)')
+        self.assertEqual(gate['env']['GH_TOKEN'], '${{ steps.source_evidence_token.outputs.token || github.token }}')
+        self.assertLess(steps.index(token), steps.index(gate))
+        self.assertNotIn('continue-on-error', token)
+
     def test_same_source_independent_runs_have_distinct_candidate_branches(self):
         create = next(step for step in self.steps if step.get('id') == 'gitops_pr')
         template = create['with']['branch']
