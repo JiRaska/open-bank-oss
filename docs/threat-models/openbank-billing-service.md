@@ -112,8 +112,13 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
   same facts later. They are erased (set to NULL) when the IR actually re-decides the input, leaving
   only the outcome; a row stuck PENDING keeps them until it completes or exhausts its retries, and a
   row completed as not comparable (`NO_IR`, `VERIFICATION_DISABLED`, `VERIFICATION_FAILED`, ...) keeps
-  them so it can be compared once the cause is fixed. No re-drive or purge of such rows exists yet, so
-  that retention is unbounded until one does; tracked as a follow-up. The comparator's
+  them so it can be compared once the cause is fixed. Each scheduler run, even with the comparator
+  disabled, erases all nine frozen facts on eligible rows older than
+  `openbank.billing.product-shadow.fact-retention` (default `P30D`), capped at
+  `max-batches-per-run × batch-size` rows. Locked rows and rows under a live claim are skipped.
+  Backlog, live claims, scheduler downtime or failures can delay physical erasure beyond the
+  configured age and one scheduler interval. DONE keeps its outcome; an eligible non-DONE row is
+  closed as `FACTS_EXPIRED`. No automatic re-drive exists. The comparator's
   metrics carry consumer, product code, rule id and a reason only, never an account, amount or
   balance. Transport is TLS; reads are OPA-authorized.
 - **Tampering (product IR, ADR-0352 phase 3)** — the shadow evaluates a revision's IR only after the
@@ -364,3 +369,5 @@ or one-time NULL identity metadata enrichment. V13 permits
 only that metadata transition with every pre-existing immutable field unchanged; it still rejects
 identity overwrite, IR/hash/signature mutation and deletion. No bare-hash signature fallback,
 revision-number default, posting authority or deployment activation is introduced.
+
+- **2026-10-24** — **Scheduled shadow fact cleanup (ADR-0352 phase 3 follow-up).** Not-comparable rows previously retained frozen facts without cleanup. Each `ProductShadowScheduler` run now erases all nine frozen facts on eligible rows older than `openbank.billing.product-shadow.fact-retention` (default `P30D`), even with the comparator disabled, capped at `max-batches-per-run × batch-size` rows. Locked rows and rows under a live claim are skipped. DONE keeps its outcome; an eligible non-DONE row is closed as `FACTS_EXPIRED`. **STRIDE-I:** backlog, live claims, scheduler downtime or failures can delay physical erasure beyond the configured age and one interval; this is not a strict wall-clock retention deadline. `ProductShadowPersistenceIT` covers eligibility, erasure and live-claim exclusion; scheduler tests cover batching. **Residual:** no automatic re-drive; retained facts alone do not re-queue a completed row. Rollback: revert; no schema change.
