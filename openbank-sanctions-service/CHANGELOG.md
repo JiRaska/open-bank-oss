@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.1...sanctions-service-v0.18.2) (2026-10-27)
+
+
+### Bug Fixes
+
+* **sanctions:** preserve JSONB payloads in reactive persistence ([#13084](https://github.com/JiRaska/open-bank-oss/issues/13084)) ([acc9f60](https://github.com/JiRaska/open-bank-oss/commit/acc9f60c8bed588c2a611436473e13abbf7fc1c2))
+* **sanctions:** src/main touched -&gt; patch release. Refs [#11948](https://github.com/JiRaska/open-bank-oss/issues/11948) ([acc9f60](https://github.com/JiRaska/open-bank-oss/commit/acc9f60c8bed588c2a611436473e13abbf7fc1c2))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.0...sanctions-service-v0.18.1) (2026-10-26)
 
 

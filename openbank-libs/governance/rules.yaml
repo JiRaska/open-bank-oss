@@ -44,12 +44,6 @@ deploy_holds:
     # their place. Every entry with its own issue, reason or release condition is kept.
     openbank-account-service:
       all_of:
-      - issue: '#13079'
-        reason: 'Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13079 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
@@ -60,74 +54,41 @@ deploy_holds:
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-billing-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-clearing-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-consent-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-delegation-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-domestic-payment:
       all_of:
-      - issue: '#13079'
-        reason: 'Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13079 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-fraud-service:
       all_of:
-      - issue: '#13079'
-        reason: 'Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13079 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 1 is healthy for 24h.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-fx-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-interest-service:
       all_of:
-      - issue: '#13079'
-        reason: 'Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13079 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: "#13167"
         reason: "Day-close participation V18 and its reporter require owner-controlled first image delivery."
         release_condition: "The owner approves the exact interest image and deployment window, accepts V18 schema and historical-run evidence semantics without inferred backfill, and verifies ledger-interest participant API and authorization compatibility. Bank participation remains shadow and pension-company participation remains off; enforcement, replay and financial operations require separate approval. Preserve every separately required catalog-sync activation condition when holds are combined."
@@ -136,9 +97,6 @@ deploy_holds:
         release_condition: "The owner approves the exact interest image and deployment window after accepting V19/V20 backfill semantics, verifying catalog access, and defining rollback that preserves account revision pins."
     openbank-ledger-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#13167'
         reason: 'Day-close participation V33 and its API require owner-controlled first image delivery.'
         release_condition: 'The owner approves the exact ledger image and deployment window, accepts V33 schema and audit-history retention, and verifies ledger-interest participant API and authorization compatibility. Bank participation remains shadow and pension-company participation remains off; enforcement, replay and financial operations require separate approval.'
@@ -147,52 +105,31 @@ deploy_holds:
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-lending-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-pension-fund-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-psd2-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-sanctions-service:
       all_of:
-      - issue: '#13079'
-        reason: 'Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13079 was held, then remove this entry in a reviewed change.'
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 1 is healthy for 24h.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-sca-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-sdd-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
@@ -203,17 +140,11 @@ deploy_holds:
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-sepa-payment:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-settlement-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
@@ -223,25 +154,16 @@ deploy_holds:
       release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-swift-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-treasury-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-vop-service:
       all_of:
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in a reviewed change.'
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
@@ -1318,6 +1240,9 @@ close_participants:
     billing:                                # #13167: monthly billing cycle + its fee postings
       service: openbank-billing-service
       principal: service-account-openbank-billing
+    treasury:                               # #13167: hourly deal accrual + the day's deal journals
+      service: openbank-treasury-service
+      principal: service-account-openbank-treasury
 
 money_path_services:
   - openbank-ledger-service
@@ -2053,6 +1978,7 @@ provenance:
   #   b) multi-stage Dockerfile: cyclonedxBom in the JDK build stage → COPY --from=build bom.json into runtime stage
   # Non-compliant: any `RUN ./gradlew` or `RUN cyclonedxBom` in the RUNTIME (non-build) stage.
   gate: provenance
+  ci_producer: ".github/scripts/check-fleet-release-evidence.py"
   # Rollout state of the deploy-time provenance gate (ADR-0030 D4), staged like the OPA-authz
   # (ADR-0034) and image-signature gates: ADVISORY now — per-release evidence bundles
   # (SBOM+SLSA+VEX+manifest) are produced, KMS-cosign-signed and independently verifiable
@@ -2061,43 +1987,18 @@ provenance:
   # only when ALL enforce_criteria below hold. (A blind flip would outage deploys of
   # uncovered services; cf. the #770 image-signature Enforce revert.)
   enforced: advisory
-  # Moved 2026-09-30 -> 2027-03-31 (#11685): criteria 1 and 4 need producers that do not
-  # exist yet (fleet-coverage evidence check; a provenance gate) — waiting cannot meet them.
+  # Issue #11685: observe fleet coverage and a clean window before graduation.
   target_enforce_date: "2027-03-31"   # ADR-0144
-  # MEASURED 2026-09-05, criterion by criterion. Two of the four already hold and this record
-  # said neither did; the other two cannot be met by waiting, because nothing measures them.
-  #
-  #   1. every service's latest release carries a green evidence bundle — NOT MEASURED, and
-  #      not measurABLE as things stand: verify-release-evidence.yml verifies ONE tag per week
-  #      (schedule default: "the newest release"). The 2026-08-31 run verified exactly
-  #      fx-service-v0.14.1. A weekly single-tag check never becomes a fleet statement, however
-  #      long it runs. Fleet coverage needs a different producer.
-  #   2. fleet-attestation green — SATISFIED. Locally the script exits 2 (0 verified, 64 could
-  #      not be checked) purely because cosign/KMS are absent, and it says so itself: "Exit 2 =
-  #      'could not run', NOT a verdict." In CI it prints
-  #      "FLEET ATTESTATION GATE: PASS — every declared openbank-* image is attested"
-  #      (run 33952524397). Do not read the local exit code as a fleet verdict.
-  #   3. kyverno SBOM-attestation rule Audit -> Enforce — ALREADY DONE, and this line describing
-  #      it as "one line once criteria 1-2 hold" is two months stale. Live in the cluster:
-  #      `kubectl get clusterpolicy verify-openbank-image-sbom-attestation` reported Enforce,
-  #      Ready, age 60d (since #11437 the ImageValidatingPolicy
-  #      verify-openbank-image-sbom-attestation-cel, validationActions [Deny]).
-  #   4. "the advisory gate has run clean for an observation window" — THE GATE DOES NOT EXIST.
-  #      `provenance` appears in no entry of .github/gates/gates.yaml and no workflow invokes a
-  #      provenance checker. A condition on the behaviour of a gate that was never built has no
-  #      truth value; it cannot be satisfied by waiting. Same shape as the finops_tiers gap
-  #      (#8799), one level up: there rules.yaml named a gate missing from the manifest, here it
-  #      predicates graduation on one that was never named at all.
-  #
-  # So the honest state is 2 of 4 met, 1 unmeasurable with today's producers, and 1 vacuous.
-  # 2026-09-30 cannot be met by waiting; it needs a fleet-coverage producer for criterion 1 and
-  # either a real gate or a rewritten criterion 4.
-  blocked_on: "measured 2026-09-05: criteria 2 (fleet-attestation, PASSES in CI run 33952524397)
-    and 3 (kyverno rule live in Enforce, Ready 60d) ALREADY HOLD — this record said neither did.
-    Criterion 1 is not measurable as things stand (verify-release-evidence.yml checks one tag per
-    week, not fleet coverage), and criterion 4 is vacuous: no `provenance` gate exists in
-    gates.yaml or any workflow, so 'the advisory gate has run clean' has no subject. The date
-    needs a fleet-coverage producer and a rewritten or implemented criterion 4, not more time."
+  # The advisory provenance gate inventories latest stable releases. PRs validate the
+  # local denominator without claiming remote coverage; main and the scheduled verifier
+  # observe live metadata. The verifier checks manifest identity, digests and KMS signatures.
+  # Official generator attestations are required assets, not cryptographically verified here.
+  # Local negative controls prove refusal behavior, not a clean hosted fleet observation.
+  # Historical evidence for criteria 2 and 3 must be revalidated at graduation; adding
+  # the missing producer does not establish either current deployment state or readiness.
+  blocked_on: "Fleet inventory and verification producers are implemented; successful hosted
+    cryptographic verification for every non-exempt latest release and a clean observation
+    window remain required. Revalidate fleet attestation and admission policy at graduation."
   enforce_criteria:
     - "every deployable service's latest release carries a verify-release-evidence-green bundle (admin-ui excepted until it has a non-Gradle SBOM source)"
     - "the fleet-attestation gate passes: .github/scripts/check-fleet-attestations.sh is GREEN against origin/main (see fleet_attestation_gate below) -- this is a HARD precondition, not a judgement call"
@@ -4951,8 +4852,11 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*TransactionServiceClient*.kt"
       - "src/main/kotlin/**/*LedgerClient*.kt"
       - "src/main/kotlin/**/*RiskCurveClient*.kt"  # ADR-0315 D9: m2m OIDC client to the risk engine
+      - "src/main/kotlin/**/close/LedgerCloseParticipationClient.kt"  # ADR-0342: m2m OIDC client, day-close report
       - "src/main/kotlin/**/nostro/**"
       - "src/main/kotlin/**/rest/NostroResource.kt"
+      - "src/main/kotlin/**/portfolio/**"            # ADR-0337 amendment: custodian holdings store
+      - "src/main/kotlin/**/rest/PortfolioResource.kt"  # semt.002 upload (sha256 evidence) + portfolio read
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/**/domain/model/Legs.kt"  # ADR-0344 D4: the leg-spec SHA-256 decides whether an override survives regeneration

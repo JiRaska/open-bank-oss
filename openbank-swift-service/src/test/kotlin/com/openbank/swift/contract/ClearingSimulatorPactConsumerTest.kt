@@ -17,6 +17,7 @@ import com.openbank.libs.iso20022.ChargeBearer
 import com.openbank.libs.iso20022.ClearingSystem
 import com.openbank.libs.iso20022.CreditTransferInstruction
 import com.openbank.libs.iso20022.InstitutionCreditTransferInstruction
+import com.openbank.libs.iso20022.Pacs002Reader
 import com.openbank.libs.iso20022.Pacs008Builder
 import com.openbank.libs.iso20022.Pacs009Builder
 import com.openbank.libs.iso20022.SettlementMethod
@@ -206,12 +207,21 @@ class ClearingSimulatorPactConsumerTest {
                         )
                     }
                     rpt.appendElement("TxInfAndSts", emptyMap<String, Any?>()) { tx ->
+                        tx.appendElement("OrgnlGrpInf", emptyMap<String, Any?>()) { group ->
+                            group.appendElement("OrgnlMsgId", emptyMap<String, Any?>(), "FI-1B4E28BA2FA14D2E")
+                            group.appendElement("OrgnlMsgNmId", emptyMap<String, Any?>(), "pacs.009.001.08")
+                        }
                         tx.appendElement(
                             "OrgnlEndToEndId",
                             emptyMap<String, Any?>(),
                             "1b4e28ba2fa14d2e883f0016d3cca427",
                         )
                         tx.appendElement("OrgnlTxId", emptyMap<String, Any?>(), "1b4e28ba2fa14d2e883f0016d3cca427")
+                        tx.appendElement(
+                            "OrgnlUETR",
+                            emptyMap<String, Any?>(),
+                            "3f0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f",
+                        )
                         tx.appendElement("TxSts", emptyMap<String, Any?>(), "ACSC")
                     }
                 }
@@ -246,6 +256,9 @@ class ClearingSimulatorPactConsumerTest {
         assertThat(
             body,
         ).contains("<TxSts>ACSC</TxSts>", "<OrgnlEndToEndId>1b4e28ba2fa14d2e883f0016d3cca427</OrgnlEndToEndId>")
+        val status = Pacs002Reader().read(body)
+        assertThat(status.originalMessageId).isEqualTo("FI-1B4E28BA2FA14D2E")
+        assertThat(status.originalUetr).isEqualTo("3f0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f")
     }
 
     @Test

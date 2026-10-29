@@ -1386,6 +1386,32 @@ gates:
     run: |
       python3 .github/scripts/check-loki-rule-self-match.py
 
+  # ADR-0357: a decoy nobody reads is the ADR-0279 outcome again (HoneyEndpointHit over a
+  # filter no service configured, 0 hits in 7 days and unable to fire). Route and rule live
+  # in different files; this is the check between them. ENFORCED.
+  - id: edge-decoy-rule-parity
+    name: "every edge decoy route has a Loki rule reading it, and vice versa (ADR-0357, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 30  # pure YAML scan of gitops/components; measured 9s locally incl. self-test
+    rationale: >-
+      Measured 2026-10-29: openbank.security.honey.paths is set in no service and no manifest,
+      the honeytoken metric series does not exist, and HoneyEndpointHit fired 0 times in 7 days
+      because its subject was never configured. The edge decoys are answered by Envoy and read
+      from the access log by route name, so the pairing is mechanical: an HTTPRoute named
+      edge-decoys-* must be selected by a loki_rule ConfigMap and every such selector must name
+      a declared route. Either half missing is a write-only control.
+    review_after: "2027-04-29"
+    min_subjects: 2   # edge-decoys-commodity and edge-decoys-targeted at authoring time
+    selftest_inputs:
+      - ".github/scripts/check-edge-decoy-rule-parity.py"
+      - "openbank-infra/gitops/components/observability/httproute-edge-decoys.yaml"
+      - "openbank-infra/gitops/components/observability/loki-rules-edge-deception.yaml"
+    selftest: |
+      python3 .github/scripts/check-edge-decoy-rule-parity.py --selftest
+    run: |
+      python3 .github/scripts/check-edge-decoy-rule-parity.py
+
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"
     group: gitops
@@ -1977,9 +2003,11 @@ gates:
       bash .github/scripts/tests/test-resolve-historical-service-ref.sh
       python3 .github/scripts/test-admin-ui-delivery-baseline.py
       python3 .github/scripts/test-admin-ui-evidence-plan.py
+      node .github/scripts/test-issue-hygiene.mjs
       node --test .github/scripts/test-publish-admin-ui-evidence-import-boundary.mjs
       node --test .github/scripts/test-publish-admin-ui-gate-health.mjs .github/scripts/test-publish-admin-ui-evidence.mjs
       python3 .github/scripts/test-collect-admin-ui-test-evidence.py
+      python3 .github/scripts/test-stage-admin-ui-performance.py
       python3 .github/scripts/test-collect-admin-ui-security-kpis.py
 
   # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
@@ -2082,10 +2110,11 @@ gates:
     run: |
       bash .github/scripts/check-deploy-coverage.sh
 
-  # Reconcile probe unit test (rules.yaml: deploy_reconcile, issue #2020). Guards the
+  # Reconcile probe + source-provenance unit tests (rules.yaml: deploy_reconcile, issue #13070).
+  # Guards the
   # self-heal detection that re-drives a service stranded when the one-shot per-push
   # auto-deploy run is blocked by a transient can-i-deploy verification lag. Pure git +
-  # jq against a throwaway fixture repo — no Gradle, no network.
+  # jq/Python fixtures against throwaway data — no Gradle or network.
   - id: auto-deploy-reconcile-probe-unit-test
     selftest_exempt: "is-a-test-suite"
     name: "auto-deploy reconcile probe unit test"
@@ -2093,6 +2122,10 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/test-auto-deploy-reconcile-lag.sh
+      bash .github/scripts/test-can-i-deploy-reconcile-source.sh
+      python3 .github/scripts/test-verify-successful-service-ci.py
+      python3 .github/scripts/test-verify-reconcile-image-map.py
+      python3 .github/scripts/test-rewrite-reconcile-image-pins.py
 
   # Deployed-code-lag report unit test. Guards the
   # hours-scale "code on main is not running in sandbox" report that feeds the
@@ -3642,7 +3675,7 @@ gates:
       capability preflight, committed read-back, canonical parent/tree/blob identity and
       PR timeline. Unknown policy source, codex downgrade and revoked intent fail closed.
     budget_seconds: 60
-    min_subjects: 29
+    min_subjects: 38
     rationale: >-
       PR intent under a reviewed pre-merge prefix rule is distinct from exact-head approval
       and from bounded legacy reconstruction. The original evidence gate retains its floor.
@@ -4257,18 +4290,18 @@ gates:
   # ADR-0317: bounded-context packages leave openbank-libs-domain for openbank-libs-<context>
   # so a business change rebuilds its 1-11 declarers, not all 57 core consumers. Three things
   # silently undo that — a moved package reappearing in core, core depending on a context
-  # module, a libs module missing from LIBS_MODULES (#2983) — and this reports each. ADVISORY
+  # module, or a libs module missing from the shared graph — and this reports each. ADVISORY
   # through phases 1-3, enforced in phase 4 (rules.yaml: architecture.libs_core_purity).
   - id: libs-core-purity
     name: "libs-core-purity — business packages stay out of libs-domain (ADR-0317, advisory)"
     group: kotlin
     mode: advisory
-    rationale: "Business packages drifting back into openbank-libs-domain, or a libs module missing from LIBS_MODULES, silently restores the 57-module rebuild fan-out ADR-0317 removes (or the #2983 no-rebuild defect)."
+    rationale: "Keep moved business packages out of core and verify source-bearing libraries in the shared dependency graph. Report unresolved graphs separately from missing modules; selectors conservatively fall back to the supplied fleet."
     review_after: "2027-03-31"
     verified: "2026-10-17 — stays advisory: the issues this gate cited (#2983, #3357) are closed, but the real blocker is ADR-0317 phase 4 ('enforce once phases 1-3 land'; delivery-status partial, phases 2-4 tracked by #11604, open). Re-measured: 0 findings over 116 subjects, so it would pass today; promotion waits on the ADR, not on the tree. review_after 2027-03-31"
     budget_seconds: 10
     min_subjects: 50   # 109 measured 2026-09-26 (libs-domain sources + 2 build files + libs modules)
-    selftest_inputs: [".github/scripts/check-libs-core-purity.py"]
+    selftest_inputs: [".github/scripts/check-libs-core-purity.py", ".github/scripts/library_dependency_graph.py"]
     selftest: python3 .github/scripts/check-libs-core-purity.py --self-test
     selftest_expect: pass
     run: |
@@ -4524,6 +4557,44 @@ gates:
     run: |
       python3 .github/scripts/check-pact-provider-replay.py
 
+  # Issue #11685. The release-time postcondition below checks only tags cut in THAT run;
+  # the old weekly verifier checked one newest tag across the whole fleet. This advisory
+  # gate reads all published releases and checks every versioned component's latest tag
+  # for the complete asset set. The scheduled verifier consumes that same inventory and
+  # cryptographically verifies each bundle. A missing release or unreadable API is red,
+  # so an empty inventory cannot look like an observed clean window.
+  - id: provenance
+    name: "latest release evidence across the fleet (issue #11685, advisory)"
+    verified: "2026-10-16 — inventory and identity negative controls pass; hosted cryptographic fleet observation remains required before enforcement."
+    group: supplychain
+    mode: advisory
+    rationale: "Graduation requires every deployable component's latest release to carry a complete, independently verified evidence bundle; a single newest-tag check cannot prove fleet coverage."
+    review_after: "2027-03-31"
+    budget_seconds: 90
+    min_subjects: 60
+    selftest_inputs:
+      - ".github/scripts/check-fleet-release-evidence.py"
+      - ".github/scripts/test-fleet-release-evidence.py"
+      - ".github/scripts/release_evidence_assets.py"
+      - ".github/scripts/verify-release-evidence-manifest.py"
+      - ".github/scripts/test-verify-release-evidence-manifest.py"
+      - ".github/scripts/tests/test_release_identity_workflow.py"
+      - ".github/workflows/verify-release-evidence.yml"
+      - "release-please-config.json"
+    selftest: |
+      python3 .github/scripts/check-fleet-release-evidence.py --self-test
+      python3 .github/scripts/test-verify-release-evidence-manifest.py
+      python3 -m unittest discover -s .github/scripts/tests -p test_release_identity_workflow.py
+    run: |
+      # Live remote state is observed on main and by the scheduled verifier. A PR
+      # checks its local denominator but must not claim that remote releases passed.
+      case "${GITHUB_EVENT_NAME:-}" in
+        push|schedule|workflow_dispatch)
+          python3 .github/scripts/check-fleet-release-evidence.py ;;
+        *)
+          python3 .github/scripts/check-fleet-release-evidence.py --local-only ;;
+      esac
+
   # Issue #7597. release-please.yml's "Map released components -> tags" step builds released.tsv
   # from release-please-config.json's per-package `component` field; a package with a version.txt
   # but no `component` produces no row, silently — no SBOM, no cosign provenance, no VEX for that
@@ -4551,7 +4622,11 @@ gates:
     min_subjects: 60
     selftest_inputs:
       - ".github/scripts/check-release-evidence-coverage.py"
+      - ".github/scripts/release_evidence_assets.py"
       - ".github/scripts/test-release-evidence-upload.py"
+      - ".github/scripts/prepare-release-evidence.py"
+      - ".github/scripts/test-release-evidence-source.py"
+      - ".github/scripts/build-release-evidence.sh"
       - ".github/scripts/verify-release-evidence-manifest.py"
       - ".github/scripts/test-verify-release-evidence-manifest.py"
       - ".github/workflows/release-please.yml"
@@ -4559,6 +4634,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-release-evidence-coverage.py --self-test
       python3 .github/scripts/test-release-evidence-upload.py
+      python3 .github/scripts/test-release-evidence-source.py
       python3 .github/scripts/test-verify-release-evidence-manifest.py
     run: |
       python3 .github/scripts/check-release-evidence-coverage.py --enforce
@@ -7276,6 +7352,29 @@ gates:
     selftest_inputs: [".github/scripts/check-hibernate-sequence-guard.py", ".github/scripts/collect-test-run-evidence.py"]
     run: |
       python3 .github/scripts/check-hibernate-sequence-guard.py --root .
+
+  # #13169: a test file that is the same source in more than two modules is a copy that belongs once
+  # in openbank-libs-testing. No existing gate covers it (`pr-shared-files` compares OPEN PRs, not the
+  # tree). Compared with the `package` line removed, since a copy necessarily differs by package: the
+  # raw-byte comparison finds 0 groups on origin/main, the package-normalised one finds 3.
+  - id: duplicate-test-files
+    name: "no test file is identical in more than two modules (#13169, enforced ratchet)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      Per-service copies drift independently (HibernateSequenceGuardTest had three byte variants,
+      M2mOidcClientIdentityWiringTest 15 shapes) and every fix has to be repeated N times. A baselined
+      group may not spread, a shrunk or vanished one fails until its baseline is lowered, and a
+      new group fails.
+    review_after: "2027-04-23"
+    verified: "2026-10-23 — self-test has a 3-module package-only copy (flagged), a 2-module one, a one-line variation, a grown baselined group (flagged), a shrunk and a vanished one (both flagged: lower the baseline) and a package directory named build (scanned); on origin/main with an empty baseline it reports TraceContractRecorder (20), TraceContractProfile (11) and MockAuthzProducer (3)"
+    budget_seconds: 30
+    min_subjects: 1380   # 2760 distinct test-file contents measured 2026-10-23; half
+    selftest: python3 .github/scripts/check-duplicate-test-files.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-duplicate-test-files.py"]
+    run: |
+      python3 .github/scripts/check-duplicate-test-files.py --root .
 
   # #13172: an ExternalSecret reading `creds/<role>` for a role the openbao-config CronJob never
   # creates fails every reconcile with `unknown role` and nothing pages (the service keeps its

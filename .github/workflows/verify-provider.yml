@@ -45,8 +45,8 @@ on:
         # Blank deliberately means the checked-out ref. A distinct value checks out deployed P,
         # then overlays the provider's src/test from ref F — only when P and F are byte-identical
         # in every production build input of the service (prove-pact-provider-version.sh, #11597);
-        # otherwise only Ledger/Balance fall back to one approved provider-state fixture blob from F.
-        description: "Provider version P to publish. Blank = ref; distinct P takes <svc>/src/test from ref F if production-identical, else Ledger/Balance use one approved fixture from F."
+        # otherwise only explicitly named provider-state fixtures are imported from F.
+        description: "Provider version P to publish. Blank = ref; distinct P takes <svc>/src/test from ref F if production-identical, else Ledger/Balance/Account/Transaction/Party use their fixed named fixture bundle from F."
         required: false
         default: ""
         type: string

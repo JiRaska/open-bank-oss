@@ -28,11 +28,18 @@ repositories {
 }
 
 dependencies {
+    // Reuse the kernel canonical JSON and SHA-256; no context-to-context dependency.
+    implementation(project(":openbank-libs-domain"))
+
     // NO framework dependencies here — same rule as openbank-libs-domain (ADR-0002, #3670).
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
+    // Same offline schema validator as the existing product IR agreement tests.
+    testImplementation("com.networknt:json-schema-validator:1.5.9") {
+        exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
+    }
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

@@ -84,7 +84,11 @@ class InstitutionTransferResolutionSweeper(
             else -> ResolutionOutcome.UNRESOLVED
         }
     } catch (e: Exception) {
-        log.warnf(e, "Resolution of bank-own transfer %s failed; retried next pass", transfer.paymentId)
+        log.warnf(
+            "Resolution of bank-own transfer %s failed (%s); retried next pass",
+            transfer.paymentId,
+            e.javaClass.simpleName,
+        )
         ResolutionOutcome.FAILED
     }
 

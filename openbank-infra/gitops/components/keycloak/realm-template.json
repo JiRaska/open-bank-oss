@@ -1687,6 +1687,48 @@
       "secret": "__SYNTHETIC_FX_READ_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-synthetic-ledger-seed",
+      "name": "OpenBank Synthetic Journey: Ledger seed posting",
+      "description": "Synthetic identity for seeding ledger fixtures (account-overview); non-personal service account, synthetic-taint only",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "optionalClientScopes": [],
+      "secret": "__SYNTHETIC_LEDGER_SEED_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "agent-merge-recorder-ci",
+      "name": "OpenBank Agent Merge Recorder CI",
+      "description": "CI-only client_credentials identity for POST /api/v1/agent-merge-records. Its service account carries ROLE_MERGE_RECORDER only, never ROLE_ADMIN (ADR-0031 phase 3, #13172).",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "optionalClientScopes": [],
+      "secret": "__MERGE_RECORDER_CI_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-grafana",
       "fullScopeAllowed": false,
       "name": "Grafana (observability single pane)",
@@ -2272,6 +2314,22 @@
       "enabled": true,
       "serviceAccountClientId": "openbank-synthetic-fx-read",
       "realmRoles": []
+    },
+    {
+      "username": "service-account-openbank-synthetic-ledger-seed",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-synthetic-ledger-seed",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-agent-merge-recorder-ci",
+      "enabled": true,
+      "serviceAccountClientId": "agent-merge-recorder-ci",
+      "realmRoles": [
+        "ROLE_MERGE_RECORDER"
+      ]
     },
     {
       "username": "service-account-openbank-mcp-service",

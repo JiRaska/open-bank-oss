@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.17.1...treasury-service-v0.18.0) (2026-10-28)
+
+
+### Features
+
+* **treasury:** custodian portfolio statements and the period-end portfolio for tax reporting ([#13992](https://github.com/JiRaska/open-bank-oss/issues/13992)) ([c82147c](https://github.com/JiRaska/open-bank-oss/commit/c82147c20901a6fe7c6f5d6639f0f8cb54e82c4e))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.17.0...treasury-service-v0.17.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **treasury:** versioned deal saves, override eligibility and a reference-only editor role ([#13756](https://github.com/JiRaska/open-bank-oss/issues/13756)) ([e710754](https://github.com/JiRaska/open-bank-oss/commit/e71075488dcfb88c5deb10d426c00d27e5dfa051))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.16.0...treasury-service-v0.17.0) (2026-10-26)
 
 

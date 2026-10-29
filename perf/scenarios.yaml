@@ -44,26 +44,26 @@ scenarios:
 
   - id: balance-read-baseline
     definition: openbank-balance-service/src/test/k6/balance-read-baseline.js
-    execution_mode: planned-read-only-sandbox
-    safety_boundary: Read-only by construction — every request is a GET against openbank-balance-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
-    target_schedule: "0 5 * * *"
-    blocker: Needs a booted openbank-balance-service target and a least-privilege read identity (PERF_READ_TOKEN); the scenario is wired into the perf-baseline.yml module-read-baselines matrix and runs whenever PERF_BALANCE_URL plus PERF_READ_TOKEN are set; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-balance-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope. The two id-scoped probes (single-currency balance, latest reconciliation) need seeded rows to answer 200, so the module ships src/test/k6/fixtures.sql, which the gate loads into the throwaway database after boot; verified locally end to end. The perf-baseline.yml leg remains for the shared-sandbox mode (PERF_BALANCE_URL plus the PERF_READ_TOKEN secret); a 401 there is rejection evidence, not a handler baseline.
     assertions: Exercises all balances for an account, single-currency balance, latest reconciliation run. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
 
   - id: ledger-read-baseline
     definition: openbank-ledger-service/src/test/k6/ledger-read-baseline.js
-    execution_mode: planned-read-only-sandbox
-    safety_boundary: Read-only by construction — every request is a GET against openbank-ledger-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
-    target_schedule: "0 5 * * *"
-    blocker: Needs a booted openbank-ledger-service target and a least-privilege read identity (PERF_READ_TOKEN); the scenario is wired into the perf-baseline.yml module-read-baselines matrix and runs whenever PERF_LEDGER_URL plus PERF_READ_TOKEN are set; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
-    assertions: Exercises journal list, trial balance, current accounting day. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-ledger-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL (OIDC and dev-mode auth disabled, so no read identity is required; verified locally, 0 failed requests over a 2-minute ramp). The id-scoped probes (journal detail at a fixed fixture id, per-customer sub-ledger balance for the fleet-wide fixture account) joined the lane with src/test/k6/fixtures.sql — 200 POSTED journals over 90 days plus their double-entry lines, loaded into the throwaway database after boot and verified locally end to end. The perf-baseline.yml leg remains for the shared-sandbox mode and lights up whenever PERF_LEDGER_URL plus the PERF_READ_TOKEN secret are set; a 401 there is rejection evidence, not a handler baseline.
+    assertions: Exercises journal list, trial balance, current accounting day, journal detail (fixed fixture id), per-customer sub-ledger balances. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
 
   - id: transaction-read-baseline
     definition: openbank-transaction-service/src/test/k6/transaction-read-baseline.js
-    execution_mode: planned-read-only-sandbox
-    safety_boundary: Read-only by construction — every request is a GET against openbank-transaction-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
-    target_schedule: "0 5 * * *"
-    blocker: Needs a booted openbank-transaction-service target and a least-privilege read identity (PERF_READ_TOKEN); the scenario is wired into the perf-baseline.yml module-read-baselines matrix and runs whenever PERF_TRANSACTION_URL plus PERF_READ_TOKEN are set; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-transaction-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope. The former boot blocker (eager WorkflowClient injection dialling a Temporal frontend that does not exist in the throwaway stack) is fixed by making the injection lazy (fix #14076), and the gate boots the service with -Dopenbank.transaction.worker.enabled=false so no worker dials either; reads never touch Temporal. Verified locally end to end: readiness 200 with no Temporal reachable, both read probes 200, and a seeded 1000-row fixtures.sql (src/test/k6/fixtures.sql, rows across 90 days so the search query plan is real) loads into the throwaway database after boot. The perf-baseline.yml leg remains for the shared-sandbox mode (PERF_TRANSACTION_URL plus PERF_READ_TOKEN secret).
     assertions: Exercises transaction list (accountId, cursor) and transaction search. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
 
   - id: sepa-payment-read-baseline

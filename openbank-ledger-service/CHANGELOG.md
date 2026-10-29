@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.39.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.39.0...ledger-service-v1.39.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ledger:** carry the synthetic taint on the CDI request context into suspended resources ([#14059](https://github.com/JiRaska/open-bank-oss/issues/14059)) ([df3ce04](https://github.com/JiRaska/open-bank-oss/commit/df3ce048f294d17a912ddbdda45f90ff41ce0fe7))
+
+## [1.39.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.38.0...ledger-service-v1.39.0) (2026-10-26)
+
+
+### Features
+
+* **customer-edge:** add measured runtime resilience pilots ([#13891](https://github.com/JiRaska/open-bank-oss/issues/13891)) ([c0c19be](https://github.com/JiRaska/open-bank-oss/commit/c0c19be26b70b4d06433138e1f5f5016db31888b))
+
+
+### Bug Fixes
+
+* **ledger:** capture source-linked journal history snapshots with idempotent capture ([#13763](https://github.com/JiRaska/open-bank-oss/issues/13763)) ([c7d103c](https://github.com/JiRaska/open-bank-oss/commit/c7d103c9f9482c8725af567a770a2ad1cf5f5cad))
+
 ## [1.38.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.37.2...ledger-service-v1.38.0) (2026-10-26)
 
 

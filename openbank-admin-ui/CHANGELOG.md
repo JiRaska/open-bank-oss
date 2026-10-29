@@ -1,5 +1,33 @@
 # Changelog
 
+## [3.14.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.13.1...admin-ui-v3.14.0) (2026-10-28)
+
+
+### Features
+
+* **admin-ui:** project new simulation scenarios onto their services (Refs [#667](https://github.com/JiRaska/open-bank-oss/issues/667)) ([#14118](https://github.com/JiRaska/open-bank-oss/issues/14118)) ([f4c4b37](https://github.com/JiRaska/open-bank-oss/commit/f4c4b371b8bfda07a388854eb5c48c86b3f1e6c8))
+
+## [3.13.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.13.0...admin-ui-v3.13.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **admin-ui:** refresh cluster declarations from reviewed content ([#13469](https://github.com/JiRaska/open-bank-oss/issues/13469)) ([44fb070](https://github.com/JiRaska/open-bank-oss/commit/44fb0709c28b94750e3dddbc6c90b826f3495e96))
+
+## [3.13.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.12.2...admin-ui-v3.13.0) (2026-10-27)
+
+
+### Features
+
+* **admin-ui:** feed the trace-contract layer of the Test Intelligence matrix ([#12865](https://github.com/JiRaska/open-bank-oss/issues/12865)) ([97b5086](https://github.com/JiRaska/open-bank-oss/commit/97b5086d5c6e2f67f64d4b6a29d6f2855b590245))
+
+## [3.12.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.12.1...admin-ui-v3.12.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **treasury:** versioned deal saves, override eligibility and a reference-only editor role ([#13756](https://github.com/JiRaska/open-bank-oss/issues/13756)) ([e710754](https://github.com/JiRaska/open-bank-oss/commit/e71075488dcfb88c5deb10d426c00d27e5dfa051))
+
 ## [3.12.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.12.0...admin-ui-v3.12.1) (2026-10-26)
 
 

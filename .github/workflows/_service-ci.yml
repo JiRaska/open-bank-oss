@@ -196,7 +196,7 @@ jobs:
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
       # lets Gradle's toolchain resolution pick the right one with zero Foojay
       # downloads at build time (faster, fewer billed minutes).
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: |
@@ -605,6 +605,29 @@ jobs:
             echo "GRADLE_USER_HOME=${{ github.workspace }}/../../.gradle-svc/${{ inputs.service }}" >> "$GITHUB_ENV"
           fi
 
+      # Bound what each persistent per-service home keeps after a Gradle version bump. Gradle
+      # keeps `caches/<old-version>/` and `wrapper/dists/gradle-<old>-bin/` for 30 days by
+      # default, and setup-gradle's own cache-cleanup is inert here (cache-disabled: true), so
+      # every bump doubled ~40 homes for a month: measured 2026-10-29 the runner held 61 GiB in
+      # `.gradle-svc`, 21.5 GiB of it Gradle 9.8.1 left behind by the 9.8.2 bump. Deleting by
+      # hand races a concurrent job on the same home (the corruption / NoClassDefFoundError
+      # this isolation exists to prevent); Gradle's own cleanup runs under its cache locks, so
+      # it is the only safe deleter. Written atomically: a sibling job may be reading init.d.
+      - name: Configure Gradle cache retention
+        run: |
+          set -euo pipefail
+          mkdir -p "${GRADLE_USER_HOME}/init.d"
+          tmp="$(mktemp "${GRADLE_USER_HOME}/init.d/.cache-retention.XXXXXX")"
+          cat > "$tmp" <<'GRADLE_INIT'
+          beforeSettings { settings ->
+              settings.caches {
+                  releasedWrappers.removeUnusedEntriesAfterDays = 1
+                  snapshotWrappers.removeUnusedEntriesAfterDays = 1
+              }
+          }
+          GRADLE_INIT
+          mv -f "$tmp" "${GRADLE_USER_HOME}/init.d/cache-retention.gradle"
+
       - name: Normalize DOCKER_HOST for Testcontainers (#873)
         run: |
           if [ -z "${DOCKER_HOST:-}" ] || [ "${DOCKER_HOST:-}" = "tcp://localhost:2375" ]; then
@@ -649,7 +672,7 @@ jobs:
           ECR_LOGIN_OUTCOME: ${{ steps.ecr_login.outcome }}
         run: bash -e "$SERVICE_CI_HELPERS/prewarm-images.sh"
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: |
