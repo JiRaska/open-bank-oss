@@ -4363,6 +4363,226 @@ public final class com/openbank/libs/product/ir/Window {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/openbank/libs/product/replay/AccountReplay {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/util/SortedMap;Ljava/util/SortedMap;II)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()I
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Ljava/math/BigDecimal;
+	public final fun component5 ()Ljava/math/BigDecimal;
+	public final fun component6 ()Ljava/math/BigDecimal;
+	public final fun component7 ()Ljava/util/SortedMap;
+	public final fun component8 ()Ljava/util/SortedMap;
+	public final fun component9 ()I
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/util/SortedMap;Ljava/util/SortedMap;II)Lcom/openbank/libs/product/replay/AccountReplay;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/replay/AccountReplay;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/util/SortedMap;Ljava/util/SortedMap;IIILjava/lang/Object;)Lcom/openbank/libs/product/replay/AccountReplay;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAcceptedPostings ()I
+	public final fun getCounts ()Ljava/util/SortedMap;
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getFinalAccruedInterest ()Ljava/math/BigDecimal;
+	public final fun getFinalBalance ()Ljava/math/BigDecimal;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getMinBalance ()Ljava/math/BigDecimal;
+	public final fun getMinCustomerBalance ()Ljava/math/BigDecimal;
+	public final fun getOutcome ()Ljava/math/BigDecimal;
+	public final fun getPosted ()Ljava/util/SortedMap;
+	public final fun getRejectedPostings ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/replay/BehaviourDiff {
+	public final fun getA ()Lcom/openbank/libs/product/replay/ReplayResult;
+	public final fun getB ()Lcom/openbank/libs/product/replay/ReplayResult;
+	public final fun getCanonicalJson ()Ljava/lang/String;
+	public final fun getIdentical ()Z
+	public final fun getTree ()Ljava/util/Map;
+}
+
+public final class com/openbank/libs/product/replay/CountKey : java/lang/Comparable {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public fun compareTo (Lcom/openbank/libs/product/replay/CountKey;)I
+	public synthetic fun compareTo (Ljava/lang/Object;)I
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/product/replay/CountKey;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/replay/CountKey;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/product/replay/CountKey;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getKind ()Ljava/lang/String;
+	public final fun getRuleId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/replay/DiffOptions {
+	public fun <init> ()V
+	public fun <init> (Ljava/math/BigDecimal;)V
+	public synthetic fun <init> (Ljava/math/BigDecimal;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/math/BigDecimal;
+	public final fun copy (Ljava/math/BigDecimal;)Lcom/openbank/libs/product/replay/DiffOptions;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/replay/DiffOptions;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/replay/DiffOptions;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMaterialityThreshold ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/replay/Movement {
+	public fun <init> ()V
+	public fun <init> (Ljava/math/BigDecimal;Ljava/math/BigDecimal;)V
+	public synthetic fun <init> (Ljava/math/BigDecimal;Ljava/math/BigDecimal;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/math/BigDecimal;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun copy (Ljava/math/BigDecimal;Ljava/math/BigDecimal;)Lcom/openbank/libs/product/replay/Movement;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/replay/Movement;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/replay/Movement;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCredit ()Ljava/math/BigDecimal;
+	public final fun getDebit ()Ljava/math/BigDecimal;
+	public final fun getNet ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public final fun plus (Lcom/openbank/libs/product/replay/Movement;)Lcom/openbank/libs/product/replay/Movement;
+	public final fun sameAs (Lcom/openbank/libs/product/replay/Movement;)Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/replay/PostedKey : java/lang/Comparable {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/product/ir/AccountingClass;)V
+	public fun compareTo (Lcom/openbank/libs/product/replay/PostedKey;)I
+	public synthetic fun compareTo (Ljava/lang/Object;)I
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/product/ir/AccountingClass;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/product/ir/AccountingClass;)Lcom/openbank/libs/product/replay/PostedKey;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/replay/PostedKey;Ljava/lang/String;Lcom/openbank/libs/product/ir/AccountingClass;ILjava/lang/Object;)Lcom/openbank/libs/product/replay/PostedKey;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccountingClass ()Lcom/openbank/libs/product/ir/AccountingClass;
+	public final fun getRuleId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/replay/ProductBehaviourDiff {
+	public static final field Companion Lcom/openbank/libs/product/replay/ProductBehaviourDiff$Companion;
+	public static final field SCHEMA_ID Ljava/lang/String;
+	public fun <init> (Lcom/openbank/libs/product/ir/ProductInterpreter;)V
+	public final fun diff (Lcom/openbank/libs/product/ir/ProductRevisionIr;Lcom/openbank/libs/product/ir/ProductRevisionIr;Lcom/openbank/libs/product/replay/ReplayPortfolio;Lcom/openbank/libs/product/replay/ReplayRange;Lcom/openbank/libs/product/replay/DiffOptions;)Lcom/openbank/libs/product/replay/BehaviourDiff;
+	public static synthetic fun diff$default (Lcom/openbank/libs/product/replay/ProductBehaviourDiff;Lcom/openbank/libs/product/ir/ProductRevisionIr;Lcom/openbank/libs/product/ir/ProductRevisionIr;Lcom/openbank/libs/product/replay/ReplayPortfolio;Lcom/openbank/libs/product/replay/ReplayRange;Lcom/openbank/libs/product/replay/DiffOptions;ILjava/lang/Object;)Lcom/openbank/libs/product/replay/BehaviourDiff;
+}
+
+public final class com/openbank/libs/product/replay/ProductBehaviourDiff$Companion {
+}
+
+public final class com/openbank/libs/product/replay/ProductReplay {
+	public static final field Companion Lcom/openbank/libs/product/replay/ProductReplay$Companion;
+	public fun <init> (Lcom/openbank/libs/product/ir/ProductInterpreter;)V
+	public final fun run (Lcom/openbank/libs/product/ir/ProductRevisionIr;Lcom/openbank/libs/product/replay/ReplayPortfolio;Lcom/openbank/libs/product/replay/ReplayRange;Lcom/openbank/libs/product/replay/ReplayListener;I)Lcom/openbank/libs/product/replay/ReplayResult;
+	public static synthetic fun run$default (Lcom/openbank/libs/product/replay/ProductReplay;Lcom/openbank/libs/product/ir/ProductRevisionIr;Lcom/openbank/libs/product/replay/ReplayPortfolio;Lcom/openbank/libs/product/replay/ReplayRange;Lcom/openbank/libs/product/replay/ReplayListener;IILjava/lang/Object;)Lcom/openbank/libs/product/replay/ReplayResult;
+}
+
+public final class com/openbank/libs/product/replay/ProductReplay$Companion {
+	public final fun historyWindow ([Lcom/openbank/libs/product/ir/ProductRevisionIr;)I
+	public final fun kindOf (Lcom/openbank/libs/product/ir/Instruction;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/replay/ReplayAccount {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/product/ir/ProductState;Ljava/util/List;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/product/ir/ProductState;
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/product/ir/ProductState;Ljava/util/List;)Lcom/openbank/libs/product/replay/ReplayAccount;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/replay/ReplayAccount;Ljava/lang/String;Lcom/openbank/libs/product/ir/ProductState;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/product/replay/ReplayAccount;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getId ()Ljava/lang/String;
+	public final fun getInitialState ()Lcom/openbank/libs/product/ir/ProductState;
+	public final fun getPostings ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/replay/ReplayLimits {
+	public static final field INSTANCE Lcom/openbank/libs/product/replay/ReplayLimits;
+	public static final field MAX_DAYS J
+}
+
+public abstract interface class com/openbank/libs/product/replay/ReplayListener {
+	public static final field Companion Lcom/openbank/libs/product/replay/ReplayListener$Companion;
+	public fun onCustomerPosting (Ljava/lang/String;Ljava/time/LocalDate;Ljava/lang/String;Lcom/openbank/libs/product/ir/Posting;)V
+	public fun onDayEnd (Ljava/time/LocalDate;)V
+	public fun onInstructions (Ljava/lang/String;Ljava/time/LocalDate;Ljava/lang/String;Ljava/util/List;)V
+}
+
+public final class com/openbank/libs/product/replay/ReplayListener$Companion {
+	public final fun getNONE ()Lcom/openbank/libs/product/replay/ReplayListener;
+}
+
+public final class com/openbank/libs/product/replay/ReplayListener$DefaultImpls {
+	public static fun onCustomerPosting (Lcom/openbank/libs/product/replay/ReplayListener;Ljava/lang/String;Ljava/time/LocalDate;Ljava/lang/String;Lcom/openbank/libs/product/ir/Posting;)V
+	public static fun onDayEnd (Lcom/openbank/libs/product/replay/ReplayListener;Ljava/time/LocalDate;)V
+	public static fun onInstructions (Lcom/openbank/libs/product/replay/ReplayListener;Ljava/lang/String;Ljava/time/LocalDate;Ljava/lang/String;Ljava/util/List;)V
+}
+
+public final class com/openbank/libs/product/replay/ReplayPortfolio {
+	public fun <init> (Ljava/util/List;Ljava/lang/Long;)V
+	public synthetic fun <init> (Ljava/util/List;Ljava/lang/Long;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ljava/lang/Long;
+	public final fun copy (Ljava/util/List;Ljava/lang/Long;)Lcom/openbank/libs/product/replay/ReplayPortfolio;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/replay/ReplayPortfolio;Ljava/util/List;Ljava/lang/Long;ILjava/lang/Object;)Lcom/openbank/libs/product/replay/ReplayPortfolio;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccounts ()Ljava/util/List;
+	public final fun getSeed ()Ljava/lang/Long;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/replay/ReplayPosting {
+	public fun <init> (Ljava/time/LocalDate;Lcom/openbank/libs/product/ir/Posting;)V
+	public final fun component1 ()Ljava/time/LocalDate;
+	public final fun component2 ()Lcom/openbank/libs/product/ir/Posting;
+	public final fun copy (Ljava/time/LocalDate;Lcom/openbank/libs/product/ir/Posting;)Lcom/openbank/libs/product/replay/ReplayPosting;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/replay/ReplayPosting;Ljava/time/LocalDate;Lcom/openbank/libs/product/ir/Posting;ILjava/lang/Object;)Lcom/openbank/libs/product/replay/ReplayPosting;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOn ()Ljava/time/LocalDate;
+	public final fun getPosting ()Lcom/openbank/libs/product/ir/Posting;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/replay/ReplayRange {
+	public fun <init> (Ljava/time/LocalDate;Ljava/time/LocalDate;Ljava/time/ZoneId;)V
+	public final fun component1 ()Ljava/time/LocalDate;
+	public final fun component2 ()Ljava/time/LocalDate;
+	public final fun component3 ()Ljava/time/ZoneId;
+	public final fun copy (Ljava/time/LocalDate;Ljava/time/LocalDate;Ljava/time/ZoneId;)Lcom/openbank/libs/product/replay/ReplayRange;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/replay/ReplayRange;Ljava/time/LocalDate;Ljava/time/LocalDate;Ljava/time/ZoneId;ILjava/lang/Object;)Lcom/openbank/libs/product/replay/ReplayRange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDays ()J
+	public final fun getFrom ()Ljava/time/LocalDate;
+	public final fun getTo ()Ljava/time/LocalDate;
+	public final fun getZone ()Ljava/time/ZoneId;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/replay/ReplayResult {
+	public fun <init> (Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/util/List;JLjava/util/SortedMap;)V
+	public final fun component1 ()Lcom/openbank/libs/product/ir/ProductRevisionIr;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()J
+	public final fun component4 ()Ljava/util/SortedMap;
+	public final fun copy (Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/util/List;JLjava/util/SortedMap;)Lcom/openbank/libs/product/replay/ReplayResult;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/replay/ReplayResult;Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/util/List;JLjava/util/SortedMap;ILjava/lang/Object;)Lcom/openbank/libs/product/replay/ReplayResult;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccounts ()Ljava/util/List;
+	public final fun getConservation ()Ljava/util/SortedMap;
+	public final fun getConserved ()Z
+	public final fun getEvaluations ()J
+	public final fun getRevision ()Lcom/openbank/libs/product/ir/ProductRevisionIr;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class com/openbank/libs/reasoning/ReasoningGraph {
 	public static final field Companion Lcom/openbank/libs/reasoning/ReasoningGraph$Companion;
 	public static final field DEFAULT_MAX_STEPS I
