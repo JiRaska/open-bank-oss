@@ -133,6 +133,14 @@ spec:
             limits:
               cpu: "1"
               memory: 768Mi
+          # Give cold JVM startup a bounded window before steady-state health checks.
+          startupProbe:
+            httpGet:
+              path: /q/health/started
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /q/health/ready

@@ -1,0 +1,37 @@
+{
+  "domain": "AML",
+  "effectiveFrom": "2026-01-01T00:00:00Z",
+  "effectiveUntil": "2027-01-01T00:00:00Z",
+  "id": "aml.count-shadow",
+  "purpose": "synthetic-review",
+  "reasons": {
+    "id": "aml.reasons",
+    "revision": 1,
+    "hash": "e556d6b6f4b6689f6dd8050f3993388d4bad7b6ce7941a2d7cdf2d1d429903cd"
+  },
+  "revision": 1,
+  "rules": [
+    {
+      "effect": {
+        "type": "AML_TRIAGE",
+        "severity": "EXPEDITED"
+      },
+      "feature": {
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "velocity_txn_count_h1",
+        "revision": 1
+      },
+      "id": "velocity",
+      "maxAgeSeconds": "60",
+      "minimum": "10",
+      "operator": "COUNT_AT_LEAST",
+      "reason": "SYNTHETIC_PATTERN"
+    }
+  ],
+  "schemaVersion": 1,
+  "severities": {
+    "id": "aml.case-severity",
+    "revision": 1,
+    "hash": "908d891a38dcff2df257f8308d66e8c61977501e635a4052399c7dae033c45c0"
+  }
+}

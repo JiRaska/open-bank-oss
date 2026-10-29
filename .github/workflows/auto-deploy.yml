@@ -675,9 +675,10 @@ jobs:
       # dependency, deterministic. configure-aws-credentials exports the creds to the job env.
       - name: Configure AWS credentials (GitHub OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
+        with: &build-aws-credentials
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1
+          unset-current-credentials: true
 
       - name: Clear stale ECR credentials (macOS keychain)
         if: runner.os == 'macOS'
@@ -923,6 +924,10 @@ jobs:
       # used to push without signing, which is the other half of why deploys never landed.
       # cosign v2 is pinned on purpose: kyverno 3.2.6 finds only the legacy sha256-<digest>.sig
       # tag scheme; cosign v3 writes OCI-referrer sigs it cannot read (see #770).
+      - name: Refresh AWS credentials before image signing
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with: *build-aws-credentials
+
       - name: Sign images (cosign v2 + KMS)
         run: |
           set -uo pipefail
@@ -1058,6 +1063,10 @@ jobs:
       #
       # An unattested image cannot be admitted, so a deploy that "succeeds" while producing one
       # is not a successful deploy — it is a time bomb with a green check. Fail here instead.
+      - name: Refresh AWS credentials before image attestations
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with: *build-aws-credentials
+
       - name: Attest image SBOMs + SLSA provenance (cosign + KMS)
         # A full-fleet docs rebuild attests every pushed image in sequence. The
         # previous 15-minute cap stopped after successful image pushes, leaving
@@ -1235,6 +1244,20 @@ jobs:
           cp .github/scripts/can-i-deploy-gate.sh "$RUNNER_TEMP/can-i-deploy-gate.sh"
           git checkout --detach "$SOURCE_COMMIT"
 
+      # Source evidence shares GITHUB_TOKEN's repository quota with other workflows.
+      # Use the existing App's separate quota, scoped to read-only evidence in this repo.
+      - name: Mint a read-only source evidence token
+        id: source_evidence_token
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true'))
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-contents: read
+
       # The pact CLI runs natively on the ARC runner pod (which resolves the broker's
       # cluster DNS); the pact-cli docker image would run in dind and could not. The
       # standalone ships a linux arm64 build for the Graviton runner.
@@ -1257,7 +1280,7 @@ jobs:
           # Reconcile must prove the exact main Services CI attempt that produced each Pact
           # source before it can ask the Broker or mutate GitOps image pins.
           RECONCILE_SOURCE_REQUIRED: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true') }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.source_evidence_token.outputs.token || github.token }}
           # A ${{ }} expression is substituted by the runner before the shell sees it, so it
           # cannot survive extraction into a script — these three move to the environment.
           # SERVICES stays out of any concurrency.group: interpolating a fleet-sized list into
