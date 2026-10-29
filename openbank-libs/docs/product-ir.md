@@ -91,6 +91,23 @@ all-not-comparable shadow reads as quiet, not as broken, so it gets its own aler
 (`ProductShadowComparedNothing`), alongside `ProductShadowStalled` and
 `ProductShadowDiverged`. billing-service is the first consumer.
 
+## Authoring surfaces and the toolkit (phase 5a)
+
+A product reaches the catalog through one of three authoring surfaces: the `obp` CLI
+(openbank-products), the MCP product tools in openbank-agent-service (`product_lint`,
+`product_compile`, `product_simulate`, `product_explain`, `product_propose`), and the Studio form
+(phase 6, not on main yet). The first two share one implementation, `ProductToolkit`
+(`com.openbank.libs.product.toolkit`): lint, compile, simulate, explain and the DRAFT-revision
+proposal plan. Every function is pure and returns a tree written with `CanonicalJson`, so the same
+document yields the same bytes on every surface.
+
+The toolkit deliberately lives here and not in openbank-products: that module depends on
+openbank-libs-testing, which must never reach a service's production classpath. Simulation takes
+the `ProductArithmetic` port as an argument; both surfaces pass `FinanceProductArithmetic`.
+
+Nothing in the toolkit signs, approves or publishes. `obp sign` is CLI-only and accepts only an
+offline test key; there is no MCP sign or publish tool at all.
+
 ## Testing
 
 openbank-libs-testing holds the golden-scenario runner, `ProductArb` property
@@ -104,5 +121,5 @@ generators and `assertMoneyConserved`. Golden scenarios live under
 |---|---|---|
 | `product-ir-determinism` | enforced | a scenario missing from the index, an unsupported `irVersion`, a disabled determinism test |
 | `product-ir-run-limits` | enforced | a committed IR or scenario over the schema maxima |
-| `product-ir-authoring-parity` | advisory until 2027-03-31 | a committed `ir/<name>.json` with no DSL product, or canonical DSL output that differs from the committed file |
+| `product-ir-authoring-parity` | advisory until 2026-12-31 | a committed `ir/<name>.json` with no DSL product, canonical DSL output that differs from the committed file, or the CLI and MCP surfaces compiling one fixture to different bytes (Studio form surface pending) |
 | `product-ir-purity` | enforced | an I/O, clock, logging or metrics import under the package, or the detekt rule not active |

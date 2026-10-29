@@ -4112,9 +4112,11 @@ product_ir_authoring_parity:
     - "every committed ir/<name>.json has a DSL product declared under that name, and every DSL product has a committed IR"
     - "ReferenceProductsTest compiles each DSL product and asserts its canonical JSON equals the committed file byte for byte (JVM half)"
     - "the parity test exists, is not disabled and iterates ReferenceProducts.all"
+    - "ProductIrAuthoringParityTest compiles one fixture through the obp CLI and the MCP product_compile handler and asserts identical canonical bytes and revisionHash (surface half, phase 5a)"
+    - "the Studio form surface is declared PENDING until product-catalog has a draft-from-form path (phase 6)"
   gate: product-ir-authoring-parity
   enforced: advisory
-  target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the MCP/Studio authoring paths (phases 5-6) are in scope
+  target_enforce_date: "2026-12-31"   # ADR-0144; CLI+MCP surfaces in scope since phase 5a, Studio joins in phase 6
   ci_producer: ".github/scripts/check-product-ir-authoring-parity.py"
 
 realm_devci_artifact_parity:

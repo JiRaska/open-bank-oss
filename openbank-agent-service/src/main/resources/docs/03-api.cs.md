@@ -148,3 +148,24 @@ včetně citlivých důvodů a referencí. Poskytovatel filtruje uvolněné/expi
 prostředky. Spotřebitelský Pact pokrývá aktivní rezervaci, prázdný výsledek a předání 401 bez identity;
 kanonický kontraktní test objevuje Pact drift CI. Fixture neprokazují živý token, předání hlavičky
 customer-edge ani produkční rozhodnutí OPA. Poskytovatel zachovává RBAC/OPA i volitelnou kontrolu vlastníka.
+
+## Nástroje pro tvorbu produktů jako kódu (ADR-0352 §12)
+
+Pět MCP nástrojů umožňuje chartě `product-author` navrhovat a kontrolovat Product IR v1. Běží
+v procesu nad `ProductToolkit` (openbank-libs-domain), tedy nad přesně týmiž funkcemi, které volá CLI
+`obp`, a vracejí kanonický JSON toolkitu beze změny — CLI i MCP proto pro stejný dokument dávají
+identické bajty (gate `product-ir-authoring-parity`). Žádný z nich nevolá jinou službu.
+
+| Nástroj | Oprávnění | Úroveň | Argumenty | Účinek |
+|---|---|---|---|---|
+| `product_lint` | `product.lint` | read | `ir` | schéma, limity běhu, jedinečnost `ruleId`; pro neplatný dokument `{ok:false, problems}` |
+| `product_compile` | `product.compile` | read | `ir` | kanonické IR a `revisionHash` |
+| `product_simulate` | `product.simulate` | read | `ir`, `portfolio`, `from?`, `to?` | přehraje fixture portfolia čistým interpretem; nic neúčtuje |
+| `product_explain` | `product.explain` | read | `ir`, `ruleId` nebo `instruction` | JSON pointer pravidla v kanonickém IR |
+| `product_propose` | `product.propose` | write_proposal | `ir`, `offeringId`, `schemaId`, `schemaVersion`, `rationale` | zapíše plán DRAFT revize jako HITL návrh; do katalogu nic nezapisuje |
+
+Nástroj pro publikaci, podpis ani schválení neexistuje. `product.publish` a `product.sign` jsou
+v `tool_tiers.deny` (agents.yaml) a jednotkový test shodí build, pokud název kteréhokoli
+registrovaného nástroje obsahuje `publish`, `sign` nebo `approve`. Publikace zůstává lidským
+katalogovým krokem se čtyřma očima (ADR-0259) a podpis vázaný na identitu patří publikační cestě
+katalogu (ADR-0352 §4). Textové JSON argumenty jsou omezeny na 256 KiB.

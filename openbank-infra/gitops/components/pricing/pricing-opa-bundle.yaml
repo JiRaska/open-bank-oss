@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pricing-service
     app.kubernetes.io/part-of: pricing
   annotations:
-    openbank.tech/policy-checksum: "6a25bacc5b21d7f7"
+    openbank.tech/policy-checksum: "f375b9a8063d2259"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1159,6 +1159,10 @@ data:
       - query.account.readonly
       - query.consent.readonly
       - verify.mandate
+      - product.lint
+      - product.compile
+      - product.simulate
+      - product.explain
       write_proposal:
       - draft.ticket
       - gh.pr.open
@@ -1166,12 +1170,15 @@ data:
       - git.branch
       - git.commit.signed
       - run.skill
+      - product.propose
       deny:
       - money.transfer
       - money.post.ledger
       - gh.pr.merge
       - gh.pr.approve
       - secrets.read.raw
+      - product.publish
+      - product.sign
     agents:
     - id: compliance-officer
       tools:
@@ -1225,6 +1232,21 @@ data:
         - query.interest.readonly
         - query.disputes.readonly
         - query.observability.readonly
+    - id: product-author
+      tools:
+        allow:
+        - product.lint
+        - product.compile
+        - product.simulate
+        - product.explain
+        - product.propose
+        deny:
+        - product.publish
+        - product.sign
+        - money.*
+        - gh.pr.*
+        - '*.write'
+        - secrets.read.raw
     - id: rca-investigator
       tools:
         allow:
