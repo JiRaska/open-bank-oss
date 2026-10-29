@@ -15,7 +15,7 @@ import com.openbank.agent.domain.ToolDefinition
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
-import com.openbank.libs.product.toolkit.ProductToolkit
+import com.openbank.libs.audit.CanonicalJson
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
@@ -463,7 +463,7 @@ class McpToolRegistry {
             when {
                 toolName == "flip_feature_flag" -> flipFeatureFlag(args, actorId)
                 toolName == "draft_ticket" -> succeed(toolName, actorId, draftTicket(args, actorId))
-                toolName in ProductAuthoringTools.READ_TOOLS -> succeedText(
+                toolName in ProductAuthoringTools.READ_TOOLS -> productResult(
                     toolName,
                     actorId,
                     productRead(toolName, args),
@@ -493,13 +493,26 @@ class McpToolRegistry {
         return ToolCallResult(content = listOf(ToolContent(text = objectMapper.writeValueAsString(result))))
     }
 
-    /** The toolkit's canonical JSON, handed to the model byte-for-byte (the parity gate compares it). */
-    private fun succeedText(toolName: String, actorId: String, text: String): ToolCallResult {
-        auditExec(actorId, toolName, AuditResult.SUCCESS)
-        return ToolCallResult(content = listOf(ToolContent(text = text)))
+    /**
+     * The toolkit's canonical JSON, handed to the model byte-for-byte (the parity gate compares it).
+     * A toolkit failure (invalid IR, unknown rule) is `isError = true`, exactly where `obp` exits
+     * non-zero, and is audited as a FAILURE.
+     */
+    private fun productResult(
+        toolName: String,
+        actorId: String,
+        outcome: ProductAuthoringTools.Outcome,
+    ): ToolCallResult {
+        auditExec(
+            actorId,
+            toolName,
+            if (outcome.ok) AuditResult.SUCCESS else AuditResult.FAILURE,
+            if (outcome.ok) null else "rejected",
+        )
+        return ToolCallResult(content = listOf(ToolContent(text = outcome.text)), isError = !outcome.ok)
     }
 
-    private fun productRead(toolName: String, args: JsonNode): String = when (toolName) {
+    private fun productRead(toolName: String, args: JsonNode): ProductAuthoringTools.Outcome = when (toolName) {
         ProductAuthoringTools.LINT -> ProductAuthoringTools.lint(args)
         ProductAuthoringTools.COMPILE -> ProductAuthoringTools.compile(args)
         ProductAuthoringTools.SIMULATE -> ProductAuthoringTools.simulate(args)
@@ -515,9 +528,9 @@ class McpToolRegistry {
         val plan = ProductAuthoringTools.proposalPlan(args)
         val p = proposals.create(
             title = "Product draft revision: ${plan["revisionHash"]}",
-            rationale = args.requiredString("rationale"),
+            rationale = ProductAuthoringTools.rationale(args),
             suggestedAction = "Create this DRAFT revision on the catalog v2 API (it does not publish): " +
-                ProductToolkit.write(plan),
+                CanonicalJson.write(plan),
             proposedBy = actorId,
             modelId = charters.modelId(actorId),
             correlationId = null,

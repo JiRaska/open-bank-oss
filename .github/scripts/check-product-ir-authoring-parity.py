@@ -23,7 +23,8 @@ TWO HALVES, AND WHERE EACH RUNS
     SURFACES (ADR-0352 phase 5a). The same fixture compiled through (a) the `obp` CLI and (b) the
     agent-service MCP `product_compile` handler must give identical canonical bytes and hash. The
     JVM half is `ProductIrAuthoringParityTest` (openbank-agent-service); this script requires it to
-    exist, not be disabled, drive BOTH `Obp.run` and `product_compile`, and assert byte equality.
+    exist, not be disabled, drive `Obp.run` and the lint/compile/simulate/explain MCP handlers, and
+    assert raw-byte equality and that MCP `isError` holds exactly when the CLI exits non-zero.
     (c) the Studio form path (product-catalog draft-from-form, phase 6) does not exist on main yet:
     it is declared PENDING below and printed on every run, so its absence is never silent. When it
     lands it joins SURFACE_TEST and STUDIO_PENDING goes.
@@ -55,7 +56,8 @@ TEST_FILE = f"openbank-products/src/test/kotlin/com/openbank/products/{TEST_CLAS
 PRODUCT_RE = re.compile(r'product\(\s*"([a-z][a-z0-9-]*)"')
 MODULE_BUILD = "openbank-products/build.gradle.kts"
 SURFACE_TEST = "openbank-agent-service/src/test/kotlin/com/openbank/agent/application/ProductIrAuthoringParityTest.kt"
-SURFACE_TOKENS = ("Obp.run(", '"product_compile"', "isEqualTo(cliBytes)", "ReferenceProducts.all")
+SURFACE_TOKENS = ("Obp.run(", '"product_compile"', '"product_lint"', '"product_simulate"', '"product_explain"',
+                  "isEqualTo(cli.first != 0)", "ReferenceProducts.all")
 STUDIO_PENDING = "surface (c) Studio form: PENDING — no product-catalog draft-from-form path on main (ADR-0352 phase 6)"
 DISABLED_RE = re.compile(r"^\s*@(?:org\.junit\.jupiter\.api\.)?Disabled\b", re.M)
 
@@ -197,7 +199,8 @@ GOOD_TEST = (
 )
 GOOD_SURFACE = (
     "class ProductIrAuthoringParityTest {\n  fun x() = ReferenceProducts.all.map { Obp.run(listOf()); "
-    "registry.call(\"product_compile\"); assertThat(mcpBytes).isEqualTo(cliBytes) }\n}\n"
+    "mcp(\"product_compile\"); mcp(\"product_lint\"); mcp(\"product_simulate\"); mcp(\"product_explain\"); "
+    "assertThat(mcp.first).isEqualTo(cli.first != 0) }\n}\n"
 )
 
 
@@ -276,7 +279,9 @@ def self_test() -> int:
     case("a surface test that never drives the MCP handler is red", 1, '`"product_compile"`', {"a": _ir()}, ["a"],
          surface_text=GOOD_SURFACE.replace('"product_compile"', '"product_lint"'))
     case("surface tokens only in a comment are red", 1, "`Obp.run(`", {"a": _ir()}, ["a"],
-         surface_text="// Obp.run( \"product_compile\" isEqualTo(cliBytes) ReferenceProducts.all\nclass ProductIrAuthoringParityTest {}")
+         surface_text="// Obp.run( \"product_compile\" \"product_lint\" \"product_simulate\" \"product_explain\" isEqualTo(cli.first != 0) ReferenceProducts.all\nclass ProductIrAuthoringParityTest {}")
+    case("a surface test that never compares failure status is red", 1, "isEqualTo(cli.first != 0)", {"a": _ir()}, ["a"],
+         surface_text=GOOD_SURFACE.replace("isEqualTo(cli.first != 0)", "isEqualTo(true)"))
     case("the Studio surface is reported pending on every run, never silently", 0, "Studio form: PENDING", {"a": _ir()}, ["a"])
     # The JUnit half: a missing report and a report with no case for a product are both findings.
     with tempfile.TemporaryDirectory() as d:
@@ -296,7 +301,7 @@ def self_test() -> int:
     if failures:
         print(f"self-test: {failures} failure(s)")
         return 1
-    print("self-test: OK (22 cases)")
+    print("self-test: OK (23 cases)")
     return 0
 
 

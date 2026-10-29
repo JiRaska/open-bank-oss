@@ -6,6 +6,7 @@
 package com.openbank.agent.application
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.openbank.libs.audit.CanonicalJson
 import com.openbank.libs.finance.deposit.FinanceProductArithmetic
 import com.openbank.libs.product.ir.ProductIrParser
 import com.openbank.libs.product.ir.ProductIrValidationException
@@ -47,45 +48,70 @@ object ProductAuthoringTools {
     )
 
     /** No registered MCP tool may carry one of these verbs — by construction, not by policy. */
-    val FORBIDDEN_VERBS = Regex("(publish|sign|approve)", RegexOption.IGNORE_CASE)
+    /**
+     * No registered MCP tool may carry one of these verbs — by construction, not by policy. Matched as
+     * a whole name segment (`_`, `.`, `-` separated), so `assign_owner` or `design_review` are not hits.
+     */
+    val FORBIDDEN_VERBS = Regex("(?:^|[._-])(publish|sign|approve)(?:$|[._-])", RegexOption.IGNORE_CASE)
 
     /** Bound on any JSON-text argument; an IR v1 document is a few KiB. */
     const val MAX_DOCUMENT_CHARS = 262_144
 
-    fun lint(args: JsonNode): String = ProductToolkit.write(ProductToolkit.lint(document(args, "ir")))
+    /** Bound on the free-text rationale a proposal carries into the HITL queue. */
+    const val MAX_RATIONALE_CHARS = 4_096
 
-    /** Canonical IR bytes and hash; an invalid document answers with the same report `lint` gives. */
-    fun compile(args: JsonNode): String = try {
-        ProductToolkit.write(ProductToolkit.compile(document(args, "ir")).tree())
-    } catch (_: ProductIrValidationException) {
-        lint(args)
-    }
+    /**
+     * What a product tool hands back: the toolkit's canonical JSON, byte-identical to what `obp`
+     * prints, and [ok] — false exactly when `obp` would exit non-zero for the same input, so the
+     * MCP result carries `isError = true` and an agent that reads only `isError` cannot mistake a
+     * failed lint or an unknown rule for success.
+     */
+    data class Outcome(val text: String, val ok: Boolean)
 
-    fun simulate(args: JsonNode): String = ProductToolkit.write(
+    fun lint(args: JsonNode): Outcome = outcome { ProductToolkit.lint(required(args, "ir")) }
+
+    fun compile(args: JsonNode): Outcome = outcome { ProductToolkit.compile(required(args, "ir")).tree() }
+
+    fun simulate(args: JsonNode): Outcome = outcome {
         ProductToolkit.simulate(
-            ProductIrParser.parse(document(args, "ir")),
-            document(args, "portfolio"),
+            ProductIrParser.parse(required(args, "ir")),
+            required(args, "portfolio"),
             FinanceProductArithmetic,
             optionalInstant(args, "from"),
             optionalInstant(args, "to"),
-        ),
-    )
+        )
+    }
 
-    fun explain(args: JsonNode): String {
-        val rev = ProductIrParser.parse(document(args, "ir"))
+    fun explain(args: JsonNode): Outcome = outcome {
+        val rev = ProductIrParser.parse(required(args, "ir"))
         val ruleId = args["ruleId"]?.asText()?.takeIf { it.isNotBlank() }
         val instruction = args["instruction"]?.asText()?.takeIf { it.isNotBlank() }
-        val report = when {
+        when {
             ruleId != null -> ProductToolkit.explainRule(rev, ruleId)
             instruction != null -> ProductToolkit.explainInstruction(rev, bounded(instruction, "instruction"))
             else -> throw IllegalArgumentException("Required field 'ruleId' or 'instruction' is missing or blank")
         }
-        return ProductToolkit.write(report)
+    }
+
+    /** The rationale, bounded before it reaches the HITL queue. */
+    fun rationale(args: JsonNode): String = required(args, "rationale", MAX_RATIONALE_CHARS)
+
+    /**
+     * An invalid IR document answers with the same `{ok:false, problems}` report `obp` prints on
+     * stderr; any other argument error propagates as [IllegalArgumentException] (invalid parameters).
+     */
+    private fun outcome(report: () -> Map<String, Any?>): Outcome {
+        val tree = try {
+            report()
+        } catch (e: ProductIrValidationException) {
+            ProductToolkit.problems(e)
+        }
+        return Outcome(CanonicalJson.write(tree), tree["ok"] == true)
     }
 
     /** The DRAFT-revision plan `obp propose` prints. Never executed here. */
     fun proposalPlan(args: JsonNode): Map<String, Any?> = ProductToolkit.proposalPlan(
-        ProductIrParser.parse(document(args, "ir")),
+        ProductIrParser.parse(required(args, "ir")),
         required(args, "offeringId"),
         mapOf(
             "id" to required(args, "schemaId"),
@@ -96,15 +122,17 @@ object ProductAuthoringTools {
         ),
     )
 
-    private fun document(args: JsonNode, field: String): String = bounded(required(args, field), field)
-
-    private fun bounded(text: String, field: String): String {
-        require(text.length <= MAX_DOCUMENT_CHARS) { "'$field' exceeds $MAX_DOCUMENT_CHARS characters" }
+    private fun bounded(text: String, field: String, max: Int = MAX_DOCUMENT_CHARS): String {
+        require(text.length <= max) { "'$field' exceeds $max characters" }
         return text
     }
 
-    private fun required(args: JsonNode, field: String): String = args[field]?.asText()?.takeIf { it.isNotBlank() }
-        ?: throw IllegalArgumentException("Required field '$field' is missing or blank")
+    /** A required, non-blank text argument, bounded to [max] characters. */
+    private fun required(args: JsonNode, field: String, max: Int = MAX_DOCUMENT_CHARS): String {
+        val text = args[field]?.asText()?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("Required field '$field' is missing or blank")
+        return bounded(text, field, max)
+    }
 
     private fun optionalInstant(args: JsonNode, field: String): Instant? =
         args[field]?.asText()?.takeIf { it.isNotBlank() }?.let {

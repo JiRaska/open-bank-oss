@@ -58,8 +58,9 @@ import kotlin.system.exitProcess
  * ```
  *
  * Exit codes: [EXIT_OK] 0 success · [EXIT_FAILURE] 1 the subject is invalid / a check failed ·
- * [EXIT_REFUSED] 2 the command refuses (a non-test key, a failed execute) · [EXIT_USAGE] 64 bad
- * arguments.
+ * [EXIT_REFUSED] 2 the command refuses (a non-test signing key) · [EXIT_USAGE] 64 bad arguments ·
+ * [EXIT_INPUT] 65 an input file or JSON argument is missing or malformed (portfolio, instruction) ·
+ * [EXIT_UNAVAILABLE] 69 `propose --execute`: the catalog was unreachable or did not answer 201.
  */
 object Obp {
 
@@ -67,6 +68,8 @@ object Obp {
     const val EXIT_FAILURE = 1
     const val EXIT_REFUSED = 2
     const val EXIT_USAGE = 64
+    const val EXIT_INPUT = 65
+    const val EXIT_UNAVAILABLE = 69
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -78,30 +81,42 @@ object Obp {
     fun run(args: List<String>, out: Appendable, err: Appendable): Int {
         if (args.isEmpty()) return usage(err)
         return try {
-            when (args[0]) {
-                "lint" -> lint(args.drop(1), out)
-                "compile" -> compile(args.drop(1), out, err)
-                "test" -> test(out)
-                "diff" -> diff(args.drop(1), out, err)
-                "explain" -> explain(args.drop(1), out, err)
-                "simulate" -> simulate(args.drop(1), out)
-                "sign" -> sign(args.drop(1), out, err)
-                "propose" -> propose(args.drop(1), out, err)
-                else -> usage(err)
-            }
+            dispatch(args[0], args.drop(1), out, err)
         } catch (e: ProductIrValidationException) {
-            emit(
-                err,
-                mapOf(
-                    "ok" to false,
-                    "problems" to e.problems.map { mapOf("path" to it.path, "message" to it.message) },
-                ),
-            )
+            emit(err, ProductToolkit.problems(e))
             EXIT_FAILURE
         } catch (e: CliUsageException) {
             err.appendLine("obp: ${e.message}")
             EXIT_USAGE
+        } catch (e: java.io.IOException) {
+            inputError(err, "cannot read ${e.message}")
+        } catch (e: java.time.format.DateTimeParseException) {
+            inputError(err, "not an ISO-8601 instant: ${e.parsedString}")
+        } catch (e: IllegalArgumentException) {
+            inputError(err, e.message ?: "malformed input")
+        } catch (e: NoSuchElementException) {
+            inputError(err, e.message ?: "a required field is missing")
+        } catch (e: ClassCastException) {
+            inputError(err, "a field has the wrong JSON type: ${e.message}")
         }
+    }
+
+    private fun dispatch(command: String, rest: List<String>, out: Appendable, err: Appendable): Int = when (command) {
+        "lint" -> lint(rest, out)
+        "compile" -> compile(rest, out, err)
+        "test" -> test(out)
+        "diff" -> diff(rest, out, err)
+        "explain" -> explain(rest, out, err)
+        "simulate" -> simulate(rest, out)
+        "sign" -> sign(rest, out, err)
+        "propose" -> propose(rest, out, err)
+        else -> usage(err)
+    }
+
+    /** One canonical line on stderr, never a stack trace: the input, not the subject, is wrong. */
+    private fun inputError(err: Appendable, message: String): Int {
+        emit(err, mapOf("ok" to false, "inputError" to message))
+        return EXIT_INPUT
     }
 
     private fun usage(err: Appendable): Int {
@@ -149,9 +164,8 @@ object Obp {
         val outDir = option(args, "--out")?.let { Path.of(it) }
         val check = "--check" in args
         if (ReferenceProducts.byName(name) == null && name != "all" && Files.isRegularFile(Path.of(name))) {
-            val compiled = ProductToolkit.compile(Files.readString(Path.of(name)))
-            out.appendLine(compiled.canonicalJson)
-            emit(out, mapOf("ok" to true, "revisionHash" to compiled.revisionHash, "status" to "printed"))
+            // The exact report the MCP `product_compile` tool returns (gate product-ir-authoring-parity).
+            emit(out, ProductToolkit.compile(Files.readString(Path.of(name))).tree())
             return EXIT_OK
         }
         val products = if (name == "all") {
@@ -224,7 +238,7 @@ object Obp {
     // --- diff --behavioural --------------------------------------------------------------------
 
     private fun diff(args: List<String>, out: Appendable, err: Appendable): Int {
-        val files = args.filter { !it.startsWith("--") && args.getOrNull(args.indexOf(it) - 1) != "--portfolio" }
+        val files = args.filterIndexed { i, a -> !a.startsWith("--") && args.getOrNull(i - 1) != "--portfolio" }
         val portfolio = option(args, "--portfolio")
         val problem = when {
             "--behavioural" !in args -> "diff supports --behavioural only (structural diff is the catalog's)"
@@ -387,12 +401,11 @@ object Obp {
         val schemaId = option(args, "--schema-id") ?: usageError("propose needs --schema-id <id>")
         val schemaVersion = option(args, "--schema-version")?.toIntOrNull()?.takeIf { it > 0 }
             ?: usageError("propose needs --schema-version <positive integer>")
+        // Loaded outside the try: an invalid IR is a ProductIrValidationException (exit 1 with its
+        // problems), which must not be caught below as an argument error.
+        val revision = loadRevision(target)
         val plan = try {
-            ProductToolkit.proposalPlan(
-                loadRevision(target),
-                offering,
-                mapOf("id" to schemaId, "version" to schemaVersion),
-            )
+            ProductToolkit.proposalPlan(revision, offering, mapOf("id" to schemaId, "version" to schemaVersion))
         } catch (e: IllegalArgumentException) {
             usageError(e.message ?: "invalid propose arguments")
         }
@@ -425,13 +438,18 @@ object Obp {
         val response = try {
             SafeHttpClient(policy).send(EgressRequest("POST", url, headers, body))
         } catch (e: EgressDeniedException) {
-            return refuse("propose", "egress refused: ${e.decision}", err)
+            return unavailable("egress refused: ${e.decision}", err)
         } catch (e: java.io.IOException) {
-            return refuse("propose", "catalog unreachable: ${e.message}", err)
+            return unavailable("catalog unreachable: ${e.message}", err)
         }
-        if (response.status != HTTP_CREATED) return refuse("propose", "catalog answered ${response.status}", err)
+        if (response.status != HTTP_CREATED) return unavailable("catalog answered ${response.status}", err)
         emit(out, mapOf("ok" to true, "executed" to true, "status" to response.status, "publishes" to false))
         return EXIT_OK
+    }
+
+    private fun unavailable(why: String, err: Appendable): Int {
+        emit(err, mapOf("ok" to false, "command" to "propose", "executed" to false, "unavailable" to why))
+        return EXIT_UNAVAILABLE
     }
 
     // --- helpers ------------------------------------------------------------------------------
@@ -450,7 +468,7 @@ object Obp {
     }
 
     private fun emit(to: Appendable, tree: Map<String, Any?>) {
-        to.appendLine(ProductToolkit.write(tree))
+        to.appendLine(CanonicalJson.write(tree))
     }
 
     /** Re-reads canonical JSON text as a tree, for embedding a revision in a scenario document. */

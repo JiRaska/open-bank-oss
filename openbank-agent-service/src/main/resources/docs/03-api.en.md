@@ -170,4 +170,8 @@ There is no publish, sign or approve tool. `product.publish` and `product.sign` 
 `tool_tiers.deny` (agents.yaml) and a unit test fails the build if any registered tool name contains
 `publish`, `sign` or `approve`. Publishing stays a human, four-eyes catalog action (ADR-0259) and
 the identity-bound signature belongs to the catalog publish path (ADR-0352 §4). JSON-text arguments
-are capped at 256 KiB.
+are capped at 256 KiB, the proposal `rationale` at 4 KiB.
+
+A tool result is `isError = true` exactly when `obp` would exit non-zero for the same input — an
+invalid IR (`{ok:false, problems}`, the same bytes obp prints on stderr), an unknown `ruleId`, or a
+foreign instruction — so an agent that reads only `isError` never takes a failed check for success.

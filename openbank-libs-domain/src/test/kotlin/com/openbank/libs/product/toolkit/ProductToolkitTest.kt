@@ -4,6 +4,7 @@
 
 package com.openbank.libs.product.toolkit
 
+import com.openbank.libs.audit.CanonicalJson
 import com.openbank.libs.product.ir.IrFixtures
 import com.openbank.libs.product.ir.IrJson
 import com.openbank.libs.product.ir.ProductIrValidationException
@@ -50,13 +51,17 @@ class ProductToolkitTest {
         val b = ProductToolkit.compile(IrFixtures.savingsJson)
         assertThat(a).isEqualTo(b)
         assertThat(a.revisionHash).isEqualTo(rev.revisionHash)
-        assertThat(ProductToolkit.write(a.tree())).isEqualTo(ProductToolkit.write(b.tree()))
+        assertThat(CanonicalJson.write(a.tree())).isEqualTo(CanonicalJson.write(b.tree()))
     }
 
     @Test
     fun `simulate rejects a malformed fixture and an unknown hook`() {
         assertThatThrownBy { ProductToolkit.simulate(rev, "[]", IrFixtures.StubArithmetic) }
             .isInstanceOf(IllegalArgumentException::class.java)
+        // Malformed JSON is an argument error, never mistaken for an invalid revision.
+        assertThatThrownBy { ProductToolkit.simulate(rev, "{not json", IrFixtures.StubArithmetic) }
+            .isExactlyInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("portfolio is not valid JSON")
         val badHook = portfolio.replace("\"scheduled\"", "\"nope\"")
         assertThatThrownBy { ProductToolkit.simulate(rev, badHook, IrFixtures.StubArithmetic) }
             .hasMessageContaining("unknown hook")
@@ -64,11 +69,11 @@ class ProductToolkitTest {
 
     @Test
     fun `simulate replays steps inside the window only and is byte-deterministic`() {
-        val all = ProductToolkit.write(ProductToolkit.simulate(rev, portfolio, IrFixtures.StubArithmetic))
+        val all = CanonicalJson.write(ProductToolkit.simulate(rev, portfolio, IrFixtures.StubArithmetic))
         assertThat(all).contains("\"ruleId\":\"interest.base\"", rev.revisionHash)
         assertThat(
             all,
-        ).isEqualTo(ProductToolkit.write(ProductToolkit.simulate(rev, portfolio, IrFixtures.StubArithmetic)))
+        ).isEqualTo(CanonicalJson.write(ProductToolkit.simulate(rev, portfolio, IrFixtures.StubArithmetic)))
         val window = ProductToolkit.simulate(
             rev,
             portfolio,

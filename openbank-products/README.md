@@ -27,8 +27,14 @@ the `obp` CLI. A released component (`version.txt`): every product change is a r
 |---|---|
 | 0 | success |
 | 1 | the subject is invalid, or a check (`compile --check`, `test`, `explain`) failed |
-| 2 | refused: a non-test signing key, or `propose --execute` the catalog did not accept |
+| 2 | refused: a non-test signing key |
 | 64 | usage error |
+| 65 | an input file or JSON argument (portfolio, instruction) is missing or malformed — one canonical `{"ok":false,"inputError":…}` line on stderr |
+| 69 | `propose --execute`: the catalog was unreachable, egress was refused, or it did not answer 201 |
+
+Failure output is one canonical JSON line on stderr. For `lint`, `compile`, `simulate` and
+`explain` it is byte-identical to the text the matching MCP tool returns, and the MCP result carries
+`isError = true` exactly when obp exits non-zero.
 
 `lint`, `compile`, `simulate`, `explain` and `propose` (without `--execute`) call
 `ProductToolkit` in openbank-libs-domain, the same functions the agent-service MCP product tools

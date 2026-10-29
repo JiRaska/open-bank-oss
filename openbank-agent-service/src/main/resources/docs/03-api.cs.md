@@ -168,4 +168,8 @@ Nástroj pro publikaci, podpis ani schválení neexistuje. `product.publish` a `
 v `tool_tiers.deny` (agents.yaml) a jednotkový test shodí build, pokud název kteréhokoli
 registrovaného nástroje obsahuje `publish`, `sign` nebo `approve`. Publikace zůstává lidským
 katalogovým krokem se čtyřma očima (ADR-0259) a podpis vázaný na identitu patří publikační cestě
-katalogu (ADR-0352 §4). Textové JSON argumenty jsou omezeny na 256 KiB.
+katalogu (ADR-0352 §4). Textové JSON argumenty jsou omezeny na 256 KiB, `rationale` návrhu na 4 KiB.
+
+Výsledek nástroje má `isError = true` právě tehdy, když by `obp` pro stejný vstup skončil nenulovým
+kódem — neplatné IR (`{ok:false, problems}`, tytéž bajty, které obp vypíše na stderr), neznámé
+`ruleId` nebo cizí instrukce — takže agent, který čte jen `isError`, nikdy nepovažuje selhání za úspěch.

@@ -34,8 +34,8 @@ import java.time.ZoneId
  * `obp` CLI and the agent-service MCP product tools call exactly these functions, so the two cannot
  * drift — the `product-ir-authoring-parity` gate compares their bytes.
  *
- * Every function is pure (no I/O, no clock, no network) and returns a tree that [CanonicalJson]
- * writes deterministically. Nothing here signs, approves or publishes: the identity-bound signature
+ * Every function is pure (no I/O, no clock, no network) and returns a tree; every surface prints it
+ * with [CanonicalJson.write], so the bytes are deterministic and identical across surfaces. Nothing here signs, approves or publishes: the identity-bound signature
  * belongs to the catalog publish path (ADR-0352 §4) and publishing to a human (ADR-0259), so neither
  * capability is reachable through this facade.
  */
@@ -46,8 +46,12 @@ object ProductToolkit {
         val rev = ProductIrParser.parse(irJson)
         lintOk(rev)
     } catch (e: ProductIrValidationException) {
-        mapOf("ok" to false, "problems" to e.problems.map { mapOf("path" to it.path, "message" to it.message) })
+        problems(e)
     }
+
+    /** The one failure report for an invalid IR document, on every surface. */
+    fun problems(e: ProductIrValidationException): Map<String, Any?> =
+        mapOf("ok" to false, "problems" to e.problems.map { mapOf("path" to it.path, "message" to it.message) })
 
     /** The lint report of an already-parsed (so already valid) revision. */
     fun lintOk(rev: ProductRevisionIr): Map<String, Any?> = mapOf(
@@ -82,7 +86,7 @@ object ProductToolkit {
         from: Instant? = null,
         to: Instant? = null,
     ): Map<String, Any?> {
-        val root = PortfolioFixture.obj(IrJson.parse(portfolioJson), "portfolio")
+        val root = PortfolioFixture.obj(PortfolioFixture.json(portfolioJson, "portfolio"), "portfolio")
         val zone = ZoneId.of(root["zone"] as? String ?: "UTC")
         val interpreter = ProductInterpreter(arithmetic)
         val accounts = PortfolioFixture.list(root["accounts"]).map { PortfolioFixture.obj(it, "account") }
@@ -136,7 +140,7 @@ object ProductToolkit {
         instructionJson: String,
         sourceOf: (String) -> String? = { null },
     ): Map<String, Any?> {
-        val instruction = PortfolioFixture.obj(IrJson.parse(instructionJson), "instruction")
+        val instruction = PortfolioFixture.obj(PortfolioFixture.json(instructionJson, "instruction"), "instruction")
         val ruleId = instruction["ruleId"] as? String
             ?: return mapOf("ok" to false, "message" to "instruction carries no ruleId")
         val hash = instruction["revisionHash"] as? String
@@ -189,14 +193,21 @@ object ProductToolkit {
         return out
     }
 
-    /** Writes a toolkit result the way every surface prints it. */
-    fun write(tree: Map<String, Any?>): String = CanonicalJson.write(tree)
-
     private val UUID_PATTERN = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 }
 
 /** The portfolio-fixture grammar (the golden scenario's state and step shape) and the replay step. */
 internal object PortfolioFixture {
+
+    /**
+     * Parses a non-IR JSON argument. A syntax error is an argument error ([IllegalArgumentException]),
+     * not an invalid revision, so it never reads as a [ProductIrValidationException] about the IR.
+     */
+    fun json(text: String, what: String): Any? = try {
+        IrJson.parse(text)
+    } catch (e: ProductIrValidationException) {
+        throw IllegalArgumentException("$what is not valid JSON: ${e.problems.first().message}", e)
+    }
 
     fun inWindow(at: Instant, from: Instant?, to: Instant?): Boolean =
         (from == null || !at.isBefore(from)) && (to == null || at.isBefore(to))

@@ -7193,7 +7193,7 @@ gates:
     mode: advisory
     rationale: "A hash on origin/main is what the catalog may publish (ADR-0352 §7); if two authoring surfaces yield two hashes for one product, the review approved neither. The JVM halves are tests; this half keeps their scope equal to the committed files and the registered surfaces."
     review_after: "2027-03-31"
-    verified: "2026-10-29 — 3 committed reference IRs each have a DSL product and both parity tests. STATIC half: 22 --self-test cases (a missing, disabled, one-sided or comment-only surface test each red). Surface half proven red by perturbing the MCP product_compile handler in place (ProductIrAuthoringParityTest failed 3/3, green again on revert). Studio form surface PENDING (no draft-from-form path on main)"
+    verified: "2026-10-29 — 3 committed reference IRs each have a DSL product and both parity tests. STATIC half: 23 --self-test cases (a missing, disabled, one-sided, comment-only or status-blind surface test each red). Surface half covers lint/compile/simulate/explain plus invalid-IR and unknown-rule failures on RAW bytes and isError==non-zero exit; proven red by perturbing the MCP handler in place (EUR->CZK bytes: 3/3 red; failures not flagged isError: 3/3 red), green on revert. Studio form surface PENDING (no draft-from-form path on main)"
     budget_seconds: 10
     min_subjects: 3   # three reference products at introduction (2026-10-23)
     selftest: python3 .github/scripts/check-product-ir-authoring-parity.py --self-test

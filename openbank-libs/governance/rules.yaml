@@ -4112,7 +4112,7 @@ product_ir_authoring_parity:
     - "every committed ir/<name>.json has a DSL product declared under that name, and every DSL product has a committed IR"
     - "ReferenceProductsTest compiles each DSL product and asserts its canonical JSON equals the committed file byte for byte (JVM half)"
     - "the parity test exists, is not disabled and iterates ReferenceProducts.all"
-    - "ProductIrAuthoringParityTest compiles one fixture through the obp CLI and the MCP product_compile handler and asserts identical canonical bytes and revisionHash (surface half, phase 5a)"
+    - "ProductIrAuthoringParityTest runs one fixture per reference product (keys reverse-ordered) through the obp CLI and the MCP handlers for lint, compile, simulate and explain, including invalid-IR and unknown-rule failures, and asserts identical raw bytes and that MCP isError holds exactly when the CLI exits non-zero (surface half, phase 5a)"
     - "the Studio form surface is declared PENDING until product-catalog has a draft-from-form path (phase 6)"
   gate: product-ir-authoring-parity
   enforced: advisory

@@ -61,7 +61,13 @@ class ProductAuthoringToolsTest {
         assertThat(offending).isEmpty()
         // Negative control: the matcher does catch the names it exists to keep out.
         assertThat(
-            listOf("product_publish", "product.sign", "approve_revision").all {
+            listOf("product_publish", "product.sign", "approve_revision", "sign").all {
+                ProductAuthoringTools.FORBIDDEN_VERBS.containsMatchIn(it)
+            },
+        ).isTrue()
+        // Whole-segment match: a verb inside another word is not a hit.
+        assertThat(
+            listOf("assign_owner", "design_review", "unpublished_list").none {
                 ProductAuthoringTools.FORBIDDEN_VERBS.containsMatchIn(it)
             },
         ).isTrue()
@@ -88,7 +94,8 @@ class ProductAuthoringToolsTest {
     @Test
     fun `lint rejects a broken document as data and a missing argument as invalid parameters`() {
         val broken = call("product_lint", "ir" to ir.replace("\"ACT_365_FIXED\"", "\"ACT_999\""))
-        assertThat(broken.isError).isFalse()
+        // A failed lint is an MCP error, exactly where `obp lint` exits 1.
+        assertThat(broken.isError).isTrue()
         assertThat(mapper.readTree(broken.content.first().text)["ok"].asBoolean()).isFalse()
 
         val missing = call("product_lint")
@@ -124,6 +131,7 @@ class ProductAuthoringToolsTest {
         assertThat(explained["ok"].asBoolean()).isTrue()
         assertThat(explained["irPath"].asText()).startsWith("/")
         assertThat(call("product_explain", "ir" to ir).isError).isTrue()
+        assertThat(call("product_explain", "ir" to ir, "ruleId" to "no.such.rule").isError).isTrue()
     }
 
     @Test

@@ -4373,11 +4373,11 @@ public final class com/openbank/libs/product/toolkit/ProductToolkit {
 	public static synthetic fun explainRule$default (Lcom/openbank/libs/product/toolkit/ProductToolkit;Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/lang/String;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/Map;
 	public final fun lint (Ljava/lang/String;)Ljava/util/Map;
 	public final fun lintOk (Lcom/openbank/libs/product/ir/ProductRevisionIr;)Ljava/util/Map;
+	public final fun problems (Lcom/openbank/libs/product/ir/ProductIrValidationException;)Ljava/util/Map;
 	public final fun proposalPlan (Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/lang/String;Ljava/util/Map;)Ljava/util/Map;
 	public final fun ruleIdPaths (Lcom/openbank/libs/product/ir/ProductRevisionIr;)Ljava/util/Map;
 	public final fun simulate (Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/lang/String;Lcom/openbank/libs/product/ir/ProductArithmetic;Ljava/time/Instant;Ljava/time/Instant;)Ljava/util/Map;
 	public static synthetic fun simulate$default (Lcom/openbank/libs/product/toolkit/ProductToolkit;Lcom/openbank/libs/product/ir/ProductRevisionIr;Ljava/lang/String;Lcom/openbank/libs/product/ir/ProductArithmetic;Ljava/time/Instant;Ljava/time/Instant;ILjava/lang/Object;)Ljava/util/Map;
-	public final fun write (Ljava/util/Map;)Ljava/lang/String;
 }
 
 public final class com/openbank/libs/product/toolkit/ProductToolkit$Compiled {

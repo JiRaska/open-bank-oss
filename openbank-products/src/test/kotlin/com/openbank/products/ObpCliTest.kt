@@ -266,8 +266,10 @@ class ObpCliTest {
         )
         assertThat(run(*base, "--execute").first).isEqualTo(Obp.EXIT_USAGE)
         assertThat(run(*base, "--execute", "--catalog-url", "http://catalog.example").first).isEqualTo(Obp.EXIT_USAGE)
-        // An unreachable loopback catalog is a refusal, not a crash.
-        assertThat(run(*base, "--execute", "--catalog-url", "http://localhost:9").first).isEqualTo(Obp.EXIT_REFUSED)
+        // An unreachable catalog is "unavailable" (69), distinct from a refused signing key (2).
+        val (down, _, downErr) = run(*base, "--execute", "--catalog-url", "http://localhost:9")
+        assertThat(down).isEqualTo(Obp.EXIT_UNAVAILABLE)
+        assertThat(json(downErr)["executed"]).isEqualTo(false)
 
         val (code, out, _) = run(*base)
         assertThat(code).isEqualTo(Obp.EXIT_OK)
@@ -275,6 +277,56 @@ class ObpCliTest {
         assertThat(plan["executed"]).isEqualTo(false)
         assertThat(plan["publishes"]).isEqualTo(false)
         assertThat(plan["path"].toString()).endsWith("/revisions").doesNotContain("publish")
+    }
+
+    @Test
+    fun `propose with an invalid IR is exit 1 with the structured problems, not a usage error`(@TempDir dir: Path) {
+        val broken = dir.resolve("broken.json")
+        Files.writeString(broken, ReferenceProducts.termDeposit.canonicalJson().replace("\"ACT_360\"", "\"ACT_999\""))
+        val (code, out, err) = run(
+            "propose",
+            broken.toString(),
+            "--offering",
+            "00000000-0000-0000-0000-0000000000a1",
+            "--schema-id",
+            "deposit",
+            "--schema-version",
+            "1",
+        )
+        assertThat(code).isEqualTo(Obp.EXIT_FAILURE)
+        assertThat(out).isEmpty()
+        assertThat(err).contains("\"problems\"", "/interest/dayCount")
+    }
+
+    @Test
+    fun `a missing or malformed input file or JSON argument is exit 65 with one canonical line, never a trace`(
+        @TempDir dir: Path,
+    ) {
+        fun assertInputError(vararg args: String) {
+            val (code, out, err) = run(*args)
+            assertThat(code).describedAs(args.joinToString(" ")).isEqualTo(Obp.EXIT_INPUT)
+            assertThat(out).isEmpty()
+            assertThat(err.lines().filter { it.isNotBlank() }).hasSize(1)
+            assertThat(json(err)["inputError"].toString()).isNotBlank()
+        }
+        val notJson = dir.resolve("p.json").also { Files.writeString(it, "not json") }
+        val noAt = dir.resolve("q.json").also {
+            Files.writeString(
+                it,
+                """{"accounts":[{"id":"a","state":{"currency":"EUR","openedOn":"2026-01-01"},"steps":[{"hook":"scheduled"}]}]}""",
+            )
+        }
+        val badAt = dir.resolve("r.json").also {
+            Files.writeString(
+                it,
+                """{"accounts":[{"id":"a","state":{"currency":"EUR","openedOn":"2026-01-01"},"steps":[{"at":"x","hook":"scheduled"}]}]}""",
+            )
+        }
+        assertInputError("simulate", "savings-fixed", "--portfolio", dir.resolve("absent.json").toString())
+        assertInputError("simulate", "savings-fixed", "--portfolio", notJson.toString())
+        assertInputError("simulate", "savings-fixed", "--portfolio", noAt.toString())
+        assertInputError("simulate", "savings-fixed", "--portfolio", badAt.toString())
+        assertInputError("explain", "savings-fixed", "--instruction", "[1,2]")
     }
 
     @Test
