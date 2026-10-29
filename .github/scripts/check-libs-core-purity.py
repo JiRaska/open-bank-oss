@@ -15,9 +15,10 @@ checker reports each:
       the phase that creates the module arms the check for its packages.
   (b) openbank-libs-domain or openbank-libs-runtime declares `api`/`implementation` on a
       context module — core re-exporting a context brings the 57-module fan-out straight back.
-  (c) an `openbank-libs-*` module with `src/main` is absent from LIBS_MODULES in
-      libs-change-dependents.sh. That list decides which services rebuild on a libs change; a
-      module missing from it is the #2983 silent-no-rebuild defect.
+  (c) a source-bearing libs module is absent from the shared dependency graph, or the graph
+      cannot be resolved. CI and deployment derive that graph from Gradle build files; no
+      separate LIBS_MODULES list exists. An unresolved graph selects the whole buildable
+      set, not a silently empty rollout, and must not be reported as verified scope.
 
 ADVISORY in phase 1 (exit 0, ::warning), enforced from phase 4 (`--enforce`, exit 1).
 
@@ -33,6 +34,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from library_dependency_graph import read_dependencies
+
 CORE = "openbank-libs-domain"
 CORE_BUILD_FILES = ("openbank-libs-domain/build.gradle.kts", "openbank-libs-runtime/build.gradle.kts")
 
@@ -45,17 +48,8 @@ CONTEXT_PACKAGES: dict[str, tuple[str, ...]] = {
     "openbank-libs-fincrime": ("com.openbank.libs.fincrime",),
 }
 
-# `openbank-libs-*` modules that are deliberately NOT in LIBS_MODULES, each with its reason.
-NOT_RUNTIME_MODULES = {
-    "openbank-libs": "aggregator; its src/main is in GLOBAL_RE, which rebuilds everything",
-    "openbank-libs-testing": "testImplementation only; a change there rebuilds no image",
-    "openbank-libs-detekt-rules": "detekt plugin; affects lint, not any service's runtime",
-    "openbank-libs-benchmarks": "JMH harness; nothing depends on it and it ships in no image",
-}
-
 PACKAGE_RE = re.compile(r"^\s*package\s+([A-Za-z0-9_.]+)", re.M)
 IMPORT_RE = re.compile(r"^\s*import\s+([A-Za-z0-9_.]+)", re.M)
-LIBS_MODULES_RE = re.compile(r"^LIBS_MODULES=\(([^)]*)\)", re.M)
 
 
 def find_violations(root: Path) -> tuple[list[str], int]:
@@ -92,19 +86,19 @@ def find_violations(root: Path) -> tuple[list[str], int]:
             if re.search(rf'^\s*(api|implementation)\(project\(":{re.escape(mod)}"\)\)', bf.read_text(), re.M):
                 findings.append(f"{rel}: declares {mod} — core must not depend on a context module (ADR-0317)")
 
-    # (c) every runtime libs module is in LIBS_MODULES
-    script = root / ".github/scripts/libs-change-dependents.sh"
-    listed: set[str] = set()
-    if script.is_file():
-        m = LIBS_MODULES_RE.search(script.read_text())
-        if m:
-            listed = set(m.group(1).split())
+    # (c) use the same module discovery as the runtime selector, never a second list.
+    graph = read_dependencies(root, include_tests=False)
+    if graph is None:
+        findings.append(
+            "runtime dependency graph unresolved — selectors use the full supplied buildable set; "
+            "scoped consumer coverage is not verified (ADR-0346)")
     for d in sorted(root.glob("openbank-libs*/src/main")):
         mod = d.parent.parent.name
         subjects += 1
-        if mod in NOT_RUNTIME_MODULES or mod in listed:
-            continue
-        findings.append(f".github/scripts/libs-change-dependents.sh: LIBS_MODULES lacks {mod} — its consumers would not rebuild on a change (#2983)")
+        if not (root / mod / "build.gradle.kts").is_file():
+            findings.append(f"{mod}: src/main has no build.gradle.kts — module is absent from Gradle/graph discovery")
+        elif graph is not None and mod not in graph:
+            findings.append(f"{mod}: source-bearing library is absent from the shared dependency graph")
     return findings, subjects
 
 
@@ -128,8 +122,9 @@ def self_test() -> int:
     with tempfile.TemporaryDirectory() as t:
         root = Path(t)
         (root / ".github/scripts").mkdir(parents=True)
+        # The production selector derives its graph, with no hand-maintained libs list.
         (root / ".github/scripts/libs-change-dependents.sh").write_text(
-            "LIBS_MODULES=(openbank-libs-domain openbank-libs-runtime openbank-libs-lending)\n")
+            "python3 .github/scripts/service-ci-library-dependents.py --runtime \"$@\"\n")
         for mod in ("openbank-libs-domain", "openbank-libs-runtime", "openbank-libs-lending"):
             (root / mod / "src/main/kotlin").mkdir(parents=True)
             (root / mod / "build.gradle.kts").write_text("dependencies {}\n")
@@ -170,12 +165,38 @@ def self_test() -> int:
             ok = False
         rt.write_text("dependencies {}\n")
 
-        # (c) a runtime libs module missing from LIBS_MODULES
-        (root / "openbank-libs-newctx/src/main").mkdir(parents=True)
+        # (c) source-bearing libraries need a build file; a new valid module needs no list edit.
+        new_module = root / "openbank-libs-newctx"
+        (new_module / "src/main").mkdir(parents=True)
         if not any("openbank-libs-newctx" in f for f in find_violations(root)[0]):
-            print("self-test FAIL: module absent from LIBS_MODULES not flagged")
+            print("self-test FAIL: source-bearing module without a build file not flagged")
             ok = False
-        shutil.rmtree(root / "openbank-libs-newctx")
+        (new_module / "build.gradle.kts").write_text("dependencies {}\n")
+        if find_violations(root)[0]:
+            print("self-test FAIL: graph-registered new library required a separate list edit")
+            ok = False
+        (new_module / "build.gradle.kts").write_text('implementation(project(dynamicName))\n')
+        if not any("unresolved" in f for f in find_violations(root)[0]):
+            print("self-test FAIL: unresolved dependency graph reported as verified")
+            ok = False
+        (new_module / "build.gradle.kts").write_text('implementation(project(":openbank-absent"))\n')
+        if not any("unresolved" in f for f in find_violations(root)[0]):
+            print("self-test FAIL: missing project dependency reported as verified")
+            ok = False
+        shutil.rmtree(new_module)
+
+        # Tooling libraries also use graph discovery, not an exemption list.
+        for module in ("openbank-libs-testing", "openbank-libs-detekt-rules"):
+            tooling = root / module
+            (tooling / "src/main").mkdir(parents=True)
+            if not any(module in f for f in find_violations(root)[0]):
+                print(f"self-test FAIL: source-bearing tooling library {module} without build not flagged")
+                ok = False
+            (tooling / "build.gradle.kts").write_text("dependencies {}\n")
+            if find_violations(root)[0]:
+                print(f"self-test FAIL: graph-registered tooling library {module} flagged")
+                ok = False
+            shutil.rmtree(tooling)
 
         # a context module that does not exist yet arms nothing
         core_pkg.write_text("package com.openbank.libs.iso20022\n")
