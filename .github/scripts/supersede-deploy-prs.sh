@@ -520,7 +520,9 @@ EOF
 "This deploy PR pins services that an owner holds on${block_list}, so it will not be armed. The owner hold on${block_list} must be recorded in main's \`rules.yaml: deploy_holds\` (or${block_list} released) before this PR can deploy. $BLOCK_NOTICE_MARKER"; then
       echo "::warning::supersede: could not post the owner-hold block notice on #$KEEP."
     fi
-    return 1
+    # rc 3, distinct from every other refusal: deploy-window-flush falls through to the other
+    # deploy kind ONLY on this one, so a held gitops PR can no longer starve admin-ui.
+    return 3
   fi
   if [ "$stale_keep" -ne 0 ]; then
     return 1
@@ -902,13 +904,14 @@ HOOK
   for path_name in coverage-skip:$OLD diverged:$CCC; do
     path_sha="${path_name#*:}"
     out="$(ov_run owner 13061 13060 "$path_sha" 2>&1)" && rc=0 || rc=$?
-    if [ "$rc" -eq 0 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' \
+    # rc 3 exactly: the flush workflow keys its fall-through to the other deploy kind on it.
+    if [ "$rc" -ne 3 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' \
        || [ "$(keep_noticed 13061)" != 1 ] || grep -q '^pr close' "$hev"; then
       echo "SELF-TEST FAIL case 37 (${path_name%%:*}): owner hold + overlap did not block #13061; rc=$rc notices=$(keep_noticed 13061)"; ok=1; dump_out "$out"
     fi
   done
   out="$(ov_run owner 13061 13060 "$NEW" "$OLD" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -eq 0 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' || [ "$(keep_noticed 13061)" != 1 ]; then
+  if [ "$rc" -ne 3 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' || [ "$(keep_noticed 13061)" != 1 ]; then
     echo "SELF-TEST FAIL case 37 (stale-keep): owner overlap not reported/noticed; rc=$rc"; ok=1; dump_out "$out"
   fi
   # CLOSE path: case 32's pair shares the sanctions manifest.

@@ -7,9 +7,9 @@
 # window, because each one makes every open PR `behind` under the strict up-to-date rule and
 # restarts its required checks. A deploy they DEFER stays open and unarmed — this workflow is
 # what lands it. A workflow_run trigger handles new PRs and the schedule recovers missed runs.
-# Each run picks the OLDEST deferred deploy PR once the window has elapsed
-# and nothing else is armed, re-runs supersede-deploy-prs.sh on it (ancestry + coverage — a
-# rollback PR is refused, never armed), and arms auto-merge with the same App token the deploy
+# Each run offers the newest PR of each deploy kind, longest-waiting kind first, once the window
+# has elapsed and nothing else is armed, re-runs supersede-deploy-prs.sh on it (ancestry + coverage
+# — a rollback PR is refused, never armed; a kind refused for an owner hold falls through), and arms auto-merge with the same App token the deploy
 # workflows use. A successful manual dispatch of either producer expedites only its matching PR.
 # An open PR labelled merge-priority:repair defers new arming, including manual expedition.
 # Draft/blocked repairs retain priority until an owner removes the label or closes the PR.
@@ -78,46 +78,61 @@ jobs:
             --commits-json "$d/commits.json" --event-json "$GITHUB_EVENT_PATH" \
             --now "$(date -u +%s)" | tee -a "$GITHUB_OUTPUT"
 
-      - name: Verify deferred GitOps image source freshness
-        if: steps.pick.outputs.arm != '' && startsWith(steps.pick.outputs.arm_head, 'chore/gitops-auto-deploy-')
-        env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          ARM: ${{ steps.pick.outputs.arm }}
-        run: |
-          set -euo pipefail
-          git fetch --depth=100 origin main
-          git reset --hard origin/main
-          gh pr diff "$ARM" --repo "$GITHUB_REPOSITORY" \
-            | python3 .github/scripts/deploy-window.py verify --root .
-
       - name: Install deploy-hold parser
-        if: steps.pick.outputs.arm != ''
+        if: steps.pick.outputs.candidates != ''
         run: |
           python3 -m venv "${RUNNER_TEMP}/deploy-hold-venv"
           "${RUNNER_TEMP}/deploy-hold-venv/bin/python" -m pip install --quiet --require-hashes \
             -r .github/scripts/pyyaml-requirements.txt
 
-      - name: Close superseded deploy PRs (refuses a rollback)
-        if: steps.pick.outputs.arm != ''
+      # One candidate per deploy kind, longest-waiting kind first. For each: GitOps image freshness,
+      # then supersede-deploy-prs.sh (refuses a rollback). supersede rc 3 = an owner hold overlaps
+      # this candidate, so fall through to the next kind: 2026-10-24..29 a held gitops PR failed
+      # 160 of 300 runs and admin-ui never armed. Any other refusal still fails the run, unarmed.
+      - name: Verify, close superseded PRs, fall through a held kind
+        id: select
+        if: steps.pick.outputs.candidates != ''
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          ARM: ${{ steps.pick.outputs.arm }}
-          ARM_HEAD: ${{ steps.pick.outputs.arm_head }}
+          CANDIDATES: ${{ steps.pick.outputs.candidates }}
           DEPLOY_HOLD_PYTHON: ${{ runner.temp }}/deploy-hold-venv/bin/python
         run: |
           set -euo pipefail
-          case "$ARM_HEAD" in
-            chore/gitops-auto-deploy-*) prefix=chore/gitops-auto-deploy- ;;
-            chore/admin-ui-deploy-*)    prefix=chore/admin-ui-deploy- ;;
-            *) echo "::error::unexpected deploy head ${ARM_HEAD}"; exit 1 ;;
-          esac
-          bash .github/scripts/supersede-deploy-prs.sh "$prefix" "$ARM"
+          fetched=""
+          for c in $CANDIDATES; do
+            arm="${c%%:*}"
+            head="${c#*:}"
+            case "$head" in
+              chore/gitops-auto-deploy-*) prefix=chore/gitops-auto-deploy- ;;
+              chore/admin-ui-deploy-*)    prefix=chore/admin-ui-deploy- ;;
+              *) echo "::error::unexpected deploy head ${head}"; exit 1 ;;
+            esac
+            if [ "$prefix" = chore/gitops-auto-deploy- ]; then
+              if [ -z "$fetched" ]; then
+                git fetch --depth=100 origin main
+                git reset --hard origin/main
+                fetched=1
+              fi
+              gh pr diff "$arm" --repo "$GITHUB_REPOSITORY" \
+                | python3 .github/scripts/deploy-window.py verify --root .
+            fi
+            rc=0
+            bash .github/scripts/supersede-deploy-prs.sh "$prefix" "$arm" || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "arm=$arm" >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+            [ "$rc" -eq 3 ] || exit "$rc"
+            echo "::warning::deploy PR #${arm} is refused for an owner hold - trying the next deploy kind."
+          done
+          echo "::error::every deploy kind is refused for an owner hold - nothing armed."
+          exit 1
 
       - name: Enable auto-merge
-        if: steps.pick.outputs.arm != ''
+        if: steps.select.outputs.arm != ''
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          ARM: ${{ steps.pick.outputs.arm }}
+          ARM: ${{ steps.select.outputs.arm }}
         run: |
           set -euo pipefail
           # Re-read the hold state AT arm time (issue #11503): the pick and the supersede step
