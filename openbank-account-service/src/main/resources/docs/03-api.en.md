@@ -126,6 +126,8 @@ Unified via `openbank-libs.api.ApiError`:
 | 409 | `account-already-closed` | close has already happened |
 | 422 | `account-frozen` | mutation on a frozen account |
 | 422 | `insufficient-authorization` | not OWNER for this operation |
+| 422 | `PRODUCT_REVISION_NOT_PUBLISHED` | opening a product with no published catalog revision to pin (ADR-0341 D1) |
+| 503 | `PRODUCT_CATALOG_UNAVAILABLE` | product catalog unreachable at opening; nothing persisted, retry after `Retry-After` |
 | 429 | `rate-limited` | per-token quota |
 | 500 | `internal-error` | unexpected error (with correlationId for support) |
 
