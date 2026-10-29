@@ -1246,6 +1246,9 @@ jobs:
 
       # Source evidence shares GITHUB_TOKEN's repository quota with other workflows.
       # Use the existing App's separate quota, scoped to read-only evidence in this repo.
+      # Request contents:read only: the GitOps App installation is not granted actions:read,
+      # and asking for it fails the mint ("permissions requested are not granted", #13587).
+      # The repo is public, so its Actions run/job reads need no extra permission on this token.
       - name: Mint a read-only source evidence token
         id: source_evidence_token
         if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true'))
@@ -1255,7 +1258,6 @@ jobs:
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          permission-actions: read
           permission-contents: read
 
       # The pact CLI runs natively on the ARC runner pod (which resolves the broker's

@@ -28,7 +28,7 @@ class ProducerIsolationTests(unittest.TestCase):
         self.assertEqual(configuration['owner'], '${{ github.repository_owner }}')
         self.assertEqual(configuration['repositories'], '${{ github.event.repository.name }}')
         permissions = {key: value for key, value in configuration.items() if key.startswith('permission-')}
-        self.assertEqual(permissions, {'permission-actions': 'read', 'permission-contents': 'read'})
+        self.assertEqual(permissions, {'permission-contents': 'read'})
         self.assertNotEqual(configuration.get('skip-token-revoke'), True)
         gate = next(step for step in steps if step.get('name') == 'can-i-deploy (per changed service)')
         self.assertEqual(gate['env']['GH_TOKEN'], '${{ steps.source_evidence_token.outputs.token || github.token }}')
