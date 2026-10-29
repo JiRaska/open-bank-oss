@@ -12,11 +12,15 @@ import com.openbank.treasury.application.port.out.NostroStatementRepository
 import com.openbank.treasury.application.port.out.StatementNotFoundException
 import com.openbank.treasury.application.port.out.StoredStatement
 import com.openbank.treasury.domain.model.Actor
+import com.openbank.treasury.domain.model.LedgerNostroLine
 import com.openbank.treasury.domain.model.NostroMatcher
 import com.openbank.treasury.domain.model.NostroReconciliation
 import com.openbank.treasury.domain.model.NostroStatement
+import com.openbank.treasury.domain.model.Side
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -104,19 +108,25 @@ class NostroReconciliationService(
         // day after the period but valued inside it, so the entry days just after the period are read
         // too and only lines valued inside the period are kept; a line booked inside the period but
         // valued outside it belongs to another statement.
-        val lines = (
+        val fetched =
             ledger.nostroLines(nostro, statement.firstDate, statement.lastDate) +
                 ledger.nostroLines(
                     nostro,
                     statement.lastDate.plusDays(1),
                     statement.lastDate.plusDays(LATE_BOOKING_WINDOW_DAYS),
                 )
-            ).filter {
+        val lines = fetched.filter {
             !it.reconciledDate.isBefore(statement.firstDate) &&
                 !it.reconciledDate.isAfter(statement.lastDate)
         }
+        // The balances are compared by VALUE date too (#13886): the ledger answers balances by entry
+        // date, so a settlement valued on or before a balance date but entered after it is added, and
+        // one entered on or before it but valued after it is taken out. Without this a late settlement
+        // matches as a line yet still shows as a closing-balance break for the period it belongs to.
         val opening = ledger.accountBalance(stored.glCode, statement.currency, statement.openingDate)
+            ?.let { it + valueDateShift(fetched, statement.openingDate) }
         val closing = ledger.accountBalance(stored.glCode, statement.currency, statement.statementDate)
+            ?.let { it + valueDateShift(fetched, statement.statementDate) }
         val stated = opening != null && closing != null
         return NostroMatcher.match(
             statement = statement,
@@ -128,8 +138,26 @@ class NostroReconciliationService(
         )
     }
 
-    private companion object {
+    internal companion object {
         /** How many entry days after the period a late, back-valued booking is looked for. */
         const val LATE_BOOKING_WINDOW_DAYS = 7L
+
+        /**
+         * What turns the ledger's entry-dated net (debit − credit) of the nostro as at [asOf] into its
+         * value-dated net, from the lines one reconcile run already read: + lines entered after [asOf]
+         * but valued on or before it, − lines entered on or before [asOf] but valued after it. Only
+         * lines inside the read window are seen, the same bound the line matching has.
+         */
+        fun valueDateShift(lines: List<LedgerNostroLine>, asOf: LocalDate): BigDecimal =
+            lines.fold(BigDecimal.ZERO) { acc, l ->
+                val signed = if (l.side == Side.DEBIT) l.amount else l.amount.negate()
+                val enteredAfter = l.entryDate.isAfter(asOf)
+                val valuedAfter = l.reconciledDate.isAfter(asOf)
+                when {
+                    enteredAfter && !valuedAfter -> acc + signed
+                    !enteredAfter && valuedAfter -> acc - signed
+                    else -> acc
+                }
+            }
     }
 }
