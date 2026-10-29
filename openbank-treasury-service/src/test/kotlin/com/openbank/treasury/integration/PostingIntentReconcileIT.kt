@@ -21,6 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.future.future
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.MethodOrderer
@@ -156,9 +157,23 @@ class PostingIntentReconcileIT {
     }
 
     @Test
-    @Order(9)
-    fun `9 - two reconcilers racing resume the intent exactly once`() {
+    @Order(11)
+    fun `11 - two reconcilers racing resume the intent exactly once, past more escalated intents than a batch`() {
         val key = "treasury:$raceId:settled"
+        // More escalated intents than BOTH racing passes' batches together (2 x 100), all OLDER than
+        // this one: were they claimable, both passes would take only them and never reach it.
+        val flood = "it-escalated-${UUID.randomUUID()}"
+        jdbc { c ->
+            c.prepareStatement(
+                "insert into deal_posting_intent (idempotency_key, deal_id, event, action, value_date, actor_id, " +
+                    "actor_type, created_at, escalated_at) select ? || ':' || g, gen_random_uuid(), 'SETTLED', " +
+                    "'SETTLE', date '2000-01-03', 'it', 'HUMAN', now() - interval '2 days', now() " +
+                    "from generate_series(1, 201) g",
+            ).use { ps ->
+                ps.setString(1, flood)
+                ps.executeUpdate()
+            }
+        }
         val barrier = CyclicBarrier(2)
         val pool = Executors.newFixedThreadPool(2)
         try {
@@ -178,6 +193,12 @@ class PostingIntentReconcileIT {
             assertThat(runs.sumOf { it.failures.size }).describedAs("no false error from the loser").isZero()
         } finally {
             pool.shutdownNow()
+            jdbc { c ->
+                c.prepareStatement("delete from deal_posting_intent where idempotency_key like ?").use { ps ->
+                    ps.setString(1, "$flood:%")
+                    ps.executeUpdate()
+                }
+            }
         }
     }
 
@@ -192,13 +213,87 @@ class PostingIntentReconcileIT {
     @Test
     @Order(8)
     @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
-    fun `8 - an approver closes it with a reason, recorded, and a second close finds nothing`() {
+    fun `8 - the approver who booked and settled the deal may not close its posting intent`() {
+        backdate("treasury:$closeId:settled")
+        close(closeId, "SETTLED", "my own posting").then().statusCode(422)
+            .body("error", equalTo("FOUR_EYES_VIOLATION"))
+        assertThat(intent("treasury:$closeId:settled").first).isEqualTo("OPEN")
+    }
+
+    @Test
+    @Order(9)
+    @TestSecurity(user = "olga.operator", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `9 - a third person closes it, not while in flight, recorded append-only, a second close finds nothing`() {
+        val key = "treasury:$closeId:settled"
         close(closeId, "SETTLED", "").then().statusCode(400)
+        // In flight: younger than the grace, or under a live reconciler claim - refused, not raced.
+        jdbcUpdate("update deal_posting_intent set created_at = now() where idempotency_key = ?", key)
+        close(closeId, "SETTLED", "too soon").then().statusCode(404)
+        backdate(key)
+        jdbcUpdate(
+            "update deal_posting_intent set claimed_until = now() + interval '10 minutes' where idempotency_key = ?",
+            key,
+        )
+        close(closeId, "SETTLED", "claimed").then().statusCode(404)
+        jdbcUpdate("update deal_posting_intent set claimed_until = null where idempotency_key = ?", key)
+
         close(closeId, "SETTLED", "ledger confirmed to hold no journal").then().statusCode(204)
-        val row = closedRow("treasury:$closeId:settled")
-        assertThat(row.first).isEqualTo("REFUSED")
-        assertThat(row.second).isEqualTo("adam.approver")
+        val row = closedRow(key)
+        assertThat(row.first).isEqualTo("CLOSED_BY_OPERATOR")
+        assertThat(row.second).isEqualTo("olga.operator")
+        assertThat(history(key)).containsExactly(
+            listOf("OPENED", "adam.approver", null),
+            listOf("CLOSED_BY_OPERATOR", "olga.operator", "ledger confirmed to hold no journal"),
+        )
         close(closeId, "SETTLED", "again").then().statusCode(404)
+        // The history refuses to be rewritten or erased.
+        assertThatThrownBy {
+            jdbcUpdate("update deal_posting_intent_history set reason = 'x' where idempotency_key = ?", key)
+        }
+            .hasMessageContaining("append-only")
+        assertThatThrownBy { jdbcUpdate("delete from deal_posting_intent_history where idempotency_key = ?", key) }
+            .hasMessageContaining("append-only")
+    }
+
+    @Test
+    @Order(10)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `10 - a re-issue after the operator close reopens it with its first day and keeps the close on record`() {
+        val key = "treasury:$closeId:settled"
+        action(closeId, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
+        assertThat(intent(key)).isEqualTo("COMPLETED" to today)
+        assertThat(closedRow(key)).isEqualTo("COMPLETED" to "olga.operator")
+        assertThat(history(key).map { it[0] }).containsExactly(
+            "OPENED",
+            "CLOSED_BY_OPERATOR",
+            "REOPENED_AFTER_OPERATOR_CLOSE",
+            "COMPLETED",
+        )
+        assertThat(ledger.calls.filter { it == key }).describedAs("re-posted under the same key").hasSize(2)
+    }
+
+    private fun backdate(key: String) = jdbcUpdate(
+        "update deal_posting_intent set created_at = now() - interval '10 minutes' where idempotency_key = ?",
+        key,
+    )
+
+    private fun jdbcUpdate(sql: String, key: String): Int = jdbc { c ->
+        c.prepareStatement(sql).use { ps ->
+            ps.setString(1, key)
+            ps.executeUpdate()
+        }
+    }
+
+    private fun history(key: String): List<List<String?>> = jdbc { c ->
+        c.prepareStatement(
+            "select transition, actor_id, reason from deal_posting_intent_history where idempotency_key = ? order by id",
+        ).use { ps ->
+            ps.setString(1, key)
+            ps.executeQuery().use { rs ->
+                generateSequence { if (rs.next()) listOf(rs.getString(1), rs.getString(2), rs.getString(3)) else null }
+                    .toList()
+            }
+        }
     }
 
     private fun close(id: String, event: String, reason: String) = given()

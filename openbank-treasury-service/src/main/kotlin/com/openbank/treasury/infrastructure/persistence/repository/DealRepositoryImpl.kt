@@ -142,6 +142,8 @@ class DealRepositoryImpl(
     DealReferenceLookup,
     PanacheRepository<DealEntity> {
 
+    private val log = org.jboss.logging.Logger.getLogger(DealRepositoryImpl::class.java)
+
     /** ADR-0344 D3: deals whose terms name [ref] (any state; a dependency query, not a filter). */
     override suspend fun dealsReferencing(ref: ReferenceRef): List<UUID> {
         val rows = Panache.withSession {
@@ -242,11 +244,28 @@ class DealRepositoryImpl(
             if (n == 0L) persistJournal(j) else Uni.createFrom().voidItem()
         }.flatMap { completeIntent(j.idempotencyKey) }
 
+    /**
+     * OPEN -> COMPLETED with a history row. A journal applied to an intent an operator (or a ledger
+     * refusal) already CLOSED never rewrites that record: the status stays as the operator left it,
+     * a JOURNAL_APPLIED_AFTER_CLOSE history row says what happened, and it is logged as an error,
+     * because the close released a day hold the ledger's journal belonged in.
+     */
     private fun completeIntent(key: String): Uni<Void> = Panache.getSession().flatMap { session ->
-        session.createNativeQuery<Int>(COMPLETE_INTENT_SQL)
-            .setParameter(1, OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))
-            .setParameter(2, key)
-            .executeUpdate()
+        val at = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
+        session.createNativeQuery<Int>(COMPLETE_INTENT_SQL).setParameter(1, at).setParameter(2, key).executeUpdate()
+            .flatMap {
+                session.createNativeQuery<Int>(APPLIED_AFTER_CLOSE_SQL).setParameter(1, at).setParameter(2, key)
+                    .executeUpdate()
+            }
+            .invoke { late ->
+                if (late > 0) {
+                    log.errorf(
+                        "posting intent %s was closed but its journal was applied afterwards; " +
+                            "re-report its value day",
+                        key,
+                    )
+                }
+            }
     }.replaceWithVoid()
 
     /** One `deal_versions` row per terms version; the schedule columns follow the latest generation. */
@@ -618,8 +637,15 @@ class DealRepositoryImpl(
         val LEGS_TYPE = object : TypeReference<List<LegSpec>>() {}
 
         const val COMPLETE_INTENT_SQL =
-            "UPDATE deal_posting_intent SET status = 'COMPLETED', closed_at = ?1, last_error = NULL, " +
-                "claim_token = NULL, claimed_until = NULL " +
-                "WHERE idempotency_key = ?2 AND status <> 'COMPLETED'"
+            "WITH u AS (UPDATE deal_posting_intent SET status = 'COMPLETED', closed_at = ?1, last_error = NULL, " +
+                "claim_token = NULL, claimed_until = NULL WHERE idempotency_key = ?2 AND status = 'OPEN' " +
+                "RETURNING idempotency_key, value_date, actor_id) " +
+                "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, value_date) " +
+                "SELECT idempotency_key, ?1, 'COMPLETED', actor_id, value_date FROM u"
+
+        const val APPLIED_AFTER_CLOSE_SQL =
+            "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, reason, value_date) " +
+                "SELECT idempotency_key, ?1, 'JOURNAL_APPLIED_AFTER_CLOSE', actor_id, status, value_date " +
+                "FROM deal_posting_intent WHERE idempotency_key = ?2 AND status IN ('CLOSED_BY_OPERATOR', 'REFUSED')"
     }
 }

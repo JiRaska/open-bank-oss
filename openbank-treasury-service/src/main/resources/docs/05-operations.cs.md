@@ -117,17 +117,24 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   pozdrží svůj den hodnoty. `PostingIntentReconcileScheduler` (každých 5 minut) si zabere záměry starší
   než `openbank.treasury.posting-intent.grace` (`FOR UPDATE SKIP LOCKED` a zápůjčka, takže dva pody
   nikdy neobnoví tentýž) a znovu spustí příkaz pod stejným klíčem; ledger odpoví původním žurnálem.
-  Obnovuje jen záměry ze stejného pražského obchodního dne mladší než `max-resume-age` (4 h), jménem
-  uloženého aktéra; starší eskaluje a nechá otevřené. Dokud má obchod otevřený záměr, akruál ho
-  přeskočí, takže obnovené storno vyrovná přesně to, proti čemu bylo rozhodnuto. Záměr uzavře jako
-  REFUSED jen kódované `409 ACCOUNTING_DAY_CLOSED` ledgeru u prvního pokusu; každé jiné selhání ho
-  nechá otevřené.
+  Jménem uloženého aktéra obnoví záměr jen mladší než `max-resume-age` (4 h, podle stáří, ne podle
+  kalendáře: den hodnoty si záměr nese sám). Starší eskaluje: zůstane otevřený, drží svůj den a už
+  se znovu nezabírá, takže eskalované záměry nemohou vyhladovět ty obnovitelné. Dokud má obchod
+  otevřený záměr, akruál ho přeskočí a vykáže jako neposouzený, takže obnovené storno vyrovná přesně
+  to, proti čemu bylo rozhodnuto. Kódované `409 ACCOUNTING_DAY_CLOSED` ledgeru uzavře záměr jako
+  REFUSED (žurnál neexistuje), je-li záměr čerstvý nebo starší než grace; každé jiné selhání ho nechá
+  otevřený.
 - **Uvízlý záměr.** `TreasuryPostingIntentStuck` se spustí, když je nejstarší otevřený záměr starší
   než 20 minut (gauge `openbank.treasury.posting_intents.open` a `.oldest_age_seconds`, -1 když je
-  nelze přečíst). Přečtěte `last_error` na řádku. Buď příkaz obchodu zopakujte přes API, které účtuje
-  pod stejným klíčem a záměr dokončí, nebo, jakmile je potvrzeno, že ledger pod klíčem žádný žurnál
-  nedrží, záměr uzavřete: `POST /api/v1/treasury/deals/{id}/posting-intent/close` s
-  `{"event": "SETTLED|MATURED|REVERSED", "reason": "..."}`. Vyžaduje oprávnění obchod stornovat a
-  osobu; kdo a proč záměr uzavřel, se zapíše na řádek a pozdržení dne se uvolní.
+  nelze přečíst; ověřeno promtoolem). Přečtěte `last_error` na řádku. Buď příkaz obchodu zopakujte přes
+  API, které účtuje pod stejným klíčem a záměr dokončí, nebo ho uzavřete:
+  `POST /api/v1/treasury/deals/{id}/posting-intent/close` s
+  `{"event": "SETTLED|MATURED|REVERSED", "reason": "..."}`. Vyžaduje akci OPA
+  `treasury.posting-intent.close` (schvalovatelé, nikdy agent), osobu a čtyři oči: ne aktéra záměru ani
+  schvalovatele obchodu. Záměr mladší než grace nebo zabraný reconcilerem uzavřít nelze. Uzavření
+  nastaví CLOSED_BY_OPERATOR (kdo a proč zůstává na řádku) a uvolní pozdržení dne. Žurnál přesto může
+  existovat, takže pozdější zopakování záměr znovu otevře s PRVNÍM dnem hodnoty. Každý přechod se
+  připíše do `deal_posting_intent_history`, která odmítá UPDATE i DELETE; žurnál, který dorazí po
+  uzavření, se tam zapíše jako `JOURNAL_APPLIED_AFTER_CLOSE` (a zaloguje jako chyba), nikdy přes něj.
 - **Provoz.** V režimu `shadow` ledger pozdržení jen počítá. V režimu `enforce` operátor den REFUSED
   posoudí a na stránce konce dne v ledgeru mu udělí výjimku (waiver).

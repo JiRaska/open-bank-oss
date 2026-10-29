@@ -79,10 +79,14 @@ internal class LedgerRefused(message: String) : RuntimeException(message)
 
 /** #13883: posting intents in memory; [InMemoryDeals.save] completes one as the real save does. */
 internal class InMemoryIntents : PostingIntentPort {
-    enum class Status { OPEN, COMPLETED, REFUSED }
+    enum class Status { OPEN, COMPLETED, REFUSED, CLOSED_BY_OPERATOR }
 
     val rows = linkedMapOf<String, Pair<PostingIntent, Status>>()
     val closedBy = mutableMapOf<String, String>()
+    val escalated = mutableSetOf<String>()
+
+    /** Append-only, as `deal_posting_intent_history`: (key, transition, actor, reason, value day). */
+    val history = mutableListOf<List<Any?>>()
 
     fun status(key: String) = rows[key]?.second
 
@@ -90,20 +94,31 @@ internal class InMemoryIntents : PostingIntentPort {
         i.copy(status = PostingIntentStatus.valueOf(st.name))
     }
 
+    private fun record(key: String, transition: String, actor: String?, reason: String?) {
+        history += listOf(key, transition, actor, reason, rows.getValue(key).first.valueDate)
+    }
+
     override suspend fun open(intent: PostingIntent): PostingIntent {
-        val existing = rows[intent.idempotencyKey]
-        // As the real store: a new or REFUSED key takes this attempt whole (fresh); OPEN/COMPLETED is kept.
+        val key = intent.idempotencyKey
+        val existing = rows[key]
+        // As the real store: a new or REFUSED key takes this attempt whole (fresh).
         if (existing == null || existing.second == Status.REFUSED) {
-            rows[intent.idempotencyKey] = intent.copy(fresh = false) to Status.OPEN
-            return stored(intent.idempotencyKey).copy(fresh = true)
+            rows[key] = intent.copy(fresh = false) to Status.OPEN
+            record(key, if (existing == null) "OPENED" else "REOPENED", intent.actor.id, null)
+            return stored(key).copy(fresh = true)
         }
-        return stored(intent.idempotencyKey)
+        if (existing.second == Status.CLOSED_BY_OPERATOR) {
+            // A journal may exist: reopened NOT fresh, keeping its first value day.
+            rows[key] = existing.first to Status.OPEN
+            record(key, "REOPENED_AFTER_OPERATOR_CLOSE", intent.actor.id, null)
+        }
+        return stored(key)
     }
 
     override suspend fun refuse(key: String, reason: String) {
         rows[key]?.takeIf { it.second == Status.OPEN }?.let {
-            rows[key] =
-                it.first.copy(lastError = reason) to Status.REFUSED
+            rows[key] = it.first.copy(lastError = reason) to Status.REFUSED
+            record(key, "REFUSED", null, reason)
         }
     }
 
@@ -113,9 +128,16 @@ internal class InMemoryIntents : PostingIntentPort {
         }
     }
 
+    override suspend fun escalate(key: String, reason: String) {
+        rows[key]?.takeIf { it.second == Status.OPEN }?.let {
+            rows[key] = it.first.copy(lastError = reason) to Status.OPEN
+            escalated += key
+        }
+    }
+
     override suspend fun claimOpen(cutoff: Instant, lease: Duration, limit: Int) = rows.values.filter {
-        it.second == Status.OPEN && it.first.createdAt.isBefore(cutoff)
-    }.take(limit).map { it.first }
+        it.second == Status.OPEN && it.first.idempotencyKey !in escalated && it.first.createdAt.isBefore(cutoff)
+    }.sortedBy { it.first.createdAt }.take(limit).map { it.first }
 
     override suspend fun openFor(dealId: UUID) =
         rows.values.filter { it.second == Status.OPEN && it.first.dealId == dealId }.map { it.first }
@@ -123,15 +145,27 @@ internal class InMemoryIntents : PostingIntentPort {
     override suspend fun summary() = rows.values.filter { it.second == Status.OPEN }
         .let { open -> OpenIntentSummary(open.size, open.minOfOrNull { it.first.createdAt }) }
 
-    override suspend fun closeByOperator(key: String, actor: Actor, reason: String): Boolean {
-        val row = rows[key]?.takeIf { it.second == Status.OPEN } ?: return false
-        rows[key] = row.first.copy(lastError = "closed by operator: $reason") to Status.REFUSED
+    override suspend fun closeByOperator(key: String, actor: Actor, reason: String, createdBefore: Instant): Boolean {
+        val row = rows[key]?.takeIf { it.second == Status.OPEN && it.first.createdAt.isBefore(createdBefore) }
+            ?: return false
+        rows[key] = row.first to Status.CLOSED_BY_OPERATOR
         closedBy[key] = actor.id
+        record(key, "CLOSED_BY_OPERATOR", actor.id, reason)
         return true
     }
 
     fun complete(key: String) {
-        rows[key]?.let { rows[key] = it.first to Status.COMPLETED }
+        val row = rows[key] ?: return
+        when (row.second) {
+            Status.OPEN -> {
+                rows[key] = row.first to Status.COMPLETED
+                record(key, "COMPLETED", row.first.actor.id, null)
+            }
+            // As the real save: a closed record is never rewritten; the late journal is recorded beside it.
+            Status.CLOSED_BY_OPERATOR, Status.REFUSED ->
+                record(key, "JOURNAL_APPLIED_AFTER_CLOSE", row.first.actor.id, row.second.name)
+            Status.COMPLETED -> Unit
+        }
     }
 }
 

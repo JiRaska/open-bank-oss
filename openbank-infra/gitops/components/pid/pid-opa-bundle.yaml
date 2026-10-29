@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pid-service
     app.kubernetes.io/part-of: pid
   annotations:
-    openbank.tech/policy-checksum: "f04cec5d05435f9f"
+    openbank.tech/policy-checksum: "ccdff450ea22f19c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1331,6 +1331,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

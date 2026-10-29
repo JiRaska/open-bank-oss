@@ -397,15 +397,16 @@ class TreasuryResource {
 
     /**
      * #13883: an operator closes the OPEN posting intent of a deal's settlement, maturity or reversal
-     * that cannot complete, releasing its day's close hold. Same authority as reversing the deal; a
-     * person only (the domain refuses any other actor); who and why are recorded on the intent.
-     * 404 when no OPEN intent exists for that event.
+     * that cannot complete, releasing its day's close hold. Its own OPA action
+     * (`treasury.posting-intent.close`, approvers only, never an agent); the domain refuses a
+     * non-person and, four eyes, the posting's own actor and the deal's approver (422). Who and why
+     * are recorded on the intent and appended to its history. 404 when no OPEN intent exists.
      */
     @POST
     @Path("/deals/{id}/posting-intent/close")
     @RolesAllowed(APPROVER)
     @Operation(summary = "Close a deal's open posting intent that cannot complete (operator, audited)")
-    @Authorize(action = "treasury.deal.reverse", resource = "#id")
+    @Authorize(action = "treasury.posting-intent.close", resource = "#id")
     suspend fun closePostingIntent(@PathParam("id") id: UUID, request: ClosePostingIntentRequest?): Response {
         requireNotNull(request) { "a request body is required" }
         val event = requireNotNull(request.event) { "event is required" }

@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: context-service
     app.kubernetes.io/part-of: context
   annotations:
-    openbank.tech/policy-checksum: "9de870cc5f1e049b"
+    openbank.tech/policy-checksum: "b0a0a6c1d1c97368"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2103,6 +2103,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

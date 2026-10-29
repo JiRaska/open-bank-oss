@@ -60,7 +60,6 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -109,12 +108,21 @@ class TreasuryDealService(
     private val intents: PostingIntentPort = PostingIntentPort.NONE,
     /**
      * #13883 review: the reconciler resumes a command as its stored actor only while that is still
-     * the actor's own recent decision, created on the same Prague business day and no older than
-     * this. Anything older is escalated to an operator, who re-issues the command through the API
-     * (authorised afresh) or closes the intent.
+     * the actor's own recent decision: no older than this. Anything older is escalated to an
+     * operator, who re-issues the command through the API (authorised afresh) or closes the intent.
      */
     private val maxResumeAge: Duration = Duration.ofHours(DEFAULT_MAX_RESUME_HOURS),
+    /**
+     * `openbank.treasury.posting-intent.grace`: an intent younger than this may still have its own
+     * request in flight to the ledger. It is neither resumed, nor closed by an operator, nor taken as
+     * proof of absence on a ledger refusal unless this very call created it.
+     */
+    private val grace: Duration = Duration.ofMinutes(DEFAULT_GRACE_MINUTES),
+    /** How many intents one reconciler pass claims. */
+    private val claimBatch: Int = DEFAULT_CLAIM_BATCH,
 ) : TreasuryDealUseCase {
+
+    private val log = System.getLogger(TreasuryDealService::class.java.name)
 
     private suspend fun policy(): ProductLimitPolicy = mandate?.invoke() ?: productLimits
 
@@ -579,8 +587,12 @@ class TreasuryDealService(
         // #13883 review: a deal with an open settle/mature/reverse intent is not accrued further. A
         // reversal resumed later re-posts its key and the ledger keeps the ORIGINAL journal, which
         // offsets only the accruals that existed when it was decided; a newer accrual would be left
-        // unreversed. The open intent holds the day; the next pass after it completes catches up.
-        if (intents.openFor(deal.id).isNotEmpty()) return AccrualProgress(0, true)
+        // unreversed. The deal is reported UNASSESSED (not complete), so the pass is not RAN for it;
+        // the open intent holds the day too, and the next pass after it completes catches up.
+        if (intents.openFor(deal.id).isNotEmpty()) {
+            log.log(System.Logger.Level.INFO, "deal {0}: accrual deferred, a posting intent is open", deal.id)
+            return AccrualProgress(0, false)
+        }
         var day = (lastAccrued(deal) ?: deal.valueDate).plusDays(1)
         var posted = 0
         while (!day.isAfter(through)) {
@@ -704,19 +716,33 @@ class TreasuryDealService(
         return try {
             post(spec, intent.valueDate, description)
         } catch (e: Exception) {
-            if (intent.fresh && ledger.isDefinitiveRefusal(e)) intents.refuse(spec.idempotencyKey, describe(e))
+            if (ledger.isDefinitiveRefusal(e) && proofOfAbsence(intent)) {
+                intents.refuse(spec.idempotencyKey, describe(e))
+            }
             throw e
         }
     }
+
+    /**
+     * The ledger's coded refusal is raised AFTER its idempotency replay check found no journal under
+     * the key, so it proves absence at that moment. The only way a journal could still appear is an
+     * earlier attempt of the same key still being processed by the ledger. A fresh intent has no
+     * earlier attempt; an intent older than [grace] has none in flight either (a ledger request does
+     * not outlive the grace by orders of magnitude, and the reconciler holds the row's claim). Only a
+     * client retry of an intent younger than the grace stays OPEN.
+     */
+    private fun proofOfAbsence(intent: PostingIntent): Boolean =
+        intent.fresh || intent.createdAt.isBefore(clock.instant().minus(grace))
 
     override suspend fun reconcilePostingIntents(olderThan: Instant): IntentReconciliation {
         var completed = 0
         var escalated = 0
         val failures = mutableListOf<Throwable>()
-        for (intent in intents.claimOpen(olderThan, CLAIM_LEASE, CLAIM_BATCH)) {
+        for (intent in intents.claimOpen(olderThan, CLAIM_LEASE, claimBatch)) {
             if (!resumable(intent)) {
                 escalated++
-                intents.failed(intent.idempotencyKey, ESCALATED)
+                // Marked escalated: no later claim takes it, so it cannot starve resumable intents.
+                intents.escalate(intent.idempotencyKey, ESCALATED)
                 continue
             }
             runCatching { resume(intent) }
@@ -730,13 +756,15 @@ class TreasuryDealService(
         return IntentReconciliation(completed, failures, escalated)
     }
 
-    /** Same Prague business day as the decision, and within [maxResumeAge] of it. */
-    private fun resumable(intent: PostingIntent): Boolean {
-        val now = clock.instant()
-        val bank = AccountingClock.bank(clock)
-        val createdDay = AccountingClock.bank(Clock.fixed(intent.createdAt, ZoneOffset.UTC)).today()
-        return createdDay == bank.today() && !intent.createdAt.plus(maxResumeAge).isBefore(now)
-    }
+    /**
+     * Within [maxResumeAge] of the decision. Age, not the calendar: the concern is the stored actor's
+     * authority lapsing, which is a matter of elapsed time, and a same-day rule would escalate an
+     * intent created at 23:59:50 that is reconciled at 00:00:30. The calendar is already handled by
+     * the intent itself: it pins the journal's value day, so a resume after midnight still posts the
+     * original day.
+     */
+    private fun resumable(intent: PostingIntent): Boolean =
+        !intent.createdAt.plus(maxResumeAge).isBefore(clock.instant())
 
     override suspend fun closePostingIntent(dealId: UUID, event: PostingEvent, reason: String, actor: Actor): Boolean {
         require(reason.isNotBlank()) { "a reason is required to close a posting intent" }
@@ -746,7 +774,16 @@ class TreasuryDealService(
             )
         }
         val intent = intents.openFor(dealId).firstOrNull { it.event == event } ?: return false
-        return intents.closeByOperator(intent.idempotencyKey, actor, reason)
+        // Segregation of duties (#14220 review): the person who decided the posting, and the approver
+        // who booked the deal, may not also release the posting's day-close hold.
+        if (actor.id == intent.actor.id || actor.id == load(dealId).approvedBy?.id) {
+            throw com.openbank.treasury.domain.model.FourEyesViolationException(
+                "the actor who decided this posting or approved the deal may not close its posting intent",
+            )
+        }
+        // Not while its own command or a reconciler may still be posting it: younger than the grace,
+        // or under a live claim, the close is refused (false) rather than raced.
+        return intents.closeByOperator(intent.idempotencyKey, actor, reason, clock.instant().minus(grace))
     }
 
     /**
@@ -808,7 +845,8 @@ class TreasuryDealService(
         const val MAX_KEY_LENGTH = 128
         const val MAX_ERROR_LENGTH = 1000
         const val DEFAULT_MAX_RESUME_HOURS = 4L
-        const val CLAIM_BATCH = 100
+        const val DEFAULT_CLAIM_BATCH = 100
+        const val DEFAULT_GRACE_MINUTES = 2L
         val CLAIM_LEASE: Duration = Duration.ofMinutes(10)
         const val ESCALATED = "escalated: too old to resume as the stored actor; " +
             "re-issue the command through the API or close the intent"

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "f6225c3d3ac8f9d7"
+    openbank.tech/policy-checksum: "a3432e8f64e6daa9"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1365,6 +1365,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

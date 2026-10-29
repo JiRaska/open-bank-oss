@@ -148,8 +148,12 @@ interface LedgerPostingPort {
 /** The lifecycle command a posting intent belongs to (#13883). */
 enum class PostingIntentAction { SETTLE, MATURE, REVERSE }
 
-/** OPEN = decided and not applied; COMPLETED = applied with its state change; REFUSED = closed with no journal. */
-enum class PostingIntentStatus { OPEN, COMPLETED, REFUSED }
+/**
+ * OPEN = decided and not applied; COMPLETED = applied with its state change; REFUSED = the ledger's
+ * coded refusal of a first attempt (no journal exists); CLOSED_BY_OPERATOR = a person released the
+ * hold. A journal MAY exist under a CLOSED_BY_OPERATOR key, so a re-issue keeps its first value day.
+ */
+enum class PostingIntentStatus { OPEN, COMPLETED, REFUSED, CLOSED_BY_OPERATOR }
 
 /**
  * A ledger post treasury decided to make (#13883), written BEFORE the ledger is contacted and keyed
@@ -187,19 +191,26 @@ interface PostingIntentPort {
     /**
      * Records [intent] if its key has none yet, or reopens one closed REFUSED as a new attempt by
      * this caller (its value day included: a refused post left no journal); returns the stored intent
-     * with [PostingIntent.fresh] set. An OPEN or COMPLETED intent is returned as stored and NOT fresh:
-     * its value day is the first attempt's, so a retry on a later day asks for the same journal.
+     * with [PostingIntent.fresh] set. A CLOSED_BY_OPERATOR intent is reopened NOT fresh with its first
+     * value day (a journal may exist). An OPEN or COMPLETED intent is returned as stored, not fresh.
+     * Every transition appends to the intent's history.
      */
     suspend fun open(intent: PostingIntent): PostingIntent
 
     /** The ledger's coded refusal of a fresh intent: closes it, and it no longer holds its day. */
     suspend fun refuse(key: String, reason: String)
 
-    /** A reconciliation attempt failed or was escalated: counted with its cause, claim released, still OPEN. */
+    /** A reconciliation attempt failed: counted with its cause, claim released, still OPEN. */
     suspend fun failed(key: String, error: String)
 
     /**
-     * Claims OPEN intents created before [cutoff] that no live claim holds, oldest first, at most
+     * Too old to resume as its stored actor: marked escalated (cause recorded, claim released), still
+     * OPEN and holding its day, and never claimed again, so it cannot starve resumable intents.
+     */
+    suspend fun escalate(key: String, reason: String)
+
+    /**
+     * Claims OPEN, non-escalated intents created before [cutoff] that no live claim holds, oldest first, at most
      * [limit], leasing them for [lease] (`FOR UPDATE SKIP LOCKED`): two reconcilers never take one row.
      */
     suspend fun claimOpen(cutoff: Instant, lease: Duration, limit: Int): List<PostingIntent>
@@ -210,10 +221,11 @@ interface PostingIntentPort {
     suspend fun summary(): OpenIntentSummary
 
     /**
-     * An operator closes an OPEN intent that cannot complete: REFUSED, with who and why recorded.
-     * False when no OPEN intent has [key].
+     * An operator closes an OPEN intent that cannot complete: CLOSED_BY_OPERATOR, with who and why
+     * recorded on the row and appended to its history. False when no OPEN intent has [key], or when
+     * it may still be in flight: created at or after [createdBefore], or under a live claim.
      */
-    suspend fun closeByOperator(key: String, actor: Actor, reason: String): Boolean
+    suspend fun closeByOperator(key: String, actor: Actor, reason: String, createdBefore: Instant): Boolean
 
     companion object {
         /** No intent store: the pre-#13883 behaviour. Unit tests of the lifecycle alone only. */
@@ -221,10 +233,12 @@ interface PostingIntentPort {
             override suspend fun open(intent: PostingIntent) = intent.copy(fresh = true)
             override suspend fun refuse(key: String, reason: String) = Unit
             override suspend fun failed(key: String, error: String) = Unit
+            override suspend fun escalate(key: String, reason: String) = Unit
             override suspend fun claimOpen(cutoff: Instant, lease: Duration, limit: Int) = emptyList<PostingIntent>()
             override suspend fun openFor(dealId: UUID) = emptyList<PostingIntent>()
             override suspend fun summary() = OpenIntentSummary(0, null)
-            override suspend fun closeByOperator(key: String, actor: Actor, reason: String) = false
+            override suspend fun closeByOperator(key: String, actor: Actor, reason: String, createdBefore: Instant) =
+                false
         }
     }
 }

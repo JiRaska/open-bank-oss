@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: billing-service
     app.kubernetes.io/part-of: billing
   annotations:
-    openbank.tech/policy-checksum: "914f3b5e9792b6f7"
+    openbank.tech/policy-checksum: "47d5a232878cac3e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1298,6 +1298,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

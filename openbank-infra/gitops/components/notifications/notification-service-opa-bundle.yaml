@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "5af037de24e6065c"
+    openbank.tech/policy-checksum: "8309e8046a0aa053"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2009,6 +2009,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

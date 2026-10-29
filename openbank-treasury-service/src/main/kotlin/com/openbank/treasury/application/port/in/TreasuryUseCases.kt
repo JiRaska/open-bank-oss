@@ -216,8 +216,9 @@ interface TreasuryDealUseCase {
 
     /**
      * #13883: an operator closes the OPEN posting intent of [dealId]'s [event] that cannot complete
-     * (REFUSED, who and why recorded), releasing its day's close hold. Only a person may; the caller
-     * asserts the ledger holds no journal under its key, or that the deal is corrected separately.
+     * (CLOSED_BY_OPERATOR, who and why recorded and appended to its history), releasing its day's
+     * close hold. Only a person may, and never the posting's own actor or the deal's approver (four
+     * eyes). A later re-issue of the command reopens it with its first value day.
      */
     suspend fun closePostingIntent(
         dealId: UUID,

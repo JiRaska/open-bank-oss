@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: settlement-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "ac138e3bc989a250"
+    openbank.tech/policy-checksum: "30c7f666fb37af9d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1314,6 +1314,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

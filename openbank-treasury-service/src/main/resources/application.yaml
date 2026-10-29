@@ -266,9 +266,11 @@ openbank:
       reconcile-enabled: ${OPENBANK_TREASURY_POSTING_INTENT_RECONCILE_ENABLED:true}
       reconcile-cron: "0 */5 * * * ?"
       grace: PT2M
-      # Older than this, or from an earlier business day, an intent is NOT resumed as its stored actor
+      # Older than this (age, not the calendar), an intent is NOT resumed as its stored actor
       # (whose authority may have lapsed): it stays OPEN, alerts, and an operator re-issues or closes it.
       max-resume-age: PT4H
+      # Intents one reconciler pass claims (escalated ones are never claimed again).
+      claim-batch: 100
     close:
       # ADR-0342 day-close participation (TreasuryCloseParticipationScheduler): every hour, in
       # Europe/Prague, re-offer the last lookback-days completed accounting days to the ledger as

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: mcp-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "4c89b062f07dedfa"
+    openbank.tech/policy-checksum: "d3068f6bcd943f28"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1231,6 +1231,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

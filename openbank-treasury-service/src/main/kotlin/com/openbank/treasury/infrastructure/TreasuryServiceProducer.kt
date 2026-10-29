@@ -89,6 +89,10 @@ class TreasuryServiceProducer {
         intents: com.openbank.treasury.application.port.out.PostingIntentPort,
         @ConfigProperty(name = "openbank.treasury.posting-intent.max-resume-age", defaultValue = "PT4H")
         maxResumeAge: java.time.Duration,
+        @ConfigProperty(name = "openbank.treasury.posting-intent.grace", defaultValue = "PT2M")
+        intentGrace: java.time.Duration,
+        @ConfigProperty(name = "openbank.treasury.posting-intent.claim-batch", defaultValue = "100")
+        claimBatch: Int,
     ): TreasuryDealUseCase = TreasuryDealService(
         deals,
         counterparties,
@@ -109,6 +113,8 @@ class TreasuryServiceProducer {
         // #13883: settle, mature and reverse record a posting intent before contacting the ledger.
         intents,
         maxResumeAge,
+        intentGrace,
+        claimBatch,
     )
 
     /** ADR-0344 D3/D4: reference validation and schedule generation through openbank-libs-finance. */

@@ -44,7 +44,15 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
                 if (inserted == 1) {
                     Uni.createFrom().item(true)
                 } else {
-                    write(s, REOPEN_SQL, intent).map { it == 1 }
+                    write(s, REOPEN_SQL, intent).flatMap { reopened ->
+                        if (reopened == 1) {
+                            Uni.createFrom().item(true)
+                        } else {
+                            // After an operator close a journal may exist: reopen, NOT fresh, first day kept.
+                            native(s, REOPEN_CLOSED_SQL, intent.idempotencyKey, utc(intent.createdAt), intent.actor.id)
+                                .map { false }
+                        }
+                    }
                 }
             }
             .flatMap { fresh ->
@@ -69,13 +77,7 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
         .executeUpdate()
 
     override suspend fun refuse(key: String, reason: String) {
-        update(
-            "UPDATE deal_posting_intent SET status = 'REFUSED', closed_at = ?1, last_error = ?2, " +
-                "claim_token = NULL, claimed_until = NULL WHERE idempotency_key = ?3 AND status = 'OPEN'",
-            utc(clock.instant()),
-            reason,
-            key,
-        )
+        update(REFUSE_SQL, utc(clock.instant()), reason, key)
     }
 
     override suspend fun failed(key: String, error: String) {
@@ -87,18 +89,24 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
         )
     }
 
-    override suspend fun closeByOperator(key: String, actor: Actor, reason: String): Boolean = update(
-        "UPDATE deal_posting_intent SET status = 'REFUSED', closed_at = ?1, closed_by = ?2, last_error = ?3, " +
-            "claim_token = NULL, claimed_until = NULL WHERE idempotency_key = ?4 AND status = 'OPEN'",
-        utc(clock.instant()),
-        actor.id,
-        "closed by operator: $reason",
-        key,
-    ) == 1
+    override suspend fun escalate(key: String, reason: String) {
+        update(
+            "UPDATE deal_posting_intent SET escalated_at = ?1, last_error = ?2, claim_token = NULL, " +
+                "claimed_until = NULL WHERE idempotency_key = ?3 AND status = 'OPEN'",
+            utc(clock.instant()),
+            reason,
+            key,
+        )
+    }
 
-    private suspend fun update(sql: String, vararg params: Any?): Int = sf.withTransaction { s ->
+    override suspend fun closeByOperator(key: String, actor: Actor, reason: String, createdBefore: Instant): Boolean =
+        update(CLOSE_SQL, utc(clock.instant()), actor.id, reason, key, utc(createdBefore)) == 1
+
+    private suspend fun update(sql: String, vararg params: Any?): Int =
+        sf.withTransaction { s -> native(s, sql, *params) }.awaitSuspending()
+
+    private fun native(s: Mutiny.Session, sql: String, vararg params: Any?): Uni<Int> =
         params.foldIndexed(s.createNativeQuery<Int>(sql)) { i, q, v -> q.setParameter(i + 1, v) }.executeUpdate()
-    }.awaitSuspending()
 
     /**
      * One statement: the inner SELECT locks the candidate rows `FOR UPDATE SKIP LOCKED` (a row another
@@ -176,22 +184,55 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
         const val P_COMMAND = 9
         const val P_CREATED = 10
 
+        // Every transition writes its history row in the SAME statement (a data-modifying CTE): the
+        // statement's count is the history rows written, which is the transitions that happened.
         const val INSERT_SQL =
-            "INSERT INTO deal_posting_intent (idempotency_key, deal_id, event, action, value_date, actor_id, " +
-                "actor_type, reason, command_key, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) " +
-                "ON CONFLICT (idempotency_key) DO NOTHING"
+            "WITH i AS (INSERT INTO deal_posting_intent (idempotency_key, deal_id, event, action, value_date, " +
+                "actor_id, actor_type, reason, command_key, created_at) " +
+                "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT (idempotency_key) DO NOTHING " +
+                "RETURNING idempotency_key, value_date) " +
+                "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, value_date) " +
+                "SELECT idempotency_key, ?10, 'OPENED', ?6, value_date FROM i"
 
-        // Only a REFUSED row is reopened, and it takes everything from the new attempt, its value day
-        // included. An OPEN row keeps its first attempt's value day: that attempt may have posted.
+        // Only a REFUSED row (no journal exists) is reopened as a new attempt, taking its value day.
+        // attempts, last_error and the operator-close columns are left as they are.
         const val REOPEN_SQL =
-            "UPDATE deal_posting_intent SET status = 'OPEN', closed_at = NULL, closed_by = NULL, " +
-                "last_error = NULL, attempts = 0, deal_id = ?2, event = ?3, action = ?4, value_date = ?5, " +
-                "actor_id = ?6, actor_type = ?7, reason = ?8, command_key = ?9, created_at = ?10 " +
-                "WHERE idempotency_key = ?1 AND status = 'REFUSED'"
+            "WITH u AS (UPDATE deal_posting_intent SET status = 'OPEN', closed_at = NULL, escalated_at = NULL, " +
+                "deal_id = ?2, " +
+                "event = ?3, action = ?4, value_date = ?5, actor_id = ?6, actor_type = ?7, reason = ?8, " +
+                "command_key = ?9, created_at = ?10 WHERE idempotency_key = ?1 AND status = 'REFUSED' " +
+                "RETURNING idempotency_key, value_date) " +
+                "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, value_date) " +
+                "SELECT idempotency_key, ?10, 'REOPENED', ?6, value_date FROM u"
+
+        // A re-issue after an operator close: OPEN again with its FIRST value day and everything else
+        // kept, closed_by/close_reason included (the history holds every close).
+        const val REOPEN_CLOSED_SQL =
+            "WITH u AS (UPDATE deal_posting_intent SET status = 'OPEN', closed_at = NULL " +
+                "WHERE idempotency_key = ?1 AND status = 'CLOSED_BY_OPERATOR' RETURNING idempotency_key, value_date) " +
+                "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, value_date) " +
+                "SELECT idempotency_key, ?2, 'REOPENED_AFTER_OPERATOR_CLOSE', ?3, value_date FROM u"
+
+        const val REFUSE_SQL =
+            "WITH u AS (UPDATE deal_posting_intent SET status = 'REFUSED', closed_at = ?1, last_error = ?2, " +
+                "claim_token = NULL, claimed_until = NULL WHERE idempotency_key = ?3 AND status = 'OPEN' " +
+                "RETURNING idempotency_key, value_date) " +
+                "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, reason, value_date) " +
+                "SELECT idempotency_key, ?1, 'REFUSED', ?2, value_date FROM u"
+
+        const val CLOSE_SQL =
+            "WITH u AS (UPDATE deal_posting_intent SET status = 'CLOSED_BY_OPERATOR', closed_at = ?1, " +
+                "closed_by = ?2, close_reason = ?3, claim_token = NULL, claimed_until = NULL " +
+                "WHERE idempotency_key = ?4 AND status = 'OPEN' AND created_at < ?5 " +
+                "AND (claimed_until IS NULL OR claimed_until < ?1) RETURNING idempotency_key, value_date) " +
+                "INSERT INTO deal_posting_intent_history " +
+                "(idempotency_key, at, transition, actor_id, reason, value_date) " +
+                "SELECT idempotency_key, ?1, 'CLOSED_BY_OPERATOR', ?2, ?3, value_date FROM u"
 
         const val CLAIM_SQL =
             "UPDATE deal_posting_intent SET claim_token = ?1, claimed_until = ?2 WHERE idempotency_key IN (" +
-                "SELECT idempotency_key FROM deal_posting_intent WHERE status = 'OPEN' AND created_at < ?3 " +
+                "SELECT idempotency_key FROM deal_posting_intent WHERE status = 'OPEN' AND escalated_at IS NULL " +
+                "AND created_at < ?3 " +
                 "AND (claimed_until IS NULL OR claimed_until < ?4) ORDER BY created_at LIMIT ?5 " +
                 "FOR UPDATE SKIP LOCKED)"
 

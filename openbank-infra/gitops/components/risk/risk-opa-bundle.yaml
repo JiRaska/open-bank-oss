@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: risk-engine
     app.kubernetes.io/part-of: risk
   annotations:
-    openbank.tech/policy-checksum: "46175a983333d378"
+    openbank.tech/policy-checksum: "f13269204fd92d8d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1313,6 +1313,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

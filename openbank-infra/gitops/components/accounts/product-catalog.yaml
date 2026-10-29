@@ -71,7 +71,7 @@ spec:
         instrumentation.opentelemetry.io/inject-java: "openbank"
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-product-catalog-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "6ac72466027331b8"
+        openbank.tech/policy-checksum: "cfc3d8db7044c774"
     spec:
       securityContext:
         runAsNonRoot: true

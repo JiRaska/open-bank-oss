@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: swift-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "2007d8b9b9753742"
+    openbank.tech/policy-checksum: "242352fd25948750"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1285,6 +1285,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*
