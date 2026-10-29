@@ -44,9 +44,9 @@ class DepositInterestTest {
     }
 
     @Test
-    fun `capitalisation and penalties round to the currency under the named policy`() {
-        assertThat(DepositInterest.capitalise(BigDecimal("12.345"), eur)).isEqualTo(BigDecimal("12.35"))
-        assertThat(DepositInterest.capitalise(BigDecimal("12.5"), jpy)).isEqualTo(BigDecimal("13"))
+    fun `capitalisation truncates and penalties round to the currency under the named policy`() {
+        assertThat(DepositInterest.capitalise(BigDecimal("12.345"), eur)).isEqualTo(BigDecimal("12.34"))
+        assertThat(DepositInterest.capitalise(BigDecimal("12.5"), jpy)).isEqualTo(BigDecimal("12"))
         assertThat(
             DepositInterest.penaltyByRate(BigDecimal("1000"), BigDecimal("0.0125"), eur, RoundingPolicy.LEDGER_POSTING),
         ).isEqualTo(BigDecimal("12.50"))
@@ -90,7 +90,7 @@ class DepositInterestTest {
             ),
         )
             .isEqualTo(DepositInterest.tieredDailyAccrual(BigDecimal("60000"), tiers, DayCount.ACT_365_FIXED, day))
-        assertThat(a.capitalise(BigDecimal("1.005"), eur, RoundingPolicy.LEDGER_POSTING)).isEqualTo(BigDecimal("1.01"))
+        assertThat(a.capitalise(BigDecimal("1.005"), eur, RoundingPolicy.LEDGER_POSTING)).isEqualTo(BigDecimal("1.00"))
         assertThat(
             a.penaltyByRate(BigDecimal("100"), BigDecimal("0.1"), eur, RoundingPolicy.LEDGER_POSTING),
         ).isEqualTo(BigDecimal("10.00"))
