@@ -88,6 +88,7 @@ class TreasuryServiceProducer {
         references: ReferenceRepository,
         cashFlows: CashFlowRepository,
         marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
+        meters: io.micrometer.core.instrument.MeterRegistry,
     ): TreasuryDealUseCase = TreasuryDealService(
         deals,
         counterparties,
@@ -106,6 +107,8 @@ class TreasuryServiceProducer {
         cashFlows,
         BookCategories(references, clock)::of,
         com.openbank.treasury.application.usecase.CreditTermsSource(references, marketData)::on,
+        // ADR-0342 (#13882): a journal first recorded for a day that has already ended.
+        { event -> meters.counter("openbank.treasury.close.late_journals", "event", event.name).increment() },
     )
 
     /** ADR-0344 D3/D4: reference validation and schedule generation through openbank-libs-finance. */

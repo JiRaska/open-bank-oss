@@ -25,6 +25,7 @@ import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.ExposureGuard
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
+import com.openbank.treasury.application.port.out.LateJournalMeter
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
@@ -59,6 +60,7 @@ import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
 import com.openbank.treasury.domain.reference.Ifrs9Category
 import java.math.BigDecimal
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -110,6 +112,8 @@ class TreasuryDealService(
      */
     private val creditTerms: suspend (asOf: LocalDate, collateralIsin: String?) -> CreditTerms =
         { _, _ -> CreditTerms.NONE },
+    /** ADR-0342: counts first-recorded journals valued on a day that has already ended. */
+    private val lateJournals: LateJournalMeter = LateJournalMeter.NONE,
 ) : TreasuryDealUseCase {
 
     private suspend fun policy(): ProductLimitPolicy = mandate?.invoke() ?: productLimits
@@ -537,29 +541,57 @@ class TreasuryDealService(
      * it is counted and returned for the scheduler to log. Idempotent: a day already accrued is
      * skipped here, and the ledger deduplicates on the per-day key if two passes race.
      */
-    override suspend fun accrueInterest(asOf: LocalDate): AccrualRun {
-        val outcomes = deals.list(DealState.SETTLED).map { d ->
-            runCatching { accrueThrough(d, minOf(asOf, d.maturityDate)) }
+    override suspend fun accrueInterest(asOf: LocalDate): AccrualRun = accrueInterest(asOf, Instant.MAX)
+
+    override suspend fun accrueInterest(asOf: LocalDate, deadline: Instant): AccrualRun {
+        val settled = deals.list(DealState.SETTLED)
+        var journals = 0
+        var assessed = 0
+        var unassessed = 0
+        val failures = mutableListOf<Throwable>()
+        for (d in settled) {
+            if (clock.instant().isAfter(deadline)) {
+                unassessed++
+                continue
+            }
+            runCatching { accrueThrough(d, minOf(asOf, d.maturityDate), deadline) }
+                .onSuccess { progress ->
+                    journals += progress.posted
+                    // A deal whose day loop hit the deadline is left for the next pass, not assessed.
+                    if (progress.complete) assessed++ else unassessed++
+                }
+                .onFailure { failures += it }
         }
-        return AccrualRun(
-            journals = outcomes.sumOf { it.getOrDefault(0) },
-            failures = outcomes.mapNotNull { it.exceptionOrNull() },
-        )
+        return AccrualRun(journals = journals, failures = failures, deals = assessed, unassessed = unassessed)
     }
 
-    /** Post each day after the last accrued one, up to and including [through]. Returns journals posted. */
-    private suspend fun accrueThrough(deal: Deal, through: LocalDate): Int {
-        if (!deal.product.legacy) return matrixAccrueAndPay(deal, through)
+    /** Journals one deal's accrual posted, and whether it reached its target day before the deadline. */
+    private data class AccrualProgress(val posted: Int, val complete: Boolean)
+
+    /**
+     * Post each day after the last accrued one, up to and including [through], checking [deadline]
+     * before EVERY day: a deal with a long gap cannot run a pass past its budget, which is what makes
+     * `TreasuryCloseJobs.staleAfter` a true bound on a live pass (#13882 review). Each journal is
+     * valued on its accrual day; the posting adapter books it in the open day (ADR-0342). A posting
+     * matrix product (ADR-0344 D7) accrues and pays through [matrixAccrueAndPay] under the same deadline.
+     */
+    private suspend fun accrueThrough(
+        deal: Deal,
+        through: LocalDate,
+        deadline: Instant = Instant.MAX,
+    ): AccrualProgress {
+        if (!deal.product.legacy) return matrixAccrueAndPay(deal, through, deadline)
         var day = (lastAccrued(deal) ?: deal.valueDate).plusDays(1)
         var posted = 0
         while (!day.isAfter(through)) {
+            if (clock.instant().isAfter(deadline)) return AccrualProgress(posted, false)
             PostingRules.accrual(deal, day)?.let { spec ->
-                deals.recordJournal(post(spec, day, "treasury ${deal.product} accrual $day"))
+                post(spec, day, "treasury ${deal.product} accrual $day")
                 posted++
             }
             day = day.plusDays(1)
         }
-        return posted
+        return AccrualProgress(posted, true)
     }
 
     /** The last day with a recorded accrual; a day that adds nothing posts no journal and is not recorded. */
@@ -583,12 +615,19 @@ class TreasuryDealService(
         val trade = MatrixPostings.trade(deal)?.let { post(it, deal.valueDate, "treasury ${deal.product} commitment") }
         val settlement = MatrixPostings.settlement(deal, flows, category)
             ?.let { post(it, deal.valueDate, "treasury ${deal.product} settlement") }
-        if (trade != null && settlement != null) deals.recordJournal(trade)
         return settlement ?: trade ?: throw NoPostingRuleException("${deal.product} settles with nothing to post")
     }
 
-    /** Accrue every day through [through] and post the flows paid by then; returns journals posted. */
-    private suspend fun matrixAccrueAndPay(deal: Deal, through: LocalDate): Int {
+    /**
+     * Accrue every day through [through] and post the flows paid by then, in day order, checking
+     * [deadline] before each posting: the next pass recomputes the run from the journals recorded,
+     * so stopping between two postings leaves nothing half-done. [post] records each journal.
+     */
+    private suspend fun matrixAccrueAndPay(
+        deal: Deal,
+        through: LocalDate,
+        deadline: Instant = Instant.MAX,
+    ): AccrualProgress {
         val flows = ledgerOf(deal)
         val journals = deals.journals(deal.id)
         val run = MatrixPostings.run(
@@ -599,10 +638,13 @@ class TreasuryDealService(
             paidFlows(journals),
             through,
         )
-        run.forEach { (spec, day) ->
-            deals.recordJournal(post(spec, day, "treasury ${deal.product} ${spec.event.key} $day"))
+        var posted = 0
+        for ((spec, day) in run) {
+            if (clock.instant().isAfter(deadline)) return AccrualProgress(posted, false)
+            post(spec, day, "treasury ${deal.product} ${spec.event.key} $day")
+            posted++
         }
-        return run.size
+        return AccrualProgress(posted, true)
     }
 
     /**
@@ -659,16 +701,29 @@ class TreasuryDealService(
         return PinnedReversal.build(rule, reversed)
     }
 
-    private suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): LedgerJournalRef {
-        val posted = ledger.post(spec, entryDate, description)
-        return LedgerJournalRef(
+    /**
+     * Posts under the spec's idempotency key, then records the journal in its OWN transaction at once
+     * (#13882 review). Settle, mature and reverse commit their state change afterwards; if that commit
+     * fails, the journal the ledger accepted is still recorded (and counted by the day-close report),
+     * and a retry of the command replays the same key (the ledger answers with the original journal)
+     * and finds it recorded. The remaining window is a crash between the ledger's answer and this
+     * write; a retry under the same key closes it.
+     */
+    private suspend fun post(spec: JournalSpec, valueDate: LocalDate, description: String): LedgerJournalRef {
+        val posted = ledger.post(spec, valueDate, description)
+        val ref = LedgerJournalRef(
             spec.dealId,
             spec.event,
             spec.idempotencyKey,
             posted.journalId,
             clock.instant(),
             posted.accounts,
+            valueDate,
         )
+        // Late = recorded for the first time HERE (not a replay of a recorded key) for an ended day;
+        // a refused post threw above and never gets this far (#13882 final review).
+        if (deals.recordJournal(ref) && valueDate.isBefore(bankToday())) lateJournals.late(spec.event)
+        return ref
     }
 
     private suspend fun limitCheck(deal: Deal): LimitCheck {

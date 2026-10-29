@@ -7,7 +7,7 @@
 INSERT INTO reference_records (id, kind, record_key, version, status, valid_from, verified, payload,
                                created_by, created_by_type, created_at, reason)
 SELECT nextval('reference_records_seq'), s.kind, s.record_key, 1, 'ACTIVE', DATE '2000-01-01', FALSE,
-       s.payload, 'system:seed', 'SYSTEM', now(), 'seeded by V27 (ADR-0315 D4 credit measure)'
+       s.payload, 'system:seed', 'SYSTEM', now(), 'seeded by V28 (ADR-0315 D4 credit measure)'
 FROM (VALUES
     ('derivative-conversion-factor', 'IRS-1Y', '{"code":"IRS-1Y","name":"IRS credit conversion factor","product":"IRS","maxResidualYears":1,"factorPercent":0.5}'),
     ('derivative-conversion-factor', 'IRS-5Y', '{"code":"IRS-5Y","name":"IRS credit conversion factor","product":"IRS","maxResidualYears":5,"factorPercent":1.0}'),
@@ -25,4 +25,4 @@ FROM (VALUES
 ) AS s(kind, record_key, payload);
 --
 -- Rollback: DELETE FROM reference_records WHERE created_by = 'system:seed'
---   AND kind IN ('derivative-conversion-factor', 'collateral-haircut') AND reason LIKE 'seeded by V27%';
+--   AND kind IN ('derivative-conversion-factor', 'collateral-haircut') AND reason LIKE 'seeded by V28%';

@@ -200,6 +200,22 @@ pre-contractual documents are not yet attached to offers (docs/compliance/pensio
 legal review pending). Withholding tax already remitted on a premium returned to the contract is
 not reversed automatically.
 
+The reference adapter closes non-success response bodies without collecting or draining them;
+HTTP status rejection retains the existing exception contract. Coroutine cancellation, including
+the quote deadline, requests cancellation of the original JDK HTTP exchange and propagates the
+cancellation to the caller. It does not retry a purchase or cancellation command. Request-local
+status handling does not convert a successful-status transport failure into a status rejection.
+`ReferenceAnnuityResponseLifecycleTest` verifies these properties against synthetic loopback
+peers, including held bodies, exchange closure and concurrent responses; it is not deployment
+proof. Existing protocol tests retain request and idempotency contracts.
+
+Successful response parsing remains compatible with the published partner protocol. This change
+does not establish a maximum successful-response size, number of offers or aggregate fan-out
+memory budget. Those bounds require an explicit partner-protocol envelope; the inbound request
+limit is not a partner-response limit. Rollback restores the previous response lifecycle while
+leaving registry authorization, credential sourcing, timeouts and financial state transitions
+unchanged.
+
 ## 4e. Reporting read model (#12425)
 
 `GET /api/v2/pension/reporting/participant-aggregates` serves the participant aggregates

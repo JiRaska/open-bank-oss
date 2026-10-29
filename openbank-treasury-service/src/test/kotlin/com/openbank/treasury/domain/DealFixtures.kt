@@ -105,7 +105,7 @@ object DealFixtures {
         fxSide = side,
     )
 
-    /** The V27 seed factors and haircut: what a deployment measures with until a person replaces them. */
+    /** The V28 seed factors and haircut: what a deployment measures with until a person replaces them. */
     val seededCreditTerms = CreditTerms(
         factors = listOf(ProductType.IRS, ProductType.FRA).flatMap { p ->
             listOf(

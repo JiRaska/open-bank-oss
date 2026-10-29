@@ -66,6 +66,27 @@ class LedgerPostingAdapterTest {
         line("NOSTRO_ACCOUNT", LedgerRole.PRINCIPAL, Side.CREDIT),
     )
 
+    // #13882 review item 2: a back-valued post is booked in the OPEN day and counted late.
+    @Test
+    fun `a post valued on an ended day is booked in today's open day with its value date`() {
+        val client = mockk<LedgerRestClient>()
+        var sent: PostJournalRequest? = null
+        every { client.postJournal(any()) } answers {
+            sent = firstArg()
+            Uni.createFrom().item(JournalResponse(UUID.randomUUID(), dealId, "POSTED", emptyList()))
+        }
+        // 2026-03-17 23:30 UTC is already 2026-03-18 in Prague.
+        val clock = java.time.Clock.fixed(java.time.Instant.parse("2026-03-17T23:30:00Z"), java.time.ZoneOffset.UTC)
+        val adapter = LedgerPostingAdapter(client, false, clock)
+        runBlocking { adapter.post(placement, LocalDate.parse("2026-03-16"), "t") }
+        assertThat(sent!!.entryDate).isEqualTo("2026-03-18")
+        assertThat(sent!!.valueDate).isEqualTo("2026-03-16")
+
+        runBlocking { adapter.post(placement, LocalDate.parse("2026-03-18"), "t") }
+        assertThat(sent!!.entryDate).isEqualTo("2026-03-18")
+        assertThat(sent!!.valueDate).isEqualTo("2026-03-18")
+    }
+
     @Test
     fun `flag off sends exactly the explicit-account payload an old ledger understands`() {
         val (request, _) = capture(false, placement, listOf(UUID.randomUUID(), UUID.randomUUID()))
