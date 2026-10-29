@@ -14,7 +14,7 @@ CREATE TABLE deal_posting_intent (
     idempotency_key VARCHAR(128)  PRIMARY KEY,
     deal_id         UUID          NOT NULL,
     event           VARCHAR(32)   NOT NULL,
-    action          VARCHAR(16)   NOT NULL CHECK (action IN ('SETTLE', 'MATURE', 'REVERSE')),
+    action          VARCHAR(16)   NOT NULL CHECK (action IN ('SETTLE', 'MATURE', 'REVERSE', 'ACCRUE')),
     value_date      DATE          NOT NULL,
     actor_id        VARCHAR(255)  NOT NULL,
     actor_type      VARCHAR(16)   NOT NULL,
@@ -42,6 +42,14 @@ CREATE TABLE deal_posting_intent (
 CREATE INDEX idx_deal_posting_intent_open ON deal_posting_intent (value_date) WHERE status = 'OPEN';
 CREATE INDEX idx_deal_posting_intent_claimable ON deal_posting_intent (created_at)
     WHERE status = 'OPEN' AND escalated_at IS NULL;
+
+-- One OPEN reversal, maturity or accrual-day posting per deal, enforced by the database: an accrual
+-- day records an ACCRUE intent before its ledger call, exactly as a reversal or maturity does, so
+-- whichever opens second is refused (the reversal answers 409, the accrual defers). That is what
+-- makes "a reversal offsets every accrual posted before it" hold under concurrency without holding
+-- a lock across the ledger call: an accrual can no longer be in flight while a reversal is decided.
+CREATE UNIQUE INDEX uq_deal_posting_intent_one_open_per_deal ON deal_posting_intent (deal_id)
+    WHERE status = 'OPEN' AND action IN ('REVERSE', 'MATURE', 'ACCRUE');
 
 -- Append-only history of every intent transition (opened, reopened, refused, closed by an operator,
 -- completed): who, when, why. Rows are written in the same statement as the transition they record

@@ -19,6 +19,7 @@ import com.openbank.treasury.application.port.`in`.SimulatedMarketRun
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
+import com.openbank.treasury.application.port.out.DealChangedException
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.DealRepository
@@ -79,7 +80,9 @@ import java.util.UUID
  */
 // LongParameterList: a plain application class wired by one CDI producer; every parameter is a
 // collaborator or a deployment decision, and bundling them would only hide which is which.
-@Suppress("TooManyFunctions", "LongParameterList")
+// LargeClass (#13883): the posting-intent guards live beside the lifecycle commands they guard, so
+// each command and its intent check read together; splitting them out is tracked as a refactor.
+@Suppress("TooManyFunctions", "LongParameterList", "LargeClass")
 class TreasuryDealService(
     private val deals: DealRepository,
     private val counterparties: CounterpartyRepository,
@@ -370,9 +373,21 @@ class TreasuryDealService(
         key?.let { k -> replay(k, MATURE, dealId)?.let { return it } }
         val deal = load(dealId)
         val matured = deal.mature(actor, bankToday(), clock.instant())
+        val ownKey = lifecycleKey(dealId, PostingEvent.MATURED)
+        val resumed = requireNoOtherUnresolved(dealId, ownKey)
         // ADR-0315 D5: catch the accrual up to maturity first, so the maturity journal clears the
-        // accrued account instead of booking the whole interest to income in one amount.
-        accrueThrough(deal, deal.maturityDate)
+        // accrued account instead of booking the whole interest to income in one amount. A resumed
+        // maturity caught up before its intent was opened (and nothing accrued since: the intent
+        // defers it). Otherwise a catch-up that could not finish fails the maturity instead of
+        // posting one that does not clear every accrual.
+        if (!resumed) {
+            val caughtUp = accrueThrough(deal, deal.maturityDate)
+            if (!caughtUp.complete || caughtUp.deferred) {
+                throw DealChangedException(
+                    "deal $dealId: the accrual could not be caught up to maturity (a posting is in flight); retry",
+                )
+            }
+        }
         check(matured.product.legacy) { NOT_DELIVERED.format(matured.product) }
         val ref = postIntended(
             PostingRules.maturity(matured, accruedSoFar(deal)),
@@ -403,6 +418,7 @@ class TreasuryDealService(
         key?.let { k -> replay(k, REVERSE, dealId)?.let { return it } }
         val deal = load(dealId)
         val reversed = deal.reverse(actor, reason, clock.instant())
+        requireNoOtherUnresolved(dealId, lifecycleKey(dealId, PostingEvent.REVERSED))
         check(deal.product.legacy || deal.state != DealState.SETTLED) {
             "a settled ${deal.product} deal is changed by a correction (ADR-0344 D7), not reversed"
         }
@@ -621,14 +637,65 @@ class TreasuryDealService(
                 )
                 return AccrualProgress(posted, complete = true, deferred = true)
             }
-            PostingRules.accrual(deal, day)?.let { spec ->
-                post(spec, day, "treasury ${deal.product} accrual $day")
-                posted++
+            val spec = PostingRules.accrual(deal, day)
+            if (spec != null) {
+                // The accrual day takes the same intent mechanism as a reversal or maturity BEFORE its
+                // ledger call. The database admits one OPEN reversal/maturity/accrual intent per deal,
+                // so an accrual can never be in flight while a reversal is decided, nor the other way
+                // round: whichever opens second is refused (the reversal 409s, the accrual defers).
+                val intent = intents.open(accrualIntent(spec, day))
+                    ?: return AccrualProgress(posted, complete = true, deferred = true)
+                if (intent.status != PostingIntentStatus.COMPLETED) {
+                    postGuarded(spec, intent, "treasury ${deal.product} accrual $day")
+                    posted++
+                }
             }
             day = day.plusDays(1)
         }
         return AccrualProgress(posted, true)
     }
+
+    private fun accrualIntent(spec: JournalSpec, day: LocalDate) = PostingIntent(
+        idempotencyKey = spec.idempotencyKey,
+        dealId = spec.dealId,
+        event = spec.event,
+        action = PostingIntentAction.ACCRUE,
+        valueDate = day,
+        actor = ACCRUAL_ACTOR,
+        createdAt = clock.instant(),
+    )
+
+    /** Posts under an open intent; a coded ledger refusal that proves absence closes it REFUSED. */
+    @Suppress("TooGenericExceptionCaught") // classified, recorded and rethrown unchanged
+    private suspend fun postGuarded(spec: JournalSpec, intent: PostingIntent, description: String): LedgerJournalRef =
+        try {
+            post(spec, intent.valueDate, description)
+        } catch (e: Exception) {
+            if (ledger.isDefinitiveRefusal(e) && proofOfAbsence(intent)) {
+                intents.refuse(spec.idempotencyKey, describe(e))
+            }
+            throw e
+        }
+
+    /**
+     * #14222 / #14220 review: a lifecycle command must not post while the deal has another posting
+     * that may hold an unapplied journal (OPEN, or closed by an operator): a failed reversal followed
+     * by a maturity would otherwise put both into the ledger. True when the deal's only unresolved
+     * intent is this command's own key (a re-issue or a resume).
+     */
+    private suspend fun requireNoOtherUnresolved(dealId: UUID, ownKey: String): Boolean {
+        val unresolved = intents.unresolvedFor(dealId)
+        val others = unresolved.filter { it.idempotencyKey != ownKey }
+        if (others.isNotEmpty()) {
+            throw DealChangedException(
+                "deal $dealId has an unresolved posting (${others.joinToString { "${it.action} ${it.status}" }}); " +
+                    "re-issue or close it first",
+            )
+        }
+        return unresolved.isNotEmpty()
+    }
+
+    private fun lifecycleKey(dealId: UUID, event: PostingEvent) = "treasury:$dealId:${event.key}"
 
     /** The last day with a recorded accrual; a day that adds nothing posts no journal and is not recorded. */
     private suspend fun lastAccrued(deal: Deal): LocalDate? = deals.journals(deal.id)
@@ -710,9 +777,9 @@ class TreasuryDealService(
      * explicit ledger business refusal of a FRESH intent (no earlier attempt can have reached the
      * ledger) closes it REFUSED; any other failure, and every failure of a resumed intent (the
      * reconciler, a client retry), leaves it open, because the ledger may hold the journal.
-     * [DealRepository.save] completes it.
+     * [DealRepository.save] completes it. Another OPEN reversal/maturity/accrual intent on the deal
+     * (the database admits one) refuses the command with 409 before anything is posted.
      */
-    @Suppress("TooGenericExceptionCaught") // classified, recorded and rethrown unchanged
     private suspend fun postIntended(
         spec: JournalSpec,
         valueDate: LocalDate,
@@ -733,20 +800,16 @@ class TreasuryDealService(
                 createdAt = clock.instant(),
             ),
         )
+            ?: throw DealChangedException(
+                "deal ${spec.dealId}: another reversal, maturity or accrual posting is in flight; retry",
+            )
         if (intent.status == PostingIntentStatus.COMPLETED) {
             // Applied already: answer with the recorded journal, never contact the ledger again.
             return deals.journals(spec.dealId).firstOrNull { it.idempotencyKey == spec.idempotencyKey }
                 ?: error("posting intent ${spec.idempotencyKey} is COMPLETED but its journal is not recorded")
         }
         beforePost(intent)
-        return try {
-            post(spec, intent.valueDate, description)
-        } catch (e: Exception) {
-            if (ledger.isDefinitiveRefusal(e) && proofOfAbsence(intent)) {
-                intents.refuse(spec.idempotencyKey, describe(e))
-            }
-            throw e
-        }
+        return postGuarded(spec, intent, description)
     }
 
     /**
@@ -835,6 +898,17 @@ class TreasuryDealService(
                 intent.actor,
                 intent.commandKey,
             )
+        PostingIntentAction.ACCRUE -> {
+            // Re-post the day under its key; recording the journal completes the intent.
+            val deal = load(intent.dealId)
+            val spec = PostingRules.accrual(deal, intent.valueDate)
+            if (spec == null) {
+                intents.refuse(intent.idempotencyKey, "the posting table yields no accrual for ${intent.valueDate}")
+            } else {
+                postGuarded(spec, intent, "treasury ${deal.product} accrual ${intent.valueDate}")
+            }
+            deal
+        }
     }
 
     private fun describe(e: Throwable): String =
@@ -894,6 +968,9 @@ class TreasuryDealService(
         const val MAX_ERROR_LENGTH = 1000
         const val DEFAULT_MAX_RESUME_HOURS = 4L
         const val DEFAULT_CLAIM_BATCH = 100
+
+        /** The actor an accrual day's posting intent is recorded under. */
+        val ACCRUAL_ACTOR = Actor("system:interest-accrual", com.openbank.treasury.domain.model.ActorType.SYSTEM)
         const val DEFAULT_GRACE_MINUTES = 2L
         val CLAIM_LEASE: Duration = Duration.ofMinutes(10)
         const val ESCALATED = "escalated: too old to resume as the stored actor; " +

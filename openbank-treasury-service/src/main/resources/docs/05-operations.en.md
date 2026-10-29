@@ -132,7 +132,12 @@ admits under `ledger.close.participate` for this participant only.
   accrual skips THAT deal only, re-checking before every day: every other deal accrues and the pass
   completes, while the day report counts the deferred deal as unaccrued (REFUSED, `deferred by an open
   or operator-closed posting intent`) until the command is re-issued. A reversal that finds a journal
-  recorded after it read the deal's journals does not post (409; re-issue it).
+  recorded after it read the deal's journals does not post (409; re-issue it). Each accrual day records
+  an ACCRUE intent before its ledger call (completed when its journal is recorded), and the database
+  admits one OPEN reversal, maturity or accrual intent per deal: a reversal decided while an accrual
+  day is in flight answers 409, and an accrual while a reversal is in flight defers. `mature` and
+  `reverse` also refuse (409) while the deal has another open or operator-closed posting intent, so a
+  failed reversal cannot be followed by a maturity.
   The ledger's coded `409 ACCOUNTING_DAY_CLOSED` closes an intent REFUSED (no journal exists) when the
   intent is fresh or older than the grace; every other failure leaves it OPEN. The pod refuses to
   boot unless the grace is at least four times one ledger call (connect + read timeout, no retry).

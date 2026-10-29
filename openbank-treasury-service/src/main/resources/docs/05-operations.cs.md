@@ -124,7 +124,11 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   ač obchod vypadá jako SETTLED), akruál přeskočí JEN tento obchod a ověřuje to před každým dnem:
   ostatní obchody se rozliší a průchod doběhne, ale denní report odložený obchod počítá jako
   nerozlišený (REFUSED) až do zopakování příkazu. Storno, které najde žurnál zapsaný až po přečtení
-  žurnálů obchodu, neúčtuje (409; zopakujte ho). Kódované `409 ACCOUNTING_DAY_CLOSED` ledgeru uzavře záměr jako
+  žurnálů obchodu, neúčtuje (409; zopakujte ho). Každý den akruálu zapíše před voláním ledgeru záměr
+  ACCRUE (dokončený se zápisem žurnálu) a databáze připustí na obchod jen jeden otevřený záměr storna,
+  splatnosti nebo akruálu: storno rozhodnuté během rozběhnutého dne akruálu vrátí 409 a akruál během
+  rozběhnutého storna se odloží. `mature` a `reverse` také odmítnou (409), dokud má obchod jiný otevřený
+  nebo operátorem uzavřený záměr, takže po neúspěšném stornu nemůže následovat splatnost. Kódované `409 ACCOUNTING_DAY_CLOSED` ledgeru uzavře záměr jako
   REFUSED (žurnál neexistuje), je-li záměr čerstvý nebo starší než grace; každé jiné selhání ho nechá
   otevřený. Pod odmítne nastartovat, pokud grace není aspoň čtyřnásobkem jednoho volání ledgeru
   (connect + read timeout, bez opakování).

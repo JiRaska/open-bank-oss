@@ -474,18 +474,38 @@ class DealRepositoryImpl(
             Panache.withSession { journals.find("idempotencyKey", journal.idempotencyKey).count() }.awaitSuspending() >
                 0
         }
-        if (recorded()) return false
+        // #13883: an accrual day's ACCRUE intent completes in the transaction that records its
+        // journal (an accrual has no state change; the record IS its application). A key already
+        // recorded completes it too, so a replay by the reconciler closes the intent it resumed.
+        val completeAccrual = suspend {
+            Panache.withTransaction { completeAccrueIntent(journal.idempotencyKey) }.awaitSuspending()
+        }
+        if (recorded()) {
+            completeAccrual()
+            return false
+        }
         try {
-            Panache.withTransaction { persistJournal(journal) }.awaitSuspending()
+            Panache.withTransaction {
+                persistJournal(journal).flatMap { completeAccrueIntent(journal.idempotencyKey) }
+            }.awaitSuspending()
         } catch (e: PersistenceException) {
             if (!recorded()) throw e
+            completeAccrual()
             return false
         } catch (e: PgException) {
             if (!recorded()) throw e
+            completeAccrual()
             return false
         }
         return true
     }
+
+    private fun completeAccrueIntent(key: String): Uni<Void> = Panache.getSession().flatMap { session ->
+        session.createNativeQuery<Int>(COMPLETE_ACCRUE_INTENT_SQL)
+            .setParameter(1, OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))
+            .setParameter(2, key)
+            .executeUpdate()
+    }.replaceWithVoid()
 
     override suspend fun journals(dealId: UUID): List<LedgerJournalRef> = Panache.withSession {
         journals.find("dealId = ?1 order by postedAt asc", dealId).list()
@@ -639,6 +659,13 @@ class DealRepositoryImpl(
         val POSTABLE_PRODUCT_NAMES = ProductType.entries.filter { it.legacy }.map { it.name }
 
         val LEGS_TYPE = object : TypeReference<List<LegSpec>>() {}
+
+        const val COMPLETE_ACCRUE_INTENT_SQL =
+            "WITH u AS (UPDATE deal_posting_intent SET status = 'COMPLETED', closed_at = ?1, last_error = NULL, " +
+                "claim_token = NULL, claimed_until = NULL WHERE idempotency_key = ?2 AND status = 'OPEN' " +
+                "AND action = 'ACCRUE' RETURNING idempotency_key, value_date, actor_id) " +
+                "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, value_date) " +
+                "SELECT idempotency_key, ?1, 'COMPLETED', actor_id, value_date FROM u"
 
         const val COMPLETE_INTENT_SQL =
             "WITH u AS (UPDATE deal_posting_intent SET status = 'COMPLETED', closed_at = ?1, last_error = NULL, " +

@@ -12,6 +12,7 @@ import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.OpenIntentSummary
 import com.openbank.treasury.application.port.out.PostedJournal
 import com.openbank.treasury.application.port.out.PostingIntent
+import com.openbank.treasury.application.port.out.PostingIntentAction
 import com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
 import com.openbank.treasury.application.port.out.PostingIntentPort
 import com.openbank.treasury.application.port.out.PostingIntentStatus
@@ -102,10 +103,17 @@ internal class InMemoryIntents : PostingIntentPort {
     /** Runs before every open (a test races a concurrent write in here). */
     var onOpen: suspend () -> Unit = {}
 
-    override suspend fun open(intent: PostingIntent): PostingIntent {
+    override suspend fun open(intent: PostingIntent): PostingIntent? {
         onOpen()
         val key = intent.idempotencyKey
         val existing = rows[key]
+        // As the real one-open-per-deal index: another OPEN reversal/maturity/accrual intent blocks.
+        val exclusive = setOf(PostingIntentAction.REVERSE, PostingIntentAction.MATURE, PostingIntentAction.ACCRUE)
+        val blocked = intent.action in exclusive &&
+            rows.values.any { (i, st) ->
+                i.dealId == intent.dealId && i.idempotencyKey != key && st == Status.OPEN && i.action in exclusive
+            }
+        if (blocked && (existing == null || existing.second != Status.OPEN)) return null
         // As the real store: a new or REFUSED key takes this attempt whole (fresh).
         if (existing == null || existing.second == Status.REFUSED) {
             rows[key] = intent.copy(fresh = false) to Status.OPEN
@@ -155,9 +163,18 @@ internal class InMemoryIntents : PostingIntentPort {
                 st == Status.OPEN ||
                     (
                         st == Status.CLOSED_BY_OPERATOR &&
-                            i.action != com.openbank.treasury.application.port.out.PostingIntentAction.SETTLE
+                            (i.action == PostingIntentAction.REVERSE || i.action == PostingIntentAction.MATURE)
                         )
                 )
+    }
+
+    override suspend fun unresolvedFor(dealId: UUID) = rows.values
+        .filter { (i, st) -> i.dealId == dealId && (st == Status.OPEN || st == Status.CLOSED_BY_OPERATOR) }
+        .map { (i, st) -> i.copy(status = PostingIntentStatus.valueOf(st.name)) }
+
+    fun completeAccrue(key: String) {
+        rows[key]?.takeIf { it.second == Status.OPEN && it.first.action == PostingIntentAction.ACCRUE }
+            ?.let { complete(key) }
     }
 
     override suspend fun summary() = rows.values.filter { it.second == Status.OPEN }
@@ -246,6 +263,7 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
         rows.values.filter { it.state == DealState.PENDING_APPROVAL && it.limitOverride != null }
     override suspend fun journals(dealId: UUID) = journals.filter { it.dealId == dealId }
     override suspend fun recordJournal(journal: LedgerJournalRef): Boolean {
+        intents?.completeAccrue(journal.idempotencyKey) // as the real record: completes an accrual day's intent
         if (journals.any { it.idempotencyKey == journal.idempotencyKey }) return false
         journals += journal
         return true

@@ -504,6 +504,68 @@ class TreasuryPostingIntentTest {
         }
 
     @Test
+    fun `a failed reversal blocks a maturity, open or closed by an operator`(): Unit = runBlocking {
+        val b = book()
+        service.settle(b.id, DealFixtures.approver)
+        ledger.loseAnswerFor = b.id // the ledger holds the reversal; treasury never applies it
+        assertThatThrownBy { runBlocking { service.reverse(b.id, "wrong rate", DealFixtures.approver) } }
+        later(Duration.ofDays(7))
+        val market = com.openbank.treasury.domain.model.Actor.SIMULATED_MARKET
+        assertThatThrownBy { runBlocking { service.mature(b.id, market) } }
+            .isInstanceOf(com.openbank.treasury.application.port.out.DealChangedException::class.java)
+        assertThat(
+            intents.closeByOperator(
+                settlementKeyOf(b, PostingEvent.REVERSED),
+                operator,
+                "investigating",
+                clock.instant(),
+            ),
+        )
+            .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+        assertThatThrownBy { runBlocking { service.mature(b.id, market) } }
+            .isInstanceOf(com.openbank.treasury.application.port.out.DealChangedException::class.java)
+        assertThat(ledger.posted.map { it.event }).doesNotContain(PostingEvent.MATURED)
+        assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.SETTLED)
+    }
+
+    @Test
+    fun `an accrual day in flight blocks a reversal, and a reversal in flight defers the accrual`(): Unit =
+        runBlocking {
+            val b = book()
+            service.settle(b.id, DealFixtures.approver)
+            later(Duration.ofDays(1))
+            // Order 1: the accrual day's answer is lost - its ACCRUE intent stays OPEN.
+            ledger.loseAnswerFor = b.id
+            val run = service.accrueInterest(monday.plusDays(1))
+            assertThat(run.failures).hasSize(1)
+            assertThatThrownBy { runBlocking { service.reverse(b.id, "wrong rate", DealFixtures.approver) } }
+                .isInstanceOf(com.openbank.treasury.application.port.out.DealChangedException::class.java)
+            assertThat(ledger.posted.map { it.event }).doesNotContain(PostingEvent.REVERSED)
+            // The reconciler completes the accrual day; now the reversal goes through and offsets it.
+            later(Duration.ofMinutes(5))
+            assertThat(service.reconcilePostingIntents(clock.instant()).completed).isEqualTo(1)
+            assertThat(service.reverse(b.id, "wrong rate", DealFixtures.approver).state).isEqualTo(DealState.REVERSED)
+            val reversal = ledger.posted.last { it.event == PostingEvent.REVERSED }
+            assertThat(deals.journals.filter { it.event == PostingEvent.ACCRUED }).hasSize(1)
+            assertThat(reversal.lines).isNotEmpty()
+        }
+
+    @Test
+    fun `a settlement whose answer was lost blocks reversing the deal`(): Unit = runBlocking {
+        val b = book()
+        ledger.loseAnswerFor = b.id // the ledger holds the settlement; the deal still reads BOOKED
+        assertThatThrownBy { runBlocking { service.settle(b.id, DealFixtures.approver) } }
+        // Reversing an unsettled deal posts nothing, so without the check it would leave the ledger's
+        // settlement unreversed behind a REVERSED deal.
+        assertThatThrownBy { runBlocking { service.reverse(b.id, "cancel it", DealFixtures.approver) } }
+            .isInstanceOf(com.openbank.treasury.application.port.out.DealChangedException::class.java)
+        assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.BOOKED)
+    }
+
+    private fun settlementKeyOf(deal: Deal, event: PostingEvent) =
+        intents.rows.values.map { it.first }.first { it.dealId == deal.id && it.event == event }.idempotencyKey
+
+    @Test
     fun `maturity records and completes its intent`(): Unit = runBlocking {
         val b = book()
         service.settle(b.id, DealFixtures.approver)
@@ -512,6 +574,9 @@ class TreasuryPostingIntentTest {
         assertThat(service.mature(b.id, DealFixtures.approver).state).isEqualTo(DealState.MATURED)
         val key = ledger.posted.single { it.event == PostingEvent.MATURED }.idempotencyKey
         assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.COMPLETED)
-        assertThat(intents.rows.values.map { it.first.action.name }).containsExactly("SETTLE", "MATURE")
+        val (accruals, lifecycle) = intents.rows.values.partition { it.first.action.name == "ACCRUE" }
+        assertThat(lifecycle.map { it.first.action.name }).containsExactly("SETTLE", "MATURE")
+        // Each accrual day took its own intent before its ledger call, completed when recorded.
+        assertThat(accruals).isNotEmpty().allMatch { it.second == InMemoryIntents.Status.COMPLETED }
     }
 }

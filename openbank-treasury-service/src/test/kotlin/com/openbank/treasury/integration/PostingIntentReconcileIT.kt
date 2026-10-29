@@ -146,6 +146,8 @@ class PostingIntentReconcileIT {
         closeId = draftAndSubmit("4323.00")
         lateId = draftAndSubmit("4324.00")
         closedReversalId = draftAndSubmit("4325.00")
+        accrualFirstId = draftAndSubmit("4326.00")
+        reversalFirstId = draftAndSubmit("4327.00")
     }
 
     @Test
@@ -355,6 +357,69 @@ class PostingIntentReconcileIT {
         assertThat(accruals).describedAs("no interest the ledger-side reversal would never offset").isZero()
     }
 
+    @Test
+    @Order(14)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `14 - an accrual day in flight refuses a reversal (409) until it completes`() {
+        val id = accrualFirstId
+        settleViaApi(id)
+        val day = today.plusDays(1)
+        val accrualKey = "treasury:$id:accrued:$day"
+        ledger.loseResponseFor = accrualKey // the ledger holds the accrual; treasury never records it
+        onContext { deals.accrueInterest(day) }
+        assertThat(intent(accrualKey)).isEqualTo("OPEN" to day)
+        val reversalKey = "treasury:$id:reversed"
+        reverseViaApi(id).then().statusCode(409)
+        assertThat(ledger.calls).describedAs("no reversal reached the ledger").doesNotContain(reversalKey)
+        assertThat(state(id)).isEqualTo("SETTLED")
+
+        reconcile(Instant.now().plusSeconds(1))
+        assertThat(intent(accrualKey).first).isEqualTo("COMPLETED")
+        reverseViaApi(id).then().statusCode(200).body("state", equalTo("REVERSED"))
+        assertThat(ledger.calls.filter { it == reversalKey }).describedAs("refused first, posted once after").hasSize(1)
+    }
+
+    @Test
+    @Order(15)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `15 - a reversal in flight defers the accrual, and the database refuses a second open posting`() {
+        val id = reversalFirstId
+        settleViaApi(id)
+        val reversalKey = "treasury:$id:reversed"
+        ledger.loseResponseFor = reversalKey
+        reverseViaApi(id).then().statusCode(500)
+        assertThat(intent(reversalKey).first).isEqualTo("OPEN")
+
+        val run = onContext { deals.accrueInterest(today.plusDays(1)) }
+        assertThat(run.deferred).isGreaterThanOrEqualTo(1)
+        assertThat(ledger.calls).doesNotContain("treasury:$id:accrued:${today.plusDays(1)}")
+        // The one-open-per-deal index itself, below the service.
+        assertThatThrownBy {
+            jdbc { c ->
+                c.prepareStatement(
+                    "insert into deal_posting_intent (idempotency_key, deal_id, event, action, value_date, actor_id, " +
+                        "actor_type, created_at) values (?, ?, 'ACCRUED', 'ACCRUE', ?, 'it', 'SYSTEM', now())",
+                ).use { ps ->
+                    ps.setString(1, "treasury:$id:accrued:it")
+                    ps.setObject(2, UUID.fromString(id))
+                    ps.setObject(3, today.plusDays(1))
+                    ps.executeUpdate()
+                }
+            }
+        }.hasMessageContaining("uq_deal_posting_intent_one_open_per_deal")
+    }
+
+    private fun settleViaApi(id: String) {
+        action(id, "approve").then().statusCode(200)
+        action(id, "confirm").then().statusCode(200)
+        action(id, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
+    }
+
+    private fun reverseViaApi(id: String) = given().contentType("application/json")
+        .header("Idempotency-Key", UUID.randomUUID().toString())
+        .body("""{"reason":"wrong rate"}""")
+        .`when`().post("/api/v1/treasury/deals/$id/reverse")
+
     private fun backdate(key: String) = jdbcUpdate(
         "update deal_posting_intent set created_at = now() - interval '10 minutes' where idempotency_key = ?",
         key,
@@ -477,5 +542,7 @@ class PostingIntentReconcileIT {
         lateinit var closeId: String
         lateinit var lateId: String
         lateinit var closedReversalId: String
+        lateinit var accrualFirstId: String
+        lateinit var reversalFirstId: String
     }
 }

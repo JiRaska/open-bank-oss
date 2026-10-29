@@ -146,7 +146,7 @@ interface LedgerPostingPort {
 }
 
 /** The lifecycle command a posting intent belongs to (#13883). */
-enum class PostingIntentAction { SETTLE, MATURE, REVERSE }
+enum class PostingIntentAction { SETTLE, MATURE, REVERSE, ACCRUE }
 
 /**
  * OPEN = decided and not applied; COMPLETED = applied with its state change; REFUSED = the ledger's
@@ -197,8 +197,11 @@ interface PostingIntentPort {
      * with [PostingIntent.fresh] set. A CLOSED_BY_OPERATOR intent is reopened NOT fresh with its first
      * value day (a journal may exist). An OPEN or COMPLETED intent is returned as stored, not fresh.
      * Every transition appends to the intent's history.
+     *
+     * Null when the deal already has another OPEN reversal, maturity or accrual-day intent: the
+     * database admits one at a time per deal, and the caller that comes second must not post.
      */
-    suspend fun open(intent: PostingIntent): PostingIntent
+    suspend fun open(intent: PostingIntent): PostingIntent?
 
     /** The ledger's coded refusal of a fresh intent: closes it, and it no longer holds its day. */
     suspend fun refuse(key: String, reason: String)
@@ -220,6 +223,9 @@ interface PostingIntentPort {
 
     /** OPEN intents of one deal. */
     suspend fun openFor(dealId: UUID): List<PostingIntent>
+
+    /** Intents of one deal that may hold an unapplied journal: OPEN or CLOSED_BY_OPERATOR. */
+    suspend fun unresolvedFor(dealId: UUID): List<PostingIntent>
 
     /**
      * True while the deal must not accrue (#14220 review): it has an OPEN intent, or a reversal or
@@ -246,12 +252,13 @@ interface PostingIntentPort {
     companion object {
         /** No intent store: the pre-#13883 behaviour. Unit tests of the lifecycle alone only. */
         val NONE = object : PostingIntentPort {
-            override suspend fun open(intent: PostingIntent) = intent.copy(fresh = true)
+            override suspend fun open(intent: PostingIntent): PostingIntent? = intent.copy(fresh = true)
             override suspend fun refuse(key: String, reason: String) = Unit
             override suspend fun failed(key: String, error: String) = Unit
             override suspend fun escalate(key: String, reason: String) = Unit
             override suspend fun claimOpen(cutoff: Instant, lease: Duration, limit: Int) = emptyList<PostingIntent>()
             override suspend fun openFor(dealId: UUID) = emptyList<PostingIntent>()
+            override suspend fun unresolvedFor(dealId: UUID) = emptyList<PostingIntent>()
             override suspend fun blocksAccrual(dealId: UUID) = false
             override suspend fun summary() = OpenIntentSummary(0, null)
             override suspend fun closeByOperator(key: String, actor: Actor, reason: String, createdBefore: Instant) =

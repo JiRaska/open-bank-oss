@@ -15,7 +15,9 @@ import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.PostingEvent
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.PersistenceException
 import org.hibernate.reactive.mutiny.Mutiny
 import java.time.Clock
 import java.time.Duration
@@ -39,37 +41,46 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
      * key and creation time: a refused post left no journal), else keep the OPEN/COMPLETED row as it
      * stands. Both writes are single atomic statements, so two racing callers cannot both be fresh.
      */
-    override suspend fun open(intent: PostingIntent): PostingIntent = sf.withTransaction { s ->
-        write(s, INSERT_SQL, intent)
-            .flatMap { inserted ->
-                if (inserted == 1) {
-                    Uni.createFrom().item(true)
-                } else {
-                    write(s, REOPEN_SQL, intent).flatMap { reopened ->
-                        if (reopened == 1) {
-                            Uni.createFrom().item(true)
-                        } else {
-                            // After an operator close a journal may exist: reopen, NOT fresh, first day kept.
-                            native(
-                                s,
-                                REOPEN_CLOSED_SQL,
-                                intent.idempotencyKey,
-                                utc(intent.createdAt),
-                                intent.actor.id,
-                                intent.actor.type.name,
-                            )
-                                .map { false }
+    override suspend fun open(intent: PostingIntent): PostingIntent? = try {
+        sf.withTransaction { s ->
+            write(s, INSERT_SQL, intent)
+                .flatMap { inserted ->
+                    if (inserted == 1) {
+                        Uni.createFrom().item(true)
+                    } else {
+                        write(s, REOPEN_SQL, intent).flatMap { reopened ->
+                            if (reopened == 1) {
+                                Uni.createFrom().item(true)
+                            } else {
+                                // After an operator close a journal may exist: reopen, NOT fresh, first day kept.
+                                native(
+                                    s,
+                                    REOPEN_CLOSED_SQL,
+                                    intent.idempotencyKey,
+                                    utc(intent.createdAt),
+                                    intent.actor.id,
+                                    intent.actor.type.name,
+                                ).map { false }
+                            }
                         }
                     }
                 }
-            }
-            .flatMap { fresh ->
-                s.createNativeQuery<Array<Any?>>("$SELECT_SQL WHERE idempotency_key = ?1")
-                    .setParameter(1, intent.idempotencyKey)
-                    .singleResult
-                    .map { it.toIntent().copy(fresh = fresh) }
-            }
-    }.awaitSuspending()
+                .flatMap { fresh ->
+                    s.createNativeQuery<Array<Any?>>("$SELECT_SQL WHERE idempotency_key = ?1")
+                        .setParameter(1, intent.idempotencyKey)
+                        .resultList
+                        .map { rows -> rows.firstOrNull()?.toIntent()?.copy(fresh = fresh) }
+                }
+        }.awaitSuspending()
+    } catch (e: PersistenceException) {
+        if (isOnePerDealViolation(e)) null else throw e
+    } catch (e: PgException) {
+        if (isOnePerDealViolation(e)) null else throw e
+    }
+
+    /** A reopen that collided with another open intent of the deal (the insert's DO NOTHING covers its own). */
+    private fun isOnePerDealViolation(e: Throwable): Boolean = generateSequence(e) { it.cause }.take(MAX_CAUSES)
+        .any { it.message?.contains(ONE_PER_DEAL_INDEX) == true }
 
     private fun write(s: Mutiny.Session, sql: String, intent: PostingIntent): Uni<Int> = s.createNativeQuery<Int>(sql)
         .setParameter(P_KEY, intent.idempotencyKey)
@@ -156,6 +167,12 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
             .resultList
     }.awaitSuspending().map { it.toIntent() }
 
+    override suspend fun unresolvedFor(dealId: UUID): List<PostingIntent> = sf.withSession { s ->
+        s.createNativeQuery<Array<Any?>>(
+            "$SELECT_SQL WHERE deal_id = ?1 AND status IN ('OPEN', 'CLOSED_BY_OPERATOR') ORDER BY created_at",
+        ).setParameter(1, dealId).resultList
+    }.awaitSuspending().map { it.toIntent() }
+
     override suspend fun blocksAccrual(dealId: UUID): Boolean = sf.withSession { s ->
         s.createNativeQuery<Any>(
             "SELECT 1 FROM deal_posting_intent WHERE deal_id = ?1 AND (status = 'OPEN' OR " +
@@ -215,10 +232,16 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
 
         // Every transition writes its history row in the SAME statement (a data-modifying CTE): the
         // statement's count is the history rows written, which is the transitions that happened.
+        const val ONE_PER_DEAL_INDEX = "uq_deal_posting_intent_one_open_per_deal"
+        const val MAX_CAUSES = 8
+
+        // ON CONFLICT with no target: a clash on the key (a retry) AND a clash on the one-open-per-deal
+        // index (another reversal, maturity or accrual day in flight) both insert nothing. The SELECT
+        // after it tells them apart: the key's own row, or no row at all (blocked).
         const val INSERT_SQL =
             "WITH i AS (INSERT INTO deal_posting_intent (idempotency_key, deal_id, event, action, value_date, " +
                 "actor_id, actor_type, reason, command_key, created_at) " +
-                "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT (idempotency_key) DO NOTHING " +
+                "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT DO NOTHING " +
                 "RETURNING idempotency_key, value_date) " +
                 "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, value_date) " +
                 "SELECT idempotency_key, ?10, 'OPENED', ?6, value_date FROM i"
