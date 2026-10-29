@@ -18,7 +18,7 @@
 
 ### Autorizace TPP (čl. 30, RTS čl. 34)
 
-Identita TPP pochází z eIDAS QWAC certifikátu (subject DN přes `SSL-CLIENT-S-DN`) nebo `X-TPP-ID`; role (`AISP` pro AIS/souhlasy, `PISP` pro platby) je ověřena proti `tpp-registry-service` před spuštěním jakékoli byznysové logiky. Žádná identita ⇒ `401 CERTIFICATE_MISSING`; neautorizováno ⇒ `401 CERTIFICATE_INVALID`; registr nedostupný ⇒ `503` (fail closed).
+Identita TPP pochází z eIDAS QWAC certifikátu (subject DN přes `SSL-CLIENT-S-DN`) nebo `X-TPP-ID`; role (`AISP` pro AIS/souhlasy, `PISP` pro platby) je ověřena proti `tpp-registry-service` před spuštěním jakékoli byznysové logiky. Žádná identita ⇒ `401 CERTIFICATE_MISSING`; neautorizováno ⇒ `401 CERTIFICATE_INVALID` (včetně HTTP 403 z registru s platným tělem `authorized:false` pro stejného TPP, což je byznysové zamítnutí, nikoli výpadek); registr nedostupný, vyprší časový limit, otevřený circuit breaker nebo jakákoli jiná odpověď (401, 404, chybně utvořené 403) ⇒ `503` (fail closed).
 
 ### Souhlas (čl. 64–67)
 
