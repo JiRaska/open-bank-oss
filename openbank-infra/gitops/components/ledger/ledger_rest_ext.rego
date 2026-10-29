@@ -223,6 +223,9 @@ close_participant_accounts := {
 	# billing holds NO ledger.create on its own identity: its journals ride the shared
 	# openbank-services principal. This is its only ledger grant (#13709 review).
 	"service-account-openbank-billing": "billing",
+	# treasury reports on the same identity it posts journals with (service-treasury-ledger-post);
+	# this entry adds only the report for its own participant (#13167).
+	"service-account-openbank-treasury": "treasury",
 }
 
 allowed_reasons contains "service-close-participation" if {
