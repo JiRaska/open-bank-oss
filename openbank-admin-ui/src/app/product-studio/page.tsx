@@ -28,6 +28,7 @@ import {
   type RevisionRequest, type Specification, type SpecificationRequest, type ValidateCatalogResponse,
   type RevisionApprovalResponse,
 } from '@/lib/product-catalog-v2'
+import { BehaviourDiffPanel } from '@/components/product-studio/BehaviourDiffPanel'
 import { ProductIrEditor } from '@/components/product-studio/ProductIrEditor'
 import styles from './page.module.css'
 
@@ -619,6 +620,7 @@ export default function ProductStudioPage() {
             <ProductIrEditor revision={selectedRevision} t={t} onSaved={async () => { if (offeringId) await loadRevisions(offeringId) }} />
             <div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision} onClick={() => void validateDraft()}><CheckCircle2 size={13} aria-hidden="true" />{t('Ověřit schéma', 'Validate schema')}</button><button className="btn btn-primary" type="button" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || busy} aria-busy={flight.isRunning('revision:save')} onClick={saveDraft}><Send size={13} aria-hidden="true" />{flight.isRunning('revision:save') ? t('Ukládám…', 'Saving…') : t('Uložit draft', 'Save draft')}</button></div>
           </Can>
+          <BehaviourDiffPanel revision={selectedRevision} t={t} />
           {approvalPolicy && selectedRevision && <div className={styles.approvalPanel} aria-label={t('Schválení revize rolemi', 'Revision role approvals')}>
             <div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Schválení rolemi', 'Role approval')}</span></div>
             <p>{t('Schválení se vztahují k uložené revizi a jejímu intervalu účinnosti. Po změně draftu je nutné nové schválení všech rolí.', 'Approvals bind to the saved revision and its effective interval. Editing the draft requires fresh approval by every role.')}</p>
