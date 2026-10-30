@@ -2092,3 +2092,25 @@ test_catalog_revision_approval_evidence_machine_reader_is_named if {
 		"attributes": {"azp": "openbank-pension", "preferred_username": "service-account-openbank-pension", "subject": "s"},
 	}
 }
+
+test_account_catalog_read_exact_identity_only if {
+	principal := {"id": "service-account-openbank-account", "type": "HUMAN", "service_account": true, "client_id": "openbank-account", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}
+	request := {"principal": principal, "action": "catalog.read"}
+	decision := rest.allow with input as request with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "account-catalog-m2m-read"
+	every action in {"catalog.publish", "catalog.publish-ir", "catalog.create", "catalog.update", "catalog.revisionApproval.read"} {
+		not rest.allow.allow with input as object.union(request, {"action": action}) with data.openbank.bundle as bundle
+	}
+	every candidate in {
+		object.union(principal, {"id": "service-account-openbank-services", "client_id": "openbank-services"}),
+		object.union(principal, {"client_id": "openbank-services"}),
+		object.remove(principal, ["client_id"]),
+		object.remove(principal, ["service_account"]),
+		object.union(principal, {"service_account": false}),
+		object.union(principal, {"roles": ["ROLE_API"]}),
+		object.union(principal, {"type": "AI_AGENT"}),
+	} {
+		not rest.allow.allow with input as {"principal": candidate, "action": "catalog.read"} with data.openbank.bundle as bundle
+	}
+}

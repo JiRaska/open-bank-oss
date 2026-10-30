@@ -35,3 +35,5 @@ fallback. Starší lokální kopie může získat identitní metadata jen jednou
 ID/hash/IR/podpis přesně odpovídají nezávisle ověřené odpovědi. V13 dál zakazuje změny obsahu,
 přepsání identity a smazání. Rollback nasadí starší aplikaci a zachová přidané sloupce i důkazy;
 V11 a V12 se nemění.
+
+Každý běh plánovače, i s vypnutým comparatorem, vymaže všech devět zmrazených údajů v omezené dávce způsobilých řádků starších než `openbank.billing.product-shadow.fact-retention` (`BILLING_PRODUCT_SHADOW_FACT_RETENTION`, výchozí `P30D`). Za běh zpracuje nejvýše `max-batches-per-run × batch-size` řádků. Zamčené řádky a řádky s živým claimem přeskočí; backlog, živé claimy, odstávka či selhání plánovače mohou fyzické vymazání oddálit za nastavené stáří i jeden interval plánovače. Řádek DONE si ponechá výsledek; způsobilý nedokončený řádek skončí jako `FACTS_EXPIRED`, aby se už bez údajů znovu nezamkl. Automatický re-drive neexistuje; samotné ponechání údajů dokončený řádek znovu nezařadí.

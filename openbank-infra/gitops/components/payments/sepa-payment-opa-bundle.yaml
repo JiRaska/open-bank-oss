@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "bf5b068d34b1028e"
+    openbank.tech/policy-checksum: "a456fc5325bd4b04"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -478,6 +478,16 @@ data:
     allowed_reasons contains "pension-catalog-m2m-read" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-pension"
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    	input.action == "catalog.read"
+    }
+
+    # Account opening reads a published revision with its verified account-owned identity only.
+    allowed_reasons contains "account-catalog-m2m-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.service_account == true
+    	machine_named("service-account-openbank-account")
+    	"ROLE_API" in input.principal.roles
     	"CATALOG_SCOPE_READ" in input.principal.roles
     	input.action == "catalog.read"
     }

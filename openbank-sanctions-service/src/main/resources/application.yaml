@@ -115,6 +115,15 @@ mp:
         topic: openbank.sanctions.screening.event
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Durable fan-out for high-risk screening hits (ADR-0031 D9). The trigger body carries only
+      # sourceService + occurredAt; ce-id/ce-type headers retain correlation to the outbox event.
+      oversight-events-out:
+        connector: smallrye-kafka
+        client:
+          id: sanctions-oversight-${quarkus.uuid}
+        topic: openbank.oversight-triggers
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"

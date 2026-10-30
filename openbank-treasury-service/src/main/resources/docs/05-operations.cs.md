@@ -153,3 +153,29 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   (`TreasuryPostingIntentJournalAfterClose`: znovu nahlaste ten den hodnoty) a nikdy se nepřepíše přes uzavření.
 - **Provoz.** V režimu `shadow` ledger pozdržení jen počítá. V režimu `enforce` operátor den REFUSED
   posoudí a na stránce konce dne v ledgeru mu udělí výjimku (waiver).
+
+## Odsouhlasení nostra podle data valuty (#13886)
+
+Výpis korespondenta je datován dnem, kdy pohyb zaúčtoval. Jeho zůstatky OPBD a CLBD jsou
+zaúčtované zůstatky: OPBD plus pohyby zaúčtované v období se rovná CLBD. Treasury tento den
+zapisuje jako **datum valuty** řádku ledgeru. Pozdní vypořádání zapíše do otevřeného dne ledgeru
+(datum zápisu), ale valutuje ho jeho ekonomickým dnem. Řádky se proto párují podle data valuty
+a stejně se porovnávají i oba zůstatky.
+
+- **Čtené okno.** Pro období výpisu `(openingDate, statementDate]` se čtou řádky ledgeru zapsané
+  ve třech rozsazích:
+  - 7 dní zápisu do `openingDate` včetně;
+  - samotné období;
+  - 7 dní zápisu po `statementDate`.
+
+  Řádky s valutou uvnitř období patří k období, ať byly zapsány kterýkoli den.
+- **Posun zůstatku.** Ledger vrací zůstatky podle data zápisu. Každý zůstatek (k `openingDate`
+  i k `statementDate`) se z už načtených řádků převede na zůstatek podle valuty. Přičtou se řádky
+  zapsané po dni zůstatku s valutou k tomuto dni nebo dříve. Odečtou se řádky zapsané k tomuto dni
+  nebo dříve s valutou později. Počítají se jen řádky v měně výpisu. Nic se neúčtuje a ledger se
+  nevolá navíc.
+- **Co se neposune.** Tyto řádky se dál ukážou jako rozdíl zůstatku, nikdy jako falešná shoda:
+  - řádek zapsaný o víc než 7 dní později než jeho valuta;
+  - řádek zapsaný víc než 7 dní před `openingDate` s valutou po něm;
+  - pohyb, který korespondent zaúčtoval jiný den, než je valuta zapsaná bankou. Takový řádek
+    zůstane i nespárovaný.
