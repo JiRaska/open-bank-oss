@@ -427,8 +427,9 @@ def legacy_gitops_hit(
 #   - OWNED: the document lives in a namespace S's workload runs in, and does not name a
 #     different identified service's workload as its subject; or it names S's workload exactly
 #     (metadata.name `<workload>` / `<workload>-…`, `app.kubernetes.io/name: <workload>`);
-#   - REFERENCED: the document names S's namespace (`namespace:`, `kubernetes.io/metadata.name:`,
-#     `<x>.<ns>.svc`), S's Service DNS / workload name as an exact identifier, or S's principal
+#   - REFERENCED: the changed lines grant S's namespace (`namespace:`,
+#     `kubernetes.io/metadata.name:`), or name S's Service DNS/workload or principal.
+#     A URL to `<other-service>.<ns>.svc` addresses that service, not every workload in `<ns>`.
 #     (`service-account-openbank-<s>`). Identifiers are matched exactly — `pension` never
 #     matches `pension-fund`, `ledger-pension-co`, or `service-account-openbank-pension-fund`.
 # A NetworkPolicy document that is owned by or references S counts on any change (reach by
@@ -569,8 +570,8 @@ def references(ident: dict, text: str) -> list[str]:
     hits: list[str] = []
     for ns in ident["namespaces"]:
         pat = re.compile(
-            rf"(?:namespace:\s*['\"]?|kubernetes\.io/metadata\.name:\s*['\"]?|\.){re.escape(ns)}"
-            rf"(?!{_IDENT})(?:['\"]|\.svc|\s|$)", re.MULTILINE)
+            rf"(?:namespace:\s*['\"]?|kubernetes\.io/metadata\.name:\s*['\"]?){re.escape(ns)}"
+            rf"(?!{_IDENT})(?:['\"]|\s|$)", re.MULTILINE)
         if pat.search(body):
             hits.append(f"namespace {ns}")
     for name in ident["names"]:
@@ -850,6 +851,10 @@ REF_SELF_TEST_CASES: list[tuple[str, str, str, bool]] = [
      _dep("tax-reporting-service", "tax-reporting", {"X": "a"}),
      _dep("tax-reporting-service", "tax-reporting", {"X": "a", "PENSION_SERVICE_URL": "https://pension-service.pension.svc:8443"}),
      True),
+    ("a URL to another service in pension namespace does not name pension-service",
+     _dep("tax-reporting-service", "tax-reporting", {"X": "a"}),
+     _dep("tax-reporting-service", "tax-reporting", {"X": "a", "FUND_URL": "https://pension-fund-service.pension.svc:8443"}),
+     False),
     ("a caller Deployment that adds the pension principal needs pension's TM",
      _dep("tax-reporting-service", "tax-reporting", {"X": "a"}),
      _dep("tax-reporting-service", "tax-reporting", {"X": "a", "ALLOWED": "service-account-openbank-pension"}),
@@ -878,6 +883,19 @@ def ref_flags(before: str, after: str) -> bool:
     return reference_hit(PENSION, OTHER_WORKLOADS, rel, changed_boundary_docs("BASE", "HEAD", rel)) is not None
 
 
+def shared_namespace_ref_flags(before: str, after: str, workload: str) -> bool:
+    """A targeted Service DNS edge in a shared namespace belongs only to its target."""
+    changed_boundary_docs.cache_clear()
+    rel = "openbank-infra/gitops/components/x/shared-namespace.yaml"
+    _PREFETCHED[("BASE", rel)] = before
+    _PREFETCHED[("HEAD", rel)] = after
+    read_at_ref.cache_clear()
+    ident = {"names": {workload}, "namespaces": {"payments"},
+             "components": {"payments"}, "principals": {f"service-account-openbank-{workload}"}}
+    return reference_hit(ident, {workload, "standing-order-service", "transaction-service"},
+                         rel, changed_boundary_docs("BASE", "HEAD", rel)) is not None
+
+
 def self_test() -> int:
     """Feed the classifier diffs it MUST flag and diffs it MUST NOT.
 
@@ -900,6 +918,19 @@ def self_test() -> int:
         print(f"  [{mark}] {name}: flagged={got} expected={expected}")
     for name, before, after, expected in REF_SELF_TEST_CASES:
         got = ref_flags(before, after)
+        mark = "ok" if got == expected else "FAIL"
+        if got != expected:
+            ok = False
+        print(f"  [{mark}] {name}: flagged={got} expected={expected}")
+    caller_before = _dep("pension-service", "pension", {"X": "a"})
+    caller_after = _dep("pension-service", "pension", {
+        "X": "a", "STANDING_ORDER_URL": "http://standing-order-service.payments.svc:8121",
+    })
+    for name, workload, expected in (
+        ("Service DNS flags its standing-order target", "standing-order-service", True),
+        ("Service DNS does not flag unrelated transaction in the same namespace", "transaction-service", False),
+    ):
+        got = shared_namespace_ref_flags(caller_before, caller_after, workload)
         mark = "ok" if got == expected else "FAIL"
         if got != expected:
             ok = False

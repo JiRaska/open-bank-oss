@@ -25,7 +25,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-interest-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "36ab68cfabebe8f3"
+        openbank.tech/policy-checksum: "e42cd03d5e3f4816"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -35,7 +35,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: interest-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-3a8493a7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-3b1311c5
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8125}
@@ -79,6 +79,12 @@ spec:
                   key: ca.password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
+            # ADR-0352 phase 3: the product-IR shadow verifies revision signatures with OpenBao Transit
+            # `verify`. Declared here so gen-network-policies.py derives the interest -> vault:8200 edge.
+            # Verification stays at the application default `disabled` (nothing compared, counted) until
+            # interest's verify-only role exists; then set INTEREST_PRODUCT_SHADOW_VERIFICATION_MODE=openbao.
+            - name: INTEREST_PRODUCT_SHADOW_VERIFICATION_OPENBAO_ADDRESS
+              value: https://openbao.vault.svc:8200
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -126,6 +132,14 @@ spec:
             # (GET /accounts/active) and reads their booked balance (GET /accounts/{id}/balance).
             - name: ACCOUNT_SERVICE_URL
               value: "http://account-service.accounts.svc:8100"
+            # ADR-0339 B: the withholding policy's tax-profile resolution
+            # (PartyTaxProfileProvider) reads the party record and the AML profile's residency
+            # countries over party-service's private-CA mTLS listener (8443, client auth REQUIRED;
+            # client cert interest-internal-tls, %prod TLS bucket party-authority), the shape
+            # account/delegation use. party enforces authn/authz at the app layer (named
+            # openbank-interest M2M identity, party.amlProfile.read via service-interest-party-m2m).
+            - name: PARTY_SERVICE_URL
+              value: "https://party-service.party.svc:8443"
             # CatalogInterestProfileSynchronizer, driven by CatalogInterestSnapshotScheduler,
             # reads product-catalog on every tick. Without this the app default (localhost:8104)
             # was dialled inside this pod and every sync failed (#10383). product-catalog's
@@ -159,6 +173,10 @@ spec:
             # private CA, but each bucket's paths name the upstream it authenticates to.
             - name: transaction-tls
               mountPath: /mnt/transaction-tls
+              readOnly: true
+            # ADR-0339 B: party-authority bucket's client cert + CA for the party-service mTLS leg.
+            - name: party-tls
+              mountPath: /mnt/party-tls
               readOnly: true
             - name: tmp
               mountPath: /tmp
@@ -232,8 +250,8 @@ spec:
             requests: {cpu: 25m, memory: 32Mi}
             limits: {cpu: 100m, memory: 64Mi}
       volumes:
-        # One client certificate, mounted twice: interest-internal-tls (#10397) identifies
-        # interest-service to BOTH upstream listeners, which trust the one private CA. Each %prod
+        # One client certificate, mounted per upstream: interest-internal-tls (#10397) identifies
+        # interest-service to EVERY upstream listener, which trust the one private CA. Each %prod
         # TLS bucket names its own path, so the mounts stay readable next to the config.
         - name: catalog-tls
           secret:
@@ -244,6 +262,12 @@ spec:
             secretName: interest-internal-tls
             optional: false
         - name: transaction-tls
+          secret:
+            secretName: interest-internal-tls
+            optional: false
+        # ADR-0339 B: the party-authority TLS bucket reads /mnt/party-tls. Same Secret, third
+        # mount — one client identity, one private CA.
+        - name: party-tls
           secret:
             secretName: interest-internal-tls
             optional: false

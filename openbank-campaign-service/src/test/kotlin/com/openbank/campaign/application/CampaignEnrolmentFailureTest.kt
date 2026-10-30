@@ -12,9 +12,11 @@ import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
+import com.openbank.campaign.application.port.out.SegmentPage
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.application.usecase.EnrolmentOutcome
+import com.openbank.campaign.application.usecase.RecipientAdmissionState
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
@@ -30,6 +32,7 @@ import com.openbank.campaign.infrastructure.observability.CampaignMetricsAdapter
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -93,18 +96,26 @@ class CampaignEnrolmentFailureTest {
     /** Records what was written, so the test can assert on absence as well as presence. */
     private class RecordingEnrolments : EnrolmentRepository {
         val saved = mutableListOf<Enrolment>()
+        var failNextSaveFor: UUID? = null
         override suspend fun findByCampaignAndParty(campaignId: UUID, partyId: UUID): Enrolment? =
             saved.firstOrNull { it.campaignId == campaignId && it.partyId == partyId }
         override suspend fun listByCampaign(campaignId: UUID): List<Enrolment> =
             saved.filter { it.campaignId == campaignId }
         override suspend fun listByParty(partyId: UUID): List<Enrolment> = saved.filter { it.partyId == partyId }
         override suspend fun countAllByCampaign() = emptyList<CampaignEnrolmentCount>()
-        override suspend fun save(enrolment: Enrolment): Enrolment = enrolment.also { saved += it }
+        override suspend fun save(enrolment: Enrolment): Enrolment {
+            if (failNextSaveFor == enrolment.partyId) {
+                failNextSaveFor = null
+                error("enrolment write failed after workflow start")
+            }
+            return enrolment.also { saved += it }
+        }
     }
 
     /** Fails for exactly [failFor], the way a missing Temporal namespace fails for every party. */
     private class FlakyJourneys(private val failFor: Set<UUID>) : JourneySignaller {
         val started = mutableListOf<UUID>()
+        val startCalls = mutableListOf<UUID>()
         override fun signalConsentRevoked(campaignId: UUID, partyId: UUID) = Unit
         override fun signalCampaignPaused(campaignId: UUID, partyId: UUID) = Unit
         override fun signalCampaignResumed(campaignId: UUID, partyId: UUID) = Unit
@@ -112,7 +123,8 @@ class CampaignEnrolmentFailureTest {
         override fun signalGoalReached(campaignId: UUID, partyId: UUID) = Unit
         override fun startJourney(campaignId: UUID, partyId: UUID, type: JourneyType) {
             check(partyId !in failFor) { "Namespace default is not found" }
-            started += partyId
+            startCalls += partyId
+            if (partyId !in started) started += partyId // Temporal no-op while this id is RUNNING.
         }
     }
 
@@ -122,7 +134,9 @@ class CampaignEnrolmentFailureTest {
         selectedCampaign: Campaign = campaign,
         audience: List<UUID> = parties,
         creditConsent: (UUID) -> Boolean = { true },
+        intentStore: InMemoryJourneyStartIntentStore = InMemoryJourneyStartIntentStore(),
     ) = CampaignService(
+        startIntents = intentStore,
         campaigns = object : CampaignRepository {
             override suspend fun findById(id: UUID): Campaign? = selectedCampaign.takeIf { it.id == id }
             override suspend fun list(): List<Campaign> = listOf(selectedCampaign)
@@ -136,7 +150,12 @@ class CampaignEnrolmentFailureTest {
             override suspend fun list(): List<Segment> = listOf(segment)
         },
         segmentEvaluation = object : SegmentEvaluationPort {
-            override suspend fun evaluate(segment: Segment): List<UUID> = audience
+            override suspend fun count(segment: Segment): Long = audience.size.toLong()
+            override suspend fun page(segment: Segment, after: UUID?, limit: Int): SegmentPage {
+                val start = if (after == null) 0 else audience.indexOf(after) + 1
+                val members = audience.drop(start).take(limit)
+                return SegmentPage(members, members.lastOrNull())
+            }
             override suspend fun matches(segment: Segment, partyId: UUID): Boolean = true
         },
         journeys = journeys,
@@ -162,6 +181,19 @@ class CampaignEnrolmentFailureTest {
     }
 
     @Test
+    fun `synchronous path refuses an oversized audience before starting any journey`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments()
+        val journeys = FlakyJourneys(emptySet())
+        val campaignService = service(enrolments, journeys)
+
+        assertThatThrownBy { runBlocking { campaignService.enrolWithinLimit(campaignId, 2) } }
+            .isInstanceOf(IllegalStateException::class.java)
+
+        assertThat(enrolments.saved).isEmpty()
+        assertThat(journeys.started).isEmpty()
+    }
+
+    @Test
     fun `a party whose journey start fails is left with no enrolment, so a later enrol retries it`(): Unit =
         runBlocking {
             val enrolments = RecordingEnrolments()
@@ -183,6 +215,55 @@ class CampaignEnrolmentFailureTest {
             assertThat(second.enrolled).isEqualTo(1)
             assertThat(second.failed).isZero()
         }
+
+    @Test
+    fun `a failed enrolment write after workflow start is recovered by replay`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments().apply { failNextSaveFor = parties[0] }
+        val journeys = FlakyJourneys(emptySet())
+        val intents = InMemoryJourneyStartIntentStore()
+        val campaignService = service(enrolments, journeys, intentStore = intents)
+
+        val first = campaignService.enrol(campaignId)
+        assertThat(first).isEqualTo(EnrolmentOutcome(enrolled = 2, failed = 1))
+        assertThat(enrolments.saved.map { it.partyId }).doesNotContain(parties[0])
+        assertThat(journeys.started).containsExactlyElementsOf(parties)
+        val originalIdentity = intents.pending.getValue(campaignId to parties[0]).enrolmentId
+
+        val replay = campaignService.enrol(campaignId)
+        assertThat(replay).isEqualTo(EnrolmentOutcome(enrolled = 1, failed = 0))
+        assertThat(journeys.startCalls.count { it == parties[0] }).isEqualTo(2)
+        assertThat(journeys.started).containsExactlyElementsOf(parties)
+        assertThat(enrolments.saved.map { it.partyId }).containsExactlyElementsOf(parties.drop(1) + parties[0])
+        assertThat(enrolments.saved.last().id).isEqualTo(originalIdentity)
+        assertThat(intents.pending).isEmpty()
+    }
+
+    @Test
+    fun `bulk cursor remains before a failed post-start write and retry admits the same party`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments().apply { failNextSaveFor = parties[0] }
+        val journeys = FlakyJourneys(emptySet())
+        val campaignService = service(enrolments, journeys)
+        val page = SegmentPage(parties, parties.last())
+        val decisions = mutableListOf<Pair<UUID, RecipientAdmissionState>>()
+
+        val first = campaignService.enrolParties(campaignId, null, page, 4) { partyId, state ->
+            decisions += partyId to state
+        }
+        assertThat(first.failed).isEqualTo(1)
+        assertThat(first.nextCursor).isNull()
+        assertThat(decisions.takeLast(2)).containsExactly(
+            parties[0] to RecipientAdmissionState.STARTING,
+            parties[0] to RecipientAdmissionState.FAILED,
+        )
+
+        val replay = campaignService.enrolParties(campaignId, first.nextCursor, page, 4) { partyId, state ->
+            decisions += partyId to state
+        }
+        assertThat(replay.enrolled).isEqualTo(3)
+        assertThat(replay.nextCursor).isEqualTo(parties.last())
+        assertThat(journeys.startCalls.count { it == parties[0] }).isEqualTo(2)
+        assertThat(journeys.started).containsExactlyElementsOf(parties)
+    }
 
     @Test
     fun `one failing party does not abort the parties after it`(): Unit = runBlocking {

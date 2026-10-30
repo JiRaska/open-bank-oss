@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.10.1...security-scanner-v0.10.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **security-scanner:** enable ICT incident outbox relay in deployed config ([#14199](https://github.com/JiRaska/open-bank-oss/issues/14199)) ([1b084fd](https://github.com/JiRaska/open-bank-oss/commit/1b084fd4dc6617641ebb8225f710058b9dc4d036))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.10.0...security-scanner-v0.10.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.9.1...security-scanner-v0.10.0) (2026-10-09)
 
 

@@ -98,9 +98,9 @@ describe('KYC case list contract', () => {
     vi.stubGlobal('fetch', f)
     render(<LanguageProvider><KycPage /></LanguageProvider>)
 
-    await waitFor(() => expect(screen.getByLabelText('Filter by Party ID')).toBeEnabled())
-    fireEvent.change(screen.getByLabelText('Filter by Party ID'), { target: { value: PARTY } })
-    fireEvent.click(screen.getByRole('button', { name: 'Search KYC cases' }))
+    const search = await screen.findByLabelText('Search parties')
+    fireEvent.change(search, { target: { value: PARTY } })
+    fireEvent.keyDown(search, { key: 'Enter' })
 
     await waitFor(() => expect(screen.getAllByText('No KYC case was found for this party.').length).toBeGreaterThan(0))
   })

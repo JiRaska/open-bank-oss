@@ -111,6 +111,14 @@ class ServiceAccountIdentityTest {
     }
 
     @Test
+    fun `a staff token without azp or username claims is not human staff`() {
+        // the two early returns between the JWT cast and the client-id check: a verified JWT that
+        // simply carries no azp (or no username) must fall out as false, not NPE on the claims
+        assertThat(ServiceAccountIdentity.isHumanStaff(jwt(null, "alice"))).isFalse()
+        assertThat(ServiceAccountIdentity.isHumanStaff(jwt("openbank-admin-ui", null))).isFalse()
+    }
+
+    @Test
     fun `MCP OBO requires positive interactive-human token evidence`() {
         assertThat(
             ServiceAccountIdentity.isInteractiveHumanToken(
@@ -137,6 +145,8 @@ class ServiceAccountIdentityTest {
                 claims("azp" to "openbank-admin-ui", "preferred_username" to "alice", "client_id" to "batch").principal,
             ),
         ).isFalse()
+        // a non-JWT principal carries no claims at all — the cast itself must fail closed
+        assertThat(ServiceAccountIdentity.isInteractiveHumanToken(QuarkusPrincipal("alice"))).isFalse()
     }
 
     @Test

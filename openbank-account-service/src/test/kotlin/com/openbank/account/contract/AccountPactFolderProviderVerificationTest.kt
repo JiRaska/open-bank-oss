@@ -116,6 +116,11 @@ class AccountPactFolderProviderVerificationTest {
         private val DELEGATION_GRANTOR_PARTY_ID = UUID.fromString("33333333-4444-4555-8666-777777777777")
         private val DELEGATE_PARTY_ID = UUID.fromString("44444444-5555-4666-8777-888888888888")
         private val DELEGATION_GRANT_ID = UUID.fromString("55555555-6666-4777-8888-999999999999")
+
+        // Must match ActiveAccountsPactConsumerTest's PACT_DETAIL_ACCOUNT_ID / PACT_PARTY_ID
+        // (openbank-interest-service, ADR-0339 B tax-profile resolution).
+        private val TAX_PROFILE_ACCOUNT_ID = UUID.fromString("60000000-0000-0000-0000-000000000060")
+        private val TAX_PROFILE_PARTY_ID = UUID.fromString("61000000-0000-0000-0000-000000000061")
     }
 
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
@@ -187,7 +192,34 @@ class AccountPactFolderProviderVerificationTest {
         if (context != null && context.interaction.description.endsWith("no caller identity")) {
             testIdentityAssociation.setTestIdentity(null)
         }
+        // ADR-0340 B1 (mirror of the party twin): the CRS/FATCA roster replay must present the
+        // verified service-account-openbank-tax-reporting identity — rego admits account.list
+        // for that principal only, so the class-level pact-verifier identity would answer 403.
+        if (context != null && context.interaction.description.contains("CRS FATCA")) {
+            testIdentityAssociation.setTestIdentity(taxReportingIdentity())
+        }
         context?.verifyInteraction()
+    }
+
+    /**
+     * The replay identity for the CRS/FATCA roster interaction: the verified service-account JWT
+     * the rego rule admits (#12448 — name bound to the service-account username, azp present).
+     */
+    private fun taxReportingIdentity(): io.quarkus.security.runtime.QuarkusSecurityIdentity {
+        val name = "service-account-openbank-tax-reporting"
+        val jwt = object : org.eclipse.microprofile.jwt.JsonWebToken {
+            private val claims = mapOf(
+                "azp" to "openbank-tax-reporting",
+                "preferred_username" to name,
+                "sub" to "tax-reporting-sa-subject",
+            )
+
+            override fun getName(): String = name
+            override fun getClaimNames(): Set<String> = claims.keys
+            override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+        }
+        return io.quarkus.security.runtime.QuarkusSecurityIdentity.builder().setPrincipal(jwt)
+            .addRole("ROLE_API").build()
     }
 
     /**
@@ -200,6 +232,12 @@ class AccountPactFolderProviderVerificationTest {
     @State("no account exists for the IBAN")
     fun noAccountForIban() {
         // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
+    }
+
+    @State("no account exists for the requested account")
+    fun noAccountForRequestedAccount() {
+        // Deliberately empty: AmlAccountOwnershipPactConsumerTest's 404 leg requests a UUID no
+        // state in this class ever seeds, so the provider's real not-found path answers.
     }
 
     @State("an account has been created")
@@ -345,5 +383,45 @@ class AccountPactFolderProviderVerificationTest {
     @State("no account exists for the unknown IBAN")
     fun noAccountForUnknownIban() {
         // Intentionally empty.
+    }
+
+    /**
+     * party-service's merge-guard empty-page leg (pact: "no account exists for the requested
+     * party"). Deliberately no seed: the pact addresses a party id this test never creates, and
+     * the handler must EXIST (with this exact name, matching PartyAccountListPactConsumerTest)
+     * because the class-level [PactFilter] drops stateless interactions from the git replay —
+     * an interaction that declares no providerState never runs here at all.
+     */
+    @State("no account exists for the requested party")
+    fun noAccountForRequestedParty() {
+        // No seed: the requested party id is one this provider test never creates.
+    }
+
+    /**
+     * Seeds the ACTIVE CZK SAVINGS account interest-service's ADR-0339 B tax-profile resolution
+     * reads to map an account to its owning party (pact: "an ACTIVE CZK account exists for
+     * tax-profile resolution"). The pact binds `partyId` non-null — a renamed field would arrive
+     * as null and every resolution would silently fail safe to the conservative default, so the
+     * seed pins the owner id the consumer's chain continues on. Same findById guard as the states
+     * above: `save` is `persist` on an application-assigned id, not an upsert.
+     */
+    @State("an ACTIVE CZK account exists for tax-profile resolution")
+    fun activeCzkAccountForTaxProfileResolution() = runOnVertxContext {
+        if (accountRepository.findById(TAX_PROFILE_ACCOUNT_ID) != null) return@runOnVertxContext
+        accountRepository.save(
+            Account(
+                id = TAX_PROFILE_ACCOUNT_ID,
+                accountNumber = Iban("CZ1108000000192000145401"),
+                accountType = AccountType.SAVINGS,
+                partyId = TAX_PROFILE_PARTY_ID,
+                productId = UUID.fromString("99999999-8888-4777-8666-555555555555"),
+                currency = CurrencyCode("CZK"),
+                status = AccountStatus.ACTIVE,
+                openedAt = Instant.parse("2026-01-01T00:00:00Z"),
+                closedAt = null,
+                version = 0,
+            ),
+        )
+        Unit
     }
 }

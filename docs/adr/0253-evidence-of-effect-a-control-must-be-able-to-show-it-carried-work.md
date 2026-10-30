@@ -13,6 +13,23 @@ summary: "Every control that claims to do work must expose a countable artifact 
 
 # ADR-0253 — Evidence of effect: a control must be able to show it carried work
 
+**Delivery note (2026-10-14).** Third slice: the fraud-scoring zero-fail reader and the
+quarterly-sweep runbook. Verified first that no alert reader existed for the fraud
+scoring artifact (`openbank_fraud_scores_total{verdict,rail,service="fraud"}`, emitted
+by `FraudMetricsAdapter` in openbank-fraud-service) — the observability rules corpus had
+no reference to it — and shipped `FraudScoringSilent`
+(`openbank-infra/gitops/components/observability/prometheus-rules-fraud.yaml`): a
+warning that fires when the counter exists but has not incremented in 6h, in the
+`unless` form that survives the lazy-registration trap instead of the
+`absent_over_time` form that would fire continuously in never-scoring sandbox
+environments (the expected-zero declaration is documented in the file). The quarterly
+sweep's recipes — the three passes the Decision section mandates, plus the proven
+`pg_sequences` gap recipe (#4512) and the orphan-join query — now live at
+`docs/runbooks/0029-evidence-of-effect-quarterly-sweep.md`, with findings→issues routing
+per ADR-0052. `decision-status` stays `proposed` and `delivery-status` stays `partial`:
+the three per-change obligations remain a review duty, encoded one checkable subset at
+a time.
+
 **Delivery note (2026-08-19).** First mechanised reader: the `adr-delivery-evidence` gate
 (enforced) applies this ADR's third obligation — *make zero fail* — to the ADR registry itself,
 which was carrying the exact defect this ADR describes. `delivery-status` claimed work that had

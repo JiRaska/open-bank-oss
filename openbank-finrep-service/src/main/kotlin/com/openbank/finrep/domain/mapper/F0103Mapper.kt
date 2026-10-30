@@ -26,7 +26,8 @@ object F0103Mapper {
         val otherInstruments = creditBalance(snapshot.lines, "6050", "6060")
         val currentProfit = sum("INCOME", "EXPENSE").negate()
         val equity = sum("EQUITY", "INCOME", "EXPENSE").negate()
-        val liabilities = sum("LIABILITY").negate()
+        // Nostro overdrafts are deposit liabilities (F01.02 r0120), so r0310 equals F01.01 r0380.
+        val liabilities = sum("LIABILITY").negate().add(NostroOverdraft.of(snapshot.lines))
         val assessment = TrialBalanceAssurance.assess(snapshot)
         return FinrepTemplate(
             templateId = "F01.03",

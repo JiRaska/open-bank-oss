@@ -60,14 +60,28 @@ concurrent decisions on the same ceremony conflict loudly (422) instead of lost-
 
 ## Persistence
 
+Repositories use Hibernate Reactive. The JDBC datasource remains available for Flyway startup migrations,
+while `quarkus.hibernate-orm.blocking=false` prevents an unused blocking Hibernate factory from starting.
+This keeps migration access separate from reactive session creation. Do not disable the JDBC datasource
+or Hibernate Reactive to achieve this separation.
+
+`DocumentPersistenceModeProviderVerificationTest` checks the absence of a blocking factory, matching
+reactive/JDBC reads from the migrated database, and HTTP 401 when an M2M identity is missing.
+
 Dedicated database `openbank_documents`, `generation: none`, Flyway V1..V3. Only the outbox entity
 extends `PanacheOutboxEntity` (Hibernate sequence `document_outbox_seq`, created in V3 — guarded by
 `HibernateSequenceGuardTest`); all other entities use application-assigned UUID/String ids.
 
 ## Seeded pension templates
 
-`DocumentTemplateSeed` also seeds the eight `pension-*` templates (DPS key information, DIP KID, tax
-certificate, annual statement; cs and en) as `PUBLISHED` `1.0.0`, because `render` resolves published
-rows only. Their wording is a draft: each body keeps the `LEGAL-REVIEW-REQUIRED` marker and renders a
-DRAFT banner while the caller sends `legalReviewRequired=true`. Reviewed wording ships as a new seed
-version.
+`DocumentTemplateSeed` seeds all eight `pension-*` templates at `1.0.0` as `DRAFT`.
+Legal review of their wording is required before publication (#12392). Live rendering resolves
+only published rows, so neither omitting nor changing `legalReviewRequired` makes a draft usable.
+Drafts remain available for authoring review and preview. Seeding a draft preserves any existing
+published version of the same code; publish reviewed wording through the existing reviewed process.
+
+Live rendering also refuses any previously published template containing `LEGAL-REVIEW-REQUIRED`, before creating or storing a PDF. Existing fixed-ID seed rows are not rewritten; caller data cannot bypass this guard.
+
+## Outbox trace propagation
+
+The outbox row stores the W3C `traceparent` of the request that wrote it (`document_outbox.trace_context`, migration `V16`, nullable). The dispatcher publishes the record with that `traceparent` header and parents its producer span on the stored context, so a consumer span links to the originating request instead of starting a trace at the scheduler thread. Rows written outside any span carry no value and are published as before.

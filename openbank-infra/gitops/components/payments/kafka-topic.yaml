@@ -171,13 +171,11 @@ spec:
     retention.ms: 604800000
     cleanup.policy: delete
 ---
-# payment.scheme-accepted — rail ACSC notification consumed by transaction-service
-# to settle a PROCESSING payment (ADR-0108). Produced by sepa-payment, sepa-instant,
-# domestic-payment, and swift-service after receiving pacs.002 ACSC from the scheme.
+# swift-service: SWIFT MT/MX cross-border payment events (ADR-0104 D4)
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
-  name: payment.scheme-accepted
+  name: openbank.payments.swift.event
   namespace: messaging
   labels:
     strimzi.io/cluster: openbank-cluster
@@ -188,28 +186,13 @@ spec:
     retention.ms: 604800000
     cleanup.policy: delete
 ---
-# DLQ for payment.scheme-accepted — receives messages that transaction-service
-# failed to process after retries (SmallRye failure-strategy=dead-letter-queue).
-# Separate retention (30d) so ops can replay failed settlements before they expire.
+# swift-service: bank-own transfer status (contract 9.2, swift.institution-transfer.status.v1) —
+# ACCEPTED / SENT / SETTLED / REJECTED, written through swift's outbox, read by treasury-service.
+# Keyed by paymentId so one payment's lifecycle stays ordered.
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
-  name: payment.scheme-accepted.dlq
-  namespace: messaging
-  labels:
-    strimzi.io/cluster: openbank-cluster
-spec:
-  partitions: 1
-  replicas: 1
-  config:
-    retention.ms: 2592000000
-    cleanup.policy: delete
----
-# swift-service: SWIFT MT/MX cross-border payment events (ADR-0104 D4)
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaTopic
-metadata:
-  name: openbank.payments.swift.event
+  name: openbank.swift.institution-transfers
   namespace: messaging
   labels:
     strimzi.io/cluster: openbank-cluster

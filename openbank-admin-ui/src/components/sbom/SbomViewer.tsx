@@ -11,6 +11,8 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 interface SbomSummary {
   service: string
+  source: 'live' | 'image-baked'
+  discovery: 'complete' | 'partial' | 'unknown' | 'static'
   generatedAt: string | null
   generator: string | null
   specVersion: string | null
@@ -188,6 +190,13 @@ export function SbomViewer({ serviceName }: Props) {
 
           {data && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {data.source === 'image-baked' && (
+                <div role="status" style={{ fontSize: '11px', color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', borderRadius: 'var(--r-sm)', padding: '8px 10px' }}>
+                  {data.discovery === 'unknown'
+                    ? t('Zobrazen je SBOM z image; umístění živé služby nelze kvůli neúplnému zjišťování ověřit.', 'Showing the image-baked SBOM; the live service location cannot be verified because discovery is incomplete.')
+                    : t('Zobrazen je SBOM z image, protože živý SBOM nebyl dostupný.', 'Showing the image-baked SBOM because the live SBOM was not available.')}
+                </div>
+              )}
               {/* Header strip — root component + meta */}
               <div style={{
                 display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px',

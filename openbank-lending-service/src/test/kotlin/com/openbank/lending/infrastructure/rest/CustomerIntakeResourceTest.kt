@@ -10,6 +10,9 @@ import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
+import com.openbank.lending.domain.model.SignApplicationRequest
+import com.openbank.lending.domain.model.SubmitDocumentsRequest
+import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
@@ -289,6 +292,13 @@ class CustomerIntakeResourceTest {
             unsupported<LoanApplication>()
         override fun advanceIfInState(id: LoanApplicationId, expectedState: String, actor: String) =
             unsupported<LoanApplication>()
+        override fun withdraw(id: LoanApplicationId, request: WithdrawApplicationRequest, withdrawnBy: String) =
+            unsupported<LoanApplication>()
+        override fun submitDocuments(id: LoanApplicationId, request: SubmitDocumentsRequest, submittedBy: String) =
+            unsupported<LoanApplication>()
+        override fun sign(id: LoanApplicationId, request: SignApplicationRequest, signedBy: String) =
+            unsupported<LoanApplication>()
+        override fun escalateFourEyesSlaIfPending(id: LoanApplicationId, actor: String) = unsupported<Boolean>()
         override fun listRecentApplications(status: String?, limit: Int) = unsupported<List<LoanApplication>>()
         override fun summariseApplications() = unsupported<List<ApplicationStateSummary>>()
 

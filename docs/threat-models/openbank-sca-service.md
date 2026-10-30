@@ -137,7 +137,7 @@ is the **authentication assurance gate** for payments and consent — defeating 
   `IDEMPOTENCY_REQUEST_IN_PROGRESS`. No new endpoint, caller or privilege; the inbound surface
   gains one error response (409, two codes).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -235,7 +235,7 @@ is the **authentication assurance gate** for payments and consent — defeating 
   (forces re-enrollment, never a silent bypass).
 - **2026-05-30** — Added `sca_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/
   boundary, no change to challenge/verify logic. Risk class = **availability**, mitigated by
-  `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 
 - **2026-08-02** — **New inbound trust edge: the `delegation` namespace.** `#3414` added
   `delegation` as an allowed ingress peer in this component's `network-policies.yaml`, so
@@ -362,3 +362,24 @@ is the **authentication assurance gate** for payments and consent — defeating 
   already sends its own bearer. Proven by `ScaListenerAuthParityIT` (production listener shape, real
   HTTP; 1 of 4 failing without the change, 4 of 4 with it) and gated fleet-wide by `mtls-bearer-only`.
   Rollback: revert the commit (re-opens the path).
+
+
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Pension challenge consumption.** This integration adds the `pension` namespace to `sca-service-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/sca/challenges/{id}/consume`.
+
+**Threat and required controls.** Challenge consumption is an authorization boundary. Knowledge of the challenge id does not establish the party, operation or payload binding. A machine caller must not create a staff-role shortcut or bypass dynamic linking and single-use consumption.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.

@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.39.0...notification-service-v0.39.1) (2026-10-18)
+
+
+### Security
+
+* **notification:** reserve commstemplate.publish for ROLE_COMMS_APPROVER ([#13133](https://github.com/JiRaska/open-bank-oss/issues/13133)) ([de2b093](https://github.com/JiRaska/open-bank-oss/commit/de2b0936fd079f9affd5f24b4eaf7532c54d6f55))
+
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.38.0...notification-service-v0.39.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
+## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.37.1...notification-service-v0.38.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
+## [0.37.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.37.0...notification-service-v0.37.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
 ## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.36.0...notification-service-v0.37.0) (2026-10-11)
 
 

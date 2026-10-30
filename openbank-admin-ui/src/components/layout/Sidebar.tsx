@@ -23,6 +23,7 @@ import {
   BarChart3,
   Bell,
   Bluetooth,
+  QrCode,
   BookOpen,
   Bot,
   Boxes,
@@ -119,6 +120,21 @@ const balanceSheetNav: NavItem[] = [
   { nameCs: 'Storno doúčtování', nameEn: 'Backfill void',         href: '/balance-sheet/ledger-backfill/voids', icon: Undo2, permission: 'ledger-backfill:view' },
 ]
 
+// ADR-0334 / #12350: the pension back office — participant contracts and their queues
+// (openbank-pension-service) and fund administration (openbank-pension-fund-service).
+const pensionNav: NavItem[] = [
+  { nameCs: 'Penzijní smlouvy',     nameEn: 'Pension contracts',    href: '/pension',               icon: PiggyBank,  permission: 'pension:view' },
+  { nameCs: 'Sjednání a převody',   nameEn: 'Onboarding & transfers', href: '/pension/queues',      icon: Inbox,      permission: 'pension:view' },
+  { nameCs: 'Nespárované příspěvky', nameEn: 'Unmatched contributions', href: '/pension/contributions', icon: FileSearch, permission: 'pension:view' },
+  { nameCs: 'Státní příspěvky',     nameEn: 'State incentives',     href: '/pension/incentives',    icon: Gift,       permission: 'pension:view' },
+  { nameCs: 'Příkazy k úhradě',     nameEn: 'Contribution mandates', href: '/pension/mandates',    icon: Repeat,     permission: 'pension:view' },
+  { nameCs: 'Výplaty a úmrtí',      nameEn: 'Payouts & death claims', href: '/pension/payouts',     icon: Wallet,     permission: 'pension:view' },
+  { nameCs: 'Anuitní partneři',     nameEn: 'Annuity partners',     href: '/pension/annuity',       icon: Handshake,  permission: 'pension:view' },
+  { nameCs: 'Fondy a NAV',          nameEn: 'Funds & NAV',          href: '/pension/funds',         icon: Landmark,   permission: 'pension:view' },
+  { nameCs: 'Strategie',            nameEn: 'Strategies',           href: '/pension/strategies',    icon: Scale,      permission: 'pension:view' },
+  { nameCs: 'Podílové jednotky',    nameEn: 'Unit holdings',        href: '/pension/holdings',      icon: Layers,     permission: 'pension:view' },
+]
+
 // ADR-0315 / #10618: the treasury desk (openbank-treasury-service). Each entry carries the
 // permission of the page it opens (roles.ts): a dealer sees no approval inbox, an approver no form.
 const treasuryNav: NavItem[] = [
@@ -183,6 +199,7 @@ const opsNav: NavItem[] = [
   // Notifications (what we send) rather than under the agent cockpit: the audience is the
   // contact centre and back-office, not agent operators.
   { nameCs: 'Komunikační studio',    nameEn: 'Communication Studio', href: '/communication', icon: MessagesSquare, permission: 'communication:view' },
+  { nameCs: 'Šablony zpráv',          nameEn: 'Message templates', href: '/communication/notification-templates', icon: Bell, permission: 'communication:templates:view' },
   { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]
@@ -193,6 +210,7 @@ const docsNav: NavItem[] = [
   { nameCs: 'Aplikace',       nameEn: 'Customer App',       href: '/docs/customer-app', icon: Smartphone, permission: 'docs:view' },
   { nameCs: 'Identita & dedup', nameEn: 'Identity & Dedup',  href: '/docs/identity-dedup', icon: Fingerprint, permission: 'docs:view' },
   { nameCs: 'QRlessPay',      nameEn: 'QRlessPay',          href: '/docs/qrlesspay',   icon: Bluetooth,  permission: 'docs:view' },
+  { nameCs: 'QR fotoaparátem', nameEn: 'Camera QR',        href: '/docs/spayd-uri',   icon: QrCode,     permission: 'docs:view' },
   { nameCs: 'Senzory',        nameEn: 'Sensors',            href: '/docs/sensors',     icon: Radar,      permission: 'docs:view' },
   { nameCs: 'Správa dokumentů', nameEn: 'Document Management', href: '/docs/document-management', icon: FileSignature, permission: 'docs:view' },
   { nameCs: 'Cloud architektura', nameEn: 'Cloud Architecture', href: '/docs/cloud-architecture', icon: Cloud, permission: 'docs:view' },
@@ -248,7 +266,7 @@ const sysNav: NavItem[] = [
 const SCROLL_KEY = 'ob.sidebar.scroll'
 
 const ALL_NAV: NavItem[] = [
-  ...coreNav, ...revenueNav, ...balanceSheetNav, ...treasuryNav, ...customerNav, ...paymentsNav,
+  ...coreNav, ...revenueNav, ...balanceSheetNav, ...treasuryNav, ...pensionNav, ...customerNav, ...paymentsNav,
   ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...toolsNav, ...sysNav,
 ]
 
@@ -396,6 +414,12 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
           <>
             <SectionLabel>{t('Treasury', 'Treasury')}</SectionLabel>
             <NavSection items={filter(treasuryNav)} currentHref={currentHref} />
+          </>
+        )}
+        {filter(pensionNav).length > 0 && (
+          <>
+            <SectionLabel>{t('Penze', 'Pensions')}</SectionLabel>
+            <NavSection items={filter(pensionNav)} currentHref={currentHref} />
           </>
         )}
         <SectionLabel>{t('Klienti', 'Customers')}</SectionLabel>

@@ -48,7 +48,7 @@ allowed_reasons contains "operator-sca-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some family in {"scaChallenge.", "device."}
 	startswith(input.action, family)
 }
@@ -86,7 +86,7 @@ allowed_reasons contains "operator-sca-write" if {
 # base rest.rego — not duplicated here.
 allowed_reasons contains "service-sca-edge-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"scaChallenge.initiate",
 		"scaChallenge.read",
@@ -97,7 +97,7 @@ allowed_reasons contains "service-sca-edge-m2m" if {
 
 allowed_reasons contains "service-sca-shared-client-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action in {"scaChallenge.read", "scaChallenge.consume"}
 }
 
@@ -125,6 +125,6 @@ allowed_reasons contains "service-sca-scoped-consumer" if {
 # consumer exists (admin-ui forwards the operator's own token; no backend client calls it), so
 # reading and deciding are human-operator only. Identity decides, never principal.type (#266).
 prohibited if {
-	startswith(input.principal.id, "service-account-")
+	machine_grant_ok
 	input.action in {"scaChallenge.approval.read", "scaChallenge.approval.decide"}
 }

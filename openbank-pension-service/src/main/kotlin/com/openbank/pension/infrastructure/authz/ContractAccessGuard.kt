@@ -46,7 +46,8 @@ import java.util.UUID
  * name any party and the ownership check below would be theatre. OPA (`pension_rest_ext.rego`)
  * independently admits participant actions only from the same edge principal.
  *
- * Without the header, only staff (operator, admin, compliance) are admitted, as a reader.
+ * Without the header, only HUMAN staff (operator, admin, compliance) are admitted, as a reader — a
+ * service account holding a staff role is refused (403).
  */
 @ApplicationScoped
 class ContractAccessGuard {
@@ -62,6 +63,10 @@ class ContractAccessGuard {
     fun readerFor(partyHeader: String?): Caller {
         if (partyHeader != null) return Caller.customer(vouchedParty(partyHeader))
         require(STAFF_ROLES.any(identity::hasRole)) { "header '$PARTY_HEADER' is required" }
+        // A staff ROLE is not staff: the shared backend client holds ROLE_OPERATOR in some realms
+        // (#3765/#3734), and Caller.STAFF reads every participant's contract. Only a human principal
+        // is staff; a machine reads a participant's data solely as the vouching relay, above.
+        if (isServiceAccount()) throw ForbiddenException("a service account is not staff")
         return Caller.STAFF
     }
 
@@ -74,6 +79,24 @@ class ContractAccessGuard {
     /** The ownership rule: someone else's contract is NOT FOUND, never forbidden. */
     fun requireVisible(caller: Caller, contract: PensionContract): PensionContract =
         ContractVisibility.requireVisible(caller, contract)
+
+    /**
+     * The acting STAFF member's principal name (#12383), for maker/checker records such as the
+     * annuity-partner registry's four-eyes activation. Never a party header, never a service account.
+     */
+    fun staffActor(partyHeader: String?): String {
+        require(partyHeader == null) { "staff work is not done on behalf of a participant" }
+        require(STAFF_ROLES.any(identity::hasRole)) { "this is staff work" }
+        val name = identity.principal?.name
+        if (name.isNullOrBlank() || isServiceAccount()) {
+            throw ForbiddenException("staff work needs a named human principal")
+        }
+        return name
+    }
+
+    // Pension-local until the libs ServiceAccountIdentity helper (#12463) lands; Keycloak names every
+    // client_credentials principal `service-account-<clientId>`.
+    private fun isServiceAccount(): Boolean = identity.principal?.name?.startsWith(SERVICE_ACCOUNT_PREFIX) ?: false
 
     private fun vouchedParty(header: String): UUID {
         if (!isTrustedRelay()) {

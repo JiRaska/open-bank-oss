@@ -22,29 +22,9 @@ quarkus:
       methods: GET,POST,PUT,DELETE,OPTIONS
       headers: Content-Type,Authorization,If-Match
       exposed-headers: ETag
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   # Health/metrics on a separate management port, matching the fleet convention and the
   # Deployment's `management` containerPort that startup/liveness/readiness probes target.
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
 
   datasource:
     db-kind: postgresql
@@ -53,6 +33,9 @@ quarkus:
     # Reactive client for the app (Panache); JDBC URL is for Flyway migrations only.
     reactive:
       url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_products}
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_products}
   hibernate-orm:
@@ -80,8 +63,8 @@ quarkus:
       verification: ${OIDC_TLS_VERIFICATION:required}
 
 # OPA sidecar (ADR-0034) for the AI-agent read bridge (query.catalog.readonly). Advisory by
-# default — a denied/unreachable decision is logged at WARN and the request proceeds; product
-# catalog has no sidecar yet, so this stays advisory until one is deployed and AUTHZ_ENFORCE=true.
+# default — a denied/unreachable decision is logged at WARN and the request proceeds. The GitOps
+# Deployment runs the sidecar (product-catalog-opa-bundle); this stays advisory until AUTHZ_ENFORCE=true.
 opa:
   url: "${OPA_URL:http://localhost:8181}"
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
@@ -90,16 +73,51 @@ authz:
   enforce: "${AUTHZ_ENFORCE:false}"
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (BUILD-time property).
+  # Without it @Authorize has no decision point at all, so enforcement could never be switched on.
+  authz:
+    opa-pdp-producer:
+      enabled: true
   catalog:
     # Current OpenBank deployment enables all reference packs (retirement: ADR-0334). Standalone charts override this to
     # an empty value and let the operator opt in explicitly.
     packs: ${OPENBANK_CATALOG_PACKS:banking,insurance,retirement}
     bank-v1-compatibility-enabled: ${OPENBANK_CATALOG_BANK_V1_COMPATIBILITY_ENABLED:true}
+    # ADR-0341: seed treasury-instrument and DPS/DIP offerings as DRAFTS (a human checker publishes them).
+    reference-offerings-enabled: ${OPENBANK_CATALOG_REFERENCE_OFFERINGS_ENABLED:true}
     security:
       scope-claim: ${CATALOG_SCOPE_CLAIM:scope}
       read-scope: ${CATALOG_READ_SCOPE:catalog:read}
       author-scope: ${CATALOG_AUTHOR_SCOPE:catalog:author}
       publish-scope: ${CATALOG_PUBLISH_SCOPE:catalog:publish}
+    # Revision approval authorities named by pack policies (catalog-packs/*/pack.json). A token
+    # holds one only with BOTH the scope and the realm role. Packs declare, deployments bind (#13429).
+    approval:
+      authorities:
+        PENSION_LEGAL_APPROVER:
+          scope: ${CATALOG_PENSION_LEGAL_SCOPE:pension:legal-approve}
+          realm-role: ROLE_PENSION_LEGAL_COUNSEL
+        PENSION_PRODUCT_OWNER:
+          scope: ${CATALOG_PENSION_PRODUCT_SCOPE:pension:product-approve}
+          realm-role: ROLE_PENSION_PRODUCT_OWNER
+      # Machine clients that may read approval evidence: azp -> service-account username.
+      evidence-readers:
+        openbank-pension: service-account-openbank-pension
+    # ADR-0352 §4: the publish-path signature over an IR-bearing revision's canonical hash.
+    # `disabled` (the default): publish-ir answers 409 and nothing is signed. `openbao`: Transit
+    # `sign` on a dedicated key; grant this service's OpenBao role `update` on
+    # transit/sign/<key-id> and nothing else (consumers get transit/verify/<key-id> only).
+    # `hmac`: a shared secret, which proves nothing about WHO signed. It is accepted only in the
+    # dev and test launch modes; IrSigningModeGuard refuses to boot a production launch with it.
+    # The secret has NO default anywhere in this file outside those two profiles.
+    ir-signing:
+      mode: ${CATALOG_IR_SIGNING_MODE:disabled}
+      key-id: ${CATALOG_IR_SIGNING_KEY_ID:product-ir-publish}
+      openbao:
+        address: ${CATALOG_IR_SIGNING_OPENBAO_ADDRESS:https://openbao.vault.svc:8200}
+        transit-mount: ${CATALOG_IR_SIGNING_OPENBAO_TRANSIT_MOUNT:transit}
+        role: ${CATALOG_IR_SIGNING_OPENBAO_ROLE:product-catalog-ir-signing}
+        sa-token-path: ${CATALOG_IR_SIGNING_OPENBAO_SA_TOKEN_PATH:/var/run/secrets/kubernetes.io/serviceaccount/token}
   api:
     # API-contract major, independent of version.txt (ADR-0048); newest served contract is /api/v2.
     version: "2"
@@ -124,6 +142,11 @@ openbank:
   # OPA sidecar is absent in CI — keep @Authorize advisory so the reads proceed under test.
   authz:
     enforce: "false"
+  openbank:
+    catalog:
+      ir-signing:
+        mode: hmac
+        hmac-secret: test-only-ir-signing-secret-not-for-production
 
 # Portable distribution: fail closed unless its operator supplies PostgreSQL and a standards-based
 # OIDC issuer. No industry pack is installed implicitly; a bank, insurer, or other regulated firm
@@ -135,6 +158,9 @@ openbank:
       password: ${POSTGRES_PASSWORD}
       reactive:
         url: ${REACTIVE_URL}
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: ${JDBC_URL}
     oidc:
@@ -145,6 +171,7 @@ openbank:
     catalog:
       packs: ${OPENBANK_CATALOG_PACKS:}
       bank-v1-compatibility-enabled: ${OPENBANK_BANK_V1_COMPATIBILITY_ENABLED:false}
+      reference-offerings-enabled: ${OPENBANK_CATALOG_REFERENCE_OFFERINGS_ENABLED:false}
       require-https-issuer: true
   authz:
     enforce: "false"
@@ -188,3 +215,8 @@ openbank:
     oidc:
       tls:
         verification: none
+  openbank:
+    catalog:
+      ir-signing:
+        mode: hmac
+        hmac-secret: dev-only-ir-signing-secret-not-for-production

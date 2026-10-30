@@ -99,5 +99,15 @@ class StatutoryReturnApiIT {
             statusCode(503)
             body("error", containsString("pension-service"))
         }
+        // PSP 34-12 PS: no PENSION_COMPANY_TREASURY_URL here (ADR-0337) — refused by name, never zero-filled.
+        Given {
+            contentType("application/json")
+            body(
+                """{"catalogueId":"cz-pension-cnb","returnCode":"PSP34-12-PS","entityId":"company","period":"2025-Q1"}""",
+            )
+        } When { post("$path/assemble") } Then {
+            statusCode(503)
+            body("error", containsString("treasury is not configured as a source"))
+        }
     }
 }

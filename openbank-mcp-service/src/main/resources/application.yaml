@@ -52,12 +52,20 @@ quarkus:
     # In-cluster ClusterIPs — same targets + ports agent-service's ServiceClients already use.
     account-service:
       url: http://localhost:8100
+      connect-timeout: 2000
+      read-timeout: 5000
     balance-service:
       url: http://localhost:8103
+      connect-timeout: 2000
+      read-timeout: 5000
     transaction-service:
       url: http://localhost:8102
+      connect-timeout: 2000
+      read-timeout: 5000
     consent-service:
       url: http://localhost:8106
+      connect-timeout: 2000
+      read-timeout: 5000
     # get_statement / get_payment_confirmation (issue #4109, ADR-0248). Same M2M principal as the
     # four clients above (service-account-openbank-services via oidc-client) reaching them through
     # base rest.rego operator-read-any — statement.read / sepaPayment.read / domestic-payment.read
@@ -65,10 +73,16 @@ quarkus:
     # rego grant is needed (same reasoning as transaction-service above).
     statement-service:
       url: http://localhost:8136
+      connect-timeout: 2000
+      read-timeout: 5000
     sepa-payment-service:
       url: http://localhost:8115
+      connect-timeout: 2000
+      read-timeout: 5000
     domestic-payment-service:
       url: http://localhost:8116
+      connect-timeout: 2000
+      read-timeout: 5000
   smallrye-openapi:
     info-title: OpenBank MCP Server
     info-version: "1.0.0"
@@ -80,6 +94,7 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_mcp
+      max-size: 20
       # Reactive pool eviction. openbank-libs META-INF/microprofile-config.properties carries
       # these fleet-wide (issue #1682), but this service depends only on openbank-libs-domain /
       # openbank-libs-runtime, neither of which ships that file — so it inherited neither, and

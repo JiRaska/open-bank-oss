@@ -6,13 +6,12 @@ package com.openbank.domestic.application.workflow
 
 import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.AmlCasePort
-import com.openbank.domestic.application.port.out.AmlCaseRiskLevel
 import com.openbank.domestic.application.port.out.CustomerNotificationPort
+import com.openbank.domestic.application.port.out.DomesticBookingWrites
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.port.out.FraudScoreCommand
 import com.openbank.domestic.application.port.out.FraudScoringPort
-import com.openbank.domestic.application.port.out.FraudVerdict
 import com.openbank.domestic.application.port.out.OpenAmlCaseCommand
 import com.openbank.domestic.application.port.out.SanctionsScreeningPort
 import com.openbank.domestic.application.port.out.SchemeGatewayPort
@@ -25,11 +24,13 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
-import com.openbank.domestic.domain.screening.ScreeningDecision
-import com.openbank.domestic.domain.screening.ScreeningMatchStatus
-import com.openbank.domestic.domain.screening.ScreeningPolicy
-import com.openbank.domestic.domain.screening.ScreeningResult
-import com.openbank.domestic.domain.screening.ScreeningRole
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningPolicy
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.vertx.VertxContextSupport
@@ -55,6 +56,7 @@ private const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
 @ApplicationScoped
 open class DomesticPaymentActivitiesImpl(
     private val paymentRepository: DomesticPaymentRepository,
+    private val bookingWrites: DomesticBookingWrites,
     private val eventPublisher: DomesticPaymentEventPublisher,
     private val screeningPort: SanctionsScreeningPort,
     private val amlCasePort: AmlCasePort,
@@ -93,7 +95,7 @@ open class DomesticPaymentActivitiesImpl(
             )
         } catch (ex: ScreeningUnavailableException) {
             log.warnf(ex, "Sanctions screening unavailable for payment %s; returning REVIEW", paymentId)
-            openCaseQuietly(payment, AmlCaseRiskLevel.MEDIUM, ALERT_SCREENING_UNAVAILABLE, ex.message, null)
+            openCaseQuietly(payment, AmlCaseSeverity.MEDIUM, ALERT_SCREENING_UNAVAILABLE, ex.message, null)
             return@vtx ScreeningDecision.REVIEW
         }
 
@@ -138,7 +140,7 @@ open class DomesticPaymentActivitiesImpl(
         val detail = nonClear
             .joinToString("; ") { "${it.role} '${it.subject}' ${it.status} score=${it.score}" }
             .ifBlank { "no actionable matches" }
-        val riskLevel = if (decision == ScreeningDecision.BLOCK) AmlCaseRiskLevel.CRITICAL else AmlCaseRiskLevel.HIGH
+        val riskLevel = if (decision == ScreeningDecision.BLOCK) AmlCaseSeverity.CRITICAL else AmlCaseSeverity.HIGH
         openCaseQuietly(
             payment,
             riskLevel,
@@ -339,14 +341,17 @@ open class DomesticPaymentActivitiesImpl(
                 null
             }
             val updated = payment.transitionTo(nextStatus, reason, rejectDetail, clock = clock)
-            paymentRepository.update(
-                payment = updated,
-                outboxMessage = OutboxMessage(
-                    aggregateId = updated.id,
-                    eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                    payload = eventPublisher.statusChangedPayload(payment, updated),
-                ),
+            val event = OutboxMessage(
+                aggregateId = updated.id,
+                eventType = PAYMENT_STATUS_CHANGED_EVENT,
+                payload = eventPublisher.statusChangedPayload(payment, updated),
             )
+            if (outcome.accepted) {
+                // Commit the booking obligation before the next activity or any provider call.
+                bookingWrites.acceptForBooking(updated, event)
+            } else {
+                paymentRepository.update(updated, event)
+            }
             if (nextStatus == DomesticPaymentStatus.REJECTED) {
                 notifyPaymentFailed(updated, reason)
             }
@@ -384,7 +389,7 @@ open class DomesticPaymentActivitiesImpl(
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during settlePayment activity")
         if (payment.status != DomesticPaymentStatus.SENT_TO_CLEARING) return@vtx payment.status
-        try {
+        val outcome = try {
             settlementPort.settle(payment)
         } catch (ex: SettlementUnavailableException) {
             // Rethrown, not absorbed: this is the planned-degradation case, and failing the
@@ -402,10 +407,15 @@ open class DomesticPaymentActivitiesImpl(
         // method. Any other fault — an invalid transition, a repository failure, an adapter bug —
         // propagates with its own type, so Temporal records what actually broke instead of
         // recording the same terminal-looking success the outage produced.
+        val transactionId = outcome.transactionId
+        if (!outcome.settled || transactionId == null) {
+            throw SettlementUnavailableException("Settlement has no proven transaction identity")
+        }
         val updated = payment.transitionTo(DomesticPaymentStatus.SETTLED, clock = clock)
-        paymentRepository.update(
+        bookingWrites.completeBooking(
             payment = updated,
-            outboxMessage = OutboxMessage(
+            transactionId = transactionId,
+            outbox = OutboxMessage(
                 aggregateId = updated.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
                 payload = eventPublisher.statusChangedPayload(payment, updated),
@@ -417,7 +427,7 @@ open class DomesticPaymentActivitiesImpl(
     @Suppress("TooGenericExceptionCaught")
     private suspend fun openCaseQuietly(
         payment: DomesticPayment,
-        riskLevel: AmlCaseRiskLevel,
+        riskLevel: AmlCaseSeverity,
         alertCode: String,
         detail: String?,
         matchedEntity: String?,

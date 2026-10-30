@@ -15,11 +15,13 @@ import com.openbank.document.application.port.out.DocumentRepositoryPort
 import com.openbank.libs.storage.ObjectStorePort
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.vertx.core.Vertx
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.hibernate.reactive.mutiny.Mutiny
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
@@ -58,6 +60,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * load-bearing half, issue #2338 — is unchanged.
  */
 @QuarkusTest
+@TestProfile(DocumentProviderProfile::class)
 @QuarkusTestResource(com.openbank.document.it.PostgresRedisTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-document-service")
@@ -80,6 +83,9 @@ class DocumentPactBrokerProviderVerificationTest {
 
     @Inject
     lateinit var vertx: Vertx
+
+    @Inject
+    lateinit var sessionFactory: Mutiny.SessionFactory
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
@@ -112,6 +118,9 @@ class DocumentPactBrokerProviderVerificationTest {
     fun stateTemplatesSeeded() {
         // Intentionally empty — see the KDoc above.
     }
+
+    @State(PensionPublishedPactState.STATE)
+    fun statePensionKidPublished() = PensionPublishedPactState.publishInTestDatabase(sessionFactory)
 
     /**
      * `previewTemplate` is stateless and non-persisting by design (ADR-0248 #3): it merges a

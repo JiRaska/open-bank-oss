@@ -84,7 +84,61 @@ data class RecordedClearing(
     val amountMinorUnits: Long,
     val currencyCode: String,
     val appliedAt: Instant,
+    val postingStatus: PostingStatus = PostingStatus.PENDING,
+    val postingAttempts: Int = 0,
+    val postingNextAttemptAt: Instant? = null,
+    /** The claim the inline attempt holds from the moment the row is written; re-driver claims replace it. */
+    val postingClaimToken: UUID? = null,
 )
+
+/** Where a clearing stands with the ledger (V5). Anything but [POSTED] is re-driven. */
+enum class PostingStatus { PENDING, POSTED, FAILED, UNKNOWN }
+
+/** Clearings that still owe the ledger a posting, and the ones that ran out of attempts. */
+data class PostingBacklog(val unposted: Long, val exhausted: Long)
+
+/**
+ * The ledger-posting state of applied clearings (V5, #13228). Kept apart from
+ * [CardAuthorizationRepository]: it is written AFTER the clearing's own transaction, by the inline
+ * attempt and by the re-driver, and never touches the authorisation.
+ */
+interface ClearingPostingRepository {
+    /** Unposted clearings whose backoff has elapsed and that still have attempts left, oldest first. */
+    suspend fun findDue(now: Instant, maxAttempts: Int, limit: Int): List<RecordedClearing>
+
+    /**
+     * Takes a short lease on a due clearing by pushing its next attempt to [leaseUntil] and stamping a
+     * fresh claim token, which is returned. `null` when another instance got there first or the row is
+     * no longer due.
+     */
+    suspend fun claim(clearingId: UUID, now: Instant, leaseUntil: Instant, maxAttempts: Int): UUID?
+
+    /**
+     * Records one attempt: increments the attempt count and stores the outcome and the next backoff.
+     *
+     * Applied ONLY if the row is not already POSTED and still carries [claimToken] - the inline attempt's
+     * token is stamped when the row is written, a re-driver's when it claims. Returns `false` when it was
+     * not applied - the attempt no longer counts: a newer claim superseded it or the debit is already
+     * booked. POSTED is never overwritten.
+     */
+    suspend fun recordAttempt(
+        clearingId: UUID,
+        claimToken: UUID,
+        status: PostingStatus,
+        transactionId: UUID?,
+        error: String?,
+        now: Instant,
+        nextAttemptAt: Instant?,
+    ): Boolean
+
+    /**
+     * Pushes a claimed row's next attempt to [nextAttemptAt] WITHOUT counting an attempt (the adapter
+     * did not try: it is switched off). Same token and not-POSTED guard as [recordAttempt].
+     */
+    suspend fun deferWithoutAttempt(clearingId: UUID, claimToken: UUID, nextAttemptAt: Instant): Boolean
+
+    suspend fun backlog(maxAttempts: Int): PostingBacklog
+}
 
 /** A concurrent request already applied a clearing under the same key; this one was rolled back. */
 class DuplicateClearingException(cause: Throwable) :
@@ -164,7 +218,18 @@ interface CardLookupPort {
  * (ADR-0252 phase 0, #4348): a skipped no-op and a real success sharing one signal cannot be told
  * apart afterwards, by anyone, at any effort.
  */
-enum class PostingOutcome { POSTED, SKIPPED_DISABLED, FAILED }
+enum class PostingOutcome {
+    POSTED,
+    SKIPPED_DISABLED,
+    FAILED,
+
+    /**
+     * The answer could not be read, so it is NOT known whether the ledger booked the debit (a body
+     * that does not bind, a connection cut). Neither a success nor a failure; the re-driver posts it
+     * again under the same idempotency key, which transaction-service dedupes.
+     */
+    UNKNOWN,
+}
 
 data class PostingResult(val outcome: PostingOutcome, val transactionId: UUID?, val detail: String?)
 

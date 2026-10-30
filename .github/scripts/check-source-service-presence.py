@@ -97,7 +97,6 @@ KNOWN_GAPS: dict[str, str] = {
     # derivation right now. They are baselined rather than excluded because a topic entering the
     # audit subscription later must not silently arrive without a producer claim -- at that moment
     # the entry below is what has to be deleted, and the ratchet is what forces the question.
-    "openbank-aml-service": "#5256 - producer of openbank.aml.events; not audit-subscribed today.",
     "openbank-campaign-service": "#5256 - producer of openbank.campaign.banner.placements.",
     "openbank-engagement-service": "#5256 - producer of openbank.engagement.events.",
     "openbank-incentive-service": "#5256 - producer of openbank.incentive.events.",

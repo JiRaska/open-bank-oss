@@ -11,3 +11,11 @@ This page currently documents only the outbox lifecycle; the rest of the data mo
 - Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
 - Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
 - Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.
+
+## Kafka consumer group override
+
+The consumer group id, offset reset and dead-letter topic for fraud-service channels are deliberately not YAML keys in `application.yaml`; they come from `fraud-service-msg-override.yaml`, loaded through `QUARKUS_CONFIG_LOCATIONS`. The reference pattern is card-issuance-service's `party-events-in` channel, which the `application.yaml` comment now cites. This is a comment and documentation change only; no configuration value or runtime behaviour changes.
+
+## Shared verdict type (ADR-0353)
+
+`FraudVerdict` is declared once in `openbank-libs-fincrime` and shared with the payment rails. Its `UNKNOWN` value is what a consumer reads when an answer cannot be parsed; this service never produces it. A `RuleHit` rejects it, and `POST /api/v1/fraud/score` answers 500 rather than emit it. The verdicts stored in `fraud_scores.verdict` and returned on the wire remain `ALLOW`, `CHALLENGE`, `REVIEW` and `DECLINE`.

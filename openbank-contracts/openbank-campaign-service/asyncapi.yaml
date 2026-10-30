@@ -4,7 +4,7 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Campaign Service — commands
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Commands emitted while executing an approved campaign journey. Campaign service owns the
     decision, consent gate and opaque interaction id; destination services own delivery/rendering.
@@ -20,15 +20,53 @@ servers:
 channels:
   notificationRequests:
     address: openbank.notification.requests
-    description: Existing notification-service delivery command emitted by KafkaNotificationSendAdapter.
+    description: |
+      Existing notification-service delivery command emitted by KafkaNotificationSendAdapter.
+      The optional v1 deduplicationKey equals the producer's correlationId (the durable send-log
+      row id). A replay of the same logical handoff therefore resolves against one notification
+      fact; consumers accepting older requests without this field remain compatible.
+    messages:
+      notificationRequest:
+        $ref: '#/components/messages/notificationRequest'
   campaignBannerPlacements:
     address: openbank.campaign.banner.placements
     description: |
       First-party app-surface placement command emitted by KafkaBannerPlacementAdapter and consumed
       by engagement-service. The compacted record key is the opaque interactionRef, so retries
       remain idempotent and do not create a second customer surface.
+operations:
+  publishNotificationRequest:
+    action: send
+    channel:
+      $ref: '#/channels/notificationRequests'
+    messages:
+      - $ref: '#/channels/notificationRequests/messages/notificationRequest'
 components:
+  messages:
+    notificationRequest:
+      name: NotificationRequest
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/notificationRequest'
   schemas:
+    notificationRequest:
+      type: object
+      required: [partyId, channel, template, recipient, variables, correlationId]
+      properties:
+        partyId: { type: string, format: uuid }
+        channel: { type: string, enum: [EMAIL, PUSH] }
+        template: { type: string, description: Reviewed notification template identifier. }
+        recipient: { type: string, description: Party identifier resolved by notification-service. }
+        variables:
+          type: object
+          additionalProperties: { type: string }
+        correlationId: { type: string, format: uuid, description: Campaign send-log row id. }
+        deduplicationKey:
+          type: string
+          format: uuid
+          description: Optional v1 field; equal to correlationId for campaign handoffs.
+        deepLink: { type: string, description: Closed authenticated app route for PUSH. }
+        interactionRef: { type: string, format: uuid, description: Opaque app interaction reference for PUSH. }
     campaignBannerPlacement:
       type: object
       required: [interactionRef, partyId, campaignId, stepOrder, template, variables, deepLink, inAppSurface]

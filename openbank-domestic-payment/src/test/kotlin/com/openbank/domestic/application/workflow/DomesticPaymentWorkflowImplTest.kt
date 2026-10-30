@@ -5,7 +5,7 @@
 package com.openbank.domestic.application.workflow
 
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
-import com.openbank.domestic.domain.screening.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningDecision
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify

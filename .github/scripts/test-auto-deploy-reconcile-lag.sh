@@ -9,7 +9,7 @@
 # file (see scripts-selftest.yml / rules.yaml: deploy_reconcile).
 #
 # The probe's notion of "same artifact" is pact-version-tree-equivalent.sh, which has its own
-# 17-case self-test. This suite asserts the probe WIRES it in, with the case that motivated it
+# self-test. This suite asserts the probe WIRES it in, with the case that motivated it
 # (#11597) as a known-positive and the cases it must not over-fire on as known-negatives.
 set -euo pipefail
 
@@ -19,6 +19,10 @@ PROBE="${SCRIPT_DIR}/auto-deploy-reconcile-lag.sh"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
+
+# run-gates.py gives each gate a private copy of the checkout index via GIT_INDEX_FILE.
+# These commits belong to this throwaway repo; do not let them mutate that shared gate index.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
 
 git init -q
 git config user.email test@example.com
@@ -40,12 +44,15 @@ for s in current-svc stale-svc placeholder-svc testonly-svc release-svc lib-svc 
   printf 'implementation(project(":openbank-libs-domain"))\n' > "openbank-${s}/build.gradle.kts"
 done
 mkdir -p openbank-libs-domain/src/main/kotlin openbank-py-svc docs build-logic
+mkdir -p .github/workflows
 echo "v1" > openbank-libs-domain/src/main/kotlin/Lib.kt
 echo "x" > openbank-libs-domain/build.gradle.kts
 echo "x" > build-logic/build.gradle.kts
 echo "x" > settings.gradle.kts
 echo "v1" > openbank-py-svc/app.py
 echo "v1" > docs/README.md
+printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n' \
+  > .github/workflows/auto-deploy.yml
 commit "c0: seed services"
 C0="$(short HEAD)"
 
@@ -151,12 +158,144 @@ done
 [ "$(jq length <<< "$T0")" = 12 ] && [ "$(jq length <<< "$T1")" = 12 ] \
   || fail "fair cap keeps the cap" "12 per tick" "tick41=$T0 tick42=$T1"
 
+# PRIORITY known-positive (2026-10-15 MGM strand): a service whose OWN source moved since
+# its pin outranks a marker-only lagger of the SAME age when the cap forces a choice.
+# release-svc and stale-svc are both pinned at c0, so pure oldest-first falls to the
+# alphabetical tiebreak and would pick release-svc — but release-svc lags only through
+# version.txt (class 1, marker drift) while stale-svc lags through src/main (class 0,
+# own-source drift). Code that is running nowhere must not wait behind a version string.
+mkdir -p "$WORK/prio"
+cat > "$WORK/prio/deploy.yaml" <<EOF
+image: repo/openbank-release-svc:sandbox-${C0}
+image: repo/openbank-stale-svc:sandbox-${C0}
+image: repo/openbank-lib-svc:sandbox-${C3}
+EOF
+GOT_PRIO="$(RECONCILE_TICK=0 RECONCILE_MAX=1 RECONCILE_SERVICES='' bash "$PROBE" "$WORK/prio" 2>/dev/null)"
+if [ "$(echo "$GOT_PRIO" | jq -c .)" != '["openbank-stale-svc"]' ]; then
+  echo "FAIL: own-source drift must outrank older marker drift under the cap (MGM strand)"
+  echo "  want: [\"openbank-stale-svc\"]"; echo "  got:  $GOT_PRIO"; exit 1
+fi
+
+# CLASS-SPLIT FAIRNESS: with class 0 below the cap, the remaining slots rotate across the
+# marker class — marker lag still drains every tick and can never crowd out code drift.
+# cap 2, one code lagger (stale-svc), two markers (release-svc@C0 oldest, lib-svc@C3): class 0
+# takes one slot every tick; the marker window covers both markers across two consecutive ticks.
+PT0="$(RECONCILE_TICK=0 RECONCILE_MAX=2 RECONCILE_SERVICES='' bash "$PROBE" "$WORK/prio" 2>/dev/null)"
+PT1="$(RECONCILE_TICK=1 RECONCILE_MAX=2 RECONCILE_SERVICES='' bash "$PROBE" "$WORK/prio" 2>/dev/null)"
+for want in openbank-stale-svc openbank-release-svc openbank-lib-svc; do
+  jq -se --arg w "$want" 'add | index($w)' <<< "$PT0 $PT1" >/dev/null \
+    || fail "class-split cap: ${want} must be selected within 2 ticks" "contains ${want}" "tick0=$PT0 tick1=$PT1"
+done
+jq -e 'index("openbank-stale-svc")' <<< "$PT0" >/dev/null \
+  && jq -e 'index("openbank-stale-svc")' <<< "$PT1" >/dev/null \
+  || fail "class 0 fills its slot every tick" "stale-svc in both ticks" "tick0=$PT0 tick1=$PT1"
+[ "$(jq length <<< "$PT0")" = 2 ] && [ "$(jq length <<< "$PT1")" = 2 ] \
+  || fail "class-split cap keeps the cap" "2 per tick" "tick0=$PT0 tick1=$PT1"
+
 # An allowlist (auto-deploy's ALL_SERVICES) drops manifest services the build path cannot
 # build — foreign-svc is stale but absent from the list.
 WANT_AL='["openbank-placeholder-svc","openbank-stale-svc"]'
 GOT_AL="$(RECONCILE_SERVICES='openbank-stale-svc openbank-placeholder-svc openbank-current-svc' \
             bash "$PROBE" "$WORK/gitops")"
 [ "$(sorted "$GOT_AL")" = "$(sorted "$WANT_AL")" ] || fail "allowlist filter" "$WANT_AL" "$GOT_AL"
+
+# Explicit targets narrow the stale candidate set BEFORE ranking/capping. A targeted manual
+# reconcile can therefore re-offer one stranded image without building the other laggers.
+GOT_TARGET="$(RECONCILE_SERVICES='openbank-stale-svc openbank-lib-svc openbank-current-svc' \
+  RECONCILE_TARGETS='openbank-lib-svc' RECONCILE_MAX=1 \
+  bash "$PROBE" "$WORK/gitops" 2>/dev/null)"
+[ "$(jq -c . <<< "$GOT_TARGET")" = '["openbank-lib-svc"]' ] \
+  || fail "target filter runs before cap and returns only requested stale service" \
+    '["openbank-lib-svc"]' "$GOT_TARGET"
+GOT_TARGET_SET="$(RECONCILE_SERVICES='openbank-stale-svc openbank-lib-svc openbank-current-svc' \
+  RECONCILE_TARGETS='openbank-lib-svc openbank-stale-svc' \
+  bash "$PROBE" "$WORK/gitops" 2>/dev/null)"
+[ "$(sorted "$GOT_TARGET_SET")" = '["openbank-lib-svc","openbank-stale-svc"]' ] \
+  || fail "multiple explicitly targeted stale services are selected together" \
+    '["openbank-lib-svc","openbank-stale-svc"]' "$GOT_TARGET_SET"
+GOT_TARGET_CURRENT="$(RECONCILE_SERVICES='openbank-current-svc' \
+  RECONCILE_TARGETS='openbank-current-svc' bash "$PROBE" "$WORK/gitops" 2>/dev/null)"
+[ "$(jq -c . <<< "$GOT_TARGET_CURRENT")" = '[]' ] \
+  || fail "requested up-to-date service is not rebuilt" '[]' "$GOT_TARGET_CURRENT"
+
+expect_target_failure() {
+  local label="$1" allowlist="$2" targets="$3"
+  if RECONCILE_SERVICES="$allowlist" RECONCILE_TARGETS="$targets" \
+       bash "$PROBE" "$WORK/gitops" >/dev/null 2>&1; then
+    echo "FAIL: targeted reconcile accepted ${label}"; exit 1
+  fi
+}
+expect_target_failure "an unbuildable/unknown service" \
+  'openbank-stale-svc' 'openbank-foreign-svc'
+expect_target_failure "a service with no GitOps image pin" \
+  'openbank-no-manifest-svc' 'openbank-no-manifest-svc'
+expect_target_failure "duplicate service names" \
+  'openbank-stale-svc' 'openbank-stale-svc openbank-stale-svc'
+expect_target_failure "more than three services" \
+  'openbank-stale-svc openbank-lib-svc openbank-placeholder-svc openbank-current-svc' \
+  'openbank-stale-svc openbank-lib-svc openbank-placeholder-svc openbank-current-svc'
+expect_target_failure "a selector without the buildable allowlist" \
+  '' 'openbank-stale-svc'
+expect_target_failure "a malformed service name" \
+  'openbank-stale-svc' '../openbank-stale-svc'
+expect_target_failure "a whitespace-only targeted service list" \
+  'openbank-stale-svc' $' \t\n\t '
+
+# Keep the workflow input wired only through the reconcile path and anchored to current main.
+WORKFLOW="${SCRIPT_DIR}/../workflows/auto-deploy.yml"
+VALIDATOR="${SCRIPT_DIR}/validate-auto-deploy-reconcile-inputs.sh"
+validate_dispatch() {
+  INPUT_RECONCILE_SERVICES="${1:-}" \
+    INPUT_RECONCILE="${2:-}" \
+    INPUT_CODEPLOY="${3:-false}" \
+    INPUT_CODEPLOY_PACT_VERSIONS="${4:-}" \
+    INPUT_BOOTSTRAP_IMAGE_ONLY="${5:-false}" \
+    bash "$VALIDATOR" >/dev/null 2>&1
+}
+if validate_dispatch '' '' true '{"openbank-stale-svc":"0123456789012345678901234567890123456789"}' true; then
+  echo 'ok: unrelated dispatch inputs bypass targeted-reconcile-only guards'
+else
+  echo 'FAIL: non-targeted dispatch unexpectedly failed targeted-reconcile validation'; exit 1
+fi
+if validate_dispatch 'openbank-stale-svc' false; then
+  echo 'FAIL: targeted reconcile without reconcile=true was accepted'; exit 1
+else
+  echo 'ok: targeted reconcile requires reconcile=true'
+fi
+if validate_dispatch 'openbank-stale-svc' true true; then
+  echo 'FAIL: targeted reconcile with co-deploy was accepted'; exit 1
+else
+  echo 'ok: targeted reconcile rejects co-deploy'
+fi
+if validate_dispatch 'openbank-stale-svc' true false '{"openbank-stale-svc":"0123456789012345678901234567890123456789"}'; then
+  echo 'FAIL: targeted reconcile with Pact replay was accepted'; exit 1
+else
+  echo 'ok: targeted reconcile rejects Pact replay'
+fi
+if validate_dispatch 'openbank-stale-svc' true false '' true; then
+  echo 'FAIL: targeted reconcile with bootstrap_image_only was accepted'; exit 1
+else
+  echo 'ok: targeted reconcile rejects bootstrap_image_only'
+fi
+if validate_dispatch 'openbank-stale-svc' true; then
+  echo 'ok: valid targeted reconcile dispatch inputs are accepted'
+else
+  echo 'FAIL: valid targeted reconcile dispatch inputs were rejected'; exit 1
+fi
+grep -Fq 'reconcile_services:' "$WORKFLOW" \
+  || { echo 'FAIL: workflow_dispatch has no reconcile_services input'; exit 1; }
+grep -Fq 'INPUT_RECONCILE_SERVICES: ${{ github.event.inputs.reconcile_services }}' "$WORKFLOW" \
+  || { echo 'FAIL: workflow does not pass reconcile_services to the selector'; exit 1; }
+grep -Fq 'bash .github/scripts/validate-auto-deploy-reconcile-inputs.sh' "$WORKFLOW" \
+  || { echo 'FAIL: workflow does not validate targeted reconcile inputs'; exit 1; }
+grep -Fq 'reconcile_services requires reconcile=true' "$VALIDATOR" \
+  || { echo 'FAIL: workflow accepts reconcile_services outside reconciliation'; exit 1; }
+grep -Fq 'targeted reconcile requires this run'"'"'s source SHA to be current main' "$WORKFLOW" \
+  || { echo 'FAIL: targeted reconciliation is not pinned to current main'; exit 1; }
+grep -Fq 'targeted reconcile cannot use co-deploy or Pact replay inputs' "$VALIDATOR" \
+  || { echo 'FAIL: targeted reconciliation does not reject co-deploy/Pact replay'; exit 1; }
+grep -Fq 'targeted reconcile cannot be combined with bootstrap_image_only' "$VALIDATOR" \
+  || { echo 'FAIL: targeted reconciliation does not reject image-only bootstrap'; exit 1; }
 
 # A held placeholder would rank first. It must be removed BEFORE the one-service
 # cap so the healthy stale service gets this tick. Once the hold is removed, the
@@ -191,4 +330,4 @@ if [ "$(jq -c . <<< "$GOT2")" != "[]" ]; then
   exit 1
 fi
 
-echo "PASS: auto-deploy-reconcile-lag.sh — shared-lib known-positive, docs/other-service known-negative, own tests, release marker, non-Gradle, CWD, missing root, cap, fair rotation, allowlist, loop-stability"
+echo "PASS: auto-deploy-reconcile-lag.sh — shared-lib known-positive, docs/other-service known-negative, own tests, release marker, non-Gradle, CWD, missing root, cap, fair rotation, allowlist, target-only stale selection/validation, loop-stability"

@@ -43,7 +43,7 @@ import rego.v1
 # session token (not a service account), so this rule is the one that carries the console.
 allowed_reasons contains "operator-sdd-write" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	startswith(input.action, "sdd.")
@@ -66,7 +66,7 @@ allowed_reasons contains "operator-sdd-write" if {
 #     reachable on a customer-facing principal.
 allowed_reasons contains "edge-service-sdd" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"sdd.create",
 		"sdd.read",

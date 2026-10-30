@@ -30,6 +30,14 @@ openbank-module-boundaries:
   GamificationModuleBoundaryRule:
     active: true
 
+# ADR-0352 §8 (openbank-libs-detekt-rules): the product interpreter under com.openbank.libs.product
+# is a pure function — no I/O, no ambient clock, no logging, no metrics imports. Enforced from
+# phase 1 (gate `product-ir-purity`).
+openbank-product-ir-purity:
+  active: true
+  ProductIrPurityRule:
+    active: true
+
 # --- correctness: keep strict ------------------------------------------------------
 
 exceptions:

@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -30,6 +15,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_lending
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_lending
   flyway:
@@ -159,8 +147,18 @@ quarkus:
       # fail boot on Connection refused). Workflow tests drive their own TestWorkflowEnvironment.
       worker:
         enabled: false
+  # No ledger under @QuarkusTest: the close reporter stays off; LendingCloseParticipationSchedulerCronIT
+  # switches it back on from its own profile.
+  lending:
+    close:
+      report-cron: "0 0 0 1 1 ? 2099"
 
 openbank:
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:
@@ -299,6 +297,14 @@ lending:
     cycle:
       every: ${LENDING_PROVISIONING_EVERY:24h} # immutable daily reporting snapshots
       batch-size: ${LENDING_PROVISIONING_BATCH_SIZE:500}
+  # Day-close participation (ADR-0342, #13167): LendingCloseParticipationScheduler reports each
+  # completed accounting day (RAN / SKIPPED / REFUSED, from lending_close_job_run) to ledger-service
+  # as participant `lending`, re-offering the last `lookback-days` days every tick. The ledger
+  # declares the participant in its own application.yaml; rules.yaml: close_participants is the
+  # source both are checked against (check-close-participants.py).
+  close:
+    report-cron: ${LENDING_CLOSE_REPORT_CRON:0 40 * * * ?}
+    lookback-days: ${LENDING_CLOSE_LOOKBACK_DAYS:3}
 
 # Build-time adapter selection for the PACKAGED IMAGE. `quarkusBuild` augments with the `prod`
 # profile active, so these — not the offline defaults above — are what ArC bakes in. Kept as a
