@@ -5,7 +5,7 @@
   "openbank-aml-service": "0.13.8",
   "openbank-anacredit-service": "0.10.0",
   "openbank-ap2-service": "0.4.2",
-  "openbank-audit-service": "0.29.2",
+  "openbank-audit-service": "0.30.0",
   "openbank-authz-policy-auditor": "0.6.5",
   "openbank-balance-service": "1.23.0",
   "openbank-billing-service": "0.17.3",
@@ -29,7 +29,7 @@
   "openbank-fraud-service": "0.18.1",
   "openbank-fx-service": "0.20.0",
   "openbank-governance-auditor": "0.6.6",
-  "openbank-interest-service": "0.26.1",
+  "openbank-interest-service": "0.27.0",
   "openbank-kyc-service": "0.17.1",
   "openbank-ledger-service": "1.40.0",
   "openbank-lending-service": "0.44.1",
@@ -48,7 +48,7 @@
   "openbank-sanctions-service": "0.18.3",
   "openbank-sca-service": "0.22.0",
   "openbank-sdd-service": "0.14.4",
-  "openbank-security-scanner": "0.10.1",
+  "openbank-security-scanner": "0.10.2",
   "openbank-sepa-instant": "0.12.2",
   "openbank-sepa-payment": "0.19.3",
   "openbank-settlement-service": "0.13.0",
@@ -67,7 +67,7 @@
   "openbank-wealth-service": "0.3.2",
   "openbank-context-service": "0.4.4",
   "openbank-risk-engine": "0.30.0",
-  "openbank-treasury-service": "0.19.0",
+  "openbank-treasury-service": "0.19.1",
   "openbank-card-processing-service": "0.7.1",
-  "openbank-products": "0.2.0"
+  "openbank-products": "0.3.0"
 }
