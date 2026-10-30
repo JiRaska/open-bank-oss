@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Tag every deployed openbank-* image `live-<digest12>` so the ECR lifecycle policy never expires
+# it (#14189). Rationale and the fail-closed rules live in .github/scripts/ecr-live-tags.py.
+#
+# Triggers: a gitops or runner-pin change on main (a new deploy), a daily tick (a digest leaving
+# the 14-day window loses its tag), and manual dispatch. It runs only from main because the role
+# it assumes trusts only main.
+name: ECR live tags
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "openbank-infra/gitops/**"
+      - "openbank-infra/aws/envs/sandbox-platform/arc-runners.tf"
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ecr-live-tags
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Full history is needed for the 14-day window of past pins (rollback targets).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Self-test
+        run: python3 .github/scripts/ecr-live-tags.py --selftest
+
+      - name: Configure AWS credentials (GitHub OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-sandbox-ecr-live-tagger
+          aws-region: eu-north-1
+          unset-current-credentials: true
+
+      - name: Tag deployed images, untag retired ones
+        run: python3 .github/scripts/ecr-live-tags.py

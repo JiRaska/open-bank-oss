@@ -59,6 +59,26 @@ locals {
     toset([local.ci_runner_repository]),
   )
 
+  # Deploy-aware protection. .github/scripts/ecr-live-tags.py (ecr-live-tags.yml) tags every
+  # image gitops or the ARC runner pin referenced on main within the last 14 days
+  # `live-<digest12>`. ECR never lets a lower-priority rule expire an image a higher-priority rule
+  # matched, so this rule shields those images from the count and untagged rules below however
+  # far down the build ranking they fall (measured with the lifecycle preview on
+  # openbank-agent-service: at countNumber 5 the deployed digest expired without this rule and was
+  # kept with it). The count is a ceiling that is never reached — the workflow removes live- tags
+  # once a digest leaves the window.
+  ecr_live_deploy_rule = {
+    rulePriority = 1
+    description  = "Never expire images tagged live-* (deployed or a rollback target)"
+    selection = {
+      tagStatus     = "tagged"
+      tagPrefixList = ["live-"]
+      countType     = "imageCountMoreThan"
+      countNumber   = 1000
+    }
+    action = { type = "expire" }
+  }
+
   ecr_sandbox_build_rule = {
     rulePriority = 10
     description  = "Keep the newest 150 sandbox-* builds; sha256-* signature/attestation tags are never selected"
@@ -119,7 +139,7 @@ resource "aws_ecr_lifecycle_policy" "service" {
   repository = each.value.name
   policy = jsonencode({
     rules = concat(
-      [local.ecr_sandbox_build_rule],
+      [local.ecr_live_deploy_rule, local.ecr_sandbox_build_rule],
       contains(local.digest_pinned_service_repositories, each.key) ? [] : [local.ecr_untagged_rule],
     )
   })
@@ -146,4 +166,65 @@ resource "aws_ecr_repository_creation_template" "pull_through" {
   encryption_configuration {
     encryption_type = "AES256"
   }
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Writer role for the live- tags — GitHub OIDC, main of this repo, ecr-live-tags.yml only.
+# ─────────────────────────────────────────────────────────────────────────────
+# A dedicated role rather than more grants on openbank-arc-build-runner: removing a tag is
+# BatchDeleteImage, which deletes an image whose last tag it removes, and no build job needs it.
+data "aws_iam_policy_document" "ecr_live_tagger_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github_actions.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.ci_oidc_host}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.ci_oidc_host}:sub"
+      values   = ["repo:${local.ci_github_repo}:ref:refs/heads/main"]
+    }
+    condition {
+      test     = "StringEqualsIfExists"
+      variable = "${local.ci_oidc_host}:job_workflow_ref"
+      values   = ["${local.ci_github_repo}/.github/workflows/ecr-live-tags.yml@refs/heads/main"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ecr_live_tagger" {
+  name                 = "${local.cluster_name}-ecr-live-tagger"
+  assume_role_policy   = data.aws_iam_policy_document.ecr_live_tagger_assume.json
+  max_session_duration = 3600
+  tags                 = { Project = "openbank", ManagedBy = "opentofu", Issue = "14189" }
+}
+
+data "aws_iam_policy_document" "ecr_live_tagger" {
+  statement {
+    sid       = "ListRepositories"
+    actions   = ["ecr:DescribeRepositories"]
+    resources = ["*"]
+  }
+  statement {
+    sid = "TagServiceImages"
+    actions = [
+      "ecr:DescribeImages",
+      "ecr:BatchGetImage",
+      "ecr:PutImage",
+      "ecr:BatchDeleteImage",
+    ]
+    resources = ["arn:aws:ecr:${local.region}:${data.aws_caller_identity.current.account_id}:repository/openbank-*"]
+  }
+}
+
+resource "aws_iam_role_policy" "ecr_live_tagger" {
+  name   = "ecr-live-tags"
+  role   = aws_iam_role.ecr_live_tagger.id
+  policy = data.aws_iam_policy_document.ecr_live_tagger.json
 }
