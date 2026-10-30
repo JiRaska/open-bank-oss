@@ -374,7 +374,7 @@ class AccountServiceTest {
         coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
-        coEvery { accountRepository.saveNewAccount(any(), any(), any(), any()) } answers { firstArg() }
+        coEvery { accountRepository.saveNewAccount(any(), any(), any(), any(), any()) } answers { firstArg() }
         coEvery { balancePort.initialize(any(), any(), any()) } returns Unit
         coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
 
@@ -496,7 +496,7 @@ class AccountServiceTest {
     fun `openAccount is refused when the revision lookup is unreachable even though the product resolved`() {
         val command = openAccountCommand()
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         coEvery { productCatalog.resolvePublishedRevision(command.productId, any()) } returns
             RevisionResolution.Unavailable
 
@@ -511,7 +511,7 @@ class AccountServiceTest {
     fun `openAccount is refused when the offering has no PUBLISHED revision`() {
         val command = openAccountCommand()
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         coEvery { productCatalog.resolvePublishedRevision(command.productId, any()) } returns
             RevisionResolution.NoPublishedRevision
 
@@ -529,7 +529,7 @@ class AccountServiceTest {
         val command = openAccountCommand()
         val eventFactory = slot<(Account) -> DomainEvent>()
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
-        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { sanctionsScreening.screen(any(), any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
         coEvery {
