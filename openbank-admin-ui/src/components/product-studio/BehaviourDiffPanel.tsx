@@ -95,17 +95,35 @@ function DiffView({ verdict, t }: { verdict: BehaviourDiffVerdict; t: (cs: strin
   if (verdict.kind === 'identical') {
     return <div data-testid="behaviour-diff-identical"><p>{t('Beze změny chování na tomto portfoliu.', 'No behavioural change on this portfolio.')}</p>{hashes}</div>
   }
+  const ids = (list: string[]) => list.length ? list.join(', ') : t('žádné', 'none')
   return (
     <div data-testid="behaviour-diff-changed">
       <p>{t('Změněné účty', 'Accounts changed')}: <b>{diff.changedAccounts} / {diff.portfolio.accounts}</b>
         {' · '}{t('Dopad na klienty (netto)', 'Customer outcome (net)')}: <b>{diff.aggregate.outcome.a} → {diff.aggregate.outcome.b} ({diff.aggregate.outcome.delta})</b></p>
-      <p>{t('Změna znaménka', 'Sign changed')}: <b>{diff.signChanged.length}</b>
-        {' · '}{t('Nad prahem', 'Over threshold')} {diff.materialityThreshold}: <b>{diff.thresholdCrossed.length}</b></p>
+      <p data-testid="behaviour-diff-sign-changed">{t('Změna znaménka', 'Sign changed')} ({diff.signChanged.length}): <b>{ids(diff.signChanged)}</b></p>
+      <p data-testid="behaviour-diff-threshold">{t('Nad prahem', 'Over threshold')} {diff.materialityThreshold} ({diff.thresholdCrossed.length}): <b>{ids(diff.thresholdCrossed)}</b></p>
       {hashes}
-      <table>
+      <table aria-label={t('Změněné účty', 'Changed accounts')} data-testid="behaviour-diff-accounts">
+        <thead><tr>
+          <th>{t('Účet', 'Account')}</th><th>{t('Dopad A', 'Outcome A')}</th><th>{t('Dopad B', 'Outcome B')}</th><th>Δ</th>
+          <th>{t('Zůstatek A', 'Balance A')}</th><th>{t('Zůstatek B', 'Balance B')}</th><th>{t('Odmítnuto A/B', 'Rejected A/B')}</th>
+        </tr></thead>
+        <tbody>{diff.accounts.map(row => <tr key={row.account}>
+          <td><code>{row.account}</code>{row.signChanged && <> · {t('znaménko', 'sign')}</>}{row.thresholdCrossed && <> · {t('práh', 'threshold')}</>}</td>
+          <td>{row.outcome.a}</td><td>{row.outcome.b}</td><td>{row.outcome.delta}</td>
+          <td>{row.finalBalance.a}</td><td>{row.finalBalance.b}</td><td>{row.rejectedPostings.a} / {row.rejectedPostings.b}</td>
+        </tr>)}</tbody>
+      </table>
+      <table aria-label={t('Zaúčtování podle pravidla', 'Postings by rule')} data-testid="behaviour-diff-posted">
         <thead><tr><th>ruleId</th><th>{t('Účetní třída', 'Accounting class')}</th><th>{t('Netto A', 'Net A')}</th><th>{t('Netto B', 'Net B')}</th><th>Δ</th></tr></thead>
         <tbody>{diff.aggregate.posted.map(row => <tr key={`${row.ruleId}:${row.accountingClass}`}>
           <td><code>{row.ruleId}</code></td><td>{row.accountingClass}</td><td>{row.a.net}</td><td>{row.b.net}</td><td>{row.deltaNet}</td>
+        </tr>)}</tbody>
+      </table>
+      <table aria-label={t('Počty instrukcí podle pravidla', 'Instruction counts by rule')} data-testid="behaviour-diff-counts">
+        <thead><tr><th>ruleId</th><th>{t('Druh', 'Kind')}</th><th>A</th><th>B</th><th>Δ</th></tr></thead>
+        <tbody>{diff.aggregate.instructionCounts.map(row => <tr key={`${row.ruleId}:${row.kind}`}>
+          <td><code>{row.ruleId}</code></td><td>{row.kind}</td><td>{row.a}</td><td>{row.b}</td><td>{row.delta}</td>
         </tr>)}</tbody>
       </table>
     </div>

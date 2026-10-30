@@ -19,7 +19,12 @@ const DIFF = {
   range: { from: '2026-01-01', to: '2026-03-31', zone: 'UTC', days: 90 }, portfolio: { accounts: 2, seed: null },
   materialityThreshold: '1.000000000000',
   aggregate: { outcome: { a: '1.000000000000', b: '3.500000000000', delta: '2.500000000000' }, posted: [{ ruleId: 'scheduled.capitalise', accountingClass: 'CUSTOMER_DEPOSIT', a: { debit: '0', credit: '1', net: '1.000000000000' }, b: { debit: '0', credit: '3.5', net: '3.500000000000' }, deltaNet: '2.500000000000' }], instructionCounts: [] },
-  signChanged: [], thresholdCrossed: ['sample-high'],
+  signChanged: [], thresholdCrossed: ['sample-high-balance'],
+  accounts: [{
+    account: 'sample-high-balance', outcome: { a: '1.000000000000', b: '3.500000000000', delta: '2.500000000000' },
+    finalBalance: { a: '20001.000000000000', b: '20003.500000000000', delta: '2.500000000000' },
+    rejectedPostings: { a: 0, b: 0 }, signChanged: false, thresholdCrossed: true, posted: [], instructionCounts: [],
+  }],
 }
 
 test.beforeEach(async ({ context, baseURL }) => {
@@ -56,6 +61,8 @@ for (const scenario of ['unconserved', 'changed'] as const) {
     } else {
       await expect(panel.getByTestId('behaviour-diff-changed')).toContainText('2.500000000000')
       await expect(panel.getByTestId('behaviour-diff-changed')).toContainText('scheduled.capitalise')
+      await expect(panel.getByTestId('behaviour-diff-accounts')).toContainText('sample-high-balance')
+      await expect(panel.getByTestId('behaviour-diff-threshold')).toContainText('sample-high-balance')
     }
     expect(posts).toEqual([`/api/svc/product-catalog/api/v2/offerings/${OFFERING.id}/revisions/${REVISION.id}/behaviour-diff`])
   })

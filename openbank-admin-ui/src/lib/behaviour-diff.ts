@@ -31,6 +31,16 @@ export type BehaviourDiffDocument = {
   }
   signChanged: string[]
   thresholdCrossed: string[]
+  accounts: Array<{
+    account: string
+    outcome: Triple
+    finalBalance: Triple
+    rejectedPostings: { a: number; b: number }
+    signChanged: boolean
+    thresholdCrossed: boolean
+    posted: BehaviourDiffDocument['aggregate']['posted']
+    instructionCounts: BehaviourDiffDocument['aggregate']['instructionCounts']
+  }>
 }
 
 export type BehaviourDiffVerdict =
@@ -52,13 +62,29 @@ export function behaviourDiffVerdict(diff: unknown): BehaviourDiffVerdict {
   return full.identical ? { kind: 'identical', diff: full } : { kind: 'changed', diff: full }
 }
 
-/** A small editable starting portfolio: one account below and one above a typical waiver threshold. */
+/**
+ * A starting portfolio in the golden-scenario `steps` grammar `obp diff --behavioural --portfolio` reads
+ * (openbank-products/portfolios): one account under and one over a typical waiver threshold, plus one
+ * customer withdrawal. The catalog reads it with the same parser as the CLI, so the same text gives the
+ * same accounts on both surfaces. Scheduled steps are optional: each revision's onOpen schedules run.
+ */
 export function samplePortfolio(currency: string, openedOn: string): string {
-  const account = (id: string, balance: string, postings: unknown[]) => ({ id, state: { currency, balance, openedOn }, postings })
+  const account = (id: string, balance: string, steps: unknown[]) => ({
+    id, state: { currency, balance, accruedInterest: '0.000000', openedOn }, steps,
+  })
+  const day = (offset: number) => {
+    const d = new Date(`${openedOn}T10:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + offset)
+    return d.toISOString().replace('.000Z', 'Z')
+  }
   return JSON.stringify({
+    zone: 'UTC',
     accounts: [
-      account('sample-low', '500.00', []),
-      account('sample-high', '20000.00', [{ on: openedOn, kind: 'DEPOSIT', direction: 'CREDIT', amount: '100.00' }]),
+      account('sample-low-balance', '500.00', [{ at: day(30), hook: 'scheduled', tag: 'CAPITALISATION' }]),
+      account('sample-high-balance', '20000.00', [{ at: day(30), hook: 'scheduled', tag: 'CAPITALISATION' }]),
+      account('sample-withdrawal', '100.00', [
+        { at: day(9), hook: 'prePosting', posting: { kind: 'WITHDRAWAL', direction: 'DEBIT', amount: '150.00' } },
+      ]),
     ],
   }, null, 2)
 }
