@@ -646,6 +646,7 @@ agents:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close   # #13883: releases a day-close hold; approvers only
         - treasury.deal.override-limit
         - treasury.nostro.*
         - "money.*"

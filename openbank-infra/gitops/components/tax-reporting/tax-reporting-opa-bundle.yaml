@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: tax-reporting-service
     app.kubernetes.io/part-of: tax-reporting
   annotations:
-    openbank.tech/policy-checksum: "42496d22834d0176"
+    openbank.tech/policy-checksum: "d939460e75647b66"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1367,6 +1367,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: vop-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "6b519d055e20c248"
+    openbank.tech/policy-checksum: "7bc97f0a3f6f5ad6"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1335,6 +1335,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

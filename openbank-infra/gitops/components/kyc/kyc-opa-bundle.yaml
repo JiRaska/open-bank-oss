@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyc-service
     app.kubernetes.io/part-of: kyc
   annotations:
-    openbank.tech/policy-checksum: "c2a4c064c0669545"
+    openbank.tech/policy-checksum: "9520796789e3ad8c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1325,6 +1325,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

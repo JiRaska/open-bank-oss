@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: anacredit-service
     app.kubernetes.io/part-of: anacredit
   annotations:
-    openbank.tech/policy-checksum: "25f99bb6183aca83"
+    openbank.tech/policy-checksum: "970e5a53e573a3c8"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1308,6 +1308,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

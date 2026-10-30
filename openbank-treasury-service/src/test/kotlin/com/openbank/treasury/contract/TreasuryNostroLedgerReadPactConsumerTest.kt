@@ -30,7 +30,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  *
  * The generated pact file is committed to `pacts/` (git-pact, ADR-0063) and replayed by
  * `LedgerPactProviderVerificationTest` (positive states) and
- * `LedgerNegativeAuthPactVerificationTest` (the 401) in openbank-ledger-service — no Pact Broker
+ * `LedgerNegativeAuthProviderVerificationTest` (the 401) in openbank-ledger-service — no Pact Broker
  * involved, both always run.
  *
  * IMPORTANT — regenerate on change: if this test's `@Pact` methods change, re-run
@@ -154,7 +154,7 @@ class TreasuryNostroLedgerReadPactConsumerTest {
      * identical to [nostroJournalLinesPact] — this pins that ledger still answers 401 (not a
      * silent 200 with stale/empty data) when it is. Shares `NEGATIVE_AUTH_STATE`
      * ("no valid M2M identity is presented") with sdd-/swift-/interest-/sepa-/transaction-service's
-     * equivalent interactions, replayed by ledger's `LedgerNegativeAuthPactVerificationTest`
+     * equivalent interactions, replayed by ledger's `LedgerNegativeAuthProviderVerificationTest`
      * (no `@TestSecurity` on that class — the state IS the absence of an identity).
      */
     @Pact(consumer = "openbank-treasury-service", provider = "openbank-ledger-service")

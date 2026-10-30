@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-23T09:37:33.301487+00:00",
+  "generatedAt": "2026-10-30T09:28:40.629375+00:00",
   "netpol": {
     "available": true,
     "covered": 72,
@@ -9,9 +9,9 @@
   },
   "freshness": {
     "available": true,
-    "fleetScore": 81,
-    "scoredModules": 16,
-    "unknownModules": 11
+    "fleetScore": 75,
+    "scoredModules": 26,
+    "unknownModules": 3
   },
   "credentials": {
     "available": true,
@@ -32,7 +32,7 @@
     "withModel": 28,
     "missing": [],
     "staleCount": 0,
-    "oldestDays": 1
+    "oldestDays": 8
   },
   "mttr": {
     "available": true,

@@ -65,6 +65,7 @@ describe('GET /api/finops/anomalies', () => {
       anomalies: [{ detector: 'D2', title: 'Idle service detected', status: 'open' }],
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('http://kube-prometheus-stack-alertmanager.observability.svc:9093/tools/alertmanager/api/v2/alerts?filter=route%3Dfinops-agent')
     expect(fetchMock.mock.calls[0][1]?.signal).toBe(signal)
   })
 

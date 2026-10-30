@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pension-fund-service
     app.kubernetes.io/part-of: pension-fund
   annotations:
-    openbank.tech/policy-checksum: "61563e34a1cd0126"
+    openbank.tech/policy-checksum: "97609914c6eb610a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1366,6 +1366,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "7ab1bc7e4c5e0c52"
+    openbank.tech/policy-checksum: "15cb3251e462bd55"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1604,6 +1604,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*
