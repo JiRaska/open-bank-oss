@@ -1603,12 +1603,14 @@ class GitHub:
         return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
 
     def rerun_inconclusive(self, sha: str, contexts: list[str]) -> bool:
-        """Re-run the cancelled (or inconclusively failed, #13400) jobs of the workflow runs behind
-        `contexts` on `sha` (once per carrier; the caller records it). True only when every run accepted."""
+        """Retry once per run, including CI's attempt-bound evidence ancestor. The caller keeps the
+        carrier's one-retry budget; a refused/uncertain write never triggers another scope of retry."""
         latest: dict[str, dict] = {}
         for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
             if check["name"] in contexts and (check["name"] not in latest or check["id"] > latest[check["name"]]["id"]):
                 latest[check["name"]] = check
+        if set(latest) != set(contexts):
+            return False
         runs = set()
         for check in latest.values():
             m = re.search(r"/actions/runs/([0-9]+)/job", check.get("details_url") or check.get("html_url") or "")
@@ -1617,7 +1619,50 @@ class GitHub:
             runs.add(int(m.group(1)))
         if not runs:
             return False
-        return all(api("POST", f"/repos/{self.repo}/actions/runs/{r}/rerun-failed-jobs", {})[0] == 201 for r in sorted(runs))
+        plans = []
+        for run in sorted(runs):
+            path = f"/repos/{self.repo}/actions/runs/{run}"
+            code, info = api("GET", path)
+            if (code != 200 or not isinstance(info, dict) or info.get("head_sha") != sha
+                    or info.get("status") != "completed" or type(info.get("run_attempt")) is not int
+                    or info["run_attempt"] < 1 or not isinstance(info.get("path"), str)):
+                return False
+            workflow = info["path"].split("@", 1)[0]
+            if not re.fullmatch(r"\.github/workflows/[^/]+\.ya?ml", workflow):
+                return False
+            retry = path + "/rerun-failed-jobs"
+            if workflow == ".github/workflows/ci.yml":
+                attempt = info["run_attempt"]
+                jobs = paginate(path + "/jobs?filter=latest", "jobs")
+                # Latest results can include a successful ancestor retained from an OLD attempt.
+                # Such a job cannot be retried by id, and its snapshot cannot authorize a new one.
+                conclusions = {"success", "skipped", "neutral", "failure", "cancelled", "timed_out",
+                               "action_required", "stale", "startup_failure"}
+                if not jobs or any(not isinstance(j, dict) or type(j.get("id")) is not int or j["id"] < 1
+                                   or j.get("run_id") != run or not isinstance(j.get("name"), str)
+                                   or j.get("status") != "completed" or j.get("conclusion") not in conclusions
+                                   or type(j.get("run_attempt")) is not int or not 1 <= j["run_attempt"] <= attempt
+                                   for j in jobs):
+                    return False
+                receiver_name = "Receive trusted ruleset evidence"
+                receivers = [j for j in jobs if j["name"] == receiver_name]
+                if len(receivers) > 1:
+                    return False
+                failed = [j for j in jobs if j["conclusion"] not in {"success", "skipped", "neutral"}]
+                descendants_only = all(j["name"] in {receiver_name, GATE_AGGREGATE_JOB}
+                                       or GATE_SHARD_JOB_RE.fullmatch(j["name"]) for j in failed)
+                if receivers and receivers[0]["run_attempt"] == attempt and descendants_only:
+                    # GitHub reruns this job AND its dependents in one attempt. Never retry a gate
+                    # first and then the receiver: that creates yet another attempt boundary.
+                    retry = f"/repos/{self.repo}/actions/jobs/{receivers[0]['id']}/rerun"
+                else:
+                    # Full CI is necessary when the receiver is inherited or another failed job
+                    # is outside its dependency closure. The separate Services CI is untouched.
+                    retry = path + "/rerun"
+            plans.append(retry)
+        # Finish every read before the first mutation. api() never retries an uncertain POST;
+        # no failed-only/full-run fallback is permitted after a refused receiver request either.
+        return all(api("POST", path, {})[0] == 201 for path in plans)
 
     def failures_inconclusive(self, sha: str, failing: list[str]) -> tuple[bool, str]:
         """Whether the carrier's failing contexts failed ONLY for inconclusive gate kinds (budget overrun,
@@ -2044,6 +2089,30 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
     return "published"
 
 
+def defer_recovered_main_red(gh, base: str, main_red: dict[str, str], summary: dict) -> bool:
+    """Fresh current-tip health before exceptional fix priority; never reuse planning reads.
+    Pending/missing results retain existing ancestor-red semantics. An observed healthy context
+    invalidates this plan, not the PR: the next tick reconstructs reservation and candidate order.
+    """
+    if not main_red:
+        return False
+    try:
+        with deciding():
+            current = gh.checks(base)
+        recovered = sorted(ctx for ctx in main_red if current.get(ctx) == "success")
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError):
+        reason = "current main health could not be read"
+    else:
+        if not recovered:
+            return False
+        reason = "current main recovered: " + ", ".join(recovered)
+    summary["in_flight"] = True  # suppress build as well as every later mutation this tick
+    summary["main_health_deferred"] = reason
+    log(f"::notice::{reason}; stale main-red priority discarded — next tick")
+    return True
+
+
+
 def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     """Judge every finished App carrier, then post the fast lane from live data."""
     summary: dict = {"in_flight": False, "merged": [], "culprits": [], "bisected": [], "rejected": [], "fast": [],
@@ -2061,6 +2130,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     # Read the strict lane BEFORE settling any carrier: a reservation holds train merges as well as the
     # fast lane, or main moves under the reserved head's CI and it is re-updated forever (#13456).
     base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required)
+    if defer_recovered_main_red(gh, base, main_red, summary):
+        return summary
     holder, timed_out = strict_reservation(git, base, strict, shadow,
                                            fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
                                            activity=gh.ci_activity)
@@ -2233,6 +2304,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     # below must already see it.
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
                 yield_why)
+    if summary.get("main_health_deferred"):
+        return summary
     if (holder is not None and not carrier_in_flight and not summary["updated"] and not summary["strict"]
             and train_waiting and not main_red and not any(is_carrier(p, repo) for p in gh.open_prs())
             and deferral_state(gh, git, strict, holder) == "open"):
@@ -2665,6 +2738,7 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         fixes = strict_fixes(gh, git, base, strict, main_red, cache)
         strict = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)  # stable: oldest first within
     updated = holder is not None  # main reserved (strict_reservation): no other strict-lane action while it runs
+    main_health_checked = False  # one final inventory read, shared by this strict-lane invocation
     for state, view in strict:
         n, head = view["number"], view["head_sha"]
         if holder is not None and n != holder:
@@ -2676,6 +2750,10 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         if current and state == "pending" and n in (timed_out or []):
             continue
         fix = fixes.get(n)
+        if fix and state == "green" and not main_health_checked:
+            main_health_checked = True
+            if defer_recovered_main_red(gh, base, main_red, summary):
+                return
         if current and state == "pending":
             log(f"#{n:>6} strict    up to date, CI running: main reserved for it")
             summary["in_flight"] = True
@@ -3299,6 +3377,132 @@ def _synthetic_origin(root: str) -> None:
               "docs/d.md": "d\n"})
 
 
+def retry_planner_self_test(check) -> None:
+    """Exercise the real GitHub adapter and HTTP transport scope, without live API access."""
+    import copy
+
+    sha, prefix = "a" * 40, "/repos/x/y/actions"
+    checks = [{"name": "gates (data)", "id": 901,
+               "details_url": "https://github.com/x/y/actions/runs/123/job/501"},
+              {"name": "Validate manifests", "id": 902,
+               "details_url": "https://github.com/x/y/actions/runs/123/job/502"}]
+    run = {"id": 123, "path": ".github/workflows/ci.yml", "head_sha": sha,
+           "run_attempt": 2, "status": "completed", "conclusion": "failure"}
+    def job(job_id, name, conclusion="success", attempt=2):
+        return {"id": job_id, "name": name, "status": "completed", "conclusion": conclusion,
+                "run_id": 123, "run_attempt": attempt}
+    jobs = [job(500, "Receive trusted ruleset evidence"), job(501, "gates (data)", "failure"),
+            job(502, "Validate manifests", "failure"), job(503, "UI build", attempt=1)]
+    saved = (_http_open, _api_sleep, os.environ.get("GH_TOKEN"), _api_slept[0], dict(_GET_MEMO))
+    receiver_post, full_post, failed_post = (f"{prefix}/jobs/500/rerun", f"{prefix}/runs/123/rerun",
+                                            f"{prefix}/runs/123/rerun-failed-jobs")
+
+    def exercise(label, *, metadata=None, listing=None, check_runs=None, want=None,
+                 read_error=None, post_error=None, extra_run=False):
+        metadata = copy.deepcopy(run if metadata is None else metadata)
+        listing = copy.deepcopy(jobs if listing is None else listing)
+        check_runs = copy.deepcopy(checks if check_runs is None else check_runs)
+        if extra_run:
+            check_runs.append({"name": "other", "id": 903,
+                               "details_url": "https://github.com/x/y/actions/runs/124/job/600"})
+        calls = []
+        def http(req, timeout):
+            parsed = urllib.parse.urlsplit(req.full_url)
+            path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
+            calls.append((req.method, path, query))
+            if req.method == "POST":
+                if post_error:
+                    raise urllib.error.HTTPError(req.full_url, post_error, "fixture write refused", {}, io.BytesIO(b"fixture"))
+                return 201, b"{}", {}
+            if req.method != "GET":
+                raise AssertionError(f"unexpected method {req.method}")
+            if read_error and read_error in path:
+                raise urllib.error.HTTPError(req.full_url, 403, "fixture read refused", {}, io.BytesIO(b"fixture"))
+            if path == f"/repos/x/y/commits/{sha}/check-runs":
+                data = {"check_runs": check_runs}
+            elif path == f"{prefix}/runs/123":
+                data = metadata
+            elif path == f"{prefix}/runs/124":
+                data = {}  # An unreadable second plan must not cause the first write.
+            elif path == f"{prefix}/runs/123/jobs":
+                if query.get("filter") != ["latest"]:
+                    raise AssertionError("job listing must request latest results")
+                offset = (int(query.get("page", ["1"])[0]) - 1) * 100
+                data = {"jobs": listing[offset:offset + 100]}
+            else:
+                raise AssertionError(f"unexpected read {path}")
+            return 200, json.dumps(data).encode(), {}
+        globals()["_http_open"] = http
+        globals()["_api_sleep"] = lambda seconds: (_ for _ in ()).throw(AssertionError("no retries expected"))
+        _GET_MEMO.clear()
+        _api_slept[0] = 0
+        os.environ["GH_TOKEN"] = "offline-fixture"
+        result, error = None, None
+        try:
+            result = GitHub("x/y", "main", "offline://fixture").rerun_inconclusive(
+                sha, [item["name"] for item in checks] + (["other"] if extra_run else []))
+        except (ApiAbort, SystemExit) as exc:
+            error = type(exc).__name__
+        posts = [path for method, path, _ in calls if method == "POST"]
+        if want is None:
+            ok = not posts and result is not True
+        elif post_error:
+            ok = posts == [want] and result is not True
+        else:
+            ok = posts == [want] and result is True and error is None
+        check(f"retry planner: {label}", ok, f"result={result} error={error} posts={posts} calls={calls}")
+        return calls
+
+    try:
+        exercise("current receiver refreshes its descendants once", want=receiver_post)
+        inherited = copy.deepcopy(jobs)
+        inherited[0]["run_attempt"] = 1
+        exercise("old successful receiver requires one full CI run", listing=inherited, want=full_post)
+        exercise("absent current receiver requires one full CI run", listing=jobs[1:], want=full_post)
+        outside = copy.deepcopy(jobs)
+        outside[-1].update(conclusion="cancelled", run_attempt=2)
+        exercise("cancelled job outside receiver descendants requires full CI", listing=outside, want=full_post)
+        exercise("unrelated workflow keeps failed-only", metadata={**run, "path": ".github/workflows/security.yml"},
+                 want=failed_post)
+        exercise("workflow ref suffix still identifies actual CI", metadata={**run, "path": run["path"] + "@refs/pull/1/merge"},
+                 want=receiver_post)
+        for label, metadata in [("missing metadata", {}), ("wrong source", {**run, "head_sha": "b" * 40}),
+                                ("nonterminal run", {**run, "status": "in_progress"}),
+                                ("invalid attempt", {**run, "run_attempt": 0}),
+                                ("boolean attempt", {**run, "run_attempt": True}),
+                                ("unknown workflow", {**run, "path": ""})]:
+            exercise(label, metadata=metadata)
+        exercise("missing requested check", check_runs=checks[:1])
+        exercise("run read denied", read_error="/runs/123")
+        exercise("job read denied", read_error="/jobs")
+        exercise("empty job evidence", listing=[])
+        exercise("ambiguous receiver", listing=jobs + [job(600, "Receive trusted ruleset evidence")])
+        future = copy.deepcopy(jobs)
+        future[0]["run_attempt"] = 3
+        exercise("attempt advanced during read", listing=future)
+        exercise("unreadable later run causes no earlier write", extra_run=True)
+        for code in (403, 500):
+            exercise(f"receiver POST {code} never falls back to another write", want=receiver_post, post_error=code)
+        paged = [job(1000 + n, f"green-{n}") for n in range(100)] + jobs
+        calls = exercise("receiver on second page is found", listing=paged, want=receiver_post)
+        check("retry planner: jobs fully paginated", any(path.endswith("/jobs") and query.get("page") == ["2"]
+                                                       for _, path, query in calls), str(calls))
+        workflow = pathlib.Path(".github/workflows/ci.yml").read_text()
+        check("retry planner: current CI declares the selected receiver and direct gate dependency",
+              "name: Receive trusted ruleset evidence" in workflow
+              and "needs: [agent-admission, ruleset-evidence]" in workflow
+              and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-rbac-contract]" in workflow)
+    finally:
+        globals()["_http_open"], globals()["_api_sleep"] = saved[:2]
+        if saved[2] is None:
+            os.environ.pop("GH_TOKEN", None)
+        else:
+            os.environ["GH_TOKEN"] = saved[2]
+        _api_slept[0] = saved[3]
+        _GET_MEMO.clear()
+        _GET_MEMO.update(saved[4])
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -3308,6 +3512,15 @@ def self_test() -> int:
         ran.append(label)
         if not cond:
             fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
+
+    retry_planner_self_test(check)
+
+    freshness = subprocess.run(
+        [sys.executable, ".github/scripts/test-merge-train-main-red-freshness.py"],
+        text=True, capture_output=True, timeout=15,
+    )
+    check("main-red freshness: actual settle/strict controller regressions", freshness.returncode == 0,
+          freshness.stdout + freshness.stderr)
 
     # ---- qualifies -----------------------------------------------------------------------
     req = ["all-green", "Gitleaks", STATUS_CONTEXT]

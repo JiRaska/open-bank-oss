@@ -105,7 +105,7 @@ class RunnerTests(unittest.TestCase):
     def run_case(self, case):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for i in range(5):
+            for i in range(17):
                 module = root / f'openbank-test-{i}'
                 module.mkdir()
                 (module / 'build.gradle.kts').write_text('')
@@ -136,11 +136,11 @@ class RunnerTests(unittest.TestCase):
                 if case == 'second-fails' and len(calls) == 2:
                     raise RuntimeError('producer failed')
                 coverage = Path(child_env['DEPENDENCY_GRAPH_COVERAGE_DIR'])
-                tasks = [arg for arg in command if arg.endswith(':ForceDependencyResolutionPlugin_resolveProjectDependencies')]
+                tasks = [arg for arg in command if arg.endswith(':OpenBankResolveDependencyGraph')]
                 for index, task in enumerate(tasks):
                     if case == 'missing-receipt' and index == 0:
                         continue
-                    project = task.removesuffix(':ForceDependencyResolutionPlugin_resolveProjectDependencies') or ':'
+                    project = task.removesuffix(':OpenBankResolveDependencyGraph') or ':'
                     receipt = {'version': 1, 'sha': SHA, 'project': project, 'configurations': ['runtimeClasspath']}
                     if case == 'wrong-receipt':
                         receipt['sha'] = '2' * 40
@@ -167,9 +167,20 @@ class RunnerTests(unittest.TestCase):
                     result = subject.generate(root, output, env)
                     self.assertEqual(result['sha'], SHA)
                     self.assertEqual(len(calls), 2)
+                    self.assertEqual([sum(arg.endswith(':OpenBankResolveDependencyGraph')
+                                              for arg in command) for command in calls], [17, 1])
+                    self.assertCountEqual(
+                        [arg for command in calls for arg in command
+                         if arg.endswith(':OpenBankResolveDependencyGraph')],
+                        [':OpenBankResolveDependencyGraph',
+                         *(f':openbank-test-{i}:OpenBankResolveDependencyGraph' for i in range(17))],
+                    )
                     self.assertEqual(timeouts, [240, 10] if case == 'budget-truncated' else [240, 180])
                     self.assertTrue((output / 'merged.json').is_file())
                     self.assertTrue(all('--continue' not in cmd for cmd in calls))
+                    self.assertTrue(all('--stacktrace' in cmd for cmd in calls))
+                    self.assertTrue(all('--configure-on-demand' in cmd for cmd in calls))
+                    self.assertTrue(all('--no-configure-on-demand' not in cmd for cmd in calls))
                 else:
                     with self.assertRaises((ValueError, RuntimeError)):
                         subject.generate(root, output, env)

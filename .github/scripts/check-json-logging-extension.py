@@ -55,7 +55,10 @@ RESOURCE_FILES = (
     "src/main/resources/application.properties",
     "src/main/resources/META-INF/microprofile-config.properties",
 )
-QUARKUS_PLUGIN = re.compile(r'id\("io\.quarkus"\)|alias\(libs\.plugins\.quarkus\)')
+QUARKUS_PLUGIN = re.compile(
+    r'id\("io\.quarkus"\)|alias\(libs\.plugins\.quarkus\)'
+    r'|pluginManager\.apply\("io\.quarkus"\)'
+)
 PLUGIN_ID = re.compile(r'id\("([A-Za-z0-9_.\-]+)"\)')
 PROJECT_DEP = re.compile(r'project\("(:[A-Za-z0-9_.\-]+)"\)')
 CATALOG_ALIAS = re.compile(r'^\s*([A-Za-z0-9_\-]+)\s*=\s*\{[^}]*module\s*=\s*"io\.quarkus:' + EXTENSION + '"', re.M)
@@ -226,6 +229,18 @@ def self_test() -> int:
         "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts": convention_with,
         "openbank-a-service/build.gradle.kts": service,
     }, [], 1)
+    case("extension through imperative convention plugin application", {
+        **lib,
+        "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts":
+            convention_with.replace('id("io.quarkus")', 'pluginManager.apply("io.quarkus")'),
+        "openbank-a-service/build.gradle.kts": service,
+    }, [], 1)
+    case("imperative convention application without extension is flagged", {
+        **lib,
+        "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts":
+            convention_without.replace('id("io.quarkus")', 'pluginManager.apply("io.quarkus")'),
+        "openbank-a-service/build.gradle.kts": service,
+    }, ["openbank-a-service"], 1)
     case("extension declared directly", {
         **lib,
         "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts": convention_without,
@@ -254,7 +269,7 @@ def self_test() -> int:
         for failure in failures:
             print(f"self-test FAIL: {failure}")
         return 1
-    print("self-test OK: 9 cases — four absent-extension shapes flagged, three declarations accepted, "
+    print("self-test OK: 11 cases — absent extensions flagged for declarative and imperative plugins; declarations accepted; "
           "json=false and a comment-only declaration handled")
     return 0
 
