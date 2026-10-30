@@ -94,6 +94,7 @@ openbank-lending-service POST /api/v1/lending/ledger-backfill/requests/{id}/exec
 openbank-sanctions-service POST /api/v1/sanctions/lists/refresh-all  # creation POST with no idempotency key today — burn-down #8351
 openbank-sanctions-service POST /api/v1/sanctions/lists/{listType}/refresh  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sanctions-service POST /api/v1/sanctions/review  # creation POST with no idempotency key today — burn-down #8351
+openbank-sanctions-service POST /api/v3/sanctions/review  # same review operation as v1, with no idempotency key today — burn-down #8351; v3 boundary #10760
 openbank-sca-service POST /api/v1/sca/challenges  # Idempotency-Key/X-Request-ID replay via store — ADR-0296, burn-down #8351
 openbank-sca-service POST /api/v1/sca/challenges/{id}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sca-service POST /api/v1/sca/challenges/{id}/verify  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
