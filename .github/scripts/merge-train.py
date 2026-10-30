@@ -452,7 +452,8 @@ def extra_verdict(states: list[str | None]) -> str | None:
 
 
 def owner_approval_valid(number: int, ref: str, app: dict | None) -> bool:
-    """Only the latest App status on this exact head can admit an owner-approved codex PR.
+    """Only the App's owner decision can admit a codex PR: the latest one on this exact head, or (ADR-0343
+    2026-10-29) the newest on any head approval_chain() links it to through pure main-update merges.
 
     app_statuses() authenticates the producer and SHA. The canonical description additionally
     binds the PR number, so two PRs sharing a head cannot borrow each other's approval.
@@ -461,6 +462,64 @@ def owner_approval_valid(number: int, ref: str, app: dict | None) -> bool:
         return True
     return (type(number) is int and number > 0
             and (app or {}).get(OWNER_APPROVAL_CONTEXT) == ("success", f"owner-approved PR #{number}"))
+
+
+APPROVAL_CHAIN_MAX = 16   # update merges an approval may survive; a longer run of them needs a re-approval
+
+
+def approval_chain(git, base: str, head: str) -> list[str]:
+    """`head`, then each earlier head an owner approval may have been given on and still cover.
+
+    Walks first parents back from `head` while the commit is a pure main-update merge: exactly two
+    parents, the second reachable from `base` (main brought in nothing but main), and its tree equal to
+    the tree `git merge-tree --write-tree` computes from the two parents — conflict-free and with no
+    edit smuggled into the merge. The walk stops at the first commit that is anything else (a push, a
+    hand-resolved conflict, a merge of a non-main branch), so an approval on any listed head covers
+    exactly the delta the owner reviewed. Deterministic and local: commits are immutable, so the chain
+    is a git fact, not a verdict; the decisions on it are always read live (owner_decision)."""
+    chain, c = [head], head
+    while len(chain) < APPROVAL_CHAIN_MAX:
+        parents = git("rev-list", "--parents", "-n", "1", c, check=False).stdout.split()
+        if len(parents) != 3 or not all(SHA_RE.fullmatch(x) for x in parents):
+            break
+        _, first, second = parents
+        if git("merge-base", "--is-ancestor", second, base, check=False).returncode != 0:
+            break
+        merged = git("merge-tree", "--write-tree", first, second, check=False)
+        if merged.returncode != 0:   # 1 = conflicted, anything else = could not compute: fail closed
+            break
+        tree = merged.stdout.split("\n", 1)[0].strip()
+        own = git("rev-parse", "--verify", "--quiet", f"{c}^{{tree}}", check=False).stdout.strip()
+        if not SHA_RE.fullmatch(tree) or tree != own:
+            break
+        chain.append(first)
+        c = first
+    return chain
+
+
+def remember_approval_chain(gh, git, base: str, head: str) -> list[str]:
+    chain = approval_chain(git, base, head)
+    gh.__dict__.setdefault("approval_chains", {})[head] = chain
+    return chain
+
+
+def owner_decision(gh, chain: list[str]) -> tuple[str, str] | None:
+    """The NEWEST App owner decision on any head of the chain, read live: a revoke posted on an earlier
+    head after an approval on a later one still revokes. None = no decision anywhere."""
+    best = None
+    for sha in chain:
+        rec = gh.app_status_latest(sha, OWNER_APPROVAL_CONTEXT)
+        if rec is not None and (best is None or rec[0] > best[0]):
+            best = rec
+    return (best[1], best[2]) if best else None
+
+
+def with_owner_decision(gh, app: dict, chain: list[str]) -> dict:
+    out = {k: v for k, v in app.items() if k != OWNER_APPROVAL_CONTEXT}
+    decision = owner_decision(gh, chain)
+    if decision is not None:
+        out[OWNER_APPROVAL_CONTEXT] = decision
+    return out
 
 
 def live_source_intent(gh, number: int, head: str) -> bool:
@@ -489,7 +548,12 @@ def live_source_intent(gh, number: int, head: str) -> bool:
         ref = source.get("ref")
         if not isinstance(ref, str) or not ref or TRAIN_BRANCH_RE.fullmatch(ref):
             return False
-        app = gh.app_statuses(head) if any(ref.startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES) else None
+        app = None
+        if any(ref.startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES):
+            # The chain was derived from git by live_candidates in this process; without it only the
+            # exact head counts (fail closed). Every decision on it is re-read live here.
+            chain = (gh.__dict__.get("approval_chains") or {}).get(head) or [head]
+            app = with_owner_decision(gh, {}, chain) if len(chain) > 1 and chain[0] == head else gh.app_statuses(head)
         return owner_approval_valid(number, ref, app)
 
 
@@ -512,7 +576,7 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
         return False, "head is a fork"
     ref = pr.get("head_ref") or ""
     if not owner_approval_valid(pr.get("number"), ref, app):
-        return False, "codex PR needs owner approval on this exact head"
+        return False, "codex PR needs owner approval on this head or one it updated from main"
     for f in pr.get("files") or []:
         if unsafe_path(f):
             return False, "a path contains a control character — manual lane, never a train"
@@ -1348,6 +1412,19 @@ def owner_approval_error(repo: str, number: int, head: str, decision: str,
     return None
 
 
+def owner_status_line(statuses: list) -> str | None:
+    """Newest owner-approval status created by the App itself (login AND id); anyone else's is ignored.
+    The description is attacker-influenceable text on a shared summary, so strip all but plain
+    printable ASCII (no markdown/HTML metacharacters) and truncate."""
+    mine = [st for st in statuses if st.get("context") == OWNER_APPROVAL_CONTEXT
+            and (st.get("creator") or {}).get("login") == BOT_LOGIN and (st.get("creator") or {}).get("id") == BOT_ID]
+    if not mine:
+        return None
+    st = max(mine, key=lambda x: x["id"])
+    desc = re.sub(r"[^A-Za-z0-9 #:._-]", "", str(st.get("description") or ""))[:80]
+    return f"state={re.sub(r'[^a-z_]', '', str(st.get('state')))[:20]} description={desc}"
+
+
 def mode_owner_approval(gh, number: int, head: str, decision: str) -> None:
     metadata = get(f"/repos/{gh.repo}")
     pr = gh.pr(number)
@@ -1461,6 +1538,16 @@ class GitHub:
             if (st.get("creator") or {}).get("login") == BOT_LOGIN:
                 out.setdefault(st["context"], (st["state"], st.get("description") or ""))
         return out
+
+    def app_status_latest(self, sha: str, context: str) -> tuple[int, str, str] | None:
+        """(id, state, description) of the App's latest `context` status on `sha`; ids order globally."""
+        rows = [st for st in paginate(f"/repos/{self.repo}/commits/{sha}/statuses")
+                if (st.get("creator") or {}).get("login") == BOT_LOGIN and st.get("context") == context
+                and type(st.get("id")) is int]
+        if not rows:
+            return None
+        st = max(rows, key=lambda r: r["id"])
+        return st["id"], st["state"], st.get("description") or ""
 
     def unverified(self, sha: str, guard: bool) -> str | None:
         """Why a write acting on `sha`'s verdict must NOT happen, re-read live (deciding): the ruleset —
@@ -1705,6 +1792,10 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         view = pr_view(repo, p, files)
         view["special_paths"] = [x for c in entries if c.new_mode in SPECIAL_MODES for x in c.paths]
         app = gh.app_statuses(fetched)
+        if any(p["head"]["ref"].startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES):
+            chain = remember_approval_chain(gh, git, base, fetched)
+            if len(chain) > 1:   # an exact-head decision is already in `app`: no extra read
+                app = with_owner_decision(gh, app, chain)
         view["app"] = app                    # strict_lane reads the notice from it, no second read
         checks = pinned_checks(gh, fetched, extra)
         ok, why = qualifies(view, member_required, checks, app, untrainable, extra=extra)
@@ -2759,12 +2850,17 @@ def owner_approval_declaration_errors(text: str) -> list[str]:
             "show HEAD:.github/scripts/merge-train.py", "python3 -I -S", '" owner-approval',
             '--pr "$OWNER_PR" --head "$OWNER_HEAD" --decision "$OWNER_DECISION"']
     errors = [f"owner approval writer missing {needle}" for needle in must if needle not in sec]
-    if "group: merge-train-owner-approval-${{ github.event_name }}-${{ github.ref }}" not in code or "cancel-in-progress: false" not in code:
+    if "group: merge-train-owner-approval-${{ github.event_name }}-${{ github.ref }}-${{ github.actor }}-${{ inputs.pr }}" not in code or "cancel-in-progress: false" not in code:
         errors.append("owner decisions must serialize separately from untrusted PR verification")
     if sec.count("actions/checkout@") != 1 or sec.count("ref: main") != 1:
         errors.append("owner approval writer must check out main exactly once")
-    if sec.count("run:") != 1:
-        errors.append("owner approval writer must have only its isolated decision command")
+    for needle in (r"^[1-9][0-9]*$", r"^[0-9a-f]{40}$"):
+        if needle not in sec:
+            errors.append(f"owner approval writer must validate inputs with {needle}")
+    if sec.index("Validate decision inputs") > sec.index("actions/checkout@"):
+        errors.append("owner approval input validation must run before anything else")
+    if sec.count("run:") != 4:
+        errors.append("owner approval writer must have only validation, revoke-first, decision and summary commands")
     for forbidden in ("github.head_ref", "github.event.", "download-artifact", "gh pr merge", "gh pr review",
                       "contents: write", "statuses: write", "pull_request_target:"):
         if forbidden in code:
@@ -2962,8 +3058,20 @@ class FakeGitHub:
                 out.setdefault(ctx, (state, desc))
         return out
 
+    def app_status_latest(self, sha, context):
+        seqs = self.__dict__.get("_seq", {}).get(sha, [])
+        rows = self.statuses.get(sha, [])
+        for i in range(len(rows) - 1, -1, -1):
+            ctx, state, desc, creator = rows[i]
+            if ctx == context and creator == BOT_LOGIN:
+                return (seqs[i] if i < len(seqs) else 0), state, desc
+        return None
+
     def post_status(self, sha, state, description, context=STATUS_CONTEXT, creator=BOT_LOGIN, *, source_number=None):
         self.statuses.setdefault(sha, []).append((context, state, description, creator))
+        seq = self.__dict__.setdefault("_seq", {})
+        self.__dict__["_n"] = self.__dict__.get("_n", 0) + 1
+        seq[sha] = seq.get(sha, [])[:len(self.statuses[sha]) - 1] + [self._n]
 
     def comment(self, n, text): self.comments.append((n, text))
 
@@ -3765,6 +3873,66 @@ def self_test() -> int:
             check("owner: approved codex workflow uses strict lane", gh.merged == [71]
                   and gh.app_statuses(h).get(STATUS_CONTEXT, ("", ""))[1].startswith("strict lane:"), str(gh.merged))
             reset()
+
+            # An approval survives an update that brought in only main (#13613): the train's update-branch
+            # merge must not void it, and nothing else may ride on it. Negative cases first.
+            def owner_updated(case):
+                """Approve #70 on H, move main, then give the PR head H' per `case`."""
+                gh.add_pr(70, "codex/owner-feature", "2026-01-01")
+                h0 = gh.prs[70]["head"]["sha"]
+                gh.post_status(h0, "success", "owner-approved PR #70", OWNER_APPROVAL_CONTEXT)
+                wt = tempfile.mkdtemp(dir=root)
+                gh.g("worktree", "add", "-q", "--detach", wt, "main")
+
+                def wg(*a):
+                    return sh(["git", "-c", "core.hooksPath=/dev/null", *a], cwd=wt, env=base_env())
+
+                def put(rel, text):
+                    pathlib.Path(wt, rel).parent.mkdir(parents=True, exist_ok=True)
+                    pathlib.Path(wt, rel).write_text(text)
+                    wg("add", rel)
+                put("docs/one.md" if case == "conflict" else "docs/main-moved.md", "main\n")
+                wg("commit", "-q", "-m", "main moves")
+                moved = wg("rev-parse", "HEAD").stdout.strip()
+                gh.g("update-ref", "refs/heads/main", moved)
+                if case == "force-push":   # same change re-made on top of main: H is no longer an ancestor
+                    put("docs/one.md", "1\n")
+                    wg("commit", "-q", "-m", "p1 again")
+                else:
+                    wg("checkout", "-q", "--detach", h0)
+                    merged = sh(["git", "-c", "core.hooksPath=/dev/null", "merge", "-q", "--no-edit", moved],
+                                cwd=wt, env=base_env(), check=False)
+                    if case == "conflict":   # hand-resolved: the tree is not what git computes
+                        check("owner chain fixture: the conflict is real", merged.returncode != 0)
+                        put("docs/one.md", "1\nmain\n")
+                        wg("commit", "-q", "--no-edit")
+                    if case == "smuggle":    # a clean merge amended with an edit the owner never saw
+                        put("docs/smuggled.md", "x\n")
+                        wg("commit", "-q", "--amend", "--no-edit")
+                    if case == "extra":      # an ordinary commit after the update merge
+                        put("docs/extra.md", "x\n")
+                        wg("commit", "-q", "-m", "extra")
+                h1 = wg("rev-parse", "HEAD").stdout.strip()
+                gh.g("worktree", "remove", "--force", wt)
+                gh.g("branch", "-f", "codex/owner-feature", h1)
+                gh.prs[70]["head"]["sha"] = h1
+                if case == "revoke":   # revoked on H after the train moved the PR to H'
+                    gh.post_status(h0, "failure", "owner-revoked PR #70", OWNER_APPROVAL_CONTEXT)
+                return h0, h1
+
+            for case in ("extra", "smuggle", "conflict", "force-push", "revoke"):
+                owner_updated(case)
+                drain()
+                check(f"owner chain: approval on H does not cover a {case} head", gh.merged == [], f"{case}: {gh.merged}")
+                reset()
+                gh.g("branch", "-f", "codex/owner-feature", "p1")
+            h0, h1 = owner_updated("clean")
+            check("owner chain: the clean update is a main-only merge of H",
+                  remember_approval_chain(gh, Git(clone("chain")), gh.main_sha(), h1)[:2] == [h1, h0])
+            drain()
+            check("owner chain: approval on H survives a clean update merge with main", gh.merged == [70], str(gh.merged))
+            reset()
+            gh.g("branch", "-f", "codex/owner-feature", "p1")
 
             # 4-PR batch, #3 bad: bisect across ticks isolates #3; 1, 2, 4 merge.
             open_only("p1", "p2", "p3", "p4")
@@ -5898,7 +6066,7 @@ def self_test() -> int:
 # --------------------------------------------------------------------------- main
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle", "owner-approval"])
+    ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle", "owner-approval", "owner-status"])
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--check-declaration", action="store_true")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
@@ -5952,6 +6120,10 @@ def api_abort_exit(mode: str, exc: ApiAbort) -> int:
 
 
 def run_mode(gh, args, ap) -> int:
+    if args.mode == "owner-status":
+        line = owner_status_line(paginate(f"/repos/{gh.repo}/commits/{args.head}/statuses"))
+        print(line or "no App status found")
+        return 0 if line else 1
     if args.mode == "owner-approval":
         mode_owner_approval(gh, args.pr, args.head, args.decision)
         return 0

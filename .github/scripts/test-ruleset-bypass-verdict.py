@@ -251,13 +251,18 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
              'expect': {'min_clock': 22 * 60 * 1000, 'max_reads': 40}}, False),
             ('collector-after-deadline', locate, {'artifactAfter': 30 * 60 * 1000 + 1,
              'expect': {'clock': 30 * 60 * 1000, 'max_reads': 40}}, True),
+            # A proven quota exhaustion waits for the hourly reset past the 30-minute
+            # evidence window, up to the 62-minute hard cap (40851745901 failed 14 min short).
             ('quota-reset-after-deadline', locate, {'failures': {'workflow': [
              {**quota, 'headers': {**quota['headers'], 'x-ratelimit-reset': '1900'}}]},
-             'expect': {'clock': 30 * 60 * 1000, 'workflow_reads': 1}}, True),
-            ('response-at-deadline', locate, {'failures': {'workflow': [
-             {**quota, 'headers': {**quota['headers'], 'x-ratelimit-reset': '1784'}}]},
+             'expect': {'clock': 1901000, 'workflow_reads': 2}}, False),
+            ('quota-reset-beyond-hard-cap', locate, {'failures': {'workflow': [
+             {**quota, 'headers': {**quota['headers'], 'x-ratelimit-reset': '3720'}}]},
+             'expect': {'clock': 0, 'workflow_reads': 1}}, True),
+            ('response-at-hard-cap', locate, {'failures': {'workflow': [
+             {**quota, 'headers': {**quota['headers'], 'x-ratelimit-reset': '3704'}}]},
              'responseDelay': {'producer': 15000},
-             'expect': {'clock': 30 * 60 * 1000, 'workflow_reads': 2}}, True),
+             'expect': {'clock': 62 * 60 * 1000, 'workflow_reads': 2}}, True),
             ('permission-denied', locate, {'failures': {'workflow': [{'status': 403}]},
              'expect': {'clock': 0, 'workflow_reads': 1}}, True),
             ('403-with-budget', locate, {'failures': {'workflow': [
@@ -298,14 +303,14 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
                     reads = [c for c in output['calls'] if c['key'] == expected['retry']]
                     self.assertEqual(len(reads), 2, output)
                     self.assertEqual(reads[1]['clock'], 121000, output)
-                self.assertTrue(all(c['clock'] < 30 * 60 * 1000 for c in output['calls']), output)
+                self.assertTrue(all(c['clock'] < 62 * 60 * 1000 for c in output['calls']), output)
                 if fails:
                     self.assertEqual(output['outputs'], {})
                 elif step is locate:
                     self.assertEqual(output['outputs'], {'artifact-id': '20', 'run-id': '900', 'run-attempt': '1'})
                 else:
                     self.assertEqual(json.loads(output['outputs']['snapshot']), snapshot)
-        self.assertEqual(job['timeout-minutes'], 35)
+        self.assertEqual(job['timeout-minutes'], 65)
         guard = next(s['run'] for s in workflow['jobs']['validate']['steps']
                      if s['name'] == 'Verify ruleset evidence was collected')
         for status in ('success', 'failure', 'skipped', 'cancelled', ''):

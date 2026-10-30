@@ -1,0 +1,360 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# ADR-0006: producer-owned AsyncAPI contract for sanctions domain and oversight events.
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Sanctions Service — events
+  version: 1.0.0
+  description: |
+    Screening, review and list-change events on openbank.sanctions.screening.event, plus minimal,
+    non-PII oversight wake-ups for high-risk screening (ADR-0031 D9). All use the durable outbox.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster openbank-cluster. The sanctions-service KafkaUser has Write and Describe;
+      downstream consumers have their own Read grants.
+
+channels:
+  sanctionsEvents:
+    address: openbank.sanctions.screening.event
+    title: Sanctions screening and list changes
+    description: |
+      Producer: openbank-sanctions-service, channel sanctions-events-out. Consumers include
+      audit-service and kyc-service's sanctions-list projection. The KafkaTopic in
+      components/sanctions-service/kafka-topics.yaml has three partitions, cleanup.policy=delete
+      and retention.ms=604800000 (seven days). The partition key is the outbox aggregate id:
+      check id for screening/review and list id for list changes. ce-type, not a body field,
+      discriminates the four payload schemas.
+    messages:
+      sanctionChecked:
+        $ref: '#/components/messages/sanctionChecked'
+      sanctionReviewed:
+        $ref: '#/components/messages/sanctionReviewed'
+      sanctionsListChanged:
+        $ref: '#/components/messages/sanctionsListChanged'
+      sanctionsListChangeStorm:
+        $ref: '#/components/messages/sanctionsListChangeStorm'
+
+  oversightTriggers:
+    address: openbank.oversight-triggers
+    title: Immediate compliance oversight wake-up
+    description: |
+      Producer: openbank-sanctions-service, channel oversight-events-out. Consumers: agent-service
+      starts an oversight sweep and audit-service appends the trigger to its audit trail. The
+      KafkaTopic in components/agent/kafka-topic.yaml has one sandbox partition,
+      cleanup.policy=delete and retention.ms=604800000 (seven days). The partition key and
+      ce-id/ce-type headers are copied from the source SanctionChecked event. This shared topic
+      also accepts aml-service triggers; consumers must use sourceService, not the topic, to
+      identify the producer.
+    messages:
+      oversightSanctionChecked:
+        $ref: '#/components/messages/oversightSanctionChecked'
+
+operations:
+  publishSanctionChecked:
+    action: send
+    channel:
+      $ref: '#/channels/sanctionsEvents'
+    summary: Publish an automated sanctions-screening outcome.
+    messages:
+      - $ref: '#/channels/sanctionsEvents/messages/sanctionChecked'
+
+  publishSanctionReviewed:
+    action: send
+    channel:
+      $ref: '#/channels/sanctionsEvents'
+    summary: Publish a human analyst's screening disposition.
+    messages:
+      - $ref: '#/channels/sanctionsEvents/messages/sanctionReviewed'
+
+  publishSanctionsListChanged:
+    action: send
+    channel:
+      $ref: '#/channels/sanctionsEvents'
+    summary: Publish one bounded chunk of committed sanctions-list changes.
+    messages:
+      - $ref: '#/channels/sanctionsEvents/messages/sanctionsListChanged'
+
+  publishSanctionsListChangeStorm:
+    action: send
+    channel:
+      $ref: '#/channels/sanctionsEvents'
+    summary: Signal that targeted list-change publication was withheld.
+    messages:
+      - $ref: '#/channels/sanctionsEvents/messages/sanctionsListChangeStorm'
+
+  publishOversightSanctionChecked:
+    action: send
+    channel:
+      $ref: '#/channels/oversightTriggers'
+    summary: Wake the compliance sweep after a high-risk sanctions screening.
+    description: |
+      KafkaSanctionsOutboxEventPublisher first sends the original screening event, then emits
+      this trigger only for SanctionChecked with status HIT or POTENTIAL_HIT above the blocking
+      threshold. A failed send leaves the outbox row unpublished so both sends retry with the
+      same ce-id and partition key.
+    messages:
+      - $ref: '#/channels/oversightTriggers/messages/oversightSanctionChecked'
+
+components:
+  messageTraits:
+    outboxHeaders:
+      headers:
+        type: object
+        required: [ce-id, ce-type, idempotency-key]
+        properties:
+          ce-id:
+            type: string
+            format: uuid
+            description: Stable outbox event id; consumers deduplicate at-least-once delivery on it.
+          ce-type:
+            type: string
+            description: The OutboxMessage eventType; there is no discriminator in these bodies.
+          idempotency-key:
+            type: string
+            format: uuid
+
+  messages:
+    sanctionChecked:
+      name: SanctionChecked
+      x-openbank-payload-class: SanctionsCheck
+      x-openbank-extra-properties: [occurredAt]
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/SanctionsCheckPayload'
+
+    sanctionReviewed:
+      name: SanctionReviewed
+      x-openbank-payload-class: SanctionsCheck
+      x-openbank-extra-properties: [occurredAt]
+      contentType: application/json
+      description: Same aggregate shape as SanctionChecked, with review fields populated.
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/SanctionsCheckPayload'
+
+    sanctionsListChanged:
+      name: SANCTIONS_LIST_CHANGED
+      x-openbank-hand-built: true
+      contentType: application/json
+      description: |
+        One bounded chunk of committed list changes. Chunks share publicationId; chunkIndex is
+        zero-based and chunk order is not guaranteed. Deduplicate on ce-id.
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/SanctionsListChangedPayload'
+
+    sanctionsListChangeStorm:
+      name: SANCTIONS_LIST_CHANGE_STORM
+      x-openbank-hand-built: true
+      contentType: application/json
+      description: Counts-only signal; never treat it as a list-change chunk.
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/SanctionsListChangeStormPayload'
+
+    oversightSanctionChecked:
+      name: SanctionChecked
+      contentType: application/json
+      description: |
+        Minimal sourceService + occurredAt wake-up. It deliberately contains no screened name,
+        party identifier, match detail, score or list data.
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/OversightTriggerPayload'
+
+  schemas:
+    SanctionsCheckPayload:
+      type: object
+      additionalProperties: false
+      required: [id, idempotencyKey, entityType, name, aliases, identifiers, status, matches, overallScore, checkedLists, checkedAt, occurredAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+        entityType:
+          type: string
+          enum: [INDIVIDUAL, ORGANIZATION, VESSEL, AIRCRAFT]
+        name:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        dateOfBirth:
+          type: [string, 'null']
+        nationality:
+          type: [string, 'null']
+        identifiers:
+          type: object
+          additionalProperties:
+            type: string
+        status:
+          type: string
+          enum: [CLEAR, HIT, POTENTIAL_HIT, WHITELISTED, ESCALATED]
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/SanctionsMatch'
+        overallScore:
+          type: number
+          minimum: 0
+          maximum: 1
+        checkedLists:
+          type: array
+          items:
+            type: string
+            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+        reviewedBy:
+          type: [string, 'null']
+        reviewNote:
+          type: [string, 'null']
+        checkedAt:
+          type: string
+          format: date-time
+        reviewedAt:
+          type: [string, 'null']
+          format: date-time
+        subjectId:
+          type: [string, 'null']
+          description: Stable caller-owned subject identity; for account opening, the party UUID.
+        clearanceExpiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: Optional expiry of WHITELISTED clearance for later fresh screens.
+        occurredAt:
+          type: string
+          format: date-time
+          description: checkedAt for screening; reviewedAt, with checkedAt fallback, for review.
+
+    SanctionsMatch:
+      type: object
+      additionalProperties: false
+      required: [listType, matchType, matchScore, matchedName, programs]
+      properties:
+        listType:
+          type: string
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+        matchType:
+          type: string
+          enum: [EXACT, FUZZY, PHONETIC, ALIAS]
+        matchScore:
+          type: number
+          minimum: 0
+          maximum: 1
+        matchedName:
+          type: string
+        matchedId:
+          type: [string, 'null']
+        listEntryDate:
+          type: [string, 'null']
+        programs:
+          type: array
+          items:
+            type: string
+
+    SanctionsListChangedPayload:
+      type: object
+      additionalProperties: false
+      required: [aggregateId, aggregateType, listType, changedExternalIds, deactivatedExternalIds, changeCount, publicationId, chunkIndex, chunkCount, occurredAt]
+      properties:
+        aggregateId:
+          type: string
+          format: uuid
+        aggregateType:
+          type: string
+          const: SanctionsList
+        listType:
+          type: string
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+        changedExternalIds:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+        deactivatedExternalIds:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+        changeCount:
+          type: integer
+          minimum: 1
+          maximum: 64
+        publicationId:
+          type: string
+          format: uuid
+        chunkIndex:
+          type: integer
+          minimum: 0
+        chunkCount:
+          type: integer
+          minimum: 1
+        occurredAt:
+          type: string
+          format: date-time
+
+    SanctionsListChangeStormPayload:
+      type: object
+      additionalProperties: false
+      required: [aggregateId, aggregateType, listType, changeCount, baselineEntryCount, reason, stormThresholdShare, evidenceFingerprint, occurredAt]
+      properties:
+        aggregateId:
+          type: string
+          format: uuid
+        aggregateType:
+          type: string
+          const: SanctionsList
+        listType:
+          type: string
+        changeCount:
+          type: integer
+          minimum: 1
+        baselineEntryCount:
+          type: integer
+          minimum: 0
+        reason:
+          type: string
+          enum: [CHANGE_SHARE, MISSING_SOURCE_ID, SOURCE_ID_TOO_LARGE]
+        stormThresholdShare:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1
+        evidenceFingerprint:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        occurredAt:
+          type: string
+          format: date-time
+
+    OversightTriggerPayload:
+      type: object
+      additionalProperties: false
+      required: [sourceService, occurredAt]
+      properties:
+        sourceService:
+          type: string
+          const: sanctions-service
+        occurredAt:
+          type: string
+          format: date-time
+          description: Business time copied from the source SanctionChecked event, not dispatch time.

@@ -72,4 +72,10 @@ class SanctionsCheckEntity {
 
     @field:Column(name = "reviewed_at")
     var reviewedAt: Instant? = null
+
+    @field:Column(name = "subject_id")
+    var subjectId: String? = null
+
+    @field:Column(name = "clearance_expires_at")
+    var clearanceExpiresAt: Instant? = null
 }

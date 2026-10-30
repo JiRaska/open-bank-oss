@@ -6,6 +6,7 @@ package com.openbank.account.domain.event
 
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
+import com.openbank.account.domain.model.ProductRevisionPin
 import com.openbank.libs.domain.event.DomainEvent
 import java.time.Instant
 import java.util.UUID
@@ -32,9 +33,41 @@ data class AccountCreatedEvent(
      * the same spelling `TopicAttribution` already maps `openbank.accounts.account.created` to.
      */
     val sourceService: String = "account-service",
+    /**
+     * The published catalog revision the account was opened under (ADR-0341 D1, V33). Additive and
+     * nullable, so every existing consumer keeps deserialising the event unchanged; null only for an
+     * event about an account that has no pin, which no opening since V33 produces. Billing, interest
+     * and later consumers can read the pin from here instead of resolving one themselves.
+     */
+    val productRevision: AccountProductRevision? = null,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountCreated"
+}
+
+/** Wire form of [ProductRevisionPin] on [AccountCreatedEvent]. */
+data class AccountProductRevision(
+    val offeringId: UUID,
+    val productCode: String,
+    val revisionId: UUID,
+    val revisionNumber: Long,
+    val contentHash: String?,
+    val irRevisionHash: String?,
+    val irVersion: Int?,
+    val pinnedAt: Instant,
+) {
+    companion object {
+        fun of(pin: ProductRevisionPin) = AccountProductRevision(
+            offeringId = pin.offeringId,
+            productCode = pin.productCode,
+            revisionId = pin.revisionId,
+            revisionNumber = pin.revisionNumber,
+            contentHash = pin.contentHash,
+            irRevisionHash = pin.irRevisionHash,
+            irVersion = pin.irVersion,
+            pinnedAt = pin.pinnedAt,
+        )
+    }
 }
 
 data class AccountStatusChangedEvent(
