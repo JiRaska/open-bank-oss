@@ -151,3 +151,7 @@ Events are **append-only**; corrections are made through a compensating event (e
 - **API version in URL** (`/api/v1/...`). Breaking changes = `/api/v2/...`, v1 runs in parallel for 6 months.
 - **Event version in topic name** (`...v1`). Schema evolution: only additive (adding optional fields), breaking = new topic.
 - **OpenAPI diff** in CI against `main` — fail when a removed endpoint or a required-added field appears without a version bump.
+
+## Listener authentication
+
+Under `/api/*` the bearer mechanism is the only accepted authentication on both listeners, and the permission now requires an authenticated caller rather than permitting everyone. A trusted client certificate on the mTLS listener is transport authentication only. A route that carries no security annotation of its own is therefore refused without a bearer. The public metadata routes `GET /api/v1/info` and `GET /api/v1/config` are explicitly permitted without one.
