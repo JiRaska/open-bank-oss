@@ -28,6 +28,7 @@ import {
   type RevisionRequest, type Specification, type SpecificationRequest, type ValidateCatalogResponse,
   type RevisionApprovalResponse,
 } from '@/lib/product-catalog-v2'
+import { ProductIrEditor } from '@/components/product-studio/ProductIrEditor'
 import styles from './page.module.css'
 
 function seed(schema: unknown): unknown {
@@ -615,6 +616,7 @@ export default function ProductStudioPage() {
             <details className={styles.expertDetails}><summary>{t('Expert režim · úplný dokument', 'Expert mode · full document')}</summary>
               <textarea className={`input ${styles.editor}`} value={draftText} onChange={e => { setDraftText(e.target.value); setValidationState('idle'); setReview(null) }} disabled={!selectedRevision || selectedRevision.state !== 'DRAFT'} />
             </details>
+            <ProductIrEditor revision={selectedRevision} t={t} onSaved={async () => { if (offeringId) await loadRevisions(offeringId) }} />
             <div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision} onClick={() => void validateDraft()}><CheckCircle2 size={13} aria-hidden="true" />{t('Ověřit schéma', 'Validate schema')}</button><button className="btn btn-primary" type="button" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || busy} aria-busy={flight.isRunning('revision:save')} onClick={saveDraft}><Send size={13} aria-hidden="true" />{flight.isRunning('revision:save') ? t('Ukládám…', 'Saving…') : t('Uložit draft', 'Save draft')}</button></div>
           </Can>
           {approvalPolicy && selectedRevision && <div className={styles.approvalPanel} aria-label={t('Schválení revize rolemi', 'Revision role approvals')}>

@@ -1,4 +1,4 @@
--- V17: Screen the separate Czech anti-terrorism legal regime (#10760).
+-- V18: Screen the separate Czech anti-terrorism legal regime (#10760).
 -- Source of record: official e-Sbírka SPARQL open data for Regulation No. 210/2008 Coll.,
 -- version 2009-04-01. Do not substitute OpenSanctions cz_terrorists: that commercially licensed
 -- mirror is not the approved legal source. CNB_DOMESTIC remains the distinct Act 1/2023 Coll. list.

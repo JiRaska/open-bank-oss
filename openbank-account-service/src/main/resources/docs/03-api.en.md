@@ -126,6 +126,8 @@ Unified via `openbank-libs.api.ApiError`:
 | 409 | `account-already-closed` | close has already happened |
 | 422 | `account-frozen` | mutation on a frozen account |
 | 422 | `insufficient-authorization` | not OWNER for this operation |
+| 422 | `PRODUCT_REVISION_NOT_PUBLISHED` | opening a product with no published catalog revision to pin (ADR-0341 D1) |
+| 503 | `PRODUCT_CATALOG_UNAVAILABLE` | product catalog unreachable at opening; nothing persisted, retry after `Retry-After` |
 | 429 | `rate-limited` | per-token quota |
 | 500 | `internal-error` | unexpected error (with correlationId for support) |
 
@@ -149,3 +151,7 @@ Events are **append-only**; corrections are made through a compensating event (e
 - **API version in URL** (`/api/v1/...`). Breaking changes = `/api/v2/...`, v1 runs in parallel for 6 months.
 - **Event version in topic name** (`...v1`). Schema evolution: only additive (adding optional fields), breaking = new topic.
 - **OpenAPI diff** in CI against `main` — fail when a removed endpoint or a required-added field appears without a version bump.
+
+## Account list cursor pagination
+
+`GET /api/v1/accounts?partyId=...` returns a party's accounts ordered by account type first (current, then savings, then other types) and by id within a type. The cursor is still the opaque encoding of the last returned account id. To continue a page the service reads that account back, restricted to the same party, takes its account type, and returns the rows that sort strictly after it in that same ordering. Comparing the id alone would skip savings accounts whose id is lower than the last current account's id. A cursor that is malformed, names no account, or names an account owned by a different party is rejected with `400`, so a cursor cannot be used to probe another party's accounts.

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.4.1...product-catalog-v1.5.0) (2026-10-30)
+
+
+### Features
+
+* **product-catalog,admin-ui:** Studio product IR editor with server-side lint (ADR-0352 5b, part 1) ([#14253](https://github.com/JiRaska/open-bank-oss/issues/14253)) ([40c80c7](https://github.com/JiRaska/open-bank-oss/commit/40c80c700aba881f05069999c34647b9c2912bf5))
+
 ## [1.4.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.4.0...product-catalog-v1.4.1) (2026-10-26)
 
 

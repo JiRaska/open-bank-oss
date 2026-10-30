@@ -8,8 +8,9 @@ info:
   # ApprovalResponse (makerId, createdAt). No breaking change.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  # 2.2.0 -> 2.3.0 (#10760): additive CZ_TERRORISTS list value; no removed or changed operation.
-  version: 2.3.0
+  # 2.3.0 (#11694): optional subjectId on screen requests/results and clearanceExpiresAt on results.
+  # 2.3.0 -> 2.4.0 (#10760): additive CZ_TERRORISTS list value; no removed or changed operation.
+  version: 2.4.0
   # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
   # required the whole external-feed fan-out to finish inside the request, which was the defect.
   # oasdiff classifies 200 -> 202 as breaking, and a breaking change here means a new URL major:
@@ -436,6 +437,12 @@ components:
         idempotencyKey:
           type: string
           description: Client-assigned idempotency key; identical key returns the original result.
+        subjectId:
+          type: string
+          description: >-
+            Stable party identifier, separate from the per-attempt idempotency key. Every new key
+            causes a fresh screen. A WHITELISTED clearance applies for at most 90 days, only to
+            exactly the same subject attributes and only to the reviewed match identities.
         entityType:
           type: string
           enum: [INDIVIDUAL, ORGANIZATION, VESSEL, AIRCRAFT]
@@ -500,6 +507,10 @@ components:
           format: uuid
         idempotencyKey:
           type: string
+        subjectId:
+          type: string
+          nullable: true
+          description: Stable party identifier supplied on the screen request; null on legacy checks.
         entityType:
           type: string
           enum: [INDIVIDUAL, ORGANIZATION, VESSEL, AIRCRAFT]
@@ -550,6 +561,14 @@ components:
           type: string
           format: date-time
           nullable: true
+        clearanceExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            End of the 90-day WHITELISTED clearance on this check; null for other statuses and
+            legacy checks. A new attempt receives WHITELISTED only while this clearance is valid
+            and covers the fresh result's subject and match identities.
 
     SanctionsMatch:
       type: object

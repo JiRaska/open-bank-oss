@@ -19,6 +19,14 @@ class ProducerIsolationTests(unittest.TestCase):
         cls.workflow = yaml.safe_load((ROOT / '.github/workflows/auto-deploy.yml').read_text())
         cls.steps = cls.workflow['jobs']['gitops-pr']['steps']
 
+    def test_reconcile_source_evidence_reads_actions_with_job_token(self):
+        job = self.workflow['jobs']['can-i-deploy']
+        self.assertEqual(job['permissions'].get('actions'), 'read')
+        gate = next(step for step in job['steps'] if step.get('name') == 'can-i-deploy (per changed service)')
+        self.assertEqual(gate['env']['GH_TOKEN'], '${{ github.token }}')
+        # No App token: the GitOps App installation lacks actions:read (#13587).
+        self.assertFalse(any('create-github-app-token' in str(step.get('uses', '')) for step in job['steps']))
+
     def test_same_source_independent_runs_have_distinct_candidate_branches(self):
         create = next(step for step in self.steps if step.get('id') == 'gitops_pr')
         template = create['with']['branch']

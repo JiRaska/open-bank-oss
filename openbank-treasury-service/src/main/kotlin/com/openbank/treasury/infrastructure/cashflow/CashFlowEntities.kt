@@ -226,3 +226,50 @@ class DealVersionEntity : PanacheEntity() {
     @Column(name = "changes", columnDefinition = "TEXT")
     var changes: String? = null
 }
+
+@Entity
+@Table(name = "position_closes")
+class PositionCloseEntity : PanacheEntity() {
+    @Column(name = "snapshot_id", nullable = false, unique = true)
+    lateinit var snapshotId: UUID
+
+    @Column(name = "close_date", nullable = false)
+    lateinit var closeDate: LocalDate
+
+    @Column(name = "book_id")
+    var bookId: String? = null
+
+    @Column(name = "scenario")
+    var scenario: String? = null
+
+    @Column(name = "special", nullable = false)
+    var special: Boolean = false
+
+    @Column(name = "closed_by", nullable = false)
+    lateinit var closedBy: String
+
+    @Column(name = "closed_at", nullable = false)
+    lateinit var closedAt: Instant
+
+    @Column(name = "positions_json", nullable = false, columnDefinition = "TEXT")
+    lateinit var positionsJson: String
+
+    @Column(name = "command_key", nullable = false, unique = true)
+    lateinit var commandKey: String
+}
+
+@Entity
+@Table(name = "deal_filters")
+class DealFilterEntity : PanacheEntity() {
+    @Column(name = "owner", nullable = false)
+    lateinit var owner: String
+
+    @Column(name = "name", nullable = false)
+    lateinit var name: String
+
+    @Column(name = "filter_json", nullable = false, columnDefinition = "TEXT")
+    lateinit var filterJson: String
+
+    @Column(name = "updated_at", nullable = false)
+    lateinit var updatedAt: Instant
+}

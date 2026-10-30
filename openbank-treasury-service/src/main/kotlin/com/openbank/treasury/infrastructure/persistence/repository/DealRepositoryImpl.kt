@@ -182,10 +182,11 @@ class DealRepositoryImpl(
         command: CommandKey?,
         schedule: ScheduleWrite?,
         extraEvents: List<DealEvent>,
+        limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
     ): Deal {
         val actor = deal.history.lastOrNull()?.actor?.id ?: deal.createdBy.id
         val storedVersion = Panache.withTransaction {
-            val row = find("dealId", deal.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
+            val row = lockedRow(deal.id, limitGuard)
             row.flatMap { existing ->
                 if (existing != null && existing.rowVersion != deal.rowVersion) {
                     throw DealChangedException(
@@ -203,7 +204,15 @@ class DealRepositoryImpl(
                 persisted
                     .flatMap { transitions.count("dealId", deal.id) }
                     .flatMap { stored -> appendTransitions(deal, stored.toInt()) }
-                    .flatMap { journal?.let { persistJournal(it) } ?: Uni.createFrom().voidItem() }
+                    // The service records a journal in its own transaction the moment the ledger
+                    // accepts it (#13882 review); here it is written only if that did not happen.
+                    .flatMap {
+                        journal?.let { j ->
+                            journals.count("idempotencyKey", j.idempotencyKey).flatMap { n ->
+                                if (n == 0L) persistJournal(j) else Uni.createFrom().voidItem()
+                            }
+                        } ?: Uni.createFrom().voidItem()
+                    }
                     .flatMap { command?.let { persistCommand(it) } ?: Uni.createFrom().voidItem() }
                     .flatMap { versionRow(deal, actor) }
                     .flatMap { schedule?.let { scheduleRows(it) } ?: Uni.createFrom().voidItem() }
@@ -228,6 +237,23 @@ class DealRepositoryImpl(
         }.awaitSuspending()
         return deal.copy(rowVersion = storedVersion)
     }
+
+    /**
+     * The deal row, ALWAYS locked for a whole-row save (so the version comparison in [save] judges
+     * the row as it stands and no concurrent save can interleave), plus the limit line when the
+     * change consumes one. Lock order everywhere: the deal row, then the limit line, so two writes
+     * on one line never deadlock.
+     */
+    private fun lockedRow(
+        dealId: UUID,
+        limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
+    ): Uni<DealEntity?> = find("dealId", dealId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
+        .flatMap { locked ->
+            limitGuard?.let { g ->
+                Panache.getSession().flatMap { exposureUnderLock(it, dealId, g) }.map { locked }
+            }
+                ?: Uni.createFrom().item(locked)
+        }
 
     /** One `deal_versions` row per terms version; the schedule columns follow the latest generation. */
     private fun versionRow(deal: Deal, actor: String): Uni<Void> =
@@ -313,6 +339,7 @@ class DealRepositoryImpl(
             idempotencyKey = ref.idempotencyKey
             journalId = ref.journalId
             postedAt = ref.postedAt
+            valueDate = ref.valueDate
             resolvedAccounts = ResolvedAccountsCodec.encode(ref.accounts)
         },
     ).replaceWithVoid()
@@ -378,9 +405,36 @@ class DealRepositoryImpl(
         }.awaitSuspending()
 
     /**
+     * The headroom a limit-consuming write (submit, approve) was vetted against,
+     * re-measured inside its transaction under a transaction-scoped lock on the (counterparty, limit
+     * currency) line — ONE key for every such write, so two writes on one line serialise and cannot
+     * jointly breach — by the same [lineExposure] query [exposure] answers with. A breach meanwhile
+     * is a 422, never a committed breach.
+     */
+    private fun exposureUnderLock(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        dealId: java.util.UUID,
+        g: com.openbank.treasury.application.port.out.ExposureGuard,
+    ): Uni<Void> = session.createNativeQuery<Any>("select pg_advisory_xact_lock(hashtext(:line))")
+        .setParameter("line", "treasury-limit:${g.counterpartyId}:${g.currency}").singleResult
+        .flatMap { lineExposure(session, g.counterpartyId, g.currency, dealId) }
+        .map { exposure ->
+            if (exposure > g.maxOthers) {
+                throw com.openbank.treasury.application.port.out.CorrectionLimitBreachedException(
+                    "counterparty ${g.counterpartyId} ${g.currency}: other exposure $exposure exceeds the " +
+                        "${g.maxOthers} headroom the change was vetted against",
+                )
+            }
+        }.replaceWithVoid()
+
+    /**
      * The limit-consuming exposure of one (counterparty, LIMIT currency) line, [excludeDealId] aside:
-     * the principal of ACTUAL asset deals in that currency in a consuming state, plus — on the CZK
-     * line — the CZK counter-amount of unsettled ACTUAL FX spots ([Deal.limitAmount] of each).
+     * the sum of each ACTUAL deal's stored credit exposure (`limit_deal_amount`, the
+     * [com.openbank.treasury.domain.model.CreditExposure] its own submission or approval measured)
+     * over the deals in a consuming state — FX spots until settlement, every other line-consuming
+     * product while live. The pre-trade check adds the new deal's figure from the SAME function, so
+     * the two cannot measure a deal differently. A legacy row without a stored figure falls back to
+     * the pre-ADR-0344 rule (principal of an asset, the CZK leg of an FX spot).
      */
     private fun lineExposure(
         session: org.hibernate.reactive.mutiny.Mutiny.Session,
@@ -388,22 +442,20 @@ class DealRepositoryImpl(
         currency: String,
         excludeDealId: UUID?,
     ): Uni<BigDecimal> {
-        val fxPart = if (currency == Deal.CZK) {
-            " + coalesce((select sum(fx_counter_amount) from deals where counterparty_id = :cp " +
-                "and product = 'FX_SPOT' and state in (:fxStates) and kind = 'ACTUAL' and deal_id <> :d), 0)"
-        } else {
-            ""
-        }
         val q = session.createNativeQuery<Any>(
-            "select coalesce((select sum(principal) from deals where counterparty_id = :cp " +
-                "and currency = :ccy and state in (:states) and product in (:products) " +
-                "and kind = 'ACTUAL' and deal_id <> :d), 0)" +
-                fxPart,
+            "select coalesce(sum(coalesce(limit_deal_amount, case when product = 'FX_SPOT' then fx_counter_amount " +
+                "when product in (:assets) then principal else 0 end)), 0) from deals " +
+                "where counterparty_id = :cp and kind = 'ACTUAL' and deal_id <> :d " +
+                "and (case when product in (:czkLine) then 'CZK' else currency end) = :ccy " +
+                "and ((product = 'FX_SPOT' and state in (:fxStates)) " +
+                "or (product in (:consuming) and state in (:states)))",
         ).setParameter("cp", counterpartyId).setParameter("ccy", currency)
             .setParameter("d", excludeDealId ?: NO_DEAL)
             .setParameter("states", LIMIT_CONSUMING_STATE_NAMES)
-            .setParameter("products", LIMIT_CONSUMING_PRODUCT_NAMES)
-        if (fxPart.isNotEmpty()) q.setParameter("fxStates", Deal.FX_LIMIT_CONSUMING_STATES.map { it.name })
+            .setParameter("fxStates", Deal.FX_LIMIT_CONSUMING_STATES.map { it.name })
+            .setParameter("assets", ASSET_PRODUCT_NAMES)
+            .setParameter("consuming", LINE_CONSUMING_PRODUCT_NAMES)
+            .setParameter("czkLine", com.openbank.treasury.domain.model.CreditMeasure.CZK_LINE_PRODUCTS.map { it.name })
         return q.singleResult.map { BigDecimal(it.toString()) }
     }
 
@@ -425,19 +477,22 @@ class DealRepositoryImpl(
      * The ledger already deduplicated the journal; here the loser of the unique-key race only
      * confirms the winner's row exists instead of failing the pass.
      */
-    override suspend fun recordJournal(journal: LedgerJournalRef) {
+    override suspend fun recordJournal(journal: LedgerJournalRef): Boolean {
         val recorded = suspend {
             Panache.withSession { journals.find("idempotencyKey", journal.idempotencyKey).count() }.awaitSuspending() >
                 0
         }
-        if (recorded()) return
+        if (recorded()) return false
         try {
             Panache.withTransaction { persistJournal(journal) }.awaitSuspending()
         } catch (e: PersistenceException) {
             if (!recorded()) throw e
+            return false
         } catch (e: PgException) {
             if (!recorded()) throw e
+            return false
         }
+        return true
     }
 
     override suspend fun journals(dealId: UUID): List<LedgerJournalRef> = Panache.withSession {
@@ -450,6 +505,7 @@ class DealRepositoryImpl(
             it.journalId,
             it.postedAt,
             ResolvedAccountsCodec.decode(it.resolvedAccounts),
+            it.valueDate,
         )
     }
 
@@ -542,7 +598,7 @@ class DealRepositoryImpl(
                 rateFlag = fxRateFlag,
             )
         }
-        val limitCurrency = if (productType == ProductType.FX_SPOT) Deal.CZK else currency
+        val limitCurrency = com.openbank.treasury.domain.model.CreditExposure.limitCurrency(productType, currency)
         return Deal(
             id = dealId,
             product = productType,
@@ -585,7 +641,14 @@ class DealRepositoryImpl(
 
         /** No deal excluded: a UUID no deal carries, so `deal_id <> :d` binds a typed value. */
         val NO_DEAL: UUID = UUID(0L, 0L)
-        val LIMIT_CONSUMING_PRODUCT_NAMES = ProductType.entries.filter { it.isAsset }.map { it.name }
+        val ASSET_PRODUCT_NAMES = ProductType.entries.filter { it.isAsset }.map { it.name }
+
+        /** Every product but FX spot (its own states) whose [CreditMeasure] consumes a line. */
+        val LINE_CONSUMING_PRODUCT_NAMES = ProductType.entries.filter {
+            it != ProductType.FX_SPOT &&
+                com.openbank.treasury.domain.model.CreditMeasure.of(it) !=
+                com.openbank.treasury.domain.model.CreditMeasure.NONE
+        }.map { it.name }
 
         /** The products with posting rules today: the only ones the simulated market moves. */
         val POSTABLE_PRODUCT_NAMES = ProductType.entries.filter { it.legacy }.map { it.name }

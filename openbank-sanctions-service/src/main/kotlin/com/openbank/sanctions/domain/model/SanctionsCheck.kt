@@ -55,6 +55,10 @@ data class SanctionsCheck(
     val reviewNote: String?,
     val checkedAt: Instant,
     val reviewedAt: Instant?,
+    /** Stable caller-owned identity (for account opening, the party UUID), never parsed from the key. */
+    val subjectId: String? = null,
+    /** A WHITELISTED review may cover later fresh screens only until this instant. */
+    val clearanceExpiresAt: Instant? = null,
 ) {
     fun isHighRisk() = status == SanctionsCheckStatus.HIT ||
         (status == SanctionsCheckStatus.POTENTIAL_HIT && overallScore > ScreeningPolicy.POTENTIAL_HIT_BLOCK_THRESHOLD)

@@ -93,6 +93,18 @@ class UserRoleParity(unittest.TestCase):
         rc, err, _ = run(template_snapshot(), scopes)
         self.assertEqual(rc, 0, err)
 
+    def test_merge_recorder_ci_is_declared_with_least_privilege(self):
+        template = json.loads(TEMPLATE.read_text())
+        clients = [c for c in template["clients"] if c["clientId"] == "agent-merge-recorder-ci"]
+        self.assertEqual(len(clients), 1, "agent-merge-recorder-ci is not declared")
+        client = clients[0]
+        self.assertTrue(client["serviceAccountsEnabled"])
+        self.assertEqual(client["defaultClientScopes"], ["basic", "profile", "roles"])
+        self.assertEqual(client["secret"], "__MERGE_RECORDER_CI_CLIENT_SECRET__")
+        live = template_snapshot()
+        self.assertEqual(live["service-account-agent-merge-recorder-ci"]["realmRoles"],
+                         ["ROLE_MERGE_RECORDER", "default-roles-openbank"])
+
 
 if __name__ == "__main__":
     unittest.main()

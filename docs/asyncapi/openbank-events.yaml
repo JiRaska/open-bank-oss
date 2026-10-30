@@ -3,8 +3,9 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Async Event API
-  # 2.4.0 -> 2.5.0 (#10760): additive CZ_TERRORISTS value on sanctions list enums.
-  version: 2.5.0
+  # 2.4.0 -> 2.5.0 (#13179): additive minimal oversight-trigger channel and payload.
+  # 2.5.0 -> 2.6.0 (#10760): additive CZ_TERRORISTS value on sanctions list enums.
+  version: 2.6.0
   description: |
     Kafka event streams across OpenBank services.
 
@@ -106,12 +107,13 @@ channels:
       not on the `...account.status-changed` topic their call sites name — that topic does not
       exist, has no Kafka resource, and nothing consumes it.
 
-      Mixed relay. Three of the four are published by a **direct emitter**
+      Mixed relay. `AccountStatusChanged` and `AccountClosed` are published by a **direct emitter**
       (`KafkaAccountEventPublisher`, `writeValueAsString(event)`) which sets no headers at all;
-      `SavingsWithdrawalApproved` is outbox-relayed and so also carries `ce-type`. All four
-      serialise a `DomainEvent` subclass, so all four do carry a **body eventType** — this is one
-      of the few channels where the body-field idiom is genuinely correct. Discriminate on the body
-      field here; `ce-type` is present only on the withdrawal event.
+      `AccountCreated` (since ADR-0341 D1) and `SavingsWithdrawalApproved` are outbox-relayed and so
+      also carry `ce-type`. All four serialise a `DomainEvent` subclass, so all four do carry a
+      **body eventType** — this is one of the few channels where the body-field idiom is genuinely
+      correct. Discriminate on the body field here; `ce-type` is present only on the outbox-relayed
+      events.
     messages:
       AccountCreated:
         $ref: '#/components/messages/AccountCreated'
@@ -258,6 +260,18 @@ channels:
         $ref: '#/components/messages/AmlCaseCreated'
       AmlCaseStatusChanged:
         $ref: '#/components/messages/AmlCaseStatusChanged'
+
+  oversight-triggers:
+    address: openbank.oversight-triggers
+    description: |
+      Minimal wake-up notifications for agent-service's immediate compliance sweep (ADR-0031 D9).
+      aml-service produces HIGH/CRITICAL case-creation triggers; sanctions-service produces
+      high-risk screening triggers. Both fan out from their durable outbox and preserve the source
+      event's `ce-id`, `ce-type` and partition key. The body deliberately excludes customer,
+      screening and match PII; the consumer needs no payload fields to start its sweep.
+    messages:
+      OversightTrigger:
+        $ref: '#/components/messages/OversightTrigger'
 
   party-events:
     address: openbank.party.events
@@ -647,7 +661,10 @@ components:
     AccountCreated:
       name: AccountCreated
       title: Account Created
-      description: 'Direct emitter. Body `eventType` = `AccountCreated`. No Kafka headers are set.'
+      description: >-
+        OUTBOX-relayed since ADR-0341 D1 (written in the account-opening transaction), so it now
+        carries `ce-type`, `ce-id` and `idempotency-key` like SavingsWithdrawalApproved. Body
+        `eventType` = `AccountCreated`; consumers keep discriminating on the body field.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/AccountCreatedPayload'
@@ -674,8 +691,8 @@ components:
       name: SavingsWithdrawalApproved
       title: Savings Withdrawal Approved
       description: >-
-        The only OUTBOX-relayed event on this topic, so the only one carrying `ce-type`, `ce-id`
-        and `idempotency-key`. Written by `WithdrawalProposalRepositoryImpl`.
+        OUTBOX-relayed (like AccountCreated), so it carries `ce-type`, `ce-id` and
+        `idempotency-key`. Written by `WithdrawalProposalRepositoryImpl`.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/SavingsWithdrawalApprovedPayload'
@@ -781,6 +798,13 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/AmlCaseStatusChangedPayload'
+
+    OversightTrigger:
+      name: OversightTrigger
+      description: 'Minimal sourceService + occurredAt wake-up; source ce-id/ce-type headers are retained.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/OversightTriggerPayload'
 
     PartyEvent:
       name: PartyEvent
@@ -1187,6 +1211,20 @@ components:
               type: string
             currency:
               type: string
+            productRevision:
+              description: >-
+                The published catalog revision the account was opened under (ADR-0341 D1). Additive;
+                null only for an account with no pin.
+              type: [object, 'null']
+              properties:
+                offeringId: { type: string, format: uuid }
+                productCode: { type: string }
+                revisionId: { type: string, format: uuid }
+                revisionNumber: { type: integer, minimum: 1 }
+                contentHash: { type: [string, 'null'] }
+                irRevisionHash: { type: [string, 'null'] }
+                irVersion: { type: [integer, 'null'] }
+                pinnedAt: { type: string, format: date-time }
 
     AccountStatusChangedPayload:
       allOf:
@@ -1593,6 +1631,18 @@ components:
           type: [string, 'null']
         matchedEntity:
           type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+
+    OversightTriggerPayload:
+      type: object
+      additionalProperties: false
+      required: [sourceService, occurredAt]
+      properties:
+        sourceService:
+          type: string
+          enum: [aml-service, sanctions-service]
         occurredAt:
           type: string
           format: date-time

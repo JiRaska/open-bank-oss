@@ -147,6 +147,8 @@ KafkaSanctionsOutboxEventPublisher odesílá do openbank.sanctions.screening.eve
 audit-service + aml-service konzumují event
 ```
 
+Událost `SanctionChecked`, která odpovídá `SanctionsCheck.isHighRisk()`, se ze stejného trvalého outbox řádku publikuje také do `openbank.oversight-triggers` (ADR-0031 D9). Tělo triggeru obsahuje pouze `sourceService` a `occurredAt`; původní hlavičky `ce-id`/`ce-type` slouží ke korelaci. Screenovaná jména, identifikátory, detaily shod ani data listin se do oversight topicu nekopírují. Výsledky CLEAR, potenciální shody s nižším skóre, přezkumy a události změn listin zůstávají pouze v doménovém topicu.
+
 ## Komponenty z `openbank-libs`
 
 | Modul | Použití zde |

@@ -137,6 +137,8 @@ sequenceDiagram
 
 **Proč outbox:** transakční konzistence mezi zápisem do DB a publikací do Kafky. Dispatcher je **jediný writer** — `concurrentExecution = SKIP` brání překryvu v rámci JVM a Deployment je pinován na `replicas: 1`; položky se zpracovávají sekvenčně pro zachování pořadí v rámci agregátu. Selhání publikace jednoho řádku jsou izolována (recover → `markFailed`), takže jeden vadný řádek nikdy nezruší celou dávku; opakovaná selhání jsou omezena přechodem do DEAD (ADR-0050 N5). Publisher obaluje odeslání MicroProfile Fault Tolerance (`@Bulkhead`, `@CircuitBreaker`, `@Retry`, `@Timeout`).
 
+Událost `aml.case.created.v1` s rizikem `HIGH` nebo `CRITICAL` se ze stejného trvalého outbox řádku publikuje také do `openbank.oversight-triggers` (ADR-0031 D9). Tělo probuzení obsahuje pouze `sourceService` a `occurredAt`; původní hlavičky `ce-id`/`ce-type` zachovávají korelaci. Reference zákazníků, party ID, jména ani detaily alertů se do oversight topicu nekopírují. Případy LOW/MEDIUM a pozdější změny stavu zůstávají pouze v `openbank.aml.events`.
+
 ## Tok příchozích událostí
 
 `PartyEventConsumer` (`@Incoming("party-events-in")`) čte `openbank.party.events`, filtruje `eventType == PARTY_CREATED` a `partyType == INDIVIDUAL` a zakládá `CUSTOMER_ONBOARDING` případ s idempotenčním klíčem `"<partyId>:CUSTOMER_ONBOARDING"` (bezpečné při redelivery). **Pouze v sandboxu** (`openbank.aml.auto-clear=true`, výchozí `false`) případ následně auto-clearuje, aby klient prošel AML klíčem aktivační brány bez analytika. Produkce zachovává decision endpoint ve čtyřech očích jako jedinou cestu do terminálního stavu. Konzument je odolný vůči poison-pill: selhání jsou logována a ACK.

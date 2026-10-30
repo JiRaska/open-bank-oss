@@ -33,7 +33,7 @@ Služba dodržuje hexagonální (ports & adapters) uspořádání předepsané [
 
 ## Ingest flow (consume)
 
-1. Producent (account, transaction, balance, party, kyc, consent service) emituje doménovou událost do svého Kafka topiku.
+1. Producent emituje doménovou událost do svého Kafka topiku. Mezi odebírané topiky patří `openbank.oversight-triggers`, který přenáší nezávislé požadavky na kontrolu z aml-service i sanctions-service.
 2. `AuditConsumer` ji přijme na sdíleném kanálu `audit-events-in` (consumer group `audit-service`, `auto.offset.reset=earliest`).
 3. Payload je naparsován; identita agregátu odvozena; vytvoří se nová `AuditEntry` s čerstvým `entry_id` UUID a `recordedAt = now`.
 4. `AuditRepository.save` ji uloží transakčně. DB trigger orazítkuje `retention_until = occurred_at + 10 let`; immutability rules blokují jakoukoli pozdější změnu.

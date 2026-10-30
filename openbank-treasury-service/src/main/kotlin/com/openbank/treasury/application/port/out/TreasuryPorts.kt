@@ -25,6 +25,13 @@ class DealNotFoundException(dealId: UUID) : NoSuchElementException("deal $dealId
 /** A deal write was computed from a copy older than the stored row. Mapped to 409 DEAL_CHANGED. */
 class DealChangedException(message: String) : IllegalStateException(message)
 
+/**
+ * The ledger refused a posting because its accounting day no longer accepts postings (`409
+ * ACCOUNTING_DAY_CLOSED`, ADR-0342 D4): a close outcome the day's record reports as REFUSED, never
+ * a retryable error.
+ */
+class AccountingDayClosedException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
 /** Raised when a deal names a counterparty not in the master. Mapped to 400 via IllegalArgumentException. */
 class UnknownCounterpartyException(id: String) : IllegalArgumentException("unknown counterparty '$id'")
 
@@ -37,6 +44,12 @@ data class LedgerJournalRef(
     val postedAt: Instant,
     /** The accounts the ledger resolved each leg to, so a reversal can offset exactly these. */
     val accounts: List<ResolvedAccount> = emptyList(),
+    /**
+     * The journal's value day: the economic accounting day it belongs to (an accrual's day, a
+     * settlement's value date). ADR-0342: treasury's day-close count attributes the journal to it.
+     * Null only for rows recorded before V26 (backfilled there from posted_at).
+     */
+    val valueDate: LocalDate? = null,
 )
 
 /**
@@ -62,6 +75,13 @@ interface DealRepository {
         schedule: ScheduleWrite? = null,
         /** Further outbox events of the same change (e.g. treasury.cashflow.generated). */
         extraEvents: List<DealEvent> = emptyList(),
+        /**
+         * A limit-consuming write (submit, approve): in the SAME transaction, after locking the deal
+         * row, take the (counterparty, limit currency) line lock and re-measure the others' exposure;
+         * past [ExposureGuard.maxOthers] it refuses (CorrectionLimitBreachedException, 422) instead of
+         * committing a joint breach.
+         */
+        limitGuard: ExposureGuard? = null,
     ): Deal
 
     /** The command previously recorded under [key], if any. */
@@ -91,8 +111,23 @@ interface DealRepository {
 
     suspend fun journals(dealId: UUID): List<LedgerJournalRef>
 
-    /** Record a journal that changes no deal state (a daily accrual, ADR-0315 D5). */
-    suspend fun recordJournal(journal: LedgerJournalRef)
+    /**
+     * Record a journal the ledger accepted, idempotent on its key. True only when THIS call recorded
+     * it: false for a key already recorded (a replayed post), so a caller counts each journal once.
+     */
+    suspend fun recordJournal(journal: LedgerJournalRef): Boolean
+}
+
+/**
+ * ADR-0342 (#13882): counts a journal recorded for the first time whose value day has already ended
+ * (a late post for that day). Never a refused post, never a replay of a recorded key.
+ */
+fun interface LateJournalMeter {
+    fun late(event: com.openbank.treasury.domain.model.PostingEvent)
+
+    companion object {
+        val NONE = LateJournalMeter { }
+    }
 }
 
 interface CounterpartyRepository {
@@ -107,10 +142,11 @@ interface CounterpartyRepository {
  */
 interface LedgerPostingPort {
     /**
-     * Returns the ledger's journal — the original one on an idempotent replay, with the accounts its
+     * Posts [spec] valued on [valueDate]; the adapter books it in the ledger's current open day when
+     * [valueDate] has already ended (ADR-0342). Returns the ledger's journal — the original one on an idempotent replay, with the accounts its
      * legs were ORIGINALLY resolved to.
      */
-    suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): PostedJournal
+    suspend fun post(spec: JournalSpec, valueDate: LocalDate, description: String): PostedJournal
 }
 
 /**
@@ -149,6 +185,16 @@ fun interface CurveSetPort {
 /** This service's outbox table; `persistInTransaction` chains inside the aggregate's transaction. */
 interface TreasuryOutboxRepository : OutboxRepository {
     fun persistInTransaction(message: OutboxMessage): Uni<Void>
+}
+
+/** ADR-0344 D7: the per-accounting-day completion record each treasury run writes. */
+interface DayCompletionRepository {
+    suspend fun record(r: com.openbank.treasury.domain.model.DayStepRecord)
+
+    suspend fun day(date: LocalDate): List<com.openbank.treasury.domain.model.DayStepRecord>
+
+    /** Every recorded step of the days in [from]..[to] (inclusive): the day-close reporter's input. */
+    suspend fun between(from: LocalDate, to: LocalDate): List<com.openbank.treasury.domain.model.DayStepRecord>
 }
 
 /** A journal the ledger holds for a posted [JournalSpec]: its id and where each leg landed. */
