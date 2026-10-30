@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.15.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.0...admin-ui-v3.15.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **admin-ui:** read FinOps anomalies from Alertmanager's route prefix ([#14279](https://github.com/JiRaska/open-bank-oss/issues/14279)) ([21a23de](https://github.com/JiRaska/open-bank-oss/commit/21a23de382a5b78568b7b5107b216e79e4bafe5e))
+* **product-catalog,admin-ui:** refuse duplicate JSON keys; keep unsaved Expert edits on IR save ([#14287](https://github.com/JiRaska/open-bank-oss/issues/14287)) ([e8c3978](https://github.com/JiRaska/open-bank-oss/commit/e8c3978adaf81c64394827733a0642914f368631))
+* **treasury:** record a posting intent before the ledger call ([#14220](https://github.com/JiRaska/open-bank-oss/issues/14220)) ([059840b](https://github.com/JiRaska/open-bank-oss/commit/059840b74eb1f495df083e12296842ad4dbd4d80))
+
 ## [3.15.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.14.0...admin-ui-v3.15.0) (2026-10-30)
 
 

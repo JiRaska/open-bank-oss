@@ -123,8 +123,50 @@ admits under `ledger.close.participate` for this participant only.
 - **Recorded before committed.** Settle, mature and reverse record the journal in its own transaction
   as soon as the ledger accepts it, before the deal's state change commits. If that commit rolls back,
   the journal is still counted, but the day is held until its lifecycle transition commits. A retry posts under the same idempotency key, gets the original journal
-  back, and finds it recorded. The remaining window is a crash between the ledger's answer and that
-  write; the intent-first follow-up is tracked separately.
+  back, and finds it recorded.
+- **Posting intents (#13883).** Before contacting the ledger, settle, mature and reverse of LEGACY products write a
+  `deal_posting_intent` row (V31) keyed by the journal's idempotency key. The deal save completes it in
+  the transaction of the state change. An OPEN intent means the ledger may hold a journal treasury has
+  not applied, so it holds its value day. `PostingIntentReconcileScheduler` (every 5 minutes) claims
+  intents older than `openbank.treasury.posting-intent.grace` (`FOR UPDATE SKIP LOCKED` plus a lease,
+  so two pods never resume one) and re-runs the command under the same key; the ledger answers with
+  the original journal. It resumes an intent as its stored actor only while it is younger than
+  `max-resume-age` (4h, by age, not the calendar: the intent already pins its value day). An older
+  one is escalated: it stays OPEN and holding its day, and is never claimed again, so escalated
+  intents cannot starve resumable ones. While a deal has an open intent, or a reversal or maturity
+  intent an operator closed (its journal may be in the ledger although the deal reads SETTLED), the
+  accrual skips THAT deal only, re-checking before every day: every other deal accrues and the pass
+  completes, while the day report counts the deferred deal as unaccrued (REFUSED, `deferred by an open
+  or operator-closed posting intent`) until the command is re-issued. A reversal that finds a journal
+  recorded after it read the deal's journals does not post (409; re-issue it). Each accrual day records
+  an ACCRUE intent before its ledger call (completed when its journal is recorded), and the database
+  admits one open lifecycle intent per deal (settlement, reversal, maturity or accrual day; an
+  operator-closed settlement, reversal or maturity keeps the slot until re-issued): whichever comes
+  second answers 409 or, for an accrual, defers. A reversal of an unsettled deal claims the slot while
+  it decides. Accrual-day intents are resumed however old they are. `mature` and
+  `reverse` also refuse (409) while the deal has another open or operator-closed posting intent, so a
+  failed reversal cannot be followed by a maturity.
+  The ledger's coded `409 ACCOUNTING_DAY_CLOSED` closes an intent REFUSED (no journal exists) when the
+  intent is fresh or older than the grace; every other failure leaves it OPEN. The pod refuses to
+  boot unless the grace is at least four times one ledger call (connect + read timeout, no retry).
+- **Matrix products have no posting intent.** FX_SWAP, FRA, IRS, REPO and REVERSE_REPO post through the posting-rule matrix under deterministic per-event or per-flow journal keys, so a replay returns the original journal. A crash after the ledger accepted a journal and before treasury recorded it is NOT covered by an intent or the day-close hold; follow-up pending.
+- **A stuck intent.** `TreasuryPostingIntentStuck` fires when the oldest open intent is over 20
+  minutes old (gauges `openbank.treasury.posting_intents.open` and `.oldest_age_seconds`, -1 when
+  unreadable; promtool-tested). Read `last_error` on the row. Either re-issue the deal command through
+  the API, which re-posts under the same key and completes the intent, or close it:
+  `POST /api/v1/treasury/deals/{id}/posting-intent/close` with
+  `{"event": "SETTLED|MATURED|REVERSED", "reason": "..."}`. That needs the OPA action
+  `treasury.posting-intent.close` (approvers, never an agent), a person, and four eyes: not the
+  posting's own actor nor the deal's approver. An intent younger than the grace or under a live
+  reconciler claim answers 409 `POSTING_IN_FLIGHT` (retry later); 404 means none is open. The close
+  sets CLOSED_BY_OPERATOR (who and why stay on the row) and releases the hold. A journal may still
+  exist, so a later re-issue reopens the intent with its FIRST value day; it becomes the re-issuer's
+  decision (their actor and time), so the grace and four eyes apply to it afresh. Every transition is
+  appended to `deal_posting_intent_history`, whose triggers refuse UPDATE, DELETE and TRUNCATE from
+  the service (not from the table owner, who can disable a trigger). A journal that lands after a
+  close is recorded there as `JOURNAL_APPLIED_AFTER_CLOSE` with the prior status, counted in
+  `openbank.treasury.posting_intents.applied_after_close`, alerted on
+  (`TreasuryPostingIntentJournalAfterClose`: re-report that value day) and never written over the close.
 - **Operating it.** Under `shadow` mode the ledger only counts a hold. Under `enforce` an operator
   reviews a REFUSED day and waives it on the ledger's day-end page.
 

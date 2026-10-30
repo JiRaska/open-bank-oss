@@ -29,5 +29,9 @@ class AccountListenerAuthParityIT : ListenerAuthParityConformance() {
     // No such id: 404 is the answer the authenticated route gives (authz runs advisory in tests).
     override val authenticatedStatus = 404
 
-    class Profile : ProductionListenerProfile()
+    class Profile : ProductionListenerProfile() {
+        override fun extraOverrides(): Map<String, String> = mapOf(
+            "quarkus.management.enabled" to "true",
+        )
+    }
 }
