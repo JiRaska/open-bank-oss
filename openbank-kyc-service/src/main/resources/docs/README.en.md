@@ -14,6 +14,7 @@ This documentation is published directly by the service at the management endpoi
 | [04 — Data](./04-data.md) | Data, analytics, DBA | Schema, migrations, retention, PII fields |
 | [05 — Operations](./05-operations.md) | DevOps, SRE, release engineers | Build, deploy, runbooks, SLO |
 | [06 — Compliance](./06-compliance.md) | Compliance, audit, GRC | AMLD, GDPR, EBA, DORA mapping |
+| [07 — Screening triggers](./07-screening-triggers.md) | Engineering, DevOps, compliance | ADR-0256 event-driven re-screening loop, trigger table, coordinator contract, rollout |
 
 ## TL;DR
 

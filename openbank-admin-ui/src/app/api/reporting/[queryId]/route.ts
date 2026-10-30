@@ -38,7 +38,7 @@ export interface ReportResult {
   titleEn: string
   columns: readonly ReportColumn[]
   rows: Record<string, unknown>[]
-  /** When the warehouse reduced the events into these rows. null when unavailable. */
+  /** Time this BFF completed the ClickHouse query; this is not a source-data watermark. */
   generatedAt: string | null
   rowCount: number
   truncated: boolean
@@ -49,16 +49,31 @@ async function chQuery(sql: string): Promise<Record<string, unknown>[]> {
   const headers: Record<string, string> = { 'Content-Type': 'text/plain' }
   if (CLICKHOUSE_USER) headers['X-ClickHouse-User'] = CLICKHOUSE_USER
   if (CLICKHOUSE_PASSWORD) headers['X-ClickHouse-Key'] = CLICKHOUSE_PASSWORD
-  const res = await fetch(`${CLICKHOUSE_URL}/?default_format=JSON`, {
+  // ClickHouse's default JSON encoder emits DateTime64 as a space-separated wall time,
+  // which is ambiguous and fails the browser's RFC3339 contract. The query is read-only;
+  // ISO mode preserves the metadata-declared UTC offset as an explicit `Z`.
+  const res = await fetch(`${CLICKHOUSE_URL}/?default_format=JSON&date_time_output_format=iso`, {
     method: 'POST',
     headers,
     body: sql,
     cache: 'no-store',
     signal: AbortSignal.timeout(CLICKHOUSE_TIMEOUT_MS),
   })
-  if (!res.ok) throw new Error(`ClickHouse ${res.status}`)
-  const body = (await res.json()) as { data?: Record<string, unknown>[] }
-  return body.data ?? []
+  if (!res.ok) {
+    // Keep ClickHouse's own reason (e.g. `Code: 60 ... (UNKNOWN_TABLE)`): a missing view, a bad
+    // query and an unreachable server all degrade to the same calm UI state, so the server log is
+    // the only place the three can be told apart.
+    const detail = (await res.text().catch(() => '')).slice(0, 500)
+    throw new Error(`ClickHouse ${res.status}: ${detail}`)
+  }
+  const body: unknown = await res.json()
+  if (typeof body !== 'object' || body === null || !('data' in body) || !Array.isArray(body.data)) {
+    throw new Error('ClickHouse returned a malformed JSON result: expected a data array')
+  }
+  if (!body.data.every((row) => typeof row === 'object' && row !== null && !Array.isArray(row))) {
+    throw new Error('ClickHouse returned a malformed JSON result: rows must be objects')
+  }
+  return body.data as Record<string, unknown>[]
 }
 
 function empty(reportId: string, error?: string): ReportResult {
@@ -116,8 +131,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ queryId: st
     return NextResponse.json(body, { headers: { 'Cache-Control': 'no-store' } })
   } catch (e) {
     // ClickHouse unreachable / query error → degrade to a calm empty state (never a raw 5xx).
+    console.error(`[reporting] ${entry.id} failed:`, e instanceof Error ? e.message : e)
     return NextResponse.json(
-      { ...empty(queryId), titleCs: entry.titleCs, titleEn: entry.titleEn, columns: entry.columns, error: e instanceof Error ? e.message : 'clickhouse unreachable' },
+      { ...empty(queryId), titleCs: entry.titleCs, titleEn: entry.titleEn, columns: entry.columns, error: 'ClickHouse query failed' },
       { headers: { 'Cache-Control': 'no-store' } },
     )
   }

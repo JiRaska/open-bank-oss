@@ -31,6 +31,7 @@ interface OriginationTimerActivities {
     fun expireIfInState(applicationId: UUID, expectedState: String)
     fun advanceIfInState(applicationId: UUID, expectedState: String)
     fun remindDocumentSla(applicationId: UUID)
+    fun escalateFourEyesSla(applicationId: UUID)
 }
 
 /**
@@ -39,6 +40,15 @@ interface OriginationTimerActivities {
  * wait elapses without a state change, calls the aggregate's explicit transition
  * commands. Every timer is armed against a generation counter, so a state change
  * mid-wait invalidates the pending fire instead of racing it.
+ *
+ * Replay-safety of the two branches added after the workflow first shipped
+ * (KYC-validity expiry, four-eyes SLA escalation): both arm waits only for states
+ * the deployed code never previously waited on, a timer that a recorded signal
+ * invalidates never materialises as a history event, and the new durations are
+ * workflow-side constants — the timer DURATION is not part of replay identity, only
+ * the ordering of fired events is, and no existing history contains fires of these
+ * timers. The pre-existing branches (DOCS_REQUIRED / OFFERED / REFLECTION_PERIOD) are
+ * deliberately untouched.
  */
 class OriginationTimersWorkflowImpl : OriginationTimersWorkflow {
 
@@ -65,8 +75,21 @@ class OriginationTimersWorkflowImpl : OriginationTimersWorkflow {
         while (!done) {
             val armedGeneration = generation
             when (currentState) {
+                OriginationState.KYC_PENDING.name ->
+                    // KYC-validity expiry: the verification's validity elapsed while the
+                    // application still waits — EXPIRED, exactly like an elapsed offer.
+                    awaitSimpleTimer(armedGeneration, Duration.ofDays(KYC_VALIDITY_DAYS)) {
+                        activities.expireIfInState(applicationId, OriginationState.KYC_PENDING.name)
+                    }
                 OriginationState.DOCS_REQUIRED.name ->
                     awaitDocsSla(applicationId, armedGeneration, docsSlaDays)
+                OriginationState.FOUR_EYES.name ->
+                    // Four-eyes SLA escalation: a decision is overdue — escalate to an
+                    // operator. NEVER an auto-approval: the aggregate stays in FOUR_EYES
+                    // until a second human decides.
+                    awaitSimpleTimer(armedGeneration, Duration.ofDays(FOUR_EYES_SLA_DAYS)) {
+                        activities.escalateFourEyesSla(applicationId)
+                    }
                 OriginationState.OFFERED.name ->
                     awaitSimpleTimer(armedGeneration, Duration.ofDays(offerValidityDays)) {
                         activities.expireIfInState(applicationId, OriginationState.OFFERED.name)
@@ -119,6 +142,19 @@ class OriginationTimersWorkflowImpl : OriginationTimersWorkflow {
         private const val BACKOFF_COEFFICIENT = 2.0
         private const val SCHEDULE_TO_CLOSE_MINUTES = 10L
         private const val HALF = 2L
+
+        /**
+         * How long a KYC verification stays valid while the application waits in KYC_PENDING
+         * before the timer expires it. Workflow-side constant on purpose: [run]'s signature is
+         * frozen by in-flight execution histories (a new parameter would break their replay),
+         * and a timer's duration is not part of replay identity, so this value may be tuned
+         * freely for waits armed from now on. Making it pack/config-driven needs a new
+         * config channel (workflow input v2 or memo), tracked in the ADR-0211 follow-ups.
+         */
+        private const val KYC_VALIDITY_DAYS = 30L
+
+        /** How long a four-eyes decision may be overdue before the SLA escalation fires. */
+        private const val FOUR_EYES_SLA_DAYS = 5L
 
         private val TERMINAL_STATES: Set<String> = setOf(
             OriginationState.DISBURSED.name,

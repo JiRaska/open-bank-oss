@@ -106,14 +106,20 @@ class TaxReportingPensionPactConsumerTest {
         val catalogue = CatalogueParser.parse(mapper, "statutory-returns/cz/pension-cnb.v1.json")
         val definition = catalogue.definition("PSP31-04")!!
         val values = runBlocking {
-            PensionReturnDataAdapter(FixedSources(aggregates), NoCorporateFacts, NoCompanyBooks)
+            PensionReturnDataAdapter(
+                FixedSources(aggregates),
+                NoCorporateFacts,
+                NoCompanyBooks,
+                NoCompanyPortfolio,
+                "CZK",
+            )
                 .fetch(
                     catalogue,
                     definition,
                     "company",
                     ReportingPeriod(Periodicity.QUARTER, LocalDate.parse("2026-09-30")),
                 )
-        }
+        }.values
         assertThat(values.keys).containsExactlyInAnyOrderElementsOf(definition.datapoints)
         assertThat(definition.validate(values)).isEmpty()
     }

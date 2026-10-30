@@ -24,10 +24,8 @@ class InMemoryProposalTokenStore(private val clock: Clock) : ProposalTokenStore 
         evictExpired()
         store[token.id] = token
         log.debugf(
-            "InMemoryProposalTokenStore: stored token_ref=%s tool=%s customer=%s",
+            "InMemoryProposalTokenStore: stored token_ref=%s",
             ProposalToken.logRef(token.id),
-            token.toolName,
-            token.customerId,
         )
     }
 

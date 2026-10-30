@@ -74,6 +74,55 @@ response_attributes := {"four_eyes_required": true} if four_eyes_required
 # the narrow path below does not.)
 default policy_version := "unknown"
 
+# ---------------------------------------------------------------------------------------
+# Machine identity: the VERIFIED flag, never the name. `input.principal.id` is a NAME claim
+# (Quarkus takes it from upn/preferred_username), so `startswith(id, "service-account-")`
+# lets a machine token whose name is not `service-account-*` (a client_id-only token, a
+# renamed account, mapper drift) read as a person. The PEP (libs-runtime AuthorizeInterceptor)
+# derives `input.principal.service_account` from the verified JWT's claims only
+# (ServiceAccountIdentity.machineClientId) and, when known, `input.principal.client_id`.
+#
+# Rules that keep machines OUT test `not principal_is_machine`; rules that grant ONE client test
+# `machine_named("service-account-<client>")`. The id must match the fixed name AND a present
+# machine marker must carry the matching client_id derived from verified JWT claims. Never write
+# a bare id-prefix check for a named grant.
+#
+# FAIL CLOSED: only an explicit `service_account == false` from the PEP makes a principal a
+# person. An absent field (an old or broken PEP, a hand-built input) is a machine, so it
+# reaches no staff grant. Grants TO machines are below (machine_grant_ok).
+# ---------------------------------------------------------------------------------------
+principal_is_machine if not input.principal.service_account == false
+
+# Grants TO machines. Generic machine grants trust the marker; only while the field is ABSENT (a
+# PEP not yet rebuilt on phase-1 libs-runtime) does the legacy name prefix stand in. Named grants
+# use machine_named below and additionally bind client_id when the marker is present. An absent
+# field never grants a STAFF rule (principal_is_machine above). Remove legacy bodies once
+# check-pdp-flag-rollout.sh --live reports the whole fleet current.
+machine_grant_ok if input.principal.service_account == true
+
+machine_grant_ok if {
+	object.get(input.principal, "service_account", null) == null
+	startswith(input.principal.id, "service-account-")
+}
+
+machine_named(name) if {
+	input.principal.id == name
+	machine_grant_ok
+	# A present PEP marker is current ABI: bind the fixed name to the client id that the
+	# interceptor derived from azp + preferred_username. A renamed machine remains classified as
+	# a machine, but cannot borrow another client's named grant.
+	input.principal.service_account == true
+	input.principal.client_id == trim_prefix(name, "service-account-")
+}
+
+machine_named(name) if {
+	input.principal.id == name
+	# Phase-1 PEPs do not send these fields; keep their historical name-based grant only while
+	# the marker is absent. A present marker with missing client_id must deny.
+	object.get(input.principal, "service_account", null) == null
+	machine_grant_ok
+}
+
 policy_version := data.openbank.bundle.version
 
 # ---------------------------------------------------------------------------------------
@@ -106,6 +155,10 @@ allowed_reasons contains "compliance-read-any" if {
     not startswith(input.principal.id, "service-account-")
 	"ROLE_COMPLIANCE" in input.principal.roles
 	endswith(input.action, ".read")
+
+	# Same exclusion as operator-read-any: the CI realm gives the shared backend client
+	# ROLE_COMPLIANCE as well, so without it an excluded read stayed reachable by every service.
+	not operator_read_any_excluded(input.action)
 }
 
 # AI agents go through this same query when the agent's tool wraps a REST call
@@ -170,7 +223,7 @@ allowed_reasons contains "party-self-service" if {
 # stay empty; remove it and they demand a declared entry per M2M-reachable action again.
 allowed_reasons contains "matrix-allows" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in input.principal.roles
 	matrix_grants(input.action, role)
 }
@@ -226,7 +279,7 @@ allowed_reasons contains "operator-mcp-session" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	startswith(input.action, "mcp.session.")
 }
 
@@ -246,7 +299,7 @@ allowed_reasons contains "operator-compose-message" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "opsmessage.compose"
 }
 
@@ -258,8 +311,49 @@ allowed_reasons contains "operator-decide-message-approval" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "opsmessage.approval.decide"
+}
+
+# ADR-0333 D6: reviewed customer notification copy is drafted by staff (the maker side).
+# Keep this outside notification.*: customer-edge has that whole prefix, and its M2M
+# identity must never be able to change copy shown to a customer. Publishing is NOT here:
+# the checker is a distinct job function (ADR-0285 D6), see commstemplate-publish below.
+allowed_reasons contains "operator-manage-notification-template" if {
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    role in input.principal.roles
+    not principal_is_machine
+    input.action in {
+        "commstemplate.create",
+        "commstemplate.read",
+        "commstemplate.preview",
+    }
+}
+
+# ADR-0333 D6 checker side, same role family as commstyle-publish (ADR-0285 D6): publishing
+# customer notification copy belongs to ROLE_COMMS_APPROVER (ADMIN as break-glass), never to
+# ROLE_OPERATOR, so one operator cannot author and release copy alone by colluding with a
+# second operator account. Maker != checker is ALSO enforced by notification-service
+# (ManagedTemplateResource.publish and the `created_by <> actor` predicate in the UPDATE);
+# this rule only decides WHO may attempt the call.
+allowed_reasons contains "commstemplate-publish" if {
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+    role in input.principal.roles
+    not principal_is_machine
+    input.action == "commstemplate.publish"
+}
+
+# The approver must be able to see the draft it publishes; a lone ROLE_COMMS_APPROVER has no
+# ROLE_OPERATOR, so the maker rule above would not admit it (same reason as
+# commstyle-read-publish-approval).
+allowed_reasons contains "commstemplate-approver-read" if {
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+    role in input.principal.roles
+    not principal_is_machine
+    input.action in {"commstemplate.read", "commstemplate.preview"}
 }
 
 # ADR-0285 D3/D6: publishing a style/playbook version. Own role family (`ROLE_COMMS_APPROVER`),
@@ -274,7 +368,7 @@ allowed_reasons contains "commstyle-publish" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "commstyle.publish"
 }
 
@@ -286,7 +380,7 @@ allowed_reasons contains "commstyle-decide-publish-approval" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "commstyle.approval.decide"
 }
 
@@ -297,6 +391,104 @@ allowed_reasons contains "commstyle-read-publish-approval" if {
 	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "commstyle.approval.read"
+}
+
+# ADR-0352 §7: publishing an IR-bearing catalog revision signs its canonical revisionHash, and a
+# valid signature is authority over every account under the product — so this is its own action
+# (catalog.publish-ir, four_eyes.actions), never the shared catalog.publish, and human-only: the
+# shared backend service-account carries ROLE_OPERATOR in some realms and is classified HUMAN
+# (rules.yaml: authz_policy.principal_type_service_unreachable), so HUMAN + ROLE_OPERATOR alone
+# would re-admit that machine identity. Maker != checker is enforced independently by
+# product-catalog (GenericCatalogService.publishIr); this rule only decides WHO may attempt it.
+allowed_reasons contains "catalog-publish-ir" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	not principal_is_machine
+	input.action == "catalog.publish-ir"
+}
+
+# Pension catalog approval is a distinct human decision, never a generic publish grant.
+# The endpoint checks the requested legal/product role and immutable JWT actor identity.
+allowed_reasons contains "pension-catalog-decide-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.pensionApproval.decide"
+	input.resource.id
+	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER"}
+	role in input.principal.roles
+}
+
+allowed_reasons contains "pension-catalog-read-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.pensionApproval.read"
+	input.resource.id
+	"CATALOG_SCOPE_READ" in input.principal.roles
+}
+
+# Generic role-qualified revision approval (#13429). Which role a revision needs and which
+# authority proves it is pack data checked by product-catalog; OPA only requires a verified human
+# holding SOME approval authority (the derived CATALOG_REVISION_APPROVER marker).
+allowed_reasons contains "catalog-revision-decide-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.revisionApproval.decide"
+	input.resource.id
+	"CATALOG_REVISION_APPROVER" in input.principal.roles
+}
+
+allowed_reasons contains "catalog-revision-read-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.revisionApproval.read"
+	input.resource.id
+	"CATALOG_SCOPE_READ" in input.principal.roles
+}
+
+# A named human legal/product reviewer needs the catalog workspace before deciding a revision.
+# The read role is derived from that reviewer's verified realm role by product-catalog; it is
+# never a realm-wide default or an assignable CATALOG_SCOPE_READ role.
+allowed_reasons contains "pension-catalog-human-reviewer-read" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.read"
+	"CATALOG_SCOPE_READ" in input.principal.roles
+	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "CATALOG_REVISION_APPROVER"}
+	role in input.principal.roles
+}
+
+# The pension service reads published strategy mappings and their approval evidence with its
+# own client_credentials identity. The scope alone is insufficient for OPA: only this named
+# caller may traverse these catalog reads; approval decisions remain human-only above.
+allowed_reasons contains "pension-catalog-m2m-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-pension"
+	"CATALOG_SCOPE_READ" in input.principal.roles
+	input.action == "catalog.read"
+}
+
+# Account opening reads a published revision with its verified account-owned identity only.
+allowed_reasons contains "account-catalog-m2m-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.service_account == true
+	machine_named("service-account-openbank-account")
+	"ROLE_API" in input.principal.roles
+	"CATALOG_SCOPE_READ" in input.principal.roles
+	input.action == "catalog.read"
+}
+
+allowed_reasons contains "pension-catalog-m2m-read-approval" if {
+    input.principal.type == "HUMAN"
+    input.principal.id == "service-account-openbank-pension"
+    "ROLE_API" in input.principal.roles
+    "CATALOG_SCOPE_READ" in input.principal.roles
+    input.action in {"catalog.pensionApproval.read", "catalog.revisionApproval.read"}
+    input.resource.id
+    input.attributes.azp == "openbank-pension"
+    input.attributes.preferred_username == "service-account-openbank-pension"
+    is_string(input.attributes.subject)
+    input.attributes.subject != ""
 }
 
 # Authenticated customers may perform any `customer.*` action (initiate payments, enroll
@@ -355,7 +547,7 @@ allowed_reasons contains "customer-self-action" if {
 # ceremony's signers, so this grant cannot sign on someone else's behalf.
 allowed_reasons contains "edge-service-notification" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	some family in {"notification.", "device.", "document.", "signatureCeremony."}
 	startswith(input.action, family)
 }
@@ -371,7 +563,7 @@ allowed_reasons contains "edge-service-notification" if {
 # edge principal (least privilege; the edge exposes no route for those anyway).
 allowed_reasons contains "edge-service-consent" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {"consent.list", "consent.revoke"}
 }
 
@@ -383,7 +575,7 @@ allowed_reasons contains "edge-service-consent" if {
 # NOT an `engagement.` family — least privilege, matching edge-service-consent's shape.
 allowed_reasons contains "edge-service-engagement" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
 }
 
@@ -405,7 +597,7 @@ allowed_reasons contains "edge-service-engagement" if {
 # through a different client, so their preferred_username is never "service-account-*".
 allowed_reasons contains "edge-service-audit-customer" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action == "audit.customerRead"
 }
 
@@ -434,7 +626,7 @@ allowed_reasons contains "edge-service-audit-customer" if {
 # staff sessions from this specific carve-out.
 allowed_reasons contains "m2m-sanctions-screening" if {
 	input.principal.type == "HUMAN"
-	startswith(input.principal.id, "service-account-")
+	machine_grant_ok
 	input.action == "sanctions.create"
 }
 
@@ -567,6 +759,7 @@ prohibited if {
 shared_m2m_identity if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
+	machine_grant_ok
 }
 
 # Which role-only write reasons this prohibition applies to — DATA, not a name pattern.

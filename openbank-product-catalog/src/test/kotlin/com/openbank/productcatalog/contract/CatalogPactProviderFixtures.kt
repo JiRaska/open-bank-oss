@@ -4,6 +4,9 @@
 
 package com.openbank.productcatalog.contract
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
 import jakarta.enterprise.context.ApplicationScoped
 import java.sql.Connection
 import java.time.OffsetDateTime
@@ -12,7 +15,11 @@ import javax.sql.DataSource
 
 /** Provider-state data only; every fixture uses a separate aggregate so Pact order is irrelevant. */
 @ApplicationScoped
-class CatalogPactProviderFixtures(private val dataSource: DataSource) {
+class CatalogPactProviderFixtures(
+    private val dataSource: DataSource,
+    private val mapper: ObjectMapper,
+    private val catalogJson: CatalogJson,
+) {
     fun specificationCodeIsAvailable() = dataSource.connection.use { connection ->
         connection.prepareStatement("DELETE FROM catalog_specifications WHERE code = ?").use { statement ->
             statement.setString(1, "PACT_STUDIO_SPEC")
@@ -104,6 +111,45 @@ class CatalogPactProviderFixtures(private val dataSource: DataSource) {
         }
     }
 
+    /**
+     * Immutable published revision of the offering mapped to the seeded CURRENT_PERSONAL product (prod-003),
+     * shaped like the lossless v1 projection a deposit account is priced from today: a `productType`, the
+     * embedded v1 document carrying fee `f1`'s identity and waiver rule, and the fee amount as a v2 price
+     * component under the code the catalog derives from `f1`. Consumed by billing-service's pinned-revision
+     * Pact (ADR-0341); the revision id is FIXED because the Pact declares its by-id path as a literal.
+     */
+    fun publishedLegacyDepositRevisionExists() = dataSource.connection.use { connection ->
+        val offeringId = connection.prepareStatement(
+            "SELECT default_offering_id FROM bank_v1_product_mapping WHERE product_id = ?",
+        ).use { statement ->
+            statement.setObject(1, UUID.nameUUIDFromBytes("openbank-product:prod-003".toByteArray()))
+            statement.executeQuery().use { rows ->
+                check(rows.next()) { "CURRENT_PERSONAL (prod-003) has no v1 mapping; the seed did not run" }
+                rows.getObject(1, UUID::class.java)
+            }
+        }
+        connection.prepareStatement(
+            "INSERT INTO catalog_revisions " +
+                "(id, offering_id, revision_no, schema_id, schema_version, state, content, effective_from, " +
+                "maker_id, checker_id, reason, content_hash, created_at, updated_at, lock_version) " +
+                "VALUES (?, ?, 1000, ?, 1, 'PUBLISHED', CAST(? AS jsonb), ?, ?, ?, ?, ?, ?, ?, 0) " +
+                "ON CONFLICT (id) DO NOTHING",
+        ).use { statement ->
+            statement.setObject(1, BILLING_LEGACY_REVISION_ID)
+            statement.setObject(2, offeringId)
+            statement.setString(3, LEGACY_SCHEMA_ID)
+            statement.setString(4, BILLING_LEGACY_REVISION_CONTENT)
+            statement.setObject(5, OffsetDateTime.parse("2026-01-01T00:00:00Z"))
+            statement.setString(6, "pact-billing-author")
+            statement.setString(7, "pact-billing-checker")
+            statement.setString(8, "published v1-projected deposit fixture")
+            statement.setString(9, "b".repeat(64))
+            statement.setObject(10, FIXTURE_TIME)
+            statement.setObject(11, FIXTURE_TIME)
+            statement.executeUpdate()
+        }
+    }
+
     /** Published loan revision consumed by lending before an application is persisted. */
     fun publishedPricedLoanRevisionExists() = dataSource.connection.use { connection ->
         connection.prepareStatement(
@@ -139,6 +185,77 @@ class CatalogPactProviderFixtures(private val dataSource: DataSource) {
             statement.executeUpdate()
         }
     }
+
+    /** Synthetic published DIP revision with two immutable, role-qualified approvals. */
+    fun publishedPensionStrategyApprovalsExist() = dataSource.connection.use { connection ->
+        val content = mapper.readTree(PENSION_REVISION_CONTENT)
+        val approvalDigest = pensionApprovalDigest(content)
+        connection.prepareStatement(
+            "INSERT INTO catalog_specifications " +
+                "(id, code, schema_id, schema_version, created_at, lock_version) VALUES (?, ?, ?, 2, ?, 0) " +
+                "ON CONFLICT (id) DO NOTHING",
+        ).use { statement ->
+            statement.setObject(1, PENSION_SPECIFICATION_ID)
+            statement.setString(2, "PACT_PENSION_DIP_STRATEGY")
+            statement.setString(3, PENSION_SCHEMA_ID)
+            statement.setObject(4, PENSION_FIXTURE_TIME)
+            statement.executeUpdate()
+        }
+        insertOffering(connection, PENSION_OFFERING_ID, PENSION_SPECIFICATION_ID, "PACT_PENSION_DIP_OFFERING")
+        connection.prepareStatement(
+            "INSERT INTO catalog_revisions " +
+                "(id, offering_id, revision_no, schema_id, schema_version, state, content, effective_from, " +
+                "effective_to, maker_id, checker_id, reason, content_hash, approval_digest, " +
+                "created_at, updated_at, lock_version) " +
+                "VALUES (?, ?, 1, ?, 2, 'PUBLISHED', CAST(? AS jsonb), ?, ?, ?, ?, ?, ?, ?, ?, ?, 0) " +
+                "ON CONFLICT (id) DO NOTHING",
+        ).use { statement ->
+            statement.setObject(1, PENSION_REVISION_ID)
+            statement.setObject(2, PENSION_OFFERING_ID)
+            statement.setString(3, PENSION_SCHEMA_ID)
+            statement.setString(4, PENSION_REVISION_CONTENT)
+            statement.setObject(5, OffsetDateTime.parse("2026-10-01T00:00:00Z"))
+            statement.setObject(6, OffsetDateTime.parse("2026-11-01T00:00:00Z"))
+            statement.setString(7, "pact-pension-maker")
+            statement.setString(8, "pact-pension-checker")
+            statement.setString(9, "independently reviewed DIP strategy fixture")
+            statement.setString(10, catalogJson.sha256(content))
+            statement.setString(11, approvalDigest)
+            statement.setObject(12, PENSION_FIXTURE_TIME)
+            statement.setObject(13, PENSION_FIXTURE_TIME)
+            statement.executeUpdate()
+        }
+        listOf("LEGAL_COUNSEL", "PRODUCT_OWNER").forEachIndexed { index, role ->
+            connection.prepareStatement(
+                "INSERT INTO catalog_revision_role_approvals " +
+                    "(id, revision_id, role, issuer, subject, digest, reason, approved_at) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+            ).use { statement ->
+                statement.setObject(1, if (index == 0) PENSION_LEGAL_APPROVAL_ID else PENSION_PRODUCT_APPROVAL_ID)
+                statement.setObject(2, PENSION_REVISION_ID)
+                statement.setString(3, role)
+                statement.setString(4, "pact-fixture")
+                statement.setString(5, "pact-$role")
+                statement.setString(6, approvalDigest)
+                statement.setString(7, "independent $role review")
+                statement.setObject(8, OffsetDateTime.parse("2026-10-08T${10 + index}:00:00Z"))
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    private fun pensionApprovalDigest(content: JsonNode) = catalogJson.sha256(
+        mapper.createObjectNode().apply {
+            put("offeringId", PENSION_OFFERING_ID.toString())
+            put("revisionId", PENSION_REVISION_ID.toString())
+            put("revisionNumber", 0)
+            put("schemaId", PENSION_SCHEMA_ID)
+            put("schemaVersion", 2)
+            put("effectiveFrom", "2026-10-01T00:00:00Z")
+            put("effectiveTo", "2026-11-01T00:00:00Z")
+            set<JsonNode>("content", content)
+        },
+    )
 
     private fun insertSpecification(connection: Connection, id: UUID, code: String) {
         connection.prepareStatement(
@@ -195,6 +312,10 @@ class CatalogPactProviderFixtures(private val dataSource: DataSource) {
     private companion object {
         const val SCHEMA_ID = "org.openbank.insurance.term-life"
         const val DEPOSIT_SCHEMA_ID = "org.openbank.banking.deposit"
+        const val LEGACY_SCHEMA_ID = "org.openbank.banking.legacy-product"
+        val BILLING_LEGACY_REVISION_ID: UUID = UUID.fromString("0191c0de-0000-7000-8000-00000000b111")
+        const val BILLING_LEGACY_REVISION_CONTENT =
+            """{"name":{"en":"Billing pact v1 deposit"},"attributes":{"productType":"CURRENT","currency":"CZK","legacyDocument":"{\"fees\":[{\"id\":\"f1\",\"name\":\"Monthly maintenance\",\"type\":\"MONTHLY\",\"amount\":150.0,\"currency\":\"CZK\",\"waivable\":false}]}"},"prices":[{"code":"FEE_F1_3F524CDC07A11D7C6220","kind":"AMOUNT","value":"150.00","currency":"CZK","unit":"monthly","cadence":"MONTHLY","taxTreatment":"UNSPECIFIED"}],"eligibility":[],"relationships":[],"documentCodes":[]}"""
         val OFFERING_SPECIFICATION_ID: UUID = UUID.fromString("10000000-0000-0000-0000-000000000001")
         val DRAFT_SPECIFICATION_ID: UUID = UUID.fromString("10000000-0000-0000-0000-000000000002")
         val UPDATE_SPECIFICATION_ID: UUID = UUID.fromString("10000000-0000-0000-0000-000000000003")
@@ -211,6 +332,15 @@ class CatalogPactProviderFixtures(private val dataSource: DataSource) {
         val LOAN_SPECIFICATION_ID: UUID = UUID.fromString("10000000-0000-0000-0000-000000000011")
         val LOAN_OFFERING_ID: UUID = UUID.fromString("20000000-0000-0000-0000-000000000011")
         val LOAN_REVISION_ID: UUID = UUID.fromString("30000000-0000-0000-0000-000000000011")
+        val PENSION_SPECIFICATION_ID: UUID = UUID.fromString("10000000-0000-0000-0000-000000000084")
+        val PENSION_OFFERING_ID: UUID = UUID.fromString("20000000-0000-0000-0000-000000000084")
+        val PENSION_REVISION_ID: UUID = UUID.fromString("30000000-0000-0000-0000-000000000084")
+        val PENSION_LEGAL_APPROVAL_ID: UUID = UUID.fromString("40000000-0000-0000-0000-000000000084")
+        val PENSION_PRODUCT_APPROVAL_ID: UUID = UUID.fromString("40000000-0000-0000-0000-000000000085")
+        const val PENSION_SCHEMA_ID = "org.openbank.retirement.pension-savings"
+        val PENSION_FIXTURE_TIME: OffsetDateTime = OffsetDateTime.parse("2026-10-08T09:00:00Z")
+        const val PENSION_REVISION_CONTENT =
+            """{"name":{"en":"Pact DIP strategy"},"attributes":{"productLine":"DIP","jurisdictionPackId":"CZ/DIP","fundStrategy":"DYNAMIC","reviewStatus":"LEGAL_AND_COMMERCIAL_REVIEWED","instrumentClasses":["BOND_FUNDS","EQUITY_FUNDS"]},"prices":[],"eligibility":[],"relationships":[],"documentCodes":[]}"""
         val FIXTURE_TIME: OffsetDateTime = OffsetDateTime.parse("2027-01-01T00:00:00Z")
         val LOAN_FIXTURE_TIME: OffsetDateTime = OffsetDateTime.parse("2026-01-01T00:00:00Z")
         const val REVISION_CONTENT =

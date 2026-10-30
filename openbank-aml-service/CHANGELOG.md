@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.13.8](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.7...aml-service-v0.13.8) (2026-10-29)
+
+
+### Bug Fixes
+
+* **aml:** publish high-risk oversight triggers ([#14151](https://github.com/JiRaska/open-bank-oss/issues/14151)) ([f7d1363](https://github.com/JiRaska/open-bank-oss/commit/f7d1363da164ac94e18dcc044be210b3d50a7ff5))
+
+## [0.13.7](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.6...aml-service-v0.13.7) (2026-10-26)
+
+
+### Bug Fixes
+
+* **fraud:** share the financial-crime vocabulary in openbank-libs-fincrime ([#13770](https://github.com/JiRaska/open-bank-oss/issues/13770)) ([bc45331](https://github.com/JiRaska/open-bank-oss/commit/bc4533123a2d8b52ba0b5e3bdfefaa91a712d6f2))
+
+## [0.13.6](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.5...aml-service-v0.13.6) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.13.5](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.4...aml-service-v0.13.5) (2026-10-14)
+
+
+### Security
+
+* **libs-runtime:** send OPA a verified service_account flag (phase 1 of 2) ([#12538](https://github.com/JiRaska/open-bank-oss/issues/12538)) ([3a8493a](https://github.com/JiRaska/open-bank-oss/commit/3a8493a7d8640b0baf252a879c1a908bd19587e2))
+
 ## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.3...aml-service-v0.13.4) (2026-10-13)
 
 

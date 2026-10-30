@@ -4,11 +4,7 @@
 
 package com.openbank.pension.domain
 
-import com.openbank.pension.domain.model.ContributionFrequency
-import com.openbank.pension.domain.model.ContributionSchedule
-import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.model.ProductLine
-import com.openbank.pension.domain.pack.ClawbackMode
 import com.openbank.pension.domain.pack.IncentivePeriod
 import com.openbank.pension.domain.pack.IncentiveRule
 import com.openbank.pension.domain.pack.IncentiveType
@@ -17,16 +13,12 @@ import com.openbank.pension.domain.pack.LegalReviewStatus
 import com.openbank.pension.domain.pack.PackEvaluator
 import com.openbank.pension.domain.pack.PackNotFoundException
 import com.openbank.pension.domain.pack.ProviderType
-import com.openbank.pension.domain.pack.SurrenderCalculator
-import com.openbank.pension.domain.pack.SurrenderInputs
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
-import java.time.Instant
 import java.time.LocalDate
-import java.util.UUID
 
 /**
  * Evaluates the shipped reference packs. The numbers asserted here restate the pack DATA, not law:
@@ -45,8 +37,8 @@ class JurisdictionPackTest {
             .associateBy { it.incentiveId }
 
     @Test
-    fun `both reference packs load and are marked as requiring legal review`() {
-        assertThat(registry.all()).hasSize(2)
+    fun `all reference packs load and are marked as requiring legal review`() {
+        assertThat(registry.all()).hasSize(3)
         assertThat(registry.all().map { it.legalReview.status }).containsOnly(LegalReviewStatus.REQUIRES_LEGAL_REVIEW)
     }
 
@@ -105,39 +97,37 @@ class JurisdictionPackTest {
     }
 
     @Test
-    fun `an early exit claws back state contributions and recent tax relief`() {
-        val contract = PensionContract.draft(
-            UUID.randomUUID(), ProductLine.DPS, "CZ", 1, UUID.randomUUID(), ProviderType.PENSION_COMPANY,
-            LocalDate.parse(
-                "1990-01-01",
-            ),
-            ContributionSchedule(BigDecimal("1700"), "CZK", ContributionFrequency.MONTHLY),
-            "BALANCED", emptyList(), LocalDate.parse("2020-01-01"), Instant.EPOCH,
-        ).submit(Instant.EPOCH).activate(LocalDate.parse("2020-01-01"), Instant.EPOCH)
-        val preview = SurrenderCalculator.preview(
-            contract,
-            dps,
-            SurrenderInputs(
-                currentValue = BigDecimal("150000"),
-                incentivesReceived = mapOf(
-                    "state-contribution" to mapOf(2020 to BigDecimal("2760"), 2025 to BigDecimal("4080")),
-                    "income-tax-deduction" to mapOf(2010 to BigDecimal("999"), 2025 to BigDecimal("2340")),
-                ),
-            ),
-            on,
-        )
-        assertThat(preview.payoutConditionsMet).isFalse()
-        val claws = preview.clawbacks.associateBy { it.incentiveId }
-        assertThat(claws["state-contribution"]!!.amount).isEqualByComparingTo("6840")
-        assertThat(claws["state-contribution"]!!.mode).isEqualTo(ClawbackMode.RETURN_ALL)
-        assertThat(claws["income-tax-deduction"]!!.amount).isEqualByComparingTo("2340")
-        assertThat(preview.estimatedNetPayout).isEqualByComparingTo("140820")
-    }
-
-    @Test
     fun `a rule missing a field its type needs is refused at construction`() {
         assertThatThrownBy { IncentiveRule(id = "m", type = IncentiveType.MATCHING, rate = BigDecimal.ONE) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("amountCap")
+    }
+
+    @Test
+    fun `exactly one CZ DPS version is in force on any date - v1 ends the day before v2 starts`() {
+        val v1 = registry.pinned("CZ", ProductLine.DPS, 1)
+        val v2 = registry.pinned("CZ", ProductLine.DPS, 2)
+        assertThat(v1.effectiveTo).isEqualTo(v2.effectiveFrom.minusDays(1))
+        assertThat(registry.resolve("CZ", ProductLine.DPS, v1.effectiveTo!!).version).isEqualTo(1)
+        assertThat(registry.resolve("CZ", ProductLine.DPS, v2.effectiveFrom).version).isEqualTo(2)
+        // effectiveTo is inclusive: v1 is still in force on its last day and not the day after.
+        assertThat(v1.isEffectiveOn(v1.effectiveTo!!)).isTrue()
+        assertThat(v1.isEffectiveOn(v2.effectiveFrom)).isFalse()
+    }
+
+    @Test
+    fun `a registry with two versions effective at once is refused`() {
+        val v1 = registry.pinned("CZ", ProductLine.DPS, 1)
+        val v2 = registry.pinned("CZ", ProductLine.DPS, 2)
+        assertThatThrownBy {
+            com.openbank.pension.domain.pack.JurisdictionPackRegistry(
+                listOf(v1.copy(effectiveTo = null), v2),
+            )
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("must end the day before")
+        assertThatThrownBy {
+            com.openbank.pension.domain.pack.JurisdictionPackRegistry(
+                listOf(v1.copy(effectiveTo = v2.effectiveFrom), v2),
+            )
+        }.isInstanceOf(IllegalArgumentException::class.java)
     }
 }

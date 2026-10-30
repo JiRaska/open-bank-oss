@@ -21,6 +21,9 @@ import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.RescheduleRequest
+import com.openbank.lending.domain.model.SignApplicationRequest
+import com.openbank.lending.domain.model.SubmitDocumentsRequest
+import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.identifiers.CollateralId
@@ -295,6 +298,119 @@ class LendingResource(
             .recoverWithItem { e -> refused(e as OriginationRefusedException) }
             .onFailure().recoverWithItem { e -> Response.status(409).entity(mapOf("error" to e.message)).build() }
 
+    @POST
+    @Path("/applications/{id}/withdraw")
+    @Operation(
+        summary = "Withdraw an application before disbursement (operator; the customer withdraws " +
+            "through the customer-edge intake route)",
+    )
+    @Authorize(action = "lending.withdraw", resource = "#id")
+    suspend fun withdrawApplication(
+        @PathParam("id") id: UUID,
+        request: WithdrawApplicationRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        // #8351 money-path POST: the replay key is REQUIRED; libs-runtime maps the
+        // IllegalArgumentException to 400, and the reserve below makes a retry replay the stored
+        // outcome instead of re-running a transition the machine would now refuse.
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", "$APPLICATIONS_PATH/$id/withdraw", request)
+        return idempotencyStore.submitOnce(
+            originationCommandKey("withdraw", id, idempotencyKey),
+            requestHash,
+            ORIGINATION_KEY_TTL_SECONDS,
+        ) {
+            try {
+                val withdrawn = apply.withdraw(LoanApplicationId(id), request, actor()).awaitSuspending()
+                jsonResponse(withdrawn)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OriginationRefusedException) {
+                refused(e)
+            } catch (e: IllegalArgumentException) {
+                Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to e.message)).build()
+            } catch (e: IllegalStateException) {
+                // The policy graph is the authority on which states may still be abandoned: the
+                // machine's refusal (e.g. SIGNED or later, or a terminal state) answers 422.
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+        }
+    }
+
+    @POST
+    @Path("/applications/{id}/submit-documents")
+    @Operation(summary = "Record document submission for an application in DOCS_REQUIRED")
+    @Authorize(action = "lending.submitDocuments", resource = "#id")
+    suspend fun submitDocuments(
+        @PathParam("id") id: UUID,
+        request: SubmitDocumentsRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val requestHash = RequestFingerprints.of(
+            objectMapper,
+            "POST",
+            "$APPLICATIONS_PATH/$id/submit-documents",
+            request,
+        )
+        return idempotencyStore.submitOnce(
+            originationCommandKey("submitDocuments", id, idempotencyKey),
+            requestHash,
+            ORIGINATION_KEY_TTL_SECONDS,
+        ) {
+            try {
+                val updated = apply.submitDocuments(LoanApplicationId(id), request, actor()).awaitSuspending()
+                jsonResponse(updated)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OriginationRefusedException) {
+                refused(e)
+            } catch (e: IllegalArgumentException) {
+                Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to e.message)).build()
+            } catch (e: IllegalStateException) {
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+        }
+    }
+
+    @POST
+    @Path("/applications/{id}/sign")
+    @Operation(
+        summary = "Record the customer's signature on the offered contract; persists the artefact hash",
+    )
+    @Authorize(action = "lending.sign", resource = "#id")
+    suspend fun sign(
+        @PathParam("id") id: UUID,
+        request: SignApplicationRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", "$APPLICATIONS_PATH/$id/sign", request)
+        return idempotencyStore.submitOnce(
+            originationCommandKey("sign", id, idempotencyKey),
+            requestHash,
+            ORIGINATION_KEY_TTL_SECONDS,
+        ) {
+            try {
+                val signed = apply.sign(LoanApplicationId(id), request, actor()).awaitSuspending()
+                jsonResponse(signed)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OriginationRefusedException) {
+                refused(e)
+            } catch (e: IllegalArgumentException) {
+                Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to e.message)).build()
+            } catch (e: IllegalStateException) {
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+        }
+    }
+
+    /** The success body of an origination command: 200 with a JSON entity the store can replay. */
+    private fun jsonResponse(body: Any): Response =
+        Response.status(HTTP_OK).entity(objectMapper.writeValueAsString(body))
+            .type(MediaType.APPLICATION_JSON).build()
+
     @GET
     @Path("/applications/{id}")
     @Operation(summary = "Get a loan application")
@@ -511,9 +627,20 @@ class LendingResource(
 
     private fun applyIdempotencyKey(partyId: UUID, requestKey: String) = "lending:apply:$partyId:$requestKey"
 
+    /**
+     * The per-command replay key for the ADR-0211 origination commands (#8351): scoped to the
+     * application, the command, and the acting principal, so the same caller-supplied key under a
+     * different body is caught by the request fingerprint (409 IDEMPOTENCY_KEY_REUSED), and another
+     * principal's key is a different key entirely.
+     */
+    private fun originationCommandKey(command: String, id: UUID, requestKey: String) =
+        "lending:$command:$id:${actor()}:$requestKey"
+
     private companion object {
+        const val HTTP_OK = 200
         const val HTTP_CREATED = 201
         const val APPLY_KEY_TTL_SECONDS = 300L
+        const val ORIGINATION_KEY_TTL_SECONDS = 300L
         const val APPLICATIONS_PATH = "/api/v1/lending/applications"
         const val HTTP_NOT_FOUND = 404
         const val HTTP_UNPROCESSABLE = 422

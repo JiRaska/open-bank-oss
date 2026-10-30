@@ -23,6 +23,11 @@ class PensionContractEntity : PanacheEntity() {
     @Column(name = "contract_id", nullable = false, unique = true)
     lateinit var contractId: UUID
 
+    /** ADR-0334 S8: a concurrent lifecycle change loses with 409 instead of overwriting the winner. */
+    @jakarta.persistence.Version
+    @Column(name = "row_version", nullable = false)
+    var rowVersion: Int = 0
+
     @Column(name = "participant_party_id", nullable = false)
     lateinit var participantPartyId: UUID
 

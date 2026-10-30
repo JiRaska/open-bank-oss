@@ -4,24 +4,30 @@
 
 package com.openbank.treasury.infrastructure.client
 
+import com.fasterxml.jackson.annotation.JsonInclude
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.treasury.application.port.out.LedgerPostingPort
+import com.openbank.treasury.application.port.out.PostedJournal
 import com.openbank.treasury.domain.model.JournalSpec
+import com.openbank.treasury.domain.model.ResolvedAccount
 import com.openbank.treasury.domain.model.Side
-import com.openbank.treasury.domain.model.TreasuryChart
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
 
@@ -54,8 +60,15 @@ data class PostJournalRequest(
     val createdBy: UUID,
 )
 
+/**
+ * A leg names its account ONE way: [glAccountId] (explicit: the rollout shim, or a reversal pinned to
+ * the original account) or [accountingClass] + [accountingRole] (the ledger resolves it). Absent
+ * fields are omitted from the JSON, so an old ledger sees exactly the payload it always did.
+ */
 data class JournalLineRequest(
-    val glAccountId: UUID,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val glAccountId: UUID?,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val accountingClass: String?,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val accountingRole: String?,
     val side: String,
     val amount: BigDecimal,
     val currencyCode: String,
@@ -64,25 +77,55 @@ data class JournalLineRequest(
     val baseCurrencyCode: String,
 )
 
-data class JournalResponse(val id: UUID, val transactionId: UUID, val status: String)
+data class JournalResponse(
+    val id: UUID,
+    val transactionId: UUID,
+    val status: String,
+    val lines: List<JournalLineResponse> = emptyList(),
+)
+
+data class JournalLineResponse(val glAccountId: UUID, val sequence: Int = 0)
 
 @ApplicationScoped
-class LedgerPostingAdapter(@RestClient private val client: LedgerRestClient) : LedgerPostingPort {
+class LedgerPostingAdapter @Inject constructor(
+    @RestClient private val client: LedgerRestClient,
+    /**
+     * `openbank.treasury.ledger.post-by-class`. FALSE (default) keeps the explicit-`glAccountId`
+     * payload every ledger understands, so deploying treasury before the ledger that serves
+     * accounting classes cannot fail a posting. Set TRUE once that ledger is live (ADR-0341 D3).
+     */
+    @ConfigProperty(name = "openbank.treasury.ledger.post-by-class", defaultValue = "false")
+    private val postByClass: Boolean,
+    private val clock: Clock,
+) : LedgerPostingPort {
+
+    /** Test construction: the system clock. */
+    constructor(client: LedgerRestClient, postByClass: Boolean) : this(client, postByClass, Clock.systemUTC())
 
     /**
      * `transactionId` is the deal id, so `GET /api/v1/journals/transaction/{dealId}` lists every
      * journal a deal produced. Lines are single-currency (base = transaction currency, no FX).
      */
-    override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID {
+    override suspend fun post(spec: JournalSpec, valueDate: LocalDate, description: String): PostedJournal {
+        // ADR-0342 (#13167 review, the lending decision): the ledger accepts postings only into an
+        // OPEN accounting day and answers 409 ACCOUNTING_DAY_CLOSED for one in CUTOFF or later, so a
+        // catch-up for an earlier day is booked in TODAY's open day (entryDate) and carries the
+        // economic day as its valueDate. Treasury's day-close evidence attributes the journal to its
+        // value day. Late posts are counted by TreasuryDealService once the journal is first recorded,
+        // never here, where a refused or replayed post would count too (#13882 final review).
+        val openDay = AccountingClock.bank(clock).today()
         val request = PostJournalRequest(
             idempotencyKey = spec.idempotencyKey,
             transactionId = spec.dealId,
-            entryDate = entryDate.toString(),
-            valueDate = entryDate.toString(),
+            entryDate = maxOf(openDay, valueDate).toString(),
+            valueDate = valueDate.toString(),
             description = description,
             lines = spec.lines.map {
+                val explicit = it.glAccountId ?: if (postByClass) null else LegacyGlChart.glAccountId(it)
                 JournalLineRequest(
-                    glAccountId = TreasuryChart.glAccountId(it.glCode),
+                    glAccountId = explicit,
+                    accountingClass = it.accountingClass.takeIf { explicit == null },
+                    accountingRole = it.role.name.takeIf { explicit == null },
                     side = if (it.side == Side.DEBIT) "DEBIT" else "CREDIT",
                     amount = it.amount,
                     currencyCode = it.currency,
@@ -93,7 +136,21 @@ class LedgerPostingAdapter(@RestClient private val client: LedgerRestClient) : L
             },
             createdBy = SYSTEM_ACTOR,
         )
-        return client.postJournal(request).awaitSuspending().id
+        val response = client.postJournal(request).awaitSuspending()
+        return PostedJournal(response.id, resolvedAccounts(spec, response))
+    }
+
+    /**
+     * Where each leg landed, from the ledger's own answer (on an idempotent replay: the ORIGINAL
+     * entry's accounts). Legs come back in `sequence` order, which is the order they were sent.
+     * A count mismatch records nothing rather than guessing a pairing.
+     */
+    private fun resolvedAccounts(spec: JournalSpec, response: JournalResponse): List<ResolvedAccount> {
+        val answered = response.lines.sortedBy { it.sequence }
+        if (answered.size != spec.lines.size) return emptyList()
+        return spec.lines.zip(answered).map { (line, resolved) ->
+            ResolvedAccount(line.accountingClass, line.role, line.currency, resolved.glAccountId)
+        }
     }
 
     companion object {

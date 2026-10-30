@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
+import { workloadHealthIdentity } from '@/lib/health/workloadHealth'
 
-export type MapHealthEntry = { port: number; status: 'UP' | 'DOWN' | 'UNKNOWN'; name?: string; container?: string }
+export type MapHealthEntry = { port: number; status: 'UP' | 'DOWN' | 'UNKNOWN'; name?: string; container?: string; namespace?: string }
 export type MapEdge = { from: string; to: string; via: string; type: 'rest' | 'kafka' }
 export type MapNode = { name: string; dependsOn?: number; dependedOnBy?: number }
 export type MapInfraNode = { id: string; kind: 'infra'; tech: string; label: string }
@@ -37,12 +38,14 @@ export function parseMapHealth(value: unknown): MapHealthEntry[] | null {
         status: item.status as MapHealthEntry['status'],
         ...(text(item.name) ? { name: item.name } : {}),
         ...(text(item.container) ? { container: item.container } : {}),
+        ...(text(item.namespace) ? { namespace: item.namespace } : {}),
       }
       : null
   })
-  // Identity is the workload (name), not the port: ports repeat across the fleet. An entry that
-  // carries no name can only be told apart by port, so those still must not collide.
-  if (!services || new Set(services.map(item => item.name ?? `port:${item.port}`)).size !== services.length) return null
+  // Namespace/name identifies discovered workloads; legacy static entries keep name/port identity.
+  if (!services || new Set(services.map(item => item.name
+    ? workloadHealthIdentity({ name: item.name, namespace: item.namespace, port: item.port })
+    : `port:${item.port}`)).size !== services.length) return null
   return services
 }
 

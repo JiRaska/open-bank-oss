@@ -801,16 +801,55 @@ def self_test() -> int:
     case("a deployed service gets no deployment banner",
          all(deployment_status(x) == "" for x in deployed[:5]))
     # A zero-replica Deployment is a deliberate activation gate, not an operational workload.
-    # Referral is the real staged instance in this repository; using it keeps the guard coupled to
-    # the manifest that must not regress into an accidental manual-scale playbook.
-    if "referral" in deployed:
-        t = render("referral")
-        case("a zero-replica workload is rendered as staged rather than operational",
-             says(t, "WORKLOAD STAGED", "ACTIVATION PENDING", "Runtime operations — DEFERRED"))
-        case("a zero-replica workload never offers a manual scale bypass",
-             "kubectl scale" not in t)
-        case("a staged workload names its declared management health port",
-             "GET :8086/q/health/ready" in t and "GET :8155/q/health/ready" not in t)
+    # Falsified against a SYNTHETIC fixture, never a named real service: referral was the live
+    # exemplar until #12813 activated it (replicas 0 -> 1), which silently un-falsified these
+    # cases overnight — the gate stayed red on main while "passing" nothing. Same lesson as the
+    # `incentive` manual-sync fixture below: a rollout state under the assertion goes stale,
+    # a synthetic component cannot.
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture_gitops = Path(tmp)
+        (fixture_gitops / "components" / "zero-replica-fixture").mkdir(parents=True)
+        (fixture_gitops / "components" / "zero-replica-fixture" / "zero-replica-fixture-service.yaml").write_text(
+            "apiVersion: apps/v1\n"
+            "kind: Deployment\n"
+            "metadata:\n"
+            "  name: zero-replica-fixture-service\n"
+            "  namespace: zero-replica-fixture\n"
+            "spec:\n"
+            "  replicas: 0\n"
+            "  template:\n"
+            "    spec:\n"
+            "      containers:\n"
+            "        - name: zero-replica-fixture-service\n"
+            "          image: registry.example/openbank-zero-replica-fixture-service:v1\n"
+            "          ports:\n"
+            "            - name: management\n"
+            "              containerPort: 8091\n"
+            "          readinessProbe:\n"
+            "            httpGet:\n"
+            "              path: /q/health/ready\n"
+            "              port: management\n"
+            "          livenessProbe:\n"
+            "            httpGet:\n"
+            "              path: /q/health/live\n"
+            "              port: management\n",
+            encoding="utf-8",
+        )
+        real_gitops = GITOPS
+        GITOPS = fixture_gitops
+        try:
+            status = deployment_status("zero-replica-fixture")
+            runtime = runtime_sections("zero-replica-fixture", "zero-replica-fixture")
+            case("a zero-replica workload is rendered as staged rather than operational",
+                 zero_replica_workload("zero-replica-fixture")
+                 and says(status, "WORKLOAD STAGED", "ACTIVATION PENDING")
+                 and says(runtime, "Runtime operations — DEFERRED"))
+            case("a zero-replica workload never offers a manual scale bypass",
+                 "kubectl scale" not in status + runtime)
+            case("a staged workload names its declared management health port",
+                 "GET :8091/q/health/ready" in runtime and "GET :8155/q/health/ready" not in runtime)
+        finally:
+            GITOPS = real_gitops
     # `application_automated()` itself, falsified against a SYNTHETIC fixture rather than a named
     # real service: which service (if any) is manual-sync is a live rollout fact that drifts —
     # `incentive` was this fixture until #10783 activated its automated sync, which silently
@@ -892,7 +931,6 @@ def self_test() -> int:
             "              containerPort: 8090\n",
             encoding="utf-8",
         )
-        global GITOPS
         real_gitops = GITOPS
         GITOPS = fixture_gitops
         try:

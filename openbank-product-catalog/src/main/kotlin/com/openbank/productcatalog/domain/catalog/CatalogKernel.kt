@@ -44,6 +44,15 @@ data class LocalizedText(val values: Map<String, String>) {
 
 enum class RevisionState { DRAFT, PUBLISHED, SUPERSEDED }
 enum class PriceKind { AMOUNT, RATE }
+
+/**
+ * What a price component IS, as opposed to how it is priced ([PriceKind]) (#13230). Closed: a consumer may
+ * act on a component only by its role -- billing charges [FEE] and nothing else, so a minimum balance or
+ * a limit priced as an AMOUNT can never be charged as a fee. Optional on the wire and in storage: a
+ * revision authored before roles existed carries none, keeps its content hash, and its consumers keep
+ * their legacy interpretation (billing: match against the embedded v1 fees).
+ */
+enum class PriceRole { FEE, RATE, LIMIT, THRESHOLD }
 enum class PriceCadence { ONCE, DAILY, MONTHLY, QUARTERLY, ANNUALLY, USAGE }
 enum class TaxTreatment { INCLUSIVE, EXCLUSIVE, EXEMPT, UNSPECIFIED }
 enum class EligibilityOperator { EQUALS, NOT_EQUALS, IN, GREATER_THAN, GREATER_OR_EQUAL, LESS_THAN, LESS_OR_EQUAL }
@@ -89,6 +98,8 @@ data class PriceComponent(
     val taxTreatment: TaxTreatment = TaxTreatment.UNSPECIFIED,
     val effectiveFrom: Instant? = null,
     val effectiveTo: Instant? = null,
+    /** Null only on components authored before #13230; see [PriceRole]. */
+    val role: PriceRole? = null,
 ) {
     init {
         require(code.isNotBlank() && code.length <= MAX_PRICE_TEXT_LENGTH) {
@@ -108,6 +119,7 @@ data class PriceComponent(
         require(effectiveFrom == null || effectiveTo == null || effectiveTo.isAfter(effectiveFrom)) {
             "price effectiveTo must be after effectiveFrom"
         }
+        require(role != PriceRole.FEE || kind == PriceKind.AMOUNT) { "a FEE price component must be an AMOUNT" }
     }
 
     private companion object {
@@ -138,6 +150,12 @@ data class RevisionContent(
     val eligibility: List<EligibilityRule> = emptyList(),
     val relationships: List<OfferingRelationship> = emptyList(),
     val documentCodes: List<String> = emptyList(),
+    /**
+     * Product IR (ADR-0352 §1): the revision's executable behaviour as the raw IR document tree,
+     * next to the attributes and prices. Validated by `ProductIrParser` on every write and hashed
+     * by `ProductIrCanonical` at publication; `null` for a revision with no behaviour.
+     */
+    val behaviour: CatalogValue.ObjectValue? = null,
 ) {
     init {
         require(prices.map(PriceComponent::code).distinct().size == prices.size) { "price codes must be unique" }
@@ -175,6 +193,12 @@ data class ProductRevision(
     val createdAt: Instant,
     val updatedAt: Instant,
     val revision: Long = 0,
+    /** Content digest the role approvals covered, frozen at publication when the schema has a policy. */
+    val approvalDigest: String? = null,
+    /** Effective-to the approvers saw; a successor may later shorten [effectiveTo], never this. */
+    val approvedEffectiveTo: Instant? = null,
+    /** Detached publish-path signature over the IR's `revisionHash` (ADR-0352 §4); set only by `publish-ir`. */
+    val irSignature: RevisionIrSignature? = null,
 ) {
     init {
         require(number > 0) { "revision number must be positive" }
@@ -189,6 +213,27 @@ data class ProductRevision(
             "checker must differ from maker"
         }
         require(revision >= 0) { "revision must not be negative" }
+    }
+}
+
+/**
+ * The publish path's detached signature over an IR-bearing revision's canonical hash (ADR-0352 §4).
+ * [revisionHash] is `ProductIrCanonical.revisionHash` of `RevisionContent.behaviour`; [signature]
+ * is produced by the configured `IrSignerPort` and verified by every consumer's pinned-revision
+ * loader before the revision is evaluated. Evidence: immutable once written.
+ */
+data class RevisionIrSignature(
+    val revisionHash: String,
+    val keyId: String,
+    val algorithm: String,
+    val signature: String,
+    val signedAt: Instant,
+) {
+    init {
+        require(revisionHash.matches(Regex("^[0-9a-f]{64}$"))) { "revisionHash must be 64 lower-case hex characters" }
+        require(keyId.isNotBlank() && algorithm.isNotBlank() && signature.isNotBlank()) {
+            "signature fields must not be blank"
+        }
     }
 }
 

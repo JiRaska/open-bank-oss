@@ -51,6 +51,7 @@ Služba se konfiguruje přes `application.yaml`. Bankovní profil vyžaduje Post
 | `CATALOG_SCOPE_CLAIM` | `scope` | JWT claim se scopes |
 | `CATALOG_READ_SCOPE` / `CATALOG_AUTHOR_SCOPE` / `CATALOG_PUBLISH_SCOPE` | `catalog:*` | provider-neutral mapování oprávnění |
 | `OPENBANK_CATALOG_PACKS` | bank: `banking,insurance,retirement`; standalone: prázdné | explicitní výběr důvěryhodných packů |
+| `CATALOG_PENSION_LEGAL_SCOPE` / `CATALOG_PENSION_PRODUCT_SCOPE` | `pension:legal-approve` / `pension:product-approve` | scope, který spolu s realm rolí uděluje schvalovací autoritu (`openbank.catalog.approval.authorities.*`) |
 | `OPENBANK_BANK_V1_COMPATIBILITY_ENABLED` | bank: `true`; standalone: `false` | zapnutí legacy bankovního API, seedů a projekce |
 | `quarkus.http.cors.origins` | `localhost:3000`, `openbank-admin-ui:3000` | CORS allowlist |
 | `quarkus.http.header.*` | bezpečnostní hlavičky | CSP, HSTS, X-Frame-Options, nosniff atd. |
@@ -71,6 +72,26 @@ certifikát naváže TLS spojení, ale sám o sobě neautentizuje požadavek na 
 `bearer-only` vybírá autentizační mechanismus; role a scopes endpointu i samostatně
 nakonfigurované autorizační kontroly platí dál. Úspěšný mTLS handshake ani toto nastavení
 cesty nedokazují, že byla vynucena konkrétní autorizační politika.
+
+### Autorizační bod OPA (ADR-0034)
+
+`openbank.authz.opa-pdp-producer.enabled: true` zapíná libs-runtime `PolicyDecisionPoint`
+nad OPA sidecarem, takže endpointy s `@Authorize` (čtecí most pro AI agenty,
+`query.catalog.readonly`) se ptají sidecaru na `OPA_URL` + `OPA_PATH`. GitOps Deployment
+spouští sidecar s politikou `product-catalog-opa-bundle`. `AUTHZ_ENFORCE` je ve výchozím stavu
+`false` (advisory): zamítnuté nebo nedostupné rozhodnutí se zaloguje na WARN a požadavek
+pokračuje. Požadavek odmítne až `AUTHZ_ENFORCE=true`.
+
+Rozhodovací a řídicí API naslouchá pouze na loopbacku podu (`127.0.0.1:8181`). Kubelet sondy používají samostatný diagnostický listener na portu 8282, který poskytuje pouze health/metrics, nikoli API politik a dat. Přístup ze stejného namespace rozhodovací listener nezpřístupňuje.
+
+Při vynucování OPA samotná role `ROLE_API` nepovoluje `catalog.read` ani `catalog.list`,
+včetně bankovních kompatibilních endpointů produktů a poplatků. Stejné akce chrání i obecný
+katalog: API klient spoléhající pouze na `ROLE_API` potřebuje existující grant pro pojmenovanou
+identitu a scope (například penzijní služba s `CATALOG_SCOPE_READ`). Zděděné čtecí granty main
+pro operator/admin zůstávají beze změny. Lidskému účtu s `ROLE_VIEWER` zůstává čtení dostupné;
+stroj ani neznámá identita tento zaměstnanecký grant nepoužijí. Syntetická čtecí cesta si
+ponechává pouze grant pro svou pojmenovanou identitu a scope. Jde o vědomé odmítnutí obecných
+API klientů, aby se nerozšířila hranice oprávnění stávající main policy.
 
 ## Health checky
 
@@ -111,3 +132,11 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 ## Release
 
 Vydávaný komponent (má `version.txt`). Verzování/changelog vlastní release-please z Conventional Commits ([ADR 0029](../../../../docs/adr/0029-versioning-release-and-governance-as-code.md)). Neupravuj `version.txt` ručně ve feature PR. Změny API kontraktu zvedají `openapi.yaml:info.version` nezávisle ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

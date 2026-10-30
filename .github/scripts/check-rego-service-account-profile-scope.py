@@ -23,10 +23,13 @@
 #       openbank-infra/gitops/components/keycloak/*realm-template*.json, and
 #   (b) lists `profile` in that client's `defaultClientScopes`.
 #   "Used as a principal identity" means: compared with `input.principal.id` (`==`, `!=`, either
-#   operand order), a member of an `input.principal.id in {...}` set, or a member of a named
-#   identity-set constant (`NAME := {"service-account-..."}` / `[...]`). Comments and allow-REASON
-#   names (`allowed_reasons contains "service-account-transaction-create"`) are NOT principals and
-#   are ignored; the bare `startswith(id, "service-account-")` prefix has no client suffix.
+#   operand order), a member of an `input.principal.id in {...}` set, a member of a named
+#   identity-set constant (`NAME := {"service-account-..."}` / `[...]`), an argument of
+#   `machine_named("service-account-<client>")` (the phase-2 verified-client grant, ADR-0034), or a
+#   scalar constant (`NAME := "service-account-..."`) that is passed to `machine_named`.
+#   Comments and allow-REASON names (`allowed_reasons contains "service-account-transaction-create"`)
+#   are NOT principals and are ignored; the bare `startswith(id, "service-account-")` prefix has no
+#   client suffix. A scalar constant assigned but never passed to `machine_named` is not a grant.
 #   `_test.rego` files are excluded: their principals are fixtures (several name clients no
 #   realm has, by design, to prove a rule does NOT admit them).
 #
@@ -54,6 +57,12 @@ CMP_RES = [re.compile(PID + r"\s*[!=]=\s*" + SA_LIT),
 # principal.id in {"sa-x", ...}  and  NAME := {"sa-x", ...} / [...]  (identity-set constants)
 SET_RES = [re.compile(PID + r"\s+in\s+[\[{]([^\]}]*)[\]}]"),
            re.compile(r"^\s*[A-Za-z_]\w*\s*(?::=|=)\s*[\[{]([^\]}]*)[\]}]", re.MULTILINE)]
+# machine_named("sa-x")  — phase-2 named machine grant with a literal
+MACHINE_LIT_RE = re.compile(r"machine_named\s*\(\s*" + SA_LIT)
+# NAME := "sa-x" / NAME = "sa-x"  — scalar constant (only counts if passed to machine_named)
+SCALAR_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*(?::=|=)\s*" + SA_LIT, re.MULTILINE)
+# machine_named(name)  — reference form; name counts iff it is a service-account scalar constant
+MACHINE_REF_RE = re.compile(r"machine_named\s*\(\s*([A-Za-z_]\w*)\s*\)")
 LIT_RE = re.compile(SA_LIT)
 
 
@@ -80,6 +89,13 @@ def principal_clients(text: str) -> set:
     for r in SET_RES:
         for m in r.finditer(code):
             found.update(LIT_RE.findall(m.group(1)))
+    found.update(m.group(1) for m in MACHINE_LIT_RE.finditer(code))
+    # scalar constants count only where they are handed to machine_named (a bare
+    # `name := "service-account-x"` that nothing reads is data, not a grant)
+    scalars = {m.group(1): m.group(2) for m in SCALAR_RE.finditer(code)}
+    for m in MACHINE_REF_RE.finditer(code):
+        if m.group(1) in scalars:
+            found.add(scalars[m.group(1)])
     return found
 
 
@@ -150,6 +166,25 @@ def self_test() -> int:
                        {"a-b", "c-d"}),
         "identity-set constant": ('CALLERS := {\n"service-account-x-y",\n}\n', {"x-y"}),
         "trailing comment": (edge.rstrip() + " # not service-account-zzz\n", {"openbank-edge"}),
+        "machine_named literal": ('machine_named("service-account-openbank-edge")\n',
+                                  {"openbank-edge"}),
+        "machine_named scalar constant": (
+            ('pension_service_account := "service-account-openbank-pension"\n'
+             "machine_named(pension_service_account)\n"), {"openbank-pension"}),
+        "machine_named mirrored scalar constant": (
+            ('tax_service_account = "service-account-openbank-tax"\n'
+             "\tmachine_named(tax_service_account)\n"), {"openbank-tax"}),
+        "unused scalar constant is not a grant": (
+            'orphan := "service-account-openbank-orphan"\n', set()),
+        "scalar consumed elsewhere is not a grant": (
+            ('reason_name := "service-account-openbank-reason"\n'
+             'allowed_reasons contains reason_name if { true }\n'), set()),
+        "machine_named rule body reason is not a principal": (
+            ('machine_named("service-account-openbank-edge") if {\n'
+             '\tallowed_reasons contains "service-account-transaction-create"\n}\n'),
+            {"openbank-edge"}),
+        "machine_named non-sa name is ignored": (
+            "machine_named(caller)\n", set()),
     }
     total = len(cases) + len(rego) + 1
     for name, (src, want) in rego.items():

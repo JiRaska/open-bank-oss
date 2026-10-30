@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -30,6 +15,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_interest
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_interest
   flyway:
@@ -74,6 +62,8 @@ quarkus:
   rest-client:
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     # ADR-0033 §D: the capitalization credit leg (DEBIT interest expense / CREDIT the customer's
     # deposit-control pocket / CREDIT withholding-tax payable). The default resolves only on
@@ -82,18 +72,38 @@ quarkus:
     # nothing is withheld, so the period simply retries).
     ledger-service:
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     # Fleet-directory read for the daily accrual run: discovers ACTIVE accounts
     # (GET /accounts/active, ADR-0143) and their booked balance (GET /accounts/{id}/balance).
     # Same openbank-services M2M principal as the ledger/transaction clients above.
     account-service:
       url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 2000
+      read-timeout: 5000
+      scope: jakarta.inject.Singleton
+    # ADR-0339 B: the withholding policy's tax-profile resolution (PartyTaxProfileProvider) —
+    # account→partyId via the account-service client above, then party-service for the party
+    # type and the AML profile's residency countries. A deployment MUST set PARTY_SERVICE_URL;
+    # until it does, every resolution fails safe to the CZ-resident-individual default
+    # (ADR-0033 §C) — loudly: each fail-safe is a warn log plus a fail_safe counter, never a
+    # skipped withholding. The named `ledger` oidc-client (Keycloak `openbank-interest`,
+    # ROLE_API only) authenticates this edge, same as the account-service client;
+    # party.amlProfile.read is granted to that principal by `service-interest-party-m2m`
+    # in party_rest_ext.rego.
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     # Immutable catalog revision and durable event cursor used only by the reference-data
     # snapshotter. Accrual reads its own PostgreSQL snapshot/config rows and never resolves the
     # mutable "latest" catalog representation on the money path.
     product-catalog:
       url: ${PRODUCT_CATALOG_URL:http://localhost:8104}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
   redis:
     hosts: redis://localhost:6379
@@ -115,11 +125,6 @@ quarkus:
     path: /api/docs
   scheduler:
     enabled: true
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -160,6 +165,9 @@ authz:
       password: openbank_secret
       reactive:
         url: postgresql://localhost:5432/openbank_interest_it
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_interest_it
     devservices:
@@ -180,6 +188,13 @@ authz:
   # enforce, and this is the one environment that opts out. Same shape as aml/pid/party.
   authz:
     enforce: "false"
+  openbank:
+    interest:
+      product-shadow:
+        # The secret product-catalog signs with in its own %test profile, so a test can sign-then-verify.
+        verification:
+          mode: hmac
+          hmac-secret: test-only-ir-signing-secret-not-for-production
 # ADR-0033 §D — the GL accounts the capitalization split posts against (InterestLedgerConfig).
 # Defaults are the stable `a0000000-…` rows seeded by the ledger's
 # V17__interest_capitalization_accounts.sql; operators repoint them at the real chart per
@@ -188,10 +203,11 @@ authz:
 # because ADR-0033 §E withholds only CZK interest.
 interest:
   catalog-sync:
-    # Expand safely: disabled until an environment gives the openbank-services principal catalog
-    # read access and opts into the migration. Enabling later is idempotent because receipts and the
-    # cursor commit with each snapshot.
-    enabled: ${INTEREST_CATALOG_SYNC_ENABLED:false}
+    # ADR-0341: on by default. The sync only caches immutable published revisions keyed by revision id;
+    # an account is pinned to the revision it first accrues under, so a newer revision never reprices
+    # an existing account. Needs interest's own catalog.read grant (#8481). Idempotent: receipts and
+    # the cursor commit with each snapshot. Set INTEREST_CATALOG_SYNC_ENABLED=false to switch it off.
+    enabled: ${INTEREST_CATALOG_SYNC_ENABLED:true}
     interval: ${INTEREST_CATALOG_SYNC_INTERVAL:30s}
     initial-delay: ${INTEREST_CATALOG_SYNC_INITIAL_DELAY:15s}
   ledger:
@@ -236,6 +252,27 @@ openbank:
       # secrets elsewhere in this repo) so an unconfigured deployment fails loudly at the
       # transaction-service call, not silently.
       remittance-source-account-id: "${INTEREST_WITHHOLDING_SOURCE_ACCOUNT_ID:00000000-0000-0000-0000-000000000000}"
+    # ADR-0352 phase 3: the product-IR SHADOW comparator. It enqueues committed accruals and
+    # capitalisations AFTER their transaction, re-decides each with the product IR of the account's
+    # pinned revision (ADR-0341) and counts agreement per ruleId; it never posts. verification.mode:
+    # disabled (default; nothing is compared, counted as verification_disabled) | openbao (Transit
+    # verify, interest's role would hold verify only) | hmac (dev/test only; refused at boot in a
+    # production launch). lookback-days bounds how far back the first run enqueues existing rows.
+    product-ir:
+      # Which path DECIDES interest: shadow (default, the only accepted value) = InterestService decides,
+      # the IR is compared. `ir` is the ADR-0352 §9 switch and is refused at boot until it is built.
+      decision-mode: "${INTEREST_PRODUCT_IR_DECISION_MODE:shadow}"
+    product-shadow:
+      enabled: "${INTEREST_PRODUCT_SHADOW_ENABLED:true}"
+      every: "${INTEREST_PRODUCT_SHADOW_EVERY:5m}"
+      batch-size: "${INTEREST_PRODUCT_SHADOW_BATCH_SIZE:200}"
+      max-batches-per-run: "${INTEREST_PRODUCT_SHADOW_MAX_BATCHES:10}"
+      lookback-days: "${INTEREST_PRODUCT_SHADOW_LOOKBACK_DAYS:35}"
+      verification:
+        mode: "${INTEREST_PRODUCT_SHADOW_VERIFICATION_MODE:disabled}"
+        key-id: "${INTEREST_PRODUCT_SHADOW_VERIFICATION_KEY_ID:product-ir-publish}"
+        openbao:
+          address: "${INTEREST_PRODUCT_SHADOW_VERIFICATION_OPENBAO_ADDRESS:https://openbao.vault.svc:8200}"
   rate-limit:
     enabled: true
     max-concurrent-requests: 200
@@ -327,6 +364,19 @@ mp:
           pem:
             certs: /mnt/transaction-tls/ca.crt
         protocols: TLSv1.3
+      # ADR-0339 B: PartyTaxProfileProvider reads party-service over its private-CA mTLS listener
+      # (8443, client auth REQUIRED), the shape account/delegation use. Same client identity,
+      # separate bucket naming the upstream.
+      party-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/party-tls/tls.crt
+              key: /mnt/party-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/party-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       product-catalog:
         tls-configuration-name: catalog-authority
@@ -334,3 +384,5 @@ mp:
         tls-configuration-name: ledger-authority
       transaction-service:
         tls-configuration-name: transaction-authority
+      party-service:
+        tls-configuration-name: party-authority

@@ -1,0 +1,162 @@
+{
+  "consumer": {
+    "name": "openbank-tax-reporting-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the first page of ACTIVE accounts for the CRS FATCA roster",
+      "providerStates": [
+        {
+          "name": "an account owned by a known party exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/active",
+        "query": {
+          "limit": [
+            "200"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "data": [
+            {
+              "accountNumber": "CZ6508000000192000145399",
+              "currencyCode": "CZK",
+              "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "openedAt": "2026-01-01T00:00:00Z",
+              "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "productId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "status": "ACTIVE"
+            }
+          ],
+          "pagination": {
+            "hasNextPage": false
+          }
+        },
+        "generators": {
+          "body": {
+            "$.data[*].id": {
+              "type": "Uuid"
+            },
+            "$.data[*].partyId": {
+              "type": "Uuid"
+            },
+            "$.data[*].productId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.data": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.data[*].accountNumber": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.data[*].currencyCode": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.data[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.data[*].openedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.data[*].partyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.data[*].productId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.pagination.hasNextPage": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the ACTIVE accounts page with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/active",
+        "query": {
+          "limit": [
+            "200"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-account-service"
+  }
+}

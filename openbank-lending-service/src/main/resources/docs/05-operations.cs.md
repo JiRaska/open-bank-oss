@@ -29,6 +29,8 @@
 
 `LENDING_LEDGER_BACKEND` je **build-time** (`@IfBuildProperty`): vybírá adaptér při sestavení image, ne za běhu.
 
+Zpoždění před prvním plánovaným obnovením compliance balíčků určuje `lending.compliance.refresh-initial-delay` (výchozí `10s`).
+
 ## Porty & probes
 
 - **App:** `8126`. **Management:** `8086`, root-path `/q` (`quarkus.management.enabled=true`).
@@ -103,9 +105,66 @@ Pro úvěry, jejichž účetní historie se do hlavní knihy nikdy nedostala (#6
 6. **Storno**: každý zápis stornujte v ledger-service (`reverseJournal`) podle klíče `loan:<id>:…`.
 Zápisy se účtují k datu cut-overu, s původním datem události ve `valueDate`. Pouze hlavní kniha: na účet klienta se nic nepřipisuje.
 
+### Pozdní migrace opravných položek V26 (#13026)
+
+V26 se dostala do main až po V27. Při `validate-on-migrate: false` může výchozí pořadí Flyway ponechat V26 neaplikovanou, přestože migrace při startu skončí úspěšně. GitOps Rollout služby dočasně nastavuje `QUARKUS_FLYWAY_OUT_OF_ORDER=true`, aby i databáze s V27 vytvořila `provisioning_cycle_attempt` a `provisioning_cycle_run.current_attempt_id`.
+
+Zachovej deployment holdy a kontroly povýšení image. Před schváleným nasazením ověř `flyway_schema_history` každé cílové databáze; historie zdrojů ani CI nedokládají nasazený stav. Po migraci ověř úspěšné záznamy V26/V27, schéma pokusů a zachování souhrnů opravných položek i podpisových hashů. Opakovaná migrace nesmí zdvojit zpětně doplněné záznamy V26.
+
+Dočasnou proměnnou prostředí z GitOps odstraň až poté, co **každá** cílová databáze eviduje úspěšnou V26. Přesnou výjimku kontroly historického pořadí ponech, dokud Git stále dokládá dřívější příchod V27. Zachovej identity potvrzených SQL migrací; obnova nepoužívá Flyway repair ani přečíslování. Návrat schématu popisuje V26 a před odstraněním vyžaduje export historie pokusů.
+
 ### Flyway checksum mismatch při startu
 Nikdy nepřepisuj nasazenou migraci. Nastav dočasně `QUARKUS_FLYWAY_REPAIR_AT_START=true`, nech DB ustálit a pak odstraň.
+
+## Pojmenování metrik
+
+Vlastní čítače Micrometeru nesou předponu `openbank.` (vynucuje CI brána `metric-name-prefix`). Čítače SLA originace se scrapují jako `openbank_lending_origination_docs_sla_reminder_total` a `openbank_lending_origination_four_eyes_sla_escalation_total`; dřívější názvy `lending_origination_*` bez předpony se po nasazení této verze už nevydávají, takže externí dotazy na ně je nutné upravit.
 
 ## Deploy
 
 GitOps (ArgoCD) dle platformního vzoru. Při konfliktech image-tagů ber `--ours` (čerstvě sestavený tag), `--theirs` pro RBAC/config/env (CLAUDE.md). Verzování a changelog vlastní release-please z Conventional Commits — nikdy ručně needituj `version.txt` ani `CHANGELOG.md`.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Účast na uzávěrce dne (ADR-0342, #13167)
+
+Lending hlásí každý dokončený účetní den (pražský čas) do ledger-service jako účastník `lending`
+(`LendingCloseParticipationScheduler`, každou hodinu v :40; `lending.close.report-cron`, zpětné okno
+`lending.close.lookback-days`, výchozí 3). Podkladem je `lending_close_job_run` (V28): jeden řádek na
+den a úlohu (`accrual`, `provisioning`).
+
+- Obě úlohy proběhly, nic nebylo odmítnuto a deníky opravných položek jsou doručeny: RAN.
+- Úloha neproběhla, právě běží nebo deníky opravných položek čekají v outboxu: zatím se nehlásí nic,
+  ledger den drží.
+- Odmítnutí `409 ACCOUNTING_DAY_CLOSED`, selhání, neúplné pokrytí, DEAD řádek outboxu nebo běh
+  zkrácený dávkovým limitem i po vyčerpání rozpočtu: REFUSED s pevnou kategorií.
+- Značka běhu starší než drain-budget × (lookback + 1) + 30 min (výchozí 70 min): REFUSED `pass started and never completed`; další běh výpočtu úroků ten den dopočítá a zapíše jako RAN.
+- Oba intervaly vypnuté (`off`): SKIPPED.
+
+Výpočet úroků zpracovává zkrácené dávky v rámci rozpočtu (`drain-budget` PT10M, `max-drain-rounds`
+100) a každý běh nejprve dopočítá dřívější dny v okně, které zůstaly REFUSED kvůli zkrácení, a zapíše
+je jako RAN. Den ve stavu REFUSED drží uzávěrku do pozdějšího RAN nebo výjimky operátora v ledgeru.
+Hlášení po uzavření dne se uloží jako `late` a den nepohne.
+
+### Trvalé potvrzení časového rozlišení (#13708)
+
+Před voláním ledgeru uloží `lending_accrual_progress` (V28) úplný datovaný požadavek splátky,
+deterministickou referenci a identitu transakce. Opakování použije stejný požadavek včetně původního
+data a GL účtů, nikoli dnešní hodiny či účtový rozvrh. Potvrzuje jej pouze odpověď POSTED se shodnou
+identitou transakce a datem zápisu. Odmítnutí uzavřeného dne zůstává viditelné; tentýž idempotency klíč
+se nikdy nepřesměruje na jiné datum.
+
+Jediná lokální DB transakce dokončí záměr, označí splátku, uloží existující outbox událost
+`loan.interest_accrued` a zvýší počet položek pracovního dne a journalů skutečného dne potvrzení.
+Selhání další splátky neztratí již potvrzený prefix. Potvrzení ledgeru následované lokálním rollbackem
+ponechá záměr čekající; přesné opakování jej může jednou dokončit. Čekající záměr brání RAN.
+Výmaz nevyřešeného záměru sleduje životní cyklus splátky a zachová pouze agregovanou nejistotu
+`unreconciled` dotčených pracovních/požadovaných dnů, kterou úspěšný běh nesmaže. Dispozici řeší
+existující řízené dorovnání či waiver v ledgeru. Nevzniká zákaznický tombstone ani nová retenční lhůta.
+Rollback zachová tabulky V28 i čekající důkazy; návrat kódu nedokazuje, že vzdálený zápis nenastal.

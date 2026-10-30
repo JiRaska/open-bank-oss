@@ -96,7 +96,7 @@ tasks.processResources {
                 "kotlinVersion" to kotlinFromCatalog,
                 "quarkusVersion" to quarkusFromCatalog,
                 "quarkusLts" to "true",
-                "quarkusSupportUntil" to "2027-03-25",
+                "quarkusSupportUntil" to "2027-09-30",
                 "gradleVersion" to gradle.gradleVersion,
                 "buildTime" to buildTimeStamp,
                 "gitCommit" to gitCommitStamp,

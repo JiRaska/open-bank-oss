@@ -1,0 +1,229 @@
+# SPDX-License-Identifier: Apache-2.0
+# Reference annuity-partner protocol (#12383, ADR-0334).
+#
+# THIS IS THE API A PARTNER INSURER IMPLEMENTS — not an API OpenBank serves. OpenBank's
+# `reference-rest` adapter is the client. Any insurer that implements these four operations is
+# connected by one registry entry (adapter `reference-rest`, `endpointUrl` = the partner's base URL)
+# and a credential in configuration; no code changes. An insurer that cannot implement it gets one
+# adapter class implementing `AnnuityProviderAdapter`.
+#
+# Held to the adapter by `ReferenceAnnuityProtocolContractTest`: every request the adapter sends
+# must validate against the request schemas below, and the adapter must parse every example
+# response below. Changing either side alone turns that test red.
+openapi: 3.1.0
+info:
+  title: OpenBank Annuity Partner Reference Protocol
+  version: 1.0.0
+  description: |
+    Conventions: JSON, money as decimal numbers in the stated ISO 4217 currency, dates ISO-8601.
+    Authentication: `Authorization: Bearer <token>` issued by the partner to OpenBank (mutual TLS
+    recommended in addition). Every write carries `Idempotency-Key`; the partner MUST return the
+    original answer for a repeated key and never create a second application.
+
+    Lifecycle: quotes -> application (POST /policies) -> OpenBank transfers the single premium with
+    `premiumReference` as remittance information -> the partner reports ACTIVE (policy issued) or
+    REFUSED (premium returned, `refundRef` set) on GET /policies/{applicationRef}. A cancellation
+    within the cooling-off period, or because OpenBank could not send the premium, is
+    POST /policies/{applicationRef}/cancellation.
+
+    Offers MUST be normalised to the `Offer` schema; an offer that does not answer the request
+    (other premium, currency or annuity type) or that expires too soon is discarded by OpenBank and
+    reported to the participant as a partner failure. Figures are indicative unless
+    `illustrative` is false, which states that the partner will issue at that price until
+    `validUntil`.
+paths:
+  /annuity/v1/quotes:
+    post:
+      operationId: requestQuotes
+      summary: Offers for one premium, for each requested annuity type the partner writes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuoteRequest' }
+      responses:
+        '200':
+          description: Zero or more offers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuoteResponse' }
+              example:
+                offers:
+                  - offerId: OFR-1001
+                    annuityType: LIFELONG
+                    premium: 1000000.00
+                    currency: CZK
+                    monthlyAmount: 3910.50
+                    guaranteeMonths: 0
+                    indexationRate: 0
+                    oneOffFee: 10000.00
+                    annualFeeRate: 0.005
+                    validUntil: '2030-01-03T12:00:00Z'
+                    illustrative: false
+                  - offerId: OFR-1002
+                    annuityType: FIXED_TERM
+                    premium: 1000000.00
+                    currency: CZK
+                    monthlyAmount: 8250.00
+                    guaranteeMonths: 0
+                    termMonths: 120
+                    indexationRate: 0
+                    oneOffFee: 10000.00
+                    annualFeeRate: 0.005
+                    validUntil: '2030-01-03T12:00:00Z'
+                    illustrative: false
+        '401': { description: Unauthenticated }
+  /annuity/v1/policies:
+    post:
+      operationId: applyForPolicy
+      summary: Apply for the policy of one offer; the premium follows by transfer
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PolicyApplication' }
+      responses:
+        '200':
+          description: Accepted (APPLIED) or refused up front (REFUSED); the same answer for a repeated key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyStatus' }
+              example:
+                applicationRef: APP-77
+                state: APPLIED
+        '401': { description: Unauthenticated }
+  /annuity/v1/policies/{applicationRef}:
+    get:
+      operationId: getPolicyStatus
+      summary: Where an application or policy stands
+      parameters:
+        - $ref: '#/components/parameters/ApplicationRef'
+      responses:
+        '200':
+          description: Current state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyStatus' }
+              example:
+                applicationRef: APP-77
+                state: ACTIVE
+                policyRef: POL-5501
+                monthlyAmount: 3910.50
+                issuedOn: '2030-01-02'
+        '401': { description: Unauthenticated }
+        '404': { description: Unknown application }
+  /annuity/v1/policies/{applicationRef}/cancellation:
+    post:
+      operationId: cancelPolicy
+      summary: Cancel within the cooling-off period, or because the premium could not be sent
+      parameters:
+        - $ref: '#/components/parameters/ApplicationRef'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CancellationRequest' }
+      responses:
+        '200':
+          description: The cancelled state; `refundRef` once a received premium has been returned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyStatus' }
+              example:
+                applicationRef: APP-77
+                state: CANCELLED
+                reason: COOLING_OFF
+                refundRef: RFD-9
+        '401': { description: Unauthenticated }
+        '409': { description: Cooling-off period over }
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    ApplicationRef:
+      name: applicationRef
+      in: path
+      required: true
+      schema: { type: string, maxLength: 128 }
+  schemas:
+    AnnuityType:
+      type: string
+      enum: [LIFELONG, FIXED_TERM, GUARANTEE_PERIOD, JOINT_LIFE, INDEXED]
+    QuoteRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId, premium, currency, jurisdiction, birthDate, startDate, annuityTypes]
+      properties:
+        requestId: { type: string, description: Stable id of the request (OpenBank payout id) }
+        premium: { type: number }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        jurisdiction: { type: string, pattern: '^[A-Z]{2}$' }
+        birthDate: { type: string, format: date }
+        startDate: { type: string, format: date }
+        annuityTypes: { type: array, items: { $ref: '#/components/schemas/AnnuityType' } }
+        guaranteeMonths: { type: integer, minimum: 0 }
+        termMonths: { type: integer, minimum: 1 }
+        jointLife:
+          type: object
+          additionalProperties: false
+          required: [birthDate, survivorShare]
+          properties:
+            birthDate: { type: string, format: date }
+            survivorShare: { type: number, minimum: 0, maximum: 1 }
+    QuoteResponse:
+      type: object
+      required: [offers]
+      properties:
+        offers: { type: array, items: { $ref: '#/components/schemas/Offer' } }
+    Offer:
+      type: object
+      required: [offerId, annuityType, premium, currency, monthlyAmount, validUntil, illustrative]
+      properties:
+        offerId: { type: string, maxLength: 128 }
+        annuityType: { $ref: '#/components/schemas/AnnuityType' }
+        premium: { type: number }
+        currency: { type: string }
+        monthlyAmount: { type: number, exclusiveMinimum: 0 }
+        guaranteeMonths: { type: integer, minimum: 0 }
+        termMonths: { type: integer, minimum: 1 }
+        indexationRate: { type: number, minimum: 0 }
+        survivorShare: { type: number, minimum: 0, maximum: 1 }
+        oneOffFee: { type: number, minimum: 0 }
+        annualFeeRate: { type: number, minimum: 0 }
+        validUntil: { type: string, format: date-time }
+        illustrative: { type: boolean }
+    PolicyApplication:
+      type: object
+      additionalProperties: false
+      required: [requestId, offerId, premium, currency, holderReference, birthDate, premiumReference]
+      properties:
+        requestId: { type: string }
+        offerId: { type: string }
+        premium: { type: number }
+        currency: { type: string }
+        holderReference: { type: string, description: Pseudonymous holder id; identity data is exchanged under the partner agreement }
+        birthDate: { type: string, format: date }
+        premiumReference: { type: string, description: Remittance information the premium transfer carries }
+    CancellationRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, enum: [COOLING_OFF, PREMIUM_NOT_SENT] }
+    PolicyStatus:
+      type: object
+      required: [applicationRef, state]
+      properties:
+        applicationRef: { type: string }
+        state: { type: string, enum: [APPLIED, PREMIUM_RECEIVED, ACTIVE, REFUSED, CANCELLED] }
+        policyRef: { type: string }
+        monthlyAmount: { type: number }
+        issuedOn: { type: string, format: date }
+        reason: { type: string }
+        refundRef: { type: string }

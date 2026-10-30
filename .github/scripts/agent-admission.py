@@ -61,8 +61,11 @@ def load_policy(path=RULES):
     if not isinstance(config, dict):
         raise ValueError("autonomous_agent_prs must be a mapping")
     prefixes = config.get("agent_branch_prefixes")
-    if not isinstance(prefixes, list) or not prefixes or any(not isinstance(p, str) or not p for p in prefixes):
-        raise ValueError("autonomous_agent_prs.agent_branch_prefixes must be a non-empty string list")
+    # 2026-10-14 (owner decision): an emptied prefix scope is valid policy — no branch then
+    # counts against the WIP ceiling, so agent PRs no longer queue behind it. The value must
+    # still be a string list; the ceiling itself stays rules-driven via max_open_prs.
+    if not isinstance(prefixes, list) or any(not isinstance(p, str) or not p for p in prefixes):
+        raise ValueError("autonomous_agent_prs.agent_branch_prefixes must be a string list")
     limit = config.get("max_open_prs")
     if type(limit) is not int or limit < 1:
         raise ValueError("autonomous_agent_prs.max_open_prs must be a positive integer")

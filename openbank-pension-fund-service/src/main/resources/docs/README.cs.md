@@ -89,6 +89,11 @@ podklady slouží čtecímu modelu reportingu, nepodávají zákonný výkaz.
 
 POST operace návrhu, schválení a zamítnutí vyžadují neprázdný `Idempotency-Key` o nejvýše 128 znacích. Klíč je oddělen podle přihlášeného uživatele a operace. Opakování stejného pokynu vrátí původní odpověď i poté, co korekce změnila stav; změněný obsah se stejným klíčem vrátí 409. Původní odpověď a změna korekce se ukládají v jedné databázové transakci. Ze souběžného schválení a zamítnutí může být zapsáno jen jedno rozhodnutí.
 
+
+## Integrační testy a příznak service-account (fail closed)
+
+OPA považuje každého volajícího, jehož token neprokazuje osobu, za service account (`input.principal.service_account`, fail closed). Prostá identita `@TestSecurity` nenese JWT, takže se počítá jako stroj a přichází o oprávnění vyhrazená lidem. Integrační testy, které vystupují jako skuteční zaměstnanci, proto přidávají lidské claimy přes `@OidcSecurity`. Proto modul testuje s `quarkus-test-security-oidc`.
+
 ## Pozorovatelnost
 
 Služba publikuje metriky `openbank.pension_fund.*`: zpoždění, stáří a opravy
@@ -100,3 +105,11 @@ obnovuje každou minutu plánovaná úloha; neúspěšné obnovení ponechá př
 hodnoty a nezaznamená úspěch, takže gauge živosti workflow zestárne a spustí
 alert. Pravidla alertů jsou v `prometheus-rules-pension-fund.yaml`, runbook v
 `docs/runbooks/pension-alerts.md`.
+
+## Zapojení při buildu
+
+- **Bod rozhodování politik OPA.** `openbank.authz.opa-pdp-producer.enabled: true` zapne v libs-runtime `OpaPolicyDecisionPointProducer`, který dodá klienta OPA sidecaru podle `opa.url`, `opa.path` a `opa.timeout-ms` (výchozí 500 ms). Čte se při buildu.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

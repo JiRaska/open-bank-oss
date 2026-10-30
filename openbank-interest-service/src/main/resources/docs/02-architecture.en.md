@@ -41,7 +41,7 @@ graph TB
     persist[Persistence<br/>*RepositoryImpl<br/>Hibernate Reactive / Panache]
     outbox["Outbox<br/>InterestOutboxDispatcher<br/>@Scheduled every 5s"]
     kafka[Kafka publisher<br/>KafkaInterestOutboxEventPublisher<br/>+ fault tolerance]
-    tax[TaxProfilePort<br/>DefaultTaxProfileProvider]
+    tax[TaxProfilePort<br/>PartyTaxProfileProvider]
   end
 
   rest --> uc
@@ -78,7 +78,7 @@ com.openbank.interest/
     ├── persistence/                 *Entity (Panache), *RepositoryImpl, InterestMapper
     ├── outbox/                      InterestOutboxDispatcher (@Scheduled)
     ├── kafka/                       KafkaInterestOutboxEventPublisher
-    └── tax/                         DefaultTaxProfileProvider
+    └── tax/                         PartyTaxProfileProvider
 ```
 
 **Dependency rule:** `domain` ← `application` ← `infrastructure`. The two tax policies (`WithholdingTaxPolicy`, `WithholdingRemittancePolicy`) are pure objects with no infrastructure imports, so the statutory rules and their rounding live in one tested place and cannot drift across call sites.

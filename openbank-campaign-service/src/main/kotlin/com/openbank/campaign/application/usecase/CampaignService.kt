@@ -13,7 +13,9 @@ import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.IncentiveOfferRegistry
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
+import com.openbank.campaign.application.port.out.ReferralProgramCatalogPort
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
+import com.openbank.campaign.application.port.out.SegmentPage
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDecision
@@ -29,6 +31,7 @@ import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.IncentiveOfferRef
+import com.openbank.campaign.domain.model.ReferralProgramRef
 import com.openbank.campaign.domain.model.ScheduleCatalog
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StopCondition
@@ -50,6 +53,15 @@ import java.util.UUID
  * or blew up (#2953).
  */
 data class EnrolmentOutcome(val enrolled: Int, val failed: Int)
+
+/** A bounded bulk-admission result. On a fault, cursor stays before the failed party. */
+data class EnrolmentPageOutcome(
+    val enrolled: Int,
+    val failed: Int,
+    val nextCursor: UUID?,
+    val complete: Boolean,
+    val holdReason: String? = null,
+)
 
 /** A missing campaign is distinct from a source definition that is no longer reusable. */
 class CampaignNotFoundException(id: UUID) : NoSuchElementException("campaign $id not found")
@@ -77,6 +89,7 @@ class CampaignService @Inject constructor(
     private val journeys: JourneySignaller,
     private val scheduler: CampaignScheduler,
     private val metrics: CampaignMetricsPort,
+    private val startIntents: JourneyStartIntentStore,
     /**
      * ADR-0269 rule 1. A live per-call check, never cached (ADR-0195): a cached credit consent
      * outlives its own revocation, and the whole point of this consent is that switching it off
@@ -97,6 +110,9 @@ class CampaignService @Inject constructor(
 
     private val log = Logger.getLogger(CampaignService::class.java)
 
+    @Inject
+    lateinit var referralPrograms: ReferralProgramCatalogPort
+
     suspend fun createDraft(
         name: String,
         goal: String,
@@ -111,9 +127,21 @@ class CampaignService @Inject constructor(
         trigger: String? = null,
         decisions: List<CampaignDecision> = emptyList(),
         incentiveOfferRef: IncentiveOfferRef? = null,
+        referralProgramId: UUID? = null,
+        expectedReferralProgramRef: ReferralProgramRef? = null,
     ): Campaign {
-        val resolvedSegment = validateDraftReferences(segmentRef, conversionRule, trigger)
+        val (resolvedSegment, resolvedReferralProgram) = validateDraftReferences(
+            segmentRef,
+            referralProgramId,
+            conversionRule,
+            trigger,
+        )
         val resolvedIncentive = validateIncentiveOffer(incentiveOfferRef)
+        if (expectedReferralProgramRef != null && resolvedReferralProgram != expectedReferralProgramRef) {
+            throw CampaignReferenceNotFoundException(
+                "source referral programme ${expectedReferralProgramRef.id} no longer matches its published version",
+            )
+        }
         val campaign = Campaign(
             id = Ids.newId(),
             name = name,
@@ -121,6 +149,7 @@ class CampaignService @Inject constructor(
             productKind = productKind,
             segmentRef = resolvedSegment,
             steps = steps.sortedBy { it.order },
+            referralProgramRef = resolvedReferralProgram,
             stopCondition = stopCondition,
             conversionRule = conversionRule,
             holdoutPercent = holdoutPercent,
@@ -141,17 +170,29 @@ class CampaignService @Inject constructor(
     }
 
     /** A draft belongs to its maker until submitted; the request never supplies that identity. */
-    suspend fun reviseDraft(id: UUID, definition: CampaignDefinition, revisedBy: String): Campaign {
+    suspend fun reviseDraft(
+        id: UUID,
+        definition: CampaignDefinition,
+        revisedBy: String,
+        referralProgramId: UUID? = null,
+    ): Campaign {
         val existing = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
         require(existing.createdBy == revisedBy) { "only the campaign maker can revise this draft" }
-        val resolvedSegment = validateDraftReferences(
+        val (resolvedSegment, resolvedReferralProgram) = validateDraftReferences(
             definition.segmentRef,
+            referralProgramId,
             definition.conversionRule,
             definition.trigger,
         )
         val resolvedIncentive = validateIncentiveOffer(definition.incentiveOfferRef)
         return campaigns.save(
-            existing.revise(definition.copy(segmentRef = resolvedSegment, incentiveOfferRef = resolvedIncentive)),
+            existing.revise(
+                definition.copy(
+                    segmentRef = resolvedSegment,
+                    referralProgramRef = resolvedReferralProgram,
+                    incentiveOfferRef = resolvedIncentive,
+                ),
+            ),
         )
     }
 
@@ -161,7 +202,9 @@ class CampaignService @Inject constructor(
      * segment, conversion-rule and trigger catalogues again, and may never inherit an approval, lifecycle
      * state, enrolment, delivery record or active Temporal schedule.  A recurring schedule remains a
      * visible DRAFT setting only; it still cannot exist in Temporal until the new draft passes
-     * its own four-eyes activation.
+     * its own four-eyes activation. The referral programme is also re-resolved by its immutable id;
+     * a missing or changed id/name/version rejects the copy before persistence rather than silently
+     * upgrading the source's pinned reference.
      */
     suspend fun duplicateAsDraft(id: UUID, createdBy: String): Campaign {
         val source = campaigns.findById(id) ?: throw CampaignNotFoundException(id)
@@ -174,6 +217,8 @@ class CampaignService @Inject constructor(
             // Carried, never defaulted: a duplicated credit campaign that silently became NONE
             // would be a credit journey the step gate no longer recognises as one.
             productKind = source.productKind,
+            referralProgramId = source.referralProgramRef?.id,
+            expectedReferralProgramRef = source.referralProgramRef,
             stopCondition = source.stopCondition,
             conversionRule = source.conversionRule,
             holdoutPercent = source.holdoutPercent,
@@ -230,9 +275,10 @@ class CampaignService @Inject constructor(
     /** Keeps create and draft revision tied to the same reviewed catalogue boundary. */
     private suspend fun validateDraftReferences(
         segmentRef: SegmentRef,
+        referralProgramId: UUID?,
         conversionRule: String?,
         trigger: String?,
-    ): SegmentRef {
+    ): Pair<SegmentRef, ReferralProgramRef?> {
         val segment = segments.load(segmentRef.name, segmentRef.version)
             ?: throw CampaignReferenceNotFoundException("segment ${segmentRef.name}@${segmentRef.version} not found")
         // Rejected here rather than at the consumer: a campaign carrying a key nobody watches would
@@ -246,7 +292,11 @@ class CampaignService @Inject constructor(
         require(trigger == null || TriggerCatalog.exists(trigger)) {
             "unknown trigger '$trigger' — must be one of ${TriggerCatalog.ALL.keys.sorted()}"
         }
-        return SegmentRef(segment.name, segment.version)
+        val referralProgram = referralProgramId?.let { id ->
+            referralPrograms.resolvePublished(id)
+                ?: throw CampaignReferenceNotFoundException("published referral programme $id not found")
+        }
+        return SegmentRef(segment.name, segment.version) to referralProgram
     }
 
     /** Pins only an exact published offer revision; Studio never owns redemption or value mutation. */
@@ -329,90 +379,159 @@ class CampaignService @Inject constructor(
         return closed
     }
 
+    /** Test-visible compatibility entry; production callers obtain a global lease first. */
+    internal suspend fun enrol(id: UUID): EnrolmentOutcome = enrolWithinLimit(id, SegmentPage.MAX_PAGE_SIZE)
+
     /**
-     * Enrols the segment's current membership: evaluates the versioned segment against the silver
-     * layer and starts one journey per party. Re-enrolment of the same party is a no-op — the
-     * workflow id is the idempotency key (ADR-0200 D1).
-     *
-     * Per party, the journey is started BEFORE the enrolment is persisted, and a failure is
-     * counted rather than thrown. Both are #2953: the reverse order left a committed `ACTIVE`
-     * enrolment with no workflow behind it, which the skip below then treated as already done
-     * forever, and the throw took out every party after the failing one.
+     * Compatibility path for the synchronous operator API and Temporal schedule. Rejects a
+     * too-large audience before starting even one journey; the caller holds one global capacity
+     * lease for this entire operation. Large audiences use a durable bulk run instead.
      */
-    // TooGenericExceptionCaught: the point is that ANY per-party fault stays local to that party —
-    // a Temporal namespace outage, a DB error, a bad segment row. Narrowing it re-opens the abort.
-    @Suppress("TooGenericExceptionCaught")
-    suspend fun enrol(id: UUID): EnrolmentOutcome {
-        val campaign = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
-        check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can enrol (state: ${campaign.state})" }
+    suspend fun enrolWithinLimit(id: UUID, limit: Int): EnrolmentOutcome {
+        require(limit in 1..SegmentPage.MAX_PAGE_SIZE)
+        val campaign = campaigns.findById(id) ?: throw CampaignNotFoundException(id)
+        check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can enrol" }
         val segment = segments.load(campaign.segmentRef.name, campaign.segmentRef.version)
-            ?: throw NoSuchElementException("segment ${campaign.segmentRef} not found")
-        // Measured around the whole sweep, segment evaluation included: the silver-layer query is
-        // the slow half and the part that degrades first.
-        val sweepStartedAt = Instant.now()
-        val partyIds = segmentEvaluation.evaluate(segment)
+            ?: throw NoSuchElementException("segment " + campaign.segmentRef + " not found")
+        val startedAt = Instant.now()
+        val firstPage = segmentEvaluation.page(segment, null, limit)
+        if (firstPage.partyIds.size == limit) {
+            val overflow = segmentEvaluation.page(segment, firstPage.nextCursor, 1)
+            check(overflow.partyIds.isEmpty()) { "audience exceeds synchronous capacity; start a bulk run" }
+        }
+        return enrolParties(campaign, firstPage.partyIds, startedAt)
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun enrolParties(
+        campaign: Campaign,
+        partyIds: List<UUID>,
+        sweepStartedAt: Instant,
+    ): EnrolmentOutcome {
         var started = 0
         var failed = 0
         for (partyId in partyIds) {
-            if (skipParty(campaign, partyId)) continue
             try {
-                val cohort = ExperimentCohort.assign(campaign.id, partyId, campaign.holdoutPercent)
-                if (cohort == ExperimentCohort.HOLDOUT) {
-                    // A control cohort must never receive a workflow: storing it as ACTIVE and
-                    // merely hoping every future activity checks a flag would leak a send on the
-                    // first new path. It is a completed, observable no-contact assignment.
-                    enrolments.save(
-                        Enrolment(
-                            id = Ids.newId(),
-                            campaignId = id,
-                            partyId = partyId,
-                            state = EnrolmentState.HOLDOUT,
-                            currentStep = 0,
-                            startedAt = Instant.now(),
-                            completedAt = Instant.now(),
-                            experimentCohort = cohort,
-                            contentVariant = null,
-                        ),
-                    )
-                    started++
-                    metrics.enrolmentRecorded(EnrolmentAttempt.HOLDOUT)
-                } else {
-                    // Start FIRST, persist on success. The workflow id is the idempotency key
-                    // (ADR-0200 D1) — `startJourney` swallows WorkflowExecutionAlreadyStarted — so a
-                    // crash between these two lines costs a duplicate start that is a no-op, and the
-                    // next `enrol` completes the pair. The reverse order costs a party: the row is
-                    // already committed, the skip below sees it, and that party is never contacted and
-                    // never retried (#2953).
-                    journeys.startJourney(id, partyId, campaign.journeyType())
-                    val contentVariant = ContentVariant.assign(campaign.id, partyId)
-                        .takeIf { campaign.hasContentExperiment }
-                    enrolments.save(
-                        Enrolment(
-                            id = Ids.newId(),
-                            campaignId = id,
-                            partyId = partyId,
-                            state = EnrolmentState.ACTIVE,
-                            currentStep = 0,
-                            startedAt = Instant.now(),
-                            completedAt = null,
-                            experimentCohort = cohort,
-                            contentVariant = contentVariant,
-                        ),
-                    )
-                    started++
-                    metrics.enrolmentRecorded(EnrolmentAttempt.STARTED)
-                }
+                if (enrolParty(campaign, partyId)) started++
             } catch (e: Exception) {
                 // Per party, so one bad party is local rather than fatal: the loop used to abort on
                 // the first failure, leaving every party after it unenrolled by a fault that had
                 // nothing to do with them. The count returned is what actually started.
                 failed++
                 metrics.enrolmentRecorded(EnrolmentAttempt.FAILED)
-                log.errorf(e, "campaign.enrol failed campaign=%s party=%s", id, partyId)
+                // The failed count is recorded; log no party id or exception text.
+                log.errorf("campaign.enrol failed campaign=%s cause=%s", campaign.id, e.javaClass.simpleName)
             }
         }
         metrics.enrolmentBatchCompleted(Duration.between(sweepStartedAt, Instant.now()))
         return EnrolmentOutcome(enrolled = started, failed = failed)
+    }
+
+    /**
+     * Process at most one ClickHouse keyset page. A fault stops at that party: retrying from
+     * the previous cursor revisits successful predecessors, which their unique enrolment
+     * turns into no-ops. Advancing past a failed party would lose them forever.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    suspend fun enrolPage(id: UUID, after: UUID?, limit: Int): EnrolmentPageOutcome {
+        require(limit in 1..SegmentPage.MAX_PAGE_SIZE)
+        val campaign = campaigns.findById(id) ?: throw CampaignNotFoundException(id)
+        check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can enrol" }
+        val segment = segments.load(campaign.segmentRef.name, campaign.segmentRef.version)
+            ?: throw NoSuchElementException("segment " + campaign.segmentRef + " not found")
+        val page = segmentEvaluation.page(segment, after, limit)
+        return enrolPartiesPage(campaign, after, page, limit) { _, _ -> }
+    }
+
+    /** Admit only parties in the completed durable snapshot; persist each recipient decision. */
+    suspend fun enrolParties(
+        id: UUID,
+        after: UUID?,
+        page: SegmentPage,
+        limit: Int,
+        record: suspend (UUID, RecipientAdmissionState) -> Unit,
+    ): EnrolmentPageOutcome {
+        val campaign = campaigns.findById(id) ?: throw CampaignNotFoundException(id)
+        check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can enrol" }
+        return enrolPartiesPage(campaign, after, page, limit, record)
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun enrolPartiesPage(
+        campaign: Campaign,
+        after: UUID?,
+        page: SegmentPage,
+        limit: Int,
+        record: suspend (UUID, RecipientAdmissionState) -> Unit,
+    ): EnrolmentPageOutcome {
+        var cursor = after
+        var started = 0
+        for (partyId in page.partyIds) {
+            if (campaigns.findById(campaign.id)?.state != CampaignState.ACTIVE) {
+                return EnrolmentPageOutcome(started, 0, cursor, false, "CAMPAIGN_NOT_ACTIVE")
+            }
+            try {
+                val enrolled = enrolParty(campaign, partyId, source = null) {
+                    record(partyId, RecipientAdmissionState.STARTING)
+                }
+                record(partyId, if (enrolled) RecipientAdmissionState.ADMITTED else RecipientAdmissionState.SKIPPED)
+                if (enrolled) started++
+                cursor = partyId
+            } catch (e: Exception) {
+                record(partyId, RecipientAdmissionState.FAILED)
+                metrics.enrolmentRecorded(EnrolmentAttempt.FAILED)
+                log.errorf("campaign.enrolPage failed campaign=%s cause=%s", campaign.id, e.javaClass.simpleName)
+                return EnrolmentPageOutcome(started, 1, cursor, false)
+            }
+        }
+        return EnrolmentPageOutcome(started, 0, cursor, page.partyIds.size < limit)
+    }
+
+    private suspend fun enrolParty(
+        campaign: Campaign,
+        partyId: UUID,
+        source: JourneyStartSource? = JourneyStartSource.DIRECT,
+        beforeStart: suspend () -> Unit = {},
+    ): Boolean {
+        if (skipParty(campaign, partyId)) return false
+        beforeStart()
+        val cohort = ExperimentCohort.assign(campaign.id, partyId, campaign.holdoutPercent)
+        if (cohort == ExperimentCohort.HOLDOUT) {
+            enrolments.save(
+                Enrolment(
+                    id = Ids.newId(),
+                    campaignId = campaign.id,
+                    partyId = partyId,
+                    state = EnrolmentState.HOLDOUT,
+                    currentStep = 0,
+                    startedAt = Instant.now(),
+                    completedAt = Instant.now(),
+                    experimentCohort = cohort,
+                    contentVariant = null,
+                ),
+            )
+            metrics.enrolmentRecorded(EnrolmentAttempt.HOLDOUT)
+        } else {
+            val contentVariant = ContentVariant.assign(campaign.id, partyId)
+                .takeIf { campaign.hasContentExperiment }
+            val candidate = JourneyStartIntent(
+                campaign.id,
+                partyId,
+                Ids.newId(),
+                campaign.journeyType(),
+                source ?: JourneyStartSource.DIRECT,
+                contentVariant,
+                Instant.now(),
+            )
+            // Bulk runs use their durable recipient ledger and cursor. Direct requests persist an
+            // independent intent so a process crash can be recovered without another HTTP call.
+            val intent = if (source == null) candidate else startIntents.begin(candidate)
+            journeys.startJourney(campaign.id, partyId, intent.journeyType)
+            enrolments.save(intent.enrolment())
+            if (source != null) startIntents.complete(campaign.id, partyId)
+            metrics.enrolmentRecorded(EnrolmentAttempt.STARTED)
+        }
+        return true
     }
 
     suspend fun listEnrolments(id: UUID): List<Enrolment> = enrolments.listByCampaign(id)

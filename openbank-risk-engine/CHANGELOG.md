@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.29.0...risk-engine-v0.30.0) (2026-10-26)
+
+
+### Features
+
+* **ledger:** treasury instrument accounts and accounting-class roles; shared schedule and rail vocabularies ([#13697](https://github.com/JiRaska/open-bank-oss/issues/13697)) ([0e044c8](https://github.com/JiRaska/open-bank-oss/commit/0e044c83945eb9d5d46e7860fed4f1c8d9bd9b83))
+
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.28.1...risk-engine-v0.29.0) (2026-10-24)
+
+
+### Features
+
+* **treasury:** reference data and the cash-flow ledger for the five existing products (ADR-0344 phase 0) ([#13614](https://github.com/JiRaska/open-bank-oss/issues/13614)) ([42eec93](https://github.com/JiRaska/open-bank-oss/commit/42eec93ad9ee5c85728242d9b559515037391274))
+
+## [0.28.1](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.28.0...risk-engine-v0.28.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **risk-engine:** bound payment and fixing lags and check the deadline while preparing legs ([#13546](https://github.com/JiRaska/open-bank-oss/issues/13546)) ([a72945a](https://github.com/JiRaska/open-bank-oss/commit/a72945ad5e6005f111ea1940c3b49642fe174602))
+
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.27.2...risk-engine-v0.28.0) (2026-10-21)
+
+
+### Features
+
+* **risk-engine:** value the own treasury book on a shared schedule and pricing engine (ADR-0344) ([#13408](https://github.com/JiRaska/open-bank-oss/issues/13408)) ([9c311d0](https://github.com/JiRaska/open-bank-oss/commit/9c311d082d452bfb76d6347b1830ce6008ac5c92))
+
+## [0.27.2](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.27.1...risk-engine-v0.27.2) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
 ## [0.27.1](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.27.0...risk-engine-v0.27.1) (2026-10-12)
 
 

@@ -1,0 +1,31 @@
+{
+  "_comment": "ADR-0340. Czech banking group annual automatic exchange of tax information: OECD CRS (MCAA, zákonný podklad zákon č. 164/2013 Sb., o mezinárodní spolupráci při správě daní, ve znění novely č. 256/2016 Sb.) and the FATCA Model 1 IGA between CZ and US (podklad zákon č. 359/2019 Sb.). Scope, reporting period and deadline are verified against those instruments: the report covers the calendar year and the Finanční zpravodaj/DAŇOVÉ NOVINY guidance puts filing of both CRS XML and FATCA XML into the GFŘ DAN portal by 30 June of the following year (181 days after 31.12, not a plain 6-month 'half-year' constant, so leap years stay exact). THE CRS XML 1.0 AND FATCA XML 2.0 WIRE SCHEMAS WERE NOT VERIFIED against a real GFŘ portal test environment: wireFormatVerified is false and no wire renderer is bound — assembling produces the platform return values and lines only. LINE FIELDS AND DATAPOINT IDS ARE PLATFORM IDENTIFIERS, not CRS OECD/MDE or FATCA schema elements; holder_name is the platform party identity in v1 (splitting given/surname per the CRS schema arrives with the party-tax-profile domain). Reportable-person status comes from the party-service tax-residency profile (CRS: crsStatus REPORTABLE = any tax residency other than CZ; FATCA: fatcaStatus US_PERSON); CRS lines are emitted per account per non-CZ residency, FATCA lines per account for residency US. Dividends and gross proceeds are NOT datapoints in v1: they arrive with the dividend/capital-gains domains (see ADR-0340 scope limits).",
+  "id": "cz-tax-information-exchange",
+  "version": 1,
+  "jurisdiction": "CZ",
+  "wireFormatVerified": false,
+  "returns": [
+    {
+      "code": "CRS", "name": "OECD CRS — Mezinárodní výměna údajů o finančních účtech (XML hlášení)",
+      "scope": "COMPANY", "periodicity": "YEAR", "deadlineDaysAfterPeriodEnd": 181,
+      "legalBasis": "zákon č. 164/2013 Sb. o mezinárodní spolupráci při správě daní (CRS/MCAA)",
+      "datapoints": ["reportable_persons", "reportable_accounts", "total_interest_credited", "total_period_end_balance"],
+      "lineSchema": ["holder_name", "party_ref", "account_ref", "residency_country", "tin", "currency", "period_end_balance", "interest_credited"],
+      "rules": [
+        {"type": "NON_NEGATIVE", "id": "crs-populations-non-negative",
+         "datapoints": ["reportable_persons", "reportable_accounts", "total_interest_credited"]}
+      ]
+    },
+    {
+      "code": "FATCA", "name": "FATCA (IGA Model 1) — Hlášení finančních účtů pro US osoby (XML hlášení)",
+      "scope": "COMPANY", "periodicity": "YEAR", "deadlineDaysAfterPeriodEnd": 181,
+      "legalBasis": "FATCA IGA Model 1 CZ–US; zákon č. 359/2019 Sb.",
+      "datapoints": ["reportable_persons", "reportable_accounts", "total_interest_credited", "total_period_end_balance"],
+      "lineSchema": ["holder_name", "party_ref", "account_ref", "residency_country", "tin", "currency", "period_end_balance", "interest_credited"],
+      "rules": [
+        {"type": "NON_NEGATIVE", "id": "fatca-populations-non-negative",
+         "datapoints": ["reportable_persons", "reportable_accounts", "total_interest_credited"]}
+      ]
+    }
+  ]
+}

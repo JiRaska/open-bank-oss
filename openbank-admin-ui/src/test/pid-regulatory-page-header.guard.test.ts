@@ -16,7 +16,9 @@ describe('operator page header contract', () => {
   })
 
   it('keeps PID and regulatory actions as native controls/links', () => {
-    expect(pid).toContain('onClick={load}')
+    expect(pid).toContain('onClick={() => void load()}')
+    expect(pid).toContain('disabled={loading || !hasSearched}')
+    expect(pid).toContain('onSubmit={submitLookup}')
     expect(pid).toContain('href="/parties/new"')
     expect(regulatory).toContain('href="https://www.cnb.cz/cs/dohled-financni-trh/vykaznictvi/"')
   })

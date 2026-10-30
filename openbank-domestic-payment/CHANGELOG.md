@@ -1,5 +1,65 @@
 # Changelog
 
+## [1.2.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.2...domestic-payment-v1.2.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* **sepa-payment:** alert on unsettled bookings and re-drive held settlement ([#13662](https://github.com/JiRaska/open-bank-oss/issues/13662)) ([bbc2b48](https://github.com/JiRaska/open-bank-oss/commit/bbc2b489726cd02d885cd0ed4452c814a17d1b1a))
+
+## [1.2.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.1...domestic-payment-v1.2.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **domestic-payment:** book via the generated transaction client and bind the answer to the request ([#13621](https://github.com/JiRaska/open-bank-oss/issues/13621)) ([c3de0a5](https://github.com/JiRaska/open-bank-oss/commit/c3de0a59fceea1653c4520d6a47a028ee21212a8))
+
+## [1.2.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.0...domestic-payment-v1.2.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **domestic-payment,card-issuance,case-coordinator-agent:** protect request-derived log fields ([#12717](https://github.com/JiRaska/open-bank-oss/issues/12717)) ([9f5862a](https://github.com/JiRaska/open-bank-oss/commit/9f5862a0246f3918a633693429fc2e2df15c4f11))
+
+## [1.2.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.1.0...domestic-payment-v1.2.0) (2026-10-16)
+
+
+### Features
+
+* **payment-batches:** persist company-scoped drafts ([#12259](https://github.com/JiRaska/open-bank-oss/issues/12259)) ([743987d](https://github.com/JiRaska/open-bank-oss/commit/743987d92e9b1ad076bccddcfbefce008ba81f5c))
+
+## [1.1.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.0.1...domestic-payment-v1.1.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
+## [1.0.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.0.0...domestic-payment-v1.0.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [1.0.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.22.2...domestic-payment-v1.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **customer-edge,admin-ui:** pension-service API moves to /api/v2; POST /api/v1/pension/contracts/{id}/activate and /early-termination are removed, and PUT .../strategy requires SCA.
+
+### Features
+
+* **customer-edge,admin-ui:** pension lifecycle UI and BFF (ADR-0334 S6) ([#12359](https://github.com/JiRaska/open-bank-oss/issues/12359)) ([542d3aa](https://github.com/JiRaska/open-bank-oss/commit/542d3aa3d8b6daef4da9f254dda257231e0bdbf2))
+
+## [0.22.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.22.1...domestic-payment-v0.22.2) (2026-10-14)
+
+
+### Security
+
+* **libs-runtime:** send OPA a verified service_account flag (phase 1 of 2) ([#12538](https://github.com/JiRaska/open-bank-oss/issues/12538)) ([3a8493a](https://github.com/JiRaska/open-bank-oss/commit/3a8493a7d8640b0baf252a879c1a908bd19587e2))
+
 ## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.22.0...domestic-payment-v0.22.1) (2026-10-11)
 
 

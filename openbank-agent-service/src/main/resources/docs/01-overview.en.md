@@ -6,13 +6,14 @@
 
 - **MCP server** (`POST /mcp`) — a Model Context Protocol 2.0 JSON-RPC server that publishes a catalogue of **read-only** OpenBank domain operations as AI-callable *tools* (`tools/list`, `tools/call`). An external MCP client (e.g. an IDE agent) can enumerate and invoke them.
 - **Admin-UI assistant** (`POST /agent/chat`) — a **server-side** reasoning loop. The model call never happens in the browser: the admin UI posts the conversation, the service resolves a model through a provider-agnostic **model gateway**, runs a bounded model↔tool loop, gates every tool call through the **OPA policy gate**, and returns the reply plus a transparent record of each tool call and whether policy allowed it.
+- **Recorded-merge evidence** (`/api/v1/agent-merge-records`) — ADR-0031 phase 3: a CI-ingested, queryable record of **who merged an agent-authored PR**. Written only by the `record-agent-merge` GitHub Actions workflow (never self-reported by the agent), read back by the admin UI and oversight roles.
 
 The assistant runs under a single fixed control-plane identity, **`ui-assistant`** (charter in `openbank-libs/governance/agents.yaml`): **read-only, proposal-only, never a money-path tool**.
 
 ## What the service **does NOT** do
 
 - ❌ Does not hold any banking data — it has no domain aggregate of its own.
-- ❌ Does not mutate state — there is **no write tool**; the charter denies `money.*`, `*.write`, `gh.pr.*`, `secrets.read.raw`.
+- ❌ The agent never mutates state — there is **no write tool**; the charter denies `money.*`, `*.write`, `gh.pr.*`, `secrets.read.raw`. (The only writes the service accepts are CI-ingested merge-evidence rows, written by a `ROLE_MERGE_RECORDER` pipeline credential — never by the agent.)
 - ❌ Does not execute payments, post to the ledger, or move money — it is **not** in `rules.yaml: money_path_services`.
 - ❌ Does not run the LLM in the browser — the model is called server-side, behind the gateway trust boundary.
 - ❌ Is **not** exposed to external TPPs via the API Gateway — it is an internal service.

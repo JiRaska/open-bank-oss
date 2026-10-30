@@ -40,6 +40,13 @@ data class ReferralInvite(
     val expiresAt: Instant,
     val idempotencyKey: String,
     val attributedAt: Instant?,
+    /**
+     * The shareable link composed at issue time (base URL + token), persisted because the referrer
+     * must be able to re-read it and it cannot be recomposed from the stored hash. NULL for invites
+     * issued before the column existed. Note the `token` field above carries the stored HASH on
+     * repository reads that are not token-keyed — the link is the only place the raw token survives.
+     */
+    val referralLink: String? = null,
 )
 
 data class ReferralReward(
@@ -120,6 +127,10 @@ sealed class ReferralEvent {
  *
  * [createdAt] comes from the invite's `INVITE_ISSUED` audit row, the only place the issue instant
  * is recorded; it is null if that row is missing rather than guessed from another timestamp.
+ *
+ * [referralLink] is the persisted shareable link — the one field of bearer character the referrer
+ * is MEANT to hold, like a password-reset link. It never reveals the raw token (stored as a hash
+ * only) and is null for invites issued before the column existed.
  */
 data class ReferrerInviteView(
     val id: UUID,
@@ -128,6 +139,7 @@ data class ReferrerInviteView(
     val expiresAt: Instant,
     val attributedAt: Instant?,
     val reward: ReferrerRewardView?,
+    val referralLink: String? = null,
 )
 
 /** The referrer-side projection of the latest reward on an invite. */

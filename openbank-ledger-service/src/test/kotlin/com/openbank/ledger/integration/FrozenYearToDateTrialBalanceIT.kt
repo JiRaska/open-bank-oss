@@ -5,6 +5,8 @@ package com.openbank.ledger.integration
 
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
@@ -21,8 +23,13 @@ import java.util.UUID
     value = com.openbank.ledger.it.PostgresTestResource::class,
     restrictToAnnotatedClass = true,
 )
+@TestProfile(FrozenYearToDateTrialBalanceIT.IsolatedPersistenceProfile::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class FrozenYearToDateTrialBalanceIT {
+
+    // Give the class-scoped database its own application bootstrap, rather than sharing the
+    // default-profile persistence factory across resource lifecycle changes in the full suite.
+    class IsolatedPersistenceProfile : QuarkusTestProfile
 
     @Test
     @Order(1)

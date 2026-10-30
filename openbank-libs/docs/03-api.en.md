@@ -4,6 +4,15 @@ Shared domain APIs live in `openbank-libs-domain`; Quarkus adapters and HTTP res
 
 How services consume each libs package. Examples are abbreviated but runnable.
 
+## Four-eyes maker provenance
+
+Pending approvals distinguish authenticated agents and named service accounts from people.
+`HUMAN` and `CUSTOMER_PARTY` require a verified person token; client-credentials markers,
+missing or unreadable person claims, and non-JWT identities are recorded as `UNKNOWN`.
+Display names and customer roles alone do not establish person provenance. This classification
+changes the approval record only; existing policy principal types and role evaluation are unchanged.
+
+
 ## domain/money — Money + CurrencyCode
 
 ```kotlin

@@ -13,12 +13,19 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
+import io.restassured.RestAssured.given
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
+import org.junit.jupiter.api.extension.ExtensionContext
+import org.junit.jupiter.api.extension.ParameterContext
+import org.junit.jupiter.api.extension.ParameterResolver
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.sql.Connection
@@ -33,7 +40,15 @@ import javax.sql.DataSource
 @QuarkusTest
 @QuarkusTestResource(IncentivePostgresTestResource::class)
 @QuarkusTestResource(IncentivePactFolderProviderVerificationTest.InMemoryKafkaResource::class)
+// #12448: customer-incentive calls are admitted only from customer-edge's own service-account token.
 @TestSecurity(user = "maker@openbank.test", roles = ["ROLE_API"])
+@OidcSecurity(
+    claims = [
+        Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+        Claim(key = "azp", value = "openbank-edge"),
+        Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+    ],
+)
 @Provider("openbank-incentive-service")
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
@@ -43,6 +58,14 @@ class IncentivePactFolderProviderVerificationTest {
             InMemoryConnector.switchOutgoingChannelsToInMemory("incentive-events-out")
 
         override fun stop() = InMemoryConnector.clear()
+    }
+
+    // A normal HTTP test has no Pact interaction; its shared setup receives no context.
+    class NoPactContext : ParameterResolver {
+        override fun supportsParameter(parameter: ParameterContext, context: ExtensionContext): Boolean =
+            parameter.parameter.type == PactVerificationContext::class.java
+
+        override fun resolveParameter(parameter: ParameterContext, context: ExtensionContext): Any? = null
     }
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -56,6 +79,26 @@ class IncentivePactFolderProviderVerificationTest {
         if (context == null) return
         context.target = HttpTestTarget("localhost", testPort.toInt())
         context.addStateChangeHandlers(this)
+    }
+
+    @Test
+    @ExtendWith(NoPactContext::class)
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "wrong-client-contract-subject"),
+            Claim(key = "azp", value = "openbank-unrelated"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
+    fun `rejects edge username carried by a different client`() {
+        given()
+            .contentType("application/json")
+            .header("X-Customer-Party-Id", "00000000-0000-0000-0000-000000000001")
+            .body("""{"productRef":"pact-product","qualifiedAt":"2026-01-01T00:00:00Z"}""")
+            .post("/api/v1/customer-incentives/reservations/00000000-0000-0000-0000-000000000002/commit")
+            .then()
+            .statusCode(403)
     }
 
     @TestTemplate

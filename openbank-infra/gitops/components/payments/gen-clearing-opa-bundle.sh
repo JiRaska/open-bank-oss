@@ -94,7 +94,7 @@ allowed_reasons contains "viewer-clearing-read" if {
 # is still correct in its own right.)
 allowed_reasons contains "service-clearing-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action in {
 		"clearingBatch.list",
 		"clearingBatch.read",

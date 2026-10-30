@@ -6,6 +6,11 @@ Provider side of the pension platform: segregated funds, strategies, NAV and the
 
 The committed `src/main/resources/openapi.yaml` defines the API contract. Read `/q/openapi` on the running service for the exact paths, request bodies, responses, and contract version of its image.
 
+The pension service uses the fund and unit register through holdings, transactions, strategies,
+and order endpoints. Provider verification tests replay its consumer contract against this service,
+including holdings before a NAV is published and requests without a valid service identity.
+These tests exercise the provider API; they do not establish that a fund or pension rollout is live.
+
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
@@ -46,3 +51,7 @@ These inputs support the reporting read model; they do not submit a statutory re
 ### Classification correction retries
 
 The proposal, approval, and rejection POSTs require a nonblank `Idempotency-Key` of at most 128 characters. A key is scoped to the authenticated caller and operation. Retrying the same instruction returns the original response, even after the correction has moved to another state; changed content with the same key returns 409. The replay snapshot and correction commit in one database transaction. Competing approval/rejection requests can commit only one decision.
+
+### Classification decision concurrency
+
+Approving or rejecting a classification correction updates only a correction still in `PROPOSED` state. The transaction must change exactly one row; a competing decision cannot silently overwrite the first decision. The mutation-query API retains the existing conditional update and transaction semantics.

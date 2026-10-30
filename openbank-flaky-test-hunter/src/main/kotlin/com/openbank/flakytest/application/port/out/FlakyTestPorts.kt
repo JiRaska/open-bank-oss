@@ -48,6 +48,18 @@ interface GitHubProposalPort {
      * test's intent before anything changes (ADR-0168 Decision) — every finding from checks 1-3,
      * and almost every `TEST_COUNT_DRIFT` finding too, ends up here. */
     suspend fun openTicket(finding: FlakyTestFinding, diagnosis: String): String?
+
+    companion object {
+        const val PR_BRANCH_PREFIX = "flaky-test-hunter/unit-return-"
+        const val SHORT_ID_LENGTH = 8
+
+        /**
+         * The one branch name this writer ever creates. Defined on the port (not inside the
+         * adapter) so the ADR-0031 phase-3 policy gate can name the exact branch an ALLOW would
+         * create — the audit event records it before any GitHub write happens.
+         */
+        fun prBranchFor(findingId: String): String = "$PR_BRANCH_PREFIX${findingId.take(SHORT_ID_LENGTH)}"
+    }
 }
 
 interface FindingRepository {

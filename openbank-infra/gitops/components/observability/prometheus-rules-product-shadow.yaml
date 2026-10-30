@@ -1,0 +1,75 @@
+# Product-IR shadow comparator alerts (ADR-0352 §6, phase 3). Picked up by the Prometheus operator
+# automatically (ruleSelectorNilUsesHelmValues=false), like every PrometheusRule in this directory.
+#
+# Every phase-3 consumer (billing first; interest, lending and account later) records the SAME series
+# through openbank-libs-runtime's ProductShadowRecorder, labelled consumer=<service short name>:
+#   openbank_product_shadow_inputs_total{consumer}                     legacy decisions queued
+#   openbank_product_shadow_compared_total{consumer,product,rule_id}   decisions compared with the IR
+#   openbank_product_shadow_diverged_total{consumer,product,rule_id}   of those, the IR decided differently
+#   openbank_product_shadow_not_comparable_total{consumer,reason}      could not be compared, by reason
+#
+# ADR-0352 §6 asks for an alert when "the compared counter is flat while the legacy path posts". That
+# is split in two here, because the two causes need different people:
+#   - ProductShadowStalled: decisions are queued and the comparator processes NONE of them, neither
+#     compared nor classified not-comparable — the comparator is dead (the ADR-0237 liveness gauge for
+#     the scheduler covers the same failure from the scheduler's side).
+#   - ProductShadowComparedNothing: the comparator runs and meets IR-bearing revisions, yet compares
+#     nothing — verification is off or failing, or the rule mapping is incomplete.
+# A queue in which every input is not_comparable{reason="no_ir"} alerts on NEITHER: that is a product
+# whose revision carries no IR yet, i.e. a product not migrated, which is the expected state today.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-product-shadow-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.product.shadow
+      rules:
+        - alert: ProductShadowStalled
+          expr: |
+            sum by (consumer) (increase(openbank_product_shadow_inputs_total[6h])) > 0
+            unless sum by (consumer) (increase(openbank_product_shadow_compared_total[6h])) > 0
+            unless sum by (consumer) (increase(openbank_product_shadow_not_comparable_total[6h])) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            # The windowed counters advance when the comparator runs (ProductShadowScheduler, every 5m).
+            subject_period: 5m
+            summary: "{{ $labels.consumer }}: product-IR shadow queued decisions but processed none in 6h"
+            description: >-
+              The {{ $labels.consumer }} shadow comparator has neither compared nor classified any of the
+              legacy decisions queued in the last six hours. The scheduler is likely dead or wedged; check
+              its workflow-liveness gauge and the shadow input table's oldest PENDING row. Nothing posts
+              differently because of this, but the switch evidence ADR-0352 §9 requires stops accruing.
+        - alert: ProductShadowComparedNothing
+          expr: |
+            sum by (consumer) (increase(openbank_product_shadow_not_comparable_total{reason!="no_ir"}[24h])) > 0
+            unless sum by (consumer) (increase(openbank_product_shadow_compared_total[24h])) > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            subject_period: 5m
+            summary: "{{ $labels.consumer }}: product-IR shadow met IR revisions but compared nothing in 24h"
+            description: >-
+              Inputs pinned to IR-bearing revisions are reaching the {{ $labels.consumer }} comparator, but
+              none was compared (reasons other than no_ir: verification disabled or failing, verifier
+              unreachable, revision unavailable, rule unmapped). See
+              openbank_product_shadow_not_comparable_total by reason. A shadow that compares nothing must
+              never read as agreement (ADR-0352 §6).
+        - alert: ProductShadowDiverged
+          expr: sum by (consumer, product, rule_id) (increase(openbank_product_shadow_diverged_total[1h])) > 0
+          labels:
+            severity: warning
+          annotations:
+            subject_period: 5m
+            summary: "{{ $labels.consumer }}: product IR decided rule {{ $labels.rule_id }} of {{ $labels.product }} differently"
+            description: >-
+              The product IR and the legacy {{ $labels.consumer }} path disagreed on at least one decision of
+              rule {{ $labels.rule_id }} in the last hour. The legacy decision is the one that posted. The
+              consumer may switch to the IR only after this has been zero across a full cadence of every rule
+              it owns (ADR-0352 §9); the shadow input table records the outcome per assessment.

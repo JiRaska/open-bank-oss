@@ -1,6 +1,21 @@
 # 01 — Overview (business)
 
-## Why openbank-libs exists
+## Current structure and source of truth
+
+The shared library is split into `openbank-libs-domain` (framework-free domain types and ports)
+and `openbank-libs-runtime` (Quarkus adapters, resources and CDI integration). `openbank-libs`
+is the compatibility umbrella and governance/documentation home, not a separately deployed service.
+Consumers and versions are determined by Gradle project dependencies, each component's `version.txt`,
+and the running service's `/api/v1/info`. A library release does not imply that every service
+already runs it. The Service Health/Tech Inventory views show the observed library version per service.
+
+These pages describe source contracts and are packaged with the Admin UI revision shown beside
+the document. Runnable services publish their own version-bound documentation at `/q/openbank/docs`.
+The architecture chapter describes the current module boundary. Counts in the following audit
+history describe the earlier migration baseline, not the current fleet.
+
+## Historical motivation (May 2026)
+
 
 Before the May 2026 audit, OpenBank was a monorepo of ~28 Quarkus microservices where every service shipped its **own implementation** of the same cross-cutting concerns:
 
@@ -13,7 +28,7 @@ Before the May 2026 audit, OpenBank was a monorepo of ~28 Quarkus microservices 
 
 The audit counted **~4 500 lines of duplicated Kotlin** and several regulatory gaps (K1-K7) where the same bug existed across multiple services simultaneously.
 
-**openbank-libs centralises everything that SHOULD be the same across services** and forces a fix to land once for the whole fleet — not 28 times.
+**openbank-libs centralises everything that SHOULD be the same across services** and forces a fix to land once for the whole fleet across its consumers.
 
 ## Value to the project
 
@@ -76,12 +91,12 @@ When a new OpenBank service `openbank-foo-service` is created:
 ## What openbank-libs is **NOT**
 
 - **Not an ORM framework** — Panache + Hibernate Reactive remain Quarkus extensions; libs only provides a shared outbox `@MappedSuperclass`
-- **Not an API gateway** — Kong / Istio gateway sits outside
+- **Not an API gateway** — the edge gateway is configured independently in GitOps
 - **Not a Quarkus extension** — the code runs in each service's classloader as a regular JAR (the Jandex index ensures discovery)
 - **Not a runtime sidecar** — no separate pod, no HTTP overhead
 - **Not a placeholder for domain logic** — no business rules, only value objects and primitives
 
-## Roadmap (from ADR 0014)
+## Historical roadmap (ADR 0014; not a live delivery report)
 
 | Phase | Status | What it adds |
 |---|---|---|

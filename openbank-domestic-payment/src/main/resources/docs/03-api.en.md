@@ -19,6 +19,8 @@ All endpoints require a **Keycloak Bearer token** (realm `openbank`, RS256 JWT).
 | `GET /domestic-payments` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_API` |
 | `PATCH /domestic-payments/{paymentId}/status` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS` + `@Authorize(action="domesticPayment.transitionStatus")` (OPA, ADR-0034) |
 
+For payment creation, the role/OPA check is followed by an initiator-scope check (ADR-0335 D5). The pension client service account is recognized only from a verified JWT with a non-empty subject, `azp` matching that client, and `preferred_username` matching `service-account-<azp>`; it may debit only the configured pension account. The edge client service account also requires `ROLE_OPERATOR` for general scope. A staff token gets general scope only with an allowed staff role and verified interactive-user claims. A role alone, a username that merely looks like a service account, or an unknown machine client does not grant general payment creation.
+
 OIDC is disabled only in `%dev` and `%test` profiles.
 
 ## Idempotence
@@ -130,6 +132,20 @@ SETTLED / REJECTED / RETURNED / CANCELLED → (terminal)
 
 `REJECTED` requires a `rejectReason` (e.g. `SANCTIONS_HIT`, `AML_HOLD`, `INSUFFICIENT_FUNDS`, `AMOUNT_LIMIT_EXCEEDED`, …). `submittedAt` is stamped on first non-`RECEIVED` transition; `settledAt` on `SETTLED`/`RETURNED`/`CANCELLED`.
 
+### Company payment batch drafts
+
+`/api/v1/business-payment-batches` stores draft-only aggregates for one company. The trusted
+customer edge calls it with a service token plus `X-Customer-Party-Id`; writes also carry the
+human `X-Actor-Party-Id`. This service rejects other callers. A draft has 1–100 CZK items,
+server-computed item count and total minor units, a revision and timestamps. It has no submit
+endpoint and cannot dispatch funds.
+
+Creation requires `Idempotency-Key` and persists a canonical-body hash: an exact retry returns
+200 with the original draft; a conflicting body returns 409. List pages contain at most 20
+drafts. Detail pages contain at most 20 items. Replacing all items requires `If-Match` with the
+current revision; a stale revision returns 409. The successful response structures are declared
+in `openapi.yaml`.
+
 ## Error model
 
 Errors use `openbank-libs` `ApiError` (`{ correlationId, status, code, message }`):
@@ -151,6 +167,15 @@ currency's minor-unit scale. Responses, the `domestic.payment.*` events and the 
 therefore carry `100.50` where they previously showed the column scale (`100.500000`) or the request's
 own spelling (`100.5`). The values are numerically equal; only the text representation changes.
 
+## Pension payment initiator identity (#12448)
+
+The pension caller receives a scoped debtor account only when the authenticated JWT is a
+service-account token for client `openbank-pension`: it has a subject, `azp` names that client,
+and `preferred_username` matches `service-account-openbank-pension`. The JWT is verified by
+Quarkus OIDC before this check. A matching principal name by itself cannot grant the scoped
+capability. An invalid or missing configured debtor account permits no scoped payment. Existing
+staff-role handling remains separate; ordinary `ROLE_API` callers do not receive this scope.
+
 ## Events
 
 Topic: `openbank.domestic.payment.events` (Kafka, JSON, channel `events-out`).
@@ -158,7 +183,7 @@ Topic: `openbank.domestic.payment.events` (Kafka, JSON, channel `events-out`).
 | Event type | Trigger | Payload (key fields) |
 |---|---|---|
 | `domestic.payment.created` | `POST /domestic-payments` | paymentId, idempotencyKey, status, debtorAccountId, debtor/creditor account+bank, amount, currency, priority, endToEndId, occurredAt |
-| `domestic.payment.status-changed` | any persisted transition | paymentId, previousStatus, newStatus, rejectReason, rejectDetail, occurredAt |
+| `domestic.payment.status-changed` | any persisted transition | paymentId, previousStatus, newStatus, rejectReason, rejectDetail, occurredAt, settledAt (the persisted SETTLED transition time, null until settled; not the event creation time) |
 
 Events are **append-only**; corrections are made by a new status-changed event, not by rewriting.
 
