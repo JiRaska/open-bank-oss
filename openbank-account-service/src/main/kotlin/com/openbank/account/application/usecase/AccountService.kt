@@ -28,10 +28,10 @@ import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.BalanceView
 import com.openbank.account.application.port.out.CurrencyPocketRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
-import com.openbank.account.application.port.out.ProductCatalogPort
-import com.openbank.account.application.port.out.ProductLookupResult
+import com.openbank.account.application.port.out.SanctionsScreenResult
 import com.openbank.account.domain.event.AccountClosedEvent
 import com.openbank.account.domain.event.AccountCreatedEvent
+import com.openbank.account.domain.event.AccountProductRevision
 import com.openbank.account.domain.event.AccountStatusChangedEvent
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
@@ -67,7 +67,7 @@ class AccountService(
     private val ibanGenerator: IbanGenerator,
     private val pocketRepository: CurrencyPocketRepository,
     private val sanctionsScreening: AccountSanctionsScreeningPort,
-    private val productCatalog: ProductCatalogPort,
+    private val productRevisionPinning: ProductRevisionPinning,
     private val metrics: DomainMetrics,
     private val clock: Clock,
     /**
@@ -77,13 +77,7 @@ class AccountService(
     private val notificationRequestPort: NotificationRequestPort,
 ) : AccountUseCase {
 
-    @Suppress("LongMethod") // issue #668: the product-catalog validation block added a few lines past threshold
-    override suspend fun openAccount(command: OpenAccountCommand): Account {
-        // Idempotent replay (#465): a repeated key returns the original account and never opens
-        // a second one. The Redis record in the REST layer is only a response cache — this DB
-        // check (and the transactional key insert in saveNewAccount) is the source of truth.
-        accountRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return replayOrRefuse(it, command) }
-
+    private suspend fun screenForOpening(command: OpenAccountCommand): SanctionsScreenResult {
         // ADR-0032 §C: Sanctions gate — fails closed.
         // Only CLEAR and WHITELISTED proceed (SanctionsScreenResult.permitsOpening). HIT,
         // POTENTIAL_HIT, ESCALATED and a response with no status all block; a flagged party
@@ -95,33 +89,28 @@ class AccountService(
         val screening = sanctionsScreening.screen(
             name = command.legalName,
             idempotencyKey = screeningKey,
+            subjectId = command.partyId.toString(),
         )
         if (!screening.permitsOpening) {
             throw AccountOpeningBlockedByScreeningException(command.partyId, screening.matchedName)
         }
+        return screening
+    }
 
-        // Issue #668: an account can no longer be opened against a product that doesn't exist or
-        // has been deactivated. Fails OPEN (proceeds, logged) when product-catalog is unreachable —
-        // reference data, not money-path; a DIFFERENT posture from the sanctions gate above.
-        when (val lookup = productCatalog.findById(command.productId)) {
-            is ProductLookupResult.NotFound ->
-                throw ProductNotEligibleException(command.productId, "product does not exist")
-            is ProductLookupResult.Found -> {
-                if (lookup.product.status != "ACTIVE") {
-                    throw ProductNotEligibleException(
-                        command.productId,
-                        "product status is ${lookup.product.status}, not ACTIVE",
-                    )
-                }
-                if (lookup.product.currency != command.currency.code) {
-                    throw ProductNotEligibleException(
-                        command.productId,
-                        "product currency is ${lookup.product.currency}, not ${command.currency.code}",
-                    )
-                }
-            }
-            ProductLookupResult.Unavailable -> Unit
-        }
+    override suspend fun openAccount(command: OpenAccountCommand): Account {
+        // Idempotent replay (#465): a repeated key returns the original account and never opens
+        // a second one. The Redis record in the REST layer is only a response cache — this DB
+        // check (and the transactional key insert in saveNewAccount) is the source of truth.
+        accountRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return replayOrRefuse(it, command) }
+
+        val screening = screenForOpening(command)
+
+        // ADR-0341 D1 / ADR-0352 phase 3: the account pins the PUBLISHED catalog revision it opens
+        // under, taken at the same instant as openedAt. Fail-closed on the pin: no product, an
+        // ineligible product, no published revision or an unreachable catalog each refuse the
+        // opening before anything is written (issue #668 replaced; it used to proceed on an outage).
+        val now = Instant.now(clock)
+        val pin = productRevisionPinning.pinFor(command.productId, command.currency.code, now)
 
         // #9044: a TERM_DEPOSIT must never open without a record of the terms version it was
         // opened under — the terms carry the early-withdrawal penalty and the notice period, and
@@ -139,7 +128,6 @@ class AccountService(
             "IBAN collision — retry"
         }
 
-        val now = Instant.now(clock)
         val account = Account(
             id = UUID.randomUUID(),
             accountNumber = iban,
@@ -157,10 +145,11 @@ class AccountService(
             termsVersion = command.termsVersion,
             termsUrl = command.termsUrl,
             termsEffectiveFrom = command.termsEffectiveFrom,
+            productRevisionPin = pin,
         )
 
-        // Account + pocket + idempotency key commit in ONE transaction (#465). A concurrent
-        // duplicate submission dies on the account_idempotency primary key — recover it into
+        // Account + pocket + idempotency key + AccountCreated outbox row commit in ONE transaction
+        // (#465). A concurrent duplicate submission dies on the account_idempotency primary key — recover it into
         // the same contract as the sequential replay above: return the winner's account,
         // publish no second event, count no second metric.
         val saved = try {
@@ -169,6 +158,7 @@ class AccountService(
                 primaryPocketFor(account),
                 command.idempotencyKey,
                 command.requestHash,
+                ::accountCreatedEvent,
             )
         } catch (e: PersistenceException) {
             return replayOrRefuse(recoverConcurrentReplay(e, command.idempotencyKey), command)
@@ -178,26 +168,9 @@ class AccountService(
 
         // Operational money lives in the balance-service (N3 / ADR-0024). Balance init is
         // event-driven (ADR-0267): balance-service's BalanceInitConsumer creates the zero
-        // balance from the AccountCreated event below. The previous synchronous REST init
-        // failed for onboarding accounts opened from a Kafka consumer (no request JWT to
-        // propagate → fail-closed; blocking REST call on the Vert.x event loop threw) and,
-        // because it ran before this publish, also suppressed the AccountCreated event.
-
-        eventPublisher.publish(
-            topic = "openbank.accounts.account.created",
-            key = saved.id.toString(),
-            event = AccountCreatedEvent(
-                aggregateId = saved.id,
-                version = saved.version,
-                accountNumber = saved.accountNumber.value,
-                accountType = saved.accountType,
-                partyId = saved.partyId,
-                productId = saved.productId,
-                currency = saved.currency.code,
-                occurredAt = clock.instant(),
-                sourceService = "account-service",
-            ),
-        )
+        // balance from the AccountCreated event, which is now written to the account outbox in
+        // the opening transaction above (it used to be a direct Kafka send after the commit, so a
+        // crash between the two lost the event while the account existed).
 
         metrics.accountCreated(saved.accountType.name, saved.currency.code)
         // Only an account that can already move money. ADR-0267 opens onboarding accounts
@@ -209,6 +182,20 @@ class AccountService(
         }
         return saved
     }
+
+    /** The event the opening transaction writes to the outbox, built from the row as persisted. */
+    private fun accountCreatedEvent(saved: Account) = AccountCreatedEvent(
+        aggregateId = saved.id,
+        version = saved.version,
+        accountNumber = saved.accountNumber.value,
+        accountType = saved.accountType,
+        partyId = saved.partyId,
+        productId = saved.productId,
+        currency = saved.currency.code,
+        occurredAt = saved.openedAt,
+        sourceService = "account-service",
+        productRevision = saved.productRevisionPin?.let(AccountProductRevision::of),
+    )
 
     override suspend fun closeAccount(command: CloseAccountCommand): Account {
         val account = requireAccount(command.accountId)

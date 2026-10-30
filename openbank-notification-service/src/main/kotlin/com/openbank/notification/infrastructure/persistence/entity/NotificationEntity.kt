@@ -24,6 +24,12 @@ class NotificationEntity : PanacheEntity() {
     @Column(nullable = false)
     lateinit var template: String
 
+    @Column(name = "template_revision")
+    var templateRevision: Long? = null
+
+    @Column(name = "visible_at")
+    var visibleAt: Instant? = null
+
     @Column(nullable = false)
     lateinit var recipient: String
 

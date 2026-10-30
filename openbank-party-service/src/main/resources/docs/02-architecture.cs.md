@@ -86,7 +86,6 @@ com.openbank.party/
     ├── persistence/repository/      *RepositoryImpl (Panache reactive)
     ├── outbox/                      PartyOutboxDispatcher (@Scheduled)
     ├── kafka/                       KafkaPartyOutboxEventPublisher, KycAmlEventConsumer
-    ├── authz/                       AuthzProducer (OPA, ADR-0034)
     └── flags/                       FlagdProducer (OpenFeature, ADR-0067)
 ```
 
@@ -173,3 +172,17 @@ jinak                                          → PENDING_KYC
 3. **Doménové eventy jako první** — každá změna stavu emituje doménový event; outbox garantuje doručení.
 4. **Minimalizace PII** — rodné číslo zde není nikdy uloženo ani vyhledatelné; vyhledávání podle jména je jediný fuzzy lookup.
 5. **Fail-static závislosti** — bez flagd / bez OPA služba stále obsluhuje provoz (defaulty volajícího / advisory režim).
+
+## Klient transaction-service (ADR-0319)
+
+Čtení seznamu transakcí pro GDPR export přenositelnosti (`TransactionServiceRestClient`) nově rozšiřuje rozhraní `TransactionsApi` vygenerované z `openapi.yaml` transaction-service (modul `openbank-client-transaction`, ADR-0319) místo ručně psaných DTO. Stránka je cursor page, řádky jsou pod klíčem `data`. Consumer pact pro `GET /api/v1/transactions` přehrává transaction-service na každém PR.
+
+
+## Odložené kontroly požadavku
+
+Autorizace a feature flagy mohou čekat na poskytovatele bez blokování event loopu. Volání feature
+flagu používá sdílené suspendující rozšíření klienta. Odložená autorizace zachovává identitu
+požadavku, hlavičky a původní Vert.x kontext; zamítnutí nikdy nespouští cílovou operaci. Zrušení
+se propaguje a nevydává se za náhradní rozhodnutí poskytovatele. PartyReactiveGuardIT ověřuje
+povolení i zamítnutí přes skutečné HTTP/CDI pro Uni a CompletionStage, včetně průběžného běhu
+jediného event loopu během čekání na rozhodnutí. REST ani eventové kontrakty se nemění.

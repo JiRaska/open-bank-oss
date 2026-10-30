@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.35.1...account-service-v0.36.0) (2026-10-29)
+
+
+### Features
+
+* **account:** pin the published product revision at account opening (ADR-0341, ADR-0352 phase 3) ([#13869](https://github.com/JiRaska/open-bank-oss/issues/13869)) ([9e34827](https://github.com/JiRaska/open-bank-oss/commit/9e348271857e1b6c63942c46496c7630ab71de37))
+
+## [0.35.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.35.0...account-service-v0.35.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **account:** preserve booking proof across transaction client consumers ([#13222](https://github.com/JiRaska/open-bank-oss/issues/13222)) ([427ce5a](https://github.com/JiRaska/open-bank-oss/commit/427ce5a055719d8e5f0cc805f44b581b9bf5c55f))
+
+## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.34.3...account-service-v0.35.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
+## [0.34.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.34.2...account-service-v0.34.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
 ## [0.34.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.34.1...account-service-v0.34.2) (2026-10-12)
 
 

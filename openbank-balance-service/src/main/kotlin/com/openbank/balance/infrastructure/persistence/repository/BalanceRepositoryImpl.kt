@@ -15,6 +15,8 @@ import jakarta.persistence.LockModeType
 import jakarta.persistence.OptimisticLockException
 import jakarta.persistence.Tuple
 import java.math.BigDecimal
+import java.time.Clock
+import java.time.OffsetDateTime
 import java.util.UUID
 
 // The balances table has a BIGSERIAL surrogate PK and no UUID business key, so the
@@ -189,6 +191,7 @@ class HoldRepositoryImpl(
     private val balanceRepo: BalancePanacheRepo,
     private val outboxRepo: BalanceOutboxRepository,
     private val mapper: com.fasterxml.jackson.databind.ObjectMapper,
+    private val clock: Clock,
 ) : HoldRepository {
 
     override suspend fun findById(holdId: UUID): BalanceHold? = Panache.withSession {
@@ -196,7 +199,11 @@ class HoldRepositoryImpl(
     }.awaitSuspending()?.toDomain()
 
     override suspend fun findActiveByAccountId(accountId: UUID): List<BalanceHold> = Panache.withSession {
-        repo.find("accountId = ?1 and releasedAt is null", accountId).list()
+        repo.find(
+            "accountId = ?1 and releasedAt is null and (expiresAt is null or expiresAt > ?2)",
+            accountId,
+            OffsetDateTime.now(clock),
+        ).list()
     }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun findActiveByReferenceId(referenceId: String): List<BalanceHold> = Panache.withSession {

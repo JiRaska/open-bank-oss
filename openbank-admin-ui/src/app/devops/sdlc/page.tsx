@@ -419,7 +419,7 @@ export default function SdlcPage() {
             aria-pressed={playing}
           >
             {playing ? <Pause aria-hidden="true" size={14} /> : <Play aria-hidden="true" size={14} />}
-            {playing ? t('Pozastavit', 'Pause') : t('Přehrát cestu', 'Play journey')}
+            {playing ? t('Pozastavit animaci', 'Pause animation') : t('Spustit animaci', 'Play animation')}
           </button>
         </div>
 

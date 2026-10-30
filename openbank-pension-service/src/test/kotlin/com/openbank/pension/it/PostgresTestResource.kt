@@ -5,6 +5,7 @@
 package com.openbank.pension.it
 
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
+import com.openbank.pension.testsupport.PensionDemoCompany
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -19,8 +20,9 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
+        val database = PensionDemoCompany.databaseName()
         val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
-            .withDatabaseName("openbank_pension_it")
+            .withDatabaseName(database)
             .withUsername("openbank")
             .withPassword("openbank_secret")
         postgres = pg
@@ -29,8 +31,8 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
         return mapOf(
-            "quarkus.datasource.reactive.url" to "vertx-reactive:postgresql://$host:$port/openbank_pension_it",
-            "quarkus.datasource.jdbc.url" to "jdbc:postgresql://$host:$port/openbank_pension_it",
+            "quarkus.datasource.reactive.url" to "vertx-reactive:postgresql://$host:$port/$database",
+            "quarkus.datasource.jdbc.url" to "jdbc:postgresql://$host:$port/$database",
             "quarkus.datasource.username" to "openbank",
             "quarkus.datasource.password" to "openbank_secret",
             "quarkus.devservices.enabled" to "false",
@@ -44,7 +46,7 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
         }
     }
 
-    private companion object {
+    internal companion object {
         const val POSTGRES_IMAGE = "postgres:18.6-alpine"
     }
 }

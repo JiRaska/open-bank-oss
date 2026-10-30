@@ -77,7 +77,7 @@ com.openbank.domestic/
 │   ├── model/                 DomesticPayment, status / priority / scope / reject enums,
 │   │                          transitionTo() + canTransitionTo() (the state machine)
 │   ├── event/                 DomesticPaymentCreatedEvent, DomesticPaymentStatusChangedEvent
-│   └── screening/             ScreeningPolicy (pure decision), ScreeningResult, ScreeningDecision
+│   └── screening/             (moved to openbank-libs-fincrime, ADR-0353)
 │
 ├── application/               ◄── use-case orchestration
 │   ├── port/in/               DomesticPaymentUseCase + commands / queries
@@ -90,7 +90,6 @@ com.openbank.domestic/
     ├── persistence/           repository impls, JPA entities, mappers
     ├── outbox/                DomesticPaymentOutboxDispatcher (scheduled, fault-tolerant)
     ├── kafka/                 KafkaDomesticPaymentEventPublisher
-    ├── approval/              ApprovalConfig (Redis-backed four-eyes workflow only)
     ├── client/               SanctionsServiceClient + adapter, AmlServiceClient + adapter
     └── authz/                AuthzProducer (OPA, ADR-0034)
 ```

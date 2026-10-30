@@ -49,6 +49,8 @@ export interface ServiceEntry {
    * re-deriving it at the call site.
    */
   k8sName?: string
+  /** Canonical namespace when GitOps deploys the same workload name for distinct tenants. */
+  k8sNamespace?: string
 }
 
 /** The Kubernetes Deployment/Service name for an entry. */
@@ -65,9 +67,11 @@ export function k8sNameOf(svc: ServiceEntry): string {
  * with a label derived from its name and group `platform`. The guard test asserts every key is a
  * real catalog module.
  */
-export const SERVICE_OVERRIDES: Record<string, { label?: string; group?: ServiceEntry['group']; id?: string; k8sName?: string; exposeViaBff?: boolean }> = {
+export const SERVICE_OVERRIDES: Record<string, { label?: string; group?: ServiceEntry['group']; id?: string; k8sName?: string; k8sNamespace?: string; exposeViaBff?: boolean }> = {
   'openbank-account-service'            : { label: 'Accounts', group: 'core' },
-  'openbank-ledger-service'             : { label: 'Ledger', group: 'core' },
+  // ADR-0337 runs a second ledger-service for the pension company. The bank's canonical
+  // registry identity remains the ledger namespace; discovery validates the live row there.
+  'openbank-ledger-service'             : { label: 'Ledger', group: 'core', k8sNamespace: 'ledger' },
   'openbank-transaction-service'        : { label: 'Transactions', group: 'core' },
   'openbank-balance-service'            : { label: 'Balance', group: 'core' },
   'openbank-product-catalog'            : { label: 'Product Catalog', group: 'core' },
@@ -151,6 +155,7 @@ export function buildRegistry(modules: readonly CatalogFleetModule[]): ServiceEn
         port: m.port as number,
         ...(typeof m.mgmtPort === 'number' ? { mgmtPort: m.mgmtPort } : {}),
         ...(o.k8sName ? { k8sName: o.k8sName } : {}),
+        ...(o.k8sNamespace ? { k8sNamespace: o.k8sNamespace } : {}),
       }
     })
     .sort((a, b) => a.container.localeCompare(b.container))

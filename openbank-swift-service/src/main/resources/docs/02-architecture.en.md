@@ -143,3 +143,9 @@ sequenceDiagram
 3. **Transactional outbox** — DB write and Kafka publish are decoupled; at-least-once delivery, idempotent consumers.
 4. **Authorization at the edge** — OPA-gated actions (`@Authorize`), advisory by default, enforceable via `AUTHZ_ENFORCE`.
 5. **Money-path discipline** — high-value wire surface; message authenticity is the dominant control (see [06 — Compliance](./06-compliance.md) and the threat model).
+
+## Institution-transfer response and retry boundaries
+
+A pacs.009 submission accepts a pacs.002 result only when its original message ID and UETR match the transfer's message ID and UETR. A missing or different identity is an unavailable answer, not a confirmed settlement or rejection. Subsequent reconciliation keeps the stored transfer identity. A submission timeout can mark only the sending `SUBMITTING` version as `SUBMISSION_UNKNOWN`; a newer version or lifecycle decision is preserved. An expected-version conflict leaves the winning state and its events intact.
+
+The release consumer keeps the existing retry classifier, attempt budget and final failure delivered to the nack path. Its retry helper receives a redacted exception view and a canonical UUID log key (or no key); the original failure is restored for classification and propagation. Operational messages retain the failure class and trusted stored transfer identifiers without logging raw dependency exceptions or XML validation diagnostics. Gateway, lifecycle and consumer regressions exercise response identity, concurrent state changes, retry counts and the observable log exception chain. These are source and test guarantees; they do not assert a deployment or rollout.

@@ -21,7 +21,66 @@ data class ReceivedCreditTransfer(
     val creditorIban: String,
     val creditorAgentBic: String,
     val debtorIban: String,
-)
+    /**
+     * Every `PmtTpInf/SvcLvl/Cd` of the transaction, in document order. `SvcLvl` is 0..n in
+     * `PaymentTypeInformation28`, so a message may carry `SEPA` after another code; read the whole
+     * list (or [isSepa]), never just the first. Empty when the message carries none.
+     */
+    val serviceLevelCodes: List<String> = emptyList(),
+    /** `PmtTpInf/LclInstrm/Cd`, or `null` when the message carries none. */
+    val localInstrumentCode: String? = null,
+) {
+    /** The pre-#13663 constructor, retained for binary compatibility (libs ABI rule). */
+    @Suppress("LongParameterList")
+    constructor(
+        messageId: String,
+        endToEndId: String,
+        transactionId: String?,
+        amount: BigDecimal,
+        currency: String,
+        creditorName: String,
+        creditorIban: String,
+        creditorAgentBic: String,
+        debtorIban: String,
+    ) : this(
+        messageId, endToEndId, transactionId, amount, currency, creditorName, creditorIban,
+        creditorAgentBic, debtorIban, emptyList(), null,
+    )
+
+    /**
+     * The pre-#13663 `copy`, retained for binary compatibility; keeps the payment type.
+     * Defaults also retain its old JVM `copy$default` descriptor for already-compiled Kotlin callers.
+     */
+    @Suppress("LongParameterList")
+    fun copy(
+        messageId: String = this.messageId,
+        endToEndId: String = this.endToEndId,
+        transactionId: String? = this.transactionId,
+        amount: BigDecimal = this.amount,
+        currency: String = this.currency,
+        creditorName: String = this.creditorName,
+        creditorIban: String = this.creditorIban,
+        creditorAgentBic: String = this.creditorAgentBic,
+        debtorIban: String = this.debtorIban,
+    ): ReceivedCreditTransfer = ReceivedCreditTransfer(
+        messageId, endToEndId, transactionId, amount, currency, creditorName, creditorIban,
+        creditorAgentBic, debtorIban, serviceLevelCodes, localInstrumentCode,
+    )
+
+    /** True when any `SvcLvl/Cd` is `SEPA`. */
+    val isSepa: Boolean get() = SEPA in serviceLevelCodes
+
+    /**
+     * True only for an SCT Inst as the EPC rulebook defines it: a `SEPA` service level AND
+     * `LclInstrm/Cd=INST`. `INST` without `SEPA` is some other scheme's instrument, not SCT Inst.
+     */
+    val isInstant: Boolean get() = isSepa && localInstrumentCode == INST
+
+    private companion object {
+        const val SEPA = "SEPA"
+        const val INST = "INST"
+    }
+}
 
 /** Thrown when a `pacs.008` cannot be parsed into a [ReceivedCreditTransfer] (missing/malformed field). */
 class Pacs008ParseException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
@@ -44,6 +103,9 @@ class Pacs008Reader {
         val root = doc.documentElement
         val tx = root.firstByLocal("CdtTrfTxInf") ?: missing("CdtTrfTxInf")
         val amountEl = tx.firstByLocal("IntrBkSttlmAmt") ?: missing("IntrBkSttlmAmt")
+        // Scoped to this transaction's own PmtTpInf by direct-child steps, never a descendant
+        // search: a SvcLvl/LclInstrm/Cd anywhere else in the document must not be read as the type.
+        val pmtTpInf = tx.directChild("PmtTpInf")
 
         return ReceivedCreditTransfer(
             messageId = root.requireText("MsgId"),
@@ -57,6 +119,10 @@ class Pacs008Reader {
             creditorIban = tx.requireChild("CdtrAcct").requireText("IBAN"),
             creditorAgentBic = tx.requireChild("CdtrAgt").requireText("BICFI"),
             debtorIban = tx.requireChild("DbtrAcct").requireText("IBAN"),
+            serviceLevelCodes = pmtTpInf?.directChildren("SvcLvl")
+                ?.mapNotNull { it.directChild("Cd")?.trimmedText() }
+                .orEmpty(),
+            localInstrumentCode = pmtTpInf?.directChild("LclInstrm")?.directChild("Cd")?.trimmedText(),
         )
     }
 
@@ -84,6 +150,18 @@ class Pacs008Reader {
         throw Pacs008ParseException("pacs.008 missing required element: $local")
 
     private fun Element.firstByLocal(local: String): Element? = getElementsByTagNameNS(NS, local).item(0) as? Element
+
+    private fun Element.directChildren(local: String): List<Element> {
+        val out = mutableListOf<Element>()
+        var n = firstChild
+        while (n != null) {
+            if (n is Element && n.namespaceURI == NS && n.localName == local) out += n
+            n = n.nextSibling
+        }
+        return out
+    }
+
+    private fun Element.directChild(local: String): Element? = directChildren(local).firstOrNull()
 
     private fun Element.trimmedText(): String = textContent.trim()
 

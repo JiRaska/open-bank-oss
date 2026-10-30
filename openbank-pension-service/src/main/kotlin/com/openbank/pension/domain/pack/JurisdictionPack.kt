@@ -4,6 +4,7 @@
 
 package com.openbank.pension.domain.pack
 
+import com.openbank.pension.domain.exit.ExitRules
 import com.openbank.pension.domain.model.PayoutForm
 import com.openbank.pension.domain.model.ProductLine
 import java.math.BigDecimal
@@ -34,13 +35,17 @@ data class JurisdictionPack(
     val incentives: List<IncentiveRule> = emptyList(),
     val payout: PayoutConditions,
     val transfer: TransferRules,
+    /** Termination, payout and death rules (slice S5); absent = exits fail closed. */
+    val exit: ExitRules? = null,
+    /** Participant-settable schedule bounds (#12376); absent = schedule changes fail closed. */
+    val contributionLimits: ContributionLimits? = null,
 ) {
     init {
         require(jurisdiction.isNotBlank()) { "pack jurisdiction must not be blank" }
         require(version >= 1) { "pack version must be >= 1" }
         require(currency.length == ISO_CURRENCY_LENGTH) { "pack currency must be an ISO 4217 code" }
-        require(effectiveTo == null || effectiveTo.isAfter(effectiveFrom)) {
-            "pack effectiveTo must be after effectiveFrom"
+        require(effectiveTo == null || !effectiveTo.isBefore(effectiveFrom)) {
+            "pack effectiveTo must not be before effectiveFrom"
         }
         require(permittedProviderTypes.isNotEmpty()) { "pack must permit at least one provider type" }
         require(incentives.map { it.id }.toSet().size == incentives.size) { "incentive ids must be unique" }
@@ -55,9 +60,9 @@ data class JurisdictionPack(
 
     val key: PackKey get() = PackKey(jurisdiction, productLine)
 
-    /** True when [date] falls inside this version's validity window. */
+    /** True when [date] falls inside this version's validity window; [effectiveTo] is INCLUSIVE (the last day). */
     fun isEffectiveOn(date: LocalDate): Boolean =
-        !date.isBefore(effectiveFrom) && (effectiveTo == null || date.isBefore(effectiveTo))
+        !date.isBefore(effectiveFrom) && (effectiveTo == null || !date.isAfter(effectiveTo))
 
     private companion object {
         const val ISO_CURRENCY_LENGTH = 3
@@ -68,7 +73,8 @@ data class PackKey(val jurisdiction: String, val productLine: ProductLine)
 
 enum class LegalReviewStatus { REQUIRES_LEGAL_REVIEW, REVIEWED }
 
-data class LegalReview(val status: LegalReviewStatus, val note: String? = null)
+/** [sources]: where each modelled value comes from (public source + retrieval date), for the reviewer. */
+data class LegalReview(val status: LegalReviewStatus, val note: String? = null, val sources: List<String>? = null)
 
 /** Which legal entity type may act as provider of the product line (ADR-0334 §2a). */
 enum class ProviderType { PENSION_COMPANY, BANK, INVESTMENT_FIRM, MANAGEMENT_COMPANY, INSURANCE_COMPANY }
@@ -139,12 +145,24 @@ data class IncentiveRule(
     val indicativeTaxRate: BigDecimal? = null,
     val claimChannel: ClaimChannel = ClaimChannel.NONE,
     val clawback: ClawbackRule? = null,
+    /** Progressive matching bands (ADR-0334 S3); when present they replace the single [rate]. */
+    val bands: List<IncentiveBand>? = null,
+    /** Wire format of the claim channel adapter that files this incentive (ADR-0334 S3). */
+    val claimFormat: String? = null,
+    /**
+     * When set, a periodic incentive is rounded DOWN to a whole multiple of this unit after the
+     * cap (CZ: whole crowns, Act 427/2011 §14(4); docs/research/cz-state-pension-contribution.md A5).
+     */
+    val roundDownToUnit: BigDecimal? = null,
 ) {
     init {
         require(id.isNotBlank()) { "incentive id must not be blank" }
+        require(roundDownToUnit == null || roundDownToUnit.signum() > 0) {
+            "incentive $id: roundDownToUnit must be positive"
+        }
         when (type) {
             IncentiveType.MATCHING -> {
-                requireField(rate, "rate")
+                if (bands == null) requireField(rate, "rate") else IncentiveBand.validate(id, bands)
                 requireField(amountCap, "amountCap")
             }
             IncentiveType.FLAT -> requireField(flatAmount, "flatAmount")
@@ -154,6 +172,11 @@ data class IncentiveRule(
         listOfNotNull(rate, minContribution, amountCap, flatAmount, threshold, annualCap, indicativeTaxRate)
             .forEach { require(it.signum() >= 0) { "incentive $id: amounts and rates must not be negative" } }
     }
+
+    /** [amount] rounded down to [roundDownToUnit], or unchanged when the rule sets none. */
+    fun roundDown(amount: BigDecimal): BigDecimal = roundDownToUnit?.let { unit ->
+        amount.divide(unit, 0, java.math.RoundingMode.DOWN).multiply(unit)
+    } ?: amount
 
     private fun requireField(value: Any?, name: String) =
         require(value != null) { "incentive $id of type $type requires '$name'" }

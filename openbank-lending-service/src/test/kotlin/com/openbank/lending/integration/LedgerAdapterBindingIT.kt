@@ -105,11 +105,13 @@ class RestBackendsProfile : QuarkusTestProfile {
     )
 }
 
-/** The offline selection ADR-0028 D3 protects: no real outbound dependency in the application. */
+/** The offline selection ADR-0028 D3 protects; shared with the Temporal no-op binding test. */
 class OfflineBackendsProfile : QuarkusTestProfile {
     override fun getConfigOverrides(): Map<String, String> = mapOf(
         "lending.ledger.backend" to "none",
         "lending.borrower-credit.backend" to "none",
         "lending.outbox.backend" to "jpa",
+        "openbank.temporal.enabled" to "false",
+        "openbank.lending.worker.enabled" to "false",
     )
 }

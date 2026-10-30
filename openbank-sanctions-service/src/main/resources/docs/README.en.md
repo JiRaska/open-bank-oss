@@ -24,3 +24,7 @@ This documentation is published directly by the service at the management endpoi
 - **Idempotency:** `idempotencyKey` field in request body → Redis (deduplication)
 - **Auth:** Keycloak OIDC, role `ROLE_OPERATOR` required for mutations
 - **Lists:** OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, CNB_DOMESTIC
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

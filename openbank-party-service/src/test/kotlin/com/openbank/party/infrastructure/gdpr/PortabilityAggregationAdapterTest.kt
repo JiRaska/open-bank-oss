@@ -4,24 +4,29 @@
 
 package com.openbank.party.infrastructure.gdpr
 
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.clients.transaction.model.TransactionPage
+import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.party.application.port.out.GdprAggregationAuthException
 import com.openbank.party.domain.model.redactIban
 import com.openbank.party.infrastructure.client.AccountPageBody
 import com.openbank.party.infrastructure.client.AccountServiceRestClient
 import com.openbank.party.infrastructure.client.AccountSummaryBody
 import com.openbank.party.infrastructure.client.CardServiceRestClient
-import com.openbank.party.infrastructure.client.TransactionItemResponse
-import com.openbank.party.infrastructure.client.TransactionPageResponse
 import com.openbank.party.infrastructure.client.TransactionServiceRestClient
 import io.mockk.every
 import io.mockk.mockk
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.WebApplicationException
+import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -38,9 +43,28 @@ class PortabilityAggregationAdapterTest {
     private val adapter = PortabilityAggregationAdapter(accountClient, transactionClient, cardClient)
 
     private val partyId: UUID = UUID.randomUUID()
+    private val txId: UUID = UUID.fromString("4f1d2a5e-0f7f-4c37-9a3c-1c7b1a2f9f01")
     private val accountId: UUID = UUID.randomUUID()
 
     private fun <T> failing(status: Int): Uni<T> = Uni.createFrom().failure(WebApplicationException(status))
+
+    private fun okPage(page: TransactionPage): Response = mockk<Response>(relaxed = true).also {
+        every { it.status } returns 200
+        every { it.hasEntity() } returns true
+        every { it.readEntity(TransactionPage::class.java) } returns page
+    }
+
+    @Test
+    fun `a listed transaction need not be completed to remain in the portability export`(): Unit = runBlocking {
+        every { accountClient.listByParty(partyId, any(), null) } returns Uni.createFrom().item(
+            AccountPageBody(data = listOf(AccountSummaryBody(id = accountId, accountNumber = "X", status = "ACTIVE"))),
+        )
+        every { transactionClient.listTransactions(accountId, any(), any()) } returns Uni.createFrom().item(
+            okPage(TransactionPage(data = listOf(TransactionResponse(id = txId, status = "FAILED")))),
+        )
+        val result = adapter.fetchAccountsWithTransactions(partyId)
+        assertThat(result.single().transactions.single().transactionId).isEqualTo(txId.toString())
+    }
 
     @Test
     fun `accounts are assembled with their transactions, counterparty identity absent in v1`(): Unit = runBlocking {
@@ -57,18 +81,20 @@ class PortabilityAggregationAdapterTest {
                 ),
             ),
         )
-        every { transactionClient.listByAccount(accountId, any()) } returns Uni.createFrom().item(
-            TransactionPageResponse(
-                data = listOf(
-                    TransactionItemResponse(
-                        id = "tx-1",
-                        referenceNumber = "TRX-000001",
-                        bookingDate = "2026-07-01",
-                        amount = "1200.00",
-                        currencyCode = "CZK",
-                        type = "DEBIT",
-                        status = "COMPLETED",
-                        description = "Nájem",
+        every { transactionClient.listTransactions(accountId, any(), any()) } returns Uni.createFrom().item(
+            okPage(
+                TransactionPage(
+                    data = listOf(
+                        TransactionResponse(
+                            id = txId,
+                            referenceNumber = "TRX-000001",
+                            bookingDate = LocalDate.parse("2026-07-01"),
+                            amount = BigDecimal("1200.00"),
+                            currencyCode = "CZK",
+                            type = "DEBIT",
+                            status = "COMPLETED",
+                            description = "Nájem",
+                        ),
                     ),
                 ),
             ),
@@ -82,7 +108,9 @@ class PortabilityAggregationAdapterTest {
         assertThat(account.currency).isEqualTo("CZK")
         assertThat(account.transactions).hasSize(1)
         val tx = account.transactions[0]
-        assertThat(tx.transactionId).isEqualTo("tx-1")
+        assertThat(tx.transactionId).isEqualTo(txId.toString())
+        assertThat(tx.bookingDate).isEqualTo("2026-07-01")
+        assertThat(tx.amount).isEqualTo("1200.00")
         assertThat(tx.currency).isEqualTo("CZK")
         assertThat(tx.remittanceInfo).isEqualTo("Nájem")
         assertThat(tx.reference).isEqualTo("TRX-000001")
@@ -113,7 +141,7 @@ class PortabilityAggregationAdapterTest {
         every { accountClient.listByParty(partyId, any(), null) } returns Uni.createFrom().item(
             AccountPageBody(data = listOf(AccountSummaryBody(id = accountId, accountNumber = "X", status = "ACTIVE"))),
         )
-        every { transactionClient.listByAccount(accountId, any()) } returns failing(500)
+        every { transactionClient.listTransactions(accountId, any(), any()) } returns failing(500)
 
         val accounts = adapter.fetchAccountsWithTransactions(partyId)
 
@@ -148,7 +176,7 @@ class PortabilityAggregationAdapterTest {
     /**
      * The provider contract, not our own DTO: this payload is the literal shape
      * transaction-service's `GET /api/v1/transactions` returns (CursorPage of
-     * TransactionResponse). Building [TransactionItemResponse] by hand elsewhere in this
+     * TransactionResponse). Building [TransactionResponse] by hand elsewhere in this
      * suite cannot catch a field-name mismatch — both sides move together. Written as a
      * literal on purpose.
      */
@@ -180,13 +208,18 @@ class PortabilityAggregationAdapterTest {
             }
         """.trimIndent()
 
-        val page = jacksonObjectMapper().readValue(providerJson, TransactionPageResponse::class.java)
-        val item = page.data.single()
+        // Bound the way the REAL client binds: Quarkus' mapper ignores unknown properties (the
+        // provider also sends `pagination.limit`) and carries the java.time module.
+        val page = jacksonObjectMapper()
+            .registerModule(JavaTimeModule())
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+            .readValue(providerJson, TransactionPage::class.java)
+        val item = page.data!!.single()
 
-        assertThat(item.id).isEqualTo("4f1d2a5e-0f7f-4c37-9a3c-1c7b1a2f9f01")
+        assertThat(item.id).isEqualTo(txId)
         assertThat(item.referenceNumber).isEqualTo("TRX-000123")
-        assertThat(item.bookingDate).isEqualTo("2026-07-02")
-        assertThat(item.amount).isEqualTo("149.50")
+        assertThat(item.bookingDate).isEqualTo(LocalDate.parse("2026-07-02"))
+        assertThat(item.amount).isEqualByComparingTo("149.50")
         assertThat(item.currencyCode).isEqualTo("CZK")
         assertThat(item.description).isEqualTo("Invoice 2026/114")
     }

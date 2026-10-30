@@ -15,7 +15,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import org.jboss.logging.Logger
 
-private const val HTTP_CREATED = 201
+private const val HTTP_OK = 200
+private const val HTTP_MULTIPLE_CHOICES = 300
 private val LOG: Logger = Logger.getLogger("com.openbank.lending.infrastructure.rest.IdempotentSubmit")
 
 /**
@@ -39,6 +40,10 @@ private val LOG: Logger = Logger.getLogger("com.openbank.lending.infrastructure.
  *
  * [submit] must return a JSON [String] entity. A `null` [storeKey] (no key supplied) runs [submit]
  * unguarded — the pre-existing contract for un-keyed callers.
+ *
+ * Any 2xx [submit] response is stored, not only a 201: the ADR-0211 origination commands
+ * (withdraw / submitDocuments / sign, #8351) answer 200 and a keyed retry of a succeeded
+ * transition must replay the stored outcome, not re-run the machine and eat its 422 refusal.
  */
 internal suspend fun IdempotencyStore.submitOnce(
     storeKey: String?,
@@ -60,7 +65,7 @@ internal suspend fun IdempotencyStore.submitOnce(
     var completed = false
     try {
         val response = submit()
-        if (response.status != HTTP_CREATED) return response
+        if (response.status !in HTTP_OK until HTTP_MULTIPLE_CHOICES) return response
         // The resource now exists: from here on the claim must never be released.
         completed = true
         saveCompleted(storeKey, requestHash, response, ttlSeconds)
@@ -76,8 +81,8 @@ internal suspend fun IdempotencyStore.submitOnce(
 }
 
 /**
- * Stores a 201 whose resource already exists. A failure is logged and swallowed, never rethrown:
- * the caller must answer the created response and keep the in-flight marker (see [submitOnce]).
+ * Stores a 2xx whose effect already happened. A failure is logged and swallowed, never rethrown:
+ * the caller must answer the successful response and keep the in-flight marker (see [submitOnce]).
  */
 private suspend fun IdempotencyStore.saveCompleted(
     storeKey: String,
@@ -92,7 +97,7 @@ private suspend fun IdempotencyStore.saveCompleted(
     } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
         LOG.warnf(
             e,
-            "idempotent submit created the resource but could not store the response; " +
+            "idempotent submit succeeded but could not store the response; " +
                 "the in-flight marker is kept so a retry answers IN_PROGRESS, not a duplicate",
         )
     }

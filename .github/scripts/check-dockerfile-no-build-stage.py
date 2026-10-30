@@ -15,13 +15,22 @@ Nothing builds them. `auto-deploy.yml`, `ghcr-publish.yml` and
 `.github/workflows/Dockerfile.deploy`, and read exactly one thing from these files:
 the EXPOSE line.
 
-So three rules:
+Five rules:
 
   1. No build stage. A `FROM ... AS build` here is either dead text or a second,
      divergent definition of how images are made. Both are worse than nothing.
   2. EXPOSE is mandatory. It is the only live contract — losing it does not fail
      anything loudly, it silently sets the container port to 8080.
   3. The FROM must be byte-identical to the one in `Dockerfile.deploy` (#3354).
+  4. The container port has ONE source, `quarkus.http.port` in application.yaml
+     (`.github/scripts/service-port.py`). A stub that still carries an EXPOSE must agree
+     with it, and a stub that says nothing the deploy recipe and application.yaml do not
+     already say (REDUNDANT_STUB_SHA256) must not exist: delete it. 38 of them were
+     byte-identical except for the port number.
+  5. Dependabot must group the shared runtime base and its declarations together,
+     including digest-only updates. Overlapping major/rest groups cannot do this:
+     assignment happens before update classification, so the major group captures
+     the image and digest changes escape into individually invalid service PRs.
 
 Rule 3 exists because #3618 moved the fleet runtime base from
 `eclipse-temurin:25-jre-alpine` (musl) to `eclipse-temurin:25-jre` (glibc) — the
@@ -60,9 +69,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import hashlib
+import importlib.util
 import pathlib
 import re
 import sys
+
+import yaml
 
 # re.M is load-bearing on all three: without it `^` anchors to the start of the whole
 # file, so only a violation on the FIRST non-comment line could ever match. That made
@@ -80,6 +94,12 @@ QUARKUS_APP_RE = re.compile(r'^\s*COPY\s+.*\bquarkus-app/', re.I | re.M)
 FROM_RE = re.compile(r'^FROM\s+(\S+)\s*$', re.M)
 
 DEPLOY_RECIPE = ".github/workflows/Dockerfile.deploy"
+
+# sha256 of the retired port-only stub with its EXPOSE line removed. 38 services carried
+# this file verbatim; the port it declared is in application.yaml, so the file is a
+# second copy of a number and nothing else. Hash, not text, so the check stays small.
+REDUNDANT_STUB_SHA256 = "f172f41bc8c647250302672ebb94aa6d2491a8b883620eee8d4084974c412e5a"
+EXPOSE_LINE_RE = re.compile(r"^EXPOSE\s+\d+\s*\n", re.M)
 
 # Files outside the openbank-*/Dockerfile glob that still declare the fleet runtime
 # base and so must track it. None is referenced by any workflow or script today —
@@ -155,6 +175,90 @@ def check_fleet_bases(root: pathlib.Path) -> list[str]:
     return problems
 
 
+def dependabot_pattern_matches(pattern: str, image: str) -> bool:
+    """Dependabot group patterns support only '*', case-insensitively (not fnmatch '?')."""
+    return re.fullmatch(re.escape(pattern).replace(r"\*", ".*"), image, re.IGNORECASE) is not None
+
+
+def check_dependabot_fleet_group(root: pathlib.Path) -> list[str]:
+    """Keep the updater's proposal boundary aligned with rule 3's runtime boundary."""
+    config = root / ".github/dependabot.yml"
+    try:
+        document = yaml.safe_load(config.read_text(encoding="utf-8"))
+        updates = document["updates"]
+        froms = FROM_RE.findall(strip_comments((root / DEPLOY_RECIPE).read_text(encoding="utf-8")))
+        image = froms[0].split("@", 1)[0]
+        if ":" in image.rsplit("/", 1)[-1]:
+            image = image.rsplit(":", 1)[0]
+        recipe_dir = "/" + str(pathlib.PurePosixPath(DEPLOY_RECIPE).parent)
+        matches = []
+        for update in updates:
+            directories = update.get("directories", [update.get("directory", "")])
+            if update.get("package-ecosystem") == "docker" and any(
+                fnmatch.fnmatchcase(recipe_dir, directory.rstrip("/") or "/")
+                for directory in directories
+            ):
+                matches.append((update, directories))
+        if len(matches) != 1:
+            return ["Dependabot must watch the shared runtime recipe in exactly one Docker update block."]
+        update, directories = matches[0]
+        problems = []
+        for path in fleet_base_files(root):
+            parent = str(path.relative_to(root).parent)
+            directory = "/" if parent == "." else "/" + parent
+            if not any(fnmatch.fnmatchcase(directory, pattern.rstrip("/") or "/") for pattern in directories):
+                problems.append(f"Dependabot runtime block does not watch {path.relative_to(root)} alongside {DEPLOY_RECIPE}.")
+        groups = []
+        for name, group in update.get("groups", {}).items():
+            if (group.get("applies-to", "version-updates") != "version-updates"
+                    or group.get("dependency-type", "production") != "production"):
+                continue
+            if (
+                any(dependabot_pattern_matches(pattern, image) for pattern in group.get("patterns", ["*"]))
+                and not any(dependabot_pattern_matches(pattern, image) for pattern in group.get("exclude-patterns", []))
+            ):
+                groups.append((name, group))
+        if len(groups) != 1:
+            problems.append(f"Dependabot runtime base {image} must match exactly one static group; found {len(groups)}.")
+        elif groups[0][1].get("group-by") or "update-types" in groups[0][1]:
+            problems.append(f"Dependabot runtime base group {groups[0][0]} must be static and unfiltered: digest-only updates have no SemVer delta.")
+        return problems
+    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, yaml.YAMLError) as exc:
+        return [f"Cannot validate Dependabot runtime grouping: {type(exc).__name__}."]
+
+def _service_port_module(root: pathlib.Path):
+    spec = importlib.util.spec_from_file_location(
+        "service_port", root / ".github" / "scripts" / "service-port.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def check_ports(root: pathlib.Path) -> list[str]:
+    """Rule 4: one source for the port, and no stub that merely restates it."""
+    sp = _service_port_module(root)
+    problems: list[str] = []
+    for path in sorted(root.glob("openbank-*/Dockerfile")):
+        service = path.parent
+        if service.name in SELF_BUILT:
+            continue
+        raw = path.read_text(encoding="utf-8")
+        rel = path.relative_to(root)
+        digest = hashlib.sha256(EXPOSE_LINE_RE.sub("", raw).encode()).hexdigest()
+        if digest == REDUNDANT_STUB_SHA256:
+            problems.append(
+                f"{rel}: is the retired port-only stub (identical to the fleet's but for the "
+                f"EXPOSE number). Nothing builds it and the port is read from "
+                f"quarkus.http.port; delete the file.")
+        declared = sp.stub_port(service)
+        authoritative = sp.yaml_port(service)
+        if declared is not None and authoritative is not None and declared != authoritative:
+            problems.append(
+                f"{rel}: EXPOSE {declared} but application.yaml says quarkus.http.port "
+                f"{authoritative}. application.yaml is the source; fix or delete the stub.")
+    return problems
+
+
 def self_test() -> int:
     """Falsify rule 3 in BOTH directions against a synthetic tree.
 
@@ -206,6 +310,89 @@ def self_test() -> int:
         (exempt / "Dockerfile").write_text(prose + bad + "\nEXPOSE 3000\n")
         if check_fleet_bases(tmp):
             failures.append("a SELF_BUILT Dockerfile was held to the fleet base")
+
+        # Rule 5: reproduce the overlap that produced individual red digest PRs.
+        config = tmp / ".github/dependabot.yml"
+        runtime = {
+            "package-ecosystem": "docker",
+            "directories": ["/.github/workflows", "/openbank-*", "/"],
+            "groups": {"runtime": {"patterns": ["eclipse-temurin"]}},
+        }
+
+        def grouping_result():
+            config.write_text(yaml.safe_dump({"version": 2, "updates": [runtime]}))
+            return check_dependabot_fleet_group(tmp)
+
+        if grouping_result():
+            failures.append("one static unfiltered fleet image group was rejected")
+        runtime["groups"] = {
+            "major": {"patterns": ["*"], "update-types": ["major"]},
+            "rest": {"patterns": ["*"]},
+        }
+        if not grouping_result():
+            failures.append("the original overlapping major/rest digest trap was accepted")
+        runtime["groups"] = {"runtime": {"patterns": ["eclipse-temurin"], "update-types": ["minor", "patch"]}}
+        if not grouping_result():
+            failures.append("a group excluding digest-only updates was accepted")
+        runtime["groups"] = {"runtime": {"group-by": "dependency-name"}}
+        if not grouping_result():
+            failures.append("a dynamic group without proven refresh support was accepted")
+        runtime["groups"] = {"runtime": {"patterns": ["eclipse-temurin"], "dependency-type": "development"}}
+        if not grouping_result():
+            failures.append("a development-only group was accepted for a runtime base")
+        runtime["groups"] = {"runtime": {"patterns": ["eclipse-temur?n"]}}
+        if not grouping_result():
+            failures.append("fnmatch '?' was treated as a Dependabot wildcard")
+        runtime["groups"] = {
+            "runtime": {"patterns": ["eclipse-temurin"]},
+            "implicit-catchall": {},
+        }
+        if not grouping_result():
+            failures.append("a patternless catch-all overlap was accepted")
+        runtime["groups"] = {
+            "runtime": {"patterns": ["ECLIPSE-TEMURIN"]},
+            "other": {"group-by": "dependency-name", "exclude-patterns": ["eclipse-*"]},
+        }
+        if grouping_result():
+            failures.append("case-insensitive grouping or an unrelated excluded dynamic group was rejected")
+        runtime["groups"] = {"runtime": {"patterns": ["eclipse-temurin"]}}
+        runtime["directories"].remove("/.github/workflows")
+        if not grouping_result():
+            failures.append("the shared runtime recipe was allowed outside Dependabot")
+        runtime["directories"].append("/.github/workflows")
+        runtime["directories"].remove("/openbank-*")
+        if not grouping_result():
+            failures.append("fleet declarations were allowed outside the shared update block")
+
+        # Rule 4, both directions, on a tree that carries the real helper.
+        (tmp / ".github" / "scripts").mkdir(parents=True)
+        shutil.copy(pathlib.Path(__file__).with_name("service-port.py"),
+                    tmp / ".github" / "scripts" / "service-port.py")
+        svc = tmp / "openbank-a-service"
+        (svc / "src/main/resources").mkdir(parents=True)
+        (svc / "src/main/resources/application.yaml").write_text(
+            "quarkus:\n  http:\n    port: 8100\n")
+        agreeing.write_text(prose + good + "\nEXPOSE 8100\n")
+        if check_ports(tmp):
+            failures.append("a stub agreeing with application.yaml was flagged")
+        agreeing.write_text(prose + good + "\nEXPOSE 8999\n")
+        if not any("8999" in p for p in check_ports(tmp)):
+            failures.append("an EXPOSE that contradicts application.yaml was NOT flagged")
+
+        # Redundant stub: same bytes as the retired fleet stub modulo the port number.
+        global REDUNDANT_STUB_SHA256
+        real_sha = REDUNDANT_STUB_SHA256
+        try:
+            stub_text = "# declaration only\n" + good + "\n"
+            REDUNDANT_STUB_SHA256 = hashlib.sha256(stub_text.encode()).hexdigest()
+            agreeing.write_text(stub_text + "EXPOSE 8100\n")
+            if not any("retired port-only stub" in p for p in check_ports(tmp)):
+                failures.append("a redundant port-only stub was NOT flagged")
+            agreeing.write_text(stub_text + "ENV X=1\nEXPOSE 8100\n")
+            if any("retired port-only stub" in p for p in check_ports(tmp)):
+                failures.append("a stub with real content was flagged as redundant")
+        finally:
+            REDUNDANT_STUB_SHA256 = real_sha
     finally:
         shutil.rmtree(tmp)
 
@@ -213,8 +400,8 @@ def self_test() -> int:
         print(f"self-test FAILED: {f}")
     if failures:
         return 1
-    print("check-dockerfile-no-build-stage --self-test: OK — rule 3 fires on drift, "
-          "stays quiet on agreement, covers the non-glob files, exempts SELF_BUILT")
+    print("check-dockerfile-no-build-stage --self-test: OK — rules 3, 4 and 5 fire on drift, "
+          "stay quiet on agreement, covers the non-glob files, exempts SELF_BUILT")
     return 0
 
 
@@ -227,7 +414,8 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
-    problems: list[str] = check_fleet_bases(pathlib.Path("."))
+    problems: list[str] = (check_fleet_bases(pathlib.Path(".")) + check_ports(pathlib.Path("."))
+                           + check_dependabot_fleet_group(pathlib.Path(".")))
     ports: dict[str, list[str]] = {}
     seen_self_built: set[str] = set()
     checked = 0

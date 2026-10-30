@@ -24,6 +24,25 @@ describe('catalog schema form', () => {
     ])
   })
 
+  it('exposes questionnaire class enum arrays and preserves other draft attributes', () => {
+    const retirementSchema = { type: 'object', required: ['instrumentClasses'], properties: {
+      instrumentClasses: { type: 'array', minItems: 1, uniqueItems: true,
+        items: { type: 'string', enum: ['PENSION_FUNDS', 'BOND_FUNDS', 'EQUITY_FUNDS'] } },
+    } }
+    expect(catalogSchemaFields(retirementSchema)).toEqual([
+      expect.objectContaining({ path: ['instrumentClasses'], type: 'enum-array', required: true,
+        minItems: 1, choices: ['PENSION_FUNDS', 'BOND_FUNDS', 'EQUITY_FUNDS'] }),
+    ])
+    const draft = { schemaRef: { id: 'pension-savings', version: 2 }, attributes: {
+      fundStrategy: 'BALANCED', instrumentClasses: ['BOND_FUNDS'], reviewStatus: 'ILLUSTRATIVE',
+    } }
+    const next = withCatalogFieldValue(draft, ['instrumentClasses'], ['BOND_FUNDS', 'EQUITY_FUNDS'])
+    expect(catalogFieldValue(next, ['instrumentClasses'])).toEqual(['BOND_FUNDS', 'EQUITY_FUNDS'])
+    expect(next.attributes).toEqual({ fundStrategy: 'BALANCED',
+      instrumentClasses: ['BOND_FUNDS', 'EQUITY_FUNDS'], reviewStatus: 'ILLUSTRATIVE' })
+    expect(draft.attributes.instrumentClasses).toEqual(['BOND_FUNDS'])
+  })
+
   it('updates a nested attribute without changing unrelated expert JSON', () => {
     const original = { attributes: { coverage: { amount: '1000', currency: 'EUR' }, perils: [{ code: 'DEATH' }] } }
     const next = withCatalogFieldValue(original, ['coverage', 'amount'], '1200')

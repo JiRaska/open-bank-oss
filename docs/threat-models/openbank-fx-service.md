@@ -52,6 +52,7 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
 
 ## 6. Change log
 
+- **2026-10-24** — **Screening, AML case severity and fraud verdict types come from `openbank-libs-fincrime` (ADR-0353, #13435/#13439).** The local copies of `ScreeningPolicy`, `ScreeningMatchStatus`, `ScreeningDecision`, `ScreeningRole`, `ScreeningResult`, the AML case risk level enum (now `AmlCaseSeverity`) and `FraudVerdict` are deleted; the rail uses the one shared definition its producers (sanctions, aml, fraud) also use. Decision logic, the 0.85 block threshold and both fail-closed wire mappings (unknown sanctions status ⇒ ESCALATED ⇒ BLOCK; unknown fraud verdict ⇒ UNKNOWN, never ALLOW) are unchanged — the adapters now call the shared parsers. No wire, DB or Pact change. Rollback: revert the PR.
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `fx_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-10-04** — Trust-boundary change: ČNB policy-rate ingestion. **New outbound edge** to four public, unauthenticated ČNB files (`openbank.cnb.policy-rates.{repo,discount,lombard,min-reserves}-url`, the same `www.cnb.cz` host as the fixing feed, probed daily by `check-external-feeds.py`), fetched daily and on boot by `CnbPolicyRateIngestionScheduler`. **New outbound Kafka topic** `openbank.fx.cnb-policy-rate.published` (compacted; Write/Describe ACL for the existing `fx-service` KafkaUser only; Read for audit-service and risk-engine), fed from `fx_outbox` in the same transaction as the `cnb_policy_rate` rows. **New read** `GET /api/v1/fx/cnb/policy-rates/{instrument}?asOf=` on the existing `fx.read` action and staff roles (no `ROLE_API`: the risk engine gets these facts by event, so no machine caller is added). **Tampering / integrity — the point of this change:** the risk engine computes the minimum-reserve requirement from these facts, so a wrong rate is a wrong regulatory figure. Mitigations: each file is parsed all-or-nothing against its exact header (an HTML error page or the wrong file is rejected, never stored); every malformed row fails the whole file with a count; bytes are decoded as strict UTF-8 and SHA-256 hashed into the row, so any served value is traceable to the exact file; a changed rate for a stored date is applied as a *revision* with the previous rate kept, a WARN, and `openbank_fx_cnb_policy_rate_rows_total{outcome="revised"}` — the ČNB does not revise history, so a revision is a signal, not routine. The minimum-reserve ratio and remuneration are DOWNLOADED too, from the ČNB workbook `PMR_historie_zmen.xlsx` (a fourth outbound file on the same host), not seeded: it is read by a JDK-only hardened reader (`SafeXlsxReader`: zip-bomb limits enforced while inflating, StAX with DTD and external entities disabled, entries looked up by name and never written to disk — no new third-party parser on the money path), the header row is located by its labels on every sheet, and the whole file is rejected on any anomaly (a sheet that is not a year, a date outside its sheet's year or going backwards, a percentage above 100, or a non-numeric/ambiguous ratio or remuneration after the history began). The history before the first single-number row is not stored. A day with no fact in effect is 404 here and NOT_EVALUABLE downstream — never a default. **Spoofing:** TLS to `www.cnb.cz`; a compromised upstream would be caught only by the revision signal for historical rows, not for a new row — accepted, as for the fixing. **DoS:** three ~2 KB files and one ~100 KB workbook per day behind the same retry/timeout/circuit-breaker as the fixing client; a dead feed records its own `openbank_feed_fetch_total` outcome and does not block the other two. Rollback: revert; `cnb_policy_rate` is forward-only and the topic may stay (compacted, no secrets).
@@ -66,7 +67,7 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
   Mitigated by `FraudScoringAdapterTest` (an unrecognised and a blank verdict are `UNKNOWN`, never
   a clean `ALLOW`; red against the old mapper).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -157,7 +158,7 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
   correctly, which is what makes this one identifiable as a typo rather than a renamed control.
 
 - **2026-05-30** — Added `fx_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/
-  boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
+  boundary. Risk class = **availability**, mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`).
   Rollback: `DROP SEQUENCE`.
 - **2026-06-17** — ADR-0084 fraud shadow scoring (observe-only). New outbound trust boundary:
   `fx-service → fraud-service (POST /api/v1/fraud/score, OIDC client-credentials)`.
@@ -214,6 +215,20 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
   transaction-service's `FX_SERVICE_URL`.
 - **2026-09-21** — **Own machine identity for the AML case open (#10486 batch 3).** `AmlServiceClient` (`POST /api/v1/aml/cases`) now mints its bearer from a NAMED oidc-client `m2m`, Keycloak client `openbank-fx` (`ROLE_API` only); aml-service grants it exactly `amlCase.create` (`service-aml-case-create-m2m`, plus a Kotlin named-caller check while aml-service runs OPA advisory). **STRIDE-S:** a new credential. Its secret is generated by Keycloak in the live realm, stored by the owner's provisioning script at Vault KV `keycloak/fx-service` (`client_secret`), projected by the `fx-service-m2m-oidc` ExternalSecret and never seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod loudly (CreateContainerConfigError) rather than calling with an empty credential. Compromise of this secret reaches only `amlCase.create`, against the shared secret's operator write set. **Repudiation improves:** a referred case now names fx-service. The sanctions and fraud clients stay on the shared client until their own edges migrate (their calls already pass with `ROLE_API`, measured by `m2m-shared-client-denylist.py`). Rollback: revert the commit.
 - **2026-09-21** — **Published-rate reads admit ROLE_API at the RBAC gate (#10486 batch 4).** `GET /api/v1/fx/rates` and `/rates/{base}/{quote}` add `ROLE_API` to `@RolesAllowed` so ledger, transaction and agent-service keep reading rates once the shared `openbank-services` client loses `ROLE_OPERATOR`. OPA is unchanged and identity-gated (`service-fx-shared-client-m2m`, `service-fx-edge-m2m`; fx enforces), so another service account with `ROLE_API` still gets 403 there. Conversion reads and `fx.convert` do not admit `ROLE_API` (`FxRateMachineReadRbacTest`). **Risk class:** published reference data only; no write, no customer record. Rollback: revert the commit.
+- **2026-10-14** — **Synthetic journey identity for the published rate sheet (#12850).** `GET
+  /api/v1/fx/rates` and `/rates/{base}/{quote}` admit a new role `FX_SCOPE_READ`, which is NOT a
+  realm role and cannot be assigned in the console: `FxScopeIdentityAugmentor` derives it solely
+  from the `fx:read` client scope (the #7324 product-catalog pattern), and the only client listing
+  that scope is the synthetic-only `openbank-synthetic-fx-read` (no realm roles; secret in Vault
+  KV `openbank/keycloak/synthetic-fx-read`, runbook 0009). OPA admits the role on `fx.read` /
+  `fx.list` only (`synthetic-fx-read-journey`, 16-case suite incl. denied `fx.convert` /
+  `fx.trigger` and denied-scope controls); `fx.convert` and `fx.trigger` have no `@RolesAllowed`
+  path for it, so even an OPA bypass cannot reach a write with this token. The k6 journey
+  (`journey-fx-rates-read`, `*/10 * * * *`) reads the rate sheet over the in-cluster Service and
+  fails closed (explicit "credential absent", optional ExternalSecret ref) until the KV entry is
+  seeded. **Risk class:** confidentiality of already-published reference rates to one more
+  least-privilege authenticated caller; read-only, no mutation, no customer record. Rollback:
+  revert the commit.
 
 - **2026-09-27** — **ApprovalResource migrated onto ApprovalEndpointSupport (#10917/#11031/#11062),
   no wire change.** The maker-checker four-eyes endpoints (`GET .../approvals`,
@@ -221,7 +236,7 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
   guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
   the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
   `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
-  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  codes and JSON field names are unchanged; ApprovalResourceMappingTest (since replaced by the shared `ApprovalEndpointConformance` suite) covers the mapping.
   **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
@@ -258,3 +273,7 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
   Rollout verification must exercise this caller against 8443 with valid and invalid
   client certificates and check that failures do not reroute to HTTP. Rollback restores
   the previous client URL/configuration while the AML listener remains available.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.

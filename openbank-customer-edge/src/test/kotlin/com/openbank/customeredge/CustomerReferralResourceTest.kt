@@ -92,7 +92,7 @@ class CustomerReferralResourceTest {
     // ---- POST /referrals/invites ----
 
     @Test
-    fun `an invite is issued as the token party with a party-namespaced key and only the four fields`() {
+    fun `an invite is issued as the token party with a party-namespaced key and the five fields`() {
         val upstream = mockk<UpstreamClient>()
         val url = slot<String>()
         val body = slot<String>()
@@ -102,7 +102,7 @@ class CustomerReferralResourceTest {
             Response.status(201).entity(
                 """{"id":"${UUID.randomUUID()}","programId":"$programId","token":"$token","referrerPartyId":"$caller",
                    "refereePartyId":null,"status":"ISSUED","expiresAt":"2026-12-31T00:00:00Z","idempotencyKey":"$caller:k1",
-                   "attributedAt":null}""",
+                   "attributedAt":null,"referralLink":"https://app.open-bank.tech/r/$token"}""",
             ).build()
 
         val response = resource(
@@ -115,8 +115,9 @@ class CustomerReferralResourceTest {
         assertThat(key.captured).isEqualTo("$caller:k1")
         assertThat(response.status).isEqualTo(201)
         val out = json(response)
-        assertThat(out.keys()).containsExactlyInAnyOrder("id", "token", "expiresAt", "status")
+        assertThat(out.keys()).containsExactlyInAnyOrder("id", "token", "referralLink", "expiresAt", "status")
         assertThat(out["token"].asText()).isEqualTo(token)
+        assertThat(out["referralLink"].asText()).isEqualTo("https://app.open-bank.tech/r/$token")
     }
 
     @Test
@@ -152,16 +153,20 @@ class CustomerReferralResourceTest {
     /**
      * The privacy property. Upstream is deliberately made to over-share (referee id and name, the
      * token, its hash, the idempotency key) — the edge projection must drop all of it regardless.
+     * referralLink is the one forwarded field (the referrer's own shareable capability); its
+     * seeded value deliberately does NOT embed the raw token so the no-token-leak assertion below
+     * stays meaningful.
      */
     @Test
     fun `the invite list never carries referee identity or the token, even if upstream sends them`() {
         val upstream = mockk<UpstreamClient>()
         val url = slot<String>()
+        val seededLink = "https://app.open-bank.tech/r/seeded-link-value"
         every { upstream.get(capture(url), caller.toString()) } returns Response.ok(
             """[{"id":"${UUID.randomUUID()}","status":"ATTRIBUTED","createdAt":"2026-09-01T00:00:00Z",
                  "expiresAt":"2026-12-31T00:00:00Z","attributedAt":"2026-09-02T00:00:00Z",
                  "refereePartyId":"$stranger","refereeName":"Jana Nováková","token":"$token","tokenHash":"abc123",
-                 "idempotencyKey":"$caller:k1",
+                 "idempotencyKey":"$caller:k1","referralLink":"$seededLink",
                  "reward":{"status":"REWARDED","amount":"500.0000","currency":"CZK","requestedAt":"2026-09-03T00:00:00Z",
                            "rewardedAt":"2026-09-04T00:00:00Z","refereePartyId":"$stranger","rewardReference":"ref"}}]""",
         ).build()
@@ -172,13 +177,29 @@ class CustomerReferralResourceTest {
         assertThat(response.status).isEqualTo(200)
         val raw = response.entity as String
         assertThat(raw).doesNotContain(
-            "refereePartyId", "refereeName", "token", "tokenHash", "idempotencyKey", "rewardReference",
-            stranger.toString(), "Jana", this.token,
+            "refereePartyId",
+            "refereeName",
+            "token",
+            "tokenHash",
+            "idempotencyKey",
+            "rewardReference",
+            stranger.toString(),
+            "Jana",
+            this.token,
         )
         val invite = json(response)[0]
         assertThat(
             invite.keys(),
-        ).containsExactlyInAnyOrder("id", "status", "createdAt", "expiresAt", "attributedAt", "reward")
+        ).containsExactlyInAnyOrder(
+            "id",
+            "status",
+            "createdAt",
+            "expiresAt",
+            "attributedAt",
+            "referralLink",
+            "reward",
+        )
+        assertThat(invite["referralLink"].asText()).isEqualTo(seededLink)
         assertThat(
             invite["reward"].keys(),
         ).containsExactlyInAnyOrder("status", "amount", "currency", "requestedAt", "rewardedAt")
@@ -199,6 +220,8 @@ class CustomerReferralResourceTest {
         assertThat(out.map { it["status"].asText() }).containsExactly("ISSUED", "EXPIRED", "ATTRIBUTED")
         assertThat(out[0]["createdAt"].isNull).isTrue()
         assertThat(out[0]["reward"].isNull).isTrue()
+        // Upstream sent no referralLink (pre-column invite): the projection passes the null through.
+        assertThat(out[0]["referralLink"].isNull).isTrue()
     }
 
     // ---- POST /referrals/attributions ----

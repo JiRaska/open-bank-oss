@@ -12,28 +12,15 @@ quarkus:
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
 
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
-
   datasource:
     db-kind: postgresql
     username: openbank
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_accounts
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     # The DEFAULT (Agroal/JDBC) datasource Flyway migrates. Declaring only the reactive URL leaves
     # it unconfigured, and `migrate-at-start` then kills the boot with "Unable to find datasource
     # '<default>' … Bean is not active: SYNTHETIC bean [class=AgroalDataSource]" — so the service
@@ -70,8 +57,8 @@ quarkus:
     # #10486: the welcome-bonus credit (transaction.create) no longer rides the shared openbank-services principal. The
     # money-path rest-clients select this NAMED client (@OidcClientFilter("m2m") /
     # @NamedOidcClient("m2m")), so their token's principal is service-account-openbank-account
-    # (ROLE_API only), granted by identity in the upstream's OPA rego. Every other rest-client
-    # stays on the default (shared) client above until its own edge is migrated.
+    # (ROLE_API plus the catalog:read scope), granted by identity in upstream OPA.
+    # Product and published-revision reads also select this named client.
     m2m:
       auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
       client-id: openbank-account
@@ -95,8 +82,12 @@ quarkus:
       read-timeout: 2000
     balance-service:
       url: ${BALANCE_SERVICE_URL:http://localhost:8103}
+      connect-timeout: 2000
+      read-timeout: 5000
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      connect-timeout: 2000
+      read-timeout: 5000
     "sanctions-service":
       # Was :8110 — that's sca-service's port, not sanctions-service's (QUARKUS_HTTP_PORT
       # 8123 in docker-compose.yml). Never caught because no local docker-compose run had
@@ -147,11 +138,6 @@ quarkus:
         service.name: openbank-account-service
         service.version: ${quarkus.application.version}
 
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -289,6 +275,9 @@ mp:
       password: openbank_secret
       reactive:
         url: vertx-reactive:postgresql://localhost:5432/openbank_accounts_it
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_accounts_it
     redis:
@@ -301,6 +290,11 @@ mp:
       enabled: false
 
 openbank:
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:

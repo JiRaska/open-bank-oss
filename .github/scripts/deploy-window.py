@@ -82,12 +82,21 @@ def manual_deploy_head(event: dict) -> str | None:
             or not re.fullmatch(r"[0-9a-f]{40}", sha)
             or (run.get("head_repository") or {}).get("full_name") != repository):
         return None
+    if producer[1] == DEPLOY_PREFIXES[0]:
+        run_id = run.get("id")
+        if type(run_id) is not int or run_id <= 0:
+            return None
+        return producer[1] + sha + f"-run{run_id}"
     return producer[1] + sha
 
 
 def flush(prs: list[dict], now: int, last_deploy: int | None, window: int,
           manual_head: str | None = None) -> dict | None:
     """Return the deferred PR to arm now, or None. prs: [{number, head, created_at, armed}]."""
+    # Explicit maintainer intent outranks both the timer and manual producer completion.
+    # Draft/blocked repairs also defer: only closing the PR or removing the label releases it.
+    if any(p.get("repair_priority") and p.get("state", "open") == "open" for p in prs):
+        return None
     deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES)]
     if any(p.get("armed") for p in deploy):
         return None
@@ -239,15 +248,27 @@ def self_test() -> int:
     check("flush arms the NEWEST PR of that kind (it supersedes the older)", pick is not None and pick["number"] == 14)
     check("flush never arms a second PR while one is armed",
           flush(prs + [{"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}], T, None, W) is None)
+    repair = {"number": 30, "head": "fix/repair", "created_at": "a", "armed": False,
+              "state": "open", "repair_priority": True, "draft": True, "blocked": True}
+    check("explicit open draft/blocked repair defers elapsed timer",
+          flush(prs + [repair], T, T - W, W) is None)
+    check("explicit repair defers matching manual producer completion",
+          flush(prs + [repair], T, None, W, prs[0]["head"]) is None)
+    check("closed marked repair releases oldest eligible deploy kind",
+          flush(prs + [{**repair, "state": "closed"}], T, T - W, W)["number"] == 11)
+    check("removing repair marker releases oldest eligible deploy kind",
+          flush(prs + [{**repair, "repair_priority": False}], T, T - W, W)["number"] == 11)
+    check("unmarked draft/blocked feature does not defer deploy",
+          flush(prs + [{**repair, "repair_priority": False}], T, None, W)["number"] == 11)
     # Exercise the same CLI and event file that the serialized workflow uses. An unrelated
     # older PR must not steal a manual run's exemption, and routine events keep the window.
     with tempfile.TemporaryDirectory() as d:
         sha = "a" * 40
-        manual_pr = {"number": 21, "head": DEPLOY_PREFIXES[0] + sha,
+        manual_pr = {"number": 21, "head": DEPLOY_PREFIXES[0] + sha + "-run101",
                      "created_at": "2026-09-30T10:10:00Z", "armed": False}
         event = {"action": "completed", "repository": {"full_name": "example/open-bank"},
                  "workflow_run": {"name": "Auto deploy", "event": "workflow_dispatch",
-                                  "conclusion": "success", "head_sha": sha,
+                                  "conclusion": "success", "head_sha": sha, "id": 101,
                                   "path": ".github/workflows/auto-deploy.yml", "head_branch": "main",
                                   "head_repository": {"full_name": "example/open-bank"}}}
         paths = {name: os.path.join(d, name + ".json") for name in ("prs", "commits", "event")}
@@ -262,6 +283,17 @@ def self_test() -> int:
             return result.returncode, result.stdout
         check("manual producer completion expedites only its matching PR inside the window",
               run_fixture(prs + [manual_pr], event) == (0, "arm=21\narm_head=" + manual_pr["head"] + "\n"))
+        sibling = {**manual_pr, "number": 22, "head": DEPLOY_PREFIXES[0] + sha + "-run102"}
+        check("same-source producer completion cannot expedite another run's candidate",
+              run_fixture([sibling], event) == (0, "arm=\narm_head=\n"))
+        check("same-source second producer maps to its own candidate",
+              run_fixture([sibling], {**event, "workflow_run": {**event["workflow_run"], "id": 102}})
+              == (0, "arm=22\narm_head=" + sibling["head"] + "\n"))
+        for bad_id in (None, 0, -1, True, "101"):
+            check(f"invalid producer run identity {bad_id!r} cannot expedite",
+                  manual_deploy_head({**event, "workflow_run": {**event["workflow_run"], "id": bad_id}}) is None)
+        check("CLI manual producer completion waits for explicit repair priority",
+              run_fixture(prs + [manual_pr, repair], event) == (0, "arm=\narm_head=\n"))
         check("manual producer completion cannot expedite an unrelated PR",
               run_fixture(prs, event) == (0, "arm=\narm_head=\n"))
         check("scheduled producer completion remains inside the window",

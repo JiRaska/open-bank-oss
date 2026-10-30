@@ -61,6 +61,7 @@ class UpstreamClientSyntheticTaintTest {
     private fun base() = "http://127.0.0.1:${server.address.port}"
 
     private fun client() = UpstreamClient().apply {
+        tlsConfigurationName = java.util.Optional.empty()
         tokenEndpointBase = "${base()}/realm"
         clientId = "edge"
         clientSecret = "s"

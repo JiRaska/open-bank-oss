@@ -132,6 +132,21 @@ SETTLED / REJECTED / RETURNED / CANCELLED → (terminální)
 
 `REJECTED` vyžaduje `rejectReason` (např. `SANCTIONS_HIT`, `AML_HOLD`, `INSUFFICIENT_FUNDS`, `AMOUNT_LIMIT_EXCEEDED`, …). `submittedAt` se razítkuje při prvním přechodu mimo `RECEIVED`; `settledAt` při `SETTLED`/`RETURNED`/`CANCELLED`.
 
+### Koncepty firemních hromadných plateb
+
+`/api/v1/business-payment-batches` uchovává koncepty jedné firmy. Důvěryhodná
+customer-edge služba volá endpoint se služebním tokenem a `X-Customer-Party-Id`;
+zápisy navíc nesou identitu člověka v `X-Actor-Party-Id`. Ostatní volající jsou
+odmítnuti. Koncept obsahuje 1–100 položek v CZK, serverem vypočtený počet a součet
+v nejmenších jednotkách, revizi a časová razítka. Nemá endpoint pro odeslání a
+neprovádí převod peněz.
+
+Založení vyžaduje `Idempotency-Key` a ukládá hash kanonického těla. Přesné opakování
+vrací 200 s původním konceptem, jiné tělo pod stejným klíčem 409. Seznam má nejvýše
+20 konceptů na stránku a detail nejvýše 20 položek. Nahrazení všech položek vyžaduje
+`If-Match` s aktuální revizí; zastaralá revize vrací 409. Struktury úspěšných odpovědí
+jsou v `openapi.yaml`.
+
 ## Chybový model
 
 Chyby používají `ApiError` z `openbank-libs` (`{ correlationId, status, code, message }`):
@@ -170,7 +185,7 @@ Topic: `openbank.domestic.payment.events` (Kafka, JSON, kanál `events-out`).
 | Typ události | Spouštěč | Payload (klíčová pole) |
 |---|---|---|
 | `domestic.payment.created` | `POST /domestic-payments` | paymentId, idempotencyKey, status, debtorAccountId, účet+banka plátce/příjemce, amount, currency, priority, endToEndId, occurredAt |
-| `domestic.payment.status-changed` | jakýkoliv perzistovaný přechod | paymentId, previousStatus, newStatus, rejectReason, rejectDetail, occurredAt |
+| `domestic.payment.status-changed` | jakýkoliv perzistovaný přechod | paymentId, previousStatus, newStatus, rejectReason, rejectDetail, occurredAt, settledAt (perzistovaný čas přechodu do SETTLED, do zúčtování null; není to čas vzniku události) |
 
 Události jsou **append-only**; opravy se dělají novou status-changed událostí, ne přepsáním.
 

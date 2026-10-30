@@ -14,7 +14,6 @@ import com.openbank.securityscanner.domain.IncidentSeverity
 import com.openbank.securityscanner.domain.IncidentStatus
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
-import io.quarkus.panache.common.Parameters
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.LockModeType
@@ -62,14 +61,14 @@ class IctIncidentRepositoryImpl :
         offset: Int,
     ): List<IctIncident> {
         val clauses = mutableListOf<String>()
-        val params = Parameters()
+        val params = mutableMapOf<String, Any>()
         status?.let {
             clauses += "status = :status"
-            params.and("status", it.name)
+            params["status"] = it.name
         }
         severity?.let {
             clauses += "severity = :severity"
-            params.and("severity", it.name)
+            params["severity"] = it.name
         }
         val where = if (clauses.isEmpty()) "" else clauses.joinToString(" and ") + " "
         val capped = limit.coerceIn(1, MAX_PAGE)

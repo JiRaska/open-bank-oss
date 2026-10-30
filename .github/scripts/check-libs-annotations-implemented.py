@@ -69,8 +69,6 @@ PROSE_DIRS = ("docs/adr", "docs/threat-models", "openbank-libs/docs")
 PROSE_ALLOWLIST: dict[tuple[str, str], str] = {
     ("docs/adr/0016-virtual-threads-not-adopted-yet.md", "RunOnVirtualThread"):
         "the ADR's whole subject is the decision NOT to adopt it; its absence is the outcome",
-    ("docs/adr/0016-virtual-threads-not-adopted-yet.md", "Transactional"):
-        "contrasted against the reactive stack that ADR chose; imperative JTA is not used here",
     ("docs/adr/0048-decouple-api-contract-version-from-service-release-version.md",
      "ApplicationPath"):
         "illustrative JAX-RS snippet showing where a version prefix would live",

@@ -4,7 +4,7 @@
 
 'use client'
 import Link from 'next/link'
-import { GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint, FileSignature, Radar, Scale } from 'lucide-react'
+import { GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint, FileSignature, Radar, Scale, QrCode } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
@@ -68,6 +68,18 @@ function buildSections(bpmnCount: number): HubSection[] {
       'Open BLE proximity-pay standard without QR: iOS→Android / Bank A→B sequence, security layers and a comparison vs QR (ADR-0095)',
     ],
     badge: 'ADR-0095',
+    color: 'var(--accent-text)',
+    solid: 'var(--accent)',
+  },
+  {
+    href: '/docs/spayd-uri',
+    icon: <QrCode size={22} />,
+    title: ['QR fotoaparátem', 'Camera QR'],
+    desc: [
+      'SPAYD čitelný fotoaparátem telefonu a výběr z nainstalovaných bankovních aplikací: formát spayd://, tok na Androidu a iOS a nerozbíjející zavedení ve třech fázích',
+      'A SPAYD the phone camera can read, with a choice among installed banking apps: the spayd:// format, the Android and iOS flow, and a non-breaking three-phase rollout',
+    ],
+    badge: 'SDK v0.2.0',
     color: 'var(--accent-text)',
     solid: 'var(--accent)',
   },

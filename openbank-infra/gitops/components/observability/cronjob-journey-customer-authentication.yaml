@@ -1,0 +1,230 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Journey: customer-authentication (ADR-0252, ADR-0331, #4348). The bank-owned canary customer
+# obtains a customers-realm token from the PUBLIC token endpoint, proves the token carries the
+# claims customer-edge trusts, and uses it on the PUBLIC edge. Read-only; writes nothing.
+#
+# WHAT THIS PROVES, AND WHAT IT DOES NOT
+#   Proves: the customers-realm issuer answers, the canary's token has the intended issuer, the
+#   ROLE_CUSTOMER role and a party_id claim, and no staff role; the edge accepts that token and
+#   resolves the SAME party from it (the profile it serves is the party named in the claim); a
+#   wrong client secret, a missing token and a tampered token are all refused (a login that
+#   "worked" because nothing validates tokens would also pass a positive-only check); and the
+#   passkey login ceremony is reachable (webauthn auth/begin issues a challenge).
+#   Does NOT prove: a passkey assertion, or an SCA challenge. ADR-0066 forbids a customer password
+#   and ADR-0331 says the identity alone does not unlock SCA -- that needs the phase-3 canary
+#   authenticator. The catalog keeps that half of the capability unclaimed (see its runtime_note).
+#
+# Identity: openbank-synthetic-retail (ADR-0331). Every request carries x-openbank-synthetic: true.
+# The secret arrives through the OPTIONAL ExternalSecret journey-customer-authentication-oidc;
+# until provisioned the script logs "credential absent" and fails every check -- red, never green.
+# Never log the secret, the token, headers or bodies: status codes only.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: journey-customer-authentication-script
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: customer-authentication
+data:
+  journey.js: |
+    import http from 'k6/http';
+    import encoding from 'k6/encoding';
+    import { check } from 'k6';
+
+    export const options = {
+      vus: 1,
+      iterations: 1,
+      thresholds: {
+        checks: ['rate==1.0'],
+        http_req_duration: ['p(95)<3000'],
+      },
+      tags: { journey: 'customer-authentication' },
+    };
+
+    // Override the bases only for the catalog's documented falsification.
+    const CUSTOMER_BASE = __ENV.CUSTOMER_BASE || 'https://customer.open-bank.tech';
+    const TOKEN_URL = __ENV.TOKEN_URL || 'https://kc.open-bank.tech/realms/openbank-customers/protocol/openid-connect/token';
+    const CLIENT_ID = __ENV.SYNTHETIC_CLIENT_ID || 'openbank-synthetic-retail';
+    const CLIENT_SECRET = __ENV.SYNTHETIC_CLIENT_SECRET || '';
+    const ISSUER_SUFFIX = '/realms/openbank-customers';
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const STAFF_ROLES = ['ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_SERVICE'];
+
+    const CHECKS = [
+      'the token endpoint issues a bearer token to the canary',
+      'the token has the customers-realm issuer, ROLE_CUSTOMER and no staff role',
+      'the token names one party',
+      'the edge serves the party named in the token',
+      'a wrong client secret is refused',
+      'a request without a token is refused',
+      'a tampered token is refused',
+      'the passkey login ceremony issues a challenge',
+    ];
+
+    function failAll() {
+      const verdicts = {};
+      for (const name of CHECKS) verdicts[name] = () => false;
+      check(null, verdicts);
+    }
+
+    function json(res) {
+      try { return res.json(); } catch (_) { return null; }
+    }
+
+    function claims(token) {
+      try {
+        return JSON.parse(encoding.b64decode(token.split('.')[1], 'rawurl', 's'));
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function tokenRequest(secret) {
+      return http.post(TOKEN_URL, {
+        grant_type: 'client_credentials',
+        client_id: CLIENT_ID,
+        client_secret: secret,
+      }, { tags: { endpoint: 'token', service: 'keycloak' } });
+    }
+
+    export default function () {
+      if (!CLIENT_SECRET) {
+        console.error('customer-authentication credential absent: SYNTHETIC_CLIENT_SECRET is not set (ExternalSecret journey-customer-authentication-oidc not provisioned); refusing to probe unauthenticated');
+        failAll();
+        return;
+      }
+      // 1. the login itself
+      const issued = tokenRequest(CLIENT_SECRET);
+      if (issued.status !== 200) console.error(`customer-authentication token request failed: status=${issued.status}`);
+      const body = issued.status === 200 ? json(issued) : null;
+      const token = body && typeof body.access_token === 'string' && body.access_token.length > 0 ? body.access_token : null;
+      if (token === null) { failAll(); return; }
+
+      // 2. what the token says
+      const c = claims(token);
+      const roles = (c && c.realm_access && Array.isArray(c.realm_access.roles)) ? c.realm_access.roles : [];
+      const partyId = c && typeof c.party_id === 'string' ? c.party_id : null;
+
+      const authed = (endpoint) => ({
+        headers: { Authorization: `Bearer ${token}`, 'x-openbank-synthetic': 'true' },
+        tags: { endpoint, service: 'customer-edge' },
+      });
+      // 3. what the edge makes of it
+      const profile = http.get(`${CUSTOMER_BASE}/customer/v1/profile`, authed('profile'));
+      if (profile.status !== 200) console.error(`customer-authentication profile: status=${profile.status} expected=200`);
+      const p = profile.status === 200 ? json(profile) : null;
+
+      // 4. negative paths: each must be REFUSED, not merely not-200
+      const wrong = tokenRequest('not-the-secret');
+      const anon = http.get(`${CUSTOMER_BASE}/customer/v1/profile`, { tags: { endpoint: 'profile-anonymous', service: 'customer-edge' } });
+      const parts = token.split('.');
+      const sig = parts[2] || '';
+      // flip the first signature character: still well-formed, no longer signed by the issuer
+      const forged = `${parts[0]}.${parts[1]}.${(sig[0] === 'A' ? 'B' : 'A')}${sig.slice(1)}`;
+      const tampered = http.get(`${CUSTOMER_BASE}/customer/v1/profile`, {
+        headers: { Authorization: `Bearer ${forged}`, 'x-openbank-synthetic': 'true' },
+        tags: { endpoint: 'profile-tampered', service: 'customer-edge' },
+      });
+
+      // 5. the passkey ceremony is reachable (anonymous by design)
+      const begin = http.post(`${CUSTOMER_BASE}/customer/v1/webauthn/auth/begin`, null, { tags: { endpoint: 'webauthn-auth-begin', service: 'customer-edge' } });
+      const challenge = begin.status === 200 ? json(begin) : null;
+
+      check(null, {
+        'the token endpoint issues a bearer token to the canary': () => !!body && String(body.token_type).toLowerCase() === 'bearer',
+        'the token has the customers-realm issuer, ROLE_CUSTOMER and no staff role': () => !!c
+          && typeof c.iss === 'string' && c.iss.endsWith(ISSUER_SUFFIX)
+          && roles.includes('ROLE_CUSTOMER') && !STAFF_ROLES.some((r) => roles.includes(r)),
+        'the token names one party': () => partyId !== null && UUID.test(partyId),
+        'the edge serves the party named in the token': () => !!p && partyId !== null && p.id === partyId,
+        'a wrong client secret is refused': () => wrong.status === 401,
+        'a request without a token is refused': () => anon.status === 401,
+        'a tampered token is refused': () => tampered.status === 401,
+        'the passkey login ceremony issues a challenge': () => !!challenge
+          && typeof challenge.challenge === 'string' && challenge.challenge.length > 0
+          && typeof challenge.rpId === 'string' && challenge.rpId.length > 0,
+      });
+    }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: journey-customer-authentication
+  namespace: observability
+  annotations:
+    # Four runs at */15: a single failed run is the journey's own alert, a silent CronJob is this.
+    openbank.tech/max-success-age-seconds: "3600"
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: customer-authentication
+spec:
+  schedule: "2,17,32,47 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 120
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: journey
+            openbank.tech/journey: customer-authentication
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: k6
+              image: docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              args:
+                - run
+                - --quiet
+                - /scripts/journey.js
+              env:
+                # Optional on purpose: an unprovisioned identity must yield a red run with an
+                # explicit "credential absent" error, not CreateContainerConfigError.
+                - name: SYNTHETIC_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: journey-customer-authentication-oidc
+                      key: SYNTHETIC_CLIENT_SECRET
+                      optional: true
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 192Mi
+          volumes:
+            - name: script
+              configMap:
+                name: journey-customer-authentication-script
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule

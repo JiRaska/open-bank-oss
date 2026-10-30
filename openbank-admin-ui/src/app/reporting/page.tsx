@@ -57,7 +57,7 @@ export default function ReportingPage() {
   const [paramValues, setParamValues] = useState<Record<string, string>>({})
   const [result, setResult] = useState<ReportResult | null>(null)
   const [loading, setLoading] = useState(false)
-  const [failure, setFailure] = useState<'unauthorized' | 'not_found' | 'invalid' | null>(null)
+  const [failure, setFailure] = useState<'unauthorized' | 'not_found' | 'invalid' | 'invalid_response' | null>(null)
 
   useEffect(() => () => { requestId.current += 1 }, [])
 
@@ -119,7 +119,17 @@ export default function ReportingPage() {
       if (res.status === 404) { setFailure('not_found'); setResult(null); return }
       if (res.status === 400) { setFailure('invalid'); setResult(null); return }
       if (!res.ok) throw new Error('report unavailable')
-      const body = parseReportResult(await res.json(), report)
+      const payload: unknown = await res.json()
+      let body: ReportResult
+      try {
+        body = parseReportResult(payload, report)
+      } catch {
+        if (id === requestId.current) {
+          setResult(null)
+          setFailure('invalid_response')
+        }
+        return
+      }
       if (id === requestId.current) setResult(body)
     } catch {
       if (id !== requestId.current) return
@@ -148,7 +158,9 @@ export default function ReportingPage() {
             <ShieldCheck size={14} aria-hidden="true" /> {t('Vyberte report', 'Choose a report')}
           </h3>
           <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
-            {t('Pět pohledů na obchodní aktivitu a kvalitu dat.', 'Five views of business activity and data quality.')}
+            {catalogue
+              ? `${t('Dostupné pohledy z registru:', 'Available registry views:')} ${catalogue.length}`
+              : t('Pohledy na obchodní aktivitu a kvalitu dat.', 'Views of business activity and data quality.')}
           </div>
           {catalogueDenied && <DataUnavailable kind="unauthorized" service="Reporting" feature={t('reporting', 'reporting')} dense />}
           {catalogue && catalogue.length === 0 && !catalogueDenied && (
@@ -225,6 +237,12 @@ export default function ReportingPage() {
                   dense />
               )}
               {failure === 'not_found' && <DataUnavailable kind="not_found" feature={cs ? report.titleCs : report.titleEn} dense />}
+              {failure === 'invalid_response' && (
+                <DataUnavailable kind="error" service="ClickHouse (analytics)" feature={cs ? report.titleCs : report.titleEn}
+                  title={t('Neplatná odpověď reportu', 'Invalid report response')}
+                  detail={t('Datový sklad vrátil obsah, který neodpovídá smlouvě reportu. Hodnoty proto nejsou zobrazeny.', 'The warehouse returned data that does not match the report contract. No values are shown.')}
+                  dense />
+              )}
 
               {result && !failure && (
                 result.available ? (
@@ -248,7 +266,7 @@ export default function ReportingPage() {
                             {result.rows.slice(page * 25, (page + 1) * 25).map((row, i) => (
                               <tr key={i}>
                                 {result.columns.map((c) => (
-                                  <td key={c.key} style={{ fontSize: '12px', fontFamily: c.format === 'number' ? 'JetBrains Mono, monospace' : 'inherit', textAlign: c.format === 'number' ? 'right' : 'left' }}>
+                                  <td key={c.key} style={{ fontSize: '12px', whiteSpace: 'nowrap', fontFamily: c.format === 'number' ? 'JetBrains Mono, monospace' : 'inherit', textAlign: c.format === 'number' ? 'right' : 'left' }}>
                                     {formatCell(row[c.key], c.format, cs ? 'cs-CZ' : 'en-GB')}
                                   </td>
                                 ))}
@@ -266,7 +284,7 @@ export default function ReportingPage() {
                     )}
                     <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
                       {t('Interní report nad eventuálně konzistentní projekcí (ADR-0022) — nepodklad pro regulatorní výkaz.', 'Internal report over an eventually-consistent projection (ADR-0022) — not a source for a regulatory return.')}
-                      {result.generatedAt ? ` · ${result.generatedAt}` : ''}
+                      {result.generatedAt ? ` · ${t('Dotaz spuštěn', 'Query executed')}: ${new Date(result.generatedAt).toLocaleString(cs ? 'cs-CZ' : 'en-GB')}` : ''}
                     </div>
                   </>
                 ) : (

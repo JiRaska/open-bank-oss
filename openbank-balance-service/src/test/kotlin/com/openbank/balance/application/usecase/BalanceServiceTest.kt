@@ -185,6 +185,39 @@ class BalanceServiceTest {
     }
 
     @Test
+    fun `listHolds returns the repository's active holds for the account unchanged`(): Unit = runBlocking {
+        val holdRepo = FakeHoldRepository()
+        val service = BalanceService(
+            FakeBalanceRepository(sampleBalance()),
+            holdRepo,
+            FakeBalanceMovementPort(FakeBalanceRepository(sampleBalance())),
+        )
+        val active = sampleHold()
+        val released = sampleHold().copy(releasedAt = OffsetDateTime.now())
+        val otherAccount = sampleHold(accountId = UUID.fromString("9a9a9a9a-9a9a-4a4a-8a9a-9a9a9a9a9a9a"))
+        holdRepo.save(active)
+        holdRepo.save(released)
+        holdRepo.save(otherAccount)
+
+        val result = service.listHolds(active.accountId)
+
+        // Pure delegation, asserted by identity: the exact rows the repository returned, in order.
+        assertEquals(listOf(active), result)
+    }
+
+    private fun sampleHold(accountId: UUID = UUID.fromString("8b8b8b8b-8b8b-4b8b-8b8b-8b8b8b8b8b8b")) = BalanceHold(
+        id = UUID.randomUUID(),
+        accountId = accountId,
+        amount = BigDecimal("100.00"),
+        currency = "CZK",
+        reason = "payment-cover",
+        referenceId = "listholds-${UUID.randomUUID()}",
+        expiresAt = null,
+        createdAt = OffsetDateTime.now(),
+        releasedAt = null,
+    )
+
+    @Test
     fun `getBalance with asOf rewinds booked by deltas booked after the date`(): Unit = runBlocking {
         // Current booked 100000; 30000 was booked AFTER asOf → balance as of that date was 70000.
         val balanceRepo = FakeBalanceRepository(sampleBalance(booked = "100000.00", available = "100000.00"))

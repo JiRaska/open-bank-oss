@@ -8,23 +8,17 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.smallrye.kafka)
+    // Independent, opt-in shadow topology; Quarkus BOM keeps clients and Streams aligned.
+    implementation("org.apache.kafka:kafka-streams")
+    testImplementation("org.apache.kafka:kafka-streams-test-utils")
     implementation(libs.quarkus.redis.client)
     // ADR-0220 D3.5 fraud-hold signal: FraudOutboxDispatcher (outbox drain) and
     // FraudHoldService.sweepExpired (TTL expiry) both need @Scheduled — first use in this service.
@@ -39,16 +33,15 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    // ADR-0353: the financial-crime published language, declared once for producers and rails.
+    implementation(project(":openbank-libs-fincrime"))
     implementation(project(":openbank-libs-runtime"))
     // In-process ONNX Runtime serving (ADR-0139 phase-1b, OnnxFraudModel). Fraud-service-only for
     // now (single ML consumer) — kept out of the shared version catalog on purpose, same rationale
     // as the pitest plugin pin above, to avoid a fleet-wide rebuild for a single-service dependency.
     implementation("com.microsoft.onnxruntime:onnxruntime:1.22.0")
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
@@ -65,6 +58,17 @@ dependencies {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// Test-JVM heap: the trace-contract IT adds a second full Quarkus boot (OTel SDK) to this
+// module's @QuarkusTest suite. Modules where that second boot landed on the Gradle default
+// ~512m heap died with java.lang.OutOfMemoryError and then hung until Quarkus' hang-detection
+// timeout killed the executor (interest-service, sepa-payment, account-service — all measured
+// 2026-10-15). Bump pre-emptively, same per-module-not-fleet-default rationale as
+// account-service's maxHeapSize comment: nothing measures test heap anywhere, so a global bump
+// would be an unmeasured ratchet across ~50 modules to fix one.
+tasks.withType<Test> {
+    maxHeapSize = "2g"
+}
 
 kover {
     reports {

@@ -5,6 +5,7 @@
 package com.openbank.libs.flags
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.sun.net.httpserver.HttpServer
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -12,9 +13,14 @@ import io.mockk.spyk
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.io.IOException
+import java.net.InetSocketAddress
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.time.Duration
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class FlagdProviderTest {
 
@@ -117,6 +123,53 @@ class FlagdProviderTest {
         assertThat(eval.value).isEqualTo(0.5)
         assertThat(eval.reason).isEqualTo(EvaluationReason.ERROR)
         assertThat(eval.errorCode).isEqualTo("PROVIDER_UNREACHABLE")
+    }
+
+    @Test
+    fun `the same provider recovers after a real HTTP 503 response`() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        val executor = Executors.newSingleThreadExecutor()
+        val requests = AtomicInteger()
+        try {
+            server.executor = executor
+            server.createContext("/ofrep/v1/evaluate/flags/recovery-flag") { exchange ->
+                try {
+                    exchange.requestBody.use { it.readBytes() }
+                    val healthy = requests.incrementAndGet() > 1
+                    val body = if (healthy) {
+                        """{"key":"recovery-flag","value":true,"reason":"STATIC"}"""
+                    } else {
+                        """{"error":"temporarily unavailable"}"""
+                    }
+                    val bytes = body.toByteArray(Charsets.UTF_8)
+                    exchange.responseHeaders.set("Content-Type", "application/json")
+                    exchange.sendResponseHeaders(if (healthy) 200 else 503, bytes.size.toLong())
+                    exchange.responseBody.use { it.write(bytes) }
+                } finally {
+                    exchange.close()
+                }
+            }
+            server.start()
+            val provider = FlagdProvider(
+                baseUrl = "http://127.0.0.1:${server.address.port}",
+                timeout = Duration.ofSeconds(2),
+            )
+
+            val failed = provider.boolean("recovery-flag", default = false)
+            assertThat(failed.value).isFalse()
+            assertThat(failed.reason).isEqualTo(EvaluationReason.ERROR)
+            assertThat(failed.errorCode).isEqualTo("HTTP_503")
+
+            val recovered = provider.boolean("recovery-flag", default = false)
+            assertThat(recovered.value).isTrue()
+            assertThat(recovered.reason).isEqualTo(EvaluationReason.STATIC)
+            assertThat(recovered.errorCode).isNull()
+            assertThat(requests.get()).isEqualTo(2)
+        } finally {
+            server.stop(0)
+            executor.shutdownNow()
+            executor.awaitTermination(5, TimeUnit.SECONDS)
+        }
     }
 
     @Test

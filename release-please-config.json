@@ -478,6 +478,12 @@
       "exclude-paths": [
         "openbank-pension-fund-service/src/test"
       ]
+    },
+    "openbank-products": {
+      "component": "products",
+      "exclude-paths": [
+        "openbank-products/src/test"
+      ]
     }
   }
 }

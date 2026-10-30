@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -30,6 +15,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_cards
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_cards
   flyway:
@@ -88,11 +76,6 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -145,8 +128,8 @@ mp:
         # Kafka's `latest` default instead of `earliest`. Set instead via the
         # card-issuance-service-msg-override ConfigMap (QUARKUS_CONFIG_LOCATIONS,
         # config_ordinal=500) — a properties FILE, matching the pattern already established for
-        # transaction-service's payment-scheme-accepted channel (see
-        # openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml); it
+        # transaction-service's former payment-scheme-accepted channel (its msg-override
+        # ConfigMap was removed with that dead path, ADR-0108); it
         # carries the exact hyphenated property key unambiguously, avoiding any reliance on
         # MicroProfile Config's env-var-name reverse-mapping for channel discovery.
         #
@@ -205,6 +188,9 @@ mp:
       password: openbank_secret
       reactive:
         url: postgresql://localhost:5432/openbank_cards_it
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_cards_it
     devservices:
