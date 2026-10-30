@@ -41,7 +41,7 @@ test('Studio IR editor: server lint gates the DRAFT save, and nothing publishes 
     if (url.pathname.endsWith('/api/v2/offerings')) return json([OFFERING])
     if (url.pathname.endsWith(`/offerings/${OFFERING.id}/revisions`)) return json([current])
     if (method === 'PUT' && url.pathname.endsWith(`/revisions/${REVISION.id}`)) {
-      current = { ...REVISION, revision: REVISION.revision + 1, content: { ...REVISION.content, behaviour: (payload as { behaviour: unknown }).behaviour } }
+      current = { ...REVISION, revision: REVISION.revision + 1, content: { ...REVISION.content, behaviour: (payload as { behaviour: typeof IR }).behaviour } }
       return json(current)
     }
     return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporarily unavailable' }) })
@@ -89,7 +89,7 @@ test('an IR save does not silently discard unsaved Expert edits', async ({ page 
     if (url.pathname.endsWith('/api/v2/offerings')) return json([OFFERING])
     if (url.pathname.endsWith(`/offerings/${OFFERING.id}/revisions`)) return json([current])
     if (method === 'PUT' && url.pathname.endsWith(`/revisions/${REVISION.id}`)) {
-      current = { ...REVISION, revision: REVISION.revision + 1, content: { ...REVISION.content, behaviour: (payload as { behaviour: unknown }).behaviour } }
+      current = { ...REVISION, revision: REVISION.revision + 1, content: { ...REVISION.content, behaviour: (payload as { behaviour: typeof IR }).behaviour } }
       return json(current)
     }
     return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporarily unavailable' }) })
