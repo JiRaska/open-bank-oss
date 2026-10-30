@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.29.1...audit-service-v0.29.2) (2026-10-29)
+
+
+### Bug Fixes
+
+* **aml:** publish high-risk oversight triggers ([#14151](https://github.com/JiRaska/open-bank-oss/issues/14151)) ([f7d1363](https://github.com/JiRaska/open-bank-oss/commit/f7d1363da164ac94e18dcc044be210b3d50a7ff5))
+
 ## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.29.0...audit-service-v0.29.1) (2026-10-28)
 
 
