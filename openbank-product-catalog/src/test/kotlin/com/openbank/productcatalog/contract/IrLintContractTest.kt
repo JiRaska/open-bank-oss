@@ -4,6 +4,9 @@
 
 package com.openbank.productcatalog.contract
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import com.openbank.libs.product.ir.ProductIrParser
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -104,6 +107,40 @@ class IrLintContractTest {
             } Extract { jsonPath().getString("canonicalIr") }
             assertThat(canonical).describedAs(file.fileName.toString()).isEqualTo(committed)
         }
+    }
+
+    @Test
+    fun `a reordered, pretty-printed IR lints to the committed canonical bytes`() {
+        // Not a fixed point: feed each committed IR with every object's keys REVERSED and pretty-printed,
+        // so a lint that echoed its input would fail. Only canonicalisation gets back to the file.
+        val mapper = ObjectMapper()
+        val files = Files.list(IR_DIR).use { s -> s.filter { it.toString().endsWith(".json") }.sorted().toList() }
+        assertThat(files).isNotEmpty()
+        files.forEach { file ->
+            val committed = Files.readString(file).trimEnd()
+            val scrambled = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(
+                reversed(mapper.readTree(committed)),
+            )
+            assertThat(scrambled).describedAs("the input really differs").isNotEqualTo(committed)
+            val canonical = Given {
+                contentType("application/json")
+                body("""{"ir":$scrambled}""")
+            } When {
+                post("/api/v2/product-ir/lint")
+            } Then {
+                statusCode(200)
+                body("valid", equalTo(true))
+            } Extract { jsonPath().getString("canonicalIr") }
+            assertThat(canonical).describedAs(file.fileName.toString()).isEqualTo(committed)
+        }
+    }
+
+    private fun reversed(node: JsonNode): JsonNode = when {
+        node.isObject -> JsonNodeFactory.instance.objectNode().also { out ->
+            node.properties().reversed().forEach { (k, v) -> out.set<JsonNode>(k, reversed(v)) }
+        }
+        node.isArray -> JsonNodeFactory.instance.arrayNode().also { out -> node.forEach { out.add(reversed(it)) } }
+        else -> node
     }
 
     private companion object {

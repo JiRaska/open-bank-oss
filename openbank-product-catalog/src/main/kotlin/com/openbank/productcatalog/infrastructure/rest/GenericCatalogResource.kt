@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.product.replay.DiffOptions
+import com.openbank.libs.product.replay.ReplayPortfolioJson
 import com.openbank.libs.product.replay.ReplayRange
 import com.openbank.libs.security.Roles
 import com.openbank.productcatalog.application.CatalogForbiddenException
@@ -143,20 +144,19 @@ class GenericCatalogResource(
     ): Response {
         val portfolioNode = mapper.valueToTree<JsonNode>(request.portfolio)
         schemaProfile.requireValidInstance(portfolioNode)
-        val zone = runCatching { ZoneId.of(request.zone ?: "UTC") }.getOrElse {
+        val defaultZone = runCatching { ZoneId.of(request.zone ?: "UTC") }.getOrElse {
             throw IllegalArgumentException("zone must be an IANA zone id")
         }
+        // The same reader `obp diff --behavioural` uses: golden `steps` or `postings`, strict keys, bounded amounts.
+        val parsed = ReplayPortfolioJson.parse(catalogJson.toObject(portfolioNode).toPlainTree(), defaultZone)
+        val threshold = request.materialityThreshold?.let { ReplayPortfolioJson.amount(it, "materialityThreshold") }
         val diff = behaviourDiff.diff(
             offeringId = offeringId,
             revisionId = revisionId,
             baseRevisionId = request.baseRevisionId,
-            portfolio = RevisionBehaviourDiffService.parsePortfolio(catalogJson.toObject(portfolioNode).toPlainTree()),
-            range = ReplayRange(request.from, request.to, zone),
-            options =
-            request.materialityThreshold?.let {
-                DiffOptions(RevisionBehaviourDiffService.decimal(it, "materialityThreshold"))
-            }
-                ?: DiffOptions(),
+            portfolio = parsed.portfolio,
+            range = ReplayRange(request.from, request.to, parsed.zone),
+            options = threshold?.let(::DiffOptions) ?: DiffOptions(),
         )
 
         // The generated model types the free-form object as Map<String, Any>; the document's null members

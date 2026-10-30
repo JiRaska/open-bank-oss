@@ -6,6 +6,7 @@ package com.openbank.productcatalog.contract
 
 import com.openbank.libs.finance.deposit.FinanceProductArithmetic
 import com.openbank.libs.product.ir.EventKind
+import com.openbank.libs.product.ir.IrJson
 import com.openbank.libs.product.ir.Posting
 import com.openbank.libs.product.ir.PostingDirection
 import com.openbank.libs.product.ir.ProductInterpreter
@@ -15,6 +16,7 @@ import com.openbank.libs.product.replay.DiffOptions
 import com.openbank.libs.product.replay.ProductBehaviourDiff
 import com.openbank.libs.product.replay.ReplayAccount
 import com.openbank.libs.product.replay.ReplayPortfolio
+import com.openbank.libs.product.replay.ReplayPortfolioJson
 import com.openbank.libs.product.replay.ReplayPosting
 import com.openbank.libs.product.replay.ReplayRange
 import com.openbank.libs.testing.containers.PostgresTestResource
@@ -111,6 +113,41 @@ class BehaviourDiffContractTest {
             body("diff.identical", equalTo(true))
         }
         assertThat(publishedId).isNotEqualTo(candidateId)
+    }
+
+    @Test
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"), Claim(key = "sub", value = "u-op"),
+            Claim(key = "preferred_username", value = "test-operator"),
+        ],
+    )
+    fun `the committed golden-steps portfolio reads exactly as the CLI reads it`() {
+        // openbank-products/portfolios/savings-sample.json is what `obp diff --behavioural --portfolio` takes.
+        // The service must accept that file as-is and replay the accounts the shared reader yields from it.
+        val fixture = Files.readString(Path.of("..", "openbank-products", "portfolios", "savings-sample.json"))
+        val (offeringId, _) = publishedRevision(baseIr)
+        val candidateId = draft(offeringId, repricedIr)
+        val body = Given {
+            contentType("application/json")
+            body(diffRequest(fixture, "2026-01-01", "2026-03-31"))
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$candidateId/behaviour-diff")
+        } Then {
+            statusCode(200)
+            body("diff.portfolio.accounts", equalTo(3))
+        } Extract { jsonPath().getString("canonicalJson") }
+
+        val parsed = ReplayPortfolioJson.parse(IrJson.parse(fixture))
+        val expected = ProductBehaviourDiff(ProductInterpreter(FinanceProductArithmetic)).diff(
+            ProductIrParser.parse(baseIr),
+            ProductIrParser.parse(repricedIr),
+            parsed.portfolio,
+            ReplayRange(LocalDate.parse("2026-01-01"), LocalDate.parse("2026-03-31"), parsed.zone),
+        ).canonicalJson
+        assertThat(body).isEqualTo(expected)
+        // The steps grammar really carried a customer movement (the overdraft attempt), not only ticks.
+        assertThat(parsed.portfolio.accounts.flatMap { it.postings }).isNotEmpty()
     }
 
     @Test
