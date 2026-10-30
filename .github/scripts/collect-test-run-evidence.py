@@ -709,6 +709,10 @@ def escaped_failure_recall(
 
 
 def coverage(service: Path) -> dict | None:
+    # CI supplies the actual render step outcome; interrupted/failed evidence is unknown.
+    outcome = os.environ.get("OPENBANK_COVERAGE_REPORT_OUTCOME")
+    if outcome is not None and outcome != "success":
+        return None
     report = service / "build" / "reports" / "kover" / "report.xml"
     if not report.exists():
         return None

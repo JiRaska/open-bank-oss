@@ -170,6 +170,14 @@ def scan_verification_classes() -> list[VerificationClass]:
     return found
 
 
+def check_provider_task_selection(classes: list[VerificationClass]) -> None:
+    """Every discovered provider class must be compiled by the explicit provider task."""
+    for cls in classes:
+        if not Path(cls.path).name.endswith("ProviderVerificationTest.kt"):
+            fail(f"{cls.path} declares a Pact provider but providerPactTest excludes its filename; "
+                 "rename it to end in ProviderVerificationTest.kt (#10801)")
+
+
 def scan_pacts() -> dict[str, str]:
     """{'pacts/<file>.json': '<provider name>'} read from the JSON, never from the filename."""
     out: dict[str, str] = {}
@@ -308,6 +316,11 @@ def selftest() -> int:
     build_excluded = VerificationClass("a/ExcludedProviderVerificationTest.kt", "p", "folder", excluded_by_build='exclude("**/ExcludedProviderVerificationTest*")')
     unselected = VerificationClass("a/NegativeAuthPactVerificationTest.kt", "p", "folder")
     one_pact = {"pacts/c-p.json": "p"}
+    run("folder provider excluded by filename", lambda: check_provider_task_selection([folder]))
+    run("broker provider excluded by filename", lambda: check_provider_task_selection([broker]))
+    run("selected sibling cannot mask an excluded provider", lambda: check_provider_task_selection([
+        VerificationClass("a/SelectedProviderVerificationTest.kt", "p", "folder"), folder,
+    ]))
 
     run("pact whose only replay is broker-gated", lambda: check_coverage(one_pact, [broker], set()))
     run("pact whose replay is @Disabled", lambda: check_coverage(one_pact, [gated_folder], set()))
@@ -382,6 +395,10 @@ def selftest() -> int:
     global errors
     saved, errors = errors, []
     try:
+        check_provider_task_selection([
+            VerificationClass("a/FolderProviderVerificationTest.kt", "p", "folder"),
+            VerificationClass("a/BrokerProviderVerificationTest.kt", "p", "broker"),
+        ])
         check_broker_publication(one_pact, [folder, broker_ok], set())
         check_task_selection([folder, broker_ok])
         accepted = not errors
@@ -405,6 +422,7 @@ def main() -> int:
     pacts = scan_pacts()
     classes = scan_verification_classes()
 
+    check_provider_task_selection(classes)
     check_coverage(pacts, classes, KNOWN_UNCOVERED)
     check_no_orphan_providers(pacts, classes)
     check_task_selection(classes)

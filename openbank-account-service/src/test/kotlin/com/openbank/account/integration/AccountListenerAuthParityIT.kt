@@ -21,6 +21,7 @@ import io.quarkus.test.junit.TestProfile
 @QuarkusTestResource(
     value = PostgresRedpandaRedisTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_accounts_listener_it")],
+    restrictToAnnotatedClass = true,
 )
 class AccountListenerAuthParityIT : ListenerAuthParityConformance() {
     override val path = "/api/v1/accounts/00000000-0000-0000-0000-00000000c0de"
