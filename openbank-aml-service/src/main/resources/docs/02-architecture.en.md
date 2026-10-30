@@ -137,6 +137,8 @@ sequenceDiagram
 
 **Why outbox:** transactional consistency between the DB write and the Kafka publish. The dispatcher is the **single writer** — `concurrentExecution = SKIP` prevents in-JVM overlap and the Deployment is pinned to `replicas: 1`; entries are processed sequentially to preserve per-aggregate ordering. Per-row publish failures are isolated (recover → `markFailed`) so one bad row never aborts the batch; repeated failures are bounded by a DEAD transition (ADR-0050 N5). The publisher wraps the send in MicroProfile Fault Tolerance (`@Bulkhead`, `@CircuitBreaker`, `@Retry`, `@Timeout`).
 
+For `aml.case.created.v1` with `HIGH` or `CRITICAL` risk, the same durable outbox row also fans out to `openbank.oversight-triggers` (ADR-0031 D9). The wake-up body contains only `sourceService` and `occurredAt`; the original `ce-id`/`ce-type` headers preserve correlation. Customer references, party IDs, names and alert details are not copied to the oversight topic. LOW/MEDIUM cases and later status changes remain on `openbank.aml.events` only.
+
 ## Inbound event flow
 
 `PartyEventConsumer` (`@Incoming("party-events-in")`) reads `openbank.party.events`, filters `eventType == PARTY_CREATED` and `partyType == INDIVIDUAL`, and opens a `CUSTOMER_ONBOARDING` case with idempotency key `"<partyId>:CUSTOMER_ONBOARDING"` (redelivery-safe). In the **sandbox only** (`openbank.aml.auto-clear=true`, default `false`) it then auto-clears the case so the party clears the AML key of the activation gate without an analyst. Production keeps the four-eyes decision endpoint as the only path to a terminal state. The consumer is poison-pill safe: failures are logged and acked.

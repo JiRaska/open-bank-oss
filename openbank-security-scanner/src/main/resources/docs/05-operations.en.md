@@ -113,9 +113,9 @@ Likely a network policy or DNS issue.
 
 ### ICT incident event missing downstream
 
-Incident transitions remain in `ict_incident_outbox` until the relay marks them sent. Production
-dispatch stays off during the migration rehearsal and is enabled only after the schema and broker
-authorization checks pass.
+Incident transitions remain in `ict_incident_outbox` until the relay marks them sent. The relay is
+enabled in the deployed configuration (`OPENBANK_OUTBOX_DISPATCH_ENABLED=true`, #4942); setting it
+back to `false` pauses delivery without losing incidents, which stay durable in the outbox.
 
 1. Check relay errors and `openbank_outbox_backlog{service="security-scanner"}`.
 2. Check the broker: `kcat -L -b kafka:9092`

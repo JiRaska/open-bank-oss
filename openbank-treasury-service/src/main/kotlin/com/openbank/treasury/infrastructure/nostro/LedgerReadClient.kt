@@ -90,6 +90,7 @@ data class JournalView(
     val id: UUID,
     val transactionId: UUID,
     val entryDate: String,
+    val valueDate: String? = null,
     val description: String? = null,
     val status: String,
     val synthetic: Boolean = false,
@@ -170,6 +171,7 @@ class LedgerReadAdapter(
                             amount = l.amount,
                             currency = l.currencyCode,
                             description = j.description,
+                            valueDate = j.valueDate?.let { LocalDate.parse(it) },
                         )
                     }
                 }

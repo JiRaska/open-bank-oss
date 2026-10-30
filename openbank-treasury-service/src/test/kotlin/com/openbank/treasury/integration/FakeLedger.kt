@@ -38,6 +38,10 @@ class FakeLedger : LedgerPostingPort {
     @Volatile
     var down = false
 
+    /** A concurrent real repository write may commit while the external acknowledgement is in flight. */
+    @Volatile
+    var afterCommit: (suspend () -> Unit)? = null
+
     override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): PostedJournal {
         if (down) throw jakarta.ws.rs.ProcessingException("simulated: ledger unreachable")
         calls += spec.idempotencyKey
@@ -48,6 +52,9 @@ class FakeLedger : LedgerPostingPort {
                 "simulated: ledger committed ${spec.idempotencyKey} but the response was lost",
             )
         }
+        val callback = afterCommit
+        afterCommit = null
+        callback?.invoke()
         return PostedJournal(
             id,
             spec.lines.map {
@@ -67,5 +74,6 @@ class FakeLedger : LedgerPostingPort {
         journals.clear()
         calls.clear()
         loseNextResponse = false
+        afterCommit = null
     }
 }
