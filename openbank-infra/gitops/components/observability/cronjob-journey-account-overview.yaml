@@ -128,7 +128,11 @@ data:
       // 1. list
       const listed = http.get(`${CUSTOMER_BASE}/customer/v1/accounts`, params('accounts-list'));
       report('list', listed, 200);
-      const accounts = listed.status === 200 ? json(listed) : null;
+      const accountsBody = listed.status === 200 ? json(listed) : null;
+      // customer-edge passes the account-service page object through since #13881: {data, pagination}.
+      // The bare array is the pre-page legacy shape; accept both so one script serves a mixed fleet.
+      const accounts = Array.isArray(accountsBody) ? accountsBody
+        : (accountsBody && Array.isArray(accountsBody.data) ? accountsBody.data : null);
       const active = Array.isArray(accounts) ? accounts.filter((a) => a && a.status === 'ACTIVE') : [];
       const owners = new Set(Array.isArray(accounts) ? accounts.map((a) => a && a.partyId) : []);
       const fixture = active.length === 1 ? active[0] : null;
@@ -140,10 +144,19 @@ data:
       const accountBody = account && account.status === 200 ? json(account) : null;
       const balance = id ? http.get(`${CUSTOMER_BASE}/customer/v1/balances/${id}`, params('balance-get')) : null;
       if (balance) report('balance', balance, 200);
-      // balance-service answers a JSON ARRAY of BalanceResponse, one per currency: pick the fixture
-      // currency's row. No match leaves b null, which fails the 'served' check below by name.
-      const balanceRows = balance && balance.status === 200 ? json(balance) : null;
+      // balance-service answers {balances: [...]}, one row per currency (bare array is the legacy
+      // shape): unwrap, then pick the fixture currency's row. No match leaves b null, which fails
+      // the 'served' check below by name.
+      const balanceBody = balance && balance.status === 200 ? json(balance) : null;
+      const balanceRows = Array.isArray(balanceBody) ? balanceBody
+        : (balanceBody && Array.isArray(balanceBody.balances) ? balanceBody.balances : null);
       const b = Array.isArray(balanceRows) ? (balanceRows.find((r) => r && r.currency === FIXTURE_CURRENCY) || null) : null;
+      // Balance field names moved with the balance kernel (#12056 era): bookedAmount/availableAmount/
+      // reservedAmount today, currentBalance/availableBalance/reservedBalance on the old wire. The
+      // seeded-fixture assertion reads the BOOKED amount — available can differ legitimately.
+      const booked = (r) => (r.bookedAmount !== undefined ? r.bookedAmount : r.currentBalance);
+      const available = (r) => (r.availableAmount !== undefined ? r.availableAmount : r.availableBalance);
+      const reserved = (r) => (r.reservedAmount !== undefined ? r.reservedAmount : r.reservedBalance);
 
       // 4. negative path: a well-formed id the caller does not own is refused (403, not 404:
       // the edge deliberately gives no existence oracle)
@@ -160,9 +173,9 @@ data:
         'the balance is served for the account': () => !!b && b.accountId === id,
         'the balance is in the fixture currency and internally consistent': () => !!b
           && b.currency === FIXTURE_CURRENCY
-          && Number.isFinite(num(b.currentBalance)) && Number.isFinite(num(b.availableBalance))
-          && num(b.reservedBalance) >= 0 && num(b.availableBalance) <= num(b.currentBalance) + 0.005,
-        'the balance equals the seeded fixture balance': () => !!b && Math.abs(num(b.currentBalance) - FIXTURE_BALANCE) < 0.005,
+          && Number.isFinite(num(booked(b))) && Number.isFinite(num(available(b)))
+          && num(reserved(b)) >= 0 && num(available(b)) <= num(booked(b)) + 0.005,
+        'the balance equals the seeded fixture balance': () => !!b && Math.abs(num(booked(b)) - FIXTURE_BALANCE) < 0.005,
         'an account the caller does not own is refused': () => foreign.status === 403,
       });
     }
