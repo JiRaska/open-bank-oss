@@ -3,7 +3,7 @@
 #
 # Daily standing-critical alert digest (ADR-0241 D1/D3, #6432).
 #
-# Replaces .github/workflows/standing-critical-digest.yml, which failed every run: a
+# Replaces the retired GitHub workflow of the same name, which failed every run: a
 # GitHub-hosted runner can reach Alertmanager only through the admin edge, and that edge
 # (httproute-tools-gate.yaml) admits an admin-UI session cookie and nothing else, so no
 # repository secret could ever have made it work. In-cluster the job reads the
