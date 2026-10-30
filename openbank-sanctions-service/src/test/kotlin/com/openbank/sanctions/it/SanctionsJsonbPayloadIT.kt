@@ -50,7 +50,7 @@ class SanctionsJsonbPayloadIT {
     @Alternative
     class LegacySchemaTarget : FlywayConfigurationCustomizer {
         override fun customize(configuration: FluentConfiguration) {
-            configuration.target("16")
+            configuration.target("17")
         }
     }
 
@@ -80,7 +80,7 @@ class SanctionsJsonbPayloadIT {
             c.createStatement().use { s ->
                 s.executeQuery("SELECT max(version::integer) FROM flyway_schema_history WHERE success").use {
                     assertThat(it.next()).isTrue()
-                    assertThat(it.getInt(1)).isEqualTo(16)
+                    assertThat(it.getInt(1)).isEqualTo(17)
                 }
                 s.executeUpdate("DELETE FROM sanctions_checks")
             }
