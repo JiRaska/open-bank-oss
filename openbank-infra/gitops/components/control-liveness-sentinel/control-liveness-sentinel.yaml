@@ -35,7 +35,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: control-liveness-sentinel
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-control-liveness-sentinel:sandbox-78902925@sha256:255cc6124f35baca369ddc18e7c5724222fd4884791cb89a739255c12cf610ea
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-control-liveness-sentinel:sandbox-63c95a17@sha256:255cc6124f35baca369ddc18e7c5724222fd4884791cb89a739255c12cf610ea
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
