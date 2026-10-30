@@ -5,6 +5,7 @@
 package com.openbank.delegation.contract
 
 import com.openbank.delegation.infrastructure.rest.DelegationPortfolioResource
+import com.openbank.libs.authz.Authorize
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -38,5 +39,20 @@ class DelegationPortfolioOwnerParameterOpenApiTest {
         assertThat(pathNames).containsExactly("ownerPartyId")
         assertThat(route).contains("{$runtimeName}")
         assertThat(parameters.getValue("PartyId").getValue("name")).isEqualTo("partyId")
+    }
+
+    @Test
+    fun `owner portfolio list rejects a profile that is not the owner with 403`() {
+        val spec = Yaml().load<Map<String, Any>>(requireNotNull(javaClass.getResourceAsStream("/openapi.yaml")))
+        val paths = spec.getValue("paths") as Map<String, Map<String, Any>>
+        val route = paths.getValue("/api/v1/delegation-portfolios/owner/{ownerPartyId}")
+        val operation = route.getValue("get") as Map<String, Any>
+        val responses = operation.getValue("responses") as Map<String, Any>
+        assertThat(responses.keys.map { it.toString() }).contains("403")
+
+        val list = DelegationPortfolioResource::class.java.declaredMethods
+            .single { it.name == "list" && it.isAnnotationPresent(GET::class.java) }
+        // The 403 is only real while the authorization resource is the renamed path parameter.
+        assertThat(list.getAnnotation(Authorize::class.java).resource).isEqualTo("#ownerPartyId")
     }
 }
