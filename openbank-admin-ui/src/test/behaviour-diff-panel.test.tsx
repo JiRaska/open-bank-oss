@@ -123,6 +123,44 @@ describe('BehaviourDiffPanel', () => {
     expect(screen.getByRole('status')).not.toHaveTextContent('404')
   })
 
+  it('drops a result that lands after the operator switched to another revision', async () => {
+    let resolve: (value: Response) => void = () => {}
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(r => { resolve = r })))
+    const first = revision()
+    const { rerender } = render(<BehaviourDiffPanel revision={first} t={t} />)
+    await runBacktest()
+    const second = { ...first, id: '30000000-0000-0000-0000-000000000002', revision: 8 } as ProductRevision
+    rerender(<BehaviourDiffPanel revision={second} t={t} />)
+    // The switch's reset runs first; the stale response lands afterwards, as a slow backtest would.
+    await new Promise(r => setTimeout(r, 30))
+    resolve(respond(200, { diff: changed, canonicalJson: '{}' }))
+    // Give the stale promise every chance to land.
+    await new Promise(r => setTimeout(r, 50))
+    expect(screen.queryByTestId('behaviour-diff-changed')).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
+    // ...and the new revision's backtest is not blocked by the old one's spinner.
+    expect(screen.getByRole('button', { name: /Run backtest/ })).toBeEnabled()
+  })
+
+  it('shows, per account, which rule moved it and by how much', async () => {
+    const perAccount = {
+      ...changed,
+      accounts: [{
+        ...changed.accounts[0],
+        posted: [{ ruleId: 'scheduled.capitalise', accountingClass: 'CUSTOMER_DEPOSIT', a: { debit: '0', credit: '8', net: '8.000000000000' }, b: { debit: '0', credit: '11.5', net: '11.500000000000' }, deltaNet: '3.500000000000' }],
+        instructionCounts: [{ ruleId: 'scheduled.fee', kind: 'Post', a: 1, b: 0, delta: -1 }],
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => respond(200, { diff: perAccount, canonicalJson: '{}' })))
+    render(<BehaviourDiffPanel revision={revision()} t={t} />)
+    await runBacktest()
+    const detail = await screen.findByTestId('behaviour-diff-account-sample-high')
+    expect(detail).toHaveTextContent('scheduled.capitalise')
+    expect(detail).toHaveTextContent('3.500000000000')
+    expect(detail).toHaveTextContent('scheduled.fee')
+    expect(detail).toHaveTextContent('-1')
+  })
+
   it('is absent for a revision without product IR', () => {
     render(<BehaviourDiffPanel revision={revision(null)} t={t} />)
     expect(screen.queryByTestId('behaviour-diff-panel')).toBeNull()

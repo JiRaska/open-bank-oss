@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Activity } from 'lucide-react'
 import { CatalogV2Error, catalogV2Operation, type ProductRevision } from '@/lib/product-catalog-v2'
 import { behaviourDiffVerdict, samplePortfolio, type BehaviourDiffVerdict } from '@/lib/behaviour-diff'
@@ -30,15 +30,21 @@ export function BehaviourDiffPanel({ revision, t }: {
   const [verdict, setVerdict] = useState<BehaviourDiffVerdict | null>(null)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  // The revision a result belongs to. A backtest still running when the operator switches revision must
+  // never land under the new one: an approver would read another revision's diff as this one's.
+  const currentKey = useRef('')
+  const revisionKey = revision ? `${revision.id}:${revision.revision}` : ''
 
   useEffect(() => {
+    currentKey.current = revisionKey
     const task = window.setTimeout(() => {
       setPortfolio(samplePortfolio(behaviour?.currency ?? 'EUR', `${today.slice(0, 4)}-01-01`))
       setVerdict(null)
       setMessage('')
+      setBusy(false)
     }, 0)
     return () => window.clearTimeout(task)
-  }, [revision?.id, revision?.revision]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [revisionKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!revision || !behaviour) return null
 
@@ -46,14 +52,18 @@ export function BehaviourDiffPanel({ revision, t }: {
     let parsed: unknown
     try { parsed = JSON.parse(portfolio) } catch { setMessage(t('Portfolio není validní JSON', 'Portfolio is not valid JSON')); return }
     setBusy(true); setMessage(''); setVerdict(null)
+    const requestedFor = revisionKey
+    const stale = () => currentKey.current !== requestedFor
     try {
       const result = await catalogV2Operation('behaviourDiffRevisionV2', {
         pathParameters: { offeringId: revision.offeringId, revisionId: revision.id },
         body: { portfolio: parsed as Record<string, unknown>, from, to },
         signal: AbortSignal.timeout(BACKTEST_TIMEOUT_MS),
       })
+      if (stale()) return
       setVerdict(behaviourDiffVerdict(result.diff))
     } catch (error) {
+      if (stale()) return
       if (error instanceof CatalogV2Error && error.status === 404) {
         setMessage(t('Není publikovaná revize, se kterou by šlo porovnat.', 'There is no published revision to compare against.'))
       } else if (error instanceof CatalogV2Error && error.status === 400) {
@@ -61,7 +71,7 @@ export function BehaviourDiffPanel({ revision, t }: {
       } else {
         setMessage(t('Backtest se nepodařilo spustit.', 'The backtest could not be run.'))
       }
-    } finally { setBusy(false) }
+    } finally { if (!stale()) setBusy(false) }
   }
 
   return (
@@ -114,6 +124,14 @@ function DiffView({ verdict, t }: { verdict: BehaviourDiffVerdict; t: (cs: strin
           <td>{row.finalBalance.a}</td><td>{row.finalBalance.b}</td><td>{row.rejectedPostings.a} / {row.rejectedPostings.b}</td>
         </tr>)}</tbody>
       </table>
+      {diff.accounts.filter(row => row.posted.length > 0 || row.instructionCounts.length > 0).map(row =>
+        <details key={row.account} data-testid={`behaviour-diff-account-${row.account}`}>
+          <summary><code>{row.account}</code>: {t('které pravidlo účet posunulo', 'which rule moved this account')}</summary>
+          <ul>
+            {row.posted.map(p => <li key={`p:${p.ruleId}:${p.accountingClass}`}><code>{p.ruleId}</code> {p.accountingClass}: {p.a.net} → {p.b.net} (Δ {p.deltaNet})</li>)}
+            {row.instructionCounts.map(c => <li key={`c:${c.ruleId}:${c.kind}`}><code>{c.ruleId}</code> {c.kind}: {c.a} → {c.b} (Δ {c.delta})</li>)}
+          </ul>
+        </details>)}
       <table aria-label={t('Zaúčtování podle pravidla', 'Postings by rule')} data-testid="behaviour-diff-posted">
         <thead><tr><th>ruleId</th><th>{t('Účetní třída', 'Accounting class')}</th><th>{t('Netto A', 'Net A')}</th><th>{t('Netto B', 'Net B')}</th><th>Δ</th></tr></thead>
         <tbody>{diff.aggregate.posted.map(row => <tr key={`${row.ruleId}:${row.accountingClass}`}>
