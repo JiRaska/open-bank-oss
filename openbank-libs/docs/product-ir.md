@@ -75,8 +75,15 @@ which product-catalog enforces separately.
 
 `ProductShadowRecorder` (`openbank-libs-runtime`, package `productrevision`) is the shared
 metrics surface for a service that evaluates the IR in **shadow mode**. That means
-asynchronously, from an outbox row written in the same transaction as the authoritative
-decision. The shadow never runs inside the posting transaction, and its result never changes
+asynchronously, off the posting path. An input reaches the shadow in one of two ways:
+
+- **Outbox row (billing).** The service writes a shadow-input row in the same transaction as
+  the authoritative decision, together with the frozen facts the IR needs.
+- **After-commit row pickup (interest).** The service writes nothing new. A scheduler later
+  enqueues the committed decision rows themselves (accruals, capitalisations) that have no queue
+  row yet.
+
+Either way, the shadow never runs inside the posting transaction, and its result never changes
 what the legacy code decided.
 
 | Metric | Meaning |
