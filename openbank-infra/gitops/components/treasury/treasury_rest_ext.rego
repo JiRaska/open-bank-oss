@@ -20,7 +20,7 @@
 #   treasury.reference.approve                — ROLE_TREASURY_APPROVER; for kind `counterparty` (limits)
 #                                               ROLE_TREASURY_SENIOR_APPROVER only
 #   treasury.reference.reject, .verify        — ROLE_TREASURY_APPROVER
-#   treasury.cashflow.override.propose        — ROLE_TREASURY_BACK_OFFICE
+#   treasury.cashflow.override.propose, treasury.position.close — ROLE_TREASURY_BACK_OFFICE
 #   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
 #   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
 #   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
@@ -210,6 +210,7 @@ allowed_reasons contains "treasury-back-office-write" if {
 	input.action in {
 		"treasury.cashflow.override.propose",
 		"treasury.deal.send-confirmation",
+		"treasury.position.close",
 	}
 }
 
