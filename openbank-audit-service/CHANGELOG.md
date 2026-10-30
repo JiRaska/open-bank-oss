@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.29.2...audit-service-v0.30.0) (2026-10-30)
+
+
+### Features
+
+* **audit:** enable agent-audit consumer with DLQ NACK handling ([#14200](https://github.com/JiRaska/open-bank-oss/issues/14200)) ([e3e81ac](https://github.com/JiRaska/open-bank-oss/commit/e3e81ac214db829186c0969991670f1d1b839bb7))
+
 ## [0.29.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.29.1...audit-service-v0.29.2) (2026-10-29)
 
 
