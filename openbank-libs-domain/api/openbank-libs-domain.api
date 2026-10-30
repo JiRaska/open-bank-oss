@@ -4538,6 +4538,32 @@ public final class com/openbank/libs/product/replay/ReplayPortfolio {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/openbank/libs/product/replay/ReplayPortfolioJson {
+	public static final field INSTANCE Lcom/openbank/libs/product/replay/ReplayPortfolioJson;
+	public static final field MAX_ACCOUNTS I
+	public static final field MAX_EVENTS_PER_ACCOUNT I
+	public final fun amount (Ljava/lang/Object;Ljava/lang/String;)Ljava/math/BigDecimal;
+	public final fun parse (Ljava/lang/Object;Ljava/time/ZoneId;)Lcom/openbank/libs/product/replay/ReplayPortfolioJson$Parsed;
+	public static synthetic fun parse$default (Lcom/openbank/libs/product/replay/ReplayPortfolioJson;Ljava/lang/Object;Ljava/time/ZoneId;ILjava/lang/Object;)Lcom/openbank/libs/product/replay/ReplayPortfolioJson$Parsed;
+}
+
+public final class com/openbank/libs/product/replay/ReplayPortfolioJson$Parsed {
+	public fun <init> (Lcom/openbank/libs/product/replay/ReplayPortfolio;Ljava/time/ZoneId;Ljava/time/LocalDate;Ljava/time/LocalDate;)V
+	public final fun component1 ()Lcom/openbank/libs/product/replay/ReplayPortfolio;
+	public final fun component2 ()Ljava/time/ZoneId;
+	public final fun component3 ()Ljava/time/LocalDate;
+	public final fun component4 ()Ljava/time/LocalDate;
+	public final fun copy (Lcom/openbank/libs/product/replay/ReplayPortfolio;Ljava/time/ZoneId;Ljava/time/LocalDate;Ljava/time/LocalDate;)Lcom/openbank/libs/product/replay/ReplayPortfolioJson$Parsed;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/replay/ReplayPortfolioJson$Parsed;Lcom/openbank/libs/product/replay/ReplayPortfolio;Ljava/time/ZoneId;Ljava/time/LocalDate;Ljava/time/LocalDate;ILjava/lang/Object;)Lcom/openbank/libs/product/replay/ReplayPortfolioJson$Parsed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFirstDay ()Ljava/time/LocalDate;
+	public final fun getLastDay ()Ljava/time/LocalDate;
+	public final fun getPortfolio ()Lcom/openbank/libs/product/replay/ReplayPortfolio;
+	public final fun getZone ()Ljava/time/ZoneId;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class com/openbank/libs/product/replay/ReplayPosting {
 	public fun <init> (Ljava/time/LocalDate;Lcom/openbank/libs/product/ir/Posting;)V
 	public final fun component1 ()Ljava/time/LocalDate;
@@ -4583,6 +4609,8 @@ public final class com/openbank/libs/product/replay/ReplayResult {
 	public final fun getRevision ()Lcom/openbank/libs/product/ir/ProductRevisionIr;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
+}
+
 public final class com/openbank/libs/product/toolkit/ProductInputException : java/lang/IllegalArgumentException {
 	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
 	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
