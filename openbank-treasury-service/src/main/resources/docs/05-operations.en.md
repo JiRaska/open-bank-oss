@@ -118,7 +118,7 @@ admits under `ledger.close.participate` for this participant only.
   as soon as the ledger accepts it, before the deal's state change commits. If that commit rolls back,
   the journal is still counted, but the day is held until its lifecycle transition commits. A retry posts under the same idempotency key, gets the original journal
   back, and finds it recorded.
-- **Posting intents (#13883).** Before contacting the ledger, settle, mature and reverse write a
+- **Posting intents (#13883).** Before contacting the ledger, settle, mature and reverse of LEGACY products write a
   `deal_posting_intent` row (V31) keyed by the journal's idempotency key. The deal save completes it in
   the transaction of the state change. An OPEN intent means the ledger may hold a journal treasury has
   not applied, so it holds its value day. `PostingIntentReconcileScheduler` (every 5 minutes) claims
@@ -143,6 +143,7 @@ admits under `ledger.close.participate` for this participant only.
   The ledger's coded `409 ACCOUNTING_DAY_CLOSED` closes an intent REFUSED (no journal exists) when the
   intent is fresh or older than the grace; every other failure leaves it OPEN. The pod refuses to
   boot unless the grace is at least four times one ledger call (connect + read timeout, no retry).
+- **Matrix products have no posting intent.** FX_SWAP, FRA, IRS, REPO and REVERSE_REPO post through the posting-rule matrix under deterministic per-event or per-flow journal keys, so a replay returns the original journal. A crash after the ledger accepted a journal and before treasury recorded it is NOT covered by an intent or the day-close hold; follow-up pending.
 - **A stuck intent.** `TreasuryPostingIntentStuck` fires when the oldest open intent is over 20
   minutes old (gauges `openbank.treasury.posting_intents.open` and `.oldest_age_seconds`, -1 when
   unreadable; promtool-tested). Read `last_error` on the row. Either re-issue the deal command through

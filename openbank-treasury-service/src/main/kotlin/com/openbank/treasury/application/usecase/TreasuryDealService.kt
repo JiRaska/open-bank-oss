@@ -75,13 +75,16 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * Deal lifecycle orchestration. Posting order is deliberate and intent-first (#13883): settle,
+ * Deal lifecycle orchestration. Posting order is deliberate and intent-first (#13883) for LEGACY
+ * products: settle,
  * mature and reverse first record a posting INTENT (keyed `treasury:<dealId>:<event>`, the journal's
  * idempotency key), then post the journal, and only then commit the state change, the journal
  * reference, the outbox event and the intent's completion together. A crash between the ledger's
  * answer and that commit leaves an OPEN intent: it holds its value day's close report, and
  * [reconcilePostingIntents] re-runs the command under the same key — the ledger returns the
  * ORIGINAL entry and the state change commits — never a double posting.
+ * Matrix products (ADR-0344 D7) write NO intent: they post under deterministic per-event or per-flow
+ * keys (a replay returns the original journal), and a crash after the ledger post stays an open residual.
  * Nothing posts before BOOKED: only settle / mature / reverse-from-SETTLED call the ledger.
  *
  * [confirmationRequired] (`openbank.treasury.confirmation.required`, default true, ADR-0315 D2):

@@ -111,7 +111,7 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   jakmile ho ledger přijme, ještě před potvrzením změny stavu obchodu. Když se toto potvrzení vrátí
   zpět, žurnál se přesto započítá, ale den čeká na potvrzení odpovídajícího přechodu. Opakování účtuje pod stejným idempotentním klíčem, dostane zpět
   původní žurnál a najde ho zapsaný.
-- **Záměry zaúčtování (#13883).** Před voláním ledgeru zapíšou vypořádání, splatnost a storno řádek
+- **Záměry zaúčtování (#13883).** Před voláním ledgeru zapíšou vypořádání, splatnost a storno u LEGACY produktů řádek
   `deal_posting_intent` (V31) s idempotentním klíčem žurnálu. Uložení obchodu ho dokončí v transakci
   změny stavu. Otevřený záměr znamená, že ledger může držet žurnál, který treasury nepromítlo, a proto
   pozdrží svůj den hodnoty. `PostingIntentReconcileScheduler` (každých 5 minut) si zabere záměry starší
@@ -134,6 +134,7 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   REFUSED (žurnál neexistuje), je-li záměr čerstvý nebo starší než grace; každé jiné selhání ho nechá
   otevřený. Pod odmítne nastartovat, pokud grace není aspoň čtyřnásobkem jednoho volání ledgeru
   (connect + read timeout, bez opakování).
+- **Maticové produkty nemají záměr zaúčtování.** FX_SWAP, FRA, IRS, REPO a REVERSE_REPO účtují přes matici účtovacích pravidel pod deterministickými klíči žurnálu na událost nebo tok, takže opakování vrátí původní žurnál. Pád po přijetí žurnálu ledgerem a před jeho zápisem v treasury záměr ani blokace uzávěrky dne nepokrývají; navazující práce čeká.
 - **Uvízlý záměr.** `TreasuryPostingIntentStuck` se spustí, když je nejstarší otevřený záměr starší
   než 20 minut (gauge `openbank.treasury.posting_intents.open` a `.oldest_age_seconds`, -1 když je
   nelze přečíst; ověřeno promtoolem). Přečtěte `last_error` na řádku. Buď příkaz obchodu zopakujte přes
