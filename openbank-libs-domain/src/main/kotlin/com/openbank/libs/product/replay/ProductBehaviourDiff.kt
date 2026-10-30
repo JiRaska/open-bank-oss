@@ -23,7 +23,10 @@ data class DiffOptions(val materialityThreshold: BigDecimal = BigDecimal("1.00")
 class BehaviourDiff internal constructor(val tree: Map<String, Any?>, val a: ReplayResult, val b: ReplayResult) {
     val canonicalJson: String by lazy { CanonicalJson.write(tree) }
 
-    /** True iff no account and no aggregate bucket differs between the revisions. */
+    /** True iff both runs conserved money. A diff that is not valid must be treated as an error, never shown. */
+    val valid: Boolean get() = tree["valid"] == true
+
+    /** True iff the diff is [valid] and no account and no aggregate bucket differs between the revisions. */
     val identical: Boolean get() = tree["identical"] == true
 }
 
@@ -59,6 +62,19 @@ class ProductBehaviourDiff(interpreter: ProductInterpreter) {
         val history = ProductReplay.historyWindow(revA, revB)
         val a = replay.run(revA, portfolio, clockRange, historyDays = history)
         val b = replay.run(revB, portfolio, clockRange, historyDays = history)
+        return render(a, b, portfolio, clockRange, options)
+    }
+
+    /** Renders two finished runs; the seam a test uses to feed a run that did not conserve money. */
+    internal fun render(
+        a: ReplayResult,
+        b: ReplayResult,
+        portfolio: ReplayPortfolio,
+        clockRange: ReplayRange,
+        options: DiffOptions,
+    ): BehaviourDiff {
+        val revA = a.revision
+        val revB = b.revision
 
         val accountRows = ArrayList<Map<String, Any?>>()
         val signChanged = ArrayList<String>()
@@ -83,6 +99,7 @@ class ProductBehaviourDiff(interpreter: ProductInterpreter) {
         val aggregateCounts = countRows(countsA, countsB)
         val outcomeA = a.accounts.fold(BigDecimal.ZERO) { acc, r -> acc + r.outcome }
         val outcomeB = b.accounts.fold(BigDecimal.ZERO) { acc, r -> acc + r.outcome }
+        val valid = a.conserved && b.conserved
         val tree = mapOf(
             "schema" to SCHEMA_ID,
             "revisionA" to revisionRef(revA),
@@ -95,7 +112,9 @@ class ProductBehaviourDiff(interpreter: ProductInterpreter) {
             ),
             "portfolio" to mapOf("accounts" to portfolio.accounts.size, "seed" to portfolio.seed?.toString()),
             "materialityThreshold" to amount(options.materialityThreshold),
-            "identical" to (accountRows.isEmpty() && aggregatePosted.isEmpty() && aggregateCounts.isEmpty()),
+            // An unconserved run is an interpreter defect (ADR-0352 §8); its diff is never "identical".
+            "valid" to valid,
+            "identical" to (valid && listOf(accountRows, aggregatePosted, aggregateCounts).all { it.isEmpty() }),
             "changedAccounts" to accountRows.size,
             "aggregate" to mapOf(
                 "outcome" to triple(outcomeA, outcomeB),
