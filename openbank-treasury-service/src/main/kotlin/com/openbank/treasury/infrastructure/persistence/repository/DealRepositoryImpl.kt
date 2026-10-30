@@ -249,28 +249,35 @@ class DealRepositoryImpl(
 
     /**
      * OPEN -> COMPLETED with a history row. A journal applied to an intent an operator (or a ledger
-     * refusal) already CLOSED never rewrites that record: the status stays as the operator left it,
-     * a JOURNAL_APPLIED_AFTER_CLOSE history row says what happened, and it is logged as an error,
-     * because the close released a day hold the ledger's journal belonged in.
+     * refusal) already CLOSED is applied all the same, and that is recorded, never hidden: a
+     * JOURNAL_APPLIED_AFTER_CLOSE history row keeps the status it was closed with (`prior_status`),
+     * the row keeps `closed_by`/`close_reason`, the counter alerts and an error is logged, because
+     * the close released a day hold the journal belonged in. The status then reads COMPLETED, which
+     * releases the deal's one lifecycle slot: the journal is applied, so nothing is left to hold it.
+     * [accrueOnly]: the accrual path, which records a journal but must never complete a lifecycle
+     * intent (theirs complete with their state change).
      */
-    private fun completeIntent(key: String): Uni<Void> = Panache.getSession().flatMap { session ->
-        val at = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
-        session.createNativeQuery<Int>(COMPLETE_INTENT_SQL).setParameter(1, at).setParameter(2, key).executeUpdate()
-            .flatMap {
-                session.createNativeQuery<Int>(APPLIED_AFTER_CLOSE_SQL).setParameter(1, at).setParameter(2, key)
-                    .executeUpdate()
-            }
-            .invoke { late ->
-                if (late > 0) {
-                    meters.counter(PostingIntentMetrics.APPLIED_AFTER_CLOSE).increment(late.toDouble())
-                    log.errorf(
-                        "posting intent %s was closed but its journal was applied afterwards; " +
-                            "re-report its value day",
-                        key,
-                    )
+    private fun completeIntent(key: String, accrueOnly: Boolean = false): Uni<Void> =
+        Panache.getSession().flatMap { session ->
+            val at = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
+            val filter = if (accrueOnly) ACCRUE_ONLY else ""
+            session.createNativeQuery<Int>(COMPLETE_INTENT_SQL.format(filter))
+                .setParameter(1, at).setParameter(2, key).executeUpdate()
+                .flatMap {
+                    session.createNativeQuery<Int>(APPLIED_AFTER_CLOSE_SQL.format(filter))
+                        .setParameter(1, at).setParameter(2, key).executeUpdate()
                 }
-            }
-    }.replaceWithVoid()
+                .invoke { late ->
+                    if (late > 0) {
+                        meters.counter(PostingIntentMetrics.APPLIED_AFTER_CLOSE).increment(late.toDouble())
+                        log.errorf(
+                            "posting intent %s was closed but its journal was applied afterwards; " +
+                                "re-report its value day",
+                            key,
+                        )
+                    }
+                }
+        }.replaceWithVoid()
 
     /** One `deal_versions` row per terms version; the schedule columns follow the latest generation. */
     private fun versionRow(deal: Deal, actor: String): Uni<Void> =
@@ -500,12 +507,7 @@ class DealRepositoryImpl(
         return true
     }
 
-    private fun completeAccrueIntent(key: String): Uni<Void> = Panache.getSession().flatMap { session ->
-        session.createNativeQuery<Int>(COMPLETE_ACCRUE_INTENT_SQL)
-            .setParameter(1, OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))
-            .setParameter(2, key)
-            .executeUpdate()
-    }.replaceWithVoid()
+    private fun completeAccrueIntent(key: String): Uni<Void> = completeIntent(key, accrueOnly = true)
 
     override suspend fun journals(dealId: UUID): List<LedgerJournalRef> = Panache.withSession {
         journals.find("dealId = ?1 order by postedAt asc", dealId).list()
@@ -660,24 +662,25 @@ class DealRepositoryImpl(
 
         val LEGS_TYPE = object : TypeReference<List<LegSpec>>() {}
 
-        const val COMPLETE_ACCRUE_INTENT_SQL =
-            "WITH u AS (UPDATE deal_posting_intent SET status = 'COMPLETED', closed_at = ?1, last_error = NULL, " +
-                "claim_token = NULL, claimed_until = NULL WHERE idempotency_key = ?2 AND status = 'OPEN' " +
-                "AND action = 'ACCRUE' RETURNING idempotency_key, value_date, actor_id) " +
-                "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, value_date) " +
-                "SELECT idempotency_key, ?1, 'COMPLETED', actor_id, value_date FROM u"
+        /** Restricts [COMPLETE_INTENT_SQL] / [APPLIED_AFTER_CLOSE_SQL] to accrual-day intents. */
+        const val ACCRUE_ONLY = "AND action = 'ACCRUE' "
 
+        // %s = an optional action filter ([ACCRUE_ONLY]).
         const val COMPLETE_INTENT_SQL =
             "WITH u AS (UPDATE deal_posting_intent SET status = 'COMPLETED', closed_at = ?1, last_error = NULL, " +
-                "claim_token = NULL, claimed_until = NULL WHERE idempotency_key = ?2 AND status = 'OPEN' " +
+                "claim_token = NULL, claimed_until = NULL WHERE idempotency_key = ?2 AND status = 'OPEN' %s" +
                 "RETURNING idempotency_key, value_date, actor_id) " +
                 "INSERT INTO deal_posting_intent_history (idempotency_key, at, transition, actor_id, value_date) " +
                 "SELECT idempotency_key, ?1, 'COMPLETED', actor_id, value_date FROM u"
 
         const val APPLIED_AFTER_CLOSE_SQL =
-            "INSERT INTO deal_posting_intent_history " +
+            "WITH old AS (SELECT idempotency_key, actor_id, value_date, status FROM deal_posting_intent " +
+                "WHERE idempotency_key = ?2 AND status IN ('CLOSED_BY_OPERATOR', 'REFUSED') %s FOR UPDATE), " +
+                "u AS (UPDATE deal_posting_intent d SET status = 'COMPLETED' FROM old " +
+                "WHERE d.idempotency_key = old.idempotency_key RETURNING d.idempotency_key) " +
+                "INSERT INTO deal_posting_intent_history " +
                 "(idempotency_key, at, transition, actor_id, prior_status, value_date) " +
-                "SELECT idempotency_key, ?1, 'JOURNAL_APPLIED_AFTER_CLOSE', actor_id, status, value_date " +
-                "FROM deal_posting_intent WHERE idempotency_key = ?2 AND status IN ('CLOSED_BY_OPERATOR', 'REFUSED')"
+                "SELECT old.idempotency_key, ?1, 'JOURNAL_APPLIED_AFTER_CLOSE', old.actor_id, old.status, " +
+                "old.value_date FROM old JOIN u ON u.idempotency_key = old.idempotency_key"
     }
 }

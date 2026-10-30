@@ -17,7 +17,7 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.persistence.PersistenceException
+import kotlinx.coroutines.CancellationException
 import org.hibernate.reactive.mutiny.Mutiny
 import java.time.Clock
 import java.time.Duration
@@ -72,15 +72,34 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
                         .map { rows -> rows.firstOrNull()?.toIntent()?.copy(fresh = fresh) }
                 }
         }.awaitSuspending()
-    } catch (e: PersistenceException) {
-        if (isOnePerDealViolation(e)) null else throw e
-    } catch (e: PgException) {
+    } catch (e: CancellationException) {
+        throw e
+    } catch (
+        @Suppress("TooGenericExceptionCaught") e: Exception, // classified below; anything else rethrown
+    ) {
         if (isOnePerDealViolation(e)) null else throw e
     }
 
-    /** A reopen that collided with another open intent of the deal (the insert's DO NOTHING covers its own). */
-    private fun isOnePerDealViolation(e: Throwable): Boolean = generateSequence(e) { it.cause }.take(MAX_CAUSES)
-        .any { it.message?.contains(ONE_PER_DEAL_INDEX) == true }
+    /**
+     * The one-open-per-deal index refused a reopen (the insert's DO NOTHING covers its own). The
+     * reactive stack wraps the driver's error in whatever it likes (CompletionException, Mutiny's
+     * CompositeException, Hibernate's PersistenceException), so every cause, suppressed and
+     * composite member is walked; the match is SQLState 23505 on this index, or its name.
+     */
+    private fun isOnePerDealViolation(e: Throwable): Boolean {
+        val seen = mutableSetOf<Throwable>()
+        val queue = ArrayDeque(listOf(e))
+        while (queue.isNotEmpty() && seen.size < MAX_CAUSES) {
+            val t = queue.removeFirst()
+            if (!seen.add(t)) continue
+            if (t is PgException && t.sqlState == UNIQUE_VIOLATION && t.constraint == ONE_PER_DEAL_INDEX) return true
+            if (t.message?.contains(ONE_PER_DEAL_INDEX) == true) return true
+            t.cause?.let(queue::add)
+            queue.addAll(t.suppressed)
+            if (t is io.smallrye.mutiny.CompositeException) queue.addAll(t.causes)
+        }
+        return false
+    }
 
     private fun write(s: Mutiny.Session, sql: String, intent: PostingIntent): Uni<Int> = s.createNativeQuery<Int>(sql)
         .setParameter(P_KEY, intent.idempotencyKey)
@@ -233,10 +252,11 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
         // Every transition writes its history row in the SAME statement (a data-modifying CTE): the
         // statement's count is the history rows written, which is the transitions that happened.
         const val ONE_PER_DEAL_INDEX = "uq_deal_posting_intent_one_open_per_deal"
-        const val MAX_CAUSES = 8
+        const val MAX_CAUSES = 32
+        const val UNIQUE_VIOLATION = "23505"
 
         // ON CONFLICT with no target: a clash on the key (a retry) AND a clash on the one-open-per-deal
-        // index (another reversal, maturity or accrual day in flight) both insert nothing. The SELECT
+        // index (another settlement, reversal, maturity or accrual day in flight) both insert nothing. The SELECT
         // after it tells them apart: the key's own row, or no row at all (blocked).
         const val INSERT_SQL =
             "WITH i AS (INSERT INTO deal_posting_intent (idempotency_key, deal_id, event, action, value_date, " +

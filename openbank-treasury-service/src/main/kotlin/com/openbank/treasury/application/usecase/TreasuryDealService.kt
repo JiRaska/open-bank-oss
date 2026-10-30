@@ -426,15 +426,19 @@ class TreasuryDealService(
         // further accrual): one posted in between would be left unreversed, so it is refused instead.
         val seen = deals.journals(deal.id)
         val accrued = if (deal.state == DealState.SETTLED) accruedSoFar(deal) else BigDecimal.ZERO
-        val ref = PostingRules.reversal(reversed, deal.state, accrued)
-            ?.let {
-                postIntended(
-                    pinToPostedAccounts(deal, it, seen),
-                    bankToday(),
-                    "treasury ${deal.product} reversal",
-                    Intended(PostingIntentAction.REVERSE, actor, key, reason),
-                ) { intent -> requireNoJournalSince(deal.id, seen, intent) }
-            }
+        val rule = PostingRules.reversal(reversed, deal.state, accrued)
+        val ref = rule?.let {
+            postIntended(
+                pinToPostedAccounts(deal, it, seen),
+                bankToday(),
+                "treasury ${deal.product} reversal",
+                Intended(PostingIntentAction.REVERSE, actor, key, reason),
+            ) { intent -> requireNoJournalSince(deal.id, seen, intent) }
+        }
+        // A reversal that posts nothing (the deal never settled) still claims the deal's single
+        // lifecycle slot while it decides, so a settlement cannot post in between and leave its
+        // journal behind a REVERSED deal: the one-open-per-deal index refuses whichever is second.
+        val claim = if (rule == null) claimUnpostedReversal(reversed, actor, key, reason) else null
         val event = DealEvent(
             DealReversed.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -454,7 +458,9 @@ class TreasuryDealService(
                 ),
             ),
         )
-        return deals.save(reversed, ref, event, cmd(key, REVERSE, dealId))
+        val saved = deals.save(reversed, ref, event, cmd(key, REVERSE, dealId))
+        claim?.let { intents.refuse(it, UNPOSTED_REVERSAL) }
+        return saved
     }
 
     override suspend fun sendConfirmation(
@@ -695,6 +701,31 @@ class TreasuryDealService(
         return unresolved.isNotEmpty()
     }
 
+    /**
+     * The claim of a reversal that posts no journal: an intent under the reversal's own key, released
+     * (REFUSED: no journal exists under it) once the state change commits. If the process dies in
+     * between, the reconciler finds the deal already REVERSED and releases it the same way.
+     */
+    private suspend fun claimUnpostedReversal(reversed: Deal, actor: Actor, key: String?, reason: String): String {
+        val claimKey = lifecycleKey(reversed.id, PostingEvent.REVERSED)
+        intents.open(
+            PostingIntent(
+                idempotencyKey = claimKey,
+                dealId = reversed.id,
+                event = PostingEvent.REVERSED,
+                action = PostingIntentAction.REVERSE,
+                valueDate = bankToday(),
+                actor = actor,
+                reason = reason,
+                commandKey = key,
+                createdAt = clock.instant(),
+            ),
+        ) ?: throw DealChangedException(
+            "deal ${reversed.id}: another settlement, reversal, maturity or accrual posting is in flight; retry",
+        )
+        return claimKey
+    }
+
     private fun lifecycleKey(dealId: UUID, event: PostingEvent) = "treasury:$dealId:${event.key}"
 
     /** The last day with a recorded accrual; a day that adds nothing posts no journal and is not recorded. */
@@ -801,7 +832,7 @@ class TreasuryDealService(
             ),
         )
             ?: throw DealChangedException(
-                "deal ${spec.dealId}: another reversal, maturity or accrual posting is in flight; retry",
+                "deal ${spec.dealId}: another settlement, reversal, maturity or accrual posting is in flight; retry",
             )
         if (intent.status == PostingIntentStatus.COMPLETED) {
             // Applied already: answer with the recorded journal, never contact the ledger again.
@@ -853,7 +884,10 @@ class TreasuryDealService(
      * original day.
      */
     private fun resumable(intent: PostingIntent): Boolean =
-        !intent.createdAt.plus(maxResumeAge).isBefore(clock.instant())
+        // An accrual day is the system's own posting (no person's authority to lapse): it is resumed
+        // however long the ledger was down, or it would hold the deal's one lifecycle slot forever.
+        intent.action == PostingIntentAction.ACCRUE ||
+            !intent.createdAt.plus(maxResumeAge).isBefore(clock.instant())
 
     override suspend fun closePostingIntent(
         dealId: UUID,
@@ -890,14 +924,22 @@ class TreasuryDealService(
         PostingIntentAction.SETTLE -> settle(intent.dealId, intent.actor, intent.commandKey)
         PostingIntentAction.MATURE -> mature(intent.dealId, intent.actor, intent.commandKey)
         PostingIntentAction.REVERSE ->
-            reverse(
-                intent.dealId,
-                requireNotNull(intent.reason) {
-                    "reversal intent without a reason"
-                },
-                intent.actor,
-                intent.commandKey,
-            )
+            if (load(intent.dealId).state == DealState.REVERSED &&
+                deals.journals(intent.dealId).none { it.idempotencyKey == intent.idempotencyKey }
+            ) {
+                // An unposted reversal's claim whose state change committed: release it.
+                intents.refuse(intent.idempotencyKey, UNPOSTED_REVERSAL)
+                load(intent.dealId)
+            } else {
+                reverse(
+                    intent.dealId,
+                    requireNotNull(intent.reason) {
+                        "reversal intent without a reason"
+                    },
+                    intent.actor,
+                    intent.commandKey,
+                )
+            }
         PostingIntentAction.ACCRUE -> {
             // Re-post the day under its key; recording the journal completes the intent.
             val deal = load(intent.dealId)
@@ -968,6 +1010,7 @@ class TreasuryDealService(
         const val MAX_ERROR_LENGTH = 1000
         const val DEFAULT_MAX_RESUME_HOURS = 4L
         const val DEFAULT_CLAIM_BATCH = 100
+        const val UNPOSTED_REVERSAL = "reversal of an unsettled deal: no journal, claim released"
 
         /** The actor an accrual day's posting intent is recorded under. */
         val ACCRUAL_ACTOR = Actor("system:interest-accrual", com.openbank.treasury.domain.model.ActorType.SYSTEM)

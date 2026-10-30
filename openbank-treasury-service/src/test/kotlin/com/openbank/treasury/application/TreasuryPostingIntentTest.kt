@@ -405,7 +405,10 @@ class TreasuryPostingIntentTest {
             service.closePostingIntent(b.id, PostingEvent.SETTLED, "racing", operator),
         ).isEqualTo(PostingIntentCloseOutcome.CLOSED)
         intents.complete(key) // the in-flight command's commit landing after the close
-        assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.CLOSED_BY_OPERATOR)
+        // Applied all the same, recorded and counted; the close stays on record and the slot is released.
+        assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.COMPLETED)
+        assertThat(intents.closedBy[key]).isEqualTo(operator.id)
+        assertThat(intents.lateApplied).containsExactly(key)
         assertThat(intents.history.filter { it[0] == key }.map { it[1] })
             .containsExactly("OPENED", "CLOSED_BY_OPERATOR", "JOURNAL_APPLIED_AFTER_CLOSE")
     }
@@ -561,6 +564,75 @@ class TreasuryPostingIntentTest {
             .isInstanceOf(com.openbank.treasury.application.port.out.DealChangedException::class.java)
         assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.BOOKED)
     }
+
+    @Test
+    fun `reversing an unsettled deal claims the lifecycle slot, then releases it with no journal`(): Unit =
+        runBlocking {
+            val b = book()
+            assertThat(service.reverse(b.id, "never traded", DealFixtures.approver).state).isEqualTo(DealState.REVERSED)
+            val key = settlementKeyOf(b, PostingEvent.REVERSED)
+            assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.REFUSED)
+            assertThat(ledger.posted).isEmpty()
+        }
+
+    @Test
+    fun `an unposted reversal in flight refuses a settlement, and a settlement in flight refuses it`(): Unit =
+        runBlocking {
+            val b = book()
+            // Reversal first: its claim is OPEN while it decides; a settlement must not post.
+            var raced = false
+            intents.afterOpen = {
+                intents.afterOpen = {}
+                raced = true
+                assertThatThrownBy { runBlocking { service.settle(b.id, DealFixtures.approver) } }
+                    .isInstanceOf(com.openbank.treasury.application.port.out.DealChangedException::class.java)
+            }
+            service.reverse(b.id, "never traded", DealFixtures.approver)
+            assertThat(raced).describedAs("the settlement raced the reversal's open claim").isTrue()
+            assertThat(ledger.posted.map { it.event }).doesNotContain(PostingEvent.SETTLED)
+
+            // Settlement first: its intent is OPEN (answer lost); an unposted reversal must not commit.
+            val c = book()
+            ledger.loseAnswerFor = c.id
+            assertThatThrownBy { runBlocking { service.settle(c.id, DealFixtures.approver) } }
+            assertThatThrownBy { runBlocking { service.reverse(c.id, "never traded", DealFixtures.approver) } }
+                .isInstanceOf(com.openbank.treasury.application.port.out.DealChangedException::class.java)
+            assertThat(deals.rows.getValue(c.id).state).isEqualTo(DealState.BOOKED)
+        }
+
+    @Test
+    fun `an accrual day stuck for 5 hours (ledger outage) is still resumed - it never escalates`(): Unit = runBlocking {
+        val b = book()
+        service.settle(b.id, DealFixtures.approver)
+        later(Duration.ofDays(1))
+        ledger.loseAnswerFor = b.id
+        assertThat(service.accrueInterest(monday.plusDays(1)).failures).hasSize(1)
+        later(Duration.ofHours(5))
+        val run = service.reconcilePostingIntents(clock.instant())
+        assertThat(run.escalated).isZero()
+        assertThat(run.completed).isEqualTo(1)
+        assertThat(intents.rows.values.single { it.first.action.name == "ACCRUE" }.second)
+            .isEqualTo(InMemoryIntents.Status.COMPLETED)
+    }
+
+    @Test
+    fun `an accrual journal recorded after its intent was refused is recorded as a late application`(): Unit =
+        runBlocking {
+            val b = book()
+            service.settle(b.id, DealFixtures.approver)
+            later(Duration.ofDays(1))
+            ledger.beforePost = { key ->
+                if (key.contains(":accrued:")) {
+                    ledger.beforePost = {}
+                    runBlocking { intents.refuse(key, "raced") }
+                }
+            }
+            service.accrueInterest(monday.plusDays(1))
+            val key = intents.rows.values.single { it.first.action.name == "ACCRUE" }.first.idempotencyKey
+            assertThat(intents.lateApplied).containsExactly(key)
+            assertThat(intents.history.filter { it[0] == key }.map { it[1] })
+                .containsExactly("OPENED", "REFUSED", "JOURNAL_APPLIED_AFTER_CLOSE")
+        }
 
     private fun settlementKeyOf(deal: Deal, event: PostingEvent) =
         intents.rows.values.map { it.first }.first { it.dealId == deal.id && it.event == event }.idempotencyKey

@@ -134,8 +134,10 @@ admits under `ledger.close.participate` for this participant only.
   or operator-closed posting intent`) until the command is re-issued. A reversal that finds a journal
   recorded after it read the deal's journals does not post (409; re-issue it). Each accrual day records
   an ACCRUE intent before its ledger call (completed when its journal is recorded), and the database
-  admits one OPEN reversal, maturity or accrual intent per deal: a reversal decided while an accrual
-  day is in flight answers 409, and an accrual while a reversal is in flight defers. `mature` and
+  admits one open lifecycle intent per deal (settlement, reversal, maturity or accrual day; an
+  operator-closed settlement, reversal or maturity keeps the slot until re-issued): whichever comes
+  second answers 409 or, for an accrual, defers. A reversal of an unsettled deal claims the slot while
+  it decides. Accrual-day intents are resumed however old they are. `mature` and
   `reverse` also refuse (409) while the deal has another open or operator-closed posting intent, so a
   failed reversal cannot be followed by a maturity.
   The ledger's coded `409 ACCOUNTING_DAY_CLOSED` closes an intent REFUSED (no journal exists) when the

@@ -23,6 +23,7 @@ import kotlinx.coroutines.future.future
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
+import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
@@ -148,6 +149,9 @@ class PostingIntentReconcileIT {
         closedReversalId = draftAndSubmit("4325.00")
         accrualFirstId = draftAndSubmit("4326.00")
         reversalFirstId = draftAndSubmit("4327.00")
+        settleRaceId = draftAndSubmit("4328.00")
+        reverseRaceId = draftAndSubmit("4329.00")
+        blockedReopenId = draftAndSubmit("4330.00")
     }
 
     @Test
@@ -305,8 +309,8 @@ class PostingIntentReconcileIT {
             )
         }
         action(lateId, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
-        assertThat(closedRow(key)).describedAs("the close is not overwritten").isEqualTo(
-            "CLOSED_BY_OPERATOR" to "olga.operator",
+        assertThat(closedRow(key)).describedAs("the close stays on record (closed_by), the row completes").isEqualTo(
+            "COMPLETED" to "olga.operator",
         )
         val late = jdbc { c ->
             c.prepareStatement(
@@ -407,6 +411,92 @@ class PostingIntentReconcileIT {
                 }
             }
         }.hasMessageContaining("uq_deal_posting_intent_one_open_per_deal")
+    }
+
+    @Test
+    @Order(16)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `16 - a settlement in flight refuses a reversal, and the index refuses a second open intent`() {
+        val id = settleRaceId
+        action(id, "approve").then().statusCode(200)
+        action(id, "confirm").then().statusCode(200)
+        val settleKey = "treasury:$id:settled"
+        ledger.loseResponseFor = settleKey
+        action(id, "settle").then().statusCode(500)
+        assertThat(intent(settleKey).first).isEqualTo("OPEN")
+        reverseViaApi(id).then().statusCode(409)
+        assertThat(state(id)).isEqualTo("CONFIRMED")
+        assertThatThrownBy { insertOpenIntent(id, "treasury:$id:reversed", "REVERSED", "REVERSE") }
+            .hasMessageContaining("uq_deal_posting_intent_one_open_per_deal")
+    }
+
+    @Test
+    @Order(17)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `17 - a reversal claim in flight refuses a settlement (409) before the ledger`() {
+        val id = reverseRaceId
+        action(id, "approve").then().statusCode(200)
+        action(id, "confirm").then().statusCode(200)
+        val claimKey = "treasury:$id:reversed"
+        insertOpenIntent(id, claimKey, "REVERSED", "REVERSE") // a reversal deciding, not yet committed
+        action(id, "settle").then().statusCode(409)
+        assertThat(
+            ledger.calls,
+        ).describedAs("the settlement never reached the ledger").doesNotContain("treasury:$id:settled")
+        assertThat(state(id)).isEqualTo("CONFIRMED")
+        jdbcUpdate("delete from deal_posting_intent where idempotency_key = ?", claimKey)
+        action(id, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
+    }
+
+    @Test
+    @Order(18)
+    fun `18 - an accrual journal recorded after its intent was refused is recorded, counted and releases the slot`() {
+        val id = reverseRaceId // SETTLED by step 17
+        val day = today.plusDays(1)
+        val key = "treasury:$id:accrued:$day"
+        val before = meters.find("openbank.treasury.posting_intents.applied_after_close").counter()!!.count()
+        ledger.afterCommitKey = key
+        ledger.afterCommit =
+            { jdbcUpdate("update deal_posting_intent set status = 'REFUSED' where idempotency_key = ?", key) }
+        onContext { deals.accrueInterest(day) }
+        assertThat(intent(key).first).isEqualTo("COMPLETED")
+        assertThat(history(key).map { it[0] }).containsExactly("OPENED", "JOURNAL_APPLIED_AFTER_CLOSE")
+        assertThat(meters.find("openbank.treasury.posting_intents.applied_after_close").counter()!!.count())
+            .isEqualTo(before + 1)
+    }
+
+    @Test
+    @Order(19)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `19 - a reopen the one-per-deal index refuses answers 409, not 500`() {
+        val id = blockedReopenId
+        action(id, "approve").then().statusCode(200)
+        action(id, "confirm").then().statusCode(200)
+        val settleKey = "treasury:$id:settled"
+        // A refused settlement (a retry reopens it) while another posting of the deal holds the slot.
+        insertOpenIntent(id, settleKey, "SETTLED", "SETTLE")
+        jdbcUpdate("update deal_posting_intent set status = 'REFUSED' where idempotency_key = ?", settleKey)
+        insertOpenIntent(id, "treasury:$id:reversed", "REVERSED", "REVERSE")
+        // DEAL_CHANGED "in flight": the violation was recognised and mapped, not merely any 409.
+        action(id, "settle").then().statusCode(409)
+            .body("error", equalTo("DEAL_CHANGED"))
+            .body("message", containsString("in flight"))
+        assertThat(ledger.calls).doesNotContain(settleKey)
+        assertThat(intent(settleKey).first).isEqualTo("REFUSED")
+    }
+
+    private fun insertOpenIntent(id: String, key: String, event: String, action: String) = jdbc { c ->
+        c.prepareStatement(
+            "insert into deal_posting_intent (idempotency_key, deal_id, event, action, value_date, actor_id, " +
+                "actor_type, created_at) values (?, ?, ?, ?, ?, 'it', 'HUMAN', now())",
+        ).use { ps ->
+            ps.setString(1, key)
+            ps.setObject(2, UUID.fromString(id))
+            ps.setString(3, event)
+            ps.setString(4, action)
+            ps.setObject(5, today)
+            ps.executeUpdate()
+        }
     }
 
     private fun settleViaApi(id: String) {
@@ -544,5 +634,8 @@ class PostingIntentReconcileIT {
         lateinit var closedReversalId: String
         lateinit var accrualFirstId: String
         lateinit var reversalFirstId: String
+        lateinit var settleRaceId: String
+        lateinit var reverseRaceId: String
+        lateinit var blockedReopenId: String
     }
 }

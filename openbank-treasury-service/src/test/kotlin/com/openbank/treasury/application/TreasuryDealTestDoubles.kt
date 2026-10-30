@@ -103,16 +103,22 @@ internal class InMemoryIntents : PostingIntentPort {
     /** Runs before every open (a test races a concurrent write in here). */
     var onOpen: suspend () -> Unit = {}
 
-    override suspend fun open(intent: PostingIntent): PostingIntent? {
+    /** Runs after an open stored its intent (a test races a concurrent command in here). */
+    var afterOpen: suspend () -> Unit = {}
+
+    override suspend fun open(intent: PostingIntent): PostingIntent? = openInner(intent).also { afterOpen() }
+
+    private suspend fun openInner(intent: PostingIntent): PostingIntent? {
         onOpen()
         val key = intent.idempotencyKey
         val existing = rows[key]
-        // As the real one-open-per-deal index: another OPEN reversal/maturity/accrual intent blocks.
-        val exclusive = setOf(PostingIntentAction.REVERSE, PostingIntentAction.MATURE, PostingIntentAction.ACCRUE)
-        val blocked = intent.action in exclusive &&
-            rows.values.any { (i, st) ->
-                i.dealId == intent.dealId && i.idempotencyKey != key && st == Status.OPEN && i.action in exclusive
-            }
+        // As the real one-open-per-deal index: another OPEN intent, or an operator-closed settlement,
+        // reversal or maturity, holds the deal's single slot.
+        val blocked = rows.values.any { (i, st) ->
+            i.dealId == intent.dealId &&
+                i.idempotencyKey != key &&
+                (st == Status.OPEN || (st == Status.CLOSED_BY_OPERATOR && i.action != PostingIntentAction.ACCRUE))
+        }
         if (blocked && (existing == null || existing.second != Status.OPEN)) return null
         // As the real store: a new or REFUSED key takes this attempt whole (fresh).
         if (existing == null || existing.second == Status.REFUSED) {
@@ -172,8 +178,10 @@ internal class InMemoryIntents : PostingIntentPort {
         .filter { (i, st) -> i.dealId == dealId && (st == Status.OPEN || st == Status.CLOSED_BY_OPERATOR) }
         .map { (i, st) -> i.copy(status = PostingIntentStatus.valueOf(st.name)) }
 
+    val lateApplied = mutableListOf<String>()
+
     fun completeAccrue(key: String) {
-        rows[key]?.takeIf { it.second == Status.OPEN && it.first.action == PostingIntentAction.ACCRUE }
+        rows[key]?.takeIf { it.second != Status.COMPLETED && it.first.action == PostingIntentAction.ACCRUE }
             ?.let { complete(key) }
     }
 
@@ -202,9 +210,13 @@ internal class InMemoryIntents : PostingIntentPort {
                 rows[key] = row.first to Status.COMPLETED
                 record(key, "COMPLETED", row.first.actor.id, null)
             }
-            // As the real save: a closed record is never rewritten; the late journal is recorded beside it.
-            Status.CLOSED_BY_OPERATOR, Status.REFUSED ->
+            // As the real save: the late journal is recorded beside the close (closed_by kept) and the
+            // row completes, releasing the deal's slot.
+            Status.CLOSED_BY_OPERATOR, Status.REFUSED -> {
                 record(key, "JOURNAL_APPLIED_AFTER_CLOSE", row.first.actor.id, row.second.name)
+                rows[key] = row.first to Status.COMPLETED
+                lateApplied += key
+            }
             Status.COMPLETED -> Unit
         }
     }

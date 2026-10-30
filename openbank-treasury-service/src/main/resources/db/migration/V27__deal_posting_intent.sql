@@ -43,13 +43,19 @@ CREATE INDEX idx_deal_posting_intent_open ON deal_posting_intent (value_date) WH
 CREATE INDEX idx_deal_posting_intent_claimable ON deal_posting_intent (created_at)
     WHERE status = 'OPEN' AND escalated_at IS NULL;
 
--- One OPEN reversal, maturity or accrual-day posting per deal, enforced by the database: an accrual
+-- One OPEN lifecycle posting per deal (settlement, reversal, maturity or accrual day), enforced by
+-- the database. A reversal that posts nothing (an unsettled deal) claims the slot too. An accrual
 -- day records an ACCRUE intent before its ledger call, exactly as a reversal or maturity does, so
 -- whichever opens second is refused (the reversal answers 409, the accrual defers). That is what
 -- makes "a reversal offsets every accrual posted before it" hold under concurrency without holding
 -- a lock across the ledger call: an accrual can no longer be in flight while a reversal is decided.
+-- A settlement, reversal or maturity an OPERATOR closed keeps the slot too: its journal may be in the
+-- ledger, so a reversal that would post nothing (behind a closed settlement), an accrual or another
+-- lifecycle command must not proceed until it is re-issued (the re-issue reopens the same row, which
+-- holds the slot already). An accrual day is never operator-closed. A journal applied after a close
+-- completes the row and releases the slot.
 CREATE UNIQUE INDEX uq_deal_posting_intent_one_open_per_deal ON deal_posting_intent (deal_id)
-    WHERE status = 'OPEN' AND action IN ('REVERSE', 'MATURE', 'ACCRUE');
+    WHERE status = 'OPEN' OR (status = 'CLOSED_BY_OPERATOR' AND action IN ('SETTLE', 'REVERSE', 'MATURE'));
 
 -- Append-only history of every intent transition (opened, reopened, refused, closed by an operator,
 -- completed): who, when, why. Rows are written in the same statement as the transition they record
