@@ -43,9 +43,16 @@ class BuildArtifactTest(unittest.TestCase):
         self.build = self.producer / MOD.SERVICE / "build"
         (self.build / "quarkus-app/lib/main").mkdir(parents=True)
         (self.build / "quarkus-app/quarkus-run.jar").write_bytes(b"runner")
-        (self.build / "quarkus-app/lib/main/example.jar").write_bytes(b"library")
+        with zipfile.ZipFile(self.build / "quarkus-app/lib/main/example.jar", "w") as jar:
+            jar.writestr("com/openbank/libs/Example.class", b"library")
         (self.build / "reports").mkdir()
-        (self.build / "reports/bom.json").write_text(json.dumps({"bomFormat": "CycloneDX", "components": [{"name": "example"}]}))
+        library = self.build / "quarkus-app/lib/main/example.jar"
+        digest = hashlib.sha256(library.read_bytes()).hexdigest()
+        bom = {"bomFormat": "CycloneDX", "components": [{"group": "com.openbank", "name": "openbank-libs-runtime", "version": "0.1.0-SNAPSHOT", "purl": "pkg:maven/com.openbank/openbank-libs-runtime@0.1.0-SNAPSHOT?project_path=%3Aopenbank-libs-runtime", "hashes": [{"alg": "SHA-256", "content": digest}]}]}
+        (self.build / "reports/bom.json").write_text(json.dumps(bom))
+        receipt = MOD.VERIFIER.verify(bom, [{"projectPath": ":openbank-libs-runtime", "file": str(library)}], self.build / "quarkus-app")
+        (self.build / MOD.RECEIPT).parent.mkdir(parents=True)
+        (self.build / MOD.RECEIPT).write_text(json.dumps(receipt))
         self.out = self.root / "out"
         self.env = {"RUNNER_ARCH": "ARM64", "RUNNER_OS": "Linux", "ANALYTICS_SINK_TYPE": "clickhouse", "AGENT_SVID_NONCE_STORE": "redis"}
         with patch.dict(os.environ, self.env):
@@ -97,7 +104,7 @@ class BuildArtifactTest(unittest.TestCase):
 
     def test_pack_restore_roundtrip_through_stub_gh(self):
         self.assertEqual(self.restore_cli(), "restored=true\n")
-        self.assertEqual((self.destination / MOD.SERVICE / "build/quarkus-app/lib/main/example.jar").read_bytes(), b"library")
+        self.assertEqual((self.destination / MOD.SERVICE / "build/quarkus-app/lib/main/example.jar").read_bytes(), (self.build / "quarkus-app/lib/main/example.jar").read_bytes())
 
     def test_manifest_identity_recipe_architecture_and_inventory(self):
         for key, value in {"sha": "b" * 40, "service": "openbank-ledger-service", "runId": 124,
@@ -180,17 +187,38 @@ class BuildArtifactTest(unittest.TestCase):
 
     def test_self_consistent_inner_replacement_cannot_replace_api_bound_archive(self):
         files = MOD.read_zip(self.bundle)
-        files["quarkus-app/lib/main/example.jar"] = b"replacement-library"
+        files["quarkus-app/quarkus-run.jar"] = b"replacement-runner"
         manifest = json.loads(files["manifest.json"])
-        manifest["files"]["quarkus-app/lib/main/example.jar"] = {
-            "size": len(files["quarkus-app/lib/main/example.jar"]),
-            "sha256": hashlib.sha256(files["quarkus-app/lib/main/example.jar"]).hexdigest(),
+        manifest["files"]["quarkus-app/quarkus-run.jar"] = {
+            "size": len(files["quarkus-app/quarkus-run.jar"]),
+            "sha256": hashlib.sha256(files["quarkus-app/quarkus-run.jar"]).hexdigest(),
         }
         files["manifest.json"] = json.dumps(manifest)
         altered = archive(files)
         self.validate(altered)  # Inner self-checks alone accept this replacement.
         self.assertEqual(self.restore_cli(bundle=altered), "restored=false\n")
         self.assertEqual(list((self.destination / MOD.SERVICE).iterdir()), [])
+
+    def test_missing_receipt_and_stale_receipt_reject_self_consistent_bundle(self):
+        for mode in ("missing", "stale"):
+            files = MOD.read_zip(self.bundle)
+            if mode == "missing":
+                del files[MOD.RECEIPT]
+            else:
+                receipt = json.loads(files[MOD.RECEIPT])
+                receipt["libraries"][0]["sha256"] = "0" * 64
+                files[MOD.RECEIPT] = json.dumps(receipt).encode()
+            manifest = json.loads(files.pop("manifest.json"))
+            manifest["files"] = {name: {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()} for name, data in files.items()}
+            files["manifest.json"] = json.dumps(manifest)
+            altered = archive(files)
+            with self.assertRaises(ValueError):
+                self.validate(altered)
+            outer = archive({"deploy-build.zip": altered})
+            item = self.item | {"size_in_bytes": len(outer), "digest": "sha256:" + hashlib.sha256(outer).hexdigest()}
+            self.assertEqual(self.restore_cli(bundle=altered, item=item), "restored=false\n")
+            self.assertEqual(list((self.destination / MOD.SERVICE).iterdir()), [])
+            (self.root / "output").unlink()
 
     def test_empty_sbom_and_missing_runner_are_rejected(self):
         (self.build / "reports/bom.json").write_text('{"bomFormat":"CycloneDX","components":[]}')

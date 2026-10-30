@@ -126,6 +126,8 @@ Sjednocený přes `openbank-libs.api.ApiError`:
 | 409 | `account-already-closed` | close již proběhl |
 | 422 | `account-frozen` | mutace na frozen účtu |
 | 422 | `insufficient-authorization` | not OWNER pro tuto operaci |
+| 422 | `PRODUCT_REVISION_NOT_PUBLISHED` | otevření produktu bez publikované revize k pinu (ADR-0341 D1) |
+| 503 | `PRODUCT_CATALOG_UNAVAILABLE` | katalog při otevření nedostupný; nic se neuloží, opakovat po `Retry-After` |
 | 429 | `rate-limited` | per-token quota |
 | 500 | `internal-error` | nečekaná chyba (s correlationId pro support) |
 
