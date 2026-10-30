@@ -420,7 +420,16 @@ paths:
         reversing the deal, and a person only.
       parameters:
         - $ref: '#/components/parameters/DealId'
-        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: |
+            Client-generated, one per close decision, stable across retries (1..128 characters).
+            Recorded on the close's append-only history row with a fingerprint of the request
+            (deal, event, actor, reason, closed intent). A replay of the same close answers as
+            the close did (204; 409 if a re-issue has since reopened the intent); the same key
+            on a different request is 400.
+          schema: { type: string, minLength: 1, maxLength: 128 }
       requestBody:
         required: true
         content:
@@ -431,7 +440,9 @@ paths:
         '204':
           description: The intent was closed
         '400':
-          description: Missing or invalid event or reason
+          description: >-
+            Missing or invalid event or reason; missing or invalid Idempotency-Key; or the
+            Idempotency-Key was already used for a different request
           content:
             application/json:
               schema:
@@ -445,8 +456,9 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: >-
-            POSTING_IN_FLIGHT. The intent may still be posting (younger than the grace period, or
-            claimed by the reconciler); retry later.
+            POSTING_IN_FLIGHT. The intent may still be posting (younger than the grace period,
+            or claimed by the reconciler), or this is a replay of a close whose intent a re-issue
+            has since reopened; retry later.
           content:
             application/json:
               schema:

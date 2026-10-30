@@ -997,7 +997,8 @@ class TreasuryDealService(
      *  - a later intent of the same event OPEN now (a later claim) is 400: the key belongs to an
      *    earlier close, and answering 204 would report a close that did not happen to this one;
      *  - the closed intent re-opened by a re-issue is 409 POSTING_IN_FLIGHT (its posting runs again);
-     *  - only an intent still CLOSED_BY_OPERATOR answers CLOSED. Null when the key was never used.
+     *  - otherwise CLOSED: still closed, or since completed by a late journal or refused, the close
+     *    this key made did happen. Null when the key was never used.
      */
     private suspend fun replayedClose(
         key: String,
@@ -1009,9 +1010,10 @@ class TreasuryDealService(
             (openNow == null || openNow.idempotencyKey == stored.intentKey)
         return when {
             !sameRequest -> throw keyReused()
-            stored.intentStatus == PostingIntentStatus.CLOSED_BY_OPERATOR -> PostingIntentCloseOutcome.CLOSED
+            // The close happened. If its journal landed afterwards (COMPLETED, APPLIED_AFTER_CLOSE) or
+            // the intent was refused, it is still the outcome of THIS request: answered the same.
             stored.intentStatus == PostingIntentStatus.OPEN -> PostingIntentCloseOutcome.IN_FLIGHT
-            else -> throw keyReused()
+            else -> PostingIntentCloseOutcome.CLOSED
         }
     }
 

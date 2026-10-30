@@ -160,6 +160,8 @@ class PostingIntentReconcileIT {
         blockedReopenId = draftAndSubmit("4330.00")
         releasedClaimId = draftAndSubmit("4331.00")
         lockedClaimId = draftAndSubmit("4332.00")
+        replayAId = draftAndSubmit("4333.00")
+        replayBId = draftAndSubmit("4334.00")
     }
 
     @Test
@@ -598,6 +600,52 @@ class PostingIntentReconcileIT {
         assertThat(intent(openKey).first).describedAs("the close rolled back with the violation").isEqualTo("OPEN")
     }
 
+    @Test
+    @Order(23)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `23 - two settlements whose answers are lost, for the replay split`() {
+        for (id in listOf(replayAId, replayBId)) {
+            action(id, "approve").then().statusCode(200)
+            action(id, "confirm").then().statusCode(200)
+            ledger.loseResponseFor = "treasury:$id:settled"
+            action(id, "settle").then().statusCode(500)
+            backdate("treasury:$id:settled")
+        }
+    }
+
+    @Test
+    @Order(24)
+    @TestSecurity(user = "olga.operator", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `24 - a replay answers CLOSED while closed, and still after the journal landed late`() {
+        close(replayAId, "SETTLED", "replay split", replayAKey).then().statusCode(204)
+        close(replayAId, "SETTLED", "replay split", replayAKey).then().statusCode(204)
+        // The close's journal applied afterwards: the row reads COMPLETED (APPLIED_AFTER_CLOSE).
+        jdbcUpdate(
+            "update deal_posting_intent set status = 'COMPLETED' where idempotency_key = ?",
+            "treasury:$replayAId:settled",
+        )
+        close(replayAId, "SETTLED", "replay split", replayAKey).then().statusCode(204)
+        close(replayBId, "SETTLED", "replay split", replayBKey).then().statusCode(204)
+    }
+
+    @Test
+    @Order(25)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `25 - a re-issue reopens the closed settlement`() {
+        ledger.loseResponseFor = "treasury:$replayBId:settled"
+        action(replayBId, "settle").then().statusCode(500)
+        assertThat(intent("treasury:$replayBId:settled").first).isEqualTo("OPEN")
+    }
+
+    @Test
+    @Order(26)
+    @TestSecurity(user = "olga.operator", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `26 - a replay of the close the re-issue reopened answers 409 POSTING_IN_FLIGHT, not 204`() {
+        close(replayBId, "SETTLED", "replay split", replayBKey).then().statusCode(409)
+            .body("error", equalTo("POSTING_IN_FLIGHT"))
+        assertThat(intent("treasury:$replayBId:settled").first).isEqualTo("OPEN")
+    }
+
     private fun saveWaitsOnLock(): Boolean = jdbc { c ->
         c.createStatement().use { st ->
             st.executeQuery(
@@ -765,5 +813,9 @@ class PostingIntentReconcileIT {
         lateinit var releasedClaimId: String
         lateinit var lockedClaimId: String
         lateinit var usedCloseKey: String
+        lateinit var replayAId: String
+        lateinit var replayBId: String
+        val replayAKey = UUID.randomUUID().toString()
+        val replayBKey = UUID.randomUUID().toString()
     }
 }

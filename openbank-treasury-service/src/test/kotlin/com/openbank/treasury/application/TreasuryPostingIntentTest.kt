@@ -922,6 +922,17 @@ class TreasuryPostingIntentTest {
         assertThat(intents.status(claim(2))).isEqualTo(InMemoryIntents.Status.OPEN)
     }
 
+    @Test
+    fun `a replay after the closed intent's journal landed late still answers CLOSED`(): Unit = runBlocking {
+        val b = lostSettlement()
+        assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "none", operator, "k-late"))
+            .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+        intents.complete(settlementKey(b)) // the journal applied after the close: the row reads COMPLETED
+        assertThat(intents.status(settlementKey(b))).isEqualTo(InMemoryIntents.Status.COMPLETED)
+        assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "none", operator, "k-late"))
+            .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+    }
+
     private fun settlementKeyOf(deal: Deal, event: PostingEvent) =
         intents.rows.values.map { it.first }.first { it.dealId == deal.id && it.event == event }.idempotencyKey
 
