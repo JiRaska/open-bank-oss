@@ -7211,15 +7211,15 @@ gates:
   # authoring path must yield the same canonical bytes: the static half here holds that each
   # committed ir/<name>.json has a DSL product of that name and that both JVM halves exist, are not
   # disabled and cover their set — ReferenceProductsTest (DSL == committed IR) and, since phase 5a,
-  # ProductIrAuthoringParityTest (obp CLI == MCP product_compile, byte for byte). The Studio form
-  # surface (phase 6) is not on main and is printed PENDING on every run.
+  # ProductIrAuthoringParityTest (obp CLI == MCP product_compile, byte for byte) and, since phase 5b,
+  # IrLintContractTest (the Studio editor's catalog lint returns each committed IR's own bytes).
   - id: product-ir-authoring-parity
-    name: "committed product IR equals the DSL, and the CLI and MCP surfaces compile it to the same bytes (ADR-0352, advisory)"
+    name: "committed product IR equals the DSL, and the CLI, MCP and Studio surfaces yield the same bytes (ADR-0352, advisory)"
     group: kotlin
     mode: advisory
     rationale: "A hash on origin/main is what the catalog may publish (ADR-0352 §7); if two authoring surfaces yield two hashes for one product, the review approved neither. The JVM halves are tests; this half keeps their scope equal to the committed files and the registered surfaces."
     review_after: "2027-03-31"
-    verified: "2026-10-29 — 3 committed reference IRs each have a DSL product and both parity tests. STATIC half: 23 --self-test cases (a missing, disabled, one-sided, comment-only or status-blind surface test each red). Surface half covers lint/compile/simulate/explain plus invalid-IR and unknown-rule failures on RAW bytes and isError==non-zero exit; proven red by perturbing the MCP handler in place (EUR->CZK bytes: 3/3 red; failures not flagged isError: 3/3 red), green on revert. Studio form surface PENDING (no draft-from-form path on main)"
+    verified: "2026-10-29 — 3 committed reference IRs each have a DSL product and both parity tests. STATIC half: 23 --self-test cases (a missing, disabled, one-sided, comment-only or status-blind surface test each red). Surface half covers lint/compile/simulate/explain plus invalid-IR and unknown-rule failures on RAW bytes and isError==non-zero exit; proven red by perturbing the MCP handler in place (EUR->CZK bytes: 3/3 red; failures not flagged isError: 3/3 red), green on revert. 2026-10-30 (phase 5b) — Studio surface: IrLintContractTest required; --self-test now counts its cases (25 case() runs plus the JUnit checks) (missing, disabled, comment-only, no canonicalIr comparison, not scoped to openbank-products/ir each red); proven red on the real tree by adding @Disabled to IrLintContractTest and by renaming its canonicalIr read, green on revert"
     budget_seconds: 10
     min_subjects: 3   # three reference products at introduction (2026-10-23)
     selftest: python3 .github/scripts/check-product-ir-authoring-parity.py --self-test

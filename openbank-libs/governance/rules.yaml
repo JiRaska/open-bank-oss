@@ -4036,10 +4036,10 @@ product_ir_authoring_parity:
     - "ReferenceProductsTest compiles each DSL product and asserts its canonical JSON equals the committed file byte for byte (JVM half)"
     - "the parity test exists, is not disabled and iterates ReferenceProducts.all"
     - "ProductIrAuthoringParityTest runs one fixture per reference product (keys reverse-ordered) through the obp CLI and the MCP handlers for lint, compile, simulate and explain, including invalid-IR and unknown-rule failures, and asserts identical raw bytes and that MCP isError holds exactly when the CLI exits non-zero (surface half, phase 5a)"
-    - "the Studio form surface is declared PENDING until product-catalog has a draft-from-form path (phase 6)"
+    - "IrLintContractTest lints every committed ir/<name>.json through the catalog endpoint the Studio IR editor uses and asserts canonicalIr equals the file byte for byte and revisionHash equals the shared parser's (Studio surface, phase 5b)"
   gate: product-ir-authoring-parity
   enforced: advisory
-  target_enforce_date: "2026-12-31"   # ADR-0144; CLI+MCP surfaces in scope since phase 5a, Studio joins in phase 6
+  target_enforce_date: "2026-12-31"   # ADR-0144; CLI+MCP surfaces in scope since phase 5a, Studio since phase 5b
   ci_producer: ".github/scripts/check-product-ir-authoring-parity.py"
 
 product_bearing_services:

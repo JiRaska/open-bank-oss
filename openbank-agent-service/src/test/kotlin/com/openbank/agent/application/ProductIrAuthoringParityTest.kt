@@ -25,8 +25,8 @@ import java.nio.file.Path
  * product, every shared operation — lint, compile, simulate, explain, and their failure outcomes —
  * gives the SAME raw bytes through (a) the `obp` CLI (its stdout on success, its stderr line on
  * failure) and (b) the MCP handler's text, and the CLI exits non-zero exactly when MCP says
- * `isError`. (c) the Studio form path does not exist on main yet and is declared pending in the gate
- * script.
+ * `isError`. (c) the Studio path is covered by product-catalog's `IrLintContractTest`: the catalog lint
+ * returns each committed IR's own bytes.
  */
 class ProductIrAuthoringParityTest {
 

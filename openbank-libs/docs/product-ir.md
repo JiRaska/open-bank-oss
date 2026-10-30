@@ -170,7 +170,8 @@ p99 of 0.048 ms per golden-set op, inside the 2 ms per-`evaluate` budget. The op
 A product reaches the catalog through one of three authoring surfaces: the `obp` CLI
 (openbank-products), the MCP product tools in openbank-agent-service (`product_lint`,
 `product_compile`, `product_simulate`, `product_explain`, `product_propose`), and the Studio form
-(phase 6, not on main yet). The first two share one implementation, `ProductToolkit`
+(phase 5b: the IR editor in Product Studio, which validates through the catalog's
+`POST /api/v2/product-ir/lint` and saves a DRAFT revision). The first two share one implementation, `ProductToolkit`
 (`com.openbank.libs.product.toolkit`): lint, compile, simulate, explain and the DRAFT-revision
 proposal plan. Every function is pure and returns a tree written with `CanonicalJson`, so the same
 document yields the same bytes on every surface.
@@ -195,5 +196,5 @@ generators and `assertMoneyConserved`. Golden scenarios live under
 |---|---|---|
 | `product-ir-determinism` | enforced | a scenario missing from the index, an unsupported `irVersion`, a disabled determinism test |
 | `product-ir-run-limits` | enforced | a committed IR or scenario over the schema maxima |
-| `product-ir-authoring-parity` | advisory until 2026-12-31 | a committed `ir/<name>.json` with no DSL product, canonical DSL output that differs from the committed file, or the CLI and MCP surfaces compiling one fixture to different bytes (Studio form surface pending) |
+| `product-ir-authoring-parity` | advisory until 2026-12-31 | a committed `ir/<name>.json` with no DSL product, canonical DSL output that differs from the committed file, or the CLI and MCP surfaces compiling one fixture to different bytes (and the Studio lint returning anything but the committed bytes) |
 | `product-ir-purity` | enforced | an I/O, clock, logging or metrics import under the package, or the detekt rule not active |
