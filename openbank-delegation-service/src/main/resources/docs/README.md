@@ -27,3 +27,7 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Owner portfolio path parameter
+
+`GET /api/v1/delegation-portfolios/owner/{ownerPartyId}` names its path parameter `ownerPartyId`, in the OpenAPI document and in the served resource alike. It must equal the authenticated active profile; any other value is rejected with `403`. Generated clients use `ownerPartyId`; the shared `partyId` parameter does not apply to this route.

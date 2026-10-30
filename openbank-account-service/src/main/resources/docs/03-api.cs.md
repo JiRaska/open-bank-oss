@@ -126,6 +126,8 @@ Sjednocený přes `openbank-libs.api.ApiError`:
 | 409 | `account-already-closed` | close již proběhl |
 | 422 | `account-frozen` | mutace na frozen účtu |
 | 422 | `insufficient-authorization` | not OWNER pro tuto operaci |
+| 422 | `PRODUCT_REVISION_NOT_PUBLISHED` | otevření produktu bez publikované revize k pinu (ADR-0341 D1) |
+| 503 | `PRODUCT_CATALOG_UNAVAILABLE` | katalog při otevření nedostupný; nic se neuloží, opakovat po `Retry-After` |
 | 429 | `rate-limited` | per-token quota |
 | 500 | `internal-error` | nečekaná chyba (s correlationId pro support) |
 
@@ -149,3 +151,7 @@ Eventy jsou **append-only**; opravy se dělají kompenzačním eventem (např. `
 - **API verze v URL** (`/api/v1/...`). Breaking změny = `/api/v2/...`, v1 běží paralelně 6 měsíců.
 - **Event verze v topic name** (`...v1`). Schema evolution: jen additive (přidání optional fieldů), breaking = nový topic.
 - **OpenAPI diff** v CI proti `main` — fail pokud removed endpoint / required-added field bez verze bumpu.
+
+## Autentizace listenerů
+
+Pod `/api/*` je na obou listenerech přijímán jen mechanismus bearer a oprávnění nově vyžaduje autentizovaného volajícího místo toho, aby povolovalo všechny. Důvěryhodný klientský certifikát na mTLS listeneru je pouze transportní autentizace. Trasa bez vlastní bezpečnostní anotace je proto bez bearer tokenu odmítnuta. Veřejné trasy s metadaty `GET /api/v1/info` a `GET /api/v1/config` jsou výslovně povoleny bez něj.

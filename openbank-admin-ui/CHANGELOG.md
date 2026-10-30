@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.15.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.0...admin-ui-v3.15.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **admin-ui:** read FinOps anomalies from Alertmanager's route prefix ([#14279](https://github.com/JiRaska/open-bank-oss/issues/14279)) ([21a23de](https://github.com/JiRaska/open-bank-oss/commit/21a23de382a5b78568b7b5107b216e79e4bafe5e))
+* **product-catalog,admin-ui:** refuse duplicate JSON keys; keep unsaved Expert edits on IR save ([#14287](https://github.com/JiRaska/open-bank-oss/issues/14287)) ([e8c3978](https://github.com/JiRaska/open-bank-oss/commit/e8c3978adaf81c64394827733a0642914f368631))
+* **treasury:** record a posting intent before the ledger call ([#14220](https://github.com/JiRaska/open-bank-oss/issues/14220)) ([059840b](https://github.com/JiRaska/open-bank-oss/commit/059840b74eb1f495df083e12296842ad4dbd4d80))
+
+## [3.15.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.14.0...admin-ui-v3.15.0) (2026-10-30)
+
+
+### Features
+
+* **admin-ui:** make Test Intelligence readable at a glance ([#14272](https://github.com/JiRaska/open-bank-oss/issues/14272)) ([76d73e6](https://github.com/JiRaska/open-bank-oss/commit/76d73e6f2840125b62fdccea3e3ef84af683632a))
+* **admin-ui:** render cluster and regulatory pages bilingually, guard Czech UI literals ([#14277](https://github.com/JiRaska/open-bank-oss/issues/14277)) ([ab7bebc](https://github.com/JiRaska/open-bank-oss/commit/ab7bebc0ef096be7dec8679ea4d8cd3facd10e38))
+* **product-catalog,admin-ui:** Studio product IR editor with server-side lint (ADR-0352 5b, part 1) ([#14253](https://github.com/JiRaska/open-bank-oss/issues/14253)) ([40c80c7](https://github.com/JiRaska/open-bank-oss/commit/40c80c700aba881f05069999c34647b9c2912bf5))
+
 ## [3.14.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.13.1...admin-ui-v3.14.0) (2026-10-28)
 
 
