@@ -232,6 +232,13 @@ components:
         reviewedAt:
           type: [string, 'null']
           format: date-time
+        subjectId:
+          type: [string, 'null']
+          description: Stable caller-owned subject identity; for account opening, the party UUID.
+        clearanceExpiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: Optional expiry of WHITELISTED clearance for later fresh screens.
         occurredAt:
           type: string
           format: date-time
