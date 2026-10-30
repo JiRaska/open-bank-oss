@@ -19,7 +19,7 @@ FINREP F01.01, F01.02 and F01.03, and COREP C01.00, read the cumulative ledger b
 
 The frozen closing balance sums hash-verified `FROZEN`/`LINES_V1` monthly evidence through the reporting month. Ledger also compares those amounts with the cumulative journal totals by account and currency. A missing, draft or legacy `HASH_ONLY` target close, a failed included-snapshot hash check, or a mismatch against the cumulative journal is refused with 409 rather than replaced by live numbers. Earlier months with postings must therefore be closed before the frozen stock report can be produced.
 
-F02.00 follows a separate source: `/frozen-trial-balance` for frozen evidence and `/trial-balance` for live preview. These return the selected month's movements. The current F02 implementation does not assemble calendar-year-to-date movements. A cumulative closing balance must not be substituted for this flow source.
+F02.00 follows a separate, calendar-year-to-date flow source: `GET /api/v1/ledger/periods/MONTH/{asOf}/frozen-year-to-date-trial-balance` for frozen evidence and `/year-to-date-trial-balance` for live preview. Both cover income and expense movements from January 1 of the reporting year through `asOf`, so a report never inherits a prior year's flows. The frozen route sums hash-verified monthly evidence for every month of the year and is refused when any month's evidence is missing or does not match the journal. A cumulative closing balance must not be substituted for this flow source.
 
 Use `LIVE_PREVIEW` to inspect current books; it does not establish frozen reporting evidence. Follow upstream close and reconciliation failures before retrying a refused frozen report.
 
