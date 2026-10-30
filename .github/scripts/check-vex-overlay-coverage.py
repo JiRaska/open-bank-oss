@@ -63,7 +63,8 @@ CONFIG = Path("release-please-config.json")
 # call, not a gate author's. Declared so the two known cases are visible and any NEW one is red.
 # Each entry names the overlay it strands, and a stale declaration fails in either direction.
 NO_RELEASE_COMPONENT: dict[str, str] = {
-    "openbank-campaign-service": "campaign-service",
+    # openbank-campaign-service left this map in #7597: it had never produced a tag, so giving it
+    # `component: campaign-service` changed no existing release identity.
 }
 
 # component -> issue that tracks writing its overlay. Reason required; stale either direction.
@@ -258,15 +259,34 @@ def self_test() -> int:
     # 5. a stale NO_RELEASE_COMPONENT entry fails in both directions too. Without this the
     #    baseline could quietly outlive the condition it records, which is how a declared
     #    exception becomes permanent.
-    for key, val, needle in (
-        ("openbank-not-a-package", "ghost", "not a registered package"),
-        ("openbank-ledger-service", "ledger-service", "HAS a `component` now"),
-        ("openbank-campaign-service", "no-such-overlay", "does not exist -- stale"),
+    #    The third case needs a package that genuinely lacks a `component`; the live config has
+    #    none since #7597, so the self-test strips campaign-service's key from an in-memory copy.
+    real_read_text = gatelib.read_text
+
+    def _without_component(pkg: str):
+        def read_text(path, errors="strict"):
+            text = real_read_text(path, errors)
+            if Path(path) != REPO / CONFIG:
+                return text
+            cfg = json.loads(text)
+            cfg["packages"][pkg].pop("component", None)
+            return json.dumps(cfg)
+        return read_text
+
+    for key, val, needle, strip in (
+        ("openbank-not-a-package", "ghost", "not a registered package", False),
+        ("openbank-ledger-service", "ledger-service", "HAS a `component` now", False),
+        ("openbank-campaign-service", "no-such-overlay", "does not exist -- stale", True),
     ):
         saved = NO_RELEASE_COMPONENT.get(key)
         NO_RELEASE_COMPONENT[key] = val
         gatelib.clear()
-        _, errs = build()
+        if strip:
+            gatelib.read_text = _without_component(key)
+        try:
+            _, errs = build()
+        finally:
+            gatelib.read_text = real_read_text
         if not any(needle in e for e in errs):
             print(f"SELF-TEST FAIL: stale NO_RELEASE_COMPONENT {key} not reported ({needle})")
             ok = False

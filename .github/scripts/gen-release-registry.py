@@ -50,6 +50,7 @@ CONFIG = REPO / "release-please-config.json"
 #
 # `openbank-tax-reporting-service` left this map in #5760, when it was first deployed: it had never
 # produced a tag, so giving it a component changed no existing release identity.
+# `openbank-campaign-service` left it in #7597 on the same ground (no tag had ever been cut).
 #
 # `openbank-campaign-service` and `openbank-tax-reporting-service` are NOT a considered exception —
 # they are a defect this script surfaced. They carry `{"release-type": "simple"}` with no
@@ -64,7 +65,6 @@ OVERRIDES: dict[str, dict] = {
         "extra-files": [{"type": "json", "path": "package.json", "jsonpath": "$.version"}],
         "exclude-paths": ["openbank-admin-ui/src/test", "openbank-admin-ui/e2e"],
     },
-    "openbank-campaign-service": {"release-type": "simple"},
 }
 
 
