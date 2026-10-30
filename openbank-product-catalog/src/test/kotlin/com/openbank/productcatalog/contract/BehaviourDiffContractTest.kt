@@ -129,6 +129,15 @@ class BehaviourDiffContractTest {
                 base = revisionId,
             ),
             diffRequest(PORTFOLIO, "2026-02-01", "2026-01-01", base = revisionId),
+            // An exponent is not a money amount: it would sidestep every account-day bound.
+            diffRequest(PORTFOLIO.replace("\"20000.00\"", "\"1E+20\""), "2026-01-01", "2026-01-31", base = revisionId),
+            diffRequest(
+                PORTFOLIO.replace("\"150.00\"", "\"0.0000000000001\""),
+                "2026-01-01",
+                "2026-01-31",
+                base = revisionId,
+            ),
+            diffRequest(PORTFOLIO, "2026-01-01", "2026-01-31", base = revisionId, threshold = "1e999999"),
             diffRequest(tooLong, "1900-01-01", "2200-01-01", base = revisionId),
         ).forEach { bad ->
             Given {

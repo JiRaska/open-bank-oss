@@ -76,6 +76,9 @@ class RevisionBehaviourDiffService(private val catalog: GenericCatalogService, p
         const val MAX_ACCOUNTS = 500
         const val MAX_POSTINGS_PER_ACCOUNT = 1000
         const val MAX_ACCOUNT_DAYS = 200_000L
+        private const val MAX_INTEGER_DIGITS = 15
+        private const val MAX_SCALE = 12
+        private val PLAIN_DECIMAL = Regex("^-?[0-9]{1,$MAX_INTEGER_DIGITS}(\\.[0-9]{1,$MAX_SCALE})?$")
 
         /**
          * The request's portfolio as a plain JSON tree: `{"accounts": [{"id", "state": {"currency",
@@ -135,12 +138,23 @@ class RevisionBehaviourDiffService(private val catalog: GenericCatalogService, p
         private fun text(tree: Any?, at: String): String =
             requireNotNull((tree as? String)?.takeIf { it.isNotBlank() }) { "$at must be a non-blank string" }
 
-        private fun decimal(tree: Any?, at: String): BigDecimal = when (tree) {
-            is String -> tree.toBigDecimalOrNull()
-            is BigDecimal -> tree
-            is Number -> tree.toString().toBigDecimalOrNull()
-            else -> null
-        } ?: throw IllegalArgumentException("$at must be a decimal")
+        /**
+         * A money amount: a plain decimal of at most [MAX_INTEGER_DIGITS] integer digits and
+         * [MAX_SCALE] decimals. An exponent form (`1E+20`, `1e999999`) is refused, not normalised:
+         * it would let one number sidestep every account-day bound on the replay's arithmetic.
+         */
+        fun decimal(tree: Any?, at: String): BigDecimal {
+            val text = when (tree) {
+                is String -> tree
+                is BigDecimal -> tree.toPlainString().takeIf { tree.scale() in 0..MAX_SCALE }
+                is Number -> tree.toString()
+                else -> null
+            }
+            require(text != null && PLAIN_DECIMAL.matches(text)) {
+                "$at must be a plain decimal with at most $MAX_INTEGER_DIGITS integer digits and $MAX_SCALE decimals"
+            }
+            return BigDecimal(text)
+        }
 
         private fun date(tree: Any?, at: String): LocalDate = (tree as? String)?.let {
             runCatching { LocalDate.parse(it) }.getOrNull()

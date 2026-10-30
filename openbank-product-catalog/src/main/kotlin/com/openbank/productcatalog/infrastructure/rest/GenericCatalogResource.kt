@@ -50,7 +50,6 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.core.EntityTag
 import jakarta.ws.rs.core.Response
-import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
@@ -153,7 +152,11 @@ class GenericCatalogResource(
             baseRevisionId = request.baseRevisionId,
             portfolio = RevisionBehaviourDiffService.parsePortfolio(catalogJson.toObject(portfolioNode).toPlainTree()),
             range = ReplayRange(request.from, request.to, zone),
-            options = request.materialityThreshold?.let { DiffOptions(BigDecimal(it)) } ?: DiffOptions(),
+            options =
+            request.materialityThreshold?.let {
+                DiffOptions(RevisionBehaviourDiffService.decimal(it, "materialityThreshold"))
+            }
+                ?: DiffOptions(),
         )
 
         // The generated model types the free-form object as Map<String, Any>; the document's null members
