@@ -1,0 +1,14 @@
+{
+  "schema": "openbank.approval-portfolios.v1",
+  "description": "ADR-0352 \u00a77 (phase 5b): the server-defined golden portfolio an approver's behavioural-diff backtest must run over to count as having seen a change. Looked up by productCode, then by currency. product-catalog packages this directory; obp diff takes the same files.",
+  "byProductCode": {
+    "CURRENT-ACCOUNT": "savings-sample.json",
+    "SAVINGS-CZK": "savings-sample-czk.json",
+    "SAVINGS-FIXED": "savings-sample.json",
+    "TERM-DEPOSIT-12M": "savings-sample.json"
+  },
+  "byCurrency": {
+    "CZK": "savings-sample-czk.json",
+    "EUR": "savings-sample.json"
+  }
+}
