@@ -149,3 +149,7 @@ Treasury se připojuje jako účastník uzávěrky pro hodinové časové rozli�
 `openbank-treasury` (`service-account-openbank-treasury`). Jeho položka v mapě přidává
 `ledger.close.participate` jen pro `participants/treasury`; stávající granty `ledger.create` a čtení pro
 nostro se nemění a za jiného účastníka hlásit nemůže.
+
+## Offline přehrání historického FINREP
+
+Sestavení definuje explicitní úlohu `historicalFinrepPactTest`, která lokálně přehraje jeden ověřený historický artefakt FINREP Pact proti poskytovateli ledger. Nejde o ověření přes broker: nikdy nemění selektory brokeru, nepublikuje výsledky a odmítne běžet, pokud zadaný commit poskytovatele není 40místné hex SHA, které je předkem `origin/main`. Není součástí výchozího sestavení.
