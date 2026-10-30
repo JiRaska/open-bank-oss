@@ -316,10 +316,13 @@ def selftest() -> int:
     build_excluded = VerificationClass("a/ExcludedProviderVerificationTest.kt", "p", "folder", excluded_by_build='exclude("**/ExcludedProviderVerificationTest*")')
     unselected = VerificationClass("a/NegativeAuthPactVerificationTest.kt", "p", "folder")
     one_pact = {"pacts/c-p.json": "p"}
-    run("folder provider excluded by filename", lambda: check_provider_task_selection([folder]))
-    run("broker provider excluded by filename", lambda: check_provider_task_selection([broker]))
+    # Filename-filter fixtures must NOT end in ProviderVerificationTest.kt (the shared fixtures above do).
+    folder_bad = VerificationClass("a/FolderTest.kt", "p", "folder")
+    broker_bad = VerificationClass("a/BrokerTest.kt", "p", "broker", gates=["@EnabledIfSystemProperty"])
+    run("folder provider excluded by filename", lambda: check_provider_task_selection([folder_bad]))
+    run("broker provider excluded by filename", lambda: check_provider_task_selection([broker_bad]))
     run("selected sibling cannot mask an excluded provider", lambda: check_provider_task_selection([
-        VerificationClass("a/SelectedProviderVerificationTest.kt", "p", "folder"), folder,
+        VerificationClass("a/SelectedProviderVerificationTest.kt", "p", "folder"), folder_bad,
     ]))
 
     run("pact whose only replay is broker-gated", lambda: check_coverage(one_pact, [broker], set()))
