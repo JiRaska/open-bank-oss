@@ -25,6 +25,13 @@ class DealNotFoundException(dealId: UUID) : NoSuchElementException("deal $dealId
 /** A deal write was computed from a copy older than the stored row. Mapped to 409 DEAL_CHANGED. */
 class DealChangedException(message: String) : IllegalStateException(message)
 
+/**
+ * The ledger refused a posting because its accounting day no longer accepts postings (`409
+ * ACCOUNTING_DAY_CLOSED`, ADR-0342 D4): a close outcome the day's record reports as REFUSED, never
+ * a retryable error.
+ */
+class AccountingDayClosedException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
 /** Raised when a deal names a counterparty not in the master. Mapped to 400 via IllegalArgumentException. */
 class UnknownCounterpartyException(id: String) : IllegalArgumentException("unknown counterparty '$id'")
 
@@ -68,6 +75,13 @@ interface DealRepository {
         schedule: ScheduleWrite? = null,
         /** Further outbox events of the same change (e.g. treasury.cashflow.generated). */
         extraEvents: List<DealEvent> = emptyList(),
+        /**
+         * A limit-consuming write (submit, approve): in the SAME transaction, after locking the deal
+         * row, take the (counterparty, limit currency) line lock and re-measure the others' exposure;
+         * past [ExposureGuard.maxOthers] it refuses (CorrectionLimitBreachedException, 422) instead of
+         * committing a joint breach.
+         */
+        limitGuard: ExposureGuard? = null,
     ): Deal
 
     /** The command previously recorded under [key], if any. */
@@ -171,6 +185,16 @@ fun interface CurveSetPort {
 /** This service's outbox table; `persistInTransaction` chains inside the aggregate's transaction. */
 interface TreasuryOutboxRepository : OutboxRepository {
     fun persistInTransaction(message: OutboxMessage): Uni<Void>
+}
+
+/** ADR-0344 D7: the per-accounting-day completion record each treasury run writes. */
+interface DayCompletionRepository {
+    suspend fun record(r: com.openbank.treasury.domain.model.DayStepRecord)
+
+    suspend fun day(date: LocalDate): List<com.openbank.treasury.domain.model.DayStepRecord>
+
+    /** Every recorded step of the days in [from]..[to] (inclusive): the day-close reporter's input. */
+    suspend fun between(from: LocalDate, to: LocalDate): List<com.openbank.treasury.domain.model.DayStepRecord>
 }
 
 /** A journal the ledger holds for a posted [JournalSpec]: its id and where each leg landed. */
