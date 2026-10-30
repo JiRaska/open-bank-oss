@@ -28,6 +28,7 @@ export function BehaviourDiffPanel({ revision, t }: {
   const [from, setFrom] = useState(`${today.slice(0, 4)}-01-01`)
   const [to, setTo] = useState(today)
   const [verdict, setVerdict] = useState<BehaviourDiffVerdict | null>(null)
+  const [evidence, setEvidence] = useState<{ approval: boolean; golden: string | null } | null>(null)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   // The revision a result belongs to. A backtest still running when the operator switches revision must
@@ -40,6 +41,7 @@ export function BehaviourDiffPanel({ revision, t }: {
     const task = window.setTimeout(() => {
       setPortfolio(samplePortfolio(behaviour?.currency ?? 'EUR', `${today.slice(0, 4)}-01-01`))
       setVerdict(null)
+      setEvidence(null)
       setMessage('')
       setBusy(false)
     }, 0)
@@ -48,24 +50,34 @@ export function BehaviourDiffPanel({ revision, t }: {
 
   if (!revision || !behaviour) return null
 
-  const run = async () => {
-    let parsed: unknown
-    try { parsed = JSON.parse(portfolio) } catch { setMessage(t('Portfolio není validní JSON', 'Portfolio is not valid JSON')); return }
-    setBusy(true); setMessage(''); setVerdict(null)
+  /**
+   * `golden`: no portfolio, so the server replays the product's own golden portfolio over its default
+   * window — the only run that counts as the approver having seen the change (ADR-0352 §7). `custom`:
+   * the portfolio and dates below, an exploration the server never records as evidence.
+   */
+  const run = async (mode: 'golden' | 'custom') => {
+    let parsed: unknown = undefined
+    if (mode === 'custom') {
+      try { parsed = JSON.parse(portfolio) } catch { setMessage(t('Portfolio není validní JSON', 'Portfolio is not valid JSON')); return }
+    }
+    setBusy(true); setMessage(''); setVerdict(null); setEvidence(null)
     const requestedFor = revisionKey
     const stale = () => currentKey.current !== requestedFor
     try {
       const result = await catalogV2Operation('behaviourDiffRevisionV2', {
         pathParameters: { offeringId: revision.offeringId, revisionId: revision.id },
-        body: { portfolio: parsed as Record<string, unknown>, from, to },
+        body: mode === 'golden' ? {} : { portfolio: parsed as Record<string, unknown>, from, to },
         signal: AbortSignal.timeout(BACKTEST_TIMEOUT_MS),
       })
       if (stale()) return
       setVerdict(behaviourDiffVerdict(result.diff))
+      setEvidence({ approval: result.approvalEvidence === true, golden: result.goldenPortfolio ?? null })
     } catch (error) {
       if (stale()) return
       if (error instanceof CatalogV2Error && error.status === 404) {
         setMessage(t('Není publikovaná revize, se kterou by šlo porovnat.', 'There is no published revision to compare against.'))
+      } else if (error instanceof CatalogV2Error && error.status === 409) {
+        setMessage(t('Pro tento produkt není definované schvalovací portfolio.', 'No approval portfolio is defined for this product.'))
       } else if (error instanceof CatalogV2Error && error.status === 400) {
         setMessage(t('Backtest odmítnut:', 'Backtest refused:') + ` ${error.message}`)
       } else {
@@ -77,16 +89,25 @@ export function BehaviourDiffPanel({ revision, t }: {
   return (
     <section aria-label={t('Behaviorální diff', 'Behavioural diff')} data-testid="behaviour-diff-panel">
       <h3><Activity size={14} aria-hidden /> {t('Behaviorální diff proti publikované revizi', 'Behavioural diff against the published revision')}</h3>
-      <p>{t('Stejný výpočet jako obp diff --behavioural: portfolio se přehraje pod oběma revizemi.',
-        'The same computation as obp diff --behavioural: the portfolio is replayed under both revisions.')}</p>
-      <label>{t('Portfolio (JSON)', 'Portfolio (JSON)')}
-        <textarea className="input" aria-label={t('Portfolio (JSON)', 'Portfolio (JSON)')} value={portfolio} onChange={e => setPortfolio(e.target.value)} rows={8} spellCheck={false} />
-      </label>
-      <label>{t('Od', 'From')} <input className="input" type="date" aria-label={t('Od', 'From')} value={from} onChange={e => setFrom(e.target.value)} /></label>
-      <label>{t('Do', 'To')} <input className="input" type="date" aria-label={t('Do', 'To')} value={to} onChange={e => setTo(e.target.value)} /></label>
-      <button type="button" className="btn btn-secondary" onClick={() => void run()} disabled={busy || !portfolio.trim()}>
-        {busy ? t('Počítám…', 'Running…') : t('Spustit backtest', 'Run backtest')}
+      <p>{t('Stejný výpočet jako obp diff --behavioural: portfolio se přehraje pod oběma revizemi. Schválení odemyká jen backtest nad zlatým portfoliem produktu, které určuje server.',
+        'The same computation as obp diff --behavioural: the portfolio is replayed under both revisions. Only a backtest over the product\'s server-defined golden portfolio unlocks approval.')}</p>
+      <button type="button" className="btn btn-primary" onClick={() => void run('golden')} disabled={busy}>
+        {busy ? t('Počítám…', 'Running…') : t('Spustit schvalovací backtest', 'Run approval backtest')}
       </button>
+      <details>
+        <summary>{t('Prozkoumat vlastní portfolio (neodemyká schválení)', 'Explore your own portfolio (does not unlock approval)')}</summary>
+        <label>{t('Portfolio (JSON)', 'Portfolio (JSON)')}
+          <textarea className="input" aria-label={t('Portfolio (JSON)', 'Portfolio (JSON)')} value={portfolio} onChange={e => setPortfolio(e.target.value)} rows={8} spellCheck={false} />
+        </label>
+        <label>{t('Od', 'From')} <input className="input" type="date" aria-label={t('Od', 'From')} value={from} onChange={e => setFrom(e.target.value)} /></label>
+        <label>{t('Do', 'To')} <input className="input" type="date" aria-label={t('Do', 'To')} value={to} onChange={e => setTo(e.target.value)} /></label>
+        <button type="button" className="btn btn-secondary" onClick={() => void run('custom')} disabled={busy || !portfolio.trim()}>
+          {t('Prozkoumat s tímto portfoliem', 'Explore with this portfolio')}
+        </button>
+      </details>
+      {evidence && <p data-testid="behaviour-diff-evidence">{evidence.approval
+        ? t('Zaznamenáno jako váš doklad pro schválení (zlaté portfolio ', 'Recorded as your approval evidence (golden portfolio ') + `${evidence.golden ?? ''})`
+        : t('Jen průzkum — neodemyká schválení.', 'Exploration only — this does not unlock approval.')}</p>}
       {message && <p role="status">{message}</p>}
       {verdict && <DiffView verdict={verdict} t={t} />}
     </section>

@@ -52,7 +52,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 /** The sample portfolio fills in after mount; clicking before that hits a disabled button. */
 async function runBacktest() {
-  const button = await screen.findByRole('button', { name: /Run backtest/ })
+  const button = await screen.findByRole('button', { name: /Run approval backtest/ })
   await waitFor(() => expect(button).toBeEnabled())
   fireEvent.click(button)
 }
@@ -80,10 +80,13 @@ describe('BehaviourDiffPanel', () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = []
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
       calls.push({ url, method: String(init.method), body: init.body ? JSON.parse(String(init.body)) : undefined })
-      return respond(200, { diff: changed, canonicalJson: '{}' })
+      return respond(200, { diff: changed, canonicalJson: '{}', approvalEvidence: true, goldenPortfolio: 'savings-sample.json' })
     }))
     render(<BehaviourDiffPanel revision={revision()} t={t} />)
     await runBacktest()
+    // The approval backtest sends NO portfolio: the server runs the product's golden one, and only that
+    // run is the approver's evidence.
+    expect(await screen.findByTestId('behaviour-diff-evidence')).toHaveTextContent('savings-sample.json')
     const view = await screen.findByTestId('behaviour-diff-changed')
     expect(view).toHaveTextContent('2 / 2')
     expect(view).toHaveTextContent('4.000000000000')
@@ -103,8 +106,22 @@ describe('BehaviourDiffPanel', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0].method).toBe('POST')
     expect(calls[0].url).toContain('/offerings/20000000-0000-0000-0000-000000000001/revisions/30000000-0000-0000-0000-000000000001/behaviour-diff')
-    expect((calls[0].body as { portfolio: { accounts: unknown[] } }).portfolio.accounts).toHaveLength(3)
+    expect(calls[0].body).not.toHaveProperty('portfolio')
     expect(calls.some(c => /approv|publish|sign/.test(c.url))).toBe(false)
+  })
+
+  it('runs an approver-chosen portfolio as an exploration that says it unlocks nothing', async () => {
+    const calls: Array<{ body: unknown }> = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      calls.push({ body: init.body ? JSON.parse(String(init.body)) : undefined })
+      return respond(200, { diff: changed, canonicalJson: '{}', approvalEvidence: false, goldenPortfolio: null })
+    }))
+    render(<BehaviourDiffPanel revision={revision()} t={t} />)
+    const explore = await screen.findByRole('button', { name: /Explore with this portfolio/ })
+    await waitFor(() => expect(explore).toBeEnabled())
+    fireEvent.click(explore)
+    expect(await screen.findByTestId('behaviour-diff-evidence')).toHaveTextContent('does not unlock')
+    expect((calls[0].body as { portfolio: { accounts: unknown[] } }).portfolio.accounts).toHaveLength(3)
   })
 
   it('shows an unconserved replay as a defect, not as "no change"', async () => {
@@ -139,7 +156,7 @@ describe('BehaviourDiffPanel', () => {
     expect(screen.queryByTestId('behaviour-diff-changed')).toBeNull()
     expect(screen.queryByRole('status')).toBeNull()
     // ...and the new revision's backtest is not blocked by the old one's spinner.
-    expect(screen.getByRole('button', { name: /Run backtest/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /Run approval backtest/ })).toBeEnabled()
   })
 
   it('shows, per account, which rule moved it and by how much', async () => {

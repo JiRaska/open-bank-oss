@@ -40,7 +40,7 @@ for (const scenario of ['unconserved', 'changed'] as const) {
       const json = (body: unknown) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
       if (route.request().method() !== 'GET' && url.pathname.startsWith('/api/svc/')) posts.push(url.pathname)
       if (url.pathname.endsWith('/behaviour-diff')) {
-        return json({ diff: scenario === 'changed' ? DIFF : { ...DIFF, valid: false, identical: true }, canonicalJson: '{}' })
+        return json({ diff: scenario === 'changed' ? DIFF : { ...DIFF, valid: false, identical: true }, canonicalJson: '{}', approvalEvidence: scenario === 'changed', goldenPortfolio: 'savings-sample.json' })
       }
       if (url.pathname.endsWith('/api/v2/product-types')) return json([])
       if (url.pathname.endsWith('/api/v2/specifications')) return json([SPEC])
@@ -53,7 +53,7 @@ for (const scenario of ['unconserved', 'changed'] as const) {
     await page.locator('#studio-offering').selectOption(OFFERING.id)
     const panel = page.getByTestId('behaviour-diff-panel')
     await expect(panel).toBeVisible()
-    await panel.getByRole('button', { name: /Spustit backtest|Run backtest/ }).click()
+    await panel.getByRole('button', { name: /Spustit schvalovací backtest|Run approval backtest/ }).click()
     if (scenario === 'unconserved') {
       // Negative first: an unconserved replay is a defect banner, never "no change".
       await expect(panel.getByTestId('behaviour-diff-error')).toBeVisible()
