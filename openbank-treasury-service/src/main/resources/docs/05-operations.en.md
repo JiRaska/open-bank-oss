@@ -121,3 +121,29 @@ admits under `ledger.close.participate` for this participant only.
   write; the intent-first follow-up is tracked separately.
 - **Operating it.** Under `shadow` mode the ledger only counts a hold. Under `enforce` an operator
   reviews a REFUSED day and waives it on the ledger's day-end page.
+
+## Nostro reconciliation by value date (#13886)
+
+A correspondent's statement is dated by the day it booked each movement. Its OPBD and CLBD
+balances are booked balances: OPBD plus the entries booked in the period equals CLBD. Treasury
+records that day as the ledger line's **value date**. It enters a late settlement in the ledger's
+open day (its entry date) but values it on its economic day. Lines are therefore matched by value
+date, and both balances are compared by value date too.
+
+- **Read window.** For a statement period `(openingDate, statementDate]` the reconciliation reads
+  ledger lines entered in three ranges:
+  - the 7 entry days up to and including `openingDate`;
+  - the period itself;
+  - the 7 entry days after `statementDate`.
+
+  Lines valued inside the period are the period's lines, whatever day they were entered.
+- **Balance shift.** The ledger answers balances by entry date. Each balance (as at `openingDate`
+  and as at `statementDate`) is shifted to its value-dated equivalent from the lines already read.
+  The shift adds lines entered after the balance date but valued on or before it. It takes out
+  lines entered on or before the balance date but valued after it. Only lines in the statement
+  currency count. Nothing is posted, and no extra ledger call is made.
+- **Not shifted.** These lines still show as a balance difference, never as a false clean:
+  - a line entered more than 7 days after its value date;
+  - a line entered more than 7 days before `openingDate` and valued after it;
+  - a movement the correspondent booked on a day other than the value date the bank recorded.
+    That line is also unmatched.
