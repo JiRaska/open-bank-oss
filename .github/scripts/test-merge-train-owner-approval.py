@@ -532,5 +532,94 @@ class SyntheticClockTest(unittest.TestCase):
         self.assertIs(train.base_env, real_env)
 
 
+
+class ApprovalChainTest(unittest.TestCase):
+    """An approval on H covers H' only through main-update merges git itself would produce."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.git = train.Git(self.tmp.name)
+        self.git("init", "-q", "-b", "main")
+        self.put("base.md", "base\n", "base")
+        self.git("checkout", "-q", "-b", "codex/x")
+        self.h0 = self.put("pr.md", "pr\n", "pr change")
+        self.git("checkout", "-q", "main")
+        self.main = self.put("main.md", "main\n", "main moves")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def put(self, rel, text, msg=None):
+        Path(self.tmp.name, rel).write_text(text)
+        self.git("add", rel)
+        if msg:
+            self.git("commit", "-q", "-m", msg)
+        return self.git("rev-parse", "HEAD").stdout.strip()
+
+    def update(self):
+        self.git("checkout", "-q", "--detach", self.h0)
+        return self.git("merge", "-q", "--no-edit", self.main, check=False)
+
+    def chain(self, head):
+        return train.approval_chain(self.git, self.main, head)
+
+    def test_clean_update_merge_reaches_the_approved_head(self):
+        self.update()
+        h1 = self.git("rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(self.chain(h1), [h1, self.h0])
+
+    def test_extra_commit_after_the_update_stops_the_chain(self):
+        self.update()
+        h2 = self.put("extra.md", "x\n", "extra")
+        self.assertNotIn(self.h0, self.chain(h2))
+
+    def test_smuggled_edit_in_the_merge_stops_the_chain(self):
+        self.update()
+        self.put("smuggled.md", "x\n")
+        self.git("commit", "-q", "--amend", "--no-edit")
+        h1 = self.git("rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(len(self.git("rev-list", "--parents", "-n", "1", h1).stdout.split()), 3)
+        self.assertEqual(self.chain(h1), [h1])
+
+    def test_hand_resolved_conflict_stops_the_chain(self):
+        self.git("checkout", "-q", "main")
+        self.main = self.put("pr.md", "main\n", "main edits the same file")
+        self.assertNotEqual(self.update().returncode, 0)
+        self.put("pr.md", "pr\nmain\n")
+        self.git("commit", "-q", "--no-edit")
+        h1 = self.git("rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(self.chain(h1), [h1])
+
+    def test_merge_of_a_non_main_branch_stops_the_chain(self):
+        self.git("checkout", "-q", "-b", "side", self.main)
+        side = self.put("side.md", "s\n", "not on main")
+        self.git("checkout", "-q", "--detach", self.h0)
+        self.git("merge", "-q", "--no-edit", side)
+        h1 = self.git("rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(self.chain(h1), [h1])
+
+    def test_newest_decision_on_the_chain_wins(self):
+        gh = Mock()
+        rows = {"h1": (5, "success", "owner-approved PR #7"), "h0": (9, "failure", "owner-revoked PR #7")}
+        gh.app_status_latest.side_effect = lambda sha, ctx: rows.get(sha)
+        self.assertEqual(train.owner_decision(gh, ["h1", "h0"]), ("failure", "owner-revoked PR #7"))
+        rows["h0"] = (3, "success", "owner-approved PR #7")
+        self.assertEqual(train.owner_decision(gh, ["h1", "h0"]), ("success", "owner-approved PR #7"))
+        rows.clear()
+        self.assertIsNone(train.owner_decision(gh, ["h1", "h0"]))
+
+    def test_live_intent_without_a_derived_chain_reads_only_the_exact_head(self):
+        gh = Mock(spec=["pr", "branch", "repo", "app_status_latest", "app_statuses"])
+        gh.app_statuses.return_value = {}
+        gh.branch, gh.repo = "main", "owner/repo"
+        head = "b" * 40
+        gh.pr.return_value = {"number": 7, "state": "open", "draft": False, "auto_merge": {"x": 1},
+                              "head": {"sha": head, "ref": "codex/x", "repo": {"full_name": "owner/repo"}},
+                              "base": {"ref": "main", "repo": {"full_name": "owner/repo"}}}
+        gh.app_status_latest.side_effect = lambda sha, ctx: (1, "success", "owner-approved PR #7") if sha == "a" * 40 else None
+        self.assertFalse(train.live_source_intent(gh, 7, head))
+        gh.approval_chains = {head: [head, "a" * 40]}
+        self.assertTrue(train.live_source_intent(gh, 7, head))
+
 if __name__ == "__main__":
     unittest.main()
