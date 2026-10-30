@@ -9,13 +9,10 @@ import com.openbank.libs.product.ir.IrJson
 import com.openbank.libs.product.ir.ProductInterpreter
 import com.openbank.libs.product.ir.ProductRevisionIr
 import com.openbank.libs.product.replay.BehaviourDiff
-import com.openbank.libs.product.replay.DiffOptions
+import com.openbank.libs.product.replay.BehaviourDiffInputs
 import com.openbank.libs.product.replay.ProductBehaviourDiff
-import com.openbank.libs.product.replay.ReplayLimits
 import com.openbank.libs.product.replay.ReplayPortfolioJson
-import com.openbank.libs.product.replay.ReplayRange
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
 
 /**
  * `obp diff --behavioural` (ADR-0352 §11.1, §11.4): the repricing backtest. It replays a portfolio
@@ -30,7 +27,7 @@ import java.time.temporal.ChronoUnit
  * schedules each revision registers in `onOpen`, which is the point of comparing two revisions.
  *
  * The range defaults to the earliest `openedOn` through the last fixture day; `from`/`to` override it,
- * and a resolved range that is empty or longer than [ReplayLimits.MAX_DAYS] is a usage error.
+ * through [BehaviourDiffInputs], the resolution the catalog backtest also runs; a bad one is a usage error.
  */
 object BehaviouralDiff {
 
@@ -42,33 +39,22 @@ object BehaviouralDiff {
         portfolioJson: String,
         from: LocalDate? = null,
         to: LocalDate? = null,
-        options: DiffOptions = DiffOptions(),
+        threshold: String? = null,
     ): BehaviourDiff {
         val parsed = try {
             ReplayPortfolioJson.parse(IrJson.parse(portfolioJson))
         } catch (e: IllegalArgumentException) {
             throw CliInputException("portfolio: ${e.message}", e)
         }
-        return engine.diff(a, b, parsed.portfolio, range(parsed, from, to), options)
-    }
-
-    /**
-     * The calendar after defaults are applied. Every way it can be empty or too long is a usage error
-     * (exit 64) naming the resolved dates — never an internal error from deep inside the replay.
-     */
-    private fun range(parsed: ReplayPortfolioJson.Parsed, from: LocalDate?, to: LocalDate?): ReplayRange {
-        val start = from ?: parsed.firstDay
-        val end = to ?: parsed.lastDay
-        if (end.isBefore(start)) {
-            throw CliUsageException(
-                "resolved range $start..$end is empty" +
-                    (if (from == null) " (--from defaults to the earliest openedOn, ${parsed.firstDay})" else "") +
-                    (if (to == null) " (--to defaults to the last fixture day, ${parsed.lastDay})" else ""),
-            )
+        // The same resolution the catalog backtest runs; a bad window or threshold is a usage error.
+        val (range, options) = try {
+            BehaviourDiffInputs.range(parsed, from, to) to BehaviourDiffInputs.options(threshold)
+        } catch (
+            // A usage error is reported as its message (exit 64); there is no stack worth keeping.
+            @Suppress("SwallowedException") e: IllegalArgumentException,
+        ) {
+            throw CliUsageException(e.message ?: "invalid diff window or threshold")
         }
-        val days = ChronoUnit.DAYS.between(start, end) + 1
-        val limit = ReplayLimits.MAX_DAYS
-        if (days > limit) throw CliUsageException("range of $days days exceeds $limit")
-        return ReplayRange(start, end, parsed.zone)
+        return engine.diff(a, b, parsed.portfolio, range, options)
     }
 }

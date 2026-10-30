@@ -15,7 +15,6 @@ import com.openbank.libs.product.ir.ProductIrCanonical
 import com.openbank.libs.product.ir.ProductIrParser
 import com.openbank.libs.product.ir.ProductIrValidationException
 import com.openbank.libs.product.ir.ProductRevisionIr
-import com.openbank.libs.product.replay.DiffOptions
 import com.openbank.libs.product.toolkit.ProductInputException
 import com.openbank.libs.product.toolkit.ProductToolkit
 import com.openbank.libs.productrevision.HmacIrSigner
@@ -266,10 +265,10 @@ object Obp {
             else -> null
         }
         if (problem != null) usageError(problem)
-        val (from, to, options) = diffWindow(args)
+        val (from, to, threshold) = diffWindow(args)
         val a = loadRevision(files[0])
         val b = loadRevision(files[1])
-        val report = BehaviouralDiff.run(a, b, readInput(Path.of(portfolio!!), "portfolio"), from, to, options)
+        val report = BehaviouralDiff.run(a, b, readInput(Path.of(portfolio!!), "portfolio"), from, to, threshold)
         out.appendLine(report.canonicalJson)
         if (!report.valid) {
             err.appendLine("obp diff: a replay did not conserve money; this is an interpreter defect, not a result")
@@ -281,17 +280,12 @@ object Obp {
         return EXIT_OK
     }
 
-    /** `--from`/`--to`/`--threshold` of `diff`; every malformed value is a usage error. */
-    private fun diffWindow(args: List<String>): Triple<java.time.LocalDate?, java.time.LocalDate?, DiffOptions> {
-        val from = option(args, "--from")?.let { date(it, "--from") }
-        val to = option(args, "--to")?.let { date(it, "--to") }
-        if (from != null && to != null && to.isBefore(from)) usageError("--to $to precedes --from $from")
-        val threshold = option(args, "--threshold")?.let {
-            it.toBigDecimalOrNull()?.takeIf { t -> t.signum() >= 0 }
-                ?: usageError("--threshold must be a non-negative decimal, not '$it'")
-        }
-        return Triple(from, to, threshold?.let { DiffOptions(it) } ?: DiffOptions())
-    }
+    /** `--from`/`--to` of `diff` as dates; the window and `--threshold` are resolved by BehaviourDiffInputs. */
+    private fun diffWindow(args: List<String>): Triple<java.time.LocalDate?, java.time.LocalDate?, String?> = Triple(
+        option(args, "--from")?.let { date(it, "--from") },
+        option(args, "--to")?.let { date(it, "--to") },
+        option(args, "--threshold"),
+    )
 
     private fun date(text: String, name: String): java.time.LocalDate = try {
         java.time.LocalDate.parse(text)
