@@ -232,6 +232,8 @@ interface TreasuryDealUseCase {
         event: com.openbank.treasury.domain.model.PostingEvent,
         reason: String,
         actor: Actor,
+        /** Client Idempotency-Key: a replay of the same close answers CLOSED again without acting. */
+        key: String? = null,
     ): com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
 }
 

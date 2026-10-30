@@ -48,6 +48,9 @@ import java.util.concurrent.Executors
  * Ordered: four-eyes needs a dealer and a different approver, and `@TestSecurity` fixes one identity
  * per method. The reconciler is called directly on a Vert.x context (its cron never fires in %test).
  */
+// LargeClass: one ordered real-database scenario per review finding, sharing one fixture of deals;
+// it splits with the service (#14232).
+@Suppress("LargeClass")
 @QuarkusTest
 @QuarkusTestResource(TreasuryDealApiIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
@@ -253,7 +256,12 @@ class PostingIntentReconcileIT {
         close(closeId, "SETTLED", "claimed").then().statusCode(409).body("error", equalTo("POSTING_IN_FLIGHT"))
         jdbcUpdate("update deal_posting_intent set claimed_until = null where idempotency_key = ?", key)
 
-        close(closeId, "SETTLED", "ledger confirmed to hold no journal").then().statusCode(204)
+        close(closeId, "SETTLED", "no key", key = null).then().statusCode(400)
+        val closeKey = UUID.randomUUID().toString()
+        close(closeId, "SETTLED", "ledger confirmed to hold no journal", closeKey).then().statusCode(204)
+        // A replay of the same close (same Idempotency-Key) answers the same, and acts no more.
+        close(closeId, "SETTLED", "ledger confirmed to hold no journal", closeKey).then().statusCode(204)
+        close(lateId, "SETTLED", "the key reused elsewhere", closeKey).then().statusCode(400)
         val row = closedRow(key)
         assertThat(row.first).isEqualTo("CLOSED_BY_OPERATOR")
         assertThat(row.second).isEqualTo("olga.operator")
@@ -625,8 +633,9 @@ class PostingIntentReconcileIT {
         }
     }
 
-    private fun close(id: String, event: String, reason: String) = given()
+    private fun close(id: String, event: String, reason: String, key: String? = UUID.randomUUID().toString()) = given()
         .contentType("application/json")
+        .apply { if (key != null) header("Idempotency-Key", key) }
         .body("""{"event":"$event","reason":"$reason"}""")
         .`when`().post("/api/v1/treasury/deals/$id/posting-intent/close")
 

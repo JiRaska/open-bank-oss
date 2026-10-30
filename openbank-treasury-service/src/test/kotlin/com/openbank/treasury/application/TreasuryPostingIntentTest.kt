@@ -766,6 +766,26 @@ class TreasuryPostingIntentTest {
             assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.OPEN)
         }
 
+    @Test
+    fun `an operator close is idempotent on its key - a replay answers CLOSED, the key elsewhere is refused`(): Unit =
+        runBlocking {
+            val b = book()
+            ledger.loseAnswerFor = b.id
+            assertThatThrownBy {
+                runBlocking { service.settle(b.id, com.openbank.treasury.domain.model.Actor.SIMULATED_MARKET) }
+            }
+            later(Duration.ofMinutes(5))
+            assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "none", operator, "close-1"))
+                .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+            val history = intents.history.size
+            assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "none", operator, "close-1"))
+                .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+            assertThat(intents.history).hasSize(history) // the replay acted no more
+            assertThatThrownBy {
+                runBlocking { service.closePostingIntent(b.id, PostingEvent.MATURED, "other", operator, "close-1") }
+            }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+
     private fun settlementKeyOf(deal: Deal, event: PostingEvent) =
         intents.rows.values.map { it.first }.first { it.dealId == deal.id && it.event == event }.idempotencyKey
 

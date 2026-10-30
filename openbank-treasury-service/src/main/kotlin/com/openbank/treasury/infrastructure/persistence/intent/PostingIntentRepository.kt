@@ -142,8 +142,9 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
         actor: Actor,
         reason: String,
         createdBefore: Instant,
+        commandKey: String?,
     ): PostingIntentCloseOutcome {
-        if (update(CLOSE_SQL, utc(clock.instant()), actor.id, reason, key, utc(createdBefore)) == 1) {
+        if (update(CLOSE_SQL, utc(clock.instant()), actor.id, reason, key, utc(createdBefore), commandKey) == 1) {
             return PostingIntentCloseOutcome.CLOSED
         }
         val stillOpen = sf.withSession { s ->
@@ -166,7 +167,7 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
      * pass's token and lease. A lease that lapsed (a pod died mid-pass) makes the row claimable again.
      */
     override suspend fun claimOpen(cutoff: Instant, lease: Duration, limit: Int): List<PostingIntent> {
-        val token = UUID.randomUUID()
+        val token = com.openbank.libs.domain.identifiers.Ids.randomId()
         val now = clock.instant()
         return sf.withTransaction { s ->
             listOf(token, utc(now.plus(lease)), utc(cutoff), utc(now), limit)
@@ -185,6 +186,12 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
             .setParameter(1, dealId)
             .resultList
     }.awaitSuspending().map { it.toIntent() }
+
+    override suspend fun closedBy(commandKey: String): String? = sf.withSession { s ->
+        s.createNativeQuery<Any>(
+            "SELECT idempotency_key FROM deal_posting_intent_history WHERE command_key = ?1",
+        ).setParameter(1, commandKey).resultList
+    }.awaitSuspending().firstOrNull()?.toString()
 
     override suspend fun unresolvedFor(dealId: UUID): List<PostingIntent> = sf.withSession { s ->
         s.createNativeQuery<Array<Any?>>(
@@ -300,8 +307,8 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
                 "WHERE idempotency_key = ?4 AND status = 'OPEN' AND created_at < ?5 " +
                 "AND (claimed_until IS NULL OR claimed_until < ?1) RETURNING idempotency_key, value_date) " +
                 "INSERT INTO deal_posting_intent_history " +
-                "(idempotency_key, at, transition, actor_id, reason, value_date) " +
-                "SELECT idempotency_key, ?1, 'CLOSED_BY_OPERATOR', ?2, ?3, value_date FROM u"
+                "(idempotency_key, at, transition, actor_id, reason, command_key, value_date) " +
+                "SELECT idempotency_key, ?1, 'CLOSED_BY_OPERATOR', ?2, ?3, ?6, value_date FROM u"
 
         const val CLAIM_SQL =
             "UPDATE deal_posting_intent SET claim_token = ?1, claimed_until = ?2 WHERE idempotency_key IN (" +

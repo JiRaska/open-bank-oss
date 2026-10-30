@@ -409,12 +409,17 @@ class TreasuryResource {
     @RolesAllowed(APPROVER)
     @Operation(summary = "Close a deal's open posting intent that cannot complete (operator, audited)")
     @Authorize(action = "treasury.posting-intent.close", resource = "#id")
-    suspend fun closePostingIntent(@PathParam("id") id: UUID, request: ClosePostingIntentRequest?): Response {
+    suspend fun closePostingIntent(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: ClosePostingIntentRequest?,
+    ): Response {
+        val idempotencyKey = requireKey(key)
         requireNotNull(request) { "a request body is required" }
         val event = requireNotNull(request.event) { "event is required" }
         require(event in CLOSABLE_EVENTS) { "event must be one of $CLOSABLE_EVENTS" }
         val reason = requireNotNull(request.reason) { "reason is required" }
-        return when (deals.closePostingIntent(id, PostingEvent.valueOf(event), reason, actor())) {
+        return when (deals.closePostingIntent(id, PostingEvent.valueOf(event), reason, actor(), idempotencyKey)) {
             PostingIntentCloseOutcome.CLOSED -> Response.noContent().build()
             PostingIntentCloseOutcome.NOT_OPEN -> Response.status(Response.Status.NOT_FOUND)
                 .entity(mapOf("error" to "NOT_FOUND", "message" to "no open posting intent for $event on deal $id"))

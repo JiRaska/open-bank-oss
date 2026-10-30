@@ -122,4 +122,3 @@ tests:
       - eval_time: 8m
         alertname: TreasuryPostingIntentJournalAfterClose
         exp_alerts: []
-

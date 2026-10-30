@@ -254,7 +254,12 @@ interface PostingIntentPort {
         actor: Actor,
         reason: String,
         createdBefore: Instant,
+        /** The client's Idempotency-Key, recorded with the close (unique). */
+        commandKey: String? = null,
     ): PostingIntentCloseOutcome
+
+    /** The intent key a close under [commandKey] closed, or null when no close used it. */
+    suspend fun closedBy(commandKey: String): String?
 
     companion object {
         /** No intent store: the pre-#13883 behaviour. Unit tests of the lifecycle alone only. */
@@ -268,8 +273,14 @@ interface PostingIntentPort {
             override suspend fun unresolvedFor(dealId: UUID) = emptyList<PostingIntent>()
             override suspend fun blocksAccrual(dealId: UUID) = false
             override suspend fun summary() = OpenIntentSummary(0, null)
-            override suspend fun closeByOperator(key: String, actor: Actor, reason: String, createdBefore: Instant) =
-                PostingIntentCloseOutcome.NOT_OPEN
+            override suspend fun closeByOperator(
+                key: String,
+                actor: Actor,
+                reason: String,
+                createdBefore: Instant,
+                commandKey: String?,
+            ) = PostingIntentCloseOutcome.NOT_OPEN
+            override suspend fun closedBy(commandKey: String): String? = null
         }
     }
 }

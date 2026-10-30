@@ -86,6 +86,9 @@ internal class InMemoryIntents : PostingIntentPort {
     val rows = linkedMapOf<String, Pair<PostingIntent, Status>>()
     val closedBy = mutableMapOf<String, String>()
     val escalated = mutableSetOf<String>()
+    val closeCommands = mutableMapOf<String, String>()
+
+    override suspend fun closedBy(commandKey: String) = closeCommands[commandKey]
 
     /** Append-only, as `deal_posting_intent_history`: (key, transition, actor, reason, value day). */
     val history = mutableListOf<List<Any?>>()
@@ -195,6 +198,7 @@ internal class InMemoryIntents : PostingIntentPort {
         actor: Actor,
         reason: String,
         createdBefore: Instant,
+        commandKey: String?,
     ): PostingIntentCloseOutcome {
         val open = rows[key]?.takeIf { it.second == Status.OPEN } ?: return PostingIntentCloseOutcome.NOT_OPEN
         val row =
@@ -202,6 +206,7 @@ internal class InMemoryIntents : PostingIntentPort {
         rows[key] = row.first to Status.CLOSED_BY_OPERATOR
         closedBy[key] = actor.id
         record(key, "CLOSED_BY_OPERATOR", actor.id, reason)
+        commandKey?.let { closeCommands[it] = key }
         return PostingIntentCloseOutcome.CLOSED
     }
 

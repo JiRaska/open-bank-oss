@@ -420,6 +420,7 @@ paths:
         reversing the deal, and a person only.
       parameters:
         - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:

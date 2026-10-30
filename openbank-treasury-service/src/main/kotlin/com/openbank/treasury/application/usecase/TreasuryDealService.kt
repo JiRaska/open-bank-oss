@@ -750,7 +750,7 @@ class TreasuryDealService(
         return claimKey
     }
 
-    private fun claimKey(dealId: UUID) = lifecycleKey(dealId, PostingEvent.REVERSED) + CLAIM_MARKER + UUID.randomUUID()
+    private fun claimKey(dealId: UUID) = lifecycleKey(dealId, PostingEvent.REVERSED) + CLAIM_MARKER + Ids.randomId()
 
     private fun lifecycleKey(dealId: UUID, event: PostingEvent) = "treasury:$dealId:${event.key}"
 
@@ -932,7 +932,20 @@ class TreasuryDealService(
         event: PostingEvent,
         reason: String,
         actor: Actor,
+        key: String?,
     ): PostingIntentCloseOutcome {
+        key?.let { k ->
+            require(k.isNotBlank() && k.length <= MAX_KEY_LENGTH) {
+                "Idempotency-Key must be 1..$MAX_KEY_LENGTH characters"
+            }
+            intents.closedBy(k)?.let { closed ->
+                // A replay of this very close answers as it did; the key on another request is a client bug.
+                require(closed == lifecycleKey(dealId, event)) {
+                    "Idempotency-Key was already used for another request"
+                }
+                return PostingIntentCloseOutcome.CLOSED
+            }
+        }
         require(reason.isNotBlank()) { "a reason is required to close a posting intent" }
         if (actor.type != com.openbank.treasury.domain.model.ActorType.HUMAN) {
             throw com.openbank.treasury.domain.model.ActorNotPermittedException(
@@ -950,7 +963,7 @@ class TreasuryDealService(
         }
         // Not while its own command or a reconciler may still be posting it: younger than the grace,
         // or under a live claim, the close is refused (IN_FLIGHT) rather than raced.
-        return intents.closeByOperator(intent.idempotencyKey, actor, reason, clock.instant().minus(grace))
+        return intents.closeByOperator(intent.idempotencyKey, actor, reason, clock.instant().minus(grace), key)
     }
 
     /**

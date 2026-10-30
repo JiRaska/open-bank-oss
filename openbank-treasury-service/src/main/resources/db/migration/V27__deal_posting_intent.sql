@@ -76,6 +76,8 @@ CREATE TABLE deal_posting_intent_history (
     -- JOURNAL_APPLIED_AFTER_CLOSE only: the status the intent was closed with (REFUSED or
     -- CLOSED_BY_OPERATOR), which the late journal did NOT overwrite.
     prior_status    VARCHAR(24),
+    -- CLOSED_BY_OPERATOR only: the client's Idempotency-Key of the close (a replay answers CLOSED).
+    command_key     VARCHAR(128)  UNIQUE,
     value_date      DATE          NOT NULL
 );
 
