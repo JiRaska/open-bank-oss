@@ -29,19 +29,36 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 
 ## Project Status
 
-**Beta — M1 complete, M2/M3/M5 in progress.** ~37 backend microservices in the repo, all now deployed to the AWS sandbox — FINREP (previously the lone code-only service) deploys via its own ArgoCD Application (#547), and the new Verification-of-Payee (VoP) service is live (ADR-0171); customer-edge + admin-UI + developer portal deployed. The intra-bank money path is end-to-end; the ISO 20022 pipeline and clearing simulator are wired; live interbank network connections and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full M1–M7 plan.
+**Beta — status verified 2026-10-30.** M1 complete; M2 (resilience), M3 (compliance evidence), M4 (observability) and M5 (security) are all substantially delivered and in their long tail; M6/M7 (multi-region) not started. The intra-bank money path runs end-to-end on Temporal, the ISO 20022 pipeline, clearing simulator and net-settlement ledger leg are wired, and the platform has grown from a payments core into treasury/ALM, card processing, KYB, engagement and pensions. Live interbank network connections and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+**At a glance** (measured on `main`, 2026-10-30):
+
+| | |
+|---|---|
+| Deployable modules (Quarkus services, agents, BFFs) | **74**, of which 12 governed AI-agent/auditor services |
+| Independently released components (release-please) | **71** — 400+ releases since 2026-09-01 |
+| Money-path services (2 approvals + threat model) | **28** |
+| Architecture Decision Records | **345** — 120 shipped, 107 partially delivered, 93 proposed/planned ([digest](docs/adr/DIGEST.md)) |
+| CI gates declared in [`gates.yaml`](.github/gates/gates.yaml) | **320** |
+| Services with Flyway schemas (migrations) · committed Pact contracts · threat models | 65 (694) · 132 · 63 |
+| Commits on `main` | 10,000+ |
 
 | Area | Status |
 |---|---|
 | Core domain (account, ledger, transaction, balance) | 🟢 Implemented, tested, deployed |
 | Payments — intra-bank (transaction Temporal workflow → ledger → balance) | 🟢 End-to-end, deployed |
-| Payments — interbank rails (SEPA, domestic, instant, clearing) | 🟡 ISO 20022 pipeline + clearing simulator wired (ADR-0104/0108); **live interbank network not connected** |
+| Payments — interbank rails (SEPA, domestic, instant, clearing) | 🟡 ISO 20022 pipeline + clearing simulator + net-settlement ledger leg (ADR-0104/0108/0281); idempotent on scheme natural keys (ADR-0287–0300); **live interbank network not connected** |
 | PSD2 / Open Banking (consent, SCA, TPP registry) | 🟢 Consent + SCA + XS2A developer portal live (developer.open-bank.tech); TPP registry deployed to sandbox |
 | EUDI / PID digital identity | 🟢 OpenID4VP + OpenID4VCI e2e live (ADR-0094); pid-service deployed |
-| KYC / AML / Sanctions screening | 🟡 Real screening logic (pg_trgm), deployed; vendor feeds are stubs |
+| KYC / KYB / AML / Sanctions screening | 🟡 Real screening logic (pg_trgm) against real OFAC/UN/HM/PEP list ingests; legal-entity onboarding + representation mandates (KYB, ADR-0284) partial; Financial-Crime-as-Code packs planned (ADR-0354); commercial vendor feeds not integrated |
 | GDPR Art. 17 right-to-erasure | 🟢 PARTY_ERASED event handled fleet-wide (kyc, notification, card-issuance) |
 | Cards, disputes, interest, standing orders, statements, onboarding | 🟢 Implemented + deployed; standing-order daily scheduler live |
-| Lending | 🟢 Deployed to sandbox (four-eyes KYC gate, ADR-0028); no live credit bureau integration |
+| Lending | 🟢 Deployed to sandbox (four-eyes KYC gate, ADR-0028), loan products in the catalog kernel (ADR-0264); no live credit bureau integration |
+| Treasury, ALM & risk | 🟡 Treasury deals + GL posting + nostro + minimum reserves, risk-engine balance-sheet snapshot (ADR-0313–0315) — partial |
+| Card platform | 🟡 Scheme-agnostic card-processing bounded context (ADR-0283), PAN vault via OpenBao Transit envelope encryption (ADR-0262) |
+| Engagement, campaigns, loyalty, referral | 🟢 Versioned decision-graph campaign journeys on Temporal (ADR-0263); gamification slice (ADR-0261) |
+| Pensions | 🟡 Pension + pension-fund services; full transformed-fund operations planned (ADR-0338) |
+| Banking context graph | 🟡 Authorized hybrid retrieval + fraud/AML investigation and payment-trace graphs (ADR-0303–0309) — partial |
 | SWIFT messaging | 🟡 Deployed (ISO 20022 MT/MX pipeline wired); no live SWIFT network connection |
 | Verification of Payee (VoP) | 🟢 Deployed to sandbox; name-match on outbound credit transfers, UI gate on SCT/SCT Inst (ADR-0171) |
 | AnaCredit, SDD, TPP registry | 🟢 Implemented, deployed to sandbox |
@@ -49,14 +66,15 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 | Product catalog | 🟢 Implemented, deployed |
 | Customer edge (BFF) + mobile app | 🟡 BFF deployed (OPA enforce mode on); KMP/Compose app in active dev (separate repo) |
 | AI agent service (MCP, policy-gated) | 🟡 Fleet read tools + audit (ADR-0031); **copilot-service with LLM deployed in sandbox** |
-| Fraud detection | 🟡 Deployed; Phase 2 velocity-counter signal plane wired (ADR-0084); rule engine pending |
-| Durable workflow execution | 🟢 Temporal live (ADR-0101); FX + statement flows on durable execution |
+| Fraud detection | 🟡 Deployed; velocity-counter signal plane (ADR-0084), ONNX shadow model scoring; relationship investigation (ADR-0304) partial |
+| Durable workflow execution | 🟢 Temporal live (ADR-0101/0120) in 20 modules — payments, FX, statements, lending, settlement, KYB, campaigns, pensions; payment-worker deployment versioning (ADR-0355) |
 | Test coverage | 🟡 Ratchet-only gate; money-path services carry higher floors |
 | Governance-as-code (versioning, release, catalog) | 🟢 CI-enforced (ADR-0029) |
 | Supply-chain security (SBOM, signing, SAST, pen-test P0–P2) | 🟢 CI-enforced (ADR-0030); external pen-test P0–P2 findings remediated |
 | CI/CD | 🟢 Self-hosted runners + path-scoped gates + GitOps auto-deploy (ADR-0040) |
-| Observability (OTel, Grafana, Prometheus, Loki, Tempo, Pyroscope) | 🟢 Live; GoAlert on-call, Pyrra SLO-as-code, GlitchTip errors, DomainMetrics fleet-wide |
-| Cloud substrate (AWS, OpenTofu, ArgoCD GitOps) | 🟢 Sandbox live (EKS + ArgoCD) — full in-repo backend fleet deployed (no service code-only any longer) |
+| Observability (OTel, Grafana, Prometheus, Loki, Tempo, Pyroscope) | 🟢 Live; GoAlert on-call, Pyrra SLO-as-code, GlitchTip errors, DomainMetrics + workflow-liveness gauges fleet-wide, admin-UI browser RUM (ADR-0274) |
+| Reporting & FinOps | 🟢 Governed query registry over ClickHouse gold (ADR-0286); in-cluster Infracost + Cost Explorer FinOps dashboard (ADR-0316, partial) |
+| Cloud substrate (AWS, OpenTofu, ArgoCD GitOps) | 🟢 Sandbox live (EKS + ArgoCD, 112 ArgoCD apps); money-path Postgres clusters HA (`instances: 2`); quarterly automated DR restore-verify |
 
 ### What works right now (sandbox at open-bank.tech)
 
@@ -86,7 +104,7 @@ See the full list in [docs/ROADMAP.md — Known gaps](docs/ROADMAP.md#known-gaps
 
 ## Quick Start (Local Docker)
 
-**Prerequisites:** Docker Desktop ≥ 4.x (Compose v2), 16 GB RAM recommended (the full fleet is ~40 services).
+**Prerequisites:** Docker Desktop ≥ 4.x (Compose v2), 16 GB RAM recommended (the full fleet is 70+ services — start a subset for day-to-day work).
 
 ```bash
 cd openbank-infra
@@ -142,15 +160,15 @@ diagram, container diagram, key decisions, deployment topology, and security arc
 
 | Layer | Technology |
 |---|---|
-| Backend | Kotlin 2.3.20 + Quarkus 3.37 |
-| Database | PostgreSQL 18 via CNPG (Flyway migrations) — cluster fleet migrated 16 → 18 (runbook 0003); local Docker dev still on 16 |
+| Backend | Kotlin 2.4 + Quarkus 3.40 (JVM 25) |
+| Database | PostgreSQL 18 via CNPG (Flyway migrations) — cluster fleet and local Docker dev both on 18 |
 | Messaging | Apache Kafka, cluster operated by the Strimzi operator (transactional outbox); Redpanda for per-JVM integration tests |
 | Schema registry | Apicurio 2.6 |
-| Cache | Valkey 7.2 |
-| IAM | Keycloak 24 |
+| Cache | Valkey 8 |
+| IAM | Keycloak 26 |
 | Secrets | OpenBao (LF fork of Vault; runbook 0005), synced into the cluster by External Secrets Operator |
 | Policy / authz | Open Policy Agent (OPA) for app-level authz; Kyverno for cluster admission policy + supply-chain (SBOM/signature) verification |
-| Durable execution | Temporal (ADR-0101/ADR-0120) — payment orchestration (transaction, SEPA, domestic) plus FX + statement flows; superseded the earlier custom saga framework (ADR-0045, now superseded) |
+| Durable execution | Temporal (ADR-0101/ADR-0120) — payment orchestration (transaction, SEPA, domestic), FX, statements, lending, settlement, KYB, campaigns; superseded the earlier custom saga framework (ADR-0045, now superseded) |
 | Observability | OpenTelemetry → Grafana (Prometheus + Loki + Tempo + Pyroscope); GoAlert on-call, Pyrra SLO-as-code, GlitchTip errors, ntfy push channel |
 | Admin UI | Next.js 16 + React 19 + TypeScript + shadcn/ui |
 | Ingress | ingress-nginx is the sandbox's actual entrypoint (per-service Ingress + rate limiting); Kong OSS ([`openbank-api-gateway`](openbank-api-gateway/README.md)) is a local-Docker-only dev gateway, not deployed to the sandbox |
