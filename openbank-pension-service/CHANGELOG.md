@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v3.1.0...pension-service-v3.1.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **pension:** bound rejected partner response lifecycles ([#14126](https://github.com/JiRaska/open-bank-oss/issues/14126)) ([167e270](https://github.com/JiRaska/open-bank-oss/commit/167e270e861dd1698f91643627fb0eb1a4193e2e))
+
 ## [3.1.0](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v3.0.0...pension-service-v3.1.0) (2026-10-21)
 
 

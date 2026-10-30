@@ -1412,6 +1412,19 @@ def owner_approval_error(repo: str, number: int, head: str, decision: str,
     return None
 
 
+def owner_status_line(statuses: list) -> str | None:
+    """Newest owner-approval status created by the App itself (login AND id); anyone else's is ignored.
+    The description is attacker-influenceable text on a shared summary, so strip all but plain
+    printable ASCII (no markdown/HTML metacharacters) and truncate."""
+    mine = [st for st in statuses if st.get("context") == OWNER_APPROVAL_CONTEXT
+            and (st.get("creator") or {}).get("login") == BOT_LOGIN and (st.get("creator") or {}).get("id") == BOT_ID]
+    if not mine:
+        return None
+    st = max(mine, key=lambda x: x["id"])
+    desc = re.sub(r"[^A-Za-z0-9 #:._-]", "", str(st.get("description") or ""))[:80]
+    return f"state={re.sub(r'[^a-z_]', '', str(st.get('state')))[:20]} description={desc}"
+
+
 def mode_owner_approval(gh, number: int, head: str, decision: str) -> None:
     metadata = get(f"/repos/{gh.repo}")
     pr = gh.pr(number)
@@ -2812,12 +2825,17 @@ def owner_approval_declaration_errors(text: str) -> list[str]:
             "show HEAD:.github/scripts/merge-train.py", "python3 -I -S", '" owner-approval',
             '--pr "$OWNER_PR" --head "$OWNER_HEAD" --decision "$OWNER_DECISION"']
     errors = [f"owner approval writer missing {needle}" for needle in must if needle not in sec]
-    if "group: merge-train-owner-approval-${{ github.event_name }}-${{ github.ref }}" not in code or "cancel-in-progress: false" not in code:
+    if "group: merge-train-owner-approval-${{ github.event_name }}-${{ github.ref }}-${{ github.actor }}-${{ inputs.pr }}" not in code or "cancel-in-progress: false" not in code:
         errors.append("owner decisions must serialize separately from untrusted PR verification")
     if sec.count("actions/checkout@") != 1 or sec.count("ref: main") != 1:
         errors.append("owner approval writer must check out main exactly once")
-    if sec.count("run:") != 1:
-        errors.append("owner approval writer must have only its isolated decision command")
+    for needle in (r"^[1-9][0-9]*$", r"^[0-9a-f]{40}$"):
+        if needle not in sec:
+            errors.append(f"owner approval writer must validate inputs with {needle}")
+    if sec.index("Validate decision inputs") > sec.index("actions/checkout@"):
+        errors.append("owner approval input validation must run before anything else")
+    if sec.count("run:") != 4:
+        errors.append("owner approval writer must have only validation, revoke-first, decision and summary commands")
     for forbidden in ("github.head_ref", "github.event.", "download-artifact", "gh pr merge", "gh pr review",
                       "contents: write", "statuses: write", "pull_request_target:"):
         if forbidden in code:
@@ -5961,7 +5979,7 @@ def self_test() -> int:
 # --------------------------------------------------------------------------- main
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle", "owner-approval"])
+    ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle", "owner-approval", "owner-status"])
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--check-declaration", action="store_true")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
@@ -6015,6 +6033,10 @@ def api_abort_exit(mode: str, exc: ApiAbort) -> int:
 
 
 def run_mode(gh, args, ap) -> int:
+    if args.mode == "owner-status":
+        line = owner_status_line(paginate(f"/repos/{gh.repo}/commits/{args.head}/statuses"))
+        print(line or "no App status found")
+        return 0 if line else 1
     if args.mode == "owner-approval":
         mode_owner_approval(gh, args.pr, args.head, args.decision)
         return 0

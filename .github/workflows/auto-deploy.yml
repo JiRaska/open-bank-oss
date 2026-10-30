@@ -746,11 +746,9 @@ jobs:
               echo "Using verified exact-source context fast-jar and SBOM."
               continue
             fi
-            # cyclonedxBom alongside quarkusBuild so every service's image gets its
-            # CycloneDX SBOM baked in (served live at /q/openbank/sbom by libs
-            # SbomResource). Fleet-wide via this central loop — no per-service
-            # Dockerfile edits, no separate sweep.
-            TASKS+=(":${svc}:quarkusBuild" ":${svc}:cyclonedxBom")
+            # Build then verify original library bytes against the generated SBOM.
+            # This does not replace image provenance or runtime rollout checks.
+            TASKS+=(":${svc}:verifyPackagedLibrarySbom")
           done
 
           echo "==> Building ${#TASKS[@]} service(s) via single Gradle invocation (--parallel --max-workers=4)"
@@ -804,6 +802,10 @@ jobs:
             local image="${ECR_REGISTRY}/${svc}:${TAG}"
             local ctx; ctx="$(mktemp -d)"
             trap 'rm -rf "$ctx"' RETURN
+            python3 .github/scripts/verify-packaged-library-sbom.py \
+              --sbom "${svc}/build/reports/bom.json" \
+              --receipt "${svc}/build/reports/library-artifacts/verification.json" \
+              --quarkus-app "$qa" > /dev/null || return 1
             cp -r "$qa" "${ctx}/quarkus-app"
             # Gradle sets quarkus-app/lib/ files to 600 (owner-read-only). The
             # container runs as non-root user `openbank` → ClassNotFoundException
@@ -815,10 +817,8 @@ jobs:
             # and treats zero-indented heredoc lines as invalid YAML nodes).
             cp "${GITHUB_WORKSPACE}/.github/workflows/Dockerfile.deploy" \
               "${ctx}/Dockerfile"
-            # Bake the CycloneDX SBOM (if cyclonedxBom produced one) so the running
-            # service serves it live at /q/openbank/sbom (libs SbomResource). Best-
-            # effort: a service without the report just ships without it and the
-            # endpoint returns not_generated (admin-ui falls back to the bundle).
+            # Bake the SBOM just validated against the packaged original libraries.
+            # The live endpoint serves inventory, not deployment attestation.
             if [ -f "${svc}/build/reports/bom.json" ]; then
               mkdir -p "${ctx}/sbom"
               cp "${svc}/build/reports/bom.json" "${ctx}/sbom/bom.json"
@@ -1244,20 +1244,6 @@ jobs:
           cp .github/scripts/can-i-deploy-gate.sh "$RUNNER_TEMP/can-i-deploy-gate.sh"
           git checkout --detach "$SOURCE_COMMIT"
 
-      # Source evidence shares GITHUB_TOKEN's repository quota with other workflows.
-      # Use the existing App's separate quota, scoped to read-only evidence in this repo.
-      - name: Mint a read-only source evidence token
-        id: source_evidence_token
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true'))
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          app-id: ${{ secrets.GITOPS_APP_ID }}
-          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: read
-          permission-contents: read
-
       # The pact CLI runs natively on the ARC runner pod (which resolves the broker's
       # cluster DNS); the pact-cli docker image would run in dind and could not. The
       # standalone ships a linux arm64 build for the Graviton runner.
@@ -1280,7 +1266,10 @@ jobs:
           # Reconcile must prove the exact main Services CI attempt that produced each Pact
           # source before it can ask the Broker or mutate GitOps image pins.
           RECONCILE_SOURCE_REQUIRED: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true') }}
-          GH_TOKEN: ${{ steps.source_evidence_token.outputs.token || github.token }}
+          # github.token (the job grants actions: read) reads the Services CI
+          # runs/jobs evidence. The GitOps App installation lacks actions:read, so an App token
+          # cannot read them (#13587); the shared GITHUB_TOKEN quota is accepted by owner decision.
+          GH_TOKEN: ${{ github.token }}
           # A ${{ }} expression is substituted by the runner before the shell sees it, so it
           # cannot survive extraction into a script — these three move to the environment.
           # SERVICES stays out of any concurrency.group: interpolating a fleet-sized list into

@@ -53,6 +53,9 @@ object TopicProducers {
         "openbank.sepa.payment.events" to "sepa-payment",
         "openbank.statement.event" to "statement-service",
         "openbank.sanctions.screening.event" to "sanctions-service",
+        // Both producers stamp a required sourceService in every valid trigger. Never guess one of
+        // them from this shared topic if a malformed record omits that producer declaration.
+        "openbank.oversight-triggers" to "multiple-producers",
         "openbank.sepa.instant.events" to "sepa-instant",
         "openbank.fx.conversion.completed" to "fx-service",
         "openbank.fx.fixing.published" to "fx-service",

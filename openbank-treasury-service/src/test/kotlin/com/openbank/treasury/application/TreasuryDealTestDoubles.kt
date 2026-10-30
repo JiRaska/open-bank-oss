@@ -25,6 +25,9 @@ internal class RecordingLedger : LedgerPostingPort {
     val entryDates = mutableMapOf<String, LocalDate>()
     var failFor: UUID? = null
 
+    /** Runs after every accepted post (a test advances its clock here). */
+    var onPost: () -> Unit = {}
+
     /**
      * Bumped to simulate a reviewed ledger migration re-pointing the accountingClass map: a class leg
      * then resolves to a DIFFERENT account, while a leg that names its account (a pinned reversal)
@@ -40,6 +43,7 @@ internal class RecordingLedger : LedgerPostingPort {
         if (spec.dealId == failFor) error("ledger unavailable")
         posted += spec
         entryDates[spec.idempotencyKey] = entryDate
+        onPost()
         return PostedJournal(
             UUID.nameUUIDFromBytes(spec.idempotencyKey.toByteArray()),
             spec.lines.map { ResolvedAccount(it.accountingClass, it.role, it.currency, resolve(it)) },
@@ -54,6 +58,9 @@ internal class InMemoryDeals : DealRepository {
 
     val commands = mutableMapOf<String, CommandKey>()
 
+    /** When true, the next save throws (nothing of it is kept), as a rolled-back transaction. */
+    var failNextSave = false
+
     val schedules = mutableListOf<com.openbank.treasury.application.port.out.ScheduleWrite>()
 
     override suspend fun save(
@@ -64,8 +71,12 @@ internal class InMemoryDeals : DealRepository {
         schedule: com.openbank.treasury.application.port.out.ScheduleWrite?,
         extraEvents: List<DealEvent>,
     ): Deal {
+        if (failNextSave) {
+            failNextSave = false
+            error("simulated: the state-change transaction rolled back")
+        }
         rows[deal.id] = deal
-        journal?.let { journals += it }
+        journal?.let { recordJournal(it) } // the real save skips a journal already recorded by key
         event?.let { events += it }
         events += extraEvents
         schedule?.let { schedules += it }
@@ -91,7 +102,9 @@ internal class InMemoryDeals : DealRepository {
     override suspend fun pendingLimitOverrides() =
         rows.values.filter { it.state == DealState.PENDING_APPROVAL && it.limitOverride != null }
     override suspend fun journals(dealId: UUID) = journals.filter { it.dealId == dealId }
-    override suspend fun recordJournal(journal: LedgerJournalRef) {
-        if (journals.none { it.idempotencyKey == journal.idempotencyKey }) journals += journal
+    override suspend fun recordJournal(journal: LedgerJournalRef): Boolean {
+        if (journals.any { it.idempotencyKey == journal.idempotencyKey }) return false
+        journals += journal
+        return true
     }
 }

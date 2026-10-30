@@ -60,6 +60,18 @@ Authorization: Bearer <token>
 - `POTENTIAL_HIT` → blokuj do ručního compliance přezkumu
 - `HIT` nebo `ESCALATED` → blokuj; nepokračuj
 
+**Clearance vázané na subjekt (#11694):**
+- Stabilní identifikátor strany posílej jako volitelné `subjectId`, odděleně od `idempotencyKey`
+  pro konkrétní pokus. Nový pokus o otevření účtu použije nový klíč a projde aktuálními listinami;
+  pouze stejný klíč vrátí původní výsledek.
+- Přezkum `WHITELISTED` platí 90 dní (`clearanceExpiresAt`) pouze pro přesně stejné `subjectId`,
+  typ entity, jméno, aliasy, datum narození, národnost a identifikátory.
+- Clearance pokrývá jen posouzené identity zásahů: `(listType, matchedId)`, případně
+  `(listType, matchedName)`, pokud záznam nemá externí ID. Nový nepokrytý zásah, změněný subjekt
+  nebo expirované clearance ponechají čerstvý blokující výsledek.
+- Staré záznamy bez `subjectId` nelze nově označit `WHITELISTED`. Subjekt znovu prověř s explicitním
+  ID a přezkum proveď nad tímto novým záznamem.
+
 ### Odeslat rozhodnutí o ručním přezkumu
 
 ```http
