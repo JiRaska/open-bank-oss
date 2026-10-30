@@ -67,6 +67,7 @@ class AccountRepositoryImpl(
             find("partyId = ?1 AND id = ?2", partyId, afterId).firstResult()
                 .flatMap { cursorRow ->
                     val cursor = requireNotNull(cursorRow) { "Invalid account cursor for party" }
+                    // Must stay in sync with the HQL CASE in typeOrder above (same type -> rank mapping).
                     val cursorOrder = when (cursor.accountType) {
                         "CURRENT" -> 0
                         "SAVINGS" -> 1

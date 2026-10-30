@@ -121,6 +121,10 @@ paths:
             default: 20
         - name: cursor
           in: query
+          description: >
+            Opaque cursor from the previous page. A cursor that is malformed, or
+            that names an account no longer visible to the caller (absent or owned
+            by another party), is rejected with 400.
           schema:
             type: string
       responses:
