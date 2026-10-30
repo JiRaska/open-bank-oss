@@ -197,6 +197,8 @@ object SyntheticPortfolio {
     private const val OPENS_INSIDE_PERCENT = 20
     private const val LEAP_DAY_PERCENT = 10
     private const val AMOUNT_SCALE = 2
+
+    // How far into the range an in-range opener may open: an offset, not a year basis.
     private const val MAX_OPEN_OFFSET_DAYS = 365
     private const val MIN_AGE_DAYS = 31
     private const val MAX_AGE_DAYS = 2000

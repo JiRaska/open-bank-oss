@@ -1,6 +1,6 @@
 {
   "name": "term-deposit-reference",
-  "description": "TERM-DEPOSIT-12M on 10 000 EUR opened 2026-01-01: maturity is scheduled for 2027-01-01, one day of the 2 % band at ACT/360 accrues 0.555556, a withdrawal of 10 000.01 is refused as INSUFFICIENT_FUNDS with no penalty, a full 10 000.00 withdrawal before maturity is refused as INSUFFICIENT_FUNDS because its 1 % penalty would overdraw the deposit, a 1000 withdrawal before maturity pays a 1 % penalty of 10.00, maturity capitalises the accrued 0.555556 truncated to 0.55 (the remainder stays accrued), and a withdrawal after maturity carries no penalty.",
+  "description": "TERM-DEPOSIT-12M on 10 000 EUR opened 2026-01-01; maturity scheduled 2027-01-01. Hand-derived: one day of the 2 % band at ACT/360 accrues 10000 x 0.02 / 360 = 0.555556 (scale 6, HALF_UP). A 10000.01 withdrawal projects 10000.00 - 10000.01 = -0.01 < 0.00, so posting.no-overdraft refuses it with INSUFFICIENT_FUNDS and, the interpreter keeping only the Reject, no penalty. A full 10000.00 withdrawal before maturity projects 0.00 >= 0 and passes posting.no-overdraft, but its 1 % penalty of 100.00 would overdraw the deposit, so posting.early-withdrawal refuses it with INSUFFICIENT_FUNDS. A 1000.00 withdrawal before maturity projects 9000.00 >= 0, so it passes and pays 1000.00 x 0.01 = 10.00. Maturity capitalises 0.555556 HALF_UP to the cent = 0.56. A withdrawal after maturity carries no penalty.",
   "revision": {
     "irVersion": 1,
     "productCode": "TERM-DEPOSIT-12M",
@@ -235,13 +235,13 @@
             {
               "accountingClass": "ACCRUED_INTEREST_PAYABLE",
               "direction": "DEBIT",
-              "amount": "0.55",
+              "amount": "0.56",
               "currency": "EUR"
             },
             {
               "accountingClass": "CUSTOMER_DEPOSIT",
               "direction": "CREDIT",
-              "amount": "0.55",
+              "amount": "0.56",
               "currency": "EUR"
             }
           ]

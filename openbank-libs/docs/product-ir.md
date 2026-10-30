@@ -120,7 +120,8 @@ its schedules. Every day after that it runs the customer postings (`prePosting`,
 itself if not rejected, then `postPosting`) and then the schedules that fall due. `MONTHLY` runs
 on the last day of the month, `QUARTERLY` on a quarter's last day, `ANNUALLY` on 31 December and
 `AT_MATURITY` once. `ProductStateTransition` moves the state between evaluations, exactly as in
-the golden runner. History older than the longest predicate window either revision reads is
+the golden runner. An evaluation that rejects counts its `Reject` only, never a `Post` or
+`Schedule` from the same batch. History older than the longest predicate window either revision reads is
 dropped, because no predicate can see it. A run is bounded by `ReplayLimits.MAX_DAYS` and the
 interpreter's per-evaluation cap.
 
@@ -138,7 +139,8 @@ closed objects, closed enums, local `$ref` only):
 | `schema` | `openbank.product-behaviour-diff.v1` |
 | `revisionA`, `revisionB` | `productCode`, `revisionHash`, `irVersion` |
 | `range`, `portfolio` | the calendar, the account count and the generator `seed` (a string, or null for recorded history) |
-| `identical` | true when no account and no aggregate bucket differs |
+| `valid` | both runs conserved money. `false` means an interpreter defect, and `obp` and Studio must treat the whole diff as an error |
+| `identical` | `valid`, and no account or aggregate bucket differs. Never true when `valid` is false |
 | `aggregate.posted` | per `ruleId` × accounting class: debit, credit and net under each revision, and `deltaNet` |
 | `aggregate.instructionCounts` | per `ruleId` × instruction kind: counts under each revision |
 | `aggregate.outcome` | net customer-deposit movement the product caused (interest, fees, penalties) |
@@ -170,9 +172,9 @@ The first replay of the reference products found four behaviours. Each was decid
 | Finding | Decision |
 |---|---|
 | `term-deposit` had no balance rule in `prePosting`, so a withdrawal larger than the balance overdrew it | Defect, fixed in `openbank-products`: a `PROJECTED_BALANCE LT 0.00` reject (`INSUFFICIENT_FUNDS`), ordered before the early-withdrawal penalty so a refused withdrawal is never charged one |
-| The savings monthly fee can take a dormant account below zero | Accepted in IR v1. `prePosting` guards customer postings; a scheduled `CHARGE_FEE` is a contractual charge and posts in full, leaving an unarranged debit balance for servicing to collect. A partial or capped fee would need a new IR action, which is an IR v2 change and not a product edit |
+| The savings monthly fee can take a dormant account below zero | Accepted in IR v1. `prePosting` guards customer postings; a scheduled `CHARGE_FEE` is a contractual charge and posts in full. Bounding it needs a new IR construct, and the v1 schema is immutable (ADR-0352 §1); tracked as #14207, folded into the IR v2 issue #14210 |
 | The `PROJECTED_BALANCE` reject leaves the early-withdrawal penalty out (`balance + signed`), so a full withdrawal before maturity passed it and the 1 % penalty overdrew the deposit to -penalty | v1 interpreter defect fix, not a product change: published v1 revisions keep their `revisionHash`, and outcomes change only where the old outcome broke the no-negative-deposit invariant, i.e. `balance - amount - penalty < 0` on a `RATE` penalty. There `EARLY_WITHDRAWAL_PENALTY` of kind `RATE` now rejects with `INSUFFICIENT_FUNDS` when `balance - amount - penalty < 0`. Capping the penalty at the balance left was rejected, because a full withdrawal would then pay no penalty at all. IR v1 cannot express balance-minus-penalty, so the check lives in the action, not in a product rule. `FORFEITED_INTEREST_FRACTION` debits accrued interest, not the deposit, and needs no check. `EarlyWithdrawalPenaltyFixInvarianceTest` replays every golden scenario against outputs captured from the pre-fix interpreter: every step outside the condition is byte-identical |
-| Capitalisation rounded accrued interest HALF_UP, so `accruedInterest` could end a few tenths of a cent negative | Defect, fixed in `DepositInterest.capitalise`: it truncates (DOWN) to the posting policy's scale and the sub-cent remainder stays accrued for the next capitalisation. The bank never posts interest that has not accrued, and `accruedInterest` never goes negative. `postingRounding` still rounds penalties |
+| Capitalisation rounds accrued interest HALF_UP to the cent, so `accruedInterest` can carry a sub-cent negative remainder into the next period | Unchanged in this IR version. Capitalisation rounding is part of every published revision's behaviour, so changing it (to DOWN, or to sweeping the residue at maturity or close) is an IR-version decision, not a shared-arithmetic edit (#14210). Each HALF_UP capitalisation leaves `|r| <= 0.005`, carried rather than accumulated, and negative when the cent was rounded up; an `AT_MATURITY` revision keeps its last `r` on `ACCRUED_INTEREST_PAYABLE`. The replay reports this as the named limitation `v1-capitalisation-residue` and asserts the bound |
 
 ## Testing
 

@@ -27,6 +27,7 @@ import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.libs.productrevision.SignedRevisionCopy
 import com.openbank.libs.productrevision.SignedRevisionSource
 import com.openbank.products.catalog.ReferenceProducts
+import com.openbank.simulation.model.CapitalisationResidueTracker
 import com.openbank.simulation.model.ProductShadowBook
 import java.math.BigDecimal
 import java.util.UUID
@@ -51,6 +52,15 @@ import java.util.UUID
  * | `no-negative-balance` | no accepted customer posting leaves a balance below the product's overdraft floor |
  * | `monotone-tier` | a larger balance never accrues less interest on the same day |
  * | `bounded-termination` | evaluations within the replay's structural bound |
+ * | `accrued-closure-reconciles` | per account, opening + accrued - capitalised - other debits == the book's accrued-interest-payable position |
+ * | `capitalisation-residue-bounded` | no capitalisation leaves more than half a cent either way on accrued interest payable |
+ *
+ * IR v1 capitalises HALF_UP to the cent, so the residue a capitalisation leaves is not zero: it is
+ * up to 0.005 either way and negative whenever the cent was rounded up (an over-payment of under
+ * half a cent, recovered from the next period's accrual). An `AT_MATURITY` product keeps its last
+ * residue on accrued interest payable for good. That is the named limitation
+ * [V1_CAPITALISATION_RESIDUE], reported in [ProductReplayReport.limitations] rather than read as a
+ * pass; an explicit rounding mode and a final residue sweep are IR v2 work.
  *
  * A balance the product's OWN debits (a scheduled fee, a penalty) take below the floor is not a
  * violation of `prePosting` — no rule of IR v1 can refuse a scheduled fee — and is reported in
@@ -80,6 +90,9 @@ object ProductReplayScenario {
         ReferenceCase("current-account", BigDecimal("-500.00")),
         ReferenceCase("term-deposit", BigDecimal.ZERO),
     )
+
+    /** The IR v1 limitation every capitalising product carries: see the class KDoc. */
+    const val V1_CAPITALISATION_RESIDUE = "v1-capitalisation-residue"
 
     private val SIMULATION_SIGNING_SECRET: ByteArray = "openbank-simulation-product-replay-key".toByteArray()
     private const val SIMULATION_KEY_ID = "simulation-hmac-1"
@@ -114,7 +127,8 @@ object ProductReplayScenario {
     ): ProductReplayReport {
         val revision = loadSigned(case.name)
         book.open(portfolio)
-        val result = ProductReplay(interpreter).run(revision, portfolio, range, book)
+        val residues = CapitalisationResidueTracker(book).also { it.open(portfolio) }
+        val result = ProductReplay(interpreter).run(revision, portfolio, range, residues)
         val violations = ArrayList<String>()
         val findings = ArrayList<ProductDebitBelowFloor>()
         if (!result.conserved) violations += "product-money-conservation: ${result.conservation}"
@@ -135,10 +149,33 @@ object ProductReplayScenario {
                 findings += ProductDebitBelowFloor(a.id, a.minBalance, debiting)
             }
         }
+        val closures = result.accounts.associate { it.id to residues.closure(it.id) }
+        violations += closureViolations(result, closures, book)
+        val limitations = if (closures.values.any { c -> c.residues.any { it.signum() != 0 } }) {
+            setOf(V1_CAPITALISATION_RESIDUE)
+        } else {
+            emptySet()
+        }
         tierViolation(revision, portfolio, range)?.let { violations += "monotone-tier: $it" }
         val bound = evaluationBound(portfolio, range)
         if (result.evaluations > bound) violations += "bounded-termination: ${result.evaluations} > $bound"
-        return ProductReplayReport(case, result, book.daysChecked, bound, violations, findings)
+        return ProductReplayReport(case, result, book.daysChecked, bound, violations, findings, closures, limitations)
+    }
+
+    /** `accrued-closure-reconciles` and `capitalisation-residue-bounded`, per account. */
+    private fun closureViolations(
+        result: ReplayResult,
+        closures: Map<String, CapitalisationResidueTracker.Closure>,
+        book: ProductShadowBook,
+    ): List<String> = result.accounts.flatMap { a ->
+        val c = closures.getValue(a.id)
+        val booked = book.accruedPayable(a.id, a.currency)
+        listOfNotNull(
+            "accrued-closure-reconciles: ${a.id} implied ${c.implied} book $booked"
+                .takeIf { c.implied.compareTo(booked) != 0 },
+            c.residues.firstOrNull { it.abs() > CapitalisationResidueTracker.V1_RESIDUE_BOUND }
+                ?.let { "capitalisation-residue-bounded: ${a.id} left $it" },
+        )
     }
 
     /**
@@ -186,6 +223,10 @@ data class ProductReplayReport(
     val evaluationBound: Long,
     val violations: List<String>,
     val findings: List<ProductDebitBelowFloor>,
+    /** Per account: how the accrued-interest-payable position moved, and each capitalisation's residue. */
+    val closures: Map<String, CapitalisationResidueTracker.Closure> = emptyMap(),
+    /** Named IR-version limitations this run exhibited, e.g. [ProductReplayScenario.V1_CAPITALISATION_RESIDUE]. */
+    val limitations: Set<String> = emptySet(),
 )
 
 /** An account the product's own debits ([rules]) took below its overdraft floor, down to [minBalance]. */
