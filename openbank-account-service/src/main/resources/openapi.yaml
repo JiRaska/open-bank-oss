@@ -22,7 +22,7 @@ info:
   # 1.23 -> 1.24 (ADR-0341 D1, #668): additive — the Account response exposes the optional
   # productRevision pin (absent on accounts opened before it existed); open-account documents
   # 422 PRODUCT_REVISION_NOT_PUBLISHED and 503 PRODUCT_CATALOG_UNAVAILABLE (fail-closed on the pin).
-  version: 1.24.0
+  version: 1.25.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
