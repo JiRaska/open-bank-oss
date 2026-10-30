@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.35.1...account-service-v0.36.0) (2026-10-29)
+
+
+### Features
+
+* **account:** pin the published product revision at account opening (ADR-0341, ADR-0352 phase 3) ([#13869](https://github.com/JiRaska/open-bank-oss/issues/13869)) ([9e34827](https://github.com/JiRaska/open-bank-oss/commit/9e348271857e1b6c63942c46496c7630ab71de37))
+
 ## [0.35.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.35.0...account-service-v0.35.1) (2026-10-19)
 
 
