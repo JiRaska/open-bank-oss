@@ -23,9 +23,11 @@ import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.NotificationCopyCatalog
 import com.openbank.notification.domain.RecipientAddress
 import com.openbank.notification.domain.model.EmailSendOutcome
+import com.openbank.notification.domain.model.ManagedNotificationTemplate
 import com.openbank.notification.domain.model.MobileDeepLink
 import com.openbank.notification.domain.model.NotificationCategory
 import com.openbank.notification.domain.model.NotificationChannel
+import com.openbank.notification.domain.model.NotificationLanguage
 import com.openbank.notification.domain.model.NotificationOutcome
 import com.openbank.notification.domain.model.NotificationOutcomeEvent
 import com.openbank.notification.domain.model.NotificationRequest
@@ -36,7 +38,10 @@ import com.openbank.notification.domain.model.PushSendOutcome
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.client.PartyContactClient
 import com.openbank.notification.infrastructure.client.PartyMergeResolver
+import com.openbank.notification.infrastructure.contact.MarketingContactReservationStore
+import com.openbank.notification.infrastructure.contact.MarketingReservationDecision
 import com.openbank.notification.infrastructure.persistence.NotificationDeduplication
+import com.openbank.notification.infrastructure.persistence.PgManagedTemplateStore
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
@@ -66,7 +71,7 @@ import java.util.function.Function
 import java.util.function.Supplier
 
 @ApplicationScoped
-@Suppress("TooManyFunctions") // one delivery path per channel + shared helpers; grows with channels
+@Suppress("TooManyFunctions", "LargeClass") // channel delivery and its shared guards remain one dispatch owner
 class NotificationConsumer @Inject constructor(
     /** See the KDoc on the `mailerMocked` declaration site below (issue #4737). */
     @ConfigProperty(name = "quarkus.mailer.mock", defaultValue = "false")
@@ -107,6 +112,7 @@ class NotificationConsumer @Inject constructor(
         fun marketingScopeFor(channel: NotificationChannel): String = when (channel) {
             NotificationChannel.EMAIL -> "MARKETING_COMMS_EMAIL"
             NotificationChannel.PUSH -> "MARKETING_COMMS_PUSH"
+            NotificationChannel.INBOX -> error("marketing inbox requires a separate impression policy")
         }
 
         /**
@@ -128,7 +134,7 @@ class NotificationConsumer @Inject constructor(
         }
 
         /**
-         * Terminal status of one EMAIL send from its three-state [EmailSendOutcome] (issue #4737).
+         * Terminal status of one EMAIL handoff, or null while provider acceptance is uncertain.
          *
          * Visible for tests, and deliberately a pure function of one value: like [pushOutcomeOf],
          * this mapping *is* the defect. The previous form asked only "did the `Uni` fail?", and a
@@ -142,17 +148,17 @@ class NotificationConsumer @Inject constructor(
          * map to SENT — that is the whole bug, and the sandbox's mock is deliberate (its gitops
          * manifest says so), so the record's honesty has to hold independently of the config.
          */
-        fun emailOutcomeOf(outcome: EmailSendOutcome): NotificationOutcome = when (outcome) {
+        fun emailOutcomeOf(outcome: EmailSendOutcome): NotificationOutcome? = when (outcome) {
             EmailSendOutcome.ACCEPTED -> NotificationOutcome.SENT
             EmailSendOutcome.MOCKED -> NotificationOutcome.SUPPRESSED
-            EmailSendOutcome.FAILED -> NotificationOutcome.FAILED
+            EmailSendOutcome.IN_DOUBT -> null
         }
 
-        /** Reason code accompanying [emailOutcomeOf]; null exactly when the mailer accepted. */
+        /** A terminal reason; unresolved handoffs have no terminal outcome event. */
         fun emailReasonOf(outcome: EmailSendOutcome): String? = when (outcome) {
             EmailSendOutcome.ACCEPTED -> null
             EmailSendOutcome.MOCKED -> NotificationOutcomeEvent.REASON_MAILER_MOCKED
-            EmailSendOutcome.FAILED -> NotificationOutcomeEvent.REASON_MAILER_REFUSED
+            EmailSendOutcome.IN_DOUBT -> null
         }
 
         /** Reason code accompanying [pushOutcomeOf]; null exactly when something was accepted. */
@@ -218,6 +224,10 @@ class NotificationConsumer @Inject constructor(
 
     @Inject lateinit var contactGate: ContactPolicyGate
 
+    @Inject lateinit var marketingReservations: MarketingContactReservationStore
+
+    @Inject lateinit var managedTemplates: PgManagedTemplateStore
+
     /** Resolves the EMAIL envelope address from `partyId` (issue #3581) — see [resolveEmailRecipient]. */
     @Inject
     @RestClient
@@ -271,8 +281,9 @@ class NotificationConsumer @Inject constructor(
         val req = try {
             objectMapper.readValue(payload, NotificationRequest::class.java)
         } catch (e: Exception) {
-            // Un-parseable (poison) payload: log and ack so one bad record can't wedge the partition.
-            log.errorf(e, "Failed to parse notification payload: %s", payload)
+            // Un-parseable (poison) payload: ack so one bad record cannot wedge the partition.
+            // Raw requests and exception messages can contain customer values; log neither.
+            log.errorf("Failed to parse notification request (%s); poison record acknowledged", e.javaClass.simpleName)
             return Uni.createFrom().voidItem()
         }
         // Closed variable schema (ADR-0176 D1, issue #1325). A key the template does not declare
@@ -301,6 +312,14 @@ class NotificationConsumer @Inject constructor(
             log.errorf("Rejected notification with non-bank mobile deep-link for template=%s", req.template.name)
             return Uni.createFrom().voidItem()
         }
+        val invalidInboxRequest = req.template.category == NotificationCategory.MARKETING ||
+            req.recipient != req.partyId.toString() ||
+            req.deduplicationKey == null
+        if (req.channel == NotificationChannel.INBOX && invalidInboxRequest) {
+            // The producer can repair a dead-lettered request. Acknowledging it here would erase
+            // a required customer notice without a row or outcome.
+            return Uni.createFrom().failure(IllegalArgumentException("invalid inbox notification request"))
+        }
         return dispatch(req)
             .onFailure().invoke { e ->
                 // #5745 (sweep of #5698): a processing failure (e.g. transient DB error) used to be
@@ -316,7 +335,7 @@ class NotificationConsumer @Inject constructor(
                 // would insert a second row and could re-send — trading a lost notification for a
                 // duplicated one. A single attempt, then rethrow, hands the decision to the
                 // connector's own failure-strategy (dead-letter-queue, application.yaml) instead.
-                log.errorf(e, "Failed to process notification — rethrowing so it is not acked: %s", payload)
+                log.errorf("Failed to process notification template=%s; record not acknowledged", req.template.name)
             }
     }
 
@@ -335,13 +354,25 @@ class NotificationConsumer @Inject constructor(
         }
 
     private fun dispatchResolved(req: NotificationRequest): Uni<Void> {
-        // Exhaustive copy lookup (#12392): a template without copy does not compile.
-        val (subject, body) = NotificationCopyCatalog.render(req.template, req.variables, req.language)
+        if (req.template !in ManagedNotificationTemplate.EDITABLE_TEMPLATES) {
+            val (subject, body) = NotificationCopyCatalog.render(req.template, req.variables, req.language)
+            return dispatchRendered(req, subject, body, null)
+        }
+        return managedTemplates.latestPublished(req.template, req.language ?: NotificationLanguage.EN, req.channel)
+            .chain { copy ->
+                val (subject, body) = copy?.render(req.variables)
+                    ?: NotificationCopyCatalog.render(req.template, req.variables, req.language)
+                dispatchRendered(req, subject, body, copy?.revision)
+            }
+    }
+
+    private fun dispatchRendered(req: NotificationRequest, subject: String, body: String, revision: Long?): Uni<Void> {
         val entity = NotificationEntity().also {
             it.notificationId = Ids.newId()
             it.partyId = req.partyId
             it.channel = req.channel.name
             it.template = req.template.name
+            it.templateRevision = revision
             it.recipient = req.recipient
             it.subject = subject
             // Secret-bearing templates persist a placeholder; `body` below still carries the
@@ -351,6 +382,11 @@ class NotificationConsumer @Inject constructor(
             it.deduplicationKey = req.deduplicationKey
             it.status = "PENDING"
             it.createdAt = Instant.now(clock)
+        }
+        if (req.channel ==
+            NotificationChannel.INBOX
+        ) {
+            return persistInbox(req, entity).call { _ -> publishOversight(req) }
         }
         return persistOnce(entity, req.deduplicationKey)
             .chain { persisted ->
@@ -366,6 +402,7 @@ class NotificationConsumer @Inject constructor(
                     when (req.channel) {
                         NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
                         NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+                        NotificationChannel.INBOX -> error("inbox has its own atomic visibility path")
                     }
                 }
             }
@@ -386,12 +423,50 @@ class NotificationConsumer @Inject constructor(
             .onFailure()
             .recoverWithUni { failure ->
                 if (deduplicationKey != null && failure.isDeduplicationConflict()) {
-                    log.debugf("Skipping duplicate notification fact %s", deduplicationKey)
-                    Uni.createFrom().item(false)
+                    notificationRepo.findByDeduplicationKey(deduplicationKey).chain { existing ->
+                        when (existing?.status) {
+                            null -> Uni.createFrom().failure(failure)
+                            NotificationStatus.PENDING.name -> {
+                                // Reconcile from the durable row; identifiers and provider errors may expose PII.
+                                log.error(
+                                    "notification.dispatch.in_doubt — replay held for reconciliation; " +
+                                        "provider handoff may have happened",
+                                )
+                                Uni.createFrom().failure(
+                                    IllegalStateException("notification dispatch outcome is unresolved"),
+                                )
+                            }
+                            else -> {
+                                log.debug("Skipping completed notification fact")
+                                Uni.createFrom().item(false)
+                            }
+                        }
+                    }
                 } else {
                     Uni.createFrom().failure(failure)
                 }
             }
+
+    /** The inbox row and VISIBLE outcome commit atomically; no provider acceptance is implied. */
+    private fun persistInbox(req: NotificationRequest, entity: NotificationEntity): Uni<Void> {
+        entity.status = NotificationOutcome.VISIBLE.name
+        entity.visibleAt = Instant.now(clock)
+        return Panache.withTransaction {
+            notificationRepo.persist(entity)
+                .chain { _ ->
+                    outboxRepo.persistInTransaction(outcomeMessage(req, entity, NotificationOutcome.VISIBLE, null))
+                }
+        }.replaceWithVoid()
+            // observed-by: a deduplicated replay already has a visible row and outcome in the DB.
+            // Every other failure is rethrown to the Kafka failure strategy.
+            .onFailure().recoverWithUni { failure ->
+                if (req.deduplicationKey != null && failure.isDeduplicationConflict()) {
+                    Uni.createFrom().voidItem()
+                } else {
+                    Uni.createFrom().failure(failure)
+                }
+            }
+    }
 
     /**
      * Hibernate Reactive adapts the Vert.x PgException into a PLAIN [java.sql.SQLException]
@@ -483,21 +558,20 @@ class NotificationConsumer @Inject constructor(
     /**
      * The ADR-0219 D4 contact gate (#2749) — this service's own `consentServiceClient` call was
      * the choke point ADR-0219 D4 names outright ("its consent call becomes this gate call"): one
-     * `ContactPolicyGate.check(...)` now wraps suppression list -> send cap -> quiet hours ->
-     * live consent pull, in the gate's ordering (same composition campaign-service and
-     * engagement-service already reuse), instead of a bespoke consent-only check.
+     * `ContactPolicyGate.check(...)` wraps live suppression, quiet hours and consent. The
+     * send cap is enforced immediately afterward by a PostgreSQL reservation transaction;
+     * a read-only local count could admit concurrent over-cap sends or count this row itself.
      *
      * Bridged into this `Uni` chain via `CoroutineScope(Dispatchers.Unconfined).async {
      * }.asUni()` — the same suspend-into-Uni idiom `CampaignJourneyActivitiesImpl` uses (the
      * gate itself is a `suspend fun`; this dispatch pipeline is Mutiny `Uni`, not coroutines).
      *
-     * Fail-closed in every deny reason, deliberately distinguishable in the audit (#2660 §3,
-     * carried forward): `NO_CONSENT` -> `no_active_consent` (a genuine refusal),
-     * `GATE_UNAVAILABLE` -> `consent_check_unavailable` (a port outage — consent, counter or
-     * suppression) — a gate outage must never read as a grant, and the two numbers must never
-     * merge into one. `SEND_CAP_REACHED`/`QUIET_HOURS`/`SUPPRESSED_LIST` are new reasons this
-     * service could not previously produce; each gets its own outcome code rather than folding
-     * into one of the two above.
+     * Fail-closed in every deny reason. `NO_CONSENT` is a terminal policy refusal;
+     * `GATE_UNAVAILABLE` is a dependency outage and leaves the committed row PENDING, with the
+     * Kafka record failed to its DLQ. It must not be counted as a customer suppression. The
+     * stale-PENDING gauge makes the required reconciliation visible. A reservation-store error
+     * also leaves PENDING with no provider handoff. `SEND_CAP_REACHED`, `QUIET_HOURS` and
+     * `SUPPRESSED_LIST` remain distinct terminal reasons.
      *
      * The check is per send, never cached (ADR-0198). `notification_preference`'s columns
      * (`payments_push` / `product_push` / `marketing_push`) remain a per-channel mute *within* a
@@ -516,14 +590,19 @@ class NotificationConsumer @Inject constructor(
         }.asUni()
         return decisionUni.chain { decision ->
             if (decision.allowed) {
-                when (req.channel) {
-                    NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
-                    NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+                marketingReservations.reserve(entity.notificationId, req.partyId).chain { reservation ->
+                    dispatchReservedMarketing(req, subject, body, entity, reservation)
                 }
             } else {
+                if (decision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
+                    // The row was committed before the gate. No provider was called, but this is
+                    // an unavailable dependency rather than a customer policy refusal. Keep
+                    // PENDING and fail the record into the DLQ for reconciliation/replay.
+                    return@chain Uni.createFrom().failure(IllegalStateException("contact gate unavailable"))
+                }
                 val reason = when (decision.denyReason) {
                     ContactDenyReason.NO_CONSENT -> NotificationOutcomeEvent.REASON_NO_CONSENT
-                    ContactDenyReason.GATE_UNAVAILABLE -> NotificationOutcomeEvent.REASON_CONSENT_UNAVAILABLE
+                    ContactDenyReason.GATE_UNAVAILABLE -> error("handled above")
                     ContactDenyReason.SEND_CAP_REACHED -> NotificationOutcomeEvent.REASON_SEND_CAP_REACHED
                     ContactDenyReason.QUIET_HOURS -> NotificationOutcomeEvent.REASON_QUIET_HOURS
                     ContactDenyReason.SUPPRESSED_LIST -> NotificationOutcomeEvent.REASON_SUPPRESSED_LIST
@@ -543,6 +622,29 @@ class NotificationConsumer @Inject constructor(
                     .invoke { _ -> auditMarketingSuppressed(req, reason) }
             }
         }
+    }
+
+    private fun dispatchReservedMarketing(
+        req: NotificationRequest,
+        subject: String,
+        body: String,
+        entity: NotificationEntity,
+        reservation: MarketingReservationDecision,
+    ): Uni<Void> = when (reservation) {
+        MarketingReservationDecision.RESERVED -> when (req.channel) {
+            NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
+            NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+            NotificationChannel.INBOX -> error("marketing inbox is rejected before dispatch")
+        }
+        MarketingReservationDecision.CAP_REACHED -> markStatus(
+            req,
+            entity,
+            NotificationOutcome.SUPPRESSED,
+            NotificationOutcomeEvent.REASON_SEND_CAP_REACHED,
+        ).invoke { _ -> auditMarketingSuppressed(req, NotificationOutcomeEvent.REASON_SEND_CAP_REACHED) }
+        MarketingReservationDecision.ALREADY_RESERVED -> Uni.createFrom().failure(
+            IllegalStateException("marketing contact reservation is already in doubt"),
+        )
     }
 
     /**
@@ -644,13 +746,14 @@ class NotificationConsumer @Inject constructor(
      *   byte-identical status and telemetry to a working one. Exactly the `PushResult.skipped()`
      *   defect (ADR-0252 phase 0) on the channel #4363 is considering re-routing *to* — and that
      *   one was found by a customer, not by any signal.
-     * - **FAILED** / `mailer_refused` — the mailer rejected the message or the call failed.
+     * - **IN_DOUBT** — the mailer call failed. The relay might already have accepted it, so the
+     *   PENDING row remains unresolved and the record is nacked for dead-letter reconciliation.
      *
      * The deployed sandbox mocks the mailer deliberately, and that stays true; what changes is
      * that the record now says so. A configuration choice must not be able to make the database
      * assert a delivery that never occurred.
      */
-    private fun deliverEmail(
+    internal fun deliverEmail(
         req: NotificationRequest,
         recipient: String,
         subject: String,
@@ -665,30 +768,32 @@ class NotificationConsumer @Inject constructor(
             // Three states, not two (issue #4737). A mocked mailer completes with no failure, so
             // `failure == null` on its own means "the call did not throw", never "the mail left".
             val sendOutcome = when {
-                failure != null -> EmailSendOutcome.FAILED
+                failure != null -> EmailSendOutcome.IN_DOUBT
                 mailerMocked -> EmailSendOutcome.MOCKED
                 else -> EmailSendOutcome.ACCEPTED
             }
             emailMetrics.recordSend(req.template, sendOutcome)
-            if (sendOutcome != EmailSendOutcome.ACCEPTED) {
-                if (failure != null) {
-                    log.warnf(failure, "Email send failed: party=%s template=%s", req.partyId, req.template)
-                } else {
-                    // Not a warning: the sandbox mocks the mailer on purpose. Logged at INFO so the
-                    // no-op is greppable, and counted as MOCKED so it is alertable — a log line is
-                    // not a signal anyone watches, which is how the push channel's identical
-                    // no-op went unnoticed until a customer reported it.
-                    log.infof(
-                        "Email NOT sent: mailer is mocked (quarkus.mailer.mock=true) — party=%s " +
-                            "template=%s recorded SUPPRESSED/%s, never SENT (#4737)",
-                        req.partyId,
-                        req.template,
-                        NotificationOutcomeEvent.REASON_MAILER_MOCKED,
-                    )
-                }
+            if (sendOutcome == EmailSendOutcome.IN_DOUBT) {
+                log.warnf(
+                    "Email handoff in doubt: template=%s cause=%s",
+                    req.template,
+                    failure?.javaClass?.simpleName ?: "unknown",
+                )
+                // A timeout or disconnect can happen after SMTP accepted the message. Terminal
+                // FAILED would invite a second contact on replay; keep PENDING and dead-letter.
+                Uni.createFrom().failure(failure ?: IllegalStateException("email handoff outcome is unresolved"))
+            } else if (sendOutcome == EmailSendOutcome.MOCKED) {
+                // Not a warning: the sandbox mocks the mailer on purpose. Logged at INFO so the
+                // no-op is greppable, and counted as MOCKED so it is alertable.
+                log.infof(
+                    "Email NOT sent: mailer is mocked (quarkus.mailer.mock=true) — " +
+                        "template=%s recorded SUPPRESSED/%s, never SENT (#4737)",
+                    req.template,
+                    NotificationOutcomeEvent.REASON_MAILER_MOCKED,
+                )
                 // sent = false, so `sent_at` stays NULL: the column means "when did this leave the
                 // process", and nothing left it.
-                markStatus(req, entity, emailOutcomeOf(sendOutcome), emailReasonOf(sendOutcome))
+                markStatus(req, entity, requireNotNull(emailOutcomeOf(sendOutcome)), emailReasonOf(sendOutcome))
             } else {
                 markStatus(req, entity, NotificationOutcome.SENT, reason = null, sent = true)
                     .onItem().invoke { _ ->
@@ -1034,6 +1139,7 @@ class NotificationConsumer @Inject constructor(
             outcome = outcome,
             reason = reason,
             occurredAt = now,
+            templateRevision = entity.templateRevision,
         )
         return OutboxMessage(
             eventId = Ids.newId(),

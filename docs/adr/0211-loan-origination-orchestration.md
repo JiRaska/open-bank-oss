@@ -21,6 +21,17 @@ migrations `V8__origination_canonical_states.sql` and `V9__origination_state_dat
 Found by the code→ADR evidence read described in #5708 (the inverse of the ADR→path probe #5669
 deliberately rejected); the remaining slices are triaged there.
 
+**Delivery note (2026-10-14).** The D3 slice lands on branch `agent/adr-0211-origination-commands`
+(refs #12748): the explicit commands `withdraw` / `submitDocuments` / `sign` (desk endpoints under
+new `lending.withdraw` / `lending.submitDocuments` / `lending.sign` actions, customer-edge
+withdraw reusing `lending.intake`, all refused past `SIGNED` or in terminal states by the state
+machine), the `signature_artefact_hash` column (V27, same-claim compare-and-set), and the
+`KYC_PENDING` (30-day expiry) and `FOUR_EYES` (5-day escalation, evidence event + metric, never
+auto-approval) timer branches — replay-safe via source constants. jqwik property tests now walk
+`OriginationTransitionPolicy` / `OriginationStateMachine` for lawful transitions and human-only
+edges. Still missing: the KYC event-driven consumer (separate PR); pack/disclosure rendering is
+ADR-0212 and the decision engine ADR-0213, both out of scope here.
+
 ## Context
 
 ADR-0028 delivered the lending bounded context with a deliberately minimal origination

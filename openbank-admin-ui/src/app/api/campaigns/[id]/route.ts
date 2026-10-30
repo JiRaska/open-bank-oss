@@ -144,7 +144,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const { id } = await ctx.params
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
 
-  const [campaign, enrolments, sends, sendSummary, journey, engagement, incentives, experiment] = await Promise.all([
+  const [campaign, enrolments, sends, sendSummary, journey, engagement, incentives, experiment, bulkRuns] = await Promise.all([
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}`, null),
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/enrolments`, []),
     // First page only. Paging and filtering go through /api/campaigns/[id]/sends so turning a
@@ -170,6 +170,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     // adjacent to engagement makes the two funnels visible without ever equating a click to value.
     readIncentives(headers, id),
     readExperiment(headers, id),
+    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/bulk-runs`, []),
   ])
 
   // Stable catalogue keys belong on the campaign record. Resolve the human label only for a
@@ -210,6 +211,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     incentives: incentives.data,
     experiment: experiment.data,
     contentExperiment: contentExperiment.data,
+    bulkRuns: bulkRuns.data,
     entryCatalogues: { cadences: cadences.data, triggers: triggers.data },
     // Per-part state travels to the client: the send log is the part most likely to be
     // restricted, and an empty send log rendered as "nothing was suppressed" would be the
@@ -224,6 +226,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       incentives: incentives.state,
       experiment: experiment.state,
       contentExperiment: contentExperiment.state,
+      bulkRuns: bulkRuns.state,
       cadences: cadences.state,
       triggers: triggers.state,
     },

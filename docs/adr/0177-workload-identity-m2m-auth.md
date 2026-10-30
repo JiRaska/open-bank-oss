@@ -1,11 +1,12 @@
 ---
 date: 2026-07-19
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
+followup: "#12748 — Phase 1 uses native JWT Authorization Grant followed by standard token exchange; persist the verified import with the owner's Vault token (runbook 0009), then wire the pilot service behind a flag; Phase 2 fleet rollout and Phase 3 secret retirement remain unbuilt"
 tags: [authn, secrets, kubernetes]
 summary: "Services prove identity to peers with their platform-attested Kubernetes ServiceAccount token, exchanged at Keycloak per RFC 8693, retiring per-service static client secrets and the rotator; OPA authorization is unchanged."
 ---
@@ -65,9 +66,13 @@ Concretely, the target model:
    to the pod).
 2. Keycloak trusts the **cluster's OIDC issuer** (its JWKS) as a trusted token
    issuer / Identity Provider.
-3. The service presents its SA token to Keycloak and obtains a service access
-   token via **OAuth 2.0 Token Exchange (RFC 8693)**, carrying the same roles the
-   service's Keycloak client carries today.
+3. On Keycloak 26.8.0 the service presents its SA token using the native
+   **JWT Authorization Grant (RFC 7523)**, then uses the resulting Keycloak access
+   token as the subject of **standard Token Exchange V2 (RFC 8693)**. The workload
+   subject is a pre-provisioned federated user with `ROLE_API`; OPA still decides
+   which actions that verified identity may perform. The pilot retains confidential
+   client authentication and its existing client-credentials fallback. Removing
+   the client secret needs a separate client-authentication migration.
 4. Downstream authorization is **unchanged** — the resulting token still flows
    through `AuthorizeInterceptor` + OPA (ADR-0034); only how the caller *proves
    who it is* changes.
@@ -100,13 +105,98 @@ end state once a mesh exists.
 **Rollout (per-service, behind a flag, never big-bang):**
 - Phase 0 (done): `keycloak/admin` seeded → rotator no longer crashes and skips
   all rotation → nothing breaks. **Do not** seed per-service `client_id` into
-  `openbank/keycloak/<svc>` — that is the dangerous half-fix.
+  `openbank/keycloak/<svc>` — that is the dangerous half-fix. The seed script is
+  `openbank-infra/scripts/seed-secret-rotator-keycloak-admin.sh` (idempotent; reads
+  the out-of-band `keycloak-bootstrap` secret and copies the admin credentials to
+  OpenBao KV `openbank/keycloak/admin` — it does not invent a password the live
+  Keycloak would not accept).
 - Phase 1: stand up the Keycloak↔cluster-issuer trust + token-exchange config in
   a non-prod realm; migrate 1–2 pilot services, keeping the `oidc-client` secret
   path as a fallback.
 - Phase 2: roll across the fleet service-by-service.
 - Phase 3: delete the static OIDC secrets, the `<svc>-oidc` ExternalSecrets, and
   the `secret-rotator`.
+
+### Phase 1 delivery note (pilot: openbank-agent-service, 2026-10-14)
+
+What is committed (this repo, no owner credentials needed):
+
+- `openbank-infra/gitops/components/keycloak/realm-template.json`: the realm's
+  first identity provider — alias `kubernetes` (OIDC), `__KUBERNETES_OIDC_ISSUER__`
+  placeholder for the cluster's `--service-account-issuer`, and on the
+  `openbank-agent` client the `standard.token.exchange.enabled` attribute plus a
+  `token-exchange` scope permission granted to requester client `openbank-agent`
+  (the `authorizationSettings` shape `openbank-mcp-service` carries for the
+  ADR-0224 OBO exchange, self-referential here). Template import verified against
+  `quay.io/keycloak/keycloak:26.8.0` with zero ERROR lines.
+- `openbank-infra/gitops/components/agent/`: ServiceAccount `openbank-agent` and a
+  projected `serviceAccountToken` volume (audience `keycloak`, ~1h TTL) mounted at
+  `/var/run/secrets/tokens/sa-token` in the agent-service Deployment. The
+  `oidc-client` secret path is untouched as the fallback; nothing consumes the
+  token file yet — this is the pilot wiring.
+
+### Native grant and standard exchange (Keycloak 26.8.0)
+
+The pilot uses the stock `oidc` provider. No custom provider JAR or image change is
+required. Kubernetes uses `typ: JWT` in the JOSE header but does not supply a
+payload `typ` claim. The OIDC legacy exchange type check reads the payload
+([upstream #37734](https://github.com/keycloak/keycloak/issues/37734), closed as
+a duplicate of #33332). `disableTypeClaimCheck` exists, but is **not enabled**:
+the chosen path uses the native JWT grant's audience and existing-user checks,
+then standard exchange V2, rather than legacy external exchange.
+
+Configuration and invariants:
+
+- The `kubernetes` IdP is enabled and `hideOnLogin: true`. Its issuer is supplied
+  at render time and EKS discovery resolves `jwks_uri` to `<issuer>/keys`.
+  Signature validation stays enabled, restricted to `RS256` for the JWT grant.
+- Only `openbank-agent` enables the JWT grant for this IdP. Its audience attribute
+  is a serialized list of key/value pairs:
+  `[{"key":"kubernetes","value":"keycloak"}]`. Keycloak groups these by IdP
+  alias. This is different from the assertion's `aud: ["keycloak"]`, which the
+  native validator accepts. More than one audience is rejected.
+- The federated user `wl-openbank-agent` is explicitly linked to
+  `system:serviceaccount:platform:openbank-agent` and holds `ROLE_API`. The native
+  grant requires an existing, enabled user and does not provision unknown identities.
+- A kubelet-projected assertion can be reused during its rotation window; the
+  grant's maximum assertion age is 7200 seconds and access-token expiration is
+  capped by assertion expiration. No refresh token is requested.
+- Legacy `subject_issuer` exchange permissions use FGAP v1 on the IdP resource,
+  with an attached client policy; a client's own resource-server permission is
+  not a substitute. These permissions are not needed by the native two-step path.
+  Do not broaden them to enable the pilot.
+
+The regression test is
+`python3 openbank-infra/e2e/keycloak_workload_identity_test.py`: it uses synthetic
+RSA-signed assertions and a throwaway Keycloak of the declared image version.
+It must prove JWT grant → standard exchange, least-privilege identity, rejection
+of an unauthorized client, unknown subject, wrong/multiple audiences and invalid
+signature, plus preservation of client credentials and a hidden login provider.
+The same positive and negative cases must pass against the non-production pilot
+with its actual projected token before enabling a service consumer.
+
+What remains owner-gated or deliberately outside this configuration slice:
+
+1. **Render + write the realm import** per runbook 0009
+   (`docs/runbooks/0009-keycloak-realm-import-reconcile.md`): substitute all
+   `__PLACEHOLDER__` tokens (including the two new `KUBERNETES_OIDC_*` ones),
+   verify with `render-verify-keycloak-realm-import.sh openbank` (the boot test
+   alone is not sufficient per the runbook — mint a token and inspect the JWT),
+   then `vault kv put openbank/keycloak-realm-import`. Because `--import-realm`
+   runs on **cold start only**, the live realm additionally needs the IdP and the
+   native grant attributes and the federated identity applied to the *running*
+   Keycloak (kcadm or admin console) — a template write alone does not touch it.
+2. **Verify the exchange end-to-end in the non-prod realm**: project a token from
+   an agent-service pod, exchange it at
+   `{issuer}/protocol/openid-connect/token` using
+   `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` and `assertion=<SA JWT>`.
+   Authenticate the confidential client, then submit the returned access token as
+   `subject_token` to `urn:ietf:params:oauth:grant-type:token-exchange`, with
+   `subject_token_type=urn:ietf:params:oauth:token-type:access_token` and requested
+   type `urn:ietf:params:oauth:token-type:access_token`. Do not send `subject_issuer`
+   on that second request. Confirm the workload subject and `ROLE_API` survive,
+   and run the negative cases above. Only then wire the service code behind a flag
+   to prefer the exchanged token. Fleet migration and secret retirement remain later phases.
 
 ## Alternatives considered
 
@@ -123,8 +213,9 @@ end state once a mesh exists.
 - **Option C — Workload identity federation: k8s SA token → Keycloak token
   exchange (CHOSEN).** No static or per-service secret at all; credential is a
   short-lived, pod-bound, kubelet-rotated SA token the platform already issues.
-  Revocation is immediate (delete/rotate the SA). Uses only components already in
-  the stack. Cost: Keycloak issuer-trust + token-exchange configuration, and token
+  Offline JWKS verification does not revoke a previously issued assertion when a
+  pod or SA is deleted; expiration bounds that window. Uses components already in
+  the stack. Cost: Keycloak issuer-trust + native-grant/exchange configuration, and token
   exchange is a comparatively young Keycloak feature that needs operational
   validation.
 - **Option D — SPIFFE/SPIRE + mTLS service mesh.** The purest zero-trust end

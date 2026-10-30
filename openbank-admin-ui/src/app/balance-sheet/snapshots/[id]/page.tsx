@@ -19,7 +19,7 @@
 
 'use client'
 
-import { use, useCallback, useEffect, useMemo, useState } from 'react'
+import { use, useCallback, useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { ArrowLeft, Scale } from 'lucide-react'
@@ -127,7 +127,7 @@ function SnapshotDetail({ id }: { id: string }) {
     <div>
       <PageHeader
         title={t(`Snímek rozvahy k ${run.asOf}`, `Balance-sheet snapshot as of ${run.asOf}`)}
-        subtitle={t(`Běh ${run.id} · hash vstupů ${run.inputHash.slice(0, 12)}…`, `Run ${run.id} · input hash ${run.inputHash.slice(0, 12)}…`)}
+        subtitle={t(`Běh rozvahy · hash vstupů ${run.inputHash.slice(0, 12)}…`, `Balance-sheet run · input hash ${run.inputHash.slice(0, 12)}…`)}
         icon={<Scale size={20} aria-hidden="true" />}
         actions={back}
       />

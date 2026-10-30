@@ -46,8 +46,9 @@ import java.time.Instant
  * Adding `openbank-libs-runtime` as a dependency makes this class visible to
  * Hibernate Reactive's Jandex-based entity scan regardless of whether the
  * service actually uses the Postgres backend — every query against it simply
- * fails until the service's own migration has created the table, matching the
- * existing failure mode of every other optional-backend adapter in this module.
+ * fails until the service's own migration has created the table. Nothing may
+ * therefore iterate "every mapped entity" and read it: the startup warm-up used
+ * to, and skips this entity unless [PostgresBlobStore] is in the container.
  */
 @Entity
 @Table(name = "object_store_blobs")
@@ -81,10 +82,13 @@ class ObjectStoreBlobRepository : PanacheRepositoryBase<ObjectStoreBlobEntity, S
  * contract, this table is one valid backing of it, not a placeholder for a
  * "real" implementation still to come.
  *
- * Selected by `openbank.objectstore.backend=postgres`, which is also the
- * **default when the key is absent** (`enableIfMissing = true`) so
- * `@QuarkusTest` and local dev need no S3/localstack — see [S3ObjectStore] for
- * the production adapter.
+ * Selected by `openbank.objectstore.backend=postgres` and ONLY then (OPT-IN,
+ * `enableIfMissing = false`). It used to be the default when the key was absent, which made the
+ * bean — and its `object_store_blobs` table — look present in every service that merely depends on
+ * this module, though only the two that inject `ObjectStorePort` (document-service, customer-edge)
+ * set the key. A service that wants it declares the key (document-service does, in its own
+ * `application.yaml`, so `@QuarkusTest` and local dev still need no S3/localstack) — see
+ * [S3ObjectStore] for the production adapter.
  *
  * [presignGet]: Postgres `BYTEA` has no native pre-signing mechanism — there is
  * no separate object-storage endpoint to hand out a scoped, time-boxed URL for.
@@ -96,7 +100,7 @@ class ObjectStoreBlobRepository : PanacheRepositoryBase<ObjectStoreBlobEntity, S
  * endpoint.
  */
 @ApplicationScoped
-@IfBuildProperty(name = "openbank.objectstore.backend", stringValue = "postgres", enableIfMissing = true)
+@IfBuildProperty(name = "openbank.objectstore.backend", stringValue = "postgres", enableIfMissing = false)
 class PostgresBlobStore(private val repository: ObjectStoreBlobRepository, private val clock: Clock) :
     ObjectStorePort {
 

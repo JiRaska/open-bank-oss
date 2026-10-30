@@ -3,7 +3,7 @@
   "currency" : "CZK",
   "periodStart" : "2025-01-01",
   "periodEnd" : "2025-12-31",
-  "closingNavId" : "01a1252e-f864-757e-b9e6-e1b191b0c591",
+  "closingNavId" : "01a12599-146b-7423-ae92-a4dda0aaba89",
   "closingValuationDate" : "2025-10-31",
   "balanceSheet" : {
     "totalAssets" : 17243.75,
@@ -11,9 +11,12 @@
     "totalEquity" : 17236.19
   },
   "profitAndLossYtd" : {
-    "income" : 1306.21,
-    "expenses" : 13.77,
-    "profitLoss" : 1292.44
+    "revaluationGains" : 100.00,
+    "revaluationLosses" : 0.00,
+    "otherInvestmentResult" : 1206.21,
+    "managementFees" : 13.77,
+    "profitLoss" : 1292.44,
+    "linesUnavailableReason" : null
   },
   "units" : {
     "opening" : 0.000000,
@@ -26,7 +29,12 @@
   "portfolio" : {
     "carryingValue" : 16300.00,
     "holdingsCount" : 2,
-    "cash" : 943.75
+    "cash" : 943.75,
+    "carryingValueByClass" : {
+      "UNCLASSIFIED" : 16300.00
+    },
+    "unclassifiedCount" : 2,
+    "loansOutstanding" : null
   },
   "flows" : {
     "subscriptions" : 17000.00,
@@ -46,6 +54,6 @@
     "holders" : 3,
     "subscribing" : 3
   },
-  "basisNavIds" : [ "01a1252e-f852-7d27-ad5f-a4b9464301b2", "01a1252e-f861-767a-9f57-96e7db1c01a7", "01a1252e-f864-757e-b9e6-e1b191b0c591" ],
-  "fingerprint" : "a5bf86c95f44bc5f085dd17bb4da8a12c99e4cf3b342017be692fbba655d403f"
+  "basisNavIds" : [ "01a12599-1462-7759-9953-7c10bae905c7", "01a12599-146a-7875-95d4-80804cc1bcdb", "01a12599-146b-7423-ae92-a4dda0aaba89" ],
+  "fingerprint" : "509eb227f035fae1c6b1a0e380e8593e3cdb03d28677f1a28cde46a92e657944"
 }

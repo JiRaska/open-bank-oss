@@ -2,7 +2,9 @@ openapi: "3.0.3"
 info:
   title: OpenBank Settlement Service
   # 1.9 -> 1.10 (#11588): additive verified makerActorKind on approval responses.
-  version: "1.10.0"
+  # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
+  # payloadRef — all optional) on ApprovalResponse; no breaking change.
+  version: "1.11.0"
   description: "Settlement orchestration service (ADR-0101 P3)"
 paths:
   /api/v1/settlements:
@@ -203,6 +205,46 @@ components:
         makerActorKind: { type: string, enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN] }
         createdAt: { type: string, format: date-time, nullable: true }
         decidedBy: { type: string, nullable: true }
+        summary:
+          type: string
+          nullable: true
+          description: >-
+            Bounded human-readable description of the paused request, persisted with the
+            approval (ADR-0227 D1). Null when the approval was created by application code
+            rather than by the intercepting pause.
+        domain:
+          type: string
+          nullable: true
+          description: >-
+            The service's domain in the unified approval inbox (ADR-0227 D1), derived from
+            quarkus.application.name. Informational; the inbox keys items off its own source
+            list.
+        amount:
+          type: string
+          nullable: true
+          description: >-
+            The maker's original request amount, when a future phase persists one (ADR-0227
+            D1). Always null today - the request body is not persisted, only its SHA-256
+            fingerprint. Absent never means zero.
+        currency:
+          type: string
+          nullable: true
+          description: ISO 4217 currency of `amount`, when an amount is present. Null today.
+        riskClass:
+          type: string
+          nullable: true
+          enum: [MONEY_PATH, DESTRUCTIVE, OPERATIONAL, UNKNOWN]
+          description: >-
+            Coarse action-class risk (ADR-0227 D1/D3). UNKNOWN from the service side - the
+            authoritative classification lives in rules.yaml four_eyes metadata the store
+            cannot see; the admin-UI BFF re-derives it per action.
+        payloadRef:
+          type: string
+          nullable: true
+          description: >-
+            Retrievable pointer to the maker's original request payload, when a future phase
+            persists one. Null today - the persisted fingerprint is an integrity digest, not
+            a payload pointer.
     SettlementApprovalDetail:
       type: object
       properties:

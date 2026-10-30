@@ -566,11 +566,53 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
 
 ## 10. Change log
 
+- **2026-10-23** — **Lending is a day-close participant (ADR-0342, #13167).** New outbound edge:
+  `PUT /api/v1/ledger/accounting-days/{date}/participants/lending` to ledger-service, over the same
+  `ledger-service` base URL and named oidc-client `m2m` (Keycloak `openbank-lending`) as the existing
+  journal POST — no new credential, client or port. The ledger authorizes it as its OWN action
+  `ledger.close.participate` (rule `service-close-participation`, which binds each account to its one
+  participant name), never the generic `ledger.create`. New table
+  `lending_close_job_run` (V28) recording, per Prague accounting day, that the accrual and
+  provisioning passes ran and what they did; a new hourly `LendingCloseParticipationScheduler`
+  folds those rows into the report. **STRIDE-S:** the ledger accepts a `lending` report only from
+  `service-account-openbank-lending`. **STRIDE-T/R:** the report is derived from the service's own
+  persisted runs, never caller input; a due pass with no recorded run produces NO report, so a late
+  or crashed pass holds the ledger's close. An accrual the ledger refuses with `409
+  ACCOUNTING_DAY_CLOSED` (D4) is recorded REFUSED with that category; any other failed pass, and a
+  provisioning pass that leaves exposures unprovisioned or cannot count coverage, is REFUSED with a
+  fixed category, never RAN. An accrual pass the batch cap cut short (the use case reads one row
+  past the batch as a probe) is REFUSED `due installment(s) left unaccrued`, so a capped pass cannot
+  report a complete day. Both passes now take their as-of date from the Prague accounting day
+  (`AccountingClock.bank`) once at the start and file their evidence under that same date, so a pass
+  crossing midnight, or a UTC pod, cannot accrue for one day and report another. Reasons carry categories and counts only — no loan id, party id or
+  exception text leaves the service. **STRIDE-D:** a ledger outage only delays the report (re-offered
+  every tick, the day waits and pages). **Review hardening:** (1) provisioning's allowance journals
+  are dispatched by the outbox, so the day is not reported while any `lending.allowance.posting` row
+  for it (payload `accountingDate`, indexed in V28) is still PENDING/DISPATCHING/FAILED; SENT rows
+  are its journals and DEAD rows (the outbox gave up, a closed-day 409 included) make the day
+  REFUSED. (2) Each pass marks itself in flight before working; the day is not reported while the
+  marker stands (a pass running across midnight cannot be overtaken by an earlier RAN row), and a
+  marker older than the derived stale threshold (`LendingCloseJobs.staleAfter`, see (5)) is reported REFUSED `pass started and never
+  completed`, so a crash cannot hold the day unresolvably. (3) The accrual drains truncated batches
+  within `drain-budget` / `max-drain-rounds`, and each pass first re-drains every earlier day in the
+  lookback still REFUSED as truncated, as of that day, re-recording it RAN once nothing is left. (4) A
+  report the ledger receives after it TIED_OUT or LOCKED the day is stored `late = true` and never
+  moves the day (`DayCloseParticipantsIT`: a later REFUSED is stored late). (5) Final review: a pass that crashed mid-way is healed — its stale in-flight marker joins the
+  catch-up set, so the next pass re-runs that day and re-records it. The stale threshold is DERIVED,
+  `drain-budget × (lookback + 1) + 30m`, so it can never be configured below the longest live pass, and
+  the drain deadline is checked per installment inside a batch. The ledger refuses postings into a
+  day past cutoff (only OPEN accepts; `409 ACCOUNTING_DAY_CLOSED` under enforce), so accrual journals
+  are dated in the CURRENT Prague day: a catch-up for D books D's remainder in the open day, D's row
+  records the installments covered and today's row the journals. The V28 partial index is a plain,
+  boot-time CREATE INDEX (rationale and out-of-band CONCURRENTLY recipe in its header). The ledger keeps the check in `shadow`; flipping
+  to enforce is an owner step. Rollback: revert the application while preserving additive V28 run
+  evidence; schema removal needs a separate reviewed retention plan.
+- **2026-10-14** — **Explicit origination commands: withdraw / submit-documents / sign, KYC-validity expiry, four-eyes SLA escalation** (ADR-0211 D3 slice; refs #12748). Four new endpoints: desk `POST /api/v1/lending/applications/{id}/withdraw|submit-documents|sign` under new actions `lending.withdraw` / `lending.submitDocuments` / `lending.sign` (desk-role sets in `lending_rest_ext.rego` plus the edge `prohibited` veto, 37 rego tests), and the customer edge `POST /api/v1/lending/intake/applications/{id}/withdraw` reusing the existing `lending.intake` action. **Elevation of privilege / spoofing:** the actor is the JWT subject on the desk endpoints and the vouched edge principal on intake; the intake endpoint looks the application up owner-filtered so a customer touching another party's id gets the same 404 as a missing one — existence is not disclosed across the trust boundary. **Tampering / repudiation:** `sign` persists the signature-artefact hash (V27 adds nullable `loan_application.signature_artefact_hash`, additive, rollback = `DROP COLUMN`) via a same-claim compare-and-set (`compareAndSetSignature`, mirroring `claimDecision`), so the row either carries the hash the decision claimed or the sign fails closed; the hash corroborates the signature evidence without storing the artefact itself. **Withdrawal boundary (ADR-0211, not ADR-0215):** application withdrawal is available only pre-disbursement — `SIGNED` and every terminal state refuse with 422 through the state machine, which remains the single authority on lawful transitions; the statutory post-disbursement cooling-off unwind stays a live-loan path (ADR-0215). **Four-eyes SLA:** a new `FOUR_EYES` timer branch escalates after 5 days — it emits a `credit.application.four_eyes_sla_escalation` evidence event and increments `openbank.lending.origination.four_eyes_sla_escalation`; it NEVER auto-approves (no human edge leaves the graph) and is idempotent by aggregate re-read, so replay cannot double-escalate. **KYC validity:** a new `KYC_PENDING` branch expires the application via the existing `expireIfInState` after 30 days to `EXPIRED`. Timer constants live in the workflow source because `run`/`stateEntered` signatures are frozen by in-flight histories — replay safety, not config. The state machine gained property tests (jqwik) over lawful walks and human-only edges. No new caller, topic, network-policy edge or machine privilege. Money-path: the PR needs two approvals. Rollback: revert; V27 is additive.
 - **2026-10-03** — **Evidence bundle reads the audit chain; `lending_outbox` joins SENT retention** (#11900, ADR-0214 D3, ADR-0329). `GET /applications/{id}/evidence` now calls audit-service's `GET /api/v1/audit/evidence/{id}` with the caller's own bearer (`CallerTokenClientHeadersFactory`), never the m2m client: no service identity is granted the audit trail, and audit-service's rule refuses service accounts outright. **STRIDE-T/R:** the bundle is now the tamper-evident chain, each event with its recomputed hash status, instead of a mutable delivery buffer — an edited row shows as `MISMATCH`. **STRIDE-I:** the residual recorded on the entry below is closed in code: nothing reads a SENT `lending_outbox` row any more, and the repository implements `SentOutboxRetention`. The purge itself stays switched OFF (`LENDING_OUTBOX_RETENTION_ENABLED=false`) until the outbox↔chain parity check in 05-operations passes, because events sent before audit-service subscribed (2026-07-31) may exist only here. **STRIDE-D:** audit-service unreachable makes the evidence read 503 — deliberately no fallback to a partial local bundle. New egress lending→audit over audit-service's private-CA mTLS listener (8443, `audit-authority`, client identity `lending-internal-tls`) — the request carries a bearer token, so never plaintext (ASVS V9.1); NetworkPolicy regenerated.
 - **2026-10-03** — **`lending_outbox` is EXEMPT from fleet SENT-row retention** (ADR-0329). Every other outbox now purges SENT rows after 7 days; this one does not, because its SENT rows are the ADR-0214 evidence bundle (`GET /applications/{id}/evidence` reads them through `findByAggregateId`) and purging them would empty that bundle. Residual risk, recorded rather than fixed here: loan-event payloads (applicant and credit data) stay in this table for the life of the database. Closing it needs the evidence moved to a store with its own retention; the exemption sits in `check-outbox-sent-retention.py` and fails CI once lending opts in.
 - **2026-09-26** — **Replay key bound to a request fingerprint on `POST /api/v1/lending/applications` and `POST /api/v1/lending/intake/applications` (#10945).** **Tampering / repudiation:** previously the same `Idempotency-Key` with a DIFFERENT body replayed the first request's response, so a second, different loan application was answered as the first and silently never happened. Now the key is claimed atomically (`IdempotencyStore.reserve`) together with a SHA-256 fingerprint of method + path + the canonicalised request DTO (libs `RequestFingerprints`, #10916/#10922) before any use case runs: a mismatch is refused **409 `IDEMPOTENCY_KEY_REUSED`**, a concurrent duplicate **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`**, and a refused or failed submit releases the claim, while a submit that created the application keeps it even if storing the response fails. The binding lives only in Redis (no DB-level check). Records stored before this deploy carry no fingerprint and are treated as a match for one TTL window. No new endpoint, caller, privilege, event or migration. Rollback: revert. Intake fingerprints the customer's `CustomerIntakeRequest`, not the clock-derived application built from it.
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -666,7 +708,7 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
   origination guard behind `lending.compliance.enforce-pack` (default off — bootstrap). Threat
   supplement in §8.
 - **2026-07-22** — Deploy an in-namespace Redis backing the four-eyes `ApprovalStore` (issue #1354).
-  The CDI bean already resolved (`ApprovalConfig` @Produces `RedisApprovalStore`), so
+  The CDI bean already resolved (ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`) @Produces `RedisApprovalStore`), so
   `AuthorizeInterceptor`'s "no store → log + proceed" branch was never taken for lending; the store
   pointed at `redis://localhost:6379` in-pod. Flipping `AUTHZ_FOUR_EYES_ENFORCE=true` would have
   failed every `lending.disburse`/`lending.collateralRegister` on a connection refusal — a latent
@@ -720,7 +762,7 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
   §7 (STRIDE supplement extended to cover collateral alongside disbursement). Rollback: revert the
   commit (`V5`'s own rollback note drops the new columns/type; pre-migration behavior returns).
 - **2026-07-08** — ADR-0155 four-eyes enforcement rollout (issue #413), mirroring the
-  sepa-payment pilot. New endpoint `PATCH /api/v1/lending/approvals/{id}` + `ApprovalConfig`
+  sepa-payment pilot. New endpoint `PATCH /api/v1/lending/approvals/{id}` + ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`)
   (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate on `lending.disburse`
   (openbank-libs-runtime, shared, opt-in). New STRIDE supplement §7. `authz.four-eyes.enforce`
   defaults `false` — no behavior change to any existing request in this PR; flipping it is a
@@ -874,7 +916,7 @@ not validate the remaining loss model. See [rollout prerequisites](../credit-ris
   guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
   the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
   `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
-  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  codes and JSON field names are unchanged; ApprovalResourceMappingTest (since replaced by the shared `ApprovalEndpointConformance` suite) covers the mapping.
   **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
@@ -931,10 +973,13 @@ write `COMPLETE`. The scheduler queries all earlier non-complete dates before re
 success, exposes their count as a gauge, and the lending alert pages when it is nonzero. The row
 contains a date and counts, not borrower identifiers. An old gap is retained for independently
 reviewed reconciliation on the actual correction date; the scheduler never backdates current facts.
+V26 also appends one STARTED and at most one result event per attempt in
+`provisioning_cycle_attempt`; same-date retries retain their earlier measured shortfall, and a
+stale attempt ID cannot overwrite the newer attempt's status.
 
 **Residual risk:** This change detects and preserves a prior-date gap but does not reconstruct the
 historical eligible population or implement a reviewed closure operation. Direct mutation of the
-run row would defeat the control; operational access to the database remains privileged and the
+run or attempt rows would defeat the control; operational access to the database remains privileged and the
 reconciliation case must retain the approval and adjustment references. The existing `(loan_id,
 period)` uniqueness, per-loan lock and allowance outbox references are not weakened.
 
@@ -945,3 +990,32 @@ than the current reporting date and never replays a past date from current input
 delivers historical-input-backed recovery or a reviewed reconciliation operation, a detected
 prior-date gap stays open and is closed only by a controlled manual correction. The
 historical-replay / reconciliation policy is tracked in #10275.
+
+## Machine-caller identity binding (#12448)
+
+The customer self-service intake, quote, credit-journey and financial-health endpoints admit only customer-edge. That caller is recognised by `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT whose `azp` is the configured client and whose `preferred_username` is that client's own `service-account-<azp>`. It is never recognised by the principal name, which Quarkus takes from a username claim. A token carrying the edge's username but issued to another client, or a human token issued through the edge client, is refused with 403.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+
+### Durable accrual evidence and retry boundary (#13708)
+
+The accrual loop commits a complete immutable dated journal request before the remote money call.
+It accepts only a POSTED, nonzero journal identity with the persisted deterministic transaction ID
+and matching provider entry date. Current time, a successful transport, a batch's returned count,
+or a missing response date cannot substitute for that receipt. Retries replay the same request;
+a closed-day refusal never silently changes its date or idempotency identity.
+
+The progress row, installment mark, existing accrual outbox event and per-day item/journal counters
+complete in one local transaction. A conditional completion and unique journal identity prevent
+recounting or assigning one journal to different intents. A committed prefix survives a later batch
+failure. A remote acknowledgement followed by local failure leaves a pending intent, which blocks
+RAN until an exact idempotent retry reconciles it. Completion re-locks the persisted installment and
+intent, validates their economic facts, and builds the event from persisted facts rather than a
+caller-supplied snapshot. Day rows are acquired in date order.
+
+Intent metadata follows installment erasure through its foreign key; no new personal-data retention
+period or permanent identity tombstone is introduced. Deleting unresolved evidence leaves only a
+scoped, non-identifying aggregate reconciliation refusal for the affected work/requested dates.
+Ordinary successful runs cannot clear this uncertainty. Existing controlled ledger reconciliation
+or waiver is required for disposition. Rollback retains additive V28 evidence and pending intents.

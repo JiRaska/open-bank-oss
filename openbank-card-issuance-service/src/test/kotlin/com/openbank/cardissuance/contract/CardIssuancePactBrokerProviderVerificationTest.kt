@@ -18,6 +18,8 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -71,6 +73,13 @@ import java.util.UUID
  * commit.
  */
 @QuarkusTest
+@OidcSecurity(
+    claims = [
+        Claim(key = "azp", value = "openbank-admin-ui"),
+        Claim(key = "sub", value = "pact-verifier"),
+        Claim(key = "preferred_username", value = "pact-verifier"),
+    ],
+)
 @QuarkusTestResource(PostgresRedisTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_VIEWER", "ROLE_OPERATOR"])
 @Provider("openbank-card-issuance-service")

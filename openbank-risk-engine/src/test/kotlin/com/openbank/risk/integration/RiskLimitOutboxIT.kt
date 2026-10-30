@@ -16,6 +16,8 @@ import com.openbank.risk.domain.limits.LimitStatus
 import com.openbank.risk.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
@@ -25,6 +27,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -41,7 +44,12 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(RiskSnapshotApiIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
+@TestProfile(RiskLimitOutboxIT.PersistenceProfile::class)
 class RiskLimitOutboxIT {
+
+    class PersistenceProfile : QuarkusTestProfile {
+        override fun getConfigOverrides() = mapOf("openbank.outbox.dispatch-enabled" to "false")
+    }
 
     @Inject
     lateinit var ledger: FakeLedgerPort
@@ -77,6 +85,9 @@ class RiskLimitOutboxIT {
     @Test
     @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
     fun `a breach is written as one pending outbox row, and recording the run again writes nothing`() {
+        assertThat(ConfigProvider.getConfig().getValue("openbank.outbox.dispatch-enabled", Boolean::class.java))
+            .describedAs("outbox persistence tests must not race the dispatcher")
+            .isFalse()
         val runId = breachingRun("2024-04-01")
         val analysis = onEventLoop { limits.evaluate(runId) }
         assertThat(analysis.evaluations.single { it.definition.id == "lcr-min" }.status).isEqualTo(LimitStatus.BREACH)
@@ -92,7 +103,7 @@ class RiskLimitOutboxIT {
             TestDb.count(
                 "SELECT count(*) FROM risk_outbox WHERE aggregate_id = '$runId' AND status = 'PENDING' " +
                     "AND event_type = 'risk.limit.breach.v1' AND attempt_count = 0 AND synthetic = false " +
-                    "AND dedup_key = '$runId:lcr-min:openbank-risk-appetite:1'",
+                    "AND dedup_key = '$runId:lcr-min:openbank-risk-appetite:2'",
             ),
         ).isEqualTo(1)
         val payload = json.readTree(payloadOf(runId))
@@ -179,7 +190,7 @@ class RiskLimitOutboxIT {
         assertThat(rows(runId)).isEqualTo(0)
         assertThat(
             TestDb.count(
-                "SELECT count(*) FROM risk_limit_event_dedup WHERE dedup_key = '$runId:lcr-min:openbank-risk-appetite:1'",
+                "SELECT count(*) FROM risk_limit_event_dedup WHERE dedup_key = '$runId:lcr-min:openbank-risk-appetite:2'",
             ),
         ).isEqualTo(1)
     }
@@ -189,7 +200,7 @@ class RiskLimitOutboxIT {
     fun `a legacy pod writing after the backfill cannot lose its replay guard during retention`() {
         val analysis = onEventLoop { limits.evaluate(breachingRun("2024-04-07")) }
         val runId = analysis.run.id
-        val key = "$runId:lcr-min:openbank-risk-appetite:1"
+        val key = "$runId:lcr-min:openbank-risk-appetite:2"
         // Simulate an old pod still running after V10 Flyway completed. Its INSERT knows only
         // risk_outbox, so a one-time migration backfill cannot see this row.
         TestDb.execute(

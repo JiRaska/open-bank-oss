@@ -14,149 +14,12 @@ import Link from 'next/link'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
-import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { useServiceResource } from '@/lib/services/useServiceResource'
+import { lifecycleSchema, resourcesSchema, costsSchema, rightSizingSchema, aiCostsSchema, anomaliesSchema, type FinOpsAnomaly, type DailyCost, type ServiceCost } from '@/lib/finops/overviewContracts'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge, type Tone } from '@/components/ui'
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface EksVersion {
-  version: string
-  eksRelease: string
-  standardSupportEnds: string
-  extendedSupportEnds: string
-  daysToStandardEnd: number
-  daysToExtendedEnd: number
-  tier: 'upcoming' | 'standard' | 'extended' | 'end_of_life'
-  runwayStatus: 'ok' | 'warn' | 'critical'
-  isCurrent: boolean
-}
-
-interface PlatformComponent {
-  name: string
-  kind: string
-  version: string
-  tier: string
-  managedBy: string
-  standardEnd: string | null
-  daysRemaining: number | null
-}
-
-interface LifecycleData {
-  currentVersion: string
-  currentTier: string
-  daysToStandardEnd: number
-  runwayStatus: 'ok' | 'warn' | 'critical'
-  standardSupportEnds: string
-  extendedSupportEnds: string
-  monthlyEstimate: number
-  annualEstimate: number
-  monthlySavingsVsExtended: number
-  annualSavingsVsExtended: number
-  minRunwayDays: number
-  versions: EksVersion[]
-  components: PlatformComponent[]
-  dataSource: 'live' | 'snapshot'
-  lastRefreshed: string
-  adrRef: string
-}
-
-interface ServiceResource {
-  name: string
-  short: string
-  heap: { usedBytes: number; maxBytes: number; pct: number | null }
-  cpuCoresUsed: number | null
-  requestsPerSec: number | null
-  efficiency: 'underutilised' | 'normal' | 'high' | 'unknown'
-}
-
-interface ResourceData {
-  available: boolean
-  fleetHeapPct: number | null
-  underutilisedCount: number
-  serviceCount: number
-  services: ServiceResource[]
-  collectedAt: string
-}
-
-interface ServiceCost { name: string; amount: number; domain: string }
-interface DailyCost { date: string; amount: number }
-interface ServiceEfficiency {
-  namespace: string
-  displayName: string
-  cpu: { requestedMillicores: number | null; usedMillicores: number | null; efficiencyPct: number | null }
-  memory: { requestedMiB: number | null; usedMiB: number | null; efficiencyPct: number | null }
-  savingsPotential: 'high' | 'medium' | 'low' | 'unknown'
-  vpaRecommendation: { cpuMillicores: number | null; memoryMiB: number | null }
-}
-
-interface RightSizingReport {
-  available: boolean
-  collectedAt: string
-  fleetCpuEfficiencyPct: number | null
-  fleetMemEfficiencyPct: number | null
-  highSavingsCount: number
-  services: ServiceEfficiency[]
-  vpaHasData: boolean
-}
-
-interface CostReport {
-  available: boolean
-  reason?: string
-  currency: string
-  periodStart: string
-  periodEnd: string
-  total: number
-  services: ServiceCost[]
-  daily: DailyCost[]
-  collectedAt: string | null
-  source: string
-}
-
-interface AgentCostEntry {
-  agentId: string
-  model: string
-  tokensLast24h: number
-  tokensLast7d: number | null
-  costLast24hUsd: number
-  costLast7dUsd: number
-  budgetMonthlyUsd: number | null
-  budgetUsedPct: number | null
-  burnRate: 'low' | 'normal' | 'high' | 'exceeded'
-  anomalyZ: number | null
-}
-
-interface FinOpsAnomaly {
-  id: string
-  detectedAt: string
-  detector: string
-  severity: 'warning' | 'critical'
-  title: string
-  rootCause: string | null
-  proposalPrUrl: string | null
-  status: 'open' | 'proposed' | 'approved' | 'rejected' | 'resolved'
-  estimatedMonthlySavingUsd: number | null
-}
-
-interface AiCostsData {
-  available: boolean
-  collectedAt: string
-  totalCostLast7dUsd: number
-  totalCostLast30dUsd: number | null
-  selfHostedPct: number | null
-  coverage: {
-    source: 'prometheus'
-    retentionHours: number
-    dataFrom: string
-    dataTo: string
-    lastSuccessfulLoad: string | null
-    windows: Record<'24h' | '7d' | '30d', { requestedHours: number; availableHours: number; partial: boolean }>
-  }
-  agents: AgentCostEntry[]
-  anomalies: FinOpsAnomaly[]
-}
 
 // ── Helper components ─────────────────────────────────────────────────────────
 
@@ -235,6 +98,16 @@ function HeapBar({ pct, efficiency }: { pct: number | null; efficiency: string }
       <span style={{ fontSize: '11px', fontWeight: 700, color, minWidth: '34px', textAlign: 'right' }}>{pct}%</span>
     </div>
   )
+}
+
+function compareEksVersionsNewestFirst(left: string, right: string): number {
+  const leftParts = left.split('.').map(Number)
+  const rightParts = right.split('.').map(Number)
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (rightParts[index] ?? 0) - (leftParts[index] ?? 0)
+    if (difference !== 0) return difference
+  }
+  return 0
 }
 
 // Per-day cloud spend trend — a hand-rolled inline SVG area chart (matches the
@@ -347,60 +220,43 @@ function toAgentFinding(a: FinOpsAnomaly, t: (cs: string, en: string) => string)
 function FinOpsContent() {
   const { t, language } = useLanguage()
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const [lifecycle, setLifecycle] = useState<LifecycleData | null>(null)
-  const [resources, setResources] = useState<ResourceData | null>(null)
-  const [costs, setCosts] = useState<CostReport | null>(null)
-  const [rightSizing, setRightSizing] = useState<RightSizingReport | null>(null)
-  const [aiCosts, setAiCosts] = useState<AiCostsData | null>(null)
-  const [anomalies, setAnomalies] = useState<FinOpsAnomaly[]>([])
-  const [loading, setLoading] = useState(true)
-  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setUnavailable(null)
-    try {
-      const [lcRes, rsRes, costRes, rsizRes, aiCostRes, anomalyRes] = await Promise.all([
-        fetch('/api/finops/lifecycle',     { cache: 'no-store' }),
-        fetch('/api/finops/resources',     { cache: 'no-store' }),
-        fetch('/api/finops/costs',         { cache: 'no-store' }),
-        fetch('/api/finops/right-sizing',  { cache: 'no-store' }),
-        fetch('/api/finops/ai-costs',      { cache: 'no-store' }),
-        fetch('/api/finops/anomalies',     { cache: 'no-store' }),
-      ])
-
-      if (!lcRes.ok) {
-        setUnavailable({ kind: 'error' })
-        return
-      }
-
-      setLifecycle(await lcRes.json())
-      if (rsRes.ok)      setResources(await rsRes.json())
-      if (costRes.ok)    setCosts(await costRes.json())
-      if (rsizRes.ok)    setRightSizing(await rsizRes.json())
-      if (aiCostRes.ok)  setAiCosts(await aiCostRes.json())
-      if (anomalyRes.ok) {
-        const aj = await anomalyRes.json() as { anomalies?: FinOpsAnomaly[] }
-        setAnomalies(aj.anomalies ?? [])
-      }
-    } catch {
-      setUnavailable({ kind: 'unreachable' })
-    } finally {
-      setLoading(false)
-      setLastRefresh(new Date())
-    }
-  }, [])
-
-  useEffect(() => { load() }, [load])
+  const lifecycleResource = useServiceResource('/api/finops/lifecycle', { select: raw => lifecycleSchema.parse(raw), maxWakeRetries: 0 })
+  const resourcesResource = useServiceResource('/api/finops/resources', { select: raw => resourcesSchema.parse(raw), maxWakeRetries: 0 })
+  const costsResource = useServiceResource('/api/finops/costs', { select: raw => costsSchema.parse(raw), maxWakeRetries: 0 })
+  const rightSizingResource = useServiceResource('/api/finops/right-sizing', { select: raw => rightSizingSchema.parse(raw), maxWakeRetries: 0 })
+  const aiCostsResource = useServiceResource('/api/finops/ai-costs', { select: raw => aiCostsSchema.parse(raw), maxWakeRetries: 0 })
+  const anomaliesResource = useServiceResource('/api/finops/anomalies', { select: raw => anomaliesSchema.parse(raw), maxWakeRetries: 0 })
+  // A failed refresh must not make an old value look current. Each source renders independently.
+  const lifecycle = lifecycleResource.unavailable ? null : lifecycleResource.data
+  const resources = resourcesResource.unavailable ? null : resourcesResource.data
+  const costs = costsResource.unavailable ? null : costsResource.data
+  const rightSizing = rightSizingResource.unavailable ? null : rightSizingResource.data
+  const aiCosts = aiCostsResource.unavailable ? null : aiCostsResource.data
+  const anomalies = anomaliesResource.unavailable ? null : anomaliesResource.data?.anomalies
+  const sections = [
+    { name: t('Životní cyklus platformy', 'Platform lifecycle'), resource: lifecycleResource },
+    { name: t('Využití zdrojů', 'Resource utilisation'), resource: resourcesResource },
+    { name: t('Cloudové náklady', 'Cloud costs'), resource: costsResource },
+    { name: t('Dimenzování zdrojů', 'Right-sizing'), resource: rightSizingResource },
+    { name: t('AI náklady', 'AI costs'), resource: aiCostsResource },
+    { name: t('Nákladové anomálie', 'Cost anomalies'), resource: anomaliesResource },
+  ]
+  const loading = sections.some(section => section.resource.loading)
+  const [lastRefresh, setLastRefresh] = useState(() => new Date())
+  const reloadLifecycle = lifecycleResource.reload
+  const reloadResources = resourcesResource.reload
+  const reloadCosts = costsResource.reload
+  const reloadRightSizing = rightSizingResource.reload
+  const reloadAiCosts = aiCostsResource.reload
+  const reloadAnomalies = anomaliesResource.reload
+  const load = useCallback(() => {
+    setLastRefresh(new Date())
+    reloadLifecycle(); reloadResources(); reloadCosts(); reloadRightSizing(); reloadAiCosts(); reloadAnomalies()
+  }, [reloadLifecycle, reloadResources, reloadCosts, reloadRightSizing, reloadAiCosts, reloadAnomalies])
   useEffect(() => {
     const id = setInterval(load, 60_000)
     return () => clearInterval(id)
   }, [load])
-
-  if (unavailable) {
-    return <DataUnavailable kind={unavailable.kind} service="finops" feature={t('FinOps přehled', 'FinOps overview')} lang={language} />
-  }
 
   const tierColor = lifecycle?.currentTier === 'standard' ? 'var(--success-text)'
     : lifecycle?.currentTier === 'extended' ? 'var(--warning-text)'
@@ -422,9 +278,9 @@ function FinOpsContent() {
         )}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">FinOps</span></div>}
         actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {lastRefresh && (
+          {lastRefresh && !loading && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString(locale)}
+              {t('Kontrola zdrojů zahájena', 'Source check started')} {lastRefresh.toLocaleTimeString(locale)}
             </span>
           )}
           <Link
@@ -452,31 +308,34 @@ function FinOpsContent() {
         </div>}
       />
 
-      {loading && !lifecycle ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
-          <RefreshCw size={16} style={{ animation: 'spin 0.8s linear infinite' }} />
-          <span style={{ fontSize: '13px' }}>{t('Načítám FinOps data…', 'Loading FinOps data…')}</span>
-        </div>
-      ) : lifecycle ? (
-        <>
+      <div aria-live="polite">
+        {sections.map(({ name, resource }) => resource.unavailable ? (
+          <section key={name} aria-label={name} className="mb-4">
+            <DataUnavailable kind={resource.unavailable.kind} feature={name} service="FinOps" lang={language} dense>
+              <button type="button" onClick={resource.reload} className="btn-secondary" style={{ color: 'var(--text-primary)', background: 'var(--surface)' }} aria-label={t(`Zkusit znovu: ${name}`, `Retry ${name}`)}>{t('Zkusit znovu', 'Retry')}</button>
+            </DataUnavailable>
+          </section>
+        ) : resource.loading && !resource.data ? <p key={name} className="text-sm text-muted-foreground">{t('Načítání', 'Loading')}: {name}…</p> : null)}
+      </div>
+      <>
           {/* KPI row */}
           <div className="grid-4" style={{ marginBottom: '28px' }}>
-            <KpiCard
+            {lifecycle && <KpiCard
               icon={<ShieldCheck size={18} />}
               label={t('Typ podpory EKS', 'EKS Support Tier')}
               value={lifecycle.currentTier === 'standard' ? 'Standard' : lifecycle.currentTier === 'extended' ? 'Extended' : 'EOL'}
               sub={`v${lifecycle.currentVersion} · $${lifecycle.monthlyEstimate.toLocaleString(locale)}/mo`}
               color={tierColor}
               accent
-            />
-            <KpiCard
+            />}
+            {lifecycle && <KpiCard
               icon={<Clock size={18} />}
               label={t('Zbývá dní (standard)', 'Standard Support Runway')}
               value={lifecycle.daysToStandardEnd > 0 ? `${lifecycle.daysToStandardEnd}d` : 'EOL'}
               sub={t(`Konec: ${lifecycle.standardSupportEnds}`, `Ends: ${lifecycle.standardSupportEnds}`)}
               color={runwayColor}
               accent={lifecycle.runwayStatus !== 'ok'}
-            />
+            />}
             <KpiCard
               icon={<DollarSign size={18} />}
               label={t('Měsíční cloud náklady', 'Monthly Cloud Spend')}
@@ -492,7 +351,7 @@ function FinOpsContent() {
               label={t('Right-sizing: potenciál úspory', 'Right-sizing Savings Potential')}
               value={rightSizing?.available ? `${rightSizing.highSavingsCount}` : '—'}
               sub={rightSizing?.available
-                ? t(`služeb silně naddimenzovaných (CPU<30% req)`, `services heavily over-provisioned (CPU<30% req)`)
+                ? t(`služeb s vysokým potenciálem úspor podle dostupných metrik`, `services with high savings potential from available metrics`)
                 : t('Prometheus nedostupný', 'Prometheus unavailable')}
               color='var(--warning-text)'
               accent={Boolean(rightSizing?.available && rightSizing.highSavingsCount > 0)}
@@ -500,7 +359,7 @@ function FinOpsContent() {
           </div>
 
           {/* ── FinOps agent findings (AI) — directly below the KPIs (admin-ui agent-output rule) ── */}
-          <AgentInsightsPanel
+          {anomalies && <AgentInsightsPanel
             title={t('FinOps náhledy (AI)', 'FinOps Insights (AI)')}
             subtitle={t(
               'Aktivní cost anomálie z finops-agenta (D1–D5 detektory z Alertmanageru — ADR-0112). Tento přehled je pouze pro čtení: alerty zatím nevytvářejí návrhy ve schvalovací frontě.',
@@ -508,11 +367,11 @@ function FinOpsContent() {
             )}
             findings={anomalies.map(a => toAgentFinding(a, t))}
             emptyMessage={t(
-              'Žádné aktivní cost anomálie — Alertmanager nedosažitelný nebo žádné finops-agent alerty.',
-              'No active cost anomalies — Alertmanager unreachable or no finops-agent alerts firing.',
+              'Žádné aktivní nákladové anomálie v poslední odpovědi zdroje.',
+              'No active cost anomalies in the latest source response.',
             )}
             sourceLabel={t('Zdroj: Alertmanager (finops-agent)', 'Source: Alertmanager (finops-agent)')}
-          />
+          />}
 
           {/* Cloud Cost (AWS Cost Explorer snapshot) */}
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
@@ -687,6 +546,7 @@ function FinOpsContent() {
             })()}
           </div>
 
+          {lifecycle && <>
           {/* EKS Version Timeline */}
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
@@ -701,7 +561,7 @@ function FinOpsContent() {
               </span>
             </div>
 
-            <div style={{ overflowX: 'auto' }}>
+            <div role="region" aria-label={t('Tabulka dat FinOps', 'FinOps data table')} tabIndex={0} style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid var(--border)' }}>
@@ -719,7 +579,10 @@ function FinOpsContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lifecycle.versions.map(v => (
+                  {[...lifecycle.versions]
+                    .sort((left, right) => compareEksVersionsNewestFirst(left.version, right.version))
+                    .slice(0, 5)
+                    .map(v => (
                     <tr key={v.version}
                       style={{
                         borderBottom: '1px solid var(--border)',
@@ -832,7 +695,9 @@ function FinOpsContent() {
             </div>
           </div>
 
+          </>}
           {/* Resource Efficiency from Prometheus */}
+          {(resources?.degraded || resources?.error) && <p role="status" className="mb-3 text-sm" style={{ color: 'var(--warning-text)' }}>{t('Využití zdrojů: částečná data. Některé dotazy neuspěly; souhrny nepokrývají celou flotilu.', 'Resource utilisation: partial evidence. Some queries failed; summaries do not cover the complete fleet.')}</p>}
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -854,8 +719,8 @@ function FinOpsContent() {
                 <Info size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                 <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                   {t(
-                    'Prometheus není dostupný — metriky vytížení nejsou k dispozici. Data se zobrazí po spuštění observability stacku.',
-                    'Prometheus is not reachable — resource utilisation metrics unavailable. Data will appear once the observability stack is running.',
+                    'Data o využití zdrojů nejsou dostupná. Zkontrolujte stav zdroje výše a zkuste načtení znovu.',
+                    'Resource utilisation evidence is unavailable. Check the source status above and retry.',
                   )}
                 </span>
               </div>
@@ -864,7 +729,7 @@ function FinOpsContent() {
                 {t('Žádná data z Promethea (JVM metriky ještě nejsou k dispozici).', 'No data from Prometheus yet (JVM metrics not yet scraped).')}
               </div>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
+              <div role="region" aria-label={t('Tabulka dat FinOps', 'FinOps data table')} tabIndex={0} style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid var(--border)' }}>
@@ -891,7 +756,7 @@ function FinOpsContent() {
                           <HeapBar pct={svc.heap.pct} efficiency={svc.efficiency} />
                         </td>
                         <td style={{ padding: '9px 12px', color: 'var(--text-secondary)', fontSize: '11px' }}>
-                          {svc.heap.maxBytes > 0 ? `${Math.round(svc.heap.maxBytes / 1048576)}MB` : '—'}
+                          {svc.heap.maxBytes !== null && svc.heap.maxBytes > 0 ? `${Math.round(svc.heap.maxBytes / 1048576)}MB` : '—'}
                         </td>
                         <td style={{ padding: '9px 12px', color: 'var(--text-secondary)', fontSize: '11px' }}>
                           {svc.cpuCoresUsed !== null ? svc.cpuCoresUsed.toFixed(3) : '—'}
@@ -935,7 +800,7 @@ function FinOpsContent() {
                 {!aiCosts?.available && (
                   <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
                     background: 'var(--warning-bg)', color: 'var(--warning-text)' }}>
-                    {t('Langfuse bridge není nasazen', 'Langfuse bridge not deployed')}
+                    {t('AI metriky nejsou dostupné', 'AI metrics unavailable')}
                   </span>
                 )}
               </div>
@@ -948,8 +813,9 @@ function FinOpsContent() {
             </div>
             <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '0 0 16px' }}>
               {t(
-                'Tokeny a náklady na AI agenty (copilot, Holmes RCA, FinOps agent). Datový zdroj: Langfuse→Prometheus bridge (ADR-0112 P1). Fallback na prázdný stav, dokud bridge není nasazen.',
-                'Token usage and cost for AI agents (copilot, Holmes RCA, FinOps agent). Data source: Langfuse→Prometheus bridge (ADR-0112 P1). Falls back to empty state until bridge is deployed.',
+
+                'Tokeny a náklady na AI agenty (copilot, Holmes RCA, FinOps agent). Datový zdroj: Langfuse→Prometheus bridge (ADR-0112 P1). Nedostupná data se zobrazují odděleně od ověřeného prázdného výsledku.',
+                'Token usage and cost for AI agents (copilot, Holmes RCA, FinOps agent). Data source: Langfuse→Prometheus bridge (ADR-0112 P1). Unavailable evidence is distinguished from a verified empty result.',
               )}
             </p>
 
@@ -959,8 +825,9 @@ function FinOpsContent() {
                 <Info size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                 <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                   {t(
-                    'Langfuse→Prometheus bridge není nasazen — AI náklady nejsou k dispozici. Data se zobrazí po nasazení bridge (ADR-0112 P1).',
-                    'Langfuse→Prometheus bridge is not deployed — AI cost metrics unavailable. Data will appear after deploying the bridge (ADR-0112 P1).',
+
+                    'Data o AI nákladech nejsou dostupná. Zkontrolujte stav zdroje výše a zkuste načtení znovu; chybějící data neurčují stav nasazení.',
+                    'AI cost evidence is unavailable. Check the source status above and retry; missing evidence does not establish deployment status.',
                   )}
                 </span>
               </div>
@@ -971,7 +838,9 @@ function FinOpsContent() {
                   padding: '14px 18px', borderRadius: '10px', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)' }}>
                   <div>
                     <div style={{ fontSize: '32px', fontWeight: 900, color: 'var(--accent-text)', letterSpacing: '-0.04em', lineHeight: 1 }}>
-                      ${aiCosts.totalCostLast7dUsd.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {aiCosts.totalCostLast7dUsd == null
+                        ? t('Žádná data', 'No data')
+                        : `$${aiCosts.totalCostLast7dUsd.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                     </div>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
                       {t('Celkem AI náklady — posledních 7 dní', 'Total AI costs — last 7 days')}
@@ -1016,7 +885,9 @@ function FinOpsContent() {
                       ))}
                     </div>
                     {aiCosts.agents.map(agent => {
-                      const burnCfg = {
+                      const burnCfg = agent.burnRate == null
+                        ? { color: 'var(--text-tertiary)', bg: 'var(--surface-3)', label: t('Žádná data', 'No data') }
+                        : {
                         low:      { color: 'var(--success-text)', bg: 'var(--success-bg)', label: t('Nízký', 'Low') },
                         normal:   { color: 'var(--info-text)', bg: 'var(--info-bg)', label: t('Normální', 'Normal') },
                         high:     { color: 'var(--warning-text)', bg: 'var(--warning-bg)', label: t('Vysoký', 'High') },
@@ -1050,10 +921,10 @@ function FinOpsContent() {
                             )}
                           </div>
                           <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', textAlign: 'right' }}>
-                            ${agent.costLast24hUsd.toFixed(2)}
+                            {agent.costLast24hUsd == null ? t('Žádná data', 'No data') : `$${agent.costLast24hUsd.toFixed(2)}`}
                           </span>
                           <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', textAlign: 'right' }}>
-                            ${agent.costLast7dUsd.toFixed(2)}
+                            {agent.costLast7dUsd == null ? t('Žádná data', 'No data') : `$${agent.costLast7dUsd.toFixed(2)}`}
                           </span>
                         </div>
                       )
@@ -1064,6 +935,7 @@ function FinOpsContent() {
             )}
           </div>
 
+          {(rightSizing?.degraded || rightSizing?.error) && <p role="status" className="mb-3 text-sm" style={{ color: 'var(--warning-text)' }}>{t('Dimenzování zdrojů: částečná data. Doporučení vycházejí pouze z dostupných metrik.', 'Right-sizing: partial evidence. Recommendations use only the available metrics.')}</p>}
           {/* Right-sizing panel — VPA recommendations + k8s resource efficiency */}
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
@@ -1113,7 +985,7 @@ function FinOpsContent() {
                       : t('VPA zatím nemá data (CRDs instalovány; počkejte ≥1 h po instalaci).', 'VPA not yet providing recommendations (CRDs installed; allow ≥1 h for initial data).')}
                   </span>
                 </div>
-                <div style={{ overflowX: 'auto' }}>
+                <div role="region" aria-label={t('Tabulka dat FinOps', 'FinOps data table')} tabIndex={0} style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                     <thead>
                       <tr style={{ borderBottom: '2px solid var(--border)' }}>
@@ -1212,6 +1084,7 @@ function FinOpsContent() {
             )}
           </div>
 
+          {lifecycle && <>
           {/* ADR reference + cost math explainer */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div style={{ padding: '16px 20px', borderRadius: 'var(--r-lg)', border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
@@ -1274,8 +1147,8 @@ function FinOpsContent() {
               </div>
             </div>
           </div>
+          </>}
         </>
-      ) : null}
     </div>
   )
 }

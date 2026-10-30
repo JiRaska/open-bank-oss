@@ -24,13 +24,14 @@ import kotlin.io.path.readText
  * That is the corruption `AnalyticsConsumer.resolveAggregateId`'s KDoc documents from #4553,
  * reproduced on a new domain. The producer settling its own identity is what prevents it.
  *
- * WHY A SOURCE SCAN RATHER THAN ELEVEN FLOWS. The behavioural assertions live beside the flows
+ * WHY A SOURCE SCAN RATHER THAN THIRTEEN FLOWS. The behavioural assertions live beside the flows
  * that already drive each event (`LendingServiceTest`), and they are the real coverage. This test
  * answers the question those cannot: is there an emit site anywhere in the service that a future
- * change could add WITHOUT identity? Two of the eleven event types are emitted through a
+ * change could add WITHOUT identity? Two of the twelve event types are emitted through a
  * parameterised helper (`loan.withdrawn`, `loan.accelerated` via `TerminationService.emitDomainEvent`),
  * so a grep for `eventType = "..."` literals finds nine and misses two — the same two-idiom trap
- * this repo has hit before. Scanning the payload builders catches both idioms.
+ * this repo has hit before. The accrual receipt repository also builds a serialized map and names
+ * its event in SQL. The scan includes that writer and checks both raw-string and map payloads.
  */
 class LendingEventIdentityTest {
 
@@ -47,7 +48,26 @@ class LendingEventIdentityTest {
         "LendingService.kt",
         "OriginationDecisionService.kt",
         "TerminationService.kt",
-    ).map { Path.of("src/main/kotlin/com/openbank/lending/application/usecase", it) }
+    ).map { Path.of("src/main/kotlin/com/openbank/lending/application/usecase", it) } + listOf(
+        Path.of(
+            "src/main/kotlin/com/openbank/lending/infrastructure/persistence/repository/AccrualProgressRepository.kt",
+        ),
+    )
+
+    private fun opensPayload(lines: List<String>, index: Int): Boolean {
+        val line = lines[index]
+        return line.contains(PAYLOAD_OPENING) ||
+            (
+                line.contains("linkedMapOf(") &&
+                    (
+                        line.contains(".writeValueAsString(") ||
+                            lines.getOrNull(index - 1)?.contains(".writeValueAsString(") == true
+                        )
+                )
+    }
+
+    private fun eventTypes(text: String): Set<String> = Regex("""["'](credit|loan)\.[a-z._]+["']""")
+        .findAll(text).map { it.value.trim('"', '\'') }.toSet()
 
     @Test
     fun `every payload builder in the service names its aggregate identity`() {
@@ -57,11 +77,17 @@ class LendingEventIdentityTest {
         // narrow enough that identity has to be at the TOP of the payload, wide enough to allow
         // the discriminator ahead of it.
         val offenders = mutableListOf<String>()
+        assertThat(sources).hasSize(4)
+        assertThat(sources.last()).isEqualTo(
+            Path.of(
+                "src/main/kotlin/com/openbank/lending/infrastructure/persistence/repository/AccrualProgressRepository.kt",
+            ),
+        )
         for (file in sources) {
-            assertThat(Files.exists(file)).describedAs("$file").isTrue()
+            assertThat(Files.isRegularFile(file)).describedAs("$file").isTrue()
             val lines = file.readText().lines()
             for ((i, line) in lines.withIndex()) {
-                if (!line.contains(PAYLOAD_OPENING)) continue
+                if (!opensPayload(lines, i)) continue
                 val window = lines.subList(i, minOf(i + IDENTITY_WINDOW, lines.size)).joinToString("\n")
                 if (!window.contains("aggregateType") || !window.contains("aggregateId")) {
                     offenders += "${file.fileName}:${i + 1}: ${line.trim()}"
@@ -74,18 +100,18 @@ class LendingEventIdentityTest {
     }
 
     @Test
-    fun `the twelve event types are the ones this test speaks for`() {
+    fun `the thirteen event types are the ones this test speaks for`() {
         // A new event type must consciously join this list, which is what makes the scan above a
-        // ratchet rather than a snapshot. Ten are literals; two arrive as a parameter.
+        // ratchet rather than a snapshot. Eleven are literals; two arrive as a parameter.
         val publisher = Path.of(
             "src/main/kotlin/com/openbank/lending/infrastructure/outbox/KafkaLendingOutboxEventPublisher.kt",
         )
         val text = (sources + listOf(publisher)).joinToString("\n") { it.readText() }
-        val literals = Regex(""""(credit|loan)\.[a-z._]+"""").findAll(text)
-            .map { it.value.trim('"') }.toSet()
+        val literals = eventTypes(text)
         assertThat(literals).containsExactlyInAnyOrder(
             "credit.application.transition",
             "credit.application.transition.refused",
+            "credit.application.four_eyes_sla_escalation",
             "credit.decision.evaluated",
             "credit.loan.transition",
             "loan.disbursed",
@@ -113,6 +139,23 @@ class LendingEventIdentityTest {
         assertThat(bad.joinToString("\n").contains("aggregateType")).isFalse()
         assertThat(good.first().contains(PAYLOAD_OPENING)).isTrue()
         assertThat(good.joinToString("\n").let { it.contains("aggregateType") && it.contains("aggregateId") }).isTrue()
+
+        val badMap = listOf("val payload = mapper.writeValueAsString(", "linkedMapOf(\"loanId\" to id)")
+        val goodMap = listOf(
+            "val payload = mapper.writeValueAsString(",
+            "linkedMapOf(",
+            "\"eventType\" to \"loan.interest_accrued\",",
+            "\"aggregateType\" to \"LOAN\",",
+            "\"aggregateId\" to id,",
+        )
+        assertThat(opensPayload(badMap, 1)).isTrue()
+        assertThat(badMap.drop(1).joinToString("\n").contains("aggregateId")).isFalse()
+        assertThat(opensPayload(goodMap, 1)).isTrue()
+        val mapWindow = goodMap.drop(1).take(IDENTITY_WINDOW).joinToString("\n")
+        assertThat(mapWindow).contains("aggregateType", "aggregateId")
+        assertThat(eventTypes("VALUES ('loan.interest_accrued')")).containsExactly("loan.interest_accrued")
+        assertThat(eventTypes("VALUES ('loanxinterest_accrued')")).isEmpty()
+        assertThat(eventTypes("loan.interest_accrued")).isEmpty()
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.openbank.context.infrastructure
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -218,7 +219,7 @@ private data class RailNode(
     val version: Long,
 ) {
     fun values(bankScope: String, generation: Long, recordedAt: Instant): Map<String, Any> = mapOf(
-        "rowId" to railStableId("$bankScope|$generation|$key"),
+        "rowId" to Ids.newId(),
         "key" to key,
         "bankScope" to bankScope,
         "generation" to generation,

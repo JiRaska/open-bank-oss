@@ -4,6 +4,7 @@
 
 package com.openbank.sanctions.domain.model
 
+import com.openbank.libs.fincrime.ScreeningPolicy
 import java.time.Instant
 import java.util.UUID
 
@@ -17,7 +18,13 @@ enum class SanctionsListType {
     CNB_DOMESTIC,
 }
 enum class MatchType { EXACT, FUZZY, PHONETIC, ALIAS }
-enum class SanctionsCheckStatus { CLEAR, HIT, POTENTIAL_HIT, WHITELISTED, ESCALATED }
+
+/**
+ * sanctions-service's name for the shared check status (ADR-0353 D4), declared once in
+ * `openbank-libs-fincrime` so every rail reads the same value set it publishes.
+ */
+typealias SanctionsCheckStatus = com.openbank.libs.fincrime.ScreeningMatchStatus
+
 enum class EntityType { INDIVIDUAL, ORGANIZATION, VESSEL, AIRCRAFT }
 
 data class SanctionsMatch(
@@ -47,7 +54,11 @@ data class SanctionsCheck(
     val reviewNote: String?,
     val checkedAt: Instant,
     val reviewedAt: Instant?,
+    /** Stable caller-owned identity (for account opening, the party UUID), never parsed from the key. */
+    val subjectId: String? = null,
+    /** A WHITELISTED review may cover later fresh screens only until this instant. */
+    val clearanceExpiresAt: Instant? = null,
 ) {
     fun isHighRisk() = status == SanctionsCheckStatus.HIT ||
-        (status == SanctionsCheckStatus.POTENTIAL_HIT && overallScore > 0.85)
+        (status == SanctionsCheckStatus.POTENTIAL_HIT && overallScore > ScreeningPolicy.POTENTIAL_HIT_BLOCK_THRESHOLD)
 }

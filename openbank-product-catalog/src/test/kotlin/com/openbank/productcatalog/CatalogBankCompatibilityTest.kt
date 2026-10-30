@@ -230,6 +230,28 @@ class CatalogBankCompatibilityTest {
     }
 
     @Test
+    fun `a v1 product id resolves to the revision a contract pins, only once one is published`() {
+        switchIdentity("pin-author")
+        val productId = createLegacyDraft("CURRENT_ADR0341_PIN")
+        val offeringId = mappedOffering(productId)
+        val path = "/api/v2/legacy-products/$productId/published-revision"
+
+        // A draft is not pinnable: nothing is published yet.
+        given().get(path).then().statusCode(404)
+
+        publishLatestDraft(offeringId, "pin-checker")
+
+        val revision = given().get(path).then().statusCode(200).extract().jsonPath()
+        assertThat(revision.getString("state")).isEqualTo("PUBLISHED")
+        assertThat(revision.getString("offeringId")).isEqualTo(offeringId.toString())
+        assertThat(revision.getString("schemaRef.id")).isEqualTo("org.openbank.banking.legacy-product")
+        // The revision id the lookup returns is the one the immutable by-id read serves.
+        given().get("/api/v2/revisions/${revision.getString("id")}").then().statusCode(200)
+
+        given().get("/api/v2/legacy-products/${UUID.randomUUID()}/published-revision").then().statusCode(404)
+    }
+
+    @Test
     fun `V7 detects a rollback era deactivation against its active published baseline`() {
         switchIdentity("deactivation-author")
         val productId = createLegacyDraft("CURRENT_V7_DEACTIVATED")

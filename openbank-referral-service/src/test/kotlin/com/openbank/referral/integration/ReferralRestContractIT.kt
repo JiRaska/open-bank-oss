@@ -9,6 +9,7 @@ import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
+import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.everyItem
 import org.hamcrest.Matchers.hasItem
@@ -85,7 +86,7 @@ class ReferralRestContractIT {
             .When { get("/api/v1/referrals/programs/$selfApprovalId") }
             .Then { statusCode(404) }
 
-        val inviteToken = Given {
+        val (inviteToken, referralLink) = Given {
             contentType("application/json")
             header("Idempotency-Key", "invite-$programId")
             body("""{"referrerPartyId":"$referrer"}""")
@@ -93,7 +94,12 @@ class ReferralRestContractIT {
             statusCode(201)
             body("status", equalTo("ISSUED"))
             body("token", notNullValue())
-        } Extract { path<String>("token") }
+            body("referralLink", notNullValue())
+        } Extract { path<String>("token") to path<String>("referralLink") }
+
+        // The link is the configured base (application.yaml's openbank.referral.link-base-url)
+        // with exactly one '/' before the raw token.
+        assertThat(referralLink).isEqualTo("https://app.open-bank.tech/r/$inviteToken")
 
         Given { contentType("application/json") }
             .header("Idempotency-Key", "attribute-$programId")

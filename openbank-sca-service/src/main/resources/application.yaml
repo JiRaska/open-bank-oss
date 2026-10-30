@@ -10,21 +10,6 @@ quarkus:
       methods: GET,POST,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key,X-Request-ID
 
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
     limits:
       max-body-size: 10M
     idle-timeout: 60S
@@ -36,6 +21,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_sca
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     # The DEFAULT (Agroal/JDBC) datasource Flyway migrates. Declaring only the reactive URL leaves
     # it unconfigured, and `migrate-at-start` then kills the boot with "Unable to find datasource
     # '<default>' … Bean is not active: SYNTHETIC bean [class=AgroalDataSource]" — so the service
@@ -99,11 +87,6 @@ quarkus:
         service.name: openbank-sca-service
         service.version: 0.1.0
 
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -178,6 +161,9 @@ quarkus:
     datasource:
       reactive:
         url: vertx-reactive:postgresql://localhost:5433/openbank_sca_test
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
     oidc:
       enabled: false
     # Tests replace the party-register lookup with a stub bean, so nothing needs an outbound token.

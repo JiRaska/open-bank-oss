@@ -13,12 +13,19 @@
       "request": {
         "body": {
           "amount": 18450.00,
+          "baseAmount": null,
+          "baseCurrencyCode": null,
+          "bookingDate": null,
           "currencyCode": "CZK",
           "description": "Withholding tax remittance 2026-01 / FU_PRAHA",
           "idempotencyKey": "interest-withholding-7c1f0a2e-1111-4222-8333-444444444444",
+          "initiatedByPartyId": null,
           "instructionType": "ONE_OFF",
           "rail": "DOMESTIC",
+          "scaChallengeId": null,
+          "scaExemption": null,
           "sourceAccountId": "cccccccc-1111-4222-8333-444444444444",
+          "targetAccountId": null,
           "type": "DEBIT",
           "valueDate": "2026-02-20"
         },
@@ -71,12 +78,19 @@
       "request": {
         "body": {
           "amount": 18450.00,
+          "baseAmount": null,
+          "baseCurrencyCode": null,
+          "bookingDate": null,
           "currencyCode": "CZK",
           "description": "Withholding tax remittance 2026-01 / FU_PRAHA",
           "idempotencyKey": "interest-withholding-7c1f0a2e-1111-4222-8333-444444444444",
+          "initiatedByPartyId": null,
           "instructionType": "ONE_OFF",
           "rail": "DOMESTIC",
+          "scaChallengeId": null,
+          "scaExemption": null,
           "sourceAccountId": "cccccccc-1111-4222-8333-444444444444",
+          "targetAccountId": null,
           "type": "DEBIT",
           "valueDate": "2026-02-20"
         },

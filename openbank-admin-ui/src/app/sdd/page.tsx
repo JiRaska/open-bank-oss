@@ -56,9 +56,17 @@ export default function SddPage() {
         setUnavailable({ kind })
         return
       }
-      const data = await res.json() as unknown
+      let parsedRows: SddMandate[]
+      try {
+        const data = await res.json() as unknown
+        if (requestRef.current !== controller) return
+        parsedRows = parseSddMandates(data)
+      } catch {
+        if (requestRef.current === controller) setUnavailable({ kind: 'error' })
+        return
+      }
       if (requestRef.current !== controller) return
-      setRows(parseSddMandates(data))
+      setRows(parsedRows)
       snapshotStatusRef.current = status
       setUnavailable(null)
     } catch {

@@ -16,6 +16,9 @@ import com.openbank.productcatalog.domain.catalog.MarketContext
 import com.openbank.productcatalog.domain.catalog.ProductOffering
 import com.openbank.productcatalog.domain.catalog.ProductRevision
 import com.openbank.productcatalog.domain.catalog.ProductSpecification
+import com.openbank.productcatalog.domain.catalog.RevisionApproval
+import com.openbank.productcatalog.domain.catalog.RevisionApprovalPolicy
+import com.openbank.productcatalog.domain.catalog.RevisionIrSignature
 import com.openbank.productcatalog.domain.catalog.RevisionState
 import com.openbank.productcatalog.domain.catalog.SchemaRef
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
@@ -53,16 +56,35 @@ class PostgresGenericCatalogRepository(
     }
 
     override suspend fun findSchema(ref: SchemaRef): CatalogSchema? = sessions.withSession { session ->
-        session.find(CatalogSchemaEntity::class.java, ref.key())
-    }.map { it?.toDomain() }.awaitSuspending()
+        session.find(CatalogSchemaEntity::class.java, ref.key()).flatMap { schema ->
+            if (schema == null) {
+                Uni.createFrom().nullItem()
+            } else {
+                approvalPolicy(session, ref).map { policy -> schema.toDomain(policy) }
+            }
+        }
+    }.awaitSuspending()
 
     override suspend fun listSchemas(): List<CatalogSchema> = sessions.withSession { session ->
         session.createQuery(
             "FROM CatalogSchemaEntity ORDER BY schemaId, schemaVersion",
             CatalogSchemaEntity::class.java,
-        )
-            .resultList
-    }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
+        ).resultList.flatMap { rows ->
+            session.createQuery("FROM SchemaApprovalPolicyEntity", SchemaApprovalPolicyEntity::class.java)
+                .resultList
+                .map { policies ->
+                    val byRef = policies.associateBy({ "${it.schemaId}:${it.schemaVersion}" }, { it.toPolicy() })
+                    rows.map { it.toDomain(byRef[it.key]) }
+                }
+        }
+    }.awaitSuspending()
+
+    private fun approvalPolicy(session: Mutiny.Session, ref: SchemaRef): Uni<RevisionApprovalPolicy?> =
+        session.find(SchemaApprovalPolicyEntity::class.java, SchemaApprovalPolicyKey(ref.id, ref.version))
+            .map { it?.toPolicy() }
+
+    private fun SchemaApprovalPolicyEntity.toPolicy(): RevisionApprovalPolicy =
+        mapper.readValue(policy.encode(), RevisionApprovalPolicy::class.java)
 
     override suspend fun createSpecification(
         specification: ProductSpecification,
@@ -158,15 +180,18 @@ class PostgresGenericCatalogRepository(
         }
 
     override suspend fun findRevision(id: UUID): ProductRevision? = sessions.withSession { session ->
-        session.find(CatalogRevisionEntity::class.java, id)
-    }.map { it?.toDomain() }.awaitSuspending()
+        session.find(CatalogRevisionEntity::class.java, id).flatMap {
+            session.withIrSignature(it) { r -> r.toDomain() }
+        }
+    }.awaitSuspending()
 
     override suspend fun listRevisions(offeringId: UUID): List<ProductRevision> = sessions.withSession { session ->
         session.createQuery(
             "FROM CatalogRevisionEntity WHERE offeringId = :offeringId ORDER BY number DESC, id",
             CatalogRevisionEntity::class.java,
         ).setParameter("offeringId", offeringId).resultList
-    }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
+            .flatMap { rows -> session.withIrSignatures(rows) { r -> r.toDomain() } }
+    }.awaitSuspending()
 
     override suspend fun updateDraft(revision: ProductRevision, actorId: String): ProductRevision =
         translateOptimisticFailure {
@@ -200,14 +225,12 @@ class PostgresGenericCatalogRepository(
         reason: String,
         contentHash: String,
         at: Instant,
+        irSignature: RevisionIrSignature?,
     ): ProductRevision = translateOptimisticFailure {
         sessions.withTransaction { session ->
-            session.createQuery(
-                "FROM CatalogRevisionEntity WHERE id = :id AND revision = :revision",
-                CatalogRevisionEntity::class.java,
-            ).setParameter("id", revisionId).setParameter("revision", expectedRevision).resultList
+            session.find(CatalogRevisionEntity::class.java, revisionId, LockMode.PESSIMISTIC_WRITE)
                 .map {
-                    it.firstOrNull()
+                    it?.takeIf { row -> row.revision == expectedRevision }
                         ?: throw CatalogPreconditionFailedException("revision was modified concurrently")
                 }
                 .flatMap { draft ->
@@ -221,7 +244,15 @@ class PostgresGenericCatalogRepository(
                     session.find(CatalogOfferingEntity::class.java, draft.offeringId, LockMode.PESSIMISTIC_WRITE)
                         .flatMap { offering ->
                             checkNotNull(offering) { "offering ${draft.offeringId} disappeared during publication" }
-                            preparePublication(session, draft, at, checkerId).flatMap {
+                            approvalPolicy(session, SchemaRef(draft.schemaId, draft.schemaVersion)).flatMap { policy ->
+                                requireRoleApprovals(session, draft, policy).flatMap {
+                                    preparePublication(session, draft, at, checkerId)
+                                }.map { policy }
+                            }.flatMap { policy ->
+                                if (policy != null) {
+                                    draft.approvalDigest = catalogJson.approvalDigest(draft.toDomain())
+                                    draft.approvedEffectiveTo = draft.effectiveTo
+                                }
                                 draft.state = RevisionState.PUBLISHED.name
                                 draft.checkerId = checkerId
                                 draft.reason = reason
@@ -229,14 +260,141 @@ class PostgresGenericCatalogRepository(
                                 draft.updatedAt = at
                                 session.persist(approval(draft, checkerId, reason, at))
                             }.flatMap {
+                                session.persistIrSignature(draft.id, irSignature)
+                            }.flatMap {
                                 recordChange(session, "REVISION", draft.id, "REVISION_PUBLISHED", checkerId)
                             }.flatMap {
                                 bankCompatibility.refreshLegacyProjection(session, draft, at)
-                            }.map { draft.toDomain().copy(revision = draft.revision + 1) }
+                            }.map { draft.toDomain().copy(revision = draft.revision + 1, irSignature = irSignature) }
                         }
                 }
         }.awaitSuspending()
     }
+
+    override suspend fun approveRevision(
+        revisionId: UUID,
+        expectedRevision: Long,
+        role: String,
+        issuer: String,
+        subject: String,
+        actorName: String,
+        reason: String,
+    ): RevisionApproval = translatePersistenceConflict("approval already exists for this role and revision") {
+        sessions.withTransaction { session ->
+            session.find(CatalogRevisionEntity::class.java, revisionId, LockMode.PESSIMISTIC_WRITE)
+                .map {
+                    it?.takeIf { row -> row.revision == expectedRevision }
+                        ?: throw CatalogPreconditionFailedException("revision was modified concurrently")
+                }
+                .flatMap { draft ->
+                    approvalPolicy(session, SchemaRef(draft.schemaId, draft.schemaVersion)).map { policy ->
+                        // Re-checked under the row lock: the service's checks ran on an unlocked read.
+                        if (draft.state != RevisionState.DRAFT.name || policy?.role(role) == null) {
+                            throw CatalogConflictException("only draft revisions accept declared role approvals")
+                        }
+                        requireApprovable(draft, policy)
+                        if (draft.makerId == subject || draft.makerId == actorName) {
+                            throw CatalogForbiddenException("maker cannot approve their own revision")
+                        }
+                        draft
+                    }
+                }
+                .flatMap { draft ->
+                    val digest = catalogJson.approvalDigest(draft.toDomain())
+                    currentApprovals(session, revisionId, digest).flatMap { existing ->
+                        if (existing.any { it.role == role }) {
+                            throw CatalogConflictException("this role already approved the current revision")
+                        }
+                        if (existing.any { it.issuer == issuer && it.subject == subject }) {
+                            throw CatalogForbiddenException("each approval role requires a different principal")
+                        }
+                        val approved = RevisionRoleApprovalEntity().apply {
+                            id = Ids.newId()
+                            this.revisionId = revisionId
+                            this.role = role
+                            this.issuer = issuer
+                            this.subject = subject
+                            this.digest = digest
+                            this.reason = reason
+                            approvedAt = Instant.now(clock)
+                        }
+                        session.persist(approved).flatMap {
+                            recordChange(session, "REVISION", revisionId, "REVISION_ROLE_${role}_APPROVED", subject)
+                        }.map { approved.toDomain() }
+                    }
+                }
+        }.awaitSuspending()
+    }
+
+    override suspend fun revisionApprovals(revisionId: UUID): List<RevisionApproval> = sessions.withSession { session ->
+        session.find(CatalogRevisionEntity::class.java, revisionId).flatMap { revision ->
+            val digest = when {
+                revision == null -> null
+                revision.state == RevisionState.DRAFT.name -> catalogJson.approvalDigest(revision.toDomain())
+                else -> revision.approvalDigest
+            }
+            if (digest ==
+                null
+            ) {
+                Uni.createFrom().item(emptyList())
+            } else {
+                currentApprovals(session, revisionId, digest)
+            }
+        }
+    }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
+
+    private fun currentApprovals(session: Mutiny.Session, revisionId: UUID, digest: String) = session.createQuery(
+        "FROM RevisionRoleApprovalEntity WHERE revisionId = :id AND digest = :digest ORDER BY approvedAt, role",
+        RevisionRoleApprovalEntity::class.java,
+    ).setParameter("id", revisionId).setParameter("digest", digest).resultList
+
+    private fun requireApprovable(draft: CatalogRevisionEntity, policy: RevisionApprovalPolicy) {
+        if (policy.requireEffectiveFrom && draft.effectiveFrom == null) {
+            throw CatalogConflictException("approval requires an explicit effectiveFrom")
+        }
+        val attributes = draft.toDomain().content.attributes.values
+        policy.requiredAttributes.forEach { (name, expected) ->
+            if (attributes[name] != com.openbank.productcatalog.domain.catalog.CatalogValue.TextValue(expected)) {
+                throw CatalogConflictException("approval requires attribute $name = $expected")
+            }
+        }
+    }
+
+    /**
+     * Publication gate for a schema whose pack declared an approval policy: every declared role has
+     * approved the exact current digest, each by a different principal, none by the maker.
+     */
+    private fun requireRoleApprovals(
+        session: Mutiny.Session,
+        draft: CatalogRevisionEntity,
+        policy: RevisionApprovalPolicy?,
+    ): Uni<Void> {
+        if (policy == null) return Uni.createFrom().voidItem()
+        requireApprovable(draft, policy)
+        val digest = catalogJson.approvalDigest(draft.toDomain())
+        return currentApprovals(session, draft.id, digest).invoke { rows ->
+            val byRole = policy.roles.map { spec -> rows.singleOrNull { it.role == spec.code } }
+            val complete = byRole.all { it != null }
+            val principals = byRole.filterNotNull().map { it.issuer to it.subject }
+            val distinct = principals.toSet().size == principals.size
+            val makerExcluded = rows.none { it.subject == draft.makerId }
+            if (!complete || !distinct || !makerExcluded) {
+                throw CatalogConflictException(
+                    "revision requires independent approvals by ${policy.roles.joinToString { it.code }}",
+                )
+            }
+        }.replaceWithVoid()
+    }
+
+    private fun RevisionRoleApprovalEntity.toDomain() = RevisionApproval(
+        revisionId,
+        role,
+        issuer,
+        subject,
+        digest,
+        reason,
+        approvedAt,
+    )
 
     override suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision? =
         sessions.withSession { session ->
@@ -247,7 +405,15 @@ class PostgresGenericCatalogRepository(
                     """AND (r.effectiveTo IS NULL OR r.effectiveTo > :at) ORDER BY r.number DESC, r.id""",
                 CatalogRevisionEntity::class.java,
             ).setParameter("offeringId", offeringId).setParameter("at", effectiveAt).resultList
-        }.map { it.firstOrNull()?.toDomain() }.awaitSuspending()
+                .flatMap { session.withIrSignature(it.firstOrNull()) { r -> r.toDomain() } }
+        }.awaitSuspending()
+
+    override suspend fun findPublishedForLegacyProduct(productId: UUID, effectiveAt: Instant): ProductRevision? {
+        val offeringId = sessions.withSession { session ->
+            session.find(BankV1ProductMappingEntity::class.java, productId)
+        }.awaitSuspending()?.defaultOfferingId ?: return null
+        return findPublished(offeringId, effectiveAt)
+    }
 
     private fun preparePublication(
         session: Mutiny.Session,
@@ -303,6 +469,7 @@ class PostgresGenericCatalogRepository(
                 taxTreatment = price.taxTreatment.name
                 effectiveFrom = price.effectiveFrom
                 effectiveTo = price.effectiveTo
+                role = price.role?.name
             }
         }
         val relationships = revision.content.relationships.map { relationship ->
@@ -414,11 +581,12 @@ class PostgresGenericCatalogRepository(
         it.registeredAt = registeredAt
     }
 
-    private fun CatalogSchemaEntity.toDomain() = CatalogSchema(
+    private fun CatalogSchemaEntity.toDomain(policy: RevisionApprovalPolicy?) = CatalogSchema(
         ref = SchemaRef(schemaId, schemaVersion),
         document = catalogJson.toObject(mapper.readTree(document.encode())),
         sha256 = sha256,
         registeredAt = registeredAt,
+        approvalPolicy = policy,
     )
 
     private fun ProductSpecification.toEntity() = CatalogSpecificationEntity().also {
@@ -470,6 +638,8 @@ class PostgresGenericCatalogRepository(
         checkerId = source.checkerId
         reason = source.reason
         contentHash = source.contentHash
+        approvalDigest = source.approvalDigest
+        approvedEffectiveTo = source.approvedEffectiveTo
         createdAt = source.createdAt
         updatedAt = source.updatedAt
         revision = source.revision
@@ -491,6 +661,8 @@ class PostgresGenericCatalogRepository(
         createdAt = createdAt,
         updatedAt = updatedAt,
         revision = revision,
+        approvalDigest = approvalDigest,
+        approvedEffectiveTo = approvedEffectiveTo,
     )
 
     private fun SchemaRef.key(): String = "$id:$version"

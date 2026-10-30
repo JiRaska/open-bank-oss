@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.infrastructure.rest
 
+import com.openbank.campaign.application.usecase.BulkAdmissionService
 import com.openbank.campaign.application.usecase.CampaignNotFoundException
 import com.openbank.campaign.application.usecase.CampaignReferenceNotFoundException
 import com.openbank.campaign.application.usecase.CampaignService
@@ -58,6 +59,8 @@ data class CreateCampaignRequest(
      * dead code.
      */
     val steps: List<StepRequest?>,
+    /** Published referral programme UUID; metadata is resolved and pinned server-side. */
+    val referralProgramId: UUID? = null,
     val stopCondition: StopConditionRequest? = null,
     /** ADR-0245 D1: a ConversionCatalog key, or absent to measure no conversion. */
     val conversionRule: String? = null,
@@ -224,7 +227,11 @@ private fun CreateCampaignRequest.toDefinition(): CampaignDefinition = CampaignD
 @Path("/api/v1/campaigns")
 @ApplicationScoped
 @Suppress("TooManyFunctions") // Each method is a separately authorised lifecycle endpoint.
-class CampaignResource(private val service: CampaignService, private val jwt: JsonWebToken) {
+class CampaignResource(
+    private val service: CampaignService,
+    private val admission: BulkAdmissionService,
+    private val jwt: JsonWebToken,
+) {
 
     @GET
     @Authorize(action = "campaign.read", resource = "#id")
@@ -254,6 +261,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             request.trigger,
             request.toDecisions(),
             request.incentiveOfferRef?.let { IncentiveOfferRef(it.id, it.name, it.version) },
+            referralProgramId = request.referralProgramId,
         )
         Response.status(Response.Status.CREATED).entity(campaign).build()
     } catch (e: CampaignReferenceNotFoundException) {
@@ -270,6 +278,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
                 id = id,
                 definition = request.toDefinition(),
                 revisedBy = jwt.principalName(),
+                referralProgramId = request.referralProgramId,
             ),
         ).build()
     }.getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
@@ -337,7 +346,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
     @Path("/{id}/enrol")
     @Authorize(action = "campaign.enrol", resource = "#id")
     suspend fun enrol(@PathParam("id") id: UUID): Response = runCatching {
-        val outcome = service.enrol(id)
+        val outcome = admission.enrolSmall(id)
         Response.ok(mapOf("enrolled" to outcome.enrolled, "failed" to outcome.failed)).build()
     }.getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
 

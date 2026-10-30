@@ -25,8 +25,9 @@ import java.util.UUID
  * run's own date (IRRBB, cash flows and the liquidity forecast all refuse otherwise), so a single
  * dated set would only ever match one run.
  *
- * Tenors stop at 1Y because [CurveBootstrap] builds only from money-market deposits; the curve
- * extrapolates flat beyond its last pillar — a stated phase-0 limit of the curve library.
+ * Since [VERSION] `v2` (ADR-0344 D8) every index also carries FRA and par-swap quotes out to 10Y,
+ * all equally SYNTHETIC: the deposit table is unchanged from `v1`, the FRA and swap levels are
+ * chosen to continue it smoothly, and the curve still extrapolates flat beyond its last pillar.
  *
  * The id is name-based on the as-of date ([idFor]), so a second write for the same date collides on
  * the primary key and is a no-op: idempotent across ticks, restarts and concurrent replicas
@@ -35,16 +36,45 @@ import java.util.UUID
 object ReferenceCurveSet {
 
     /** Bumping the table means a new version here, and a new id namespace in [idFor]. */
-    const val VERSION = "v1"
+    const val VERSION = "v2"
 
     const val SOURCE =
         "OpenBank sandbox reference curves $VERSION - illustrative demo quotes, NOT market data"
 
-    private fun quotes(vararg pairs: Pair<String, String>): List<MoneyMarketQuote> =
+    private fun quotes(vararg pairs: Pair<String, String>): List<CurveQuote> =
         pairs.map { (tenor, rate) -> MoneyMarketQuote(Tenor.parse(tenor), BigDecimal(rate)) }
 
-    /** Simple money-market rates as fractions (0.0347 = 3.47 %). Illustrative only. */
-    val QUOTES: Map<CurveIndex, List<MoneyMarketQuote>> = mapOf(
+    private fun fra(code: String, rate: String): CurveQuote = FraQuote.parse(code, BigDecimal(rate))
+
+    private fun swap(code: String, rate: String): CurveQuote = SwapQuote.parse(code, BigDecimal(rate))
+
+    /** Synthetic FRA (6x12, 12x18) and par-swap (2Y..10Y) quotes per index, continuing its deposits. */
+    private val LONG_END: Map<CurveIndex, List<CurveQuote>> = mapOf(
+        CurveIndex.CZEONIA to
+            listOf(swap("2Y", "0.0330"), swap("3Y", "0.0328"), swap("5Y", "0.0330"), swap("10Y", "0.0340")),
+        CurveIndex.PRIBOR_1M to listOf(swap("2Y", "0.0340"), swap("5Y", "0.0342"), swap("10Y", "0.0350")),
+        CurveIndex.PRIBOR_3M to listOf(
+            fra("12x18", "0.0342"),
+            swap("2Y", "0.0343"),
+            swap("3Y", "0.0342"),
+            swap("5Y", "0.0345"),
+            swap("10Y", "0.0355"),
+        ),
+        CurveIndex.PRIBOR_6M to
+            listOf(fra("12x18", "0.0346"), swap("2Y", "0.0347"), swap("5Y", "0.0349"), swap("10Y", "0.0358")),
+        CurveIndex.ESTR to
+            listOf(swap("2Y", "0.0185"), swap("3Y", "0.0190"), swap("5Y", "0.0200"), swap("10Y", "0.0220")),
+        CurveIndex.EURIBOR_3M to listOf(
+            fra("12x18", "0.0212"),
+            swap("2Y", "0.0213"),
+            swap("3Y", "0.0218"),
+            swap("5Y", "0.0228"),
+            swap("10Y", "0.0245"),
+        ),
+    )
+
+    /** Deposits (simple rates as fractions, 0.0347 = 3.47 %) plus [LONG_END]. Illustrative only. */
+    val QUOTES: Map<CurveIndex, List<CurveQuote>> = mapOf(
         CurveIndex.CZEONIA to quotes(
             "ON" to "0.0347",
             "1W" to "0.0347",
@@ -65,7 +95,7 @@ object ReferenceCurveSet {
             "1Y" to "0.0185",
         ),
         CurveIndex.EURIBOR_3M to quotes("1M" to "0.0200", "3M" to "0.0203", "6M" to "0.0206", "1Y" to "0.0210"),
-    )
+    ).mapValues { (index, deposits) -> deposits + LONG_END.getValue(index) }
 
     /** Deterministic per date, so the primary key makes a repeat write a no-op. */
     fun idFor(asOf: LocalDate): UUID =

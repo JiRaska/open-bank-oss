@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.10.11](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.10...pid-service-v0.10.11) (2026-10-26)
+
+
+### Bug Fixes
+
+* **pid:** stop asserting a defaulted AML risk score; deprecate amlRiskScore ([#13772](https://github.com/JiRaska/open-bank-oss/issues/13772)) ([17ca912](https://github.com/JiRaska/open-bank-oss/commit/17ca9124e98a69da3d7c49689b48b4573359b915))
+
+## [0.10.10](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.9...pid-service-v0.10.10) (2026-10-19)
+
+
+### Bug Fixes
+
+* **pid:** add minimized body-based external identifier lookup ([#13388](https://github.com/JiRaska/open-bank-oss/issues/13388)) ([2c92595](https://github.com/JiRaska/open-bank-oss/commit/2c925952168a8e2060ac74fbb0e0b3fc75146911))
+
+## [0.10.9](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.8...pid-service-v0.10.9) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
 ## [0.10.8](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.7...pid-service-v0.10.8) (2026-10-12)
 
 

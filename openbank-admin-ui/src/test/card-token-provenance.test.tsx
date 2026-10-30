@@ -49,18 +49,21 @@ function renderPage() {
 }
 
 async function loadCard(body: unknown) {
-  vi.stubGlobal('fetch', vi.fn(async () =>
-    new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } }),
-  ))
+  // The page now PICKS a card (name / masked PAN) instead of taking a typed id: the card list is
+  // served for card-issuance-service, everything else answers with the token body under test.
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    const payload = url.includes('card-issuance-service') ? [{
+      id: CARD_ID, partyId: 'p', accountId: 'a', productCode: 'DEBIT_STD', cardType: 'DEBIT', network: 'VISA',
+      maskedPan: '4111 **** **** 1111', cardholderName: 'Jana Nováková', embossedName: 'JANA NOVAKOVA',
+      expiryDate: '2030-01', status: 'ACTIVE', dailyLimitMinorUnits: 0,
+    }] : body
+    return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
   await act(async () => { renderPage() })
-  const input = screen.getByPlaceholderText('00000000-0000-0000-0000-000000000000') as HTMLInputElement
+  expect(screen.queryByPlaceholderText(/0000-0000/)).not.toBeInTheDocument()
   await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
-    setter.call(input, CARD_ID)
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-  })
-  await act(async () => {
-    screen.getByRole('button', { name: /Load/i }).click()
+    ;(await screen.findByRole('button', { name: /Select/i })).click()
   })
 }
 

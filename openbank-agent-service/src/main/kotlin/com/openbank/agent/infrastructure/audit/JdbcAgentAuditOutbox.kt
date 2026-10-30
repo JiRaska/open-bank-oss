@@ -6,10 +6,14 @@ package com.openbank.agent.infrastructure.audit
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.quarkus.runtime.Startup
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.reactive.messaging.kafka.Record
+import jakarta.annotation.PostConstruct
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
@@ -20,6 +24,7 @@ import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Emitter
 import java.sql.Connection
 import java.sql.Timestamp
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
@@ -188,6 +193,8 @@ class DurableAgentAuditPublisher @Inject constructor(
     }
 }
 
+// @Startup: the heartbeat gauge must exist from boot, not from the first poll of this lazy bean.
+@Startup
 @ApplicationScoped
 class AgentAuditOutboxDispatcher @Inject constructor(
     private val outbox: AgentAuditOutbox,
@@ -196,7 +203,26 @@ class AgentAuditOutboxDispatcher @Inject constructor(
     // scheduler attempt fail before this class can return at the feature gate.
     @Channel("agent-audit-events-out") private val emitter: Instance<Emitter<Record<String, String>>>,
     @ConfigProperty(name = "agent.audit.kafka.enabled", defaultValue = "false") private val enabled: Boolean,
+    // The SAME key and default as the @Scheduled expression below, so the heartbeat's expected
+    // interval cannot drift from the real poll cadence when an environment overrides it.
+    @ConfigProperty(name = "agent.audit.outbox.poll-interval", defaultValue = "5s")
+    private val pollInterval: Duration,
 ) {
+    @Inject
+    lateinit var metrics: DomainMetrics
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    // Registered only when transport is on: a disabled dispatcher polls nothing, and reporting a
+    // success for a no-op is the shared-flag trap (PushResult.skipped). Absent means "not running
+    // by configuration"; present and stale means "should be running and is not".
+    @PostConstruct
+    fun registerHeartbeat() {
+        if (enabled) {
+            liveness = metrics.registerWorkflowLiveness("agent-audit-outbox-dispatch", pollInterval)
+        }
+    }
+
     @Scheduled(
         every = "\${agent.audit.outbox.poll-interval:5s}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
@@ -207,6 +233,7 @@ class AgentAuditOutboxDispatcher @Inject constructor(
     @Suppress("TooGenericExceptionCaught")
     suspend fun dispatch() {
         if (!enabled) return
+        var allPublished = true
         outbox.claim(BATCH_SIZE).forEach { row ->
             try {
                 Uni.createFrom().completionStage(
@@ -216,9 +243,12 @@ class AgentAuditOutboxDispatcher @Inject constructor(
             } catch (
                 e: Exception,
             ) {
+                allPublished = false
                 outbox.failed(row.eventId, e.message ?: e.javaClass.simpleName)
             }
         }
+        // An empty poll counts (the dispatcher ran); a poll where any send failed does not.
+        if (allPublished) liveness?.recordSuccess()
     }
     private companion object {
         const val BATCH_SIZE = 25

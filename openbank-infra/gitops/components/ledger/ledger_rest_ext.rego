@@ -97,7 +97,7 @@ allowed_reasons contains "viewer-auditor-ledger-read" if {
 # unsafe (real operator/admin staff also carry ROLE_OPERATOR); gate on identity instead.
 allowed_reasons contains "service-ledger-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	some verb in {"list", "read"}
 	endswith(input.action, sprintf(".%v", [verb]))
 }
@@ -119,7 +119,7 @@ allowed_reasons contains "ledger-close-inspect-read" if {
 
 allowed_reasons contains "service-ledger-close-inspect" if {
     input.principal.type == "HUMAN"
-    input.principal.id == "service-account-openbank-services"
+    machine_named("service-account-openbank-services")
     input.action == "ledger.close.inspect"
 }
 
@@ -129,7 +129,7 @@ allowed_reasons contains "operator-ledger-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay"}
 }
 
@@ -140,8 +140,24 @@ allowed_reasons contains "operator-ledger-close-draft" if {
     input.principal.type == "HUMAN"
     some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     role in input.principal.roles
-    not startswith(input.principal.id, "service-account-")
+    not principal_is_machine
     input.action == "ledger.close.draft"
+}
+
+# #12906: journal-approval queue reads and checker decisions are human-only. The
+# explicit machine veto is required for reads because base operator-read-any would
+# otherwise admit a client_credentials principal carrying ROLE_OPERATOR.
+allowed_reasons contains "operator-journal-approval" if {
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    role in input.principal.roles
+    not principal_is_machine
+    input.action in {"ledger.approval.read", "ledger.approval.decide"}
+}
+
+prohibited if {
+    principal_is_machine
+    input.action in {"ledger.approval.read", "ledger.approval.decide"}
 }
 
 # Year-close attestation (ledger.approve) is deliberately its OWN rule, not folded into
@@ -154,7 +170,7 @@ allowed_reasons contains "operator-year-close-attest" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "ledger.approve"
 }
 
@@ -180,7 +196,7 @@ allowed_reasons contains "operator-year-close-attest" if {
 # risk").
 allowed_reasons contains "service-ledger-post" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action == "ledger.create"
 }
 
@@ -195,7 +211,7 @@ allowed_reasons contains "service-ledger-post" if {
 # (ledger_rest_ext_test.rego: test_other_role_api_service_account_may_not_create).
 allowed_reasons contains "service-interest-ledger-post" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-interest"
+	machine_named("service-account-openbank-interest")
 	input.action == "ledger.create"
 }
 
@@ -206,13 +222,39 @@ allowed_reasons contains "service-interest-ledger-post" if {
 #   clearing-service (ClearingLedgerRestClient, named oidc-client `m2m`): ADR-0281 net settlement
 allowed_reasons contains "service-lending-ledger-post" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-lending"
+	machine_named("service-account-openbank-lending")
 	input.action == "ledger.create"
+}
+
+# ── ledger.close.participate: day-close participation reports (ADR-0342 D2, #13167) ─────────
+# PUT /api/v1/ledger/accounting-days/{date}/participants/{participant} authorizes as its OWN
+# action, never ledger.create, so reporting a day does not need (or grant) a journal-create grant.
+# Each machine account may report for exactly ONE participant: the resource is the participant
+# name from the path, and the use case additionally checks the verified caller against
+# openbank.ledger.close.participants.<name>.principal. A new participant adds one map entry here
+# and its test; nothing else reaches this action (no staff role, no shared client).
+close_participant_accounts := {
+	"service-account-openbank-interest": "interest",
+	"service-account-openbank-lending": "lending",
+	# billing holds NO ledger.create on its own identity: its journals ride the shared
+	# openbank-services principal. This is its only ledger grant (#13709 review).
+	"service-account-openbank-billing": "billing",
+	# treasury reports on the same identity it posts journals with (service-treasury-ledger-post);
+	# this entry adds only the report for its own participant (#13167).
+	"service-account-openbank-treasury": "treasury",
+}
+
+allowed_reasons contains "service-close-participation" if {
+	input.principal.type == "HUMAN"
+	input.action == "ledger.close.participate"
+	some account, participant in close_participant_accounts
+	machine_named(account)
+	input.resource == participant
 }
 
 allowed_reasons contains "service-clearing-ledger-post" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-clearing"
+	machine_named("service-account-openbank-clearing")
 	input.action == "ledger.create"
 }
 
@@ -226,13 +268,13 @@ allowed_reasons contains "service-clearing-ledger-post" if {
 #     already-posted check) -> ledger.create + ledger.read. Never reverse.
 allowed_reasons contains "service-transaction-ledger-write" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-transaction"
+	machine_named("service-account-openbank-transaction")
 	input.action in {"ledger.create", "ledger.reverse"}
 }
 
 allowed_reasons contains "service-settlement-ledger-post" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-settlement"
+	machine_named("service-account-openbank-settlement")
 	input.action in {"ledger.create", "ledger.read"}
 }
 
@@ -242,7 +284,22 @@ allowed_reasons contains "service-settlement-ledger-post" if {
 # (idempotency key treasury:<dealId>:reversed), so it never needs ledger.reverse.
 allowed_reasons contains "service-treasury-ledger-post" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-treasury"
+	machine_named("service-account-openbank-treasury")
+	input.action == "ledger.create"
+}
+
+# #14058 — synthetic seed identity for the account-overview k6 journey fixture (ADR-0252).
+# One deterministic seed posting (DEBIT 1001 Nostro / CREDIT 2100 <fixture account>) is posted
+# through Keycloak client `openbank-synthetic-ledger-seed`, whose service account carries ROLE_API
+# (postJournal's @RolesAllowed requires ROLE_API or ROLE_OPERATOR). This rule is its WHOLE grant:
+# exactly ledger.create, never reverse/trigger/replay/approve/close.draft — same shape as
+# service-interest-ledger-post. The synthetic taint must arrive on the x-openbank-synthetic header
+# and survive the CDI suspend boundary (#14059); ledger's own application.yaml adds the principal
+# to OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS so postJournal accepts it as a trusted synthetic source.
+# Seed-only: it must never need ledger.reverse — a fixture reset is a new offsetting journal.
+allowed_reasons contains "synthetic-ledger-seed-post" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-synthetic-ledger-seed")
 	input.action == "ledger.create"
 }
 
@@ -252,7 +309,7 @@ allowed_reasons contains "service-treasury-ledger-post" if {
 # never posts a reconciling entry.
 allowed_reasons contains "service-treasury-ledger-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-treasury"
+	machine_named("service-account-openbank-treasury")
 	input.action in {"ledger.list", "ledger.read"}
 }
 
@@ -267,7 +324,7 @@ allowed_reasons contains "service-treasury-ledger-read" if {
 # PR "Residual risk").
 allowed_reasons contains "service-ledger-reverse" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action == "ledger.reverse"
 }
 
@@ -278,6 +335,6 @@ allowed_reasons contains "service-ledger-reverse" if {
 # un-mapped SERVICE call to either 403s, by design (deny-by-default, no rule added).
 
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
     input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"}
 }

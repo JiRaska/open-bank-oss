@@ -9,6 +9,9 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -18,11 +21,35 @@ class AbstractOutboxBacklogGaugeTest {
     private class TestGauge(
         override val service: String,
         private val metrics: DomainMetrics,
-        private val backlog: () -> Long,
+        private val backlog: suspend () -> Long,
     ) : AbstractOutboxBacklogGauge(metrics) {
         override suspend fun currentBacklog(): Long = backlog()
         fun register() = registerBacklogGauge()
         suspend fun refresh() = refreshBacklog()
+    }
+
+    @Test
+    fun `suspended refresh updates on success and retains last value on resumed failure`(): Unit = runBlocking {
+        val metrics = mockk<DomainMetrics>(relaxed = true)
+        val supplier = slot<() -> Number>()
+        every { metrics.registerOutboxBacklog("party", capture(supplier)) } returns Unit
+        var result = CompletableDeferred<Long>()
+        val gauge = TestGauge("party", metrics) { result.await() }
+        gauge.register()
+        val success = async(start = CoroutineStart.UNDISPATCHED) { gauge.refresh() }
+        assertThat(success.isCompleted).isFalse()
+        assertThat(supplier.captured().toLong()).isZero()
+        result.complete(23)
+        success.await()
+        assertThat(supplier.captured().toLong()).isEqualTo(23)
+
+        result = CompletableDeferred()
+        val failure = async(start = CoroutineStart.UNDISPATCHED) { gauge.refresh() }
+        assertThat(failure.isCompleted).isFalse()
+        result.completeExceptionally(java.net.ConnectException("test database unavailable"))
+        failure.await()
+        assertThat(supplier.captured().toLong()).isEqualTo(23)
+        verify(exactly = 1) { metrics.outboxGaugeRefreshFailed("party", "backlog") }
     }
 
     @Test

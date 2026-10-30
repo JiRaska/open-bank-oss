@@ -40,19 +40,29 @@ class ReferralResource(
 
     @GET
     @Path("/programs")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_MARKETING")
     suspend fun programs(): Response = Response.ok(service.listPublishedPrograms()).build()
 
     @GET
     @Path("/programs/{id}")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_MARKETING")
     suspend fun program(@PathParam("id") id: UUID): Response = service.publishedProgram(id)
         ?.let { Response.ok(it).build() }
         ?: Response.status(Response.Status.NOT_FOUND).build()
 
+    // Exact-match segment: RESTEasy routes /programs/drafts here and /programs/{id} only for
+    // a single path segment — 'drafts' is not a UUID, so an unknown {id} still 404s below.
+    @GET
+    @Path("/programs/drafts")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_MARKETING")
+    suspend fun drafts(): Response = Response.ok(service.listDraftPrograms()).build()
+
     /**
      * The invites [partyId] issued, as the REFERRER may see them. Reached through the customer
      * edge, which supplies the token's party. Privacy is the point of the shape: no referee party
-     * id or name, no token or token hash, no idempotency key. Amount is a decimal STRING so no
-     * client parses a reward through a binary float.
+     * id or name, no token or token hash, no idempotency key. referralLink is the deliberate
+     * exception — a shareable capability the referrer must re-read (like a password-reset link).
+     * Amount is a decimal STRING so no client parses a reward through a binary float.
      */
     @GET
     @Path("/parties/{partyId}/invites")
@@ -64,6 +74,7 @@ class ReferralResource(
                 "createdAt" to v.createdAt?.toString(),
                 "expiresAt" to v.expiresAt.toString(),
                 "attributedAt" to v.attributedAt?.toString(),
+                "referralLink" to v.referralLink,
                 "reward" to v.reward?.let { r ->
                     mapOf(
                         "status" to r.status.name,
@@ -79,6 +90,7 @@ class ReferralResource(
 
     @POST
     @Path("/programs")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_MARKETING")
     suspend fun create(req: CreateReferralProgramRequest): Response = Response.status(
         Response.Status.CREATED,
     ).entity(
@@ -95,6 +107,7 @@ class ReferralResource(
 
     @POST
     @Path("/programs/{id}/publish")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_MARKETING")
     suspend fun publish(@PathParam("id") id: UUID): Response = Response.ok(service.publishProgram(id, actor())).build()
 
     @POST

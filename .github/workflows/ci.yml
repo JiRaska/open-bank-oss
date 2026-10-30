@@ -92,6 +92,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 .github/scripts/tests/test_select_admin_ui_rbac_tests.py
+          python3 .github/scripts/test-ci-ui-verdict.py
+          python3 .github/scripts/test-ci-latency-report.py
+          python3 .github/scripts/test-packaged-library-sbom.py
+          python3 .github/scripts/test-service-build-artifact.py
+          python3 .github/scripts/test-prepare-test-priority.py
+          python3 .github/scripts/test-context-deploy-handoff.py
+          python3 .github/scripts/test-can-i-deploy-source.py
+          python3 .github/scripts/test-slsa-source-identity.py
           if [ "${{ github.event_name }}" = "push" ]; then
             # Post-merge main build always includes admin-ui.
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -103,9 +111,11 @@ jobs:
             git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}" --no-tags
             # The extra pathspecs are the governance gate's INPUTS, not UI code:
             # every per-service governance.yaml, plus the schema it validates them
-            # against. The generator itself lives under openbank-admin-ui/.
+            # against, plus the backend OpenAPI consumed by the catalog type generator.
+            # The generators themselves live under openbank-admin-ui/.
             N=$(git diff --name-only "${BASE}...HEAD" -- \
                   openbank-admin-ui/ \
+                  openbank-product-catalog/src/main/resources/openapi.yaml \
                   '*/governance.yaml' \
                   openbank-libs/governance/governance.schema.json | wc -l | tr -d ' ')
             echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
@@ -127,7 +137,7 @@ jobs:
         working-directory: openbank-admin-ui
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "26"
           cache: "npm"
@@ -167,7 +177,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           # Matches the runtime image (openbank-admin-ui/Dockerfile: node:26-alpine). Pinned at 20
           # it was three majors behind what ships, and #3569's jsdom bump made that fatal:
@@ -269,7 +279,7 @@ jobs:
 
       - name: Retain Admin UI test evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-intelligence-run-openbank-admin-ui-${{ github.run_id }}-a${{ github.run_attempt }}
           path: openbank-admin-ui/build/test-intelligence/run.json
@@ -277,17 +287,18 @@ jobs:
 
       - name: Publish latest Admin UI test evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-intelligence-openbank-admin-ui
           path: |
             openbank-admin-ui/build/test-intelligence/run.json
             openbank-admin-ui/build/test-results/**/*.xml
+            openbank-admin-ui/build/test-results/e2e/sidebar-navigation-*.json
           retention-days: 14
           overwrite: true
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         # `always() &&` is load-bearing. A step `if:` that names no status-check function is
         # implicitly ANDed with success(), so `browser_e2e.outcome == 'failure'` could never hold:
         # the E2E step has no continue-on-error, so its failure puts the job in a failed state and
@@ -331,7 +342,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Check build result
+      - &admin-ui-verdict
+        name: Check build result
         env:
           RESULT: ${{ needs.ui-build.result }}
           DETECTION_RESULT: ${{ needs.changes-ui.result }}
@@ -347,6 +359,10 @@ jobs:
             echo "Admin UI change detection did not succeed ($DETECTION_RESULT)."
             exit 1
           fi
+          case "$UI_CHANGED" in
+            true|false) ;;
+            *) echo "::error::Admin UI change decision is missing or invalid."; exit 1 ;;
+          esac
           if [ "$UI_CHANGED" = "false" ] && { [ -n "$RBAC_TESTS" ] || [ "$REGISTRY_TEST" = 'true' ]; } && [ "$RBAC_RESULT" != "success" ]; then
             echo "Admin UI cross-package guards did not pass ($RBAC_RESULT)."
             exit 1
@@ -364,6 +380,10 @@ jobs:
             fi
             echo "Admin UI build was cancelled before it finished, so nothing was built."
             echo "Re-run it (or push again) — a cancelled run must not read as a passing gate."
+            exit 1
+          fi
+          if [ "$UI_CHANGED" = "true" ] && [ "$RESULT" != "success" ]; then
+            echo "::error::Admin UI changed but its build did not succeed ($RESULT)."
             exit 1
           fi
           echo "Admin UI: $RESULT (skipped = no UI changes in this PR)."
@@ -395,10 +415,124 @@ jobs:
   # one gets slow. Adding a group here without one in the manifest fails loudly: run-gates.py
   # refuses a selection that matches no gates rather than reporting a green about no work.
   # ---------------------------------------------------------------------------
-  gates:
-    name: gates (${{ matrix.slug }})
+  ruleset-evidence:
+    name: Receive trusted ruleset evidence
     needs: agent-admission
     if: needs.agent-admission.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    permissions:
+      actions: read
+    outputs:
+      snapshot: ${{ steps.read.outputs.snapshot }}
+    steps:
+      # This job holds only GITHUB_TOKEN with Actions:read. The privileged producer
+      # runs separately from main; neither App key nor installation token enters CI.
+      - name: Locate successful evidence from the trusted collector
+        id: locate
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const path = '.github/workflows/ruleset-bypass-evidence.yml';
+            const name = `ruleset-bypass-${process.env.GITHUB_RUN_ID}-a${process.env.GITHUB_RUN_ATTEMPT}`;
+            // GITHUB_TOKEN quota is 1000/h per REPOSITORY, shared by every job. A proven
+            // exhaustion may extend the wait to the hourly reset, never past the hard cap.
+            const started = Date.now();
+            const hardCap = started + 62 * 60 * 1000;
+            let deadline = started + 30 * 60 * 1000;
+            const exhausted = () => new Error('No trusted ruleset evidence for this CI attempt; NOT_EVALUATED');
+            const pause = async milliseconds => {
+              const remaining = deadline - Date.now();
+              if (remaining <= 0) throw exhausted();
+              await new Promise(resolve => setTimeout(resolve, Math.min(milliseconds, remaining)));
+              if (Date.now() >= deadline) throw exhausted();
+            };
+            // Retry only a proven primary quota exhaustion. Permission denial stays an error.
+            const read = async request => {
+              let quotaRetries = 0;
+              while (Date.now() < deadline) {
+                try {
+                  const response = await request(Math.max(1, Math.min(15000, deadline - Date.now())));
+                  if (Date.now() >= deadline) throw exhausted();
+                  return response;
+                } catch (error) {
+                  const headers = error.response?.headers || {};
+                  const reset = Number(headers['x-ratelimit-reset']);
+                  if (error.status !== 403 || headers['x-ratelimit-remaining'] !== '0' ||
+                      !Number.isFinite(reset) || reset <= 0 || quotaRetries++ >= 3) throw error;
+                  const resume = Math.max(Date.now() + 1000, reset * 1000 + 1000);
+                  if (resume > hardCap) throw exhausted();
+                  deadline = Math.min(hardCap, Math.max(deadline, resume + 60 * 1000));
+                  await pause(resume - Date.now());
+                }
+              }
+              throw exhausted();
+            };
+            let workflow;
+            let poll = 0;
+            while (Date.now() < deadline) {
+              if (!workflow) {
+                ({data: workflow} = await read(timeout => github.rest.actions.getWorkflow({
+                  ...context.repo, workflow_id: 'ruleset-bypass-evidence.yml', request: {timeout}
+                })));
+              }
+              const {data} = await read(timeout => github.rest.actions.listArtifactsForRepo({
+                ...context.repo, name, per_page: 100, request: {timeout}
+              }));
+              for (const artifact of data.artifacts) {
+                if (artifact.name !== name || artifact.expired || !artifact.workflow_run) continue;
+                const {data: run} = await read(timeout => github.rest.actions.getWorkflowRun({
+                  ...context.repo, run_id: artifact.workflow_run.id, request: {timeout}
+                }));
+                if (run.workflow_id !== workflow.id || run.path !== path ||
+                    run.event !== 'workflow_run' || run.status !== 'completed' ||
+                    run.conclusion !== 'success') continue;
+                core.setOutput('artifact-id', String(artifact.id));
+                core.setOutput('run-id', String(run.id));
+                core.setOutput('run-attempt', String(run.run_attempt));
+                return;
+              }
+              await pause([5000, 10000, 20000, 30000][poll++] || 60000);
+            }
+            throw exhausted();
+      - name: Download data from the verified collector run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.locate.outputs.run-id }}
+          artifact-ids: ${{ steps.locate.outputs.artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/ruleset-evidence
+      - name: Bind evidence to this CI attempt and its producer
+        id: read
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SOURCE_RUN_ID: ${{ steps.locate.outputs.run-id }}
+          SOURCE_RUN_ATTEMPT: ${{ steps.locate.outputs.run-attempt }}
+        with:
+          script: |
+            const fs = require('fs');
+            const file = `${process.env.RUNNER_TEMP}/ruleset-evidence/snapshot.json`;
+            if (fs.statSync(file).size > 256 * 1024) throw new Error('Oversized ruleset evidence');
+            const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const expected = {
+              version: 1, repository: `${context.repo.owner}/${context.repo.repo}`,
+              run_id: process.env.GITHUB_RUN_ID, run_attempt: process.env.GITHUB_RUN_ATTEMPT,
+              source_run_id: process.env.SOURCE_RUN_ID,
+              source_run_attempt: process.env.SOURCE_RUN_ATTEMPT
+            };
+            for (const [key, value] of Object.entries(expected)) {
+              if (snapshot[key] !== value) throw new Error(`Evidence binding mismatch: ${key}`);
+            }
+            core.setOutput('snapshot', JSON.stringify(snapshot));
+
+  gates:
+    name: gates (${{ matrix.slug }})
+    needs: [agent-admission, ruleset-evidence]
+    # Missing evidence must produce NOT_EVALUATED in the gate report while the
+    # independent governance checks still run. Admission refusal still blocks all.
+    if: always() && needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -444,6 +578,12 @@ jobs:
       # commit (the sha an image tag names) through the contents API, because CI checks out
       # at fetch-depth: 1 and GitHub will not serve an arbitrary sha to `git fetch`.
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # An id, not a credential: check-deploy-holds.py (gate deploy-hold-image-pins) accepts a
+      # `merge-train` context pinned to this App in place of strict up-to-date (ADR-0343).
+      # Dependabot cannot read Actions secrets; the reviewed public id remains available.
+      # Missing or incorrect ids still fail the guard; retain the legacy secret fallback.
+      GITOPS_APP_ID: ${{ vars.GITOPS_APP_ID || secrets.GITOPS_APP_ID }}
+      RULESET_BYPASS_SNAPSHOT: ${{ needs.ruleset-evidence.outputs.snapshot }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -460,9 +600,19 @@ jobs:
       # failing to apply it, not a broken package. The gate reported UNFALSIFIED rather than
       # passing — its own self-test could not run — which is how a runtime mismatch that
       # reproduces nowhere else got caught at all.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "26"
+
+      # The evidence publisher governance tests include the strict source-content schema,
+      # which imports the UI's YAML/Zod runtime. The parallel governance-manifest gate also
+      # needs jsdom, so install the complete locked graph before starting gates. This avoids
+      # a second npm ci replacing node_modules while another gate reads the schema.
+      - name: Install locked Admin UI dependencies before parallel governance gates
+        if: contains(matrix.groups, 'supplychain')
+        run: |
+          source .github/scripts/ensure-admin-ui-deps.sh
+          ensure_admin_ui_deps "governance-preflight"
 
       # PyYAML is a prerequisite of run-gates.py itself, and of most checkers. It used to
       # be installed inside the gen-network-policies gate, which happened to be the first
@@ -596,11 +746,13 @@ jobs:
       # run-gates.py's own comment at the call site), so a failed shard still has one to upload.
       - name: Upload gate results (ADR-0255)
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # matrix.slug, not matrix.groups: a space is not valid in an artifact name, and
           # this must match the --json path above exactly or the upload finds no file.
-          name: gate-results-${{ matrix.slug }}
+          # A rerun retains artifacts from earlier attempts of the same run. Keep the
+          # evidence tied to the attempt whose gate job produced it.
+          name: gate-results-${{ matrix.slug }}-a${{ github.run_attempt }}
           path: ${{ runner.temp }}/gate-results-${{ matrix.slug }}.json
           if-no-files-found: warn
           retention-days: 90
@@ -608,13 +760,12 @@ jobs:
   # Aggregates the shards into the single REQUIRED context named in the main-protection
   # ruleset. `cancelled` is treated as a failure on a PR for the same reason the Admin UI
   # gate does it (#2185): a cancelled shard built nothing and must not read as a pass.
-  # needs also binds the `ui` aggregator (issue #3675): the Admin UI build carries the
-  # enforced Playwright golden-path suite (#653), and depending on it here makes that
-  # suite merge-blocking for admin-ui-touching PRs without a ruleset edit — the
-  # in-repo fix the ruleset can't ship itself.
+  # Both named required contexts evaluate the same anchored UI verdict against the raw
+  # producer jobs. They can acquire runners independently instead of queueing serially.
+  # Detection, cross-package guards and the golden-path suite remain merge-blocking.
   validate:
     name: Validate manifests
-    needs: [agent-admission, gates, ui]
+    needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-rbac-contract]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -626,6 +777,14 @@ jobs:
         run: |
           if [ "$RESULT" != 'success' ] || [ "$PROCEED" != 'true' ]; then
             echo "::error::Agent PR admission refused or failed ($RESULT, proceed=$PROCEED)."
+            exit 1
+          fi
+      - name: Verify ruleset evidence was collected
+        env:
+          RESULT: ${{ needs.ruleset-evidence.result }}
+        run: |
+          if [ "$RESULT" != 'success' ]; then
+            echo "::error::Ruleset configuration was not read ($RESULT). Refusing to report success."
             exit 1
           fi
       - name: Verify no gate shard failed
@@ -654,21 +813,7 @@ jobs:
               exit 1 ;;
           esac
 
-      # The ui aggregator already encodes the skip/cancel semantics (#2185): it passes
-      # when the PR touches no admin-ui paths (ui-build skipped) and fails on a real
-      # build/test failure — including the Playwright E2E step. So a plain success
-      # check here is the whole binding; anything else fails closed.
-      - name: Verify Admin UI gate (build + golden-path E2E)
-        env:
-          RESULT: ${{ needs.ui.result }}
-        run: |
-          set -euo pipefail
-          if [ "$RESULT" = "success" ]; then
-            echo "Admin UI gate green (or correctly skipped: no admin-ui changes)."
-            exit 0
-          fi
-          echo "::error::Admin UI gate did not succeed (result=$RESULT) — the Playwright E2E / build must pass on admin-ui-touching PRs (issue #3675)."
-          exit 1
+      - *admin-ui-verdict
 
   app-status:
     name: Customer-app dossier
@@ -739,7 +884,7 @@ jobs:
         if: env.APP_RO_TOKEN == ''
         run: echo "::notice title=app-status::OPENBANK_APP_RO_TOKEN not set — skipping customer-app dossier content check (ADR-0074)."
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: env.APP_RO_TOKEN != '' && steps.scope.outputs.owns == 'true'
         with:
           # Matches the runtime image (openbank-admin-ui/Dockerfile: node:26-alpine). Pinned at 20

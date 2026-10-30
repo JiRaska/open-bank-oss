@@ -9,7 +9,9 @@ import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.flags.FeatureClient
+import com.openbank.libs.flags.enabledSuspending
 import com.openbank.libs.flags.FeatureFlag
 import com.openbank.party.application.port.`in`.AddDocumentCommand
 import com.openbank.party.application.port.`in`.CreatePartyCommand
@@ -129,7 +131,7 @@ class PartyResource {
         // would throw there instead of refusing. In a CDI context `defaultValue` guarantees it is
         // set, so this branch is unreachable in production and reads as "no principal configured".
         val permitted = if (this::gdprCustomerEdgePrincipal.isInitialized) gdprCustomerEdgePrincipal else ""
-        return permitted.isNotBlank() && securityIdentity.principal?.name == permitted
+        return ServiceAccountIdentity.isPrincipal(securityIdentity, permitted)
     }
 
     /**
@@ -173,7 +175,7 @@ class PartyResource {
         // ADR-0067 pilot: first live feature-flag evaluation in the fleet. Cosmetic, fail-static —
         // surfaces the resolved variant in a response header so the flip is observable via curl,
         // without changing the response body or any business logic. Flag-as-code: party-list-enriched.
-        val listMode = if (flags.enabled("party-list-enriched")) "enriched" else "standard"
+        val listMode = if (flags.enabledSuspending("party-list-enriched")) "enriched" else "standard"
         return Response.ok(partyUseCase.listParties(page, size.coerceIn(1, 100), status))
             .header("X-Party-List-Mode", listMode)
             .build()
@@ -843,6 +845,8 @@ fun Party.toSimpleResponse() = mapOf(
     "legalName" to legalName,
     "tradingName" to tradingName,
     "email" to email,
+    // Lets an operator tell two namesakes apart in a search result (the detail already carries it).
+    "dateOfBirth" to dateOfBirth,
     "kycStatus" to kycStatus,
     "createdAt" to createdAt,
 )

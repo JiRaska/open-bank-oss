@@ -21,7 +21,18 @@ MODULE_DIR="${4:?module_dir}"; SBOM_FILE="${5:?sbom_file}"
 
 REPO="${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
 SERVER="${GITHUB_SERVER_URL:-https://github.com}"
-SHA="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
+# The producer invocation can precede the commit release-please tagged. An explicit
+# source identity must describe the isolated checkout, never the invocation SHA.
+if [ "${RELEASE_EVIDENCE_SOURCE_SHA+x}" = x ]; then
+  SHA="$RELEASE_EVIDENCE_SOURCE_SHA"
+  ACTUAL_SOURCE_SHA="$(git rev-parse --verify 'HEAD^{commit}')" || exit 1
+  if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]] || [ "$SHA" != "$ACTUAL_SOURCE_SHA" ]; then
+    echo "::error::release evidence source does not match the source checkout" >&2
+    exit 1
+  fi
+else
+  SHA="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
+fi
 RUN_ID="${GITHUB_RUN_ID:-local}"
 RUN_URL="${SERVER}/${REPO}/actions/runs/${RUN_ID}"
 WORKFLOW_REF="${SERVER}/${REPO}/.github/workflows/release-please.yml"

@@ -87,6 +87,16 @@ class StandingOrderOutboxAtomicityIT {
         val xminAfterSecondFailure = orderXmin(orderId)
 
         recordFailure(orderId, expectedStatus = "FAILED")
+        // Reload the committed value, not the service's returned in-memory aggregate (#13475).
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT failure_count FROM standing_orders WHERE id = ?").use { statement ->
+                statement.setObject(1, orderId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getInt(1)).isEqualTo(3)
+                }
+            }
+        }
 
         val rows = writersOf(orderId)
         assertThat(rows)
@@ -112,6 +122,39 @@ class StandingOrderOutboxAtomicityIT {
                 outboxXmin,
             )
             .isNotEqualTo(xminAfterSecondFailure)
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_OPERATOR"])
+    fun `failed outbox insert rolls back the FAILED status and scalar count together`() {
+        val orderId = createOrder()
+        recordFailure(orderId, expectedStatus = "ACTIVE")
+        recordFailure(orderId, expectedStatus = "ACTIVE")
+        val before = orderXmin(orderId)
+        val constraint = "synthetic_reject_${orderId.toString().replace("-", "")}"
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "ALTER TABLE standing_order_outbox ADD CONSTRAINT $constraint " +
+                        "CHECK (aggregate_id <> '$orderId'::uuid) NOT VALID",
+                )
+            }
+        }
+        try {
+            val rejected = RestAssured.given().contentType("application/json")
+                .patch("/api/v1/standing-orders/$orderId/record-failure")
+            assertThat(rejected.statusCode).isBetween(400, 599)
+            assertRolledBack(orderId, before)
+        } finally {
+            dataSource.connection.use { connection ->
+                connection.createStatement().use {
+                    it.execute("ALTER TABLE standing_order_outbox DROP CONSTRAINT $constraint")
+                }
+            }
+        }
+        // A fresh HTTP retry can then complete; the rejected transaction left no phantom event.
+        recordFailure(orderId, expectedStatus = "FAILED")
+        assertThat(writersOf(orderId)).hasSize(1)
     }
 
     /**
@@ -142,6 +185,25 @@ class StandingOrderOutboxAtomicityIT {
                 generateSequence { if (rows.next()) rows else null }
                     .map { WriterPair(it.getString(1), it.getString(2), it.getString(3)) }
                     .toList()
+            }
+        }
+    }
+
+    private fun assertRolledBack(orderId: UUID, before: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT status, failure_count, xmin::text, " +
+                    "(SELECT count(*) FROM standing_order_outbox WHERE aggregate_id = standing_orders.id) " +
+                    "FROM standing_orders WHERE id = ?",
+            ).use { statement ->
+                statement.setObject(1, orderId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString(1)).isEqualTo("ACTIVE")
+                    assertThat(rows.getInt(2)).isEqualTo(2)
+                    assertThat(rows.getString(3)).isEqualTo(before)
+                    assertThat(rows.getInt(4)).isZero()
+                }
             }
         }
     }

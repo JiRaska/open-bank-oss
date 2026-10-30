@@ -20,6 +20,17 @@ on:
 permissions:
   contents: read
 
+# THE ONE mutation-score threshold. Every lane below — the advisory money-path matrix, the
+# advisory libs matrix, the ENFORCED authz lane, and every `collect-test-run-evidence.py
+# --mutation-threshold` envelope step — reads this value. Before this it was a literal in nine
+# places and two of them disagreed: the authz Gradle lane enforced 70 while its Test Intelligence
+# envelope was built with 63, so the dashboard could show a PASS for a run the lane had failed.
+# `check-pitest-threshold-single-source.py` (gate `pitest-threshold-single-source`) fails the
+# build if a numeric threshold literal reappears in a step. Raise it here, never lower
+# (rules.yaml: coverage.money_path_depth).
+env:
+  PITEST_MUTATION_THRESHOLD: "70"
+
 jobs:
   pitest:
     name: pitest / ${{ matrix.service }}
@@ -29,6 +40,9 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # Advisory mutation work shares hosted capacity with required PR checks.
+      # Keep every module, but bound its simultaneous runner demand.
+      max-parallel: 2
       matrix:
         service:
           - openbank-ledger-service
@@ -96,7 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           java-version: "25"
           distribution: temurin
@@ -127,12 +141,12 @@ jobs:
           python3 .github/scripts/collect-test-run-evidence.py \
             --service "${{ matrix.service }}" \
             --mutation-report "${{ matrix.service }}/build/reports/pitest/mutations.xml" \
-            --mutation-threshold 70 \
+            --mutation-threshold "$PITEST_MUTATION_THRESHOLD" \
             --out "${{ matrix.service }}/build/reports/pitest/test-intelligence-run.json"
 
       - name: Upload pitest XML report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pitest-${{ matrix.service }}
           path: ${{ matrix.service }}/build/reports/pitest/
@@ -164,8 +178,8 @@ jobs:
           fi
           SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))
           echo "Mutation score: ${SCORE}% (${DETECTED}/${TOTAL} detected)"
-          if [ "$SCORE" -lt "70" ]; then
-            echo "::warning::Mutation score ${SCORE}% is below the 70% advisory threshold for ${{ matrix.service }}"
+          if [ "$SCORE" -lt "$PITEST_MUTATION_THRESHOLD" ]; then
+            echo "::warning::Mutation score ${SCORE}% is below the ${PITEST_MUTATION_THRESHOLD}% advisory threshold for ${{ matrix.service }}"
           else
             echo "::notice::Mutation score ${SCORE}% — OK"
           fi
@@ -175,8 +189,8 @@ jobs:
   # (AuthorizeInterceptor scope derivation + OPA PDP call) is the fleet's security-critical
   # decision code — a surviving mutant there is an authorization check no test could tell
   # from its negation. The package is small (3 files, ~40s), so a blocking lane costs
-  # nothing. Threshold 63 = measured baseline (2026-09-05: 174 mutations, 110 detected);
-  # raise it as surviving mutants get killed — the lane is a ratchet, never lowered.
+  # nothing. Threshold 70 = measured baseline (2026-10-14: 419 mutations, 316 killed + 8 timed
+  # out); raise it as surviving mutants get killed — the lane is a ratchet, never lowered.
   # pitest is applied by init script, NOT the plugins DSL: any external versioned plugin
   # in openbank-libs-runtime's plugins{} block splits the classloaders and kordamp jandex
   # loads twice (Banner$Inject_ ClassCastException) — see the init script header.
@@ -189,7 +203,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           java-version: "25"
           distribution: temurin
@@ -202,11 +216,11 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - name: Run pitest on the authz package (threshold 63 enforced)
+      - name: Run pitest on the authz package (PITEST_MUTATION_THRESHOLD enforced)
         run: |
           ./gradlew -I .github/scripts/pitest-authz.init.gradle \
             :openbank-libs-runtime:pitest \
-            -Ppitest.mutationThreshold=63
+            "-Ppitest.mutationThreshold=$PITEST_MUTATION_THRESHOLD"
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx2g"
 
@@ -217,12 +231,12 @@ jobs:
           python3 .github/scripts/collect-test-run-evidence.py \
             --service "openbank-libs-runtime-authz" \
             --mutation-report openbank-libs-runtime/build/reports/pitest/mutations.xml \
-            --mutation-threshold 63 \
+            --mutation-threshold "$PITEST_MUTATION_THRESHOLD" \
             --out openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json
 
       - name: Upload pitest XML report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pitest-authz
           path: openbank-libs-runtime/build/reports/pitest/
@@ -252,19 +266,20 @@ jobs:
           # 62% while PIT displays 63%.
           SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))
           echo "Mutation score: ${SCORE}% (${DETECTED}/${TOTAL} detected)"
-          if [ "$SCORE" -lt "63" ]; then
-            echo "::error::Mutation score ${SCORE}% is below the 63% enforced threshold for the authz decision path"
+          if [ "$SCORE" -lt "$PITEST_MUTATION_THRESHOLD" ]; then
+            echo "::error::Mutation score ${SCORE}% is below the ${PITEST_MUTATION_THRESHOLD}% enforced threshold for the authz decision path"
             exit 1
           fi
-          echo "::notice::Mutation score ${SCORE}% — OK (enforced floor 63%)"
+          echo "::notice::Mutation score ${SCORE}% — OK (enforced floor ${PITEST_MUTATION_THRESHOLD}%)"
 
   # Advisory mutation testing over the shared libs modules (ADR-0063 gap): money, idempotency,
   # audit and outbox logic lives in openbank-libs-domain / openbank-libs-runtime and previously
   # carried no pitest coverage at all, unlike the money-path services in the matrix job above.
   # This mirrors pitest-authz's init-script application (plugins DSL can't add pitest to either
-  # module without splitting the jandex classloaders) but stays advisory, like the service matrix.
+  # module without splitting the jandex classloaders). Domain stays advisory; runtime's shared
+  # init script enforces 70% and is also run by the PR library quality lane.
   pitest-libs:
-    name: pitest / libs (${{ matrix.module }}, advisory)
+    name: pitest / libs (${{ matrix.module }}, ${{ matrix.module == 'openbank-libs-runtime' && 'enforced' || 'advisory' }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -279,7 +294,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           java-version: "25"
           distribution: temurin
@@ -292,7 +307,7 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - name: Run pitest on the shared libs module (advisory)
+      - name: Run pitest with the shared module threshold
         run: |
           ./gradlew -I .github/scripts/pitest-libs-advisory.init.gradle \
             :${{ matrix.module }}:pitest
@@ -306,12 +321,12 @@ jobs:
           python3 .github/scripts/collect-test-run-evidence.py \
             --service "${{ matrix.module }}" \
             --mutation-report "${{ matrix.module }}/build/reports/pitest/mutations.xml" \
-            --mutation-threshold 70 \
+            --mutation-threshold "$PITEST_MUTATION_THRESHOLD" \
             --out "${{ matrix.module }}/build/reports/pitest/test-intelligence-run.json"
 
       - name: Upload pitest XML report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pitest-${{ matrix.module }}
           path: ${{ matrix.module }}/build/reports/pitest/
@@ -338,8 +353,8 @@ jobs:
           fi
           SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))
           echo "Mutation score: ${SCORE}% (${DETECTED}/${TOTAL} detected)"
-          if [ "$SCORE" -lt "70" ]; then
-            echo "::warning::Mutation score ${SCORE}% is below the 70% advisory threshold for ${{ matrix.module }}"
+          if [ "$SCORE" -lt "$PITEST_MUTATION_THRESHOLD" ]; then
+            echo "::warning::Mutation score ${SCORE}% is below the ${PITEST_MUTATION_THRESHOLD}% advisory threshold for ${{ matrix.module }}"
           else
             echo "::notice::Mutation score ${SCORE}% — OK"
           fi

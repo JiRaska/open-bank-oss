@@ -49,7 +49,7 @@ private const val UNPROCESSABLE = 422
  * alone let a machine assemble, approve (as the checker) or submit a regulatory return. Two layers
  * close that: `@Authorize` actions whose verbs are deliberately NOT `read`/`list` (so the fleet's
  * generic read-any rules never match; `tax_reporting_rest_ext.rego` grants them to real staff
- * only), and [StatutoryReturnActor] here, which refuses a service-account as maker, checker or
+ * only), and [TaxReportingActor] here, which refuses a service-account as maker, checker or
  * submitter even where OPA enforcement is off.
  */
 @Path("/api/v1/statutory-returns")
@@ -146,7 +146,8 @@ class StatutoryReturnResource(
     private fun parseId(value: String): UUID = runCatching { UUID.fromString(value) }.getOrNull()
         ?: throw WebApplicationException("id must be a UUID (got '$value')", Response.Status.BAD_REQUEST)
 
-    private fun actingPrincipal(): String = StatutoryReturnActor.staffSubject(identity)
+    private fun actingPrincipal(): String =
+        TaxReportingActor.staffSubject(identity, "assemble, approve or submit a statutory return")
 }
 
 data class AssembleReturnRequest(

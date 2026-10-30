@@ -33,18 +33,16 @@ class RedisProposalTokenStore @Inject constructor(
             values.set(key(token.id), json, args).awaitSuspending()
         }
         log.debugf(
-            "RedisProposalTokenStore: saved token_ref=%s tool=%s customer=%s ttl=%ds",
+            "RedisProposalTokenStore: saved token_ref=%s ttl=%ds",
             ProposalToken.logRef(token.id),
-            token.toolName,
-            token.customerId,
             ProposalTokenStore.TOKEN_TTL_SECONDS,
         )
     }
 
     override fun find(id: UUID): ProposalToken? {
         val json = runBlocking { values.get(key(id)).awaitSuspending() } ?: return null
-        return runCatching { mapper.readValue(json, ProposalToken::class.java) }.getOrElse { e ->
-            log.warnf(e, "RedisProposalTokenStore: failed to deserialise token_ref=%s", ProposalToken.logRef(id))
+        return runCatching { mapper.readValue(json, ProposalToken::class.java) }.getOrElse {
+            log.warnf("RedisProposalTokenStore: failed to deserialise token_ref=%s", ProposalToken.logRef(id))
             null
         }
     }

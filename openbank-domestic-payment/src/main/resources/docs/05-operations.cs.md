@@ -72,6 +72,23 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 
 ## Runbooky
 
+### Trvalé hodiny odchozího zaúčtování
+
+Přijetí do `SENT_TO_CLEARING` uloží první okamžik splatného zaúčtování ve stejné zamčené transakci s kontrolou revize jako stav a outbox událost, před aktivitou settlementu. Retry zachová tento čas i klíč `domestic-settlement-<paymentId>`. Jen přísně odpovídající dokončená odpověď s identitou transakce dovolí atomicky uložit důkaz zaúčtování a identitu společně se stavem `SETTLED` a outbox událostí. Obecný zápis stavu nesmaže čekající hodiny ani nepotvrdí pokrytí.
+
+`openbank_payment_booking_tracked_pending_oldest_age_seconds{rail="DOMESTIC_CZK"}` měří nejstarší sledovaný čekající záznam napříč obchodními stavy. Při neúplném pokrytí jde o dolní mez; před prvním úspěšným dotazem je NaN, prázdná úspěšně načtená sledovaná množina má nulu. Neúspěšný refresh zachová poslední trvalý čas a stáří dále roste. `openbank_payment_booking_unknown_coverage{rail="DOMESTIC_CZK"}` samostatně počítá záznamy bez začátku/důkazu s neznámým pokrytím. Historické záznamy ve všech stavech zůstávají bez backfillu s neznámou proveniencí; obecný zápis obcházející sledování také zůstane neznámý i po přechodu do terminálního stavu. Jde o konzervativní neznámé historické pokrytí, nikoli důkaz nevyřešenosti každého záznamu. Prázdná sledovaná množina při neznámém pokrytí nedokládá vyřešení všeho.
+
+Tyto hodiny se liší od vytvoření platby, clearingu, refundů i původního gauge uvízlých plateb. Alarmuje na ně `DomesticPaymentBookingUnsettled` (1 h, níže). Nepřidávají historické přiřazení, nový retry klíč, lookup/recovery API ani retenční pravidla.
+
+
+### Nevyřešené výsledky interního zaúčtování
+
+`openbank_payment_unsettled_total{rail="DOMESTIC_CZK",outcome="..."}` počítá neúspěšné pokusy vůči transaction-service. Název v Micrometeru je `openbank.payment.unsettled`. Povolené výsledky jsou `mismatch`, `failed-replay`, `conflict`, `unexpected-status` a `transport-error`; všech pět řad se registruje s nulou před prvním pokusem. Opakované pokusy se počítají samostatně, nejde o počet unikátních plateb. Zrušení coroutine ani úspěšná odpovídající reakce čítač nezvyšují. `failed-replay` označuje dekódovanou odpověď FAILED, nikoli důkaz, že tento požadavek byl replay. Metrika používá label `DOMESTIC_CZK`; požadavek na transakci nadále obsahuje `rail=DOMESTIC` a `instructionType=ONE_OFF`.
+
+Zaúčtování vyžaduje HTTP 201, transakci COMPLETED s identifikátorem a shodu typu, identit účtů, částky, měny, railu a typu instrukce s odeslanými údaji. Neúspěšný či nejistý pokus neposune platbu ze SENT_TO_CLEARING do SETTLED. Existující resilience vůči provideru a politika Temporal activity mohou pokus opakovat; čítač tyto politiky nemění ani znovu nezapočítává vnější obalení výjimky. Při šetření zachovejte `domestic-settlement-<paymentId>`: 409 ani nejistá odpověď nedokazují, že zaúčtování neproběhlo. Před nápravnou akcí ověřte výsledek schváleným reconciliation nástrojem; neměňte klíč ani nepoužívejte nový booking POST jako vyhledávání.
+
+Samotný čítač pokusů nedokládá trvalé stáří ani reconciliation. Samostatné hodiny výše přidávají částečné trvalé pokrytí, nikoli veřejné vyhledání transakce podle idempotentního klíče nebo recovery endpoint; alarm stáří je níže. Existující gauge uvízlých plateb zůstává beze změny a tyto chybějící záruky nedokládá. Nulový čítač ani úspěšný lokální build nedokazují dokončenou reconciliation nebo připravenost nasazení.
+
 ### Platby uvíznuté v RECEIVED
 
 Očekávané, když screening vrátí REVIEW (potenciální zásah ≤ 0,85) nebo když byla sanctions-service nedostupná (fail-closed). Postup:
@@ -127,3 +144,24 @@ Volající zkusil přechod, který stavový automat zakazuje (viz [03 — API](.
 ## Produkční mTLS volání AML služby
 
 Produkční REST klient AML používá pojmenovanou konfiguraci TLS `aml-authority` a listener AML služby na portu 8443, který vyžaduje klientský certifikát. Nasazení dodává klientský certifikát a svazek důvěryhodné privátní CA; vyžaduje se TLS 1.3. Pokud volání AML po nasazení selhává, zkontrolujte společně klientský certifikát a CA, produkční URL REST klienta a síťovou politiku k listeneru. Lokální vývoj a testy nadále používají HTTP fixture; úspěšný lokální HTTP test sám neprokazuje navázání TLS v nasazení.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+### Alarm nezaúčtované platby a re-drive (#13623)
+
+`DomesticPaymentBookingUnsettled` alarmuje, když jsou nejstarší otevřené hodiny bookingu starší než 1 h (`openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`, testy v `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`). Temporal opakuje settlement každých 5 minut po 7 dní se stejným klíčem; to zhojí přechodný výpadek, nikdy deterministickou odpověď. Postup operátora (dotaz do transaction-service podle klíče, pak reconcile, reverse nebo re-drive, včetně resetu již selhaného workflow) je v `docs/runbooks/0032-payment-rail-unsettled-booking.md`.
+
+## Typ platby v pacs.008 (#13663)
+
+Domácí adaptér výslovně ponechává volitelný blok typu platby nepřítomný. Úroveň služby SEPA je kód
+EPC, nikoli kód domácího clearingového schématu; nové pole sdílené knihovny z domácího převodu
+nedělá SEPA platbu. Výchozí XML bez bloku se nemění.
+`DomesticPaymentPriority.INSTANT` stále nemá odpovídající kód v této zprávě: volba úrovně služby
+a lokálního instrumentu domácího schématu zůstává nevyřešená. Toto zachování kompatibility
+nedokládá, že se okamžitá priorita předává schématu.

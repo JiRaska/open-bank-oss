@@ -85,6 +85,12 @@ FLEET_ATTEST_JSON="${FLEET_ATTEST_JSON:-}"
 # into a supply-chain finding (#1915).
 classify_failure() {
   local err="$1"
+  # Cosign can wrap transport failures in "no matching attestations". Such a
+  # probe has no verdict and must retain bounded retries instead of accusing the image.
+  if grep -qiE 'connection reset by peer|connection refused|i/o timeout|TLS handshake timeout|no such host|TOOMANYREQUESTS|unexpected status code 5[0-9][0-9]' <<< "$err"; then
+    printf 'UNKNOWN\n'
+    return 0
+  fi
   if printf '%s' "$err" | grep -qE 'NAME_UNKNOWN|MANIFEST_UNKNOWN|does not exist|not found|404'; then
     printf 'ABSENT\n'
     return 0
@@ -145,6 +151,11 @@ selftest() {
 main.go:74: error during command execution: no matching attestations:'
   check_case "invalid signature" UNATTESTED 'Error: invalid signature when validating ASN.1 encoded signature'
 
+  check_case "cosign wraps a connection reset in its verdict prefix" UNKNOWN \
+    'Error: no matching attestations: read tcp: read: connection reset by peer'
+  check_case "cosign wraps registry throttling in its verdict prefix" UNKNOWN \
+    'Error: no matching attestations: TOOMANYREQUESTS: Rate exceeded'
+
   # UNKNOWN — the probe could not run. Each of these used to be published as UNATTESTED.
   check_case "ECR throttle" UNKNOWN \
     'Error: GET https://...amazonaws.com/v2/: TOOMANYREQUESTS: Rate exceeded'
@@ -175,10 +186,16 @@ main.go:74: error during command execution: no matching attestations:'
 # fails the way its name declares. Deliberately writes to stderr, as the real one does.
 if [ "$1" = version ]; then echo "GitVersion: v2.4.3"; exit 0; fi
 img="${!#}"
+[ -n "${TUF_LOG:-}" ] && printf '%s\n' "${TUF_ROOT:-UNSET}" >> "$TUF_LOG"
+# Real cosign materialises its trusted-root cache under $TUF_ROOT on the first call. A stub
+# that skips this cannot see where that directory lands (#13166 put it inside the worker's
+# result directory, whose exact entry count makes every image UNKNOWN).
+[ -n "${TUF_ROOT:-}" ] && mkdir -p "$TUF_ROOT"
 case "$img" in
   *fixture-ok*)     echo "Verification for $img -- The signatures were verified"; exit 0 ;;
   *fixture-gone*)   echo "Error: MANIFEST_UNKNOWN: manifest unknown" >&2; exit 1 ;;
   *fixture-bare*)   echo "Error: no matching attestations:" >&2; exit 1 ;;
+  *fixture-reset*) echo "Error: no matching attestations: read tcp: read: connection reset by peer" >&2; exit 1 ;;
   *fixture-flaky*)  echo "Error: TOOMANYREQUESTS: Rate exceeded" >&2; exit 1 ;;
   # The ARC runner repository, keyed by digest: one attested, one carrying a predicate the
   # policies require and it does not — the September shape.
@@ -209,8 +226,8 @@ STUB
     # default and the systemic case would prove nothing.
     out="$(GITOPS_DIR="$tmp/gitops" COSIGN_BIN="$stub" PLACEHOLDER_FILE="$tmp/none.txt" \
            ARC_RUNNERS_TF="${fixture_arc_tf:-$tmp/arc-ok.tf}" \
-           VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" \
-           SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
+           VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" TUF_LOG="$tmp/tuf.log" \
+           FLEET_ATTEST_WORKERS=1 SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
            bash "$SELF" 2>&1)"
     code=$?
     # Both failure branches print what the run ACTUALLY produced, not only what was wanted.
@@ -339,6 +356,19 @@ STUB
   run_fixture "all attested -> exit 0" 0 \
     "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
     "openbank-fixture-ok:t"
+  # Workers must not share a cosign TUF cache: concurrent probes lost the refresh lock with
+  # "getting Rekor public keys ... resource temporarily unavailable" and failed auto-deploy's
+  # Build job. Two images were just probed (a signature check plus one verify-attestation per
+  # predicate each); every call must see a TUF_ROOT, and the two images must not share one.
+  # Without the export in probe_one_image the stub logs UNSET and this fails.
+  cases=$((cases + 1))
+  if [ -s "$tmp/tuf.log" ] && ! grep -qx UNSET "$tmp/tuf.log" \
+     && [ "$(sort -u "$tmp/tuf.log" | wc -l)" -ge 2 ]; then
+    printf '  ok: each probe worker gets its own TUF_ROOT\n'
+  else
+    printf '  FAIL: probe workers share (or lack) a TUF_ROOT: %s\n' "$(sort -u "$tmp/tuf.log" 2>/dev/null | tr '\n' ' ')"
+    failures=$((failures + 1))
+  fi
   # A real gap -> 1. Both fatal classes, so the summary carries each count.
   run_fixture "unattested + absent -> exit 1" 1 \
     "2 attested / 1 unattested / 1 absent / 0 allowlisted placeholder / 0 unknown" \
@@ -369,6 +399,14 @@ STUB
   run_fixture "probe failure only -> exit 2 (not 1)" 2 \
     "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
     "openbank-fixture-ok:t" "openbank-fixture-flaky:t"
+  run_fixture "wrapped connection reset remains a probe failure -> exit 2" 2 \
+    "1 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
+    "openbank-fixture-reset:t"
+  if ! grep -q '  retry ' <<< "$LAST_OUT"; then
+    printf '  FAIL: wrapped connection reset did not receive bounded retry\n'
+    failures=$((failures + 1))
+  fi
+
   # A REAL gap alongside a probe failure must still be 1 — "could not run" never masks a
   # verdict that was reached, or an unlucky throttle would downgrade a live outage.
   run_fixture "gap + probe failure -> exit 1 (gap wins)" 1 \
@@ -464,11 +502,48 @@ STUB
 # does not classify as UNATTESTED, the vocabulary has moved and the gate is blind.
 # No side effects — verify-attestation is read-only.
 # ---------------------------------------------------------------------------------------
+# Every image worker retains main's private cache, even with a caller-supplied TUF_ROOT.
+# Unset mode keeps the original vocabulary call. isolated-default also isolates vocabulary
+# and refuses custom trust/cache environment or preseeded default state before native calls.
+COSIGN_TUF_ROOT=""
+tuf_cache_dir=""
+cosign_verify() {
+  if [ -n "$COSIGN_TUF_ROOT" ]; then
+    COSIGN_YES=true TUF_ROOT="$COSIGN_TUF_ROOT" "$COSIGN_BIN_RESOLVED" "$@"
+  else
+    COSIGN_YES=true "$COSIGN_BIN_RESOLVED" "$@"
+  fi
+}
+
+prepare_tuf_cache() {
+  case "${FLEET_ATTEST_TUF_CACHE_MODE:-}" in
+    "") return 0 ;;
+    isolated-default) ;;
+    *) echo 'UNKNOWN: unsupported TUF cache mode' >&2; return 2 ;;
+  esac
+  local name
+  while IFS= read -r name; do
+    case "$name" in
+      TUF_* | SIGSTORE_*)
+        printf 'UNKNOWN: isolated-default refuses custom trust/cache environment (%s)\n' "$name" >&2
+        return 2 ;;
+    esac
+  done < <(compgen -e)
+  if [ -z "${HOME:-}" ] || [ ! -d "$HOME" ] || [ -e "$HOME/.sigstore/root" ] || [ -L "$HOME/.sigstore/root" ]; then
+    echo 'UNKNOWN: isolated-default requires absent default TUF state and a home directory' >&2
+    return 2
+  fi
+  tuf_cache_dir="$(mktemp -d)" || return 2
+  COSIGN_TUF_ROOT="$tuf_cache_dir/vocabulary"
+  trap 'rm -rf "$tuf_cache_dir"' EXIT
+  mkdir "$COSIGN_TUF_ROOT" || return 2
+}
+
 vocabulary_control() {
   local image="$1" err verdict
   printf '==> Vocabulary control: %s with --type spdx (never attested; must read UNATTESTED)\n' \
     "${image#"${ECR_REGISTRY}"/}"
-  if err="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
+  if err="$(cosign_verify verify-attestation \
               --key "$COSIGN_KEY" --type spdx "$image" 2>&1)"; then
     echo "ERROR: control image verified against a type it should not carry — the control is" >&2
     echo "       no longer negative. Pick a type this fleet genuinely never attests." >&2
@@ -554,6 +629,10 @@ if [ "$MODE" != check-placeholders ] && [ -z "$COSIGN_BIN_RESOLVED" ]; then
   echo "ERROR: cosign v2 unavailable — cannot verify fleet attestations." >&2
   echo "       Install cosign v2.x, set COSIGN_BIN, or set COSIGN_VERSION." >&2
   exit 1
+fi
+
+if [ "$MODE" != check-placeholders ]; then
+  prepare_tuf_cache || exit 2
 fi
 
 echo "==> Enumerating openbank-* images declared in ${GITOPS_DIR}"
@@ -815,12 +894,40 @@ SYSTEMIC_UNKNOWN_THRESHOLD="${SYSTEMIC_UNKNOWN_THRESHOLD:-5}"
 
 BY_DIGEST=0
 BY_TAG=0
-for image in "${IMAGES[@]}"; do
+# Each worker owns one private indexed result directory. Never source worker output.
+# Four workers may be in flight; a systemic outage disables retries for all workers
+# at their next retry boundary. At most three other image groups are in flight;
+# each retains up to VERIFY_ATTEMPTS attempts (at most nine attempts at defaults).
+# This bounds registry load but is not the old serial circuit's exact retry budget.
+FLEET_ATTEST_WORKERS="${FLEET_ATTEST_WORKERS:-4}"
+case "$FLEET_ATTEST_WORKERS" in 1|2|3|4) ;; *) echo 'ERROR: FLEET_ATTEST_WORKERS must be 1..4' >&2; exit 2 ;; esac
+pool_dir="$(mktemp -d)" || exit 2
+pool_pids=()
+cleanup_pool() {
+  local pid
+  # Drain only our own workers before deleting their output. Interruption does not
+  # orphan verification processes; it may wait for an already running cosign call.
+  for pid in ${pool_pids[@]+"${pool_pids[@]}"}; do wait "$pid" 2>/dev/null || true; done
+  rm -rf "$pool_dir"
+  if [ -n "$tuf_cache_dir" ]; then rm -rf "$tuf_cache_dir"; fi
+}
+trap cleanup_pool EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+probe_one_image() {
+  local image="$1" result="$2" ref mode short verdict err missing_type attempt _e _pt
+  local COSIGN_TUF_ROOT="$COSIGN_TUF_ROOT"
+  if [ -n "$tuf_cache_dir" ]; then
+    COSIGN_TUF_ROOT="$tuf_cache_dir/${result##*/}"
+    mkdir "$COSIGN_TUF_ROOT" || return 2
+  else
+    # Preserve main's per-worker isolation even when the caller supplied TUF_ROOT.
+    # The caller cache is never used or changed; this sibling stays outside result entries.
+    export TUF_ROOT="${result}.tuf"
+  fi
   ref="$(probe_ref "$image")"
   mode="$(probe_mode "$image")"
-  if [ "$mode" = digest ]; then BY_DIGEST=$((BY_DIGEST + 1)); else BY_TAG=$((BY_TAG + 1)); fi
   short="${ref#"${ECR_REGISTRY}"/} [${mode}]"
-
   # Bounded retry, then classify. A verdict (OK / ABSENT / UNATTESTED) is final on the first
   # attempt that produces one; only an UNKNOWN — which is precisely the transient class — is
   # retried, so a genuinely unattested image still fails fast and no result is retried into
@@ -836,7 +943,7 @@ for image in "${IMAGES[@]}"; do
     missing_type=""
     # The image SIGNATURE first: the policy's first validation is verifyImageSignatures, and a
     # signed attestation does not imply a signed image.
-    if ! _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify \
+    if ! _e="$(cosign_verify verify \
                  --key "$COSIGN_KEY" "$ref" 2>&1)"; then
       err="$_e"
       verdict="$(classify_failure "$err")"
@@ -844,7 +951,7 @@ for image in "${IMAGES[@]}"; do
     fi
     for _pt in "${PREDICATE_TYPES[@]}"; do
       [ "$verdict" = OK ] || break
-      if _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
+      if _e="$(cosign_verify verify-attestation \
                  --key "$COSIGN_KEY" --type "$_pt" "$ref" 2>&1)"; then
         continue
       fi
@@ -855,7 +962,7 @@ for image in "${IMAGES[@]}"; do
     done
     [ "$verdict" = OK ] && break
     [ "$verdict" != "UNKNOWN" ] && break
-    [ "$RETRIES_DISABLED" -eq 1 ] && break
+    [ -f "$pool_dir/retries-disabled" ] && break
     [ "$attempt" -ge "$VERIFY_ATTEMPTS" ] && break
     printf '  retry %s/%s  %s  (probe failed, not a verdict)\n' \
       "$attempt" "$VERIFY_ATTEMPTS" "$short"
@@ -863,6 +970,56 @@ for image in "${IMAGES[@]}"; do
     attempt=$((attempt + 1))
   done
 
+  printf '%s\n' "$image" > "$result/image"
+  printf '%s\n' "$verdict" > "$result/verdict"
+  printf '%s' "$err" > "$result/error"
+  printf '%s\n' "$missing_type" > "$result/missing-type"
+  printf '%s\n' "$attempt" > "$result/attempt"
+}
+
+# Admit at most four images, then fold in enumeration order. A worker that exits
+# without a complete, unique result is UNKNOWN, never a successful partial fleet.
+next_image=0
+launch_image() {
+  local index="$1"
+  mkdir "$pool_dir/$index" || return 1
+  probe_one_image "${IMAGES[$index]}" "$pool_dir/$index" > "$pool_dir/$index/output" 2>&1 &
+  pool_pids[$index]=$!
+}
+for ((i=0; i<${#IMAGES[@]}; i++)); do
+  while [ "$next_image" -lt "${#IMAGES[@]}" ] && [ "$next_image" -lt "$((i + FLEET_ATTEST_WORKERS))" ]; do
+    launch_image "$next_image" || exit 2
+    next_image=$((next_image + 1))
+  done
+  image="${IMAGES[$i]}"
+  ref="$(probe_ref "$image")"
+  mode="$(probe_mode "$image")"
+  if [ "$mode" = digest ]; then BY_DIGEST=$((BY_DIGEST + 1)); else BY_TAG=$((BY_TAG + 1)); fi
+  short="${ref#"${ECR_REGISTRY}"/} [${mode}]"
+  result="$pool_dir/$i"
+  worker_ok=1
+  wait "${pool_pids[$i]}" || worker_ok=0
+  for field in image verdict error missing-type attempt output; do
+    [ -f "$result/$field" ] && [ ! -L "$result/$field" ] || worker_ok=0
+  done
+  [ "$(find "$result" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 6 ] || worker_ok=0
+  if [ "$worker_ok" -eq 1 ]; then
+    [ "$(cat "$result/image")" = "$image" ] || worker_ok=0
+    verdict="$(cat "$result/verdict")"
+    case "$verdict" in OK|ABSENT|UNATTESTED|UNKNOWN) ;; *) worker_ok=0 ;; esac
+    attempt="$(cat "$result/attempt")"
+    case "$attempt" in ''|*[!0-9]*) worker_ok=0 ;; esac
+    [ "$attempt" -ge 1 ] && [ "$attempt" -le "$VERIFY_ATTEMPTS" ] || worker_ok=0
+  fi
+  if [ "$worker_ok" -eq 1 ]; then
+    cat "$result/output"
+    err="$(cat "$result/error")"
+    missing_type="$(cat "$result/missing-type")"
+  else
+    verdict=UNKNOWN
+    err='worker failed or produced an incomplete/ambiguous result; no image verdict'
+    missing_type=''
+  fi
   case "$verdict" in
     OK)
       printf '  OK          %s\n' "$short"
@@ -906,7 +1063,12 @@ for image in "${IMAGES[@]}"; do
   else
     CONSECUTIVE_UNKNOWN=0
   fi
+  if [ "$RETRIES_DISABLED" -eq 1 ]; then : > "$pool_dir/retries-disabled"; fi
 done
+rm -rf "$pool_dir"
+if [ -n "$tuf_cache_dir" ]; then rm -rf "$tuf_cache_dir"; fi
+trap - EXIT INT TERM
+
 
 FAIL=$((UNATTESTED + ABSENT))
 
