@@ -10,7 +10,9 @@ info:
   # `behaviour` (product IR v1), ProductRevision gains an optional `irSignature`, and
   # POST .../revisions/{revisionId}/publish-ir publishes an IR-bearing revision signed (four-eyes
   # action catalog.publish-ir). The plain publish refuses an IR-bearing revision with 409.
-  version: 2.9.0
+  # 2.9.0 -> 2.10.0 (ADR-0352 phase 5b): additive POST /api/v2/product-ir/lint, the Studio IR editor's
+  # dry-run of the same parser a revision write runs; stores nothing.
+  version: 2.10.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -353,6 +355,31 @@ paths:
               schema: { $ref: '#/components/schemas/ValidateCatalogResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/product-ir/lint:
+    post:
+      tags: [Catalog V2]
+      summary: Lint a product IR document without storing it
+      description: >-
+        ADR-0352 phase 5b. Runs the exact validation a revision write runs on its `behaviour`
+        (trusted-profile bound, then the shared ProductIrParser) and returns what `obp lint` prints:
+        productCode, irVersion and the canonical revisionHash, plus the canonical IR bytes. Stores
+        nothing, signs nothing, publishes nothing. Invalid IR is a 200 with valid=false and the
+        parser's problems, so an editor can show every problem at once.
+      operationId: lintProductIrV2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LintProductIrRequest' }
+      responses:
+        '200':
+          description: Lint result, deterministically ordered problems
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LintProductIrResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/specifications:
@@ -978,6 +1005,39 @@ components:
       properties:
         attributes: { type: object, additionalProperties: true }
       required: [attributes]
+    LintProductIrRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        ir:
+          type: object
+          additionalProperties: true
+          description: Product IR v1 document (ADR-0352), exactly as it would be sent as a revision's `behaviour`.
+      required: [ir]
+    ProductIrProblem:
+      type: object
+      additionalProperties: false
+      properties:
+        path: { type: string, description: JSON pointer into the submitted IR }
+        message: { type: string }
+      required: [path, message]
+    LintProductIrResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        valid: { type: boolean }
+        productCode: { type: [string, 'null'] }
+        irVersion: { type: [integer, 'null'] }
+        revisionHash:
+          type: [string, 'null']
+          description: SHA-256 of the canonical IR, the hash two approvals bind to (ADR-0352 §4).
+        canonicalIr:
+          type: [string, 'null']
+          description: Canonical JSON of the IR, byte-identical to `obp compile` output for the same product.
+        problems:
+          type: array
+          items: { $ref: '#/components/schemas/ProductIrProblem' }
+      required: [valid, problems]
     ValidateCatalogResponse:
       type: object
       additionalProperties: false

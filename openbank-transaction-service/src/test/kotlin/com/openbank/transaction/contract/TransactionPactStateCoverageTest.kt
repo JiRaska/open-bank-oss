@@ -59,7 +59,7 @@ class TransactionPactStateCoverageTest {
             .describedAs(
                 "interactions with no provider state would be filtered out of BOTH " +
                     "TransactionPactFolderProviderVerificationTest and " +
-                    "TransactionNegativeAuthPactVerificationTest, and verified by neither",
+                    "TransactionNegativeAuthProviderVerificationTest, and verified by neither",
             )
             .isEmpty()
     }

@@ -138,7 +138,10 @@ select_modules() {
              && ! grep -qE '(^| )openbank-client-account( |$)' <<< " $CHANGED "; then
             CHANGED="$CHANGED openbank-client-account"
           fi
-          # Recipe-only change -> one canary (same as the PR path).
+          # Preserve readers of filtered cross-module fixtures on main as well as PRs.
+        CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
+          --expand "$CHANGED" --input-paths-stdin <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES")")"
+        # Recipe-only change -> one canary (same as the PR path).
           if [ -z "${CHANGED// /}" ] \
              && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-select-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
             CHANGED="openbank-libs"
@@ -291,9 +294,8 @@ select_modules() {
       fi
       # Tests reading OTHER modules' trees escape the fan-out above (#10010 -> #11513).
       # Derived from test sources; rationale in the script header.
-      if [ -n "${CHANGED// /}" ]; then
-        CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py --expand "$CHANGED")"
-      fi
+      CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
+        --expand "$CHANGED" --input-paths-stdin <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES")")"
       # A change to the CI recipe itself (services-ci / _service-ci) can NOT
       # alter any service's compile/test inputs, so it does NOT warrant a
       # 28-module fan-out -- that is what turned the trivial #547 cache-flag
@@ -310,6 +312,23 @@ select_modules() {
         CHANGED="openbank-libs"
       fi
     fi
+  fi
+
+  # PRs must retain the same conservative unknown-path fallback as main.
+  if [ "$EVENT_NAME" = "pull_request" ]; then
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      is_inert_service_path "$f" && continue
+      case "$f" in
+        openbank-libs/governance/*|pacts/*.json|.github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-select-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) continue ;;
+        openbank-*/*)
+          m="${f%%/*}"
+          if grep -qE "(^| )${m}( |$)" <<< " $ALL "; then continue; fi ;;
+      esac
+      CHANGED="$ALL"
+      echo "Decision: unowned PR input -> full-fleet."
+      break
+    done <<< "$FILES"
   fi
 
   mkdir -p "$SELECT_OUT"
