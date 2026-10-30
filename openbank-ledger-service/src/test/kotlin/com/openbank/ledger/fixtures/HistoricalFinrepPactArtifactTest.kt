@@ -62,6 +62,16 @@ class HistoricalFinrepPactArtifactTest {
     }
 
     @Test
+    fun `committed pact records a 401 for a missing identity on every negative-auth interaction`() {
+        val interactions = mapper.readTree(pactBytes()).path("interactions")
+        val denied = interactions.filter { node ->
+            node.path("providerStates").any { it.path("name").asText() == "no valid M2M identity is presented" }
+        }
+        assertThat(denied).isNotEmpty()
+        assertThat(denied.map { it.path("response").path("status").asInt() }).containsOnly(401)
+    }
+
+    @Test
     fun `wrong pair hashes count origin and version are refused`() {
         val bytes = pactBytes()
         val bad = listOf(

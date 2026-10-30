@@ -60,6 +60,11 @@ class LedgerHostedHistoricalFinrepProviderVerificationTest {
     fun verifyPact(context: PactVerificationContext) {
         if (context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
             testIdentityAssociation.setTestIdentity(null)
+            // The anonymous replay is only meaningful if the pact demands a 401; a decoy state
+            // name over a 200 interaction would verify authenticated-looking behaviour as denial.
+            check((context.interaction as SynchronousRequestResponse).response.status == 401) {
+                "negative-auth interaction must expect 401"
+            }
         }
         val index = context.pact.interactions.indexOf(context.interaction)
         try {
