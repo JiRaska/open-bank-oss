@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.0...customer-edge-v1.5.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **customer-edge:** name the subject when passkey token-exchange fails ([#14234](https://github.com/JiRaska/open-bank-oss/issues/14234)) ([be9b211](https://github.com/JiRaska/open-bank-oss/commit/be9b211f74c4b07b291e84e4c2b109203d9522e2))
+
 ## [1.5.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.4...customer-edge-v1.5.0) (2026-10-26)
 
 
