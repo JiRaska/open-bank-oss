@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.19.0...treasury-service-v0.19.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **treasury:** compare nostro balances by value date ([#14218](https://github.com/JiRaska/open-bank-oss/issues/14218)) ([e46468b](https://github.com/JiRaska/open-bank-oss/commit/e46468bf92ef3ae2dcd98705bf9fe08708a78a42))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.18.0...treasury-service-v0.19.0) (2026-10-29)
 
 
