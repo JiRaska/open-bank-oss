@@ -40,7 +40,11 @@ REALM="openbank"
 EMAIL="canary-operator@synthetic.open-bank.tech"
 OPERATOR_ROLE="ROLE_OPERATOR"
 KV_SECRET_PATH="openbank/keycloak/synthetic-operator"
-KV_REALM_PATH="keycloak-realm-import"
+# The realm-import blob lives in the `openbank` KV-v2 mount (that is the path ESO mirrors into
+# the keycloak-realm-import Secret, and the only path the openbank-sso-writer policy grants for
+# it: openbank/data/keycloak-realm-import). A top-level `keycloak-realm-import` mount does not
+# exist and would be denied (found live 2026-10-30).
+KV_REALM_PATH="openbank/keycloak-realm-import"
 REALM_FIELD="openbank-realm.json"
 NS_KC=iam NS_VAULT=vault
 
@@ -69,11 +73,23 @@ PASSWORD="$(openssl rand -base64 36 | tr -d '\n=' | cut -c1-40)"
 UID_="$(kc get users -r "$REALM" -q username="$USER_NAME" --fields id --format csv --noquotes | head -1)"
 if [[ -z "$UID_" ]]; then
   echo "==> creating user $USER_NAME in realm $REALM (permanent generated password, no required actions)"
-  UID_="$(kc create users -r "$REALM" -s "username=$USER_NAME" -s enabled=true -s "email=$EMAIL" \
-    --fields id --format csv --noquotes)"
+  # `kcadm create` does not support --fields/--format on this Keycloak build (verified live
+  # 2026-10-30 — it exits "Unknown options"), and it prints the id in a confirmation line,
+  # so create plainly and parse the uuid out of the output.
+  # firstName/lastName are REQUIRED: the realm's declarative user profile attaches a
+  # required action at first authentication when the profile is incomplete, and the token
+  # endpoint then answers "Account is not fully set up" — the canary could not sign in
+  # until the names were set.
+  CREATED="$(kc create users -r "$REALM" -s "username=$USER_NAME" -s enabled=true -s "email=$EMAIL" \
+    -s firstName=Synthetic -s 'lastName=Operator Canary')"
+  UID_="$(grep -oE "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" <<<"$CREATED" | head -1)"
+  [[ -n "$UID_" ]] || { echo "ERROR: user created but its id could not be parsed from: $CREATED" >&2; exit 1; }
   # Idempotency guard for a partial run: the password is only set when the user did not exist,
   # so re-running never rotates a password the workflow secrets already carry.
-  kc update "users/$UID_/reset-password" -r "$REALM" -s type=password -s "value=$PASSWORD" -s temporary=false >/dev/null
+  # `kcadm set-password` is the verb this Keycloak build accepts — update users/{id}/reset-password
+  # 404s on it (verified live 2026-10-30).
+  kc set-password -r "$REALM" --userid "$UID_" --new-password "$PASSWORD" >/dev/null \
+    || { echo "ERROR: failed to set the initial password for $USER_NAME" >&2; exit 1; }
 else
   echo "==> user $USER_NAME exists; reusing it and keeping its current password"
   PASSWORD=""
