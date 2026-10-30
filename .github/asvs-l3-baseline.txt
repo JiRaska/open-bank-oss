@@ -334,3 +334,4 @@ V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:97: plain
 V9.1 openbank-infra/gitops/components/pension/pension-service.yaml:62: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/pension-fund/pension-fund-service.yaml:62: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/tax-reporting/tax-reporting-service.yaml:63: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/ai-platform/langfuse-exporter.yaml:276: plaintext http:// env value http://langfuse-web.ai-platform.svc:3000

@@ -240,6 +240,11 @@ metadata:
     app.kubernetes.io/part-of: ai-platform
 spec:
   replicas: 1
+  # Stateless poller: terminate-first costs seconds of scrape gap and can never deadlock on a full
+  # cluster (issue #3545).
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 0, maxUnavailable: 1}
   selector:
     matchLabels:
       app.kubernetes.io/name: langfuse-exporter
