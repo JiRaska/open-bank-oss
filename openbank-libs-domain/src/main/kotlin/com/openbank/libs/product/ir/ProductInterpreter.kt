@@ -259,6 +259,6 @@ class ProductInterpreter(private val arithmetic: ProductArithmetic) {
     companion object {
         const val PARAM_RATE = "interest.rate"
         const val PARAM_BONUS_RATE = "interest.bonus.rate"
-        const val INSUFFICIENT_FUNDS = "INSUFFICIENT_FUNDS"
+        private const val INSUFFICIENT_FUNDS = "INSUFFICIENT_FUNDS"
     }
 }

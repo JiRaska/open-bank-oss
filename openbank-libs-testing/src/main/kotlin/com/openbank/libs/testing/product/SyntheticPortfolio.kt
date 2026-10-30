@@ -70,7 +70,7 @@ object SyntheticPortfolio {
         val rangeDays = shape.from.until(shape.to).days.coerceAtLeast(0)
         val openedOn = if (opensInside) {
             (if (onLeapDay) leapDayIn(shape) else null)
-                ?: shape.from.plusDays(Arb.int(0, rangeDays.coerceAtMost(DAYS_IN_YEAR)).bind().toLong())
+                ?: shape.from.plusDays(Arb.int(0, rangeDays.coerceAtMost(MAX_OPEN_OFFSET_DAYS)).bind().toLong())
         } else {
             shape.from.minusDays(Arb.int(MIN_AGE_DAYS, MAX_AGE_DAYS).bind().toLong())
         }
@@ -197,7 +197,7 @@ object SyntheticPortfolio {
     private const val OPENS_INSIDE_PERCENT = 20
     private const val LEAP_DAY_PERCENT = 10
     private const val AMOUNT_SCALE = 2
-    private const val DAYS_IN_YEAR = 365
+    private const val MAX_OPEN_OFFSET_DAYS = 365
     private const val MIN_AGE_DAYS = 31
     private const val MAX_AGE_DAYS = 2000
     private const val LEAP_DAY = 29
