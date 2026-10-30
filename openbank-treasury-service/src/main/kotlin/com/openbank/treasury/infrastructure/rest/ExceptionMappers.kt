@@ -161,6 +161,16 @@ class ExceptionMappers {
     fun notPermitted(e: ActorNotPermittedException): Response =
         error(Response.Status.FORBIDDEN.statusCode, "ACTOR_NOT_PERMITTED", e.message)
 
+    /** ADR-0315 D4: a derivative or repo whose credit measure needs reference data that is not effective. */
+    @ServerExceptionMapper
+    fun creditMeasureMissing(e: com.openbank.treasury.domain.model.CreditMeasureMissingException): Response =
+        error(UNPROCESSABLE, e.code, e.message)
+
+    /** The line moved past the vetted headroom between the pre-trade check and the locked write. */
+    @ServerExceptionMapper
+    fun correctionLimit(e: com.openbank.treasury.application.port.out.CorrectionLimitBreachedException): Response =
+        error(UNPROCESSABLE, "LIMIT_BREACHED", e.message)
+
     private fun error(status: Int, code: String, message: String?): Response =
         Response.status(status).entity(mapOf("error" to code, "message" to message)).build()
 

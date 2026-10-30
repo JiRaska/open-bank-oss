@@ -62,7 +62,10 @@ refused command for a transition.
 - **DecisionRequest** — `approve` (bool, required), `reason` (string, nullable). **No `decidedBy`** — the checker is the JWT subject.
 - **CollateralRequest** — `type` (string), `description` (nullable), `marketValue` (Money), `haircut` (number, default 0, validated to `[0,1]`).
 - **WriteOffRequest** — `reason` (string, nullable). The acting principal is the JWT subject.
-- **Money** — `{ amount: number, currency: ISO-4217 }`.
+- **Money in requests** — the published schema remains `{ amount: number, currency: ISO-4217 }`. The reader also retains compatibility with decimal text and the legacy nested currency form.
+- **Money in responses** — the existing wire form is `{ amount: number, currency: { code: "EUR", defaultFractionDigits: 2 }, isNonNegative: boolean, isZero: boolean, isNegative: boolean, isPositive: boolean }`. The OpenAPI `MoneyResponse` schema describes it separately so generated clients do not read the request's string currency shape as a response guarantee.
+- **Repayment schedule and repayment result** — `LoanInstallment` uses that same `MoneyResponse` form for opening balance, principal, interest, payment and closing balance.
+- **Other monetary responses** — settlement quotes expose five `MoneyResponse` fields; collateral returns `marketValue` in that form. Loan lifecycle transitions return `Loan` with a `MoneyResponse` principal, and application advancement/decision returns `LoanApplicationResponse` with its requested amount.
 
 Validation (application service): requested amount must be positive, term ≥ 1 period, nominal rate ≥ 0, proposer identity non-blank, haircut within `[0,1]`.
 
