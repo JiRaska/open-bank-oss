@@ -54,12 +54,14 @@ class RevisionBehaviourDiffService(
         portfolio: ReplayPortfolio,
         range: ReplayRange,
         options: DiffOptions,
+        requester: BacktestRequester,
     ): BehaviourDiff {
         require(portfolio.accounts.size.toLong() * range.days <= MAX_ACCOUNT_DAYS) {
             "portfolio of ${portfolio.accounts.size} accounts over ${range.days} days exceeds $MAX_ACCOUNT_DAYS account-days"
         }
         return slots.run {
-            val candidate = irOf(catalog.findRevision(revisionId).also { requireOffering(it.offeringId, offeringId) })
+            val candidateRevision = catalog.findRevision(revisionId).also { requireOffering(it.offeringId, offeringId) }
+            val candidate = irOf(candidateRevision)
             val base = irOf(
                 if (baseRevisionId != null) {
                     catalog.findRevision(baseRevisionId).also { requireOffering(it.offeringId, offeringId) }
@@ -67,7 +69,18 @@ class RevisionBehaviourDiffService(
                     catalog.findPublished(offeringId, Instant.now(clock))
                 },
             )
-            withContext(Dispatchers.Default) { engine.diff(base, candidate, portfolio, range, options) }
+            val diff = withContext(Dispatchers.Default) { engine.diff(base, candidate, portfolio, range, options) }
+            // Evidence for the approval gate (ADR-0352 §7): only a VALID diff counts as having seen the change.
+            if (diff.valid) {
+                catalog.recordBacktest(
+                    candidateRevision,
+                    requester,
+                    base.revisionHash,
+                    candidate.revisionHash,
+                    diff.canonicalJson,
+                )
+            }
+            diff
         }
     }
 

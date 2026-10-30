@@ -146,6 +146,17 @@ class BehaviourDiffContractTest {
             ReplayRange(LocalDate.parse("2026-01-01"), LocalDate.parse("2026-03-31"), parsed.zone),
         ).canonicalJson
         assertThat(body).isEqualTo(expected)
+        // No dates: the same default window `obp diff` resolves (earliest openedOn .. last fixture day).
+        Given {
+            contentType("application/json")
+            body("""{"portfolio":$fixture}""")
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$candidateId/behaviour-diff")
+        } Then {
+            statusCode(200)
+            body("diff.range.from", equalTo("2026-01-01"))
+            body("diff.range.to", equalTo("2026-01-31"))
+        }
         // The steps grammar really carried a customer movement (the overdraft attempt), not only ticks.
         assertThat(parsed.portfolio.accounts.flatMap { it.postings }).isNotEmpty()
     }
@@ -263,6 +274,16 @@ class BehaviourDiffContractTest {
                 st.setObject(2, revisionId)
                 assertThat(st.executeUpdate()).isEqualTo(1)
             }
+        }
+        // The checker's own backtest of this content is a precondition of publish-ir (against itself: nothing
+        // is published yet).
+        Given {
+            contentType("application/json")
+            body(diffRequest(PORTFOLIO, "2026-01-01", "2026-01-31", base = revisionId))
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$revisionId/behaviour-diff")
+        } Then {
+            statusCode(200)
         }
         Given {
             contentType("application/json")

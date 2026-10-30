@@ -642,6 +642,8 @@ paths:
         by the publish path; the detached signature is stored with the revision and returned as
         `irSignature`. A revision without `behaviour` is refused with 409; the plain publish refuses
         a revision WITH `behaviour` with 409, so an IR-bearing revision is never published unsigned.
+        Since 2.11.0 (ADR-0352 §7/§11.4) the checker must also have run a valid behavioural-diff
+        backtest (`POST .../behaviour-diff`) of the revision as it stands now; otherwise 409.
       operationId: publishOfferingRevisionIrV2
       parameters:
         - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -677,7 +679,9 @@ paths:
         offering's revision published now) and under this revision with the shared
         ProductBehaviourDiff, and returns its schema-v1 document (`product-ir/behaviour-diff.v1`)
         unchanged together with its canonical JSON bytes, the same document `obp diff --behavioural`
-        prints. Stores, signs and approves nothing. The run is bounded: at most 500 accounts, 1000
+        prints. A valid diff is recorded as evidence bound to the caller and the revision's current
+        approval digest: publish-ir, and a role approval of an IR-bearing revision, require one from
+        the approving principal (409 otherwise). Signs and approves nothing. The run is bounded: at most 500 accounts, 1000
         events per account, 200000 account-days and a small number of concurrent runs (429 beyond).
       operationId: behaviourDiffRevisionV2
       parameters:
@@ -725,6 +729,10 @@ paths:
       tags: [Revision Approvals]
       operationId: approveRevisionV2
       summary: Record one immutable, authenticated approval by a role the revision's pack policy declares
+      description: >-
+        For a revision whose content carries product IR (`behaviour`), the approving principal (JWT
+        issuer and subject) must first have run a valid behavioural-diff backtest of the revision as it
+        stands now (`POST .../behaviour-diff`, ADR-0352 §7/§11.4); otherwise 409.
       parameters:
         - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1042,7 +1050,7 @@ components:
     BehaviourDiffRequest:
       type: object
       additionalProperties: false
-      required: [portfolio, from, to]
+      required: [portfolio]
       properties:
         baseRevisionId:
           type: [string, 'null']
@@ -1057,10 +1065,19 @@ components:
             "accruedInterest", "openedOn", ...}, "postings": [{"on": "YYYY-MM-DD", "kind", "direction",
             "amount"}], "steps": [<golden-scenario step>]}]}. A step with a posting is a customer
             movement; scheduled steps are skipped because each revision's onOpen schedules run.
-        from: { type: string, format: date }
-        to: { type: string, format: date }
+        from:
+          type: [string, 'null']
+          format: date
+          description: Default the portfolio's earliest openedOn (the same default `obp diff` applies).
+        to:
+          type: [string, 'null']
+          format: date
+          description: Default the portfolio's last day (the same default `obp diff` applies).
         zone: { type: string, maxLength: 64, default: UTC }
-        materialityThreshold: { type: string, pattern: '^[0-9]{1,15}(\.[0-9]{1,12})?$' }
+        materialityThreshold:
+          type: string
+          pattern: '^[0-9]{1,15}(\.[0-9]{1,12})?$'
+          description: Same grammar as `obp diff --threshold`; default 1.00.
     BehaviourDiffResponse:
       type: object
       additionalProperties: false

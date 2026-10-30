@@ -84,3 +84,19 @@ sealed interface SchemaValidationResult {
 fun interface CatalogSchemaValidator {
     fun validate(schema: CatalogSchema, attributes: CatalogValue.ObjectValue): SchemaValidationResult
 }
+
+/**
+ * ADR-0352 §7/§11.4: evidence that [principalName] (and, for a JWT caller, [issuer]/[subject]) ran a
+ * valid behavioural-diff backtest of revision [revisionId] as it stood at approval [digest].
+ */
+data class RevisionBacktest(
+    val revisionId: java.util.UUID,
+    val digest: String,
+    val principalName: String,
+    val issuer: String?,
+    val subject: String?,
+    val baseRevisionHash: String,
+    val candidateRevisionHash: String,
+    val diffSha256: String,
+    val recordedAt: Instant,
+)

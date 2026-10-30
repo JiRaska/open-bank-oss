@@ -77,6 +77,7 @@ class IrPublishContractTest {
     fun `human publish-ir signs the canonical hash and a consumer loader verifies it from the HTTP response`() {
         val (offeringId, revisionId) = draft(irJson)
         setMaker(revisionId, "independent-ir-author")
+        backtest(offeringId, revisionId)
         val expectedHash = ProductIrParser.parse(irJson).revisionHash
 
         Given {
@@ -151,6 +152,7 @@ class IrPublishContractTest {
         assertThat(numeric).isNotEqualTo(irJson).contains("\"rate\": 0.0250")
         val (offeringId, revisionId) = draft(numeric)
         setMaker(revisionId, "independent-ir-author")
+        backtest(offeringId, revisionId)
         Given {
             contentType("application/json")
             body("""{"reason":"numeric authoring"}""")
@@ -183,6 +185,39 @@ class IrPublishContractTest {
         } Then {
             statusCode(403)
         }
+    }
+
+    @Test
+    @TestSecurity(user = "test-operator", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"), Claim(key = "sub", value = "u-op"),
+            Claim(key = "preferred_username", value = "test-operator"),
+        ],
+    )
+    fun `publish-ir needs the checker's own backtest of this exact content, else 409`() {
+        // ADR-0352 §7 / §11.4: nobody approves a behaviour change without having seen what it does.
+        val (offeringId, revisionId) = draft(irJson)
+        setMaker(revisionId, "independent-ir-author")
+        publishIr(offeringId, revisionId, "\"0\"", 409)
+
+        // A backtest of an EARLIER content does not count: an edit moves the approval digest.
+        backtest(offeringId, revisionId)
+        Given {
+            contentType("application/json")
+            header("If-Match", "\"0\"")
+            body(revisionBody(irJson))
+        } When {
+            put("/api/v2/offerings/$offeringId/revisions/$revisionId")
+        } Then {
+            statusCode(200)
+        }
+        setMaker(revisionId, "independent-ir-author")
+        publishIr(offeringId, revisionId, "\"1\"", 409)
+
+        // Backtested as it now stands, by this checker: publishes.
+        backtest(offeringId, revisionId)
+        publishIr(offeringId, revisionId, "\"1\"", 200)
     }
 
     @Test
@@ -271,6 +306,33 @@ class IrPublishContractTest {
             post("/api/v2/offerings/${UUID.randomUUID()}/revisions/${UUID.randomUUID()}/publish-ir")
         } Then {
             statusCode(403)
+        }
+    }
+
+    private fun publishIr(offeringId: UUID, revisionId: UUID, ifMatch: String, expected: Int) {
+        Given {
+            contentType("application/json")
+            body("""{"reason":"approved savings behaviour"}""")
+            header("If-Match", ifMatch)
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$revisionId/publish-ir")
+        } Then {
+            statusCode(expected)
+        }
+    }
+
+    /** The checker's backtest of the revision as it stands (no published base yet, so against itself). */
+    private fun backtest(offeringId: UUID, revisionId: UUID) {
+        Given {
+            contentType("application/json")
+            body(
+                """{"baseRevisionId":"$revisionId","from":"2026-01-01","to":"2026-01-31","portfolio":""" +
+                    """{"accounts":[{"id":"a","state":{"currency":"EUR","balance":"100.00","openedOn":"2026-01-01"}}]}}""",
+            )
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$revisionId/behaviour-diff")
+        } Then {
+            statusCode(200)
         }
     }
 

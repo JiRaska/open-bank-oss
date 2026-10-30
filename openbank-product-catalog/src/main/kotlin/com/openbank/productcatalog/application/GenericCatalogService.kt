@@ -15,6 +15,7 @@ import com.openbank.libs.productrevision.IrSignerPort
 import com.openbank.libs.productrevision.IrSigningException
 import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
+import com.openbank.productcatalog.application.port.out.RevisionBacktestRepository
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
 import com.openbank.productcatalog.domain.catalog.CatalogValue
@@ -25,6 +26,7 @@ import com.openbank.productcatalog.domain.catalog.ProductSpecification
 import com.openbank.productcatalog.domain.catalog.RelationshipKind
 import com.openbank.productcatalog.domain.catalog.RevisionApproval
 import com.openbank.productcatalog.domain.catalog.RevisionApprovalPolicy
+import com.openbank.productcatalog.domain.catalog.RevisionBacktest
 import com.openbank.productcatalog.domain.catalog.RevisionContent
 import com.openbank.productcatalog.domain.catalog.RevisionIrSignature
 import com.openbank.productcatalog.domain.catalog.RevisionState
@@ -62,6 +64,7 @@ class GenericCatalogService(
     private val catalogJson: CatalogJson,
     private val clock: Clock,
     private val irSigner: IrSignerPort,
+    private val backtests: RevisionBacktestRepository,
 ) {
     suspend fun listSchemas(): List<CatalogSchema> = repository.listSchemas()
 
@@ -202,6 +205,7 @@ class GenericCatalogService(
         val draft = findRevision(revisionId)
         val ir = parseBehaviour(draft.content)
             ?: throw CatalogConflictException("revision carries no product IR; publish it through publish")
+        requireBacktest(draft) { it.principalName == checkerId }
         // Transit `sign` is a blocking HTTP call (and may log in first); never on the event loop.
         val signature = try {
             // ADR-0352 §4: the signature binds the whole revision identity, not the bare hash, so it
@@ -308,7 +312,48 @@ class GenericCatalogService(
             throw CatalogForbiddenException("maker cannot approve their own revision")
         }
         validateOrThrow(draft.schemaRef, draft.content.attributes)
+        if (draft.content.behaviour != null) requireBacktest(draft) { it.issuer == issuer && it.subject == subject }
         return repository.approveRevision(revisionId, expectedRevision, role, issuer, subject, actorName, reason)
+    }
+
+    /**
+     * ADR-0352 §7/§11.4: the approver must have SEEN the behaviour change. Records a valid
+     * behavioural-diff backtest against the revision's current approval digest; [requireBacktest]
+     * then admits an approval only from a principal that has one.
+     */
+    suspend fun recordBacktest(
+        revision: ProductRevision,
+        requester: BacktestRequester,
+        baseRevisionHash: String,
+        candidateRevisionHash: String,
+        canonicalDiff: String,
+    ) = backtests.record(
+        RevisionBacktest(
+            revisionId = revision.id,
+            digest = catalogJson.approvalDigest(revision),
+            principalName = requester.name,
+            issuer = requester.issuer,
+            subject = requester.subject,
+            baseRevisionHash = baseRevisionHash,
+            candidateRevisionHash = candidateRevisionHash,
+            diffSha256 = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(canonicalDiff.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) },
+            recordedAt = Instant.now(clock),
+        ),
+    )
+
+    /**
+     * 409 unless [byApprover] ran a backtest of [draft] as it stands now. The digest covers content and
+     * row version, so an edit after the backtest needs a new one; the publish/approve write re-checks
+     * the row version under its lock, so the content cannot change between this check and the write.
+     */
+    private suspend fun requireBacktest(draft: ProductRevision, byApprover: (RevisionBacktest) -> Boolean) {
+        if (backtests.find(draft.id, catalogJson.approvalDigest(draft)).none(byApprover)) {
+            throw CatalogConflictException(
+                "approval of a product-IR revision needs a behavioural-diff backtest of its current content " +
+                    "run by the approving principal (POST .../behaviour-diff)",
+            )
+        }
     }
 
     suspend fun revisionApprovals(revisionId: UUID): List<RevisionApproval> {
@@ -451,3 +496,6 @@ data class IrLintResult(
     val canonicalJson: String?,
     val problems: List<ProductIrValidationException.Problem>,
 )
+
+/** Who asked for a backtest: the principal name, and the JWT issuer/subject when the caller has one. */
+data class BacktestRequester(val name: String, val issuer: String?, val subject: String?)

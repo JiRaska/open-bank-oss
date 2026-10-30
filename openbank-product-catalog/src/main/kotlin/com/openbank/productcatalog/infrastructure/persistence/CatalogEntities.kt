@@ -190,6 +190,38 @@ class CatalogApprovalEntity {
     lateinit var approvedAt: Instant
 }
 
+/** V17: a valid behavioural-diff backtest a principal ran against a revision's current digest. */
+@Entity
+@Table(name = "catalog_revision_backtests")
+class RevisionBacktestEntity {
+    @Id lateinit var id: UUID
+
+    @Column(name = "revision_id")
+    lateinit var revisionId: UUID
+    lateinit var digest: String
+
+    @Column(name = "principal_name")
+    lateinit var principalName: String
+
+    @Column(name = "issuer")
+    var issuer: String? = null
+
+    @Column(name = "subject")
+    var subject: String? = null
+
+    @Column(name = "base_revision_hash")
+    lateinit var baseRevisionHash: String
+
+    @Column(name = "candidate_revision_hash")
+    lateinit var candidateRevisionHash: String
+
+    @Column(name = "diff_sha256")
+    lateinit var diffSha256: String
+
+    @Column(name = "recorded_at")
+    lateinit var recordedAt: Instant
+}
+
 @Entity
 @Table(name = "catalog_revision_role_approvals")
 class RevisionRoleApprovalEntity {
