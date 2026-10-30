@@ -29,6 +29,8 @@ def validate(document):
     ))
     require(job["runs-on"] == "openbank-build")
     require("secrets." not in str(job.get("env", {})))
+    # runner context is unavailable in job-level env (actionlint rejects it)
+    require("runner." not in str(job.get("env", {})))
     steps = job["steps"]
     for step in steps:
         require(not step.get("continue-on-error", False))

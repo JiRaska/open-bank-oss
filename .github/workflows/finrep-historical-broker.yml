@@ -27,17 +27,11 @@ jobs:
       run:
         shell: bash
     env:
-      GRADLE_USER_HOME: ${{ runner.temp }}/finrep-gradle-${{ github.run_id }}-${{ github.run_attempt }}
-      FINREP_CHECKOUT_PROOF: ${{ runner.temp }}/finrep-proof-${{ github.run_id }}-${{ github.run_attempt }}/checkout.json
-      FINREP_ORIGINAL_PACT: ${{ runner.temp }}/finrep-proof-${{ github.run_id }}-${{ github.run_attempt }}/original-pact.json
       FINREP_CONSUMER_SHA: 4c86c6f729c27fabcf5431d27ee5270116df06b2
       FINREP_PROVIDER_SHA: ${{ github.sha }}
       FINREP_ORIGINAL_SHA256: 5b9c5e7ea079626460d0634a78605d24f4ab50a345168c8af3139e68b3cb7d86
       FINREP_INTERACTION_COUNT: '3'
-      FINREP_OUTCOMES: ${{ runner.temp }}/finrep-proof-${{ github.run_id }}-${{ github.run_attempt }}/outcomes.json
       FINREP_FINAL_XML: ${{ github.workspace }}/openbank-ledger-service/build/test-results/hostedHistoricalFinrepPactTest/TEST-com.openbank.ledger.contract.LedgerHostedHistoricalFinrepProviderVerificationTest.xml
-      FINREP_POSTBUILD_PROOF: ${{ runner.temp }}/finrep-proof-${{ github.run_id }}-${{ github.run_attempt }}/postbuild.json
-      FINREP_PUBLICATION_ATTEMPT: ${{ runner.temp }}/finrep-publication-attempt-${{ github.run_id }}
       FINREP_PUBLIC_EVIDENCE: ${{ github.workspace }}/openbank-ledger-service/build/finrep-historical-public-evidence.json
 
     steps:
@@ -47,6 +41,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           clean: true
+
+      - name: Compute run-scoped paths under runner temp
+        env:
+          RUNNER_TEMP_DIR: ${{ runner.temp }}
+          RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          echo "GRADLE_USER_HOME=${RUNNER_TEMP_DIR}/finrep-gradle-${RUN_KEY}" >> "$GITHUB_ENV"
+          {
+            echo "FINREP_CHECKOUT_PROOF=${RUNNER_TEMP_DIR}/finrep-proof-${RUN_KEY}/checkout.json"
+            echo "FINREP_ORIGINAL_PACT=${RUNNER_TEMP_DIR}/finrep-proof-${RUN_KEY}/original-pact.json"
+            echo "FINREP_OUTCOMES=${RUNNER_TEMP_DIR}/finrep-proof-${RUN_KEY}/outcomes.json"
+            echo "FINREP_POSTBUILD_PROOF=${RUNNER_TEMP_DIR}/finrep-proof-${RUN_KEY}/postbuild.json"
+            echo "FINREP_PUBLICATION_ATTEMPT=${RUNNER_TEMP_DIR}/finrep-publication-attempt-${GITHUB_RUN_ID}"
+          } >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
