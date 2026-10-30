@@ -67,6 +67,12 @@ class TppAuthorizationRestClientIT {
         assertThat(registryHits(TYPED_MISSING_AUTHORIZED)).isEqualTo(1)
         assertThat(decodedMissingAuthorized.authorized).isFalse()
 
+        // #14202: a 200 whose `authorized` is the STRING "true" must not be coerced into a grant.
+        val coerced = publicRequest(STRING_TRUE_200)
+        assertThat(coerced.statusCode).isEqualTo(503)
+        assertThat(coerced.jsonPath().getString("tppMessages[0].code")).isEqualTo("SERVICE_UNAVAILABLE")
+        assertThat(registryHits(STRING_TRUE_200)).isEqualTo(3)
+
         val denial = publicRequest(VALID_DENIAL)
         assertThat(denial.statusCode).isEqualTo(401)
         assertThat(denial.jsonPath().getString("tppMessages[0].code")).isEqualTo("CERTIFICATE_INVALID")
@@ -125,6 +131,7 @@ class TppAuthorizationRestClientIT {
         const val NULL_AUTHORIZED = "TPP-IT-NULL-AUTHORIZED"
         const val STRING_AUTHORIZED = "TPP-IT-STRING-AUTHORIZED"
         const val TYPED_MISSING_AUTHORIZED = "TPP-IT-TYPED-MISSING-AUTHORIZED"
+        const val STRING_TRUE_200 = "TPP-IT-STRING-TRUE-200"
         const val UPSTREAM_FAILURE = "TPP-IT-UPSTREAM-500"
         const val CIRCUIT_FAILURE = "TPP-IT-CIRCUIT-500"
     }
@@ -165,6 +172,10 @@ class LocalTppRegistryResource : io.quarkus.test.common.QuarkusTestResourceLifec
                 "TPP-IT-TYPED-MISSING-AUTHORIZED" ->
                     200 to
                         """{"tppId":"$tppId","roles":[],"reason":"TPP not found in registry"}"""
+
+                "TPP-IT-STRING-TRUE-200" ->
+                    200 to
+                        """{"tppId":"$tppId","authorized":"true","roles":["AISP"],"reason":null}"""
 
                 else -> 500 to """{"error":"synthetic registry outage"}"""
             }

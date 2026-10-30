@@ -4,7 +4,12 @@
 
 package com.openbank.psd2.infrastructure.client
 
+import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.core.JsonToken
+import com.fasterxml.jackson.databind.DeserializationContext
+import com.fasterxml.jackson.databind.JsonDeserializer
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -22,8 +27,26 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.io.InputStream
 
+/**
+ * Accepts only the JSON booleans `true` / `false` for `authorized`. Default Jackson coercion also
+ * maps the string "true" (and 0/1) onto a Kotlin Boolean, which would let a malformed 200 body
+ * grant access; here any other token is a decode failure and the guard stays fail-closed (503).
+ */
+class StrictBooleanDeserializer : JsonDeserializer<Boolean>() {
+    override fun deserialize(p: JsonParser, ctxt: DeserializationContext): Boolean = when (p.currentToken) {
+        JsonToken.VALUE_TRUE -> true
+        JsonToken.VALUE_FALSE -> false
+        else -> ctxt.handleUnexpectedToken(Boolean::class.javaObjectType, p) as Boolean
+    }
+
+    // Absent/null keeps the previous fail-closed meaning (false = deny), only coercion changes.
+    override fun getNullValue(ctxt: DeserializationContext): Boolean = false
+    override fun getAbsentValue(ctxt: DeserializationContext): Boolean = false
+}
+
 data class TppAuthorizationResponse(
     val tppId: String,
+    @param:JsonDeserialize(using = StrictBooleanDeserializer::class)
     val authorized: Boolean,
     val roles: Set<String>,
     val reason: String?,
