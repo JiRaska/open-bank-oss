@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { Bot, Boxes, CheckCircle2, CircleAlert, Eye, FileJson, Link2, ListChecks, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
@@ -105,6 +105,9 @@ export default function ProductStudioPage() {
   const [offeringId, setOfferingId] = useState('')
   const [revisionId, setRevisionId] = useState('')
   const [draftText, setDraftText] = useState('')
+  // The server document the Expert draft was last loaded from; a reload never overwrites unsaved edits.
+  const draftServerRef = useRef<{ revisionId?: string; text: string }>({ text: '' })
+  const [draftStale, setDraftStale] = useState(false)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const flight = useSingleFlight()
@@ -268,9 +271,18 @@ export default function ProductStudioPage() {
     const nextDraft = selectedRevision
       ? JSON.stringify(catalogRevisionEditorDocument(selectedRevision), null, 2)
       : ''
-    const task = window.setTimeout(() => setDraftText(nextDraft), 0)
+    const loaded = draftServerRef.current
+    if (loaded.revisionId === selectedRevision?.id && loaded.text === nextDraft) return
+    const task = window.setTimeout(() => {
+      const dirty = loaded.revisionId === selectedRevision?.id && draftText !== loaded.text
+      draftServerRef.current = { revisionId: selectedRevision?.id, text: nextDraft }
+      if (dirty) { setDraftStale(true); return }
+      setDraftText(nextDraft)
+      setDraftStale(false)
+    }, 0)
     return () => window.clearTimeout(task)
-  }, [selectedRevision])
+  }, [selectedRevision, draftText])
+  const reloadDraftFromServer = () => { setDraftText(draftServerRef.current.text); setDraftStale(false) }
   useEffect(() => {
     if (!selectedRevision || !approvalPolicy) return
     let active = true
@@ -404,7 +416,7 @@ export default function ProductStudioPage() {
   }
 
   const saveDraft = () => {
-    if (!selectedRevision || selectedRevision.state !== 'DRAFT') return
+    if (!selectedRevision || selectedRevision.state !== 'DRAFT' || draftStale) return
     if (!parsedDraft) { setMessage(t('Draft není validní JSON', 'Draft is not valid JSON')); return }
     void run('revision:save', () => catalogV2Operation('replaceOfferingRevisionV2', {
       pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id },
@@ -615,9 +627,10 @@ export default function ProductStudioPage() {
             </div>}
             <details className={styles.expertDetails}><summary>{t('Expert režim · úplný dokument', 'Expert mode · full document')}</summary>
               <textarea className={`input ${styles.editor}`} value={draftText} onChange={e => { setDraftText(e.target.value); setValidationState('idle'); setReview(null) }} disabled={!selectedRevision || selectedRevision.state !== 'DRAFT'} />
+              {draftStale && <p role="alert" data-testid="expert-draft-stale">{t('Revize se na serveru změnila (např. uložením IR). Vaše neuložené úpravy zůstaly; uložení je zablokováno, dokud dokument nenačtete znovu.', 'The revision changed on the server (for example an IR save). Your unsaved edits are kept; saving is blocked until you reload the document.')} <button type="button" className="btn btn-secondary" onClick={reloadDraftFromServer}>{t('Načíst ze serveru', 'Reload from server')}</button></p>}
             </details>
             <ProductIrEditor revision={selectedRevision} t={t} onSaved={async () => { if (offeringId) await loadRevisions(offeringId) }} />
-            <div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision} onClick={() => void validateDraft()}><CheckCircle2 size={13} aria-hidden="true" />{t('Ověřit schéma', 'Validate schema')}</button><button className="btn btn-primary" type="button" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || busy} aria-busy={flight.isRunning('revision:save')} onClick={saveDraft}><Send size={13} aria-hidden="true" />{flight.isRunning('revision:save') ? t('Ukládám…', 'Saving…') : t('Uložit draft', 'Save draft')}</button></div>
+            <div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision} onClick={() => void validateDraft()}><CheckCircle2 size={13} aria-hidden="true" />{t('Ověřit schéma', 'Validate schema')}</button><button className="btn btn-primary" type="button" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || busy || draftStale} aria-busy={flight.isRunning('revision:save')} onClick={saveDraft}><Send size={13} aria-hidden="true" />{flight.isRunning('revision:save') ? t('Ukládám…', 'Saving…') : t('Uložit draft', 'Save draft')}</button></div>
           </Can>
           {approvalPolicy && selectedRevision && <div className={styles.approvalPanel} aria-label={t('Schválení revize rolemi', 'Revision role approvals')}>
             <div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Schválení rolemi', 'Role approval')}</span></div>
