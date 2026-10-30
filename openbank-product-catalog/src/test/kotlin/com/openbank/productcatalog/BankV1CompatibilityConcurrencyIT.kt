@@ -94,7 +94,12 @@ class BankV1CompatibilityConcurrencyIT {
     /** Drops the whole v2 projection so the next reconciliation has to rebuild it from `products`. */
     private fun stripCompatibilityProjection() = dataSource.connection.use { connection ->
         connection.createStatement().use { statement ->
+            // CASCADE reaches catalog_revision_backtests (V17), whose evidence trigger refuses TRUNCATE.
+            // This is a fixture reset of this test's own database, so suspend user triggers for this
+            // session only; the guard stays on for every real connection.
+            statement.execute("SET session_replication_role = replica")
             statement.execute("TRUNCATE TABLE bank_v1_product_mapping, catalog_specifications CASCADE")
+            statement.execute("SET session_replication_role = origin")
         }
     }
 

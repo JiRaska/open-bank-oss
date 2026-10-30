@@ -201,11 +201,13 @@ class GenericCatalogService(
         expectedRevision: Long,
         checkerId: String,
         reason: String,
+        checker: ApproverIdentity?,
     ): ProductRevision {
         val draft = findRevision(revisionId)
         val ir = parseBehaviour(draft.content)
             ?: throw CatalogConflictException("revision carries no product IR; publish it through publish")
-        requireBacktest(draft) { it.principalName == checkerId }
+        // Matched by JWT issuer + subject, as a role approval is; a display name proves nothing.
+        requireBacktest(draft) { checker != null && it.issuer == checker.issuer && it.subject == checker.subject }
         // Transit `sign` is a blocking HTTP call (and may log in first); never on the event loop.
         val signature = try {
             // ADR-0352 §4: the signature binds the whole revision identity, not the bare hash, so it
@@ -321,23 +323,21 @@ class GenericCatalogService(
      * behavioural-diff backtest against the revision's current approval digest; [requireBacktest]
      * then admits an approval only from a principal that has one.
      */
-    suspend fun recordBacktest(
-        revision: ProductRevision,
-        requester: BacktestRequester,
-        baseRevisionHash: String,
-        candidateRevisionHash: String,
-        canonicalDiff: String,
-    ) = backtests.record(
+    suspend fun recordBacktest(revision: ProductRevision, evidence: BacktestEvidence) = backtests.record(
         RevisionBacktest(
             revisionId = revision.id,
             digest = catalogJson.approvalDigest(revision),
-            principalName = requester.name,
-            issuer = requester.issuer,
-            subject = requester.subject,
-            baseRevisionHash = baseRevisionHash,
-            candidateRevisionHash = candidateRevisionHash,
+            principalName = evidence.approver.name,
+            issuer = evidence.approver.issuer,
+            subject = evidence.approver.subject,
+            portfolioName = evidence.portfolioName,
+            portfolioSha256 = evidence.portfolioSha256,
+            identical = evidence.identical,
+            changedAccounts = evidence.changedAccounts,
+            baseRevisionHash = evidence.baseRevisionHash,
+            candidateRevisionHash = evidence.candidateRevisionHash,
             diffSha256 = java.security.MessageDigest.getInstance("SHA-256")
-                .digest(canonicalDiff.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) },
+                .digest(evidence.canonicalDiff.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) },
             recordedAt = Instant.now(clock),
         ),
     )
@@ -497,5 +497,17 @@ data class IrLintResult(
     val problems: List<ProductIrValidationException.Problem>,
 )
 
-/** Who asked for a backtest: the principal name, and the JWT issuer/subject when the caller has one. */
-data class BacktestRequester(val name: String, val issuer: String?, val subject: String?)
+/** A verified JWT approver: [issuer] + [subject] identify them; [name] is for display only. */
+data class ApproverIdentity(val name: String, val issuer: String, val subject: String)
+
+/** What a golden-portfolio backtest proved, kept so it can be re-checked later. */
+data class BacktestEvidence(
+    val approver: ApproverIdentity,
+    val portfolioName: String,
+    val portfolioSha256: String,
+    val identical: Boolean,
+    val changedAccounts: Int,
+    val baseRevisionHash: String,
+    val candidateRevisionHash: String,
+    val canonicalDiff: String,
+)

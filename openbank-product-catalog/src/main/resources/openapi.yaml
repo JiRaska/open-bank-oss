@@ -679,9 +679,12 @@ paths:
         offering's revision published now) and under this revision with the shared
         ProductBehaviourDiff, and returns its schema-v1 document (`product-ir/behaviour-diff.v1`)
         unchanged together with its canonical JSON bytes, the same document `obp diff --behavioural`
-        prints. A valid diff is recorded as evidence bound to the caller and the revision's current
-        approval digest: publish-ir, and a role approval of an IR-bearing revision, require one from
-        the approving principal (409 otherwise). Signs and approves nothing. The run is bounded: at most 500 accounts, 1000
+        prints. Without a portfolio it runs over the product's server-defined golden portfolio, and a
+        valid such run is recorded as evidence bound to the caller's JWT issuer + subject and the
+        revision's current approval digest: publish-ir, and a role approval of an IR-bearing revision,
+        require one from the approving principal (409 otherwise). A caller-supplied portfolio is an
+        exploration and is never evidence. Action `catalog.backtest` (approvers only). Signs and
+        approves nothing. The run is bounded: at most 500 accounts, 1000
         events per account, 200000 account-days and a small number of concurrent runs (429 beyond).
       operationId: behaviourDiffRevisionV2
       parameters:
@@ -702,6 +705,8 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409':
+          description: No server-defined golden portfolio for the product (pass a portfolio to explore)
         '429':
           description: Too many backtests are running; retry after the Retry-After interval
   /api/v2/offerings/{offeringId}/revisions/{revisionId}/approvals:
@@ -1050,16 +1055,18 @@ components:
     BehaviourDiffRequest:
       type: object
       additionalProperties: false
-      required: [portfolio]
       properties:
         baseRevisionId:
           type: [string, 'null']
           format: uuid
           description: Revision to compare against; default the offering's revision published now.
         portfolio:
-          type: object
+          type: [object, 'null']
           additionalProperties: true
           description: >-
+            Omitted: the product's SERVER-DEFINED golden portfolio (openbank-products/portfolios/approval.json),
+            and only that run is recorded as approval evidence. Supplied: an exploration only — it is
+            never evidence, because the caller chose what to look at.
             The portfolio document `obp diff --behavioural --portfolio` reads (ReplayPortfolioJson, one
             parser for both): {"zone", "accounts": [{"id", "state": {"currency", "balance",
             "accruedInterest", "openedOn", ...}, "postings": [{"on": "YYYY-MM-DD", "kind", "direction",
@@ -1081,8 +1088,16 @@ components:
     BehaviourDiffResponse:
       type: object
       additionalProperties: false
-      required: [diff, canonicalJson]
+      required: [diff, canonicalJson, approvalEvidence]
       properties:
+        approvalEvidence:
+          type: boolean
+          description: >-
+            True when this run was recorded as evidence that unlocks publish-ir / an IR role approval
+            for the caller: the golden portfolio, a valid diff, a verified JWT principal.
+        goldenPortfolio:
+          type: [string, 'null']
+          description: The server-defined portfolio the run used; null for a caller-supplied one.
         diff:
           type: object
           additionalProperties: true

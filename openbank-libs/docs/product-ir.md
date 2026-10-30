@@ -211,12 +211,21 @@ The repricing backtest of ADR-0352 §11.4 has one engine, one portfolio reader a
   plain-decimal grammar above, non-negative) for both surfaces, so the CLI and the catalog accept and
   refuse the same inputs and compute the same diff from them.
 
-**Approval needs the approver's own backtest (ADR-0352 §7).** A valid backtest is recorded as
-evidence (`catalog_revision_backtests`, immutable) bound to the requesting principal and the
-revision's approval digest, which covers its content and row version. `publish-ir` refuses with 409
-unless the checker has such a record for the revision as it stands; a role approval of an
-IR-bearing revision likewise needs one from the approving JWT subject. Editing the draft after the
-backtest invalidates it. The existing four-eyes and role-approval rules are unchanged.
+**Approval needs the approver's own backtest over the server's golden portfolio (ADR-0352 §7).**
+`openbank-products/portfolios/approval.json` names, per `productCode` and then per currency, the
+golden portfolio a product's approval backtest runs over; product-catalog packages that directory
+at build time. A backtest request WITHOUT a portfolio runs over that golden portfolio, and only such
+a run — valid, by a verified JWT principal — is recorded as evidence (`catalog_revision_backtests`,
+immutable: no UPDATE, DELETE or TRUNCATE). The row binds the principal's JWT issuer + subject and the
+revision's approval digest (content + row version), and keeps the portfolio's name and sha-256,
+`identical`, `changedAccounts` and the diff's sha-256 so it can be re-checked later. A request WITH
+a portfolio is an exploration: it runs and renders, but it is never evidence, because the approver
+chose what to look at. `publish-ir` refuses with 409 unless the checker has such evidence for the
+revision as it stands, matched by issuer + subject (never by display name); a role approval of an
+IR-bearing revision needs the same from the approving subject. Editing the draft invalidates earlier
+evidence. Running a backtest is its own action, `catalog.backtest` (`rest.rego`: a human
+operator/admin or revision-approval authority, never a machine), not a catalog read. The four-eyes
+and role-approval rules are unchanged.
 
 **Breaking for `obp diff` consumers.** Until phase 5b `obp diff --behavioural` printed a CLI-local
 report. It now prints the schema-v1 document above. Two members are gone — `changedRules` and

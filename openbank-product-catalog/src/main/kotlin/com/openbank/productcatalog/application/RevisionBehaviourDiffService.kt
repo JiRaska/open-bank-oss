@@ -9,10 +9,10 @@ import com.openbank.libs.finance.deposit.FinanceProductArithmetic
 import com.openbank.libs.product.ir.ProductInterpreter
 import com.openbank.libs.product.ir.ProductRevisionIr
 import com.openbank.libs.product.replay.BehaviourDiff
-import com.openbank.libs.product.replay.DiffOptions
+import com.openbank.libs.product.replay.BehaviourDiffInputs
 import com.openbank.libs.product.replay.ProductBehaviourDiff
-import com.openbank.libs.product.replay.ReplayPortfolio
-import com.openbank.libs.product.replay.ReplayRange
+import com.openbank.libs.product.replay.ReplayPortfolioJson
+import com.openbank.productcatalog.application.port.out.ApprovalPortfolioSource
 import com.openbank.productcatalog.domain.catalog.ProductRevision
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +21,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.Semaphore
 
@@ -28,8 +30,13 @@ import java.util.concurrent.Semaphore
  * ADR-0352 §11.4 / phase 5b: the backtest the Studio approval panel shows next to the role approval
  * buttons. Replays a portfolio under a base revision (by default the offering's revision published
  * now) and under the candidate with the shared [ProductBehaviourDiff] — the same engine and the same
- * schema-v1 document `obp diff --behavioural` prints. The portfolio is read by the same
- * [ReplayPortfolioJson] the CLI uses. Stores, signs and approves nothing.
+ * schema-v1 document `obp diff --behavioural` prints, read by the same [ReplayPortfolioJson] and
+ * resolved by the same [BehaviourDiffInputs].
+ *
+ * Without a portfolio it runs over the product's SERVER-DEFINED golden portfolio
+ * ([ApprovalPortfolioSource]), and only that run — valid, and by a verified JWT principal — is recorded
+ * as approval evidence (ADR-0352 §7). A portfolio the caller supplies may still be run to explore, but
+ * the caller chose what to look at, so it unlocks nothing.
  *
  * The replay is CPU-bound, so it is bounded three ways before any evaluation starts: the document
  * ([ReplayPortfolioJson.MAX_ACCOUNTS], its per-account event cap and plain-decimal amounts), the work
@@ -39,6 +46,7 @@ import java.util.concurrent.Semaphore
 @ApplicationScoped
 class RevisionBehaviourDiffService(
     private val catalog: GenericCatalogService,
+    private val portfolios: ApprovalPortfolioSource,
     private val clock: Clock,
     @ConfigProperty(name = "openbank.catalog.behaviour-diff.max-concurrent", defaultValue = "2")
     private val maxConcurrent: Int,
@@ -51,37 +59,51 @@ class RevisionBehaviourDiffService(
         offeringId: UUID,
         revisionId: UUID,
         baseRevisionId: UUID?,
-        portfolio: ReplayPortfolio,
-        range: ReplayRange,
-        options: DiffOptions,
-        requester: BacktestRequester,
-    ): BehaviourDiff {
-        require(portfolio.accounts.size.toLong() * range.days <= MAX_ACCOUNT_DAYS) {
-            "portfolio of ${portfolio.accounts.size} accounts over ${range.days} days exceeds $MAX_ACCOUNT_DAYS account-days"
-        }
-        return slots.run {
-            val candidateRevision = catalog.findRevision(revisionId).also { requireOffering(it.offeringId, offeringId) }
-            val candidate = irOf(candidateRevision)
-            val base = irOf(
-                if (baseRevisionId != null) {
-                    catalog.findRevision(baseRevisionId).also { requireOffering(it.offeringId, offeringId) }
-                } else {
-                    catalog.findPublished(offeringId, Instant.now(clock))
-                },
+        request: BacktestRequest,
+        requester: ApproverIdentity?,
+    ): BacktestOutcome = slots.run {
+        val candidateRevision = catalog.findRevision(revisionId).also { requireOffering(it.offeringId, offeringId) }
+        val candidate = irOf(candidateRevision)
+        val base = irOf(
+            if (baseRevisionId != null) {
+                catalog.findRevision(baseRevisionId).also { requireOffering(it.offeringId, offeringId) }
+            } else {
+                catalog.findPublished(offeringId, Instant.now(clock))
+            },
+        )
+        val golden = if (request.portfolio == null) {
+            portfolios.find(candidate.productCode, candidate.currency) ?: throw CatalogConflictException(
+                "no server-defined approval portfolio for product ${candidate.productCode} (${candidate.currency})",
             )
-            val diff = withContext(Dispatchers.Default) { engine.diff(base, candidate, portfolio, range, options) }
-            // Evidence for the approval gate (ADR-0352 §7): only a VALID diff counts as having seen the change.
-            if (diff.valid) {
-                catalog.recordBacktest(
-                    candidateRevision,
-                    requester,
-                    base.revisionHash,
-                    candidate.revisionHash,
-                    diff.canonicalJson,
-                )
-            }
-            diff
+        } else {
+            null
         }
+        val parsed = ReplayPortfolioJson.parse(golden?.tree ?: request.portfolio, request.defaultZone)
+        val range = BehaviourDiffInputs.range(parsed, request.from, request.to)
+        val options = BehaviourDiffInputs.options(request.threshold)
+        require(parsed.portfolio.accounts.size.toLong() * range.days <= MAX_ACCOUNT_DAYS) {
+            "portfolio of ${parsed.portfolio.accounts.size} accounts over ${range.days} days exceeds " +
+                "$MAX_ACCOUNT_DAYS account-days"
+        }
+        val diff = withContext(Dispatchers.Default) { engine.diff(base, candidate, parsed.portfolio, range, options) }
+        // Approval evidence (ADR-0352 §7): the golden portfolio, a valid diff, a verified JWT principal.
+        val evidence = golden != null && diff.valid && requester != null
+        if (evidence) {
+            catalog.recordBacktest(
+                candidateRevision,
+                BacktestEvidence(
+                    approver = requester!!,
+                    portfolioName = golden!!.name,
+                    portfolioSha256 = golden.sha256,
+                    identical = diff.identical,
+                    changedAccounts = (diff.tree["changedAccounts"] as Number).toInt(),
+                    baseRevisionHash = base.revisionHash,
+                    candidateRevisionHash = candidate.revisionHash,
+                    canonicalDiff = diff.canonicalJson,
+                ),
+            )
+        }
+        BacktestOutcome(diff, evidence, golden?.name)
     }
 
     private fun requireOffering(actual: UUID, expected: UUID) {
@@ -97,6 +119,18 @@ class RevisionBehaviourDiffService(
         const val MAX_ACCOUNT_DAYS = 200_000L
     }
 }
+
+/** A backtest request: no [portfolio] means the product's server-defined golden one. */
+data class BacktestRequest(
+    val portfolio: Any?,
+    val defaultZone: ZoneId,
+    val from: LocalDate?,
+    val to: LocalDate?,
+    val threshold: String?,
+)
+
+/** [approvalEvidence]: the run was recorded as evidence that unlocks approval; [goldenPortfolio] names it. */
+class BacktestOutcome(val diff: BehaviourDiff, val approvalEvidence: Boolean, val goldenPortfolio: String?)
 
 /**
  * A non-blocking admission limit: [run] takes a slot or refuses at once with [RateLimitExceeded]

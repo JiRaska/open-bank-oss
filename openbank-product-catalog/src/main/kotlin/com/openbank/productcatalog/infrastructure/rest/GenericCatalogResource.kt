@@ -8,10 +8,9 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
-import com.openbank.libs.product.replay.BehaviourDiffInputs
-import com.openbank.libs.product.replay.ReplayPortfolioJson
 import com.openbank.libs.security.Roles
-import com.openbank.productcatalog.application.BacktestRequester
+import com.openbank.productcatalog.application.ApproverIdentity
+import com.openbank.productcatalog.application.BacktestRequest
 import com.openbank.productcatalog.application.CatalogForbiddenException
 import com.openbank.productcatalog.application.CatalogNotFoundException
 import com.openbank.productcatalog.application.CatalogPreconditionRequiredException
@@ -136,38 +135,52 @@ class GenericCatalogResource(
         ).build()
     }
 
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
-    @Authorize(action = "catalog.read", resource = "#offeringId")
+    /**
+     * ADR-0352 §7: a backtest RECORDS approval evidence, so it is an approver's action
+     * (`catalog.backtest`: a publish-ir checker or a revision-approval authority), not a catalog read.
+     */
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.REVISION_APPROVER)
+    @Authorize(action = "catalog.backtest", resource = "#offeringId")
     override suspend fun behaviourDiffRevisionV2(
         offeringId: UUID,
         revisionId: UUID,
         request: BehaviourDiffRequest,
     ): Response {
-        val portfolioNode = mapper.valueToTree<JsonNode>(request.portfolio)
-        schemaProfile.requireValidInstance(portfolioNode)
+        val custom = request.portfolio?.let {
+            val node = mapper.valueToTree<JsonNode>(it)
+            schemaProfile.requireValidInstance(node)
+            catalogJson.toObject(node).toPlainTree()
+        }
         val defaultZone = runCatching { ZoneId.of(request.zone ?: "UTC") }.getOrElse {
             throw IllegalArgumentException("zone must be an IANA zone id")
         }
-        // The same reader `obp diff --behavioural` uses: golden `steps` or `postings`, strict keys, bounded amounts.
-        val parsed = ReplayPortfolioJson.parse(catalogJson.toObject(portfolioNode).toPlainTree(), defaultZone)
-        val diff = behaviourDiff.diff(
+        val outcome = behaviourDiff.diff(
             offeringId = offeringId,
             revisionId = revisionId,
             baseRevisionId = request.baseRevisionId,
-            portfolio = parsed.portfolio,
-            // The same window and threshold resolution `obp diff --behavioural` runs.
-            range = BehaviourDiffInputs.range(parsed, request.from, request.to),
-            options = BehaviourDiffInputs.options(request.materialityThreshold),
-            requester = (identity.principal as? JsonWebToken).let { jwt ->
-                BacktestRequester(actor(), jwt?.issuer, jwt?.subject)
-            },
+            request = BacktestRequest(custom, defaultZone, request.from, request.to, request.materialityThreshold),
+            requester = approver(),
         )
 
         // The generated model types the free-form object as Map<String, Any>; the document's null members
         // (a recorded portfolio's `seed`) serialise as JSON null exactly as in canonicalJson.
         @Suppress("UNCHECKED_CAST")
-        val tree = diff.tree as Map<String, Any>
-        return Response.ok(GeneratedBehaviourDiffResponse(diff = tree, canonicalJson = diff.canonicalJson)).build()
+        val tree = outcome.diff.tree as Map<String, Any>
+        return Response.ok(
+            GeneratedBehaviourDiffResponse(
+                diff = tree,
+                canonicalJson = outcome.diff.canonicalJson,
+                approvalEvidence = outcome.approvalEvidence,
+                goldenPortfolio = outcome.goldenPortfolio,
+            ),
+        ).build()
+    }
+
+    /** The caller as an approver: a verified JWT's issuer + subject, or null (it can then approve nothing). */
+    private fun approver(): ApproverIdentity? = (identity.principal as? JsonWebToken)?.let { jwt ->
+        val issuer = jwt.issuer?.takeIf { it.isNotBlank() }
+        val subject = jwt.subject?.takeIf { it.isNotBlank() }
+        if (issuer != null && subject != null) ApproverIdentity(actor(), issuer, subject) else null
     }
 
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.AUTHOR)
@@ -319,7 +332,7 @@ class GenericCatalogResource(
             throw CatalogForbiddenException("publish-ir requires a verified human checker")
         }
         requireRevisionOwner(service.findRevision(revisionId), offeringId)
-        val published = service.publishIr(revisionId, requiredRevision(ifMatch), actor(), request.reason)
+        val published = service.publishIr(revisionId, requiredRevision(ifMatch), actor(), request.reason, approver())
         return Response.ok(revisionResponse(published)).tag(EntityTag(published.revision.toString())).build()
     }
 

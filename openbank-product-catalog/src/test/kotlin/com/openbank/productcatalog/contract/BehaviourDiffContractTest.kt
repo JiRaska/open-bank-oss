@@ -70,6 +70,7 @@ class BehaviourDiffContractTest {
     @Test
     @OidcSecurity(
         claims = [
+            Claim(key = "iss", value = "https://example.invalid/catalog-issuer"),
             Claim(key = "azp", value = "openbank-admin-ui"), Claim(key = "sub", value = "u-op"),
             Claim(key = "preferred_username", value = "test-operator"),
         ],
@@ -118,6 +119,7 @@ class BehaviourDiffContractTest {
     @Test
     @OidcSecurity(
         claims = [
+            Claim(key = "iss", value = "https://example.invalid/catalog-issuer"),
             Claim(key = "azp", value = "openbank-admin-ui"), Claim(key = "sub", value = "u-op"),
             Claim(key = "preferred_username", value = "test-operator"),
         ],
@@ -275,15 +277,16 @@ class BehaviourDiffContractTest {
                 assertThat(st.executeUpdate()).isEqualTo(1)
             }
         }
-        // The checker's own backtest of this content is a precondition of publish-ir (against itself: nothing
-        // is published yet).
+        // The checker's own GOLDEN backtest of this content is a precondition of publish-ir (against itself:
+        // nothing is published yet).
         Given {
             contentType("application/json")
-            body(diffRequest(PORTFOLIO, "2026-01-01", "2026-01-31", base = revisionId))
+            body("""{"baseRevisionId":"$revisionId"}""")
         } When {
             post("/api/v2/offerings/$offeringId/revisions/$revisionId/behaviour-diff")
         } Then {
             statusCode(200)
+            body("approvalEvidence", equalTo(true))
         }
         Given {
             contentType("application/json")

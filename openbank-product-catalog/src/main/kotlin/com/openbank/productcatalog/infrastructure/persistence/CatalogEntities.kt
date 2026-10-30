@@ -203,11 +203,18 @@ class RevisionBacktestEntity {
     @Column(name = "principal_name")
     lateinit var principalName: String
 
-    @Column(name = "issuer")
-    var issuer: String? = null
+    lateinit var issuer: String
+    lateinit var subject: String
 
-    @Column(name = "subject")
-    var subject: String? = null
+    @Column(name = "portfolio_name")
+    lateinit var portfolioName: String
+
+    @Column(name = "portfolio_sha256")
+    lateinit var portfolioSha256: String
+    var identical: Boolean = false
+
+    @Column(name = "changed_accounts")
+    var changedAccounts: Int = 0
 
     @Column(name = "base_revision_hash")
     lateinit var baseRevisionHash: String

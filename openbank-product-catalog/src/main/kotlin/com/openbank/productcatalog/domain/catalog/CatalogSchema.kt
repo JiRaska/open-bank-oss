@@ -86,15 +86,20 @@ fun interface CatalogSchemaValidator {
 }
 
 /**
- * ADR-0352 §7/§11.4: evidence that [principalName] (and, for a JWT caller, [issuer]/[subject]) ran a
- * valid behavioural-diff backtest of revision [revisionId] as it stood at approval [digest].
+ * ADR-0352 §7/§11.4: evidence that the JWT principal [issuer]/[subject] ([principalName] for display)
+ * ran a valid behavioural-diff backtest of revision [revisionId] as it stood at approval [digest], over
+ * the server-defined golden portfolio [portfolioName] whose bytes hash to [portfolioSha256].
  */
 data class RevisionBacktest(
     val revisionId: java.util.UUID,
     val digest: String,
     val principalName: String,
-    val issuer: String?,
-    val subject: String?,
+    val issuer: String,
+    val subject: String,
+    val portfolioName: String,
+    val portfolioSha256: String,
+    val identical: Boolean,
+    val changedAccounts: Int,
     val baseRevisionHash: String,
     val candidateRevisionHash: String,
     val diffSha256: String,

@@ -31,6 +31,8 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.Test
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -68,6 +70,7 @@ class IrPublishContractTest {
     @TestSecurity(user = "test-operator", roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
+            Claim(key = "iss", value = "https://example.invalid/catalog-issuer"),
             Claim(
                 key = "azp",
                 value = "openbank-admin-ui",
@@ -125,6 +128,7 @@ class IrPublishContractTest {
             statusCode(200)
             body("[0].irSignature.revisionHash", equalTo(expectedHash))
         }
+        assertBacktestEvidence(revisionId)
         // The evidence row is immutable in the database (V16 trigger).
         dataSource.connection.use { c ->
             c.createStatement().use { st ->
@@ -140,6 +144,7 @@ class IrPublishContractTest {
     @TestSecurity(user = "test-operator", roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
+            Claim(key = "iss", value = "https://example.invalid/catalog-issuer"),
             Claim(
                 key = "azp",
                 value = "openbank-admin-ui",
@@ -169,6 +174,7 @@ class IrPublishContractTest {
     @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_OPERATOR", "ROLE_ADMIN"])
     @OidcSecurity(
         claims = [
+            Claim(key = "iss", value = "https://example.invalid/catalog-issuer"),
             Claim(key = "azp", value = "openbank-services"),
             Claim(key = "sub", value = "sa-services"),
             Claim(key = "preferred_username", value = "service-account-openbank-services"),
@@ -191,6 +197,7 @@ class IrPublishContractTest {
     @TestSecurity(user = "test-operator", roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
+            Claim(key = "iss", value = "https://example.invalid/catalog-issuer"),
             Claim(key = "azp", value = "openbank-admin-ui"), Claim(key = "sub", value = "u-op"),
             Claim(key = "preferred_username", value = "test-operator"),
         ],
@@ -258,6 +265,7 @@ class IrPublishContractTest {
     @TestSecurity(user = "test-operator", roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
+            Claim(key = "iss", value = "https://example.invalid/catalog-issuer"),
             Claim(
                 key = "azp",
                 value = "openbank-admin-ui",
@@ -309,6 +317,39 @@ class IrPublishContractTest {
         }
     }
 
+    /**
+     * The backtest evidence names the server's golden portfolio by the sha of its exact bytes and keeps
+     * what the diff showed, so it can be re-checked; and it cannot be deleted or truncated (V17).
+     */
+    private fun assertBacktestEvidence(revisionId: UUID) {
+        val golden = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(Files.readAllBytes(Path.of("..", "openbank-products", "portfolios", "savings-sample.json")))
+            .joinToString("") { "%02x".format(it) }
+        dataSource.connection.use { c ->
+            c.createStatement().use { st ->
+                st.executeQuery(
+                    "SELECT portfolio_name, portfolio_sha256, identical, changed_accounts, issuer, subject " +
+                        "FROM catalog_revision_backtests WHERE revision_id = '$revisionId'",
+                ).use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getString(1)).isEqualTo("savings-sample.json")
+                    assertThat(rs.getString(2)).isEqualTo(golden)
+                    assertThat(rs.getBoolean(3)).isTrue() // the base is the candidate itself here
+                    assertThat(rs.getInt(4)).isZero()
+                    assertThat(rs.getString(5)).isEqualTo("https://example.invalid/catalog-issuer")
+                    assertThat(rs.getString(6)).isEqualTo("u-op")
+                }
+                for (sql in listOf("DELETE FROM catalog_revision_backtests", "TRUNCATE catalog_revision_backtests")) {
+                    assertThat(
+                        runCatching {
+                            st.executeUpdate(sql)
+                        }.exceptionOrNull(),
+                    ).describedAs(sql).hasMessageContaining("immutable")
+                }
+            }
+        }
+    }
+
     private fun publishIr(offeringId: UUID, revisionId: UUID, ifMatch: String, expected: Int) {
         Given {
             contentType("application/json")
@@ -321,18 +362,19 @@ class IrPublishContractTest {
         }
     }
 
-    /** The checker's backtest of the revision as it stands (no published base yet, so against itself). */
+    /**
+     * The checker's GOLDEN backtest of the revision as it stands (no portfolio: the server's own; nothing
+     * is published yet, so against itself) — the only kind that unlocks publish-ir.
+     */
     private fun backtest(offeringId: UUID, revisionId: UUID) {
         Given {
             contentType("application/json")
-            body(
-                """{"baseRevisionId":"$revisionId","from":"2026-01-01","to":"2026-01-31","portfolio":""" +
-                    """{"accounts":[{"id":"a","state":{"currency":"EUR","balance":"100.00","openedOn":"2026-01-01"}}]}}""",
-            )
+            body("""{"baseRevisionId":"$revisionId"}""")
         } When {
             post("/api/v2/offerings/$offeringId/revisions/$revisionId/behaviour-diff")
         } Then {
             statusCode(200)
+            body("approvalEvidence", equalTo(true))
         }
     }
 

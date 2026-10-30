@@ -80,6 +80,13 @@ tasks.named("compileKotlin") {
     dependsOn(tasks.named("openApiGenerate"))
 }
 
+// ADR-0352 §7 (phase 5b): the approval backtest runs over openbank-products' committed golden
+// portfolios (portfolios/approval.json picks one per product). Packaged from that directory at build
+// time rather than copied into this module, so the catalog cannot hold a stale second copy.
+tasks.named<ProcessResources>("processResources") {
+    from(rootProject.file("openbank-products/portfolios")) { into("approval-portfolios") }
+}
+
 tasks.configureEach {
     if (name == "detekt" || name.startsWith("runKtlint")) {
         dependsOn(tasks.named("openApiGenerate"))

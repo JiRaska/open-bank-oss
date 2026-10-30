@@ -26,6 +26,10 @@ class PostgresRevisionBacktestRepository(private val sessions: Mutiny.SessionFac
                     principalName = backtest.principalName
                     issuer = backtest.issuer
                     subject = backtest.subject
+                    portfolioName = backtest.portfolioName
+                    portfolioSha256 = backtest.portfolioSha256
+                    identical = backtest.identical
+                    changedAccounts = backtest.changedAccounts
                     baseRevisionHash = backtest.baseRevisionHash
                     candidateRevisionHash = backtest.candidateRevisionHash
                     diffSha256 = backtest.diffSha256
@@ -43,8 +47,9 @@ class PostgresRevisionBacktestRepository(private val sessions: Mutiny.SessionFac
             ).setParameter("id", revisionId).setParameter("digest", digest).resultList
         }.awaitSuspending().map {
             RevisionBacktest(
-                it.revisionId, it.digest, it.principalName, it.issuer, it.subject,
-                it.baseRevisionHash, it.candidateRevisionHash, it.diffSha256, it.recordedAt,
+                it.revisionId, it.digest, it.principalName, it.issuer, it.subject, it.portfolioName,
+                it.portfolioSha256, it.identical, it.changedAccounts, it.baseRevisionHash, it.candidateRevisionHash,
+                it.diffSha256, it.recordedAt,
             )
         }
 }
