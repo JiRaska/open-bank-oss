@@ -4,6 +4,7 @@
 
 package com.openbank.billing.infrastructure.scheduler
 
+import com.openbank.billing.application.port.out.ProductShadowQueuePort
 import com.openbank.billing.application.usecase.ProductShadowService
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
@@ -28,6 +29,7 @@ import java.time.Duration
 @ApplicationScoped
 class ProductShadowScheduler(
     private val service: ProductShadowService,
+    private val queue: ProductShadowQueuePort,
     private val domainMetrics: DomainMetrics,
     // No Kotlin defaults on these (rules.yaml: a defaulted @ConfigProperty constructor parameter makes Arc
     // build the bean through the synthetic constructor and never apply the config); application.yaml
@@ -38,6 +40,8 @@ class ProductShadowScheduler(
     private val batchSize: Int,
     @ConfigProperty(name = "openbank.billing.product-shadow.max-batches-per-run")
     private val maxBatches: Int,
+    @ConfigProperty(name = "openbank.billing.product-shadow.fact-retention")
+    private val factRetention: Duration,
 ) {
 
     private var liveness: WorkflowLivenessRecorder? = null
@@ -62,8 +66,14 @@ class ProductShadowScheduler(
         runOnce()
     }
 
-    /** One run: drains up to [maxBatches] batches. Split from [tick] so tests drive it directly. */
+    /**
+     * One run: bounds fact retention, then drains up to [maxBatches] batches. Split from [tick] so tests
+     * drive it directly. The retention purge runs even with the comparator disabled: assessments keep
+     * queueing rows (and their facts) either way, and a switched-off comparator must not mean the facts
+     * are kept for ever.
+     */
     suspend fun runOnce(): Int {
+        purgeExpiredFacts()
         if (!enabled) return 0
         var total = 0
         repeat(maxBatches) {
@@ -77,6 +87,17 @@ class ProductShadowScheduler(
         log.infof("product shadow: backlog larger than %d inputs per run; continuing next tick", batchSize * maxBatches)
         liveness?.recordSuccess()
         return total
+    }
+
+    private suspend fun purgeExpiredFacts() {
+        var erased = 0
+        var batches = 0
+        do {
+            val n = queue.eraseExpiredFacts(factRetention, batchSize)
+            erased += n
+            batches++
+        } while (n == batchSize && batches < maxBatches)
+        if (erased > 0) log.infof("product shadow: erased frozen facts on %d rows older than %s", erased, factRetention)
     }
 
     companion object {

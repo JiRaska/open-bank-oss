@@ -150,7 +150,11 @@ object IrJson {
                             'u' -> {
                                 if (i + 4 > s.length) fail("truncated \\u escape")
                                 val hex = s.substring(i, i + 4)
-                                val cp = hex.toIntOrNull(16) ?: fail("invalid \\u escape")
+                                // toIntOrNull(16) accepts a leading '+'/'-', so check the shape first.
+                                if (!hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                                    fail("invalid \\u escape")
+                                }
+                                val cp = hex.toInt(16)
                                 sb.append(cp.toChar())
                                 i += 4
                             }

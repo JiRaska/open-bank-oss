@@ -35,7 +35,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-aml-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a4a99980d43113fc"
+        openbank.tech/policy-checksum: "6b6f6b3161a9c22c"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -46,7 +46,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: aml-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-aml-service:sandbox-a212613e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-aml-service:sandbox-63c95a17@sha256:fccb3394705c6bd95c407afa08b3cc1a24462c3907d7d8fdaf27f8e14fd741d9
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
