@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.7](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.6...finrep-service-v0.17.7) (2026-10-30)
+
+
+### Bug Fixes
+
+* **finrep:** classify ADR-0344 instrument accounts ([#14290](https://github.com/JiRaska/open-bank-oss/issues/14290)) ([8d34a27](https://github.com/JiRaska/open-bank-oss/commit/8d34a274aaa97da3e28381d06f113f056e6ff12d)), closes [#14284](https://github.com/JiRaska/open-bank-oss/issues/14284)
+
 ## [0.17.6](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.5...finrep-service-v0.17.6) (2026-10-29)
 
 
