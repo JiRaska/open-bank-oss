@@ -35,6 +35,8 @@ openApiGenerate {
             "models" to listOf(
                 "EligibilityRule",
                 "IrSignature",
+                "BehaviourDiffRequest",
+                "BehaviourDiffResponse",
                 "LintProductIrRequest",
                 "LintProductIrResponse",
                 "ProductIrProblem",
@@ -106,6 +108,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.reactive)
 
     implementation(project(":openbank-libs"))
+    // FinanceProductArithmetic for the behavioural-diff backtest (ADR-0352 phase 5b); pure, no framework.
+    implementation(project(":openbank-libs-finance"))
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

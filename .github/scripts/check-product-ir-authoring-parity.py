@@ -20,8 +20,18 @@ TWO HALVES, AND WHERE EACH RUNS
         compares `canonicalJson()` with the committed file;
       * with --junit-xml <dir>: the test's JUnit report lists one PASSED dynamic case per product.
 
-    MCP/Studio authoring (ADR-0352 phases 5-6) are further paths into the same artifact; when they
-    land, their fixtures join the SUBJECTS here — the requirement does not change.
+    SURFACES (ADR-0352 phase 5a). The same fixture compiled through (a) the `obp` CLI and (b) the
+    agent-service MCP `product_compile` handler must give identical canonical bytes and hash. The
+    JVM half is `ProductIrAuthoringParityTest` (openbank-agent-service); this script requires it to
+    exist, not be disabled, drive `Obp.run` and the lint/compile/simulate/explain MCP handlers, and
+    assert raw-byte equality and that MCP `isError` holds exactly when the CLI exits non-zero.
+    (c) the Studio form path (ADR-0352 phase 5b): Studio's IR editor validates through the catalog's
+    `POST /api/v2/product-ir/lint`, which returns the canonical IR it would store. Its JVM half is
+    `IrLintContractTest` (openbank-product-catalog): for every committed `ir/<name>.json` the lint's
+    `canonicalIr` must equal the file byte for byte and its `revisionHash` the shared parser's. With
+    ReferenceProductsTest (DSL == file) and the CLI/MCP test (CLI == MCP over the same DSL), all three
+    surfaces meet at the committed bytes. This script requires that test to exist, not be disabled and
+    carry those comparisons.
 
 SCOPE is derived from the filesystem (every *.json under openbank-products/ir/) and from the DSL
 source. Prints SUBJECTS=<n committed IR files>.
@@ -49,6 +59,13 @@ TEST_CLASS = "ReferenceProductsTest"
 TEST_FILE = f"openbank-products/src/test/kotlin/com/openbank/products/{TEST_CLASS}.kt"
 PRODUCT_RE = re.compile(r'product\(\s*"([a-z][a-z0-9-]*)"')
 MODULE_BUILD = "openbank-products/build.gradle.kts"
+SURFACE_TEST = "openbank-agent-service/src/test/kotlin/com/openbank/agent/application/ProductIrAuthoringParityTest.kt"
+SURFACE_TOKENS = ("Obp.run(", '"product_compile"', '"product_lint"', '"product_simulate"', '"product_explain"',
+                  "isEqualTo(cli.first != 0)", "ReferenceProducts.all")
+STUDIO_TEST = "openbank-product-catalog/src/test/kotlin/com/openbank/productcatalog/contract/IrLintContractTest.kt"
+STUDIO_TOKENS = ('"/api/v2/product-ir/lint"', '"openbank-products", "ir"', "canonicalIr", "revisionHash",
+                 "ProductIrParser.parse(")
+STUDIO_COVERED = "surface (c) Studio form: covered by IrLintContractTest (catalog lint canonicalIr == committed IR)"
 DISABLED_RE = re.compile(r"^\s*@(?:org\.junit\.jupiter\.api\.)?Disabled\b", re.M)
 
 
@@ -126,6 +143,26 @@ def findings(root: pathlib.Path) -> tuple[list[str], list[str]]:
             f.append(f"{TEST_FILE}: does not iterate ReferenceProducts.all — its scope is not the DSL product set")
         if "canonicalJson()" not in text or 'Path.of("ir"' not in text:
             f.append(f"{TEST_FILE}: does not compare canonicalJson() with the committed ir/<name>.json")
+    surface = root / SURFACE_TEST
+    if not surface.is_file():
+        f.append(f"{SURFACE_TEST}: missing — the CLI/MCP surface parity test does not exist")
+    else:
+        code = strip_kotlin_comments(surface.read_text(encoding="utf-8"))
+        if DISABLED_RE.search(code):
+            f.append(f"{SURFACE_TEST}: carries @Disabled — the surface parity half is switched off")
+        for token in SURFACE_TOKENS:
+            if token not in code:
+                f.append(f"{SURFACE_TEST}: no `{token}` — it does not compare the CLI and MCP surfaces byte for byte")
+    studio = root / STUDIO_TEST
+    if not studio.is_file():
+        f.append(f"{STUDIO_TEST}: missing — the Studio surface parity test does not exist")
+    else:
+        code = strip_kotlin_comments(studio.read_text(encoding="utf-8"))
+        if DISABLED_RE.search(code):
+            f.append(f"{STUDIO_TEST}: carries @Disabled — the Studio surface half is switched off")
+        for token in STUDIO_TOKENS:
+            if token not in code:
+                f.append(f"{STUDIO_TEST}: no `{token}` — it does not compare the Studio lint with the committed IR")
     build = root / MODULE_BUILD
     if build.is_file():
         code = strip_kotlin_comments(build.read_text(encoding="utf-8"))
@@ -155,6 +192,7 @@ def run(root: pathlib.Path, junit: pathlib.Path | None, enforce: bool) -> int:
     if junit is not None:
         f += junit_findings(junit, names)
     print(f"SUBJECTS={len(names)}")
+    print(f"product-ir-authoring-parity: {STUDIO_COVERED}")
     if not names:
         for line in f:
             print(f"::error::product-ir-authoring-parity: {line}")
@@ -176,10 +214,29 @@ def run(root: pathlib.Path, junit: pathlib.Path | None, enforce: bool) -> int:
 GOOD_TEST = (
     "class ReferenceProductsTest {\n  fun x() = ReferenceProducts.all.map { p -> p.canonicalJson(); Path.of(\"ir\", p.name) }\n}\n"
 )
+GOOD_STUDIO = (
+    "class IrLintContractTest {\n  val dir = Path.of(\"..\", \"openbank-products\", \"ir\")\n"
+    "  fun x() { val e = ProductIrParser.parse(t); post(\"/api/v2/product-ir/lint\"); "
+    "body(\"revisionHash\", e.revisionHash); getString(\"canonicalIr\") }\n}\n"
+)
+GOOD_SURFACE = (
+    "class ProductIrAuthoringParityTest {\n  fun x() = ReferenceProducts.all.map { Obp.run(listOf()); "
+    "mcp(\"product_compile\"); mcp(\"product_lint\"); mcp(\"product_simulate\"); mcp(\"product_explain\"); "
+    "assertThat(mcp.first).isEqualTo(cli.first != 0) }\n}\n"
+)
 
 
 def _fixture(root: pathlib.Path, irs: dict[str, dict], dsl_names: list[str] | None, test_text: str | None = GOOD_TEST,
-             dsl_text: str | None = None, build_text: str | None = None) -> None:
+             dsl_text: str | None = None, build_text: str | None = None, surface_text: str | None = GOOD_SURFACE,
+             studio_text: str | None = GOOD_STUDIO) -> None:
+    if studio_text is not None:
+        st = root / STUDIO_TEST
+        st.parent.mkdir(parents=True, exist_ok=True)
+        st.write_text(studio_text, encoding="utf-8")
+    if surface_text is not None:
+        sp = root / SURFACE_TEST
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        sp.write_text(surface_text, encoding="utf-8")
     for name, doc in irs.items():
         p = root / IR_DIR / f"{name}.json"
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -207,13 +264,15 @@ def _ir() -> dict:
 
 def self_test() -> int:
     failures = 0
+    ran = 0
 
     def case(label: str, want_exit: int, text: str, irs, dsl_names, test_text=GOOD_TEST, enforce=True,
-             dsl_text=None, build_text=None) -> None:
-        nonlocal failures
+             dsl_text=None, build_text=None, surface_text=GOOD_SURFACE, studio_text=GOOD_STUDIO) -> None:
+        nonlocal failures, ran
+        ran += 1
         with tempfile.TemporaryDirectory() as d:
             root = pathlib.Path(d)
-            _fixture(root, irs, dsl_names, test_text, dsl_text, build_text)
+            _fixture(root, irs, dsl_names, test_text, dsl_text, build_text, surface_text, studio_text)
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 got = run(root, None, enforce)
@@ -242,6 +301,27 @@ def self_test() -> int:
          build_text='tasks.test { filter { excludeTestsMatching("*ReferenceProductsTest") } }')
     case("a build that only MENTIONS the test in a comment is fine", 0, "OK — 1 committed", {"a": _ir()}, ["a"], GOOD_TEST,
          build_text='// ReferenceProductsTest is the JVM half\ntasks.test { useJUnitPlatform() }')
+    # The CLI/MCP surface half (phase 5a): missing, disabled, one-sided or comment-only is red.
+    case("a missing surface parity test is red", 1, "surface parity test does not exist", {"a": _ir()}, ["a"], surface_text=None)
+    case("a disabled surface parity test is red", 1, "surface parity half is switched off", {"a": _ir()}, ["a"],
+         surface_text="@Disabled\n" + GOOD_SURFACE)
+    case("a surface test that never drives the MCP handler is red", 1, '`"product_compile"`', {"a": _ir()}, ["a"],
+         surface_text=GOOD_SURFACE.replace('"product_compile"', '"product_lint"'))
+    case("surface tokens only in a comment are red", 1, "`Obp.run(`", {"a": _ir()}, ["a"],
+         surface_text="// Obp.run( \"product_compile\" \"product_lint\" \"product_simulate\" \"product_explain\" isEqualTo(cli.first != 0) ReferenceProducts.all\nclass ProductIrAuthoringParityTest {}")
+    case("a surface test that never compares failure status is red", 1, "isEqualTo(cli.first != 0)", {"a": _ir()}, ["a"],
+         surface_text=GOOD_SURFACE.replace("isEqualTo(cli.first != 0)", "isEqualTo(true)"))
+    case("a missing Studio surface test is red", 1, "Studio surface parity test does not exist", {"a": _ir()}, ["a"],
+         studio_text=None)
+    case("a disabled Studio surface test is red", 1, "Studio surface half is switched off", {"a": _ir()}, ["a"],
+         studio_text="@Disabled\n" + GOOD_STUDIO)
+    case("a Studio test that never compares the canonical bytes is red", 1, "`canonicalIr`", {"a": _ir()}, ["a"],
+         studio_text=GOOD_STUDIO.replace("canonicalIr", "valid"))
+    case("a Studio test not scoped to the committed IR set is red", 1, '`"openbank-products", "ir"`', {"a": _ir()}, ["a"],
+         studio_text=GOOD_STUDIO.replace('"openbank-products", "ir"', '"fixtures"'))
+    case("Studio tokens only in a comment are red", 1, '`"/api/v2/product-ir/lint"`', {"a": _ir()}, ["a"],
+         studio_text="/* " + GOOD_STUDIO + " */")
+    case("the Studio surface is no longer reported pending", 0, "Studio form: covered", {"a": _ir()}, ["a"])
     # The JUnit half: a missing report and a report with no case for a product are both findings.
     with tempfile.TemporaryDirectory() as d:
         root = pathlib.Path(d)
@@ -260,7 +340,7 @@ def self_test() -> int:
     if failures:
         print(f"self-test: {failures} failure(s)")
         return 1
-    print("self-test: OK (17 cases)")
+    print(f"self-test: OK ({ran} cases)")
     return 0
 
 
