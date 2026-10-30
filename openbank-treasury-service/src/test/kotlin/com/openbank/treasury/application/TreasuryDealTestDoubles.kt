@@ -87,13 +87,19 @@ internal class InMemoryIntents : PostingIntentPort {
     val closedBy = mutableMapOf<String, String>()
     val escalated = mutableSetOf<String>()
 
-    /** Idempotency-Key -> request fingerprint, as the history row's unique command_key. */
-    val closeCommands = mutableMapOf<String, String>()
+    /** Idempotency-Key -> (closed intent key, request fingerprint), as the history row's unique command_key. */
+    val closeCommands = mutableMapOf<String, Pair<String, String>>()
 
     /** Runs before a close (a test races a concurrent close in here). */
     var beforeClose: suspend () -> Unit = {}
 
-    override suspend fun closedBy(commandKey: String) = closeCommands[commandKey]
+    override suspend fun closedBy(commandKey: String) = closeCommands[commandKey]?.let { (intentKey, fp) ->
+        com.openbank.treasury.application.port.out.RecordedClose(
+            intentKey,
+            fp,
+            PostingIntentStatus.valueOf(rows.getValue(intentKey).second.name),
+        )
+    }
 
     /** Append-only, as `deal_posting_intent_history`: (key, transition, actor, reason, value day). */
     val history = mutableListOf<List<Any?>>()
@@ -215,7 +221,7 @@ internal class InMemoryIntents : PostingIntentPort {
         rows[key] = row.first to Status.CLOSED_BY_OPERATOR
         closedBy[key] = actor.id
         record(key, "CLOSED_BY_OPERATOR", actor.id, reason)
-        commandKey?.let { closeCommands[it] = requireNotNull(fingerprint) }
+        commandKey?.let { closeCommands[it] = key to requireNotNull(fingerprint) }
         return PostingIntentCloseOutcome.CLOSED
     }
 

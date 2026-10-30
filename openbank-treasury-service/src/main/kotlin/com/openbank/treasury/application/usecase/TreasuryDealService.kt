@@ -935,10 +935,7 @@ class TreasuryDealService(
         key: String?,
     ): PostingIntentCloseOutcome {
         requireClosable(reason, actor, key)
-        // The request's fingerprint: what a replay must repeat exactly (deal, event, reason, actor).
-        // Never the intent key: a reversal's claim row is keyed per attempt, so "the key this close
-        // should have touched" cannot be recomputed from the request.
-        val fingerprint = closeFingerprint(dealId, event, reason, actor)
+        val request = CloseRequest(dealId, event, reason, actor)
         val intent = intents.openFor(dealId).firstOrNull { it.event == event }
         if (intent != null) {
             // Segregation of duties (#14220 review): the person who decided the posting, and the
@@ -949,7 +946,7 @@ class TreasuryDealService(
                 )
             }
         }
-        key?.let { k -> replayedClose(k, fingerprint)?.let { return it } }
+        key?.let { k -> replayedClose(k, request, intent)?.let { return it } }
         intent ?: return PostingIntentCloseOutcome.NOT_OPEN
         // Not while its own command or a reconciler may still be posting it: younger than the grace,
         // or under a live claim, the close is refused (IN_FLIGHT) rather than raced.
@@ -959,9 +956,9 @@ class TreasuryDealService(
             reason,
             clock.instant().minus(grace),
             key,
-            fingerprint,
+            request.fingerprint(intent.idempotencyKey),
         )
-        return if (key == null) outcome else resolveRace(outcome, key, fingerprint)
+        return if (key == null) outcome else resolveRace(outcome, key, request, intent)
     }
 
     /**
@@ -971,10 +968,12 @@ class TreasuryDealService(
     private suspend fun resolveRace(
         outcome: PostingIntentCloseOutcome,
         key: String,
-        fingerprint: String,
+        request: CloseRequest,
+        intent: PostingIntent,
     ): PostingIntentCloseOutcome = when (outcome) {
-        PostingIntentCloseOutcome.NOT_OPEN -> replayedClose(key, fingerprint) ?: outcome
-        PostingIntentCloseOutcome.DUPLICATE_KEY -> replayedClose(key, fingerprint) ?: throw keyReused()
+        // The intent is no longer OPEN: only a stored close of THIS intent by THIS request matches.
+        PostingIntentCloseOutcome.NOT_OPEN -> replayedClose(key, request, null) ?: outcome
+        PostingIntentCloseOutcome.DUPLICATE_KEY -> replayedClose(key, request, intent) ?: throw keyReused()
         else -> outcome
     }
 
@@ -992,19 +991,44 @@ class TreasuryDealService(
         }
     }
 
-    /** CLOSED for a replay of the same close; 400 for the key on another request; null when unused. */
-    private suspend fun replayedClose(key: String, fingerprint: String): PostingIntentCloseOutcome? {
+    /**
+     * The close previously recorded under [key], judged against this request (#14220 review):
+     *  - a different request (fingerprint over the CLOSED intent's key and the request) is 400;
+     *  - a later intent of the same event OPEN now (a later claim) is 400: the key belongs to an
+     *    earlier close, and answering 204 would report a close that did not happen to this one;
+     *  - the closed intent re-opened by a re-issue is 409 POSTING_IN_FLIGHT (its posting runs again);
+     *  - only an intent still CLOSED_BY_OPERATOR answers CLOSED. Null when the key was never used.
+     */
+    private suspend fun replayedClose(
+        key: String,
+        request: CloseRequest,
+        openNow: PostingIntent?,
+    ): PostingIntentCloseOutcome? {
         val stored = intents.closedBy(key) ?: return null
-        if (stored != fingerprint) throw keyReused()
-        return PostingIntentCloseOutcome.CLOSED
+        val sameRequest = stored.fingerprint == request.fingerprint(stored.intentKey) &&
+            (openNow == null || openNow.idempotencyKey == stored.intentKey)
+        return when {
+            !sameRequest -> throw keyReused()
+            stored.intentStatus == PostingIntentStatus.CLOSED_BY_OPERATOR -> PostingIntentCloseOutcome.CLOSED
+            stored.intentStatus == PostingIntentStatus.OPEN -> PostingIntentCloseOutcome.IN_FLIGHT
+            else -> throw keyReused()
+        }
     }
 
     private fun keyReused() = IllegalArgumentException("Idempotency-Key already used for a different request")
 
-    private fun closeFingerprint(dealId: UUID, event: PostingEvent, reason: String, actor: Actor): String =
-        java.security.MessageDigest.getInstance("SHA-256")
-            .digest("$dealId|${event.name}|${actor.id}|$reason".toByteArray(Charsets.UTF_8))
+    /** What a close under one Idempotency-Key must repeat exactly. */
+    private data class CloseRequest(val dealId: UUID, val event: PostingEvent, val reason: String, val actor: Actor) {
+        /**
+         * sha256 over length-prefixed fields (`<length>:<value>`), so no field content can shift a
+         * boundary (`|` in a reason or an actor id cannot make two requests collide), bound to the
+         * intent INSTANCE it closes (its idempotency key: lifecycle key or per-attempt claim key).
+         */
+        fun fingerprint(intentKey: String): String = listOf(dealId.toString(), event.name, actor.id, reason, intentKey)
+            .joinToString("") { "${it.length}:$it" }
+            .let { java.security.MessageDigest.getInstance("SHA-256").digest(it.toByteArray(Charsets.UTF_8)) }
             .joinToString("") { "%02x".format(it) }
+    }
 
     /**
      * Re-runs the intent's command as its original actor and client key. The domain transition is

@@ -196,6 +196,9 @@ enum class PostingIntentCloseOutcome {
     DUPLICATE_KEY,
 }
 
+/** An operator close as recorded under its Idempotency-Key, with the closed intent's CURRENT status. */
+data class RecordedClose(val intentKey: String, val fingerprint: String, val intentStatus: PostingIntentStatus)
+
 /** OPEN intents at a glance, for the gauges: how many, and since when the oldest has waited. */
 data class OpenIntentSummary(val count: Int, val oldestCreatedAt: Instant?)
 
@@ -267,8 +270,8 @@ interface PostingIntentPort {
         fingerprint: String? = null,
     ): PostingIntentCloseOutcome
 
-    /** The request fingerprint of the close recorded under [commandKey], or null when none used it. */
-    suspend fun closedBy(commandKey: String): String?
+    /** The close recorded under [commandKey] (its intent, fingerprint and the intent's status now), or null. */
+    suspend fun closedBy(commandKey: String): RecordedClose?
 
     companion object {
         /** No intent store: the pre-#13883 behaviour. Unit tests of the lifecycle alone only. */
@@ -290,7 +293,7 @@ interface PostingIntentPort {
                 commandKey: String?,
                 fingerprint: String?,
             ) = PostingIntentCloseOutcome.NOT_OPEN
-            override suspend fun closedBy(commandKey: String): String? = null
+            override suspend fun closedBy(commandKey: String): RecordedClose? = null
         }
     }
 }

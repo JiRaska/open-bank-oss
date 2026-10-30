@@ -854,13 +854,72 @@ class TreasuryPostingIntentTest {
         val b = lostSettlement()
         intents.beforeClose = {
             intents.beforeClose = {}
-            intents.closeCommands["raced"] = "someone else's fingerprint"
+            intents.closeCommands["raced"] = settlementKey(b) to "someone else's fingerprint"
         }
         assertThatThrownBy {
             runBlocking { service.closePostingIntent(b.id, PostingEvent.SETTLED, "none", operator, "raced") }
         }
             .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("different request")
         assertThat(intents.status(settlementKey(b))).isEqualTo(InMemoryIntents.Status.OPEN)
+    }
+
+    @Test
+    fun `a pipe in the actor or the reason cannot make two different closes share a fingerprint`(): Unit = runBlocking {
+        val b = lostSettlement()
+        val human = { id: String ->
+            com.openbank.treasury.domain.model.Actor(id, com.openbank.treasury.domain.model.ActorType.HUMAN)
+        }
+        // "x|y" + "z" and "x" + "y|z" joined with "|" are the same string; length-prefixed they are not.
+        assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "z", human("x|y"), "pipe"))
+            .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+        assertThatThrownBy {
+            runBlocking { service.closePostingIntent(b.id, PostingEvent.SETTLED, "y|z", human("x"), "pipe") }
+        }
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("different request")
+    }
+
+    @Test
+    fun `a replay after a re-issue reopened the closed intent answers in flight, never 204`(): Unit = runBlocking {
+        val b = lostSettlement()
+        assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "none", operator, "k-reopen"))
+            .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+        // A re-issue reopens the same row (its answer is lost again, so it stays OPEN).
+        ledger.loseAnswerFor = b.id
+        assertThatThrownBy {
+            runBlocking { service.settle(b.id, com.openbank.treasury.domain.model.Actor.SIMULATED_MARKET) }
+        }
+        assertThat(intents.status(settlementKey(b))).isEqualTo(InMemoryIntents.Status.OPEN)
+        assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "none", operator, "k-reopen"))
+            .isEqualTo(PostingIntentCloseOutcome.IN_FLIGHT)
+        assertThat(intents.status(settlementKey(b))).isEqualTo(InMemoryIntents.Status.OPEN)
+    }
+
+    @Test
+    fun `a REVERSED close replayed against a later claim is refused, not reported as done`(): Unit = runBlocking {
+        val b = book()
+        fun claim(n: Int) = "treasury:${b.id}:reversed:claim:attempt-$n"
+        fun openClaim(n: Int) {
+            intents.rows[claim(n)] = com.openbank.treasury.application.port.out.PostingIntent(
+                idempotencyKey = claim(n),
+                dealId = b.id,
+                event = PostingEvent.REVERSED,
+                action = com.openbank.treasury.application.port.out.PostingIntentAction.REVERSE,
+                valueDate = monday,
+                actor = com.openbank.treasury.domain.model.Actor.SIMULATED_MARKET,
+                reason = "stuck",
+                createdAt = clock.instant(),
+            ) to InMemoryIntents.Status.OPEN
+        }
+        openClaim(1)
+        later(Duration.ofMinutes(5))
+        assertThat(service.closePostingIntent(b.id, PostingEvent.REVERSED, "stuck claim", operator, "k-claim"))
+            .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+        openClaim(2)
+        later(Duration.ofMinutes(5))
+        assertThatThrownBy {
+            runBlocking { service.closePostingIntent(b.id, PostingEvent.REVERSED, "stuck claim", operator, "k-claim") }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(intents.status(claim(2))).isEqualTo(InMemoryIntents.Status.OPEN)
     }
 
     private fun settlementKeyOf(deal: Deal, event: PostingEvent) =

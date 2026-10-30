@@ -10,6 +10,7 @@ import com.openbank.treasury.application.port.out.PostingIntentAction
 import com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
 import com.openbank.treasury.application.port.out.PostingIntentPort
 import com.openbank.treasury.application.port.out.PostingIntentStatus
+import com.openbank.treasury.application.port.out.RecordedClose
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.PostingEvent
@@ -205,11 +206,14 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
             .resultList
     }.awaitSuspending().map { it.toIntent() }
 
-    override suspend fun closedBy(commandKey: String): String? = sf.withSession { s ->
-        s.createNativeQuery<Any>(
-            "SELECT request_fingerprint FROM deal_posting_intent_history WHERE command_key = ?1",
+    override suspend fun closedBy(commandKey: String): RecordedClose? = sf.withSession { s ->
+        s.createNativeQuery<Array<Any?>>(
+            "SELECT h.idempotency_key, h.request_fingerprint, i.status FROM deal_posting_intent_history h " +
+                "JOIN deal_posting_intent i ON i.idempotency_key = h.idempotency_key WHERE h.command_key = ?1",
         ).setParameter(1, commandKey).resultList
-    }.awaitSuspending().firstOrNull()?.toString()
+    }.awaitSuspending().firstOrNull()?.let {
+        RecordedClose(it[0] as String, (it[1] as String).trim(), PostingIntentStatus.valueOf(it[2] as String))
+    }
 
     override suspend fun unresolvedFor(dealId: UUID): List<PostingIntent> = sf.withSession { s ->
         s.createNativeQuery<Array<Any?>>(
