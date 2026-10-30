@@ -201,13 +201,29 @@ The repricing backtest of ADR-0352 §11.4 has one engine, one portfolio reader a
 - The catalog's `POST /api/v2/offerings/{id}/revisions/{revisionId}/behaviour-diff` runs the same
   engine on the same reader (base: the revision published now, unless `baseRevisionId` names one) and
   Studio's approval panel renders that document — per account, per rule, instruction counts, and the
-  accounts that changed sign or crossed the materiality threshold. It is bounded (500 accounts, 1000
-  events per account, 200 000 account-days) and admits a few concurrent runs; the rest get 429.
+  accounts that changed sign or crossed the materiality threshold, and per account which rule moved it.
+  It is bounded (500 accounts, 1000 events per account, 200 000 account-days). Concurrency is capped
+  by one non-blocking semaphore per catalog pod — `openbank.catalog.behaviour-diff.max-concurrent`,
+  default 2 — shared by every caller (it is global, not per principal): a backtest that finds no free
+  slot gets 429 with `Retry-After` at once rather than queueing behind CPU-bound work.
+- `BehaviourDiffInputs` resolves the window (default: earliest `openedOn` through the last portfolio
+  day; empty or longer than `ReplayLimits.MAX_DAYS` is refused) and the threshold (the bounded
+  plain-decimal grammar above, non-negative) for both surfaces, so the CLI and the catalog accept and
+  refuse the same inputs and compute the same diff from them.
+
+**Approval needs the approver's own backtest (ADR-0352 §7).** A valid backtest is recorded as
+evidence (`catalog_revision_backtests`, immutable) bound to the requesting principal and the
+revision's approval digest, which covers its content and row version. `publish-ir` refuses with 409
+unless the checker has such a record for the revision as it stands; a role approval of an
+IR-bearing revision likewise needs one from the approving JWT subject. Editing the draft after the
+backtest invalidates it. The existing four-eyes and role-approval rules are unchanged.
 
 **Breaking for `obp diff` consumers.** Until phase 5b `obp diff --behavioural` printed a CLI-local
-report (`accounts` as a count, `changedRules`, `rules[].accounts[].customerDepositDelta`). It now
-prints the schema-v1 document above, so a script that read those members must read
-`changedAccounts`, `aggregate.posted[].deltaNet` and `accounts[].outcome` instead.
+report. It now prints the schema-v1 document above. Two members are gone — `changedRules` and
+`rules[]` (with `rules[].accounts[].customerDepositDelta`) — and one CHANGED TYPE: `accounts` was the
+account COUNT (a number) and is now the ARRAY of changed-account rows. Read the count from
+`portfolio.accounts` (or `changedAccounts` for the changed ones), per-rule deltas from
+`aggregate.posted[].deltaNet`, and per-account movement from `accounts[].outcome`.
 
 ## Testing
 

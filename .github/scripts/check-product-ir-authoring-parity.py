@@ -202,7 +202,7 @@ def junit_findings(junit_dir: pathlib.Path, names: list[str]) -> list[str]:
             if case.find("failure") is None and case.find("error") is None and case.find("skipped") is None:
                 passed.add(case.get("name", ""))
     for n in names:
-        if not any(n in p for p in passed):
+        if n not in passed:
             f.append(f"{TEST_CLASS}: no passed dynamic case for product '{n}'")
     return f
 
@@ -220,7 +220,8 @@ def studio_junit_findings(junit_dir: pathlib.Path) -> list[str]:
             verdicts[name] = bad or "passed"
     out: list[str] = []
     for wanted in STUDIO_CASES:
-        got = next((v for n, v in verdicts.items() if wanted in n), None)
+        # Exact: JUnit 5 names a method `<display name>()`; a renamed or prefixed case is not this one.
+        got = verdicts.get(wanted, verdicts.get(f"{wanted}()"))
         if got != "passed":
             out.append(f"{STUDIO_CLASS}: '{wanted}' {got or 'absent'} — the Studio lint's canonical bytes are not "
                        "proven equal to the committed IR")
@@ -393,6 +394,13 @@ def self_test() -> int:
         if junit_findings(junit, ["a"]) or not junit_findings(junit, ["z"]):
             failures += 1
             print("SELF-TEST FAIL: JUnit pass/fail per product misread", file=sys.stderr)
+        # Exact names: a passing `savings-fixed-v2` is not evidence for `savings-fixed`.
+        (junit / f"TEST-com.openbank.products.{TEST_CLASS}.xml").write_text(
+            '<testsuite><testcase name="savings-fixed-v2"/></testsuite>', encoding="utf-8"
+        )
+        if not junit_findings(junit, ["savings-fixed"]):
+            failures += 1
+            print("SELF-TEST FAIL: a product's case must match by exact name, not substring", file=sys.stderr)
     # The Studio JUnit half: a missing report, a failed byte case and a skipped one are all findings.
     with tempfile.TemporaryDirectory() as d:
         junit = pathlib.Path(d)
@@ -405,6 +413,11 @@ def self_test() -> int:
         if studio_junit_findings(junit):
             failures += 1
             print("SELF-TEST FAIL: a passing IrLintContractTest report must be clean", file=sys.stderr)
+        prefixed = "".join(f'<testcase name="old {c}()"/>' for c in STUDIO_CASES)
+        report.write_text(f"<testsuite>{prefixed}</testsuite>", encoding="utf-8")
+        if len(studio_junit_findings(junit)) != len(STUDIO_CASES):
+            failures += 1
+            print("SELF-TEST FAIL: a Studio case must match by exact name, not substring", file=sys.stderr)
         for verdict in ("<failure/>", "<skipped/>"):
             bad = ok.replace(f'<testcase name="{STUDIO_CASES[1]}()"/>', f'<testcase name="{STUDIO_CASES[1]}()">{verdict}</testcase>')
             report.write_text(f"<testsuite>{bad}</testsuite>", encoding="utf-8")

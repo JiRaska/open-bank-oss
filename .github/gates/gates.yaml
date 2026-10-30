@@ -7216,7 +7216,9 @@ gates:
   # for a reordered, pretty-printed input). This shard has no test results, so it runs the STATIC half
   # (the tests exist, run, and assert the byte comparison); the JUnit half — a Studio lint or DSL
   # compile that diverged from the committed bytes — runs in _service-ci.yml's "Product IR authoring
-  # parity (JUnit half)" step of the products / product-catalog module jobs, where the reports exist.
+  # parity (JUnit half)" step of the products / product-catalog module jobs, where the reports exist,
+  # and that step is ENFORCED (--enforce): a byte mismatch is decidable. This static shard stays
+  # advisory until the rule's target_enforce_date (ADR-0352 §8).
   - id: product-ir-authoring-parity
     name: "committed product IR equals the DSL, and the CLI, MCP and Studio surfaces yield the same bytes (ADR-0352, advisory)"
     group: kotlin
