@@ -35,7 +35,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: dispute-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-dispute-service:sandbox-78902925@sha256:8cbf8fb3af6f949e8b8ed571789792eb2b8bca9a327d3c8a2d4fbe1501a6ac60
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-dispute-service:sandbox-63c95a17@sha256:c5fef62680553582ee5fa2f2b6ce2dd2ea96528e473d46a33ba5b164450b1b10
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8135}
