@@ -191,41 +191,41 @@ def findings(root: pathlib.Path) -> tuple[list[str], list[str]]:
     return f, names
 
 
-def junit_findings(junit_dir: pathlib.Path, names: list[str]) -> list[str]:
-    f: list[str] = []
-    reports = list(junit_dir.glob(f"TEST-*{TEST_CLASS}.xml"))
+def junit_verdicts(junit_dir: pathlib.Path, cls: str) -> dict[str, str] | None:
+    """Verdict per test case of `cls` in a Gradle JUnit dir: `passed`, `failure`, `error` or `skipped`
+    (a skip is not a pass); None when there is no report for the class. ONE reader for both halves."""
+    reports = list(junit_dir.glob(f"TEST-*{cls}.xml"))
     if not reports:
-        return [f"{junit_dir}: no JUnit report for {TEST_CLASS} — the JVM half did not run"]
-    passed: set[str] = set()
-    for r in reports:
-        for case in ET.parse(r).getroot().iter("testcase"):
-            if case.find("failure") is None and case.find("error") is None and case.find("skipped") is None:
-                passed.add(case.get("name", ""))
-    for n in names:
-        if n not in passed:
-            f.append(f"{TEST_CLASS}: no passed dynamic case for product '{n}'")
-    return f
-
-
-def studio_junit_findings(junit_dir: pathlib.Path) -> list[str]:
-    """The Studio half's JUnit report: both byte-parity cases present and PASSED (a skip is not a pass)."""
-    reports = list(junit_dir.glob(f"TEST-*{STUDIO_CLASS}.xml"))
-    if not reports:
-        return [f"{junit_dir}: no JUnit report for {STUDIO_CLASS} — the Studio half did not run"]
+        return None
     verdicts: dict[str, str] = {}
     for r in reports:
         for case in ET.parse(r).getroot().iter("testcase"):
-            name = case.get("name", "")
             bad = next((tag for tag in ("failure", "error", "skipped") if case.find(tag) is not None), None)
-            verdicts[name] = bad or "passed"
-    out: list[str] = []
-    for wanted in STUDIO_CASES:
-        # Exact: JUnit 5 names a method `<display name>()`; a renamed or prefixed case is not this one.
-        got = verdicts.get(wanted, verdicts.get(f"{wanted}()"))
-        if got != "passed":
-            out.append(f"{STUDIO_CLASS}: '{wanted}' {got or 'absent'} — the Studio lint's canonical bytes are not "
-                       "proven equal to the committed IR")
-    return out
+            verdicts[case.get("name", "")] = bad or "passed"
+    return verdicts
+
+
+def verdict_of(verdicts: dict[str, str], wanted: str) -> str | None:
+    """EXACT match: Gradle names a dynamic test by its display name (`savings-fixed`) and a method test
+    `<display name>()`; a renamed, prefixed or suffixed case (`savings-fixed-v2`) is not this one."""
+    return verdicts.get(wanted, verdicts.get(f"{wanted}()"))
+
+
+def junit_findings(junit_dir: pathlib.Path, names: list[str]) -> list[str]:
+    verdicts = junit_verdicts(junit_dir, TEST_CLASS)
+    if verdicts is None:
+        return [f"{junit_dir}: no JUnit report for {TEST_CLASS} — the JVM half did not run"]
+    return [f"{TEST_CLASS}: product '{n}' {verdict_of(verdicts, n) or 'absent'} — no passed dynamic case"
+            for n in names if verdict_of(verdicts, n) != "passed"]
+
+
+def studio_junit_findings(junit_dir: pathlib.Path) -> list[str]:
+    """The Studio half's JUnit report: both byte-parity cases present and PASSED."""
+    verdicts = junit_verdicts(junit_dir, STUDIO_CLASS)
+    if verdicts is None:
+        return [f"{junit_dir}: no JUnit report for {STUDIO_CLASS} — the Studio half did not run"]
+    return [f"{STUDIO_CLASS}: '{w}' {verdict_of(verdicts, w) or 'absent'} — the Studio lint's canonical bytes "
+            "are not proven equal to the committed IR" for w in STUDIO_CASES if verdict_of(verdicts, w) != "passed"]
 
 
 def run(root: pathlib.Path, junit: pathlib.Path | None, enforce: bool,
