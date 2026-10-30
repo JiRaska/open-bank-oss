@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.26.1...interest-service-v0.27.0) (2026-10-30)
+
+
+### Features
+
+* **interest:** product-IR shadow comparator, shadow mode only (ADR-0352 phase 3) ([#14174](https://github.com/JiRaska/open-bank-oss/issues/14174)) ([b0ad31a](https://github.com/JiRaska/open-bank-oss/commit/b0ad31a4250e8a9ca79d99105ead97a9fa7694f4))
+
 ## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.26.0...interest-service-v0.26.1) (2026-10-26)
 
 
