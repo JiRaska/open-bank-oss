@@ -29,7 +29,7 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 /**
- * `deal_posting_intent` (V27, #13883). Completion is not here: [com.openbank.treasury.infrastructure
+ * `deal_posting_intent` (V31, #13883). Completion is not here: [com.openbank.treasury.infrastructure
  * .persistence.repository.DealRepositoryImpl.save] completes the intent in the transaction that
  * stores the state change and the journal.
  */

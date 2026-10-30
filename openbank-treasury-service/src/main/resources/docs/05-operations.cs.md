@@ -112,7 +112,7 @@ Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
   zpět, žurnál se přesto započítá, ale den čeká na potvrzení odpovídajícího přechodu. Opakování účtuje pod stejným idempotentním klíčem, dostane zpět
   původní žurnál a najde ho zapsaný.
 - **Záměry zaúčtování (#13883).** Před voláním ledgeru zapíšou vypořádání, splatnost a storno řádek
-  `deal_posting_intent` (V27) s idempotentním klíčem žurnálu. Uložení obchodu ho dokončí v transakci
+  `deal_posting_intent` (V31) s idempotentním klíčem žurnálu. Uložení obchodu ho dokončí v transakci
   změny stavu. Otevřený záměr znamená, že ledger může držet žurnál, který treasury nepromítlo, a proto
   pozdrží svůj den hodnoty. `PostingIntentReconcileScheduler` (každých 5 minut) si zabere záměry starší
   než `openbank.treasury.posting-intent.grace` (`FOR UPDATE SKIP LOCKED` a zápůjčka, takže dva pody

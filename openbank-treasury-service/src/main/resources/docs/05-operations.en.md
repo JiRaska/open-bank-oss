@@ -119,7 +119,7 @@ admits under `ledger.close.participate` for this participant only.
   the journal is still counted, but the day is held until its lifecycle transition commits. A retry posts under the same idempotency key, gets the original journal
   back, and finds it recorded.
 - **Posting intents (#13883).** Before contacting the ledger, settle, mature and reverse write a
-  `deal_posting_intent` row (V27) keyed by the journal's idempotency key. The deal save completes it in
+  `deal_posting_intent` row (V31) keyed by the journal's idempotency key. The deal save completes it in
   the transaction of the state change. An OPEN intent means the ledger may hold a journal treasury has
   not applied, so it holds its value day. `PostingIntentReconcileScheduler` (every 5 minutes) claims
   intents older than `openbank.treasury.posting-intent.grace` (`FOR UPDATE SKIP LOCKED` plus a lease,

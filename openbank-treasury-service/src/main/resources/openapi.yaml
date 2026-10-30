@@ -55,7 +55,7 @@ info:
   #         /portfolio/statements (custodian semt.002; a correction supersedes, the prior version is
   #         kept), GET /portfolio/statements?date= (the version trail) and GET
   #         /portfolio/period-end?date= (tax-reporting's PSP 34-12 PS source; 409 when no statement).
-  version: 1.23.0
+  version: 1.24.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
