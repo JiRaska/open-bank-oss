@@ -146,7 +146,10 @@ class RevisionBehaviourDiffService(private val catalog: GenericCatalogService, p
         fun decimal(tree: Any?, at: String): BigDecimal {
             val text = when (tree) {
                 is String -> tree
-                is BigDecimal -> tree.toPlainString().takeIf { tree.scale() in 0..MAX_SCALE }
+                // Bound BEFORE rendering: toPlainString() of 1E+999999 is a million digits.
+                is BigDecimal -> tree.takeIf {
+                    it.scale() in 0..MAX_SCALE && it.precision() - it.scale() <= MAX_INTEGER_DIGITS
+                }?.toPlainString()
                 is Number -> tree.toString()
                 else -> null
             }

@@ -138,6 +138,8 @@ class BehaviourDiffContractTest {
                 base = revisionId,
             ),
             diffRequest(PORTFOLIO, "2026-01-01", "2026-01-31", base = revisionId, threshold = "1e999999"),
+            // The same as a JSON NUMBER (decoded to BigDecimal), not a string.
+            diffRequest(PORTFOLIO.replace("\"20000.00\"", "1E+999999"), "2026-01-01", "2026-01-31", base = revisionId),
             diffRequest(tooLong, "1900-01-01", "2200-01-01", base = revisionId),
         ).forEach { bad ->
             Given {
