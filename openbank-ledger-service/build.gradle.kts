@@ -62,6 +62,19 @@ dependencies {
 }
 
 kover {
+    currentProject {
+        instrumentation {
+            // Kover otherwise wires every Test task into koverVerify, so `build` would run these
+            // opt-in FINREP replay tasks, which need -Dfinrep.* inputs and fail with
+            // "Required value was null". Keep them explicit, like providerPactTest.
+            disabledForTestTasks.addAll(
+                "historicalFinrepPactTest",
+                "controlledFinrepOrderPactTest",
+                "hostedHistoricalFinrepPactTest",
+                "hostedHistoricalFinrepPublish",
+            )
+        }
+    }
     reports {
         filters {
             excludes {
