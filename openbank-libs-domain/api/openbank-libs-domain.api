@@ -4402,6 +4402,13 @@ public final class com/openbank/libs/product/replay/BehaviourDiff {
 	public final fun getValid ()Z
 }
 
+public final class com/openbank/libs/product/replay/BehaviourDiffInputs {
+	public static final field INSTANCE Lcom/openbank/libs/product/replay/BehaviourDiffInputs;
+	public final fun amount (Ljava/lang/Object;Ljava/lang/String;)Ljava/math/BigDecimal;
+	public final fun options (Ljava/lang/Object;)Lcom/openbank/libs/product/replay/DiffOptions;
+	public final fun range (Lcom/openbank/libs/product/replay/ReplayPortfolioJson$Parsed;Ljava/time/LocalDate;Ljava/time/LocalDate;)Lcom/openbank/libs/product/replay/ReplayRange;
+}
+
 public final class com/openbank/libs/product/replay/CountKey : java/lang/Comparable {
 	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
 	public fun compareTo (Lcom/openbank/libs/product/replay/CountKey;)I
