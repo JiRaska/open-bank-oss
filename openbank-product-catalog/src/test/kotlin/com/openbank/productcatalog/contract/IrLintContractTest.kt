@@ -71,6 +71,19 @@ class IrLintContractTest {
     }
 
     @Test
+    @TestSecurity(user = "test-reader", roles = ["CATALOG_SCOPE_READ"])
+    fun `a read-only caller is refused with 403`() {
+        Given {
+            contentType("application/json")
+            body("""{"ir":{"irVersion":1,"productCode":"X","currency":"EUR","hooks":{}}}""")
+        } When {
+            post("/api/v2/product-ir/lint")
+        } Then {
+            statusCode(403)
+        }
+    }
+
+    @Test
     fun `every committed reference IR lints to its own bytes and hash`() {
         val files = Files.list(IR_DIR).use { s -> s.filter { it.toString().endsWith(".json") }.sorted().toList() }
         assertThat(files).describedAs("committed IR under $IR_DIR").isNotEmpty()
