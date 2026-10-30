@@ -8,7 +8,8 @@
 # restarts its required checks. A deploy they DEFER stays open and unarmed — this workflow is
 # what lands it. A workflow_run trigger handles new PRs and the schedule recovers missed runs.
 # Each run offers the newest PR of each deploy kind, longest-waiting kind first, once the window
-# has elapsed and nothing else is armed, re-runs supersede-deploy-prs.sh on it (ancestry + coverage
+# has elapsed and nothing of that kind is armed (each kind is an independent lane with its own
+# window), re-runs supersede-deploy-prs.sh on it (ancestry + coverage
 # — a rollback PR is refused, never armed; any refused kind falls through to the next), and arms auto-merge with the same App token the deploy
 # workflows use. A successful manual dispatch of either producer expedites only its matching PR.
 # An open PR labelled merge-priority:repair defers new arming, including manual expedition.
