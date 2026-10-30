@@ -52,9 +52,12 @@ test-key signature verifies nowhere a deployment trusts.
 loopback; bearer token from `OBP_TOKEN`), and it never publishes — publishing is a human, four-eyes
 catalog action (ADR-0259). This is the CLI's only network call.
 
-`diff --behavioural` is the repricing backtest shipped with phase 2. The multi-account
-`ProductBehaviourDiff` of phase 4 lives in openbank-libs-testing and `obp diff` is rewired to it
-once that lands.
+`diff --behavioural` is the repricing backtest. It prints the `ProductBehaviourDiff` document
+(openbank-libs-domain, schema `product-ir/behaviour-diff.v1.schema.json`) unchanged, the same object
+the Studio approval panel shows. Postings in the portfolio fixture become customer movements; the
+replay runs each revision's own `onOpen` schedules. `--from`/`--to` set the calendar (default:
+earliest `openedOn` through the last fixture step) and `--threshold` the materiality threshold. Exit
+1 if a replay did not conserve money, which is an interpreter defect, not a result.
 
 Everything runs offline against the one pure interpreter in `openbank-libs-domain`; output is
 canonical JSON. Rates, fees and thresholds in the reference products are illustrative shapes, not

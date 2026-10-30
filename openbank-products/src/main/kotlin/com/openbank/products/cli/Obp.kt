@@ -15,6 +15,7 @@ import com.openbank.libs.product.ir.ProductIrCanonical
 import com.openbank.libs.product.ir.ProductIrParser
 import com.openbank.libs.product.ir.ProductIrValidationException
 import com.openbank.libs.product.ir.ProductRevisionIr
+import com.openbank.libs.product.replay.DiffOptions
 import com.openbank.libs.product.toolkit.ProductInputException
 import com.openbank.libs.product.toolkit.ProductToolkit
 import com.openbank.libs.productrevision.HmacIrSigner
@@ -55,7 +56,7 @@ import kotlin.system.exitProcess
  *                                                          identity-bound envelope signature, OFFLINE TEST KEY only
  * obp propose  <product|ir.json> --offering <uuid> --schema-id <id> --schema-version <n>
  *              [--execute --catalog-url URL]              plan (or create) a DRAFT revision; never publishes
- * obp diff     <revA.json> <revB.json> --behavioural --portfolio <fixture.json>
+ * obp diff     <revA.json> <revB.json> --behavioural --portfolio <fixture.json> [--from D] [--to D] [--threshold X]
  *                                                          per-rule posting deltas over a portfolio
  * ```
  *
@@ -131,7 +132,8 @@ object Obp {
     private fun usage(err: Appendable): Int {
         err.appendLine(
             "usage: obp lint <ir.json|product> | compile <product|all> [--out DIR] [--check] | test | " +
-                "diff <revA.json> <revB.json> --behavioural --portfolio <fixture.json> | " +
+                "diff <revA.json> <revB.json> --behavioural --portfolio <fixture.json> " +
+                "[--from D] [--to D] [--threshold X] | " +
                 "simulate <product> --portfolio <fixture.json> [--from ISO] [--to ISO] | " +
                 "explain <product> --rule <ruleId> | explain <product> --instruction <json> | " +
                 "explain <ruleId> [--product <name>] | " +
@@ -254,7 +256,8 @@ object Obp {
     // --- diff --behavioural --------------------------------------------------------------------
 
     private fun diff(args: List<String>, out: Appendable, err: Appendable): Int {
-        val files = args.filterIndexed { i, a -> !a.startsWith("--") && args.getOrNull(i - 1) != "--portfolio" }
+        val valued = setOf("--portfolio", "--from", "--to", "--threshold")
+        val files = args.filterIndexed { i, a -> !a.startsWith("--") && args.getOrNull(i - 1) !in valued }
         val portfolio = option(args, "--portfolio")
         val problem = when {
             "--behavioural" !in args -> "diff supports --behavioural only (structural diff is the catalog's)"
@@ -263,16 +266,37 @@ object Obp {
             else -> null
         }
         if (problem != null) usageError(problem)
+        val (from, to, options) = diffWindow(args)
         val a = loadRevision(files[0])
         val b = loadRevision(files[1])
-        val report = BehaviouralDiff.run(a, b, readInput(Path.of(portfolio!!), "portfolio"))
-        emit(out, report)
-        if (report["changedRules"] !=
-            0
-        ) {
-            err.appendLine("obp diff: ${report["changedRules"]} rule(s) post differently; see per-rule deltas")
+        val report = BehaviouralDiff.run(a, b, readInput(Path.of(portfolio!!), "portfolio"), from, to, options)
+        out.appendLine(report.canonicalJson)
+        if (!report.valid) {
+            err.appendLine("obp diff: a replay did not conserve money; this is an interpreter defect, not a result")
+            return EXIT_FAILURE
+        }
+        if (!report.identical) {
+            err.appendLine("obp diff: ${report.tree["changedAccounts"]} account(s) differ between the revisions")
         }
         return EXIT_OK
+    }
+
+    /** `--from`/`--to`/`--threshold` of `diff`; every malformed value is a usage error. */
+    private fun diffWindow(args: List<String>): Triple<java.time.LocalDate?, java.time.LocalDate?, DiffOptions> {
+        val from = option(args, "--from")?.let { date(it, "--from") }
+        val to = option(args, "--to")?.let { date(it, "--to") }
+        if (from != null && to != null && to.isBefore(from)) usageError("--to $to precedes --from $from")
+        val threshold = option(args, "--threshold")?.let {
+            it.toBigDecimalOrNull()?.takeIf { t -> t.signum() >= 0 }
+                ?: usageError("--threshold must be a non-negative decimal, not '$it'")
+        }
+        return Triple(from, to, threshold?.let { DiffOptions(it) } ?: DiffOptions())
+    }
+
+    private fun date(text: String, name: String): java.time.LocalDate = try {
+        java.time.LocalDate.parse(text)
+    } catch (e: java.time.format.DateTimeParseException) {
+        usageError("$name must be an ISO date (YYYY-MM-DD), not '$text'")
     }
 
     // --- explain ------------------------------------------------------------------------------

@@ -92,7 +92,7 @@ class ObpCliTest {
     }
 
     @Test
-    fun `diff --behavioural reports per-rule posting deltas over a portfolio and nothing for identical revisions`(
+    fun `diff --behavioural renders the shared ProductBehaviourDiff over a portfolio, deterministically`(
         @TempDir dir: Path,
     ) {
         val a = dir.resolve("a.json")
@@ -106,18 +106,21 @@ class ObpCliTest {
             ).replace("\"amount\":\"2.0000\"", "\"amount\":\"4.0000\"").replace("0.0250000000", "0.0350000000"),
         )
         val portfolio = Path.of("portfolios", "savings-sample.json").toString()
+        val args = arrayOf("diff", a.toString(), b.toString(), "--behavioural", "--portfolio", portfolio)
 
-        val (code, out, err) = run("diff", a.toString(), b.toString(), "--behavioural", "--portfolio", portfolio)
+        val (code, out, err) = run(*args)
         assertThat(code).isEqualTo(Obp.EXIT_OK)
         val report = json(out)
-        assertThat(report["accounts"].toString()).isEqualTo("3")
-        assertThat(report["changedRules"].toString()).isNotEqualTo("0")
-        // The fee doubles (-2.00 per charge) and the capitalised interest grows; the accrual itself never touches
-        // the customer deposit, so interest.base is NOT a changed rule even though its amounts differ.
-        assertThat(out).contains("\"ruleId\":\"scheduled.fee\"", "\"customerDepositDelta\":\"-2.000000000000\"")
-        assertThat(out).contains("\"ruleId\":\"scheduled.capitalise\"")
-        assertThat(out).doesNotContain("\"ruleId\":\"interest.base\"")
-        assertThat(err).contains("post differently")
+        // The CLI prints ProductBehaviourDiff's own document (schema v1), not a CLI-local rendering.
+        assertThat(report["schema"]).isEqualTo("openbank.product-behaviour-diff.v1")
+        assertThat(report["valid"]).isEqualTo(true)
+        assertThat(report["identical"]).isEqualTo(false)
+        assertThat(
+            out,
+        ).contains("\"accounts\":3", "\"ruleId\":\"scheduled.fee\"", "\"ruleId\":\"scheduled.capitalise\"")
+        assertThat(err).contains("differ")
+        // Same input, same bytes: the report is the approval artefact, so it must be reproducible.
+        assertThat(run(*args).second).isEqualTo(out)
 
         val (same, sameOut, sameErr) = run(
             "diff",
@@ -128,8 +131,16 @@ class ObpCliTest {
             portfolio,
         )
         assertThat(same).isEqualTo(Obp.EXIT_OK)
-        assertThat(json(sameOut)["changedRules"].toString()).isEqualTo("0")
+        assertThat(json(sameOut)["identical"]).isEqualTo(true)
         assertThat(sameErr).isEmpty()
+
+        // An explicit range and threshold are honoured; nonsense ones are usage errors.
+        val ranged = json(run(*args, "--from", "2026-01-01", "--to", "2026-03-31", "--threshold", "0.50").second)
+        assertThat(ranged["range"].toString()).contains("from=2026-01-01", "to=2026-03-31")
+        assertThat(ranged["materialityThreshold"]).isEqualTo("0.500000000000")
+        assertThat(run(*args, "--from", "2026-02-01", "--to", "2026-01-01").first).isEqualTo(Obp.EXIT_USAGE)
+        assertThat(run(*args, "--threshold", "-1").first).isEqualTo(Obp.EXIT_USAGE)
+        assertThat(run(*args, "--from", "monday").first).isEqualTo(Obp.EXIT_USAGE)
 
         assertThat(run("diff", a.toString(), b.toString()).first).isEqualTo(Obp.EXIT_USAGE)
         assertThat(run("diff", a.toString(), "--behavioural", "--portfolio", portfolio).first).isEqualTo(Obp.EXIT_USAGE)
