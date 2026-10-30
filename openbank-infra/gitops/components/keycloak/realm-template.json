@@ -1062,7 +1062,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "secret": "__ACCOUNT_CLIENT_SECRET__"
     },
@@ -1708,6 +1709,27 @@
       "secret": "__SYNTHETIC_LEDGER_SEED_CLIENT_SECRET__"
     },
     {
+      "clientId": "agent-merge-recorder-ci",
+      "name": "OpenBank Agent Merge Recorder CI",
+      "description": "CI-only client_credentials identity for POST /api/v1/agent-merge-records. Its service account carries ROLE_MERGE_RECORDER only, never ROLE_ADMIN (ADR-0031 phase 3, #13172).",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "optionalClientScopes": [],
+      "secret": "__MERGE_RECORDER_CI_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-grafana",
       "fullScopeAllowed": false,
       "name": "Grafana (observability single pane)",
@@ -2300,6 +2322,14 @@
       "serviceAccountClientId": "openbank-synthetic-ledger-seed",
       "realmRoles": [
         "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-agent-merge-recorder-ci",
+      "enabled": true,
+      "serviceAccountClientId": "agent-merge-recorder-ci",
+      "realmRoles": [
+        "ROLE_MERGE_RECORDER"
       ]
     },
     {
