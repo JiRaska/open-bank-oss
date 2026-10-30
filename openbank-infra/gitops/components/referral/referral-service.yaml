@@ -40,7 +40,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: referral-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-referral-service:sandbox-63c95a17@sha256:f3193db2c18a5f0333595e3abf12bb2055723f613e59a2543cdcd58681d94911
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-referral-service:sandbox-6872893a@sha256:8bf9c0b71f783243e2d81b809d4cdc3055d367835a8fc9889c28dca4bd84b5f5
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
