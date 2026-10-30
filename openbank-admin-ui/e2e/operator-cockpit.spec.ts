@@ -135,7 +135,7 @@ test('regulatory preview blocks fiction: it shows real FINREP cells and no submi
     await page.waitForTimeout(250)
     return [before, await disclosure.count()]
   }).toEqual([1, 1])
-  await expect(disclosure).toHaveAccessibleName(/CNB — Finanční výkazy.*(?:Rozbalit detail|Expand details)/)
+  await expect(disclosure).toHaveAccessibleName(/CNB — (?:Finanční výkazy|Financial statements).*(?:Rozbalit detail|Expand details)/)
   await disclosure.focus()
   await page.keyboard.press('Enter')
   await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
