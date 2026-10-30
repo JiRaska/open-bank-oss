@@ -4,17 +4,22 @@
 
 package com.openbank.account.infrastructure.persistence.repository
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.account.application.port.out.AccountOutboxRepository
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.usecase.AccountUpdateConflictException
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.CurrencyPocket
+import com.openbank.account.domain.model.ProductRevisionPin
 import com.openbank.account.domain.model.SigningRule
 import com.openbank.account.infrastructure.persistence.entity.AccountEntity
 import com.openbank.account.infrastructure.persistence.entity.AccountIdempotencyEntity
 import com.openbank.libs.domain.account.Iban
+import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
@@ -47,6 +52,8 @@ class AccountRepositoryImpl(
     internal val clock: Clock,
     private val idempotencyRepository: AccountIdempotencyRepository,
     private val pocketRepository: CurrencyPocketRepositoryImpl,
+    private val outboxRepository: AccountOutboxRepository,
+    private val objectMapper: ObjectMapper,
 ) : AccountRepository,
     PanacheRepository<AccountEntity> {
 
@@ -130,6 +137,7 @@ class AccountRepositoryImpl(
         primaryPocket: CurrencyPocket,
         idempotencyKey: String,
         requestHash: String?,
+        createdEvent: (Account) -> DomainEvent,
     ): Account {
         val entity = account.toEntity()
         // Audit timestamps come from the injected Clock here, same as save() (ADR-0100 / #540):
@@ -146,9 +154,25 @@ class AccountRepositoryImpl(
             persist(entity)
                 .flatMap { pocketRepository.persistInTransaction(primaryPocket) }
                 .flatMap { idempotencyRepository.persistInTransaction(idempotencyKey, entity.id, requestHash) }
+                .flatMap { outboxRepository.persistInTransaction(outboxMessage(createdEvent(entity.toDomain()))) }
                 .replaceWith(entity)
         }.awaitSuspending().toDomain()
     }
+
+    private fun outboxMessage(event: DomainEvent) = OutboxMessage(
+        aggregateId = event.aggregateId,
+        eventType = event.eventType,
+        payload = objectMapper.writeValueAsString(event),
+        createdAt = clock.instant(),
+    )
+
+    /**
+     * Accounts not CLOSED that carry no product-revision pin (ADR-0341 D1): every one opened before
+     * V33, awaiting the documented backfill. Read-only; served by idx_accounts_unpinned_product_revision.
+     */
+    suspend fun countUnpinnedNotClosed(): Long = Panache.withSession {
+        count("productRevisionId is null and status <> ?1", AccountStatus.CLOSED.name)
+    }.awaitSuspending()
 
     override suspend fun findIdempotencyRequestHash(idempotencyKey: String): String? = Panache.withSession {
         idempotencyRepository.find("idempotencyKey", idempotencyKey).firstResult()
@@ -261,7 +285,23 @@ private fun AccountEntity.toDomain() = Account(
     termsVersion = termsVersion,
     termsUrl = termsUrl,
     termsEffectiveFrom = termsEffectiveFrom,
+    productRevisionPin = productRevisionPinOrNull(),
 )
+
+// Whole or absent, as chk_accounts_product_revision_pin_whole guarantees for the row.
+private fun AccountEntity.productRevisionPinOrNull(): ProductRevisionPin? {
+    val revisionId = productRevisionId ?: return null
+    return ProductRevisionPin(
+        offeringId = checkNotNull(productOfferingId) { "pinned account $id has no offering id" },
+        productCode = checkNotNull(productRevisionProductCode) { "pinned account $id has no product code" },
+        revisionId = revisionId,
+        revisionNumber = checkNotNull(productRevisionNumber) { "pinned account $id has no revision number" },
+        contentHash = productRevisionContentHash,
+        irRevisionHash = productRevisionIrHash,
+        irVersion = productRevisionIrVersion,
+        pinnedAt = checkNotNull(productRevisionPinnedAt) { "pinned account $id has no pinnedAt" },
+    )
+}
 
 private fun Account.toEntity() = AccountEntity().also {
     it.id = id
@@ -285,4 +325,14 @@ private fun Account.toEntity() = AccountEntity().also {
     it.termsVersion = termsVersion
     it.termsUrl = termsUrl
     it.termsEffectiveFrom = termsEffectiveFrom
+    productRevisionPin?.let { pin ->
+        it.productRevisionId = pin.revisionId
+        it.productRevisionNumber = pin.revisionNumber
+        it.productOfferingId = pin.offeringId
+        it.productRevisionProductCode = pin.productCode
+        it.productRevisionContentHash = pin.contentHash
+        it.productRevisionIrHash = pin.irRevisionHash
+        it.productRevisionIrVersion = pin.irVersion
+        it.productRevisionPinnedAt = pin.pinnedAt
+    }
 }

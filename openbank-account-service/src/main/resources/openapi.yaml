@@ -19,7 +19,10 @@ info:
   # 1.20 -> 1.21 (#11588): additive — approval responses expose verified makerActorKind.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 1.23.0
+  # 1.23 -> 1.24 (ADR-0341 D1, #668): additive — the Account response exposes the optional
+  # productRevision pin (absent on accounts opened before it existed); open-account documents
+  # 422 PRODUCT_REVISION_NOT_PUBLISHED and 503 PRODUCT_CATALOG_UNAVAILABLE (fail-closed on the pin).
+  version: 1.24.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -90,11 +93,14 @@ paths:
             Well-formed request refused by policy — e.g. product not eligible
             (BUSINESS_RULE_VIOLATION) or sanctions screening refused the opening
             (ACCOUNT_OPENING_BLOCKED). The screening-refusal body deliberately names
-            neither the matched name nor the party (#8512).
+            neither the matched name nor the party (#8512). PRODUCT_REVISION_NOT_PUBLISHED
+            when the product has no published catalog revision to pin (ADR-0341 D1).
         '503':
           description: >
-            Sanctions screening temporarily unavailable; the opening gate fails
-            closed (ADR-0032 §C). Safe to retry after the Retry-After interval.
+            Sanctions screening (SCREENING_UNAVAILABLE) or the product catalog
+            (PRODUCT_CATALOG_UNAVAILABLE) temporarily unavailable; both gates fail
+            closed (ADR-0032 §C, ADR-0341 D1) and nothing is persisted. Safe to retry
+            after the Retry-After interval.
           headers:
             Retry-After:
               schema:
@@ -1459,6 +1465,41 @@ components:
           type: string
           format: date
           nullable: true
+        productRevision:
+          $ref: '#/components/schemas/ProductRevisionPin'
+
+    ProductRevisionPin:
+      type: object
+      description: >
+        The published product-catalog revision the account was opened under (ADR-0341 D1).
+        Immutable. Absent on accounts opened before the pin existed (not yet backfilled).
+      required: [offeringId, productCode, revisionId, revisionNumber, pinnedAt]
+      properties:
+        offeringId:
+          type: string
+          format: uuid
+        productCode:
+          type: string
+        revisionId:
+          type: string
+          format: uuid
+        revisionNumber:
+          type: integer
+          format: int64
+          minimum: 1
+        contentHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        irRevisionHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Canonical product-IR hash the catalog signed (ADR-0352 §4); absent for a revision without IR.
+        irVersion:
+          type: integer
+          description: Product-IR version; present exactly when irRevisionHash is.
+        pinnedAt:
+          type: string
+          format: date-time
 
     RenameAccountRequest:
       type: object
