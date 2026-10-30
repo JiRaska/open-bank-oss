@@ -4,7 +4,7 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 -->
 # Threat model — account-service
 
-- **Date:** 2026-05-30
+- **Date:** 2026-10-29
 - **Status:** Lightweight STRIDE/DFD (ADR-0030 D2). Money-path bounded context.
 - **Service ADR:** see `docs/adr/` (account lifecycle); platform controls per ADR-0029/0030/0034.
 
@@ -100,6 +100,18 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-29** — **Party identity is separate from the per-attempt screening key (#11694).**
+  Account opening now sends `partyId` as `subjectId` while retaining
+  `account-open:<partyId>:<idempotencyKey>` only as the attempt's replay key. This lets a new
+  attempt use a valid compliance clearance without reusing a stale `CLEAR`. sanctions-service
+  still freshly screens every new key: its 90-day `WHITELISTED` clearance covers only exactly the
+  same subject attributes and reviewed match identities, so a changed subject, expired decision or
+  new uncovered hit remains blocking. Identical account idempotency keys retain the existing
+  replay contract. **Tampering/elevation:** the caller cannot borrow another party's clearance by
+  copying its screening key; the explicit party binding and sanctions-service's exact-subject
+  comparison are the control. No new endpoint, privilege or trust boundary. Rollback: revert both
+  services together; do not deploy an account writer that sends `subjectId` ahead of a sanctions
+  reader that persists it if clearance retry is being relied upon.
 - **2026-10-17** — **`TransactionServiceClient` is now GENERATED from transaction-service's `openapi.yaml` (ADR-0319).** The hand-written interface and DTOs were replaced by a sub-interface of the client built in `openbank-client-transaction`; the welcome-bonus credit keeps its request fields; the response is now the spec's `TransactionResponse` (only `id` and `status` are read elsewhere). **STRIDE-T/S (trust boundary):** the outbound call is the same route, the same NAMED oidc-client `m2m` (Keycloak client `openbank-account`) and the same `SyntheticTaintClientFilter` registration, pinned by the existing `M2mOidcClientIdentityWiringTest`-style wiring assertions and by the consumer pact (literal `/api/v1/transactions`, replayed by transaction-service's `@PactFolder` class). What changes is where the request/response types come from: the provider's own spec, so a spec change now fails this service's compile instead of production, and the request carries the spec's full optional field set serialised as `null` (transaction-service ignores them). No new credential, no new scope, no new network path. Rollback: revert the commit (the hand-written client returns).
 - **2026-10-15** — **product-catalog gets an OPA sidecar (issue #12823).** product-catalog (same `accounts` namespace) had no `PolicyDecisionPoint` bean, so its `@Authorize` points logged "no PolicyDecisionPoint bean" per request and enforcement could never be switched on. Its pod now runs an `opa` sidecar on `localhost:8181` with the generated `product-catalog-opa-bundle` (base `rest.rego` + `product_catalog_rest_ext.rego`), and the libs-runtime PDP producer is enabled. **Elevation:** none — `AUTHZ_ENFORCE` stays `false`, so a deny is logged and the request proceeds, and `@RolesAllowed` remains the enforcing gate exactly as before. The new reasons grant human `ROLE_VIEWER` reads, the named synthetic catalog-read journey with `CATALOG_SCOPE_READ`, and authoring/publishing for human staff only; `ROLE_API` alone grants no catalog read, and API callers require an existing named, scoped grant (such as the pension service with `CATALOG_SCOPE_READ`), with every `service-account-*` and `agent:` principal excluded from catalog authoring/publishing (so the edge client's `ROLE_OPERATOR` reaches no catalog write). The synthetic client gains the `profile` scope so its `principal.id` resolves on a cold-started realm. **Spoofing / tampering:** no new ingress — the app container reaches OPA over loopback; OPA decision and management APIs bind only `127.0.0.1:8181`; kubelet probes use the separate read-only diagnostic listener on `0.0.0.0:8282`, so other pods cannot reach the decision API. No NetworkPolicy edge was added. account-service's own call to product-catalog is unchanged and remains fail-open (ADR-0158). Rollback: remove the sidecar and the producer opt-in; the service returns to the no-PDP advisory branch.
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `account_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
