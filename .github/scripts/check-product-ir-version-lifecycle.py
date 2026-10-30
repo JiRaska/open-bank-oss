@@ -85,7 +85,12 @@ def base_text(root: pathlib.Path, base: str) -> str | None:
     git = ["git", "-C", str(root)]
     if subprocess.run(git + ["rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"], capture_output=True).returncode:
         raise BaseUnreadable(f"base {base!r} is not a commit in this clone")
-    if subprocess.run(git + ["cat-file", "-e", f"{base}:{IR_KT}"], capture_output=True).returncode:
+    # Absence is decided by ls-tree alone: exit 0 with no entry is "absent"; any non-zero exit (an
+    # unreadable tree, a missing object) is a failure to look, never evidence that the file is gone.
+    ls = subprocess.run(git + ["ls-tree", "-z", base, "--", IR_KT], capture_output=True)
+    if ls.returncode:
+        raise BaseUnreadable(f"git ls-tree {base} failed: {ls.stderr.decode(errors='replace').strip()}")
+    if not ls.stdout:
         return None
     r = subprocess.run(git + ["show", f"{base}:{IR_KT}"], capture_output=True, text=True)
     if r.returncode:
@@ -214,6 +219,23 @@ def self_test() -> int:
             rc = run(root, "HEAD", "", "")
         if rc != 0 or "absent" not in buf.getvalue():
             failures.append(f"a real base without the file: exit {rc}, output:\n{buf.getvalue()}")
+        # A real commit whose tree object is missing (a broken or partial clone): git fails for a reason
+        # other than absence, and that must fail closed rather than read as "the file is not there".
+        broken = root / "broken"
+        _fixture(broken, v12, "V1", [1])
+        subprocess.run(["git", "init", "-q", str(broken)], check=True)
+        subprocess.run(["git", "-C", str(broken), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(broken), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false",
+                        "commit", "-q", "-m", "base"], check=True)
+        tree = subprocess.run(["git", "-C", str(broken), "rev-parse", "HEAD^{tree}"], capture_output=True, text=True,
+                              check=True).stdout.strip()
+        (broken / ".git" / "objects" / tree[:2] / tree[2:]).unlink()
+        ran.append("a base whose tree git cannot read fails closed")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = run(broken, "HEAD", "", "")
+        if rc != 1 or "::error::" not in buf.getvalue():
+            failures.append(f"a base whose tree git cannot read: exit {rc}, output:\n{buf.getvalue()}")
     os.environ.update(saved)
     case("adding a version needs no marker", 0, "OK", v12, "V1, V2", [1, 2], "V1", "feat(libs): add v2")
     for f in failures:

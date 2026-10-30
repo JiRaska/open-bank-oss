@@ -7255,7 +7255,7 @@ gates:
     mode: advisory
     rationale: "A property test that is deleted, @Disabled or narrowed to a hand-picked list reads like a passing one; the JVM half runs in the module CI lane, this half keeps its scope and assertions present."
     review_after: "2027-04-30"
-    verified: "2026-10-29 — PRESENCE only, per named test: each of 6 assertion groups (5 properties + the HALF_UP pin) must sit inside its own test or helper body, so a helper definition or a known-negative cannot stand in for a deleted test; deleting any one of 8 property tests, flipping checkRates, dropping the base-rule filter, the finance scan or a golden, @Disabled, narrowing the scope and a build exclude each turn it red (--self-test, 20 cases). The JVM half was falsified separately: an unbalanced Post, a removed limit guard, System.nanoTime() in the interpreter and in DepositInterest, a falling tier, HALF_EVEN accrual and an always-true monotonicity check each turn ProductFormalPropertiesTest red"
+    verified: "2026-10-29 — PRESENCE only, per named test: each of 6 assertion groups (5 properties + the HALF_UP pin) must sit inside its own test or helper body, so a helper definition or a known-negative cannot stand in for a deleted test; deleting any one of 8 property tests, flipping checkRates, dropping the base-rule filter, the per-rule filter in interpreterAccrual, the checkRates ordering block (a 'marginal rate' literal does not satisfy it), the finance scan or a golden, @Disabled, narrowing the scope and a build exclude each turn it red (--self-test, 23 cases). The JVM half was falsified separately: an unbalanced Post, a removed limit guard, System.nanoTime() in the interpreter and in DepositInterest, a falling tier, HALF_EVEN accrual and an always-true monotonicity check each turn ProductFormalPropertiesTest red"
     budget_seconds: 10
     min_subjects: 5   # five properties at introduction (2026-10-29)
     selftest: python3 .github/scripts/check-product-ir-formal-properties.py --self-test
@@ -7271,7 +7271,7 @@ gates:
     mode: advisory
     rationale: "A published revision is pinned to its irVersion; dropping that version from IrVersion.SUPPORTED makes every such revision fail to load, so the removal must be visible as breaking and the set must stay small enough to test both members."
     review_after: "2027-04-30"
-    verified: "2026-10-29 — SUPPORTED=[1] on the real tree; three versions, a version without its schema, an empty set, an unresolvable member and a removal without `!:`/BREAKING CHANGE a pull_request with no base and an unreadable base ref each turn it red (--self-test, 15 cases); setOf(V1, 2, 3) in a copy of the real ProductIr.kt is red"
+    verified: "2026-10-29 — SUPPORTED=[1] on the real tree; three versions, a version without its schema, an empty set, an unresolvable member and a removal without `!:`/BREAKING CHANGE a pull_request with no base, an unreadable base ref and a base commit whose tree git cannot read each turn it red (--self-test, 16 cases); setOf(V1, 2, 3) in a copy of the real ProductIr.kt is red"
     budget_seconds: 10
     min_subjects: 1   # one supported irVersion at introduction (2026-10-29)
     needs_base: optional

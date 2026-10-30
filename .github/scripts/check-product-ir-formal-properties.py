@@ -58,8 +58,8 @@ PROPERTIES: dict[str, list[tuple[str, list[str]]]] = {
     "monotone-tiers": [
         ("`reference products - a higher balance never gets a lower tier rate", [r"assertMonotoneTiers\([^)]*checkRates = true"]),
         ("`generated revisions - every revision the monotonicity check passes", [r"ProductMonotonicity\.isMonotone\(", r"assertMonotoneTiers\([^)]*checkRates = true"]),
-        ("assertMonotoneTiers(", [r"\binterpreterAccrual\(", r"marginal rate", r"terms\.ruleId"]),
-        ("interpreterAccrual(", [r"\binterpreter\.evaluate\("]),
+        ("assertMonotoneTiers(", [r"\binterpreterAccrual\(", r"terms\.ruleId", r"if \(checkRates\) \{", r"\.isGreaterThanOrEqualTo\(lo\.rate\)"]),
+        ("interpreterAccrual(", [r"\binterpreter\.evaluate\(", r"\bit\.ruleId == ruleId\b"]),
     ],
     "determinism": [
         ("`generated revisions terminate within the limit", [r"InstructionCanonical\.write\(\w+\)\)\.isEqualTo\(InstructionCanonical\.write\("]),
@@ -191,7 +191,7 @@ def self_test() -> int:
         ("deleting the generated monotone test is red", "`generated revisions - every revision the monotonicity check passes", "monotone-tiers"),
         ("deleting the generated termination test is red", "`generated revisions terminate within the limit", "termination"),
         ("deleting the over-limit test is red", "`an evaluation that would exceed the instruction limit is refused", "termination"),
-        ("deleting the reference determinism factory is red", "`reference products - same input, byte-identical output", "balance-conservation"),
+        ("deleting the reference determinism factory is red", "`reference products - same input, byte-identical output", "determinism"),
         ("deleting the purity scan is red", "`the compiled interpreter package references no", "purity"),
         ("deleting the purity known-positive is red", "`the purity scan flags each ambient family", "purity"),
         ("deleting the HALF_UP golden is red", "`v1 accrual and capitalisation round HALF_UP", "half-up-rounding"),
@@ -202,6 +202,12 @@ def self_test() -> int:
     case("checkRates = false in the reference factory is red", 1, "property monotone-tiers",
          good.replace("SAMPLE_DAYS.forEach { assertMonotoneTiers(rev, it, checkRates = true) }", "SAMPLE_DAYS.forEach { assertMonotoneTiers(rev, it, checkRates = false) }"))
     case("dropping the base-rule filter is red", 1, "property monotone-tiers", good.replace("day, terms.ruleId)", "day)"))
+    case("dropping the per-rule filter in interpreterAccrual is red", 1, "property monotone-tiers",
+         good.replace(".filter { ruleId == null || it.ruleId == ruleId }\n", ""))
+    case("dropping the checkRates ordering block is red", 1, "property monotone-tiers",
+         good.replace("if (checkRates) {", "if (false) {"))
+    case("a 'marginal rate' literal does not stand in for the ordering", 1, "property monotone-tiers",
+         good.replace(".isGreaterThanOrEqualTo(lo.rate)", ".isNotNull()").replace("if (checkRates) {", "if (\"marginal rate\".isEmpty()) {"))
     case("dropping the finance scan is red", 1, "property purity", good.replace("FinanceProductArithmetic::class.java", "String::class.java"))
     case("dropping the capitalisation golden is red", 1, "property half-up-rounding", good.replace('BigDecimal("0.13")', 'BigDecimal("0.12")'))
     case("narrowing to a hand list is red", 1, "ReferenceProducts.all", good.replace("ReferenceProducts.all", "listOf(ReferenceProducts.savingsFixed)"))
