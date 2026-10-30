@@ -4783,6 +4783,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsCheck.kt"
       - "src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsEntry.kt"
       - "src/main/kotlin/com/openbank/sanctions/infrastructure/importer/EuFsfSaxParser.kt"
+      - "src/main/kotlin/com/openbank/sanctions/infrastructure/importer/CzAntiTerrorismCsvParser.kt"
       - "src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/entity/SanctionsCheckEntity.kt"
       - "src/main/resources/db/migration/V1__create_sanctions.sql"
       - "src/main/resources/db/migration/V5__create_sanctions_entries.sql"
