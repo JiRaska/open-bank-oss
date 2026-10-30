@@ -3,14 +3,14 @@
 openapi: 3.1.0
 info:
   title: Sanctions Screening Service API
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.1 -> 1.2): additive
-  # only — GET /approvals (the checker's queue, issue #3472) plus two additive fields on
-  # ApprovalResponse (makerId, createdAt). No breaking change.
+  # major == openbank.api.version == newest served URL major (ADR-0048).
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
   # 2.3.0 (#11694): optional subjectId on screen requests/results and clearanceExpiresAt on results.
-  # 2.3.0 -> 2.4.0 (#10760): additive CZ_TERRORISTS list value; no removed or changed operation.
-  version: 2.4.0
+  # 2.3.0 -> 3.0.0 (#10760): CZ_TERRORISTS is a new response enum value, so the six operations
+  # returning SanctionsCheck move to parallel /api/v3 contracts. Their /api/v1 schemas retain the
+  # original seven values throughout the deprecation window; list administration is unchanged.
+  version: 3.0.0
   # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
   # required the whole external-feed fan-out to finish inside the request, which was the defect.
   # oasdiff classifies 200 -> 202 as breaking, and a breaking change here means a new URL major:
@@ -35,6 +35,7 @@ paths:
     get:
       tags: [Sanctions]
       summary: List all sanctions checks
+      deprecated: true
       operationId: listSanctionsChecks
       responses:
         '200':
@@ -50,6 +51,7 @@ paths:
     post:
       tags: [Sanctions]
       summary: Screen an entity against all enabled sanctions lists
+      deprecated: true
       operationId: screenEntity
       requestBody:
         required: true
@@ -74,6 +76,7 @@ paths:
         Submit a manual review decision for a hit or potential hit. Subject to the four-eyes
         `clear` verb (ADR-0155) — a maker's call may be paused (202, PendingApproval) pending a
         distinct checker's decision via /approvals/{id}, then retried with an X-Approval-Id header.
+      deprecated: true
       operationId: reviewSanctionsHit
       requestBody:
         required: true
@@ -95,6 +98,7 @@ paths:
     get:
       tags: [Sanctions]
       summary: List all confirmed hits
+      deprecated: true
       operationId: listSanctionsHits
       responses:
         '200':
@@ -110,6 +114,7 @@ paths:
     get:
       tags: [Sanctions]
       summary: List potential hits awaiting manual review
+      deprecated: true
       operationId: listPendingReviews
       responses:
         '200':
@@ -125,6 +130,7 @@ paths:
     get:
       tags: [Sanctions]
       summary: Get a sanctions check by ID
+      deprecated: true
       operationId: getSanctionsCheck
       parameters:
         - name: id
@@ -140,6 +146,119 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SanctionsCheck'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v3/sanctions:
+    get:
+      tags: [Sanctions]
+      summary: List all sanctions checks, including the Czech anti-terrorism list
+      operationId: listSanctionsChecksV3
+      responses:
+        '200':
+          description: All checks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SanctionsCheckV3'
+
+  /api/v3/sanctions/screen:
+    post:
+      tags: [Sanctions]
+      summary: Screen an entity against all enabled sanctions lists
+      operationId: screenEntityV3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenEntityCommandV3'
+      responses:
+        '201':
+          description: Screening result created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SanctionsCheckV3'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v3/sanctions/review:
+    post:
+      tags: [Sanctions]
+      summary: Submit a manual review decision for a hit or potential hit
+      description: >-
+        Subject to the four-eyes `clear` verb (ADR-0155) — a maker's call may be paused (202,
+        PendingApproval) pending a distinct checker's decision via /approvals/{id}, then retried
+        with an X-Approval-Id header.
+      operationId: reviewSanctionsHitV3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewCommand'
+      responses:
+        '200':
+          description: Review recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SanctionsCheckV3'
+        '202':
+          description: Four-eyes pending — a second, distinct principal must approve via /approvals/{id}.
+
+  /api/v3/sanctions/hits:
+    get:
+      tags: [Sanctions]
+      summary: List all confirmed hits
+      operationId: listSanctionsHitsV3
+      responses:
+        '200':
+          description: Confirmed hits
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SanctionsCheckV3'
+
+  /api/v3/sanctions/pending:
+    get:
+      tags: [Sanctions]
+      summary: List potential hits awaiting manual review
+      operationId: listPendingReviewsV3
+      responses:
+        '200':
+          description: Potential hits
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SanctionsCheckV3'
+
+  /api/v3/sanctions/{id}:
+    get:
+      tags: [Sanctions]
+      summary: Get a sanctions check by ID
+      operationId: getSanctionsCheckV3
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Sanctions check
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SanctionsCheckV3'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -468,10 +587,61 @@ components:
         listTypes:
           type: array
           description: >-
-            Restrict screening to these lists. Omitted, null or empty means every enabled list.
-            An unrecognised name is rejected with 400 — it is never dropped, because a dropped
+            Restrict screening to these lists. Omitted, null or empty means the original seven
+            enabled v1 lists. An unrecognised name is rejected with 400 — it is never dropped, because a dropped
             entry would produce a screening result narrower than the caller asked for while
             reporting success.
+          items:
+            type: string
+            enum:
+              - OFAC_SDN
+              - EU_CONSOLIDATED
+              - UN_CONSOLIDATED
+              - HM_TREASURY
+              - FATF_HIGH_RISK
+              - PEP_GLOBAL
+              - CNB_DOMESTIC
+
+    ScreenEntityCommandV3:
+      type: object
+      required: [idempotencyKey, entityType, name]
+      properties:
+        idempotencyKey:
+          type: string
+          description: Client-assigned idempotency key; identical key returns the original result.
+        subjectId:
+          type: string
+          description: >-
+            Stable party identifier, separate from the per-attempt idempotency key. Every new key
+            causes a fresh screen. A WHITELISTED clearance applies for at most 90 days, only to
+            exactly the same subject attributes and only to the reviewed match identities.
+        entityType:
+          type: string
+          enum: [INDIVIDUAL, ORGANIZATION, VESSEL, AIRCRAFT]
+        name:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+          default: []
+        dateOfBirth:
+          type: string
+          format: date
+        nationality:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+        identifiers:
+          type: object
+          additionalProperties:
+            type: string
+          description: "Arbitrary identifiers e.g. passport, taxId"
+          default: {}
+        listTypes:
+          type: array
+          description: >-
+            Restrict screening to these lists. Omitted, null or empty means every enabled list,
+            including CZ_TERRORISTS. An unrecognised name is rejected with 400 — it is never dropped.
           items:
             type: string
             enum:
@@ -547,7 +717,7 @@ components:
           type: array
           items:
             type: string
-            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC, CZ_TERRORISTS]
+            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
         reviewedBy:
           type: string
           nullable: true
@@ -571,6 +741,104 @@ components:
             and covers the fresh result's subject and match identities.
 
     SanctionsMatch:
+      type: object
+      properties:
+        listType:
+          type: string
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+        matchType:
+          type: string
+          enum: [EXACT, FUZZY, PHONETIC, ALIAS]
+        matchScore:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+        matchedName:
+          type: string
+        matchedId:
+          type: string
+          nullable: true
+        listEntryDate:
+          type: string
+          nullable: true
+        programs:
+          type: array
+          items:
+            type: string
+
+    SanctionsCheckV3:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+        subjectId:
+          type: string
+          nullable: true
+          description: Stable party identifier supplied on the screen request; null on legacy checks.
+        entityType:
+          type: string
+          enum: [INDIVIDUAL, ORGANIZATION, VESSEL, AIRCRAFT]
+        name:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        dateOfBirth:
+          type: string
+          format: date
+          nullable: true
+        nationality:
+          type: string
+          nullable: true
+        identifiers:
+          type: object
+          additionalProperties:
+            type: string
+        status:
+          type: string
+          enum: [CLEAR, HIT, POTENTIAL_HIT, WHITELISTED, ESCALATED]
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/SanctionsMatchV3'
+        overallScore:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+        checkedLists:
+          type: array
+          items:
+            type: string
+            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC, CZ_TERRORISTS]
+        reviewedBy:
+          type: string
+          nullable: true
+        reviewNote:
+          type: string
+          nullable: true
+        checkedAt:
+          type: string
+          format: date-time
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        clearanceExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            End of the 90-day WHITELISTED clearance on this check; null for other statuses and
+            legacy checks. A new attempt receives WHITELISTED only while this clearance is valid
+            and covers the fresh result's subject and match identities.
+
+    SanctionsMatchV3:
       type: object
       properties:
         listType:

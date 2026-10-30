@@ -2,9 +2,26 @@
 
 ## Base path
 
-- **Produkční base:** `http://openbank-sanctions-service:8123/api/v1` (in-cluster)
+- **Produkční base pro prověření:** `http://openbank-sanctions-service:8123/api/v3` (in-cluster)
+- **Správa listin a schvalování:** zůstávají pod `/api/v1` a `/api/v2` podle dokumentace níže
 - **OpenAPI spec:** [`/q/openapi`](http://localhost:8123/q/openapi)
 - **Swagger UI (dev):** [`/q/swagger-ui`](http://localhost:8123/q/swagger-ui)
+
+### Migrace prověření z v1 do v3
+
+`CZ_TERRORISTS` je nová hodnota v požadavcích a odpovědích screeningů, proto má šest operací
+vracejících `SanctionsCheck` paralelní kontrakt `/api/v3`: seznam prověření, screening, přezkum,
+hity, čekající přezkumy a detail podle ID. Tyto volání přesuňte do v3; URL správy listin, obnovy
+a schvalování se nemění.
+
+Nahrazené operace v1 vracejí `Deprecation: true`, hlavičku `Sunset` podle RFC 8594 a `Link` na v3
+s `rel="successor-version"`. Během migračního okna zůstává jejich kontrakt neměnný:
+
+- vynechané, null nebo prázdné `listTypes` znamená původních sedm listin bez `CZ_TERRORISTS`;
+  ve v3 znamená všech osm;
+- v1 odmítne explicitní požadavek na `CZ_TERRORISTS` i idempotentní replay mezi major verzemi s 400;
+- prověření obsahující novou listinu je skryté z kolekcí v1 a detail/přezkum v1 odpoví 404 před
+  jakoukoli změnou. Pro čtení nebo přezkum použijte stejnou operaci ve v3.
 
 ## Autentizace
 
@@ -38,7 +55,7 @@ Pravidla:
 ### Prověřit entitu
 
 ```http
-POST /api/v1/sanctions/screen
+POST /api/v3/sanctions/screen
 Content-Type: application/json
 Authorization: Bearer <token>
 
@@ -75,7 +92,7 @@ Authorization: Bearer <token>
 ### Odeslat rozhodnutí o ručním přezkumu
 
 ```http
-POST /api/v1/sanctions/review
+POST /api/v3/sanctions/review
 Content-Type: application/json
 Authorization: Bearer <token>
 
@@ -92,19 +109,19 @@ Authorization: Bearer <token>
 ### Získat konkrétní prověření
 
 ```http
-GET /api/v1/sanctions/{id}
+GET /api/v3/sanctions/{id}
 ```
 
 ### Zobrazit všechny potvrzené hity
 
 ```http
-GET /api/v1/sanctions/hits
+GET /api/v3/sanctions/hits
 ```
 
 ### Zobrazit čekající přezkumy
 
 ```http
-GET /api/v1/sanctions/pending
+GET /api/v3/sanctions/pending
 ```
 
 ### Zobrazit konfigurace sankcičních listin
