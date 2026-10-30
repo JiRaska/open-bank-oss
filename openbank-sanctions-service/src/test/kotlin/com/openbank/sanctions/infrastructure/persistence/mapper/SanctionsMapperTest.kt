@@ -47,6 +47,8 @@ class SanctionsMapperTest {
             reviewNote = "confirmed hit",
             checkedAt = Instant.parse("2024-01-15T12:00:00Z"),
             reviewedAt = Instant.parse("2024-01-16T09:30:00Z"),
+            subjectId = "33333333-3333-4333-8333-333333333333",
+            clearanceExpiresAt = Instant.parse("2024-04-15T09:30:00Z"),
         )
 
         val entity = check.toEntity()
