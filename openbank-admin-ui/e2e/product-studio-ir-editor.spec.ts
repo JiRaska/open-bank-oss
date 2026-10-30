@@ -20,6 +20,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 
 test('Studio IR editor: server lint gates the DRAFT save, and nothing publishes or signs', async ({ page }) => {
   const writes: Array<{ method: string; path: string; ifMatch?: string; body: unknown }> = []
+  let current: typeof REVISION = REVISION
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url())
     if (url.pathname.startsWith('/api/auth/')) return route.continue()
@@ -38,8 +39,11 @@ test('Studio IR editor: server lint gates the DRAFT save, and nothing publishes 
     if (url.pathname.endsWith('/api/v2/product-types')) return json([])
     if (url.pathname.endsWith('/api/v2/specifications')) return json([SPEC])
     if (url.pathname.endsWith('/api/v2/offerings')) return json([OFFERING])
-    if (url.pathname.endsWith(`/offerings/${OFFERING.id}/revisions`)) return json([REVISION])
-    if (method === 'PUT' && url.pathname.endsWith(`/revisions/${REVISION.id}`)) return json(REVISION)
+    if (url.pathname.endsWith(`/offerings/${OFFERING.id}/revisions`)) return json([current])
+    if (method === 'PUT' && url.pathname.endsWith(`/revisions/${REVISION.id}`)) {
+      current = { ...REVISION, revision: REVISION.revision + 1, content: { ...REVISION.content, behaviour: (payload as { behaviour: unknown }).behaviour } }
+      return json(current)
+    }
     return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporarily unavailable' }) })
   })
 
@@ -68,4 +72,47 @@ test('Studio IR editor: server lint gates the DRAFT save, and nothing publishes 
   expect(put.ifMatch).toBe('"3"')
   expect((put.body as { behaviour: unknown }).behaviour).toEqual({ ...IR, currency: 'CZK' })
   expect(writes.some(w => /publish|approv|sign/.test(w.path))).toBe(false)
+})
+
+test('an IR save does not silently discard unsaved Expert edits', async ({ page }) => {
+  let current: typeof REVISION = REVISION
+  await page.route('**/api/**', route => {
+    const url = new URL(route.request().url())
+    if (url.pathname.startsWith('/api/auth/')) return route.continue()
+    const method = route.request().method()
+    let payload: Record<string, unknown> | undefined
+    try { const raw = route.request().postData(); payload = raw ? JSON.parse(raw) as Record<string, unknown> : undefined } catch { payload = undefined }
+    const json = (body: unknown) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    if (url.pathname.endsWith('/api/v2/product-ir/lint')) return json({ valid: true, productCode: 'SAV', irVersion: 1, revisionHash: 'c'.repeat(64), canonicalIr: '{}', problems: [] })
+    if (url.pathname.endsWith('/api/v2/product-types')) return json([])
+    if (url.pathname.endsWith('/api/v2/specifications')) return json([SPEC])
+    if (url.pathname.endsWith('/api/v2/offerings')) return json([OFFERING])
+    if (url.pathname.endsWith(`/offerings/${OFFERING.id}/revisions`)) return json([current])
+    if (method === 'PUT' && url.pathname.endsWith(`/revisions/${REVISION.id}`)) {
+      current = { ...REVISION, revision: REVISION.revision + 1, content: { ...REVISION.content, behaviour: (payload as { behaviour: unknown }).behaviour } }
+      return json(current)
+    }
+    return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporarily unavailable' }) })
+  })
+
+  await page.goto('/product-studio')
+  await page.locator('#studio-offering').selectOption(OFFERING.id)
+  await page.getByText(/Expert režim|Expert mode/).click()
+  const expert = page.locator('details textarea').first()
+  await expect(expert).toHaveValue(/"Savings"/)
+  const dirty = (await expert.inputValue()).replace('"Savings"', '"Savings edited"')
+  await expert.fill(dirty)
+
+  const editor = page.getByTestId('product-ir-editor')
+  await editor.getByRole('textbox', { name: /IR dokument|IR document/ }).fill(JSON.stringify({ ...IR, currency: 'CZK' }))
+  await editor.getByRole('button', { name: /Zkontrolovat IR|Lint IR/ }).click()
+  await expect(editor.getByTestId('ir-lint-valid')).toBeVisible()
+  await editor.getByRole('button', { name: /Uložit IR do draftu|Save IR to draft/ }).click()
+
+  await expect(page.getByTestId('expert-draft-stale')).toBeVisible()
+  await expect(expert).toHaveValue(dirty)
+  await expect(page.getByRole('button', { name: /^(Uložit draft|Save draft)$/ })).toBeDisabled()
+  await page.getByRole('button', { name: /Načíst ze serveru|Reload from server/ }).click()
+  await expect(expert).toHaveValue(/"CZK"/)
+  await expect(page.getByTestId('expert-draft-stale')).toHaveCount(0)
 })
