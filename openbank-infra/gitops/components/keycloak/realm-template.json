@@ -1991,6 +1991,18 @@
       ]
     },
     {
+      "username": "e2e-operator@openbank.local",
+      "email": "e2e-operator@openbank.local",
+      "firstName": "E2E",
+      "lastName": "Operator",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": [
+        "ROLE_VIEWER",
+        "ROLE_AUDITOR"
+      ]
+    },
+    {
       "username": "compliance@openbank.local",
       "email": "compliance@openbank.local",
       "firstName": "Compliance",

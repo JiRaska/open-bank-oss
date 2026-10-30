@@ -28,6 +28,7 @@ import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.BalanceView
 import com.openbank.account.application.port.out.CurrencyPocketRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
+import com.openbank.account.application.port.out.SanctionsScreenResult
 import com.openbank.account.domain.event.AccountClosedEvent
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.event.AccountProductRevision
@@ -76,12 +77,7 @@ class AccountService(
     private val notificationRequestPort: NotificationRequestPort,
 ) : AccountUseCase {
 
-    override suspend fun openAccount(command: OpenAccountCommand): Account {
-        // Idempotent replay (#465): a repeated key returns the original account and never opens
-        // a second one. The Redis record in the REST layer is only a response cache — this DB
-        // check (and the transactional key insert in saveNewAccount) is the source of truth.
-        accountRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return replayOrRefuse(it, command) }
-
+    private suspend fun screenForOpening(command: OpenAccountCommand): SanctionsScreenResult {
         // ADR-0032 §C: Sanctions gate — fails closed.
         // Only CLEAR and WHITELISTED proceed (SanctionsScreenResult.permitsOpening). HIT,
         // POTENTIAL_HIT, ESCALATED and a response with no status all block; a flagged party
@@ -93,10 +89,21 @@ class AccountService(
         val screening = sanctionsScreening.screen(
             name = command.legalName,
             idempotencyKey = screeningKey,
+            subjectId = command.partyId.toString(),
         )
         if (!screening.permitsOpening) {
             throw AccountOpeningBlockedByScreeningException(command.partyId, screening.matchedName)
         }
+        return screening
+    }
+
+    override suspend fun openAccount(command: OpenAccountCommand): Account {
+        // Idempotent replay (#465): a repeated key returns the original account and never opens
+        // a second one. The Redis record in the REST layer is only a response cache — this DB
+        // check (and the transactional key insert in saveNewAccount) is the source of truth.
+        accountRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return replayOrRefuse(it, command) }
+
+        val screening = screenForOpening(command)
 
         // ADR-0341 D1 / ADR-0352 phase 3: the account pins the PUBLISHED catalog revision it opens
         // under, taken at the same instant as openedAt. Fail-closed on the pin: no product, an
