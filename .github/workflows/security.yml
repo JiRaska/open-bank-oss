@@ -79,15 +79,19 @@ jobs:
           # Java/Kotlin" (issue seen on PR #3079). Including workflows bought no coverage —
           # it bought a guaranteed red on exactly the PRs that change no code.
 
-          # Emits codeql_matrix as a JSON array of matrix entries; '[]' means skip the job.
+          # Emits codeql_matrix as a JSON array of matrix entries.
+          # The `actions` leg (workflow injection, unpinned refs, excessive permissions)
+          # runs on EVERY commit: it needs no build, finishes in ~1-2 min, and gives every
+          # main commit a SAST result — OpenSSF Scorecard's SAST check counted only 23/30
+          # commits while the code legs were path-scoped. It is the right fix for the
+          # workflow-only PRs above too: those are exactly what this language analyses.
           emit_matrix() {
-            local java="$1" js="$2" out="["
+            local java="$1" js="$2" out='[{"language":"actions","build-mode":"none"}'
             if [ "$java" = "true" ]; then
-              out="$out{\"language\":\"java-kotlin\",\"build-mode\":\"manual\"}"
-              if [ "$js" = "true" ]; then out="$out,"; fi
+              out="$out,{\"language\":\"java-kotlin\",\"build-mode\":\"manual\"}"
             fi
             if [ "$js" = "true" ]; then
-              out="$out{\"language\":\"javascript-typescript\",\"build-mode\":\"none\"}"
+              out="$out,{\"language\":\"javascript-typescript\",\"build-mode\":\"none\"}"
             fi
             out="$out]"
             echo "codeql_matrix=$out" >> "$GITHUB_OUTPUT"
