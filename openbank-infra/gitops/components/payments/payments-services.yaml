@@ -2220,7 +2220,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-a212613e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-f7d1363d@sha256:a08fd0683e03f903e10d043610b6ab597364d4868339f8a95a08a1d27424c014
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3124,7 +3124,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-simulator
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-a212613e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-f7d1363d@sha256:8fd732ffece17cf219e7029518e43647c0dfd51280268c328bbd7468e5dcebcd
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

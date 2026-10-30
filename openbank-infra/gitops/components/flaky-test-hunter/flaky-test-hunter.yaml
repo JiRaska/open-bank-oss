@@ -40,7 +40,7 @@ spec:
         - name: flaky-test-hunter
           # Pending first CI build (ADR-0168 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-bc453312
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-f7d1363d@sha256:08673f3fbcd8143cef3dd8d6bed007024131d354084f80c18398677d2998d96f
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

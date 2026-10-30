@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: security-scanner-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-security-scanner:sandbox-bc453312
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-security-scanner:sandbox-f7d1363d@sha256:3af4ba4c141a8b2965a0f04aed577e3992e4dd3101142efbda9fb547b792070a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

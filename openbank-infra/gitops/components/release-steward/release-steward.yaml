@@ -37,7 +37,7 @@ spec:
         - name: release-steward
           # Pending first CI build (ADR-0165 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-release-steward:sandbox-bc453312
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-release-steward:sandbox-f7d1363d@sha256:03b314923bb8ec3aa7fcb0fe3957380429a9ebdc0f3a7d2a3bc6c0ffb59850ac
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

@@ -37,7 +37,7 @@ spec:
         - name: docs-truth-agent
           # Pending first CI build (ADR-0166 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-docs-truth-agent:sandbox-c65bc012
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-docs-truth-agent:sandbox-f7d1363d@sha256:93bcb1276e0e7a73503e644b29e624a18f10d2179a7990330edb4d77c24134f3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
