@@ -25,9 +25,11 @@ permissions:
   contents: read
 
 concurrency:
-  # A newer push to main supersedes this run: its decisions would be made against a stale main.
+  # A newer push to main supersedes decisions against the previous main. Scheduled and
+  # manual fallbacks must not cancel admitted work. GitHub can still replace a pending
+  # member of this group; this does not guarantee queue ordering or fairness.
   group: auto-update-armed-prs
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   update:
@@ -45,7 +47,7 @@ jobs:
 
       - name: Mint the GitHub App installation token
         id: app_token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}

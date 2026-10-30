@@ -90,7 +90,7 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         identifierValue = case.identifier.value
         initiatorPartyId = case.initiatorPartyId
         status = case.status.name
-        extractJson = case.extract?.let { KybJson.write(it) }
+        extractJson = case.extract?.let { KybJson.writeExtract(it) }
         entityPartyId = case.entityPartyId
         entityPartyActive = case.entityPartyActive
         requiredSignatures = case.requiredSignatures
@@ -162,7 +162,7 @@ class RegistryExtractCacheImpl :
                         identifierScheme = extract.identifier.scheme.name
                         identifierValue = extract.identifier.value
                     }
-                    e.extractJson = KybJson.write(extract)
+                    e.extractJson = KybJson.writeExtract(extract)
                     e.source = extract.source
                     e.fetchedAt = extract.fetchedAt
                     if (existing == null) persist(e) else Uni.createFrom().item(e)

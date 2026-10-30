@@ -194,7 +194,7 @@ def validate_envelope(envelope: dict) -> None:
     for item in envelope.get("testCases", []):
         required_case_fields = {"fingerprint", "kind", "classname", "name", "state", "durationMs"}
         retry_fields = {"retryFlaky", "failedAttemptCount", "failedAttemptDurationMs"}
-        if set(item) - (required_case_fields | {"testDefinitionPath"} | retry_fields) or not required_case_fields.issubset(item):
+        if set(item) - (required_case_fields | {"testDefinitionPath", "verifies"} | retry_fields) or not required_case_fields.issubset(item):
             raise ValueError("test case fields are invalid")
         if (not re.fullmatch(r"[0-9a-f]{24}", item["fingerprint"]) or item["kind"] not in SUITE_KINDS
                 or item["state"] not in {"passed", "failed", "skipped"}
@@ -213,6 +213,11 @@ def validate_envelope(envelope: dict) -> None:
                     or failed_attempt_duration < 0 or failed_attempt_duration > JSON_SAFE_INTEGER_MAX
                     or failed_attempt_duration > item["durationMs"]):
                 raise ValueError("retry-flaky test case metadata is invalid")
+        verifies = item.get("verifies")
+        if verifies is not None and (
+                not isinstance(verifies, list) or not 1 <= len(verifies) <= MAX_VERIFIES
+                or any(not isinstance(v, str) or not re.fullmatch(VERIFIES_ID, v) for v in verifies)):
+            raise ValueError("test case verifies ids are invalid")
         path = item.get("testDefinitionPath")
         if (path is not None and (
                 not re.fullmatch(r"src/test/(?:kotlin|java)/[A-Za-z0-9_./-]+\.(?:kt|java)", path)
@@ -421,6 +426,144 @@ def safe_sum_duration_ms(values: list[int | None]) -> int | None:
     return total
 
 
+# `verifies:<id>` convention (issue #13171): a test that proves a requirement names it in a form the
+# collector can read, so "this requirement is verified" is a claim about an executed, green test and
+# not about a class that merely exists. Kotlin/JUnit 5 uses the built-in `@Tag("verifies:<id>")`
+# (class or method); Playwright puts `@verifies:<id>` in the test title, because the JUnit reporter
+# writes the title into `name`. An id is `<scope>/<ref>`, e.g. `clearing/T1`.
+VERIFIES_ID = r"[a-z0-9][a-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+VERIFIES_TAG = re.compile(r"""@Tag\(\s*"verifies:(""" + VERIFIES_ID + r""")"\s*\)""")
+VERIFIES_TITLE = re.compile(r"(?<![A-Za-z0-9])@verifies:(" + VERIFIES_ID + r")")
+MAX_VERIFIES = 8
+
+
+def mask_kotlin_comments(source: str, *, mask_strings: bool = False) -> str:
+    """Blank comments, optionally strings, preserving offsets and newlines."""
+    out = list(source)
+    i, depth, quote = 0, 0, None
+
+    def blank(start, end):
+        out[start:end] = ["\n" if c == "\n" else " " for c in source[start:end]]
+
+    while i < len(source):
+        start = i
+        if depth:
+            if source.startswith("/*", i):
+                depth += 1
+                i += 2
+            elif source.startswith("*/", i):
+                depth -= 1
+                i += 2
+            else:
+                i += 1
+            blank(start, i)
+        elif quote:
+            if source.startswith(quote, i):
+                i += len(quote)
+                quote = None
+            elif quote != '"""' and source[i] == "\\":
+                i = min(i + 2, len(source))
+            else:
+                i += 1
+            if mask_strings:
+                blank(start, i)
+        elif source.startswith("//", i):
+            end = source.find("\n", i)
+            i = len(source) if end < 0 else end
+            blank(start, i)
+        elif source.startswith("/*", i):
+            depth = 1
+            i += 2
+            blank(start, i)
+        elif source.startswith('"""', i):
+            quote = '"""'
+            i += 3
+            if mask_strings:
+                blank(start, i)
+        elif source[i] in ("'", '"'):
+            quote = source[i]
+            i += 1
+            if mask_strings:
+                blank(start, i)
+        else:
+            i += 1
+    return "".join(out)
+
+
+
+def kotlin_class_owners(code: str):
+    """Return the direct class owner at an offset in comment/string-masked Kotlin.
+
+    Every brace participates, so a local function or anonymous object cannot borrow its
+    enclosing test class's method identity. Class headers may contain parenthesized lambdas.
+    Unsupported/ambiguous headers have no class owner and therefore supply no tags.
+    """
+    class_openings = {}
+    for declaration in re.finditer(r"(?<![:\w])\bclass\s+([A-Za-z_]\w*)", code):
+        nesting = 0
+        for token in re.finditer(r"[{}()[\]]|\b(?:class|fun|val|var|object)\b", code[declaration.end():]):
+            value = token.group()
+            if value in ("(", "["):
+                nesting += 1
+            elif value in (")", "]"):
+                nesting -= 1
+            elif nesting == 0:
+                if value == "{":
+                    class_openings[declaration.end() + token.start()] = declaration.group(1)
+                break
+    stack, spans = [], []
+    for brace in re.finditer(r"[{}]", code):
+        if brace.group() == "{":
+            parent = stack[-1][1] if stack else ()
+            name = class_openings.get(brace.start())
+            owner = parent + (name,) if name is not None and parent is not None else None
+            stack.append((brace.start(), owner))
+        elif stack:
+            start, owner = stack.pop()
+            spans.append((start, brace.start(), owner))
+
+    def owner_at(position: int):
+        enclosing = [(start, owner) for start, end, owner in spans if start < position < end]
+        return max(enclosing, key=lambda item: item[0])[1] if enclosing else ()
+
+    return owner_at
+
+
+def verifies_ids(service: Path, classname: str, name: str) -> list[str]:
+    """Requirement ids a test case declares, from its source tag or its Playwright title."""
+    found = set(VERIFIES_TITLE.findall(name))
+    source_path = test_definition_path(service, classname)
+    if source_path is not None:
+        source = mask_kotlin_comments((service / source_path).read_text(errors="replace"))
+        declarations = mask_kotlin_comments(source, mask_strings=True)
+        expected_owner = tuple(classname.rsplit(".", 1)[-1].split("$"))
+        owner_at = kotlin_class_owners(declarations)
+
+        def annotation_ids(start: int, end: int) -> set[str]:
+            ids = set()
+            # Locate tokens in code, then read only THAT annotation's literal argument.
+            # Scanning raw annotation blocks also credits @Tag examples inside @DisplayName.
+            for token in re.finditer(r"@Tag\b", declarations[start:end]):
+                tag = VERIFIES_TAG.match(source, start + token.start())
+                if tag is not None and tag.end() <= end:
+                    ids.add(tag.group(1))
+            return ids
+
+        # A class tag applies to that class and its nested tests, never a sibling/parent.
+        for match in re.finditer(r"((?:[ \t]*@[A-Za-z][^\n]*\n)+)[ \t]*(?:\w+[ \t]+)*class[ \t]+([A-Za-z_]\w*)\b", declarations):
+            parent = owner_at(match.start())
+            if parent is not None:
+                declared_owner = parent + (match.group(2),)
+                if expected_owner[:len(declared_owner)] == declared_owner:
+                    found.update(annotation_ids(match.start(1), match.end(1)))
+        method = re.sub(r"\(\)$", "", re.sub(r"\s*\[[^]]*]\s*$", "", name)).strip()
+        if method:
+            for match in re.finditer(r"((?:[ \t]*@[A-Za-z][^\n]*\n)+)[ \t]*(?:\w+[ \t]+)*fun[ \t]+`?" + re.escape(method) + r"`?\s*\(", declarations):
+                if owner_at(match.start()) == expected_owner:
+                    found.update(annotation_ids(match.start(1), match.end(1)))
+    return sorted(found)[:MAX_VERIFIES]
+
+
 def test_cases(component: str, service: Path) -> list[dict]:
     """Emit secret-free observations with stable identity and verified test-source provenance."""
     result = []
@@ -471,6 +614,9 @@ def test_cases(component: str, service: Path) -> list[dict]:
             source_path = test_definition_path(service, classname)
             if source_path is not None:
                 item["testDefinitionPath"] = source_path
+            declared = verifies_ids(service, classname, name)
+            if declared:
+                item["verifies"] = declared
             result.append(item)
     return sorted(result, key=lambda item: (item["fingerprint"], item["state"]))
 
@@ -674,6 +820,11 @@ def observations(service: Path, schema_version: int = 1) -> list[dict]:
                         # no run.json (#11850). Never echo a recorder-supplied value to CI logs.
                         print("collect-test-run-evidence: ignoring unsupported runtime resource", file=sys.stderr)
                         continue
+                    # The recorder may supply the same transient Docker id as the daemon
+                    # stream. Keep it only for exact in-process correlation; never publish it.
+                    container_id = item.pop("containerId", None)
+                    if file.name == "testcontainers.jsonl" and container_id:
+                        item["_dockerContainerId"] = container_id
                     item["image"] = public_runtime_image(resource, item.get("image", ""))
                     result.append((0 if file.name == "testcontainers.jsonl" else 1, item))
             except (json.JSONDecodeError, ValueError, OverflowError, TypeError):
@@ -722,6 +873,7 @@ def observations(service: Path, schema_version: int = 1) -> list[dict]:
     for observed_at, item in recorder:
         duplicate = any(
             same_lifecycle(observed_at, item, previous_at, previous)
+            and item.get("_dockerContainerId") == previous.get("_dockerContainerId")
             and (not item.get("resourceScopeId") or not previous.get("resourceScopeId")
                  or item["resourceScopeId"] == previous["resourceScopeId"])
             for previous_at, previous in deduplicated_recorder
@@ -729,15 +881,32 @@ def observations(service: Path, schema_version: int = 1) -> list[dict]:
         if not duplicate:
             deduplicated_recorder.append((observed_at, item))
 
-    # Suppress a daemon event only for an unambiguous one-to-one recorder pairing. A raw stream
-    # with two different daemon ids near one recorder is evidence of two physical containers,
-    # not a reason to hide one. Legacy streams without an id retain the former compatibility
-    # behaviour, because their ambiguity cannot be resolved retrospectively.
+    # Exact container identity wins even when readiness delayed the recorder timestamp.
+    # Old recorder files have no id; preserve their conservative one-to-one time pairing.
+    # Never infer an id for a recorder that supplied a different one.
     published = list(deduplicated_recorder)
     for observed_at, item in docker:
-        matches = [(previous_at, previous) for previous_at, previous in deduplicated_recorder
-                   if same_lifecycle(observed_at, item, previous_at, previous)]
         docker_id = item.get("_dockerContainerId")
+        exact_matches = [previous for _, previous in deduplicated_recorder
+                         if docker_id and previous.get("_dockerContainerId") == docker_id
+                         and previous["resource"] == item["resource"]
+                         and runtime_image_identity(previous["image"]) == runtime_image_identity(item["image"])
+                         and previous["lifecycle"] == item["lifecycle"]]
+        exact_docker_count = sum(1 for _, other in docker
+                                 if docker_id and other.get("_dockerContainerId") == docker_id
+                                 and other["resource"] == item["resource"]
+                                 and runtime_image_identity(other["image"]) == runtime_image_identity(item["image"])
+                                 and other["lifecycle"] == item["lifecycle"])
+        if len(exact_matches) == 1 and exact_docker_count == 1:
+            continue
+        if exact_matches:
+            # Duplicate exact claims are ambiguous; a nearby legacy recorder must
+            # not make that ambiguity disappear.
+            published.append((observed_at, item))
+            continue
+        matches = [(previous_at, previous) for previous_at, previous in deduplicated_recorder
+                   if not previous.get("_dockerContainerId")
+                   and same_lifecycle(observed_at, item, previous_at, previous)]
         same_recorder_raw_count = sum(
             1 for other_at, other in docker
             if same_lifecycle(other_at, other, matches[0][0], matches[0][1])
@@ -1234,6 +1403,49 @@ def main() -> None:
             assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres@sha256:" + "A" * 64) == "postgres@sha256:" + "a" * 64
             assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres:tag?credential=secret") == "postgres"
             assert all("containerId" not in item and "_dockerContainerId" not in item for item in observed)
+            # Two same-image containers overlap. The recorder identifies only the
+            # first, and its readiness timestamp is deliberately outside the old
+            # duplicate window; only that exact daemon lifecycle may disappear.
+            exact_service = service / "exact-container"
+            exact_runtime = exact_service / "build/test-intelligence/runtime"
+            exact_runtime.mkdir(parents=True)
+            (exact_runtime / "docker-events.jsonl").write_text(
+                '{"image":"postgres:18.6-alpine","containerId":"pg-a","lifecycle":"start","observedAtUnix":1787433000}\n'
+                '{"image":"postgres:18.6-alpine","containerId":"pg-b","lifecycle":"start","observedAtUnix":1787433001}\n'
+                '{"image":"postgres:18.6-alpine","containerId":"pg-a","lifecycle":"die","observedAtUnix":1787433060}\n'
+                '{"image":"postgres:18.6-alpine","containerId":"pg-b","lifecycle":"die","observedAtUnix":1787433061}\n'
+            )
+            recorder_file = exact_runtime / "testcontainers.jsonl"
+            recorder_file.write_text(
+                '{"resource":"postgres","image":"postgres:18.6-alpine","containerId":"pg-a","lifecycle":"started","observedAt":"2026-08-22T21:12:00Z"}\n'
+                '{"resource":"postgres","image":"postgres:18.6-alpine","containerId":"pg-a","lifecycle":"stopped","observedAt":"2026-08-22T21:13:00Z"}\n'
+            )
+            exact_observed = observations(exact_service)
+            assert [item["lifecycle"] for item in exact_observed].count("started") == 2
+            assert [item["lifecycle"] for item in exact_observed].count("stopped") == 2
+            assert all("containerId" not in item and "_dockerContainerId" not in item for item in exact_observed)
+            recorder_file.write_text(recorder_file.read_text().replace("pg-a", "pg-other"))
+            unmatched_observed = observations(exact_service)
+            assert [item["lifecycle"] for item in unmatched_observed].count("started") == 3
+            assert [item["lifecycle"] for item in unmatched_observed].count("stopped") == 3
+            recorder_only_service = service / "distinct-recorder-containers"
+            recorder_only_runtime = recorder_only_service / "build/test-intelligence/runtime"
+            recorder_only_runtime.mkdir(parents=True)
+            recorder_rows = [
+                {"resource": "postgres", "image": "postgres:18.6-alpine", "containerId": identity,
+                 "lifecycle": lifecycle, "observedAt": timestamp}
+                for lifecycle, timestamp in (("started", "2026-08-22T21:12:00Z"),
+                                             ("stopped", "2026-08-22T21:13:00Z"))
+                for identity in ("pg-a", "pg-b", "pg-a")
+            ]
+            (recorder_only_runtime / "testcontainers.jsonl").write_text(
+                "\n".join(json.dumps(item) for item in recorder_rows) + "\n"
+            )
+            recorder_only_observed = observations(recorder_only_service)
+            assert [item["lifecycle"] for item in recorder_only_observed].count("started") == 2
+            assert [item["lifecycle"] for item in recorder_only_observed].count("stopped") == 2
+            assert all("containerId" not in item and "_dockerContainerId" not in item
+                       for item in recorder_only_observed)
             pact_runtime = runtime / "providerPactTest"
             pact_runtime.mkdir()
             (pact_runtime / "testcontainers.jsonl").write_text(
@@ -1453,6 +1665,25 @@ def main() -> None:
                     f"classify({classname!r}, task={task!r}) returned {got!r}, expected {want!r}"
                 )
 
+        # `verifies:` convention: read from a Kotlin @Tag (class AND method level) and from a
+        # Playwright title; a NEAR-MISS spelling must be ignored (a negative control — a reader
+        # that accepts `verified:` or an unscoped id would credit a test with a claim it never made).
+        with tempfile.TemporaryDirectory() as directory:
+            service = Path(directory)
+            source_dir = service / "src/test/kotlin/com/openbank/x"
+            source_dir.mkdir(parents=True)
+            (source_dir / "GuardTest.kt").write_text(
+                '@Tag("verifies:x/T1")\nclass GuardTest {\n'
+                '    @Test\n    @Tag("verifies:x/R2")\n    fun `denies`() {}\n\n'
+                '    @Test\n    @Tag("verified:x/R9")\n    @Tag("verifies:unscoped")\n    fun `allows`() {}\n}\n')
+            got = verifies_ids(service, "com.openbank.x.GuardTest", "denies()")
+            assert got == ["x/R2", "x/T1"], f"verifies: class+method tags not read: {got}"
+            got = verifies_ids(service, "com.openbank.x.GuardTest", "allows()")
+            assert got == ["x/T1"], f"verifies: near-miss spellings were credited: {got}"
+            got = verifies_ids(service, "nav.spec.ts", "loads the inbox @verifies:approvals/A1")
+            assert got == ["approvals/A1"], f"verifies: Playwright title tag not read: {got}"
+            assert verifies_ids(service, "nav.spec.ts", "loads the inbox @verifies:nonsense") == [], \
+                "verifies: unscoped title id accepted"
         print("test-run evidence collector self-test: classification and runtime red/green paths proven")
         return
     if not args.service or not args.out:

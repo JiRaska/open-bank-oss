@@ -52,7 +52,7 @@ import rego.v1
 # principal (no M2M caller reads close-runs; the only M2M caller, the edge, calls list/read).
 allowed_reasons contains "statement-close-run-telemetry-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR"}
 	role in input.principal.roles
 	input.action in {"statement.close-run.list", "statement.close-run.read"}
@@ -66,7 +66,7 @@ allowed_reasons contains "statement-close-run-telemetry-read" if {
 # without it a role-only check would hand this operator action to the edge, which never calls it.
 allowed_reasons contains "operator-statement-close-run-trigger" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "statement.close-run.trigger"
@@ -80,7 +80,7 @@ allowed_reasons contains "operator-statement-close-run-trigger" if {
 # to drive per-account close, add that caller here with matching evidence, do NOT widen this rule.
 allowed_reasons contains "operator-statement-close" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "statement.close"
@@ -96,7 +96,7 @@ allowed_reasons contains "operator-statement-close" if {
 # rather than broadening to VIEWER/AUDITOR or to the edge M2M speculatively.
 allowed_reasons contains "operator-statement-export" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "statement.export"

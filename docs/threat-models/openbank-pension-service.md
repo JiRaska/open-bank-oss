@@ -141,6 +141,16 @@ quote moves NAV risk to the provider for the notice period (`navVariance` is rec
 charged to the participant). A death during a phased withdrawal stops the remaining installments;
 handing the unpaid remainder to the claim is a follow-up.
 
+The unit register these exits redeem from (pension-fund-service) is reachable over the network
+only from the `pension` namespace: its generated ingress NetworkPolicy admits `pension` (and the
+staff BFF in `admin-ui`) on the API ports, and customer-edge no longer declares a route to it, so
+the participant-facing edge cannot reach holdings or place orders even with a valid token. What
+remains is pension-service's own client: a compromised pension-service pod can read every
+contract's holdings and place redemptions within OPA's grant to
+`service-account-openbank-pension`. The app's participant valuation and unit transactions come
+from pension-service's own participant reads (`/contracts/{id}/valuation`, `/transactions`,
+ownership-checked there), relayed by the edge — never from the fund API.
+
 ## 4c. Integration (slice S8)
 
 S8 joins S1/S2/S3/S5 into one service and adds the routes customer-edge needs. New trust boundary:
@@ -190,6 +200,38 @@ pre-contractual documents are not yet attached to offers (docs/compliance/pensio
 legal review pending). Withholding tax already remitted on a premium returned to the contract is
 not reversed automatically.
 
+The reference adapter closes non-success response bodies without collecting or draining them;
+HTTP status rejection retains the existing exception contract. Coroutine cancellation, including
+the quote deadline, requests cancellation of the original JDK HTTP exchange and propagates the
+cancellation to the caller. It does not retry a purchase or cancellation command. Request-local
+status handling does not convert a successful-status transport failure into a status rejection.
+`ReferenceAnnuityResponseLifecycleTest` verifies these properties against synthetic loopback
+peers, including held bodies, exchange closure and concurrent responses; it is not deployment
+proof. Existing protocol tests retain request and idempotency contracts.
+
+Successful response parsing remains compatible with the published partner protocol. This change
+does not establish a maximum successful-response size, number of offers or aggregate fan-out
+memory budget. Those bounds require an explicit partner-protocol envelope; the inbound request
+limit is not a partner-response limit. Rollback restores the previous response lifecycle while
+leaving registry authorization, credential sourcing, timeouts and financial state transitions
+unchanged.
+
+## 4e. Reporting read model (#12425)
+
+`GET /api/v2/pension/reporting/participant-aggregates` serves the participant aggregates
+tax-reporting-service assembles the ČNB returns from (PSP 31-04 and kin). New machine caller:
+tax-reporting-service's OWN client, `service-account-openbank-tax-reporting` (ROLE_API).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **Information disclosure** | The read model leaks participants (ids, birth dates, amounts per person) | Every statement in `PgParticipantReportingQueries` is an aggregate (COUNT/SUM ... GROUP BY); age leaves the database already in years and is banded before it leaves the service; `ParticipantReportingApiIT` asserts none of the six seeded contract ids appears in the payload |
+| **Elevation of privilege** | The shared service-account (HUMAN + ROLE_OPERATOR) or another service reads the aggregates through base `operator-read-any` | The action is `pension.reporting.aggregate` — deliberately not a `.read`/`.list` verb, which the generic rule grants to any operator-role principal; admitted only for real staff and the tax-reporting client (`pension_rest_ext.rego`), must-ALLOW/must-DENY in `opa test` and `opa eval` on the bundle; sabotage (dropping the principal-id condition) fails the must-DENY test |
+| **Tampering** | A closed period answers differently on each read | Intervals are closed on dates and timestamps are bucketed by UTC day, independent of the session time zone (the IT's 1 April 00:30Z instruction lands in April); a period booked in more than one currency is refused (409), never summed |
+
+Residual: contract status at period end is only knowable while the contract has not changed since
+— later changes are reported under `CHANGED_AFTER_PERIOD_END`, not guessed; there is no status
+history table.
+
 ## 5. Residual risks / assumptions
 
 - **(Resolved in S8)** S1's caller-valued surrender preview is retired; termination is S5's quote
@@ -211,6 +253,8 @@ not reversed automatically.
 - 2026-10-09 — S5 exits: termination, payout, death claims (§4b).
 - 2026-10-09 — S8 integration: fund REST client identity, onboarding-only activation, account-bound SCA, held account change, optimistic locking, POST replay (§4c).
 - 2026-10-09 — annuity partner integration: registry with four-eyes activation, adapter SPI, SCA-bound selection, premium/compensation flow (§4d, #12383).
+- 2026-10-10 — network reach of the unit register: only `pension` (plus the staff BFF) is admitted; customer-edge's direct route removed (§4b, #12359).
+- 2026-10-10 — reporting read model for the ČNB returns: aggregate-only route, tax-reporting client (§4e, #12425).
 
 ## Creation and strategy decision controls
 
@@ -287,3 +331,54 @@ service-account `preferred_username`. A matching display principal alone grants 
 foreign-client, missing-subject and non-JWT identities are rejected before transfer writes.
 Participant SCA consent remains required before funds can move. Rollback of this guard
 restores username-only authentication and must not precede an equivalent replacement.
+
+## Idempotency replay telemetry boundary — #12424
+
+The idempotency replay filter increments `openbank.pension.idempotency.replays` only after finding a
+stored response and accepting the existing request fingerprint. The metric's sole label is the HTTP
+method. The filter accepts only POST, PUT and PATCH in its existing replay scope, so the label has
+three values; principal, participant, path, key, fingerprint and request/response bodies are not
+metric labels or values.
+
+The existing scope still binds principal, customer-party header, method, path and key; a mismatching
+stored fingerprint is still rejected before a replay is counted. Counting an accepted replay does
+not repeat the business operation, alter authorization, weaken fingerprint checks, or add a new data
+destination beyond the existing metrics registry. The counter describes stored-response reuse, not
+successful new money movement. Existing concurrent-first-attempt limitations and lower-layer
+financial idempotency remain as described above.
+
+The observability adapter and service tests provide source evidence for the metric contract. This
+document does not establish deployed metric availability, scraper access control, cardinality
+measurements on running pods or successful hosted CI on a later documentation-only head. Rollback of
+this observation removes the counter call and metric wiring while retaining the replay scope and
+fingerprint checks. The separate pending staff-search assessment in #12943 is not part of this
+change; a future merge must preserve both independent threat-model additions.
+
+## Staff contract search and participant birth-date response — #12942
+
+The staff contract-list surface accepts an optional free-text `q` covering contract and participant
+identifiers, product line, participant birth date, and payment reference.
+`ContractResponse.participantBirthDate` is personal data. Existing contract-read authorization still
+runs before the use case; search does not introduce a new role grant. The use case ignores `q` for a
+participant caller and loads only that participant's contracts. Only the staff path can invoke the
+cross-contract search, while the existing status filter narrows results and the result limit remains
+capped at 100.
+
+The repository binds the search pattern and digit pattern as SQL parameters; the optional status
+fragment comes only from the `ContractStatus` enum. Payment-reference matching selects contract IDs
+before normal aggregate hydration. These controls address SQL injection and cross-participant
+disclosure; they do not establish indexed or constant-time search. Search input, birth dates,
+payment references, and returned records must remain confidential. This change adds no application
+logging of those values and no new retention or external data destination; operational access-log
+configuration requires its own assessment and is not proven by the source tests.
+
+Evidence: the real HTTP integration test exercises birth-date, identifier, product and reference
+matches plus status narrowing. Existing participant ownership checks remain in the read path; that
+scope is also enforced independently of the UI's request-ordering guard. The UI guard suppresses
+stale completions only and is not an authorization control. The deadline endpoint regression
+exercises the injected CDI bean and prevents the default-argument proxy failure; it changes no
+deadline rule or financial operation. These are source/test claims, not proof of deployment, access-
+log redaction or runtime enforcement. Rollback: revert the search parameter/response addition and UI
+changes together; no migration or stored-data rewrite is introduced.
+
+- **2026-10-17** — **OPA PolicyDecisionPoint now comes from libs-runtime (#13136).** The per-service AuthzProducer is removed and the service opts into the shared `OpaPolicyDecisionPointProducer` with `openbank.authz.opa-pdp-producer.enabled: true` (a build-time switch). `opa.url` and `opa.path` keep their keys and defaults. The timeout key is renamed from `opa.timeout` (`PT0.5S`) to `opa.timeout-ms` (`500`); no manifest or environment sets either, so the effective OPA timeout stays 500 ms. No change to policy, actions, roles, the sidecar edge or fail-closed behaviour; the PDP object is the same `OpaSidecarPolicyDecisionPoint`. Rollback: revert the PR.

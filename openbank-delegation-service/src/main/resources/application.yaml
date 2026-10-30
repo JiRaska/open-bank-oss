@@ -14,21 +14,6 @@ quarkus:
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
 
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
     limits:
       max-body-size: 10M
     idle-timeout: 60S
@@ -40,6 +25,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_delegations
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_delegations
 
@@ -259,6 +247,9 @@ mp:
     datasource:
       reactive:
         url: vertx-reactive:postgresql://localhost:5433/openbank_delegations_test
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
     management:
       enabled: false
     oidc:

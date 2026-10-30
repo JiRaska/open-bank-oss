@@ -276,10 +276,15 @@ class CustomerEdgeResource(
     @Path("/accounts")
     @Authorize(action = "customer.accounts.read")
     @Blocking
-    fun listAccounts(): Response {
+    fun listAccounts(@QueryParam("cursor") cursor: String?): Response {
         val customer = customer()
-        val own = upstream.get(
-            "$accountServiceUrl/api/v1/accounts?partyId=${customer.partyId}",
+        val firstPage = cursor.isNullOrBlank()
+        val query = linkedMapOf("partyId" to customer.partyId.toString())
+        if (!firstPage) query["cursor"] = requireNotNull(cursor)
+        val own = upstream.getToService(
+            accountServiceUrl,
+            "/api/v1/accounts",
+            query,
             customer.partyId.toString(),
         )
         // Accounts shared WITH the caller belong in the list — without this a grantee accepts a
@@ -288,14 +293,42 @@ class CustomerEdgeResource(
         // whose account it is. Own accounts are unaffected if delegation-service is unreachable —
         // the customer's own money must not disappear because a secondary service is down.
         if (own.statusInfo.family != Response.Status.Family.SUCCESSFUL) return own
+        // Shared accounts ride on the FIRST page only (no cursor); a client following cursors must
+        // not receive them again on every page.
+        if (!firstPage) return own
         val shared = sharedAccountsFor(customer.partyId)
         if (shared.isEmpty()) return own
-        val merged = runCatching { objectMapper.readTree(own.entity?.toString() ?: "") }
-            .getOrNull()?.takeIf { it.isArray } ?: return own
-        val out = objectMapper.createArrayNode()
-        merged.forEach { out.add(it) }
-        shared.forEach { out.add(it) }
-        return Response.ok(objectMapper.writeValueAsString(out)).type(MediaType.APPLICATION_JSON).build()
+        return mergeSharedAccounts(own, shared)
+    }
+
+    private fun mergeSharedAccounts(own: Response, shared: List<com.fasterxml.jackson.databind.JsonNode>): Response {
+        val body = runCatching { objectMapper.readTree(own.entity?.toString() ?: "") }.getOrNull()
+            ?: return own
+        // account-service answers a page object {data, pagination}; a bare array is the legacy
+        // shape and is still merged. Anything else is passed through untouched.
+        val rows = when {
+            body.isArray -> body as com.fasterxml.jackson.databind.node.ArrayNode
+            body.path("data").isArray -> body.path("data") as com.fasterxml.jackson.databind.node.ArrayNode
+            else -> return own
+        }
+        val seen = rows.mapNotNull { it.path("id").asText(null) }.toMutableSet()
+        var appended = 0
+        shared.forEach { node ->
+            val id = node.path("id").asText(null)
+            if (id != null && seen.add(id)) {
+                rows.add(node)
+                appended++
+            }
+        }
+        if (appended == 0) return own
+        // Shared accounts sit OUTSIDE cursor pagination: they are appended to the FIRST page only
+        // (no cursor), cursors are left as account-service issued them, and only totalCount (when the
+        // upstream supplied one) is raised so the count still describes what the caller can see.
+        val pagination = body.path("pagination")
+        if (pagination is com.fasterxml.jackson.databind.node.ObjectNode && pagination.path("totalCount").isNumber) {
+            pagination.put("totalCount", pagination.path("totalCount").asLong() + appended)
+        }
+        return Response.ok(objectMapper.writeValueAsString(body)).type(MediaType.APPLICATION_JSON).build()
     }
 
     /**
@@ -368,6 +401,40 @@ class CustomerEdgeResource(
             return forbidden("Account does not belong to caller")
         }
         return upstream.get("$balanceServiceUrl/api/v1/balances/$accountId", customer.partyId.toString())
+    }
+
+    /** Low-balance alerts belong only to the account owner, never a delegated reader. */
+    @GET
+    @Path("/balances/{accountId}/{currency}/low-balance-alert")
+    @Authorize(action = "customer.balances.read", resource = "#accountId")
+    @Blocking
+    fun getLowBalanceAlert(@PathParam("accountId") accountId: UUID, @PathParam("currency") currency: String): Response {
+        val customer = customer()
+        if (!ownsAccount(accountId, customer.partyId)) return forbidden("Account does not belong to caller")
+        val ccy = CurrencyCode.parse(currency)?.value ?: return badRequest("Invalid currency")
+        return upstream.get(
+            "$balanceServiceUrl/api/v1/balances/$accountId/$ccy/low-balance-alert",
+            customer.partyId.toString(),
+        )
+    }
+
+    @PUT
+    @Path("/balances/{accountId}/{currency}/low-balance-alert")
+    @Authorize(action = "customer.balances.alert.update", resource = "#accountId")
+    @Blocking
+    fun setLowBalanceAlert(
+        @PathParam("accountId") accountId: UUID,
+        @PathParam("currency") currency: String,
+        body: String,
+    ): Response {
+        val customer = customer()
+        if (!ownsAccount(accountId, customer.partyId)) return forbidden("Account does not belong to caller")
+        val ccy = CurrencyCode.parse(currency)?.value ?: return badRequest("Invalid currency")
+        return upstream.put(
+            "$balanceServiceUrl/api/v1/balances/$accountId/$ccy/low-balance-alert",
+            customer.partyId.toString(),
+            body,
+        )
     }
 
     // --- Interest (ADR-0033) ---
@@ -497,6 +564,13 @@ class CustomerEdgeResource(
      * price and "not priced" is not.
      *
      * `type` narrows the list; omitted, every discoverable type comes back.
+     *
+     * ADR-0284 D10: under an `X-Acting-For` business profile the list is further narrowed to
+     * products whose `eligibilitySegments` include BUSINESS (or ALL — the catalogue's
+     * segment-agnostic default); in the personal profile BUSINESS-only products are excluded.
+     * A product the profile cannot take is invisible rather than greyed out, exactly like a
+     * withdrawn one. The catalogue is not changed; the edge filters on the segments the
+     * catalogue response already carries.
      */
     @GET
     @Path("/products")
@@ -518,9 +592,11 @@ class CustomerEdgeResource(
         val catalog = upstream.get("$productCatalogUrl/api/v1/products$query", customer.partyId.toString())
         if (catalog.status != 200) return productCatalogueUnavailable()
         val products = parseJson(catalog)?.takeIf { it.isArray } ?: return productCatalogueUnavailable()
+        val businessProfile = customer.actingFor != null
         val today = LocalDate.now(clock)
         val offers = objectMapper.createArrayNode()
-        products.forEach { product -> productOffer(product, today)?.let(offers::add) }
+        products.filter { isEligibleForProfile(it, businessProfile) }
+            .forEach { product -> productOffer(product, today)?.let(offers::add) }
         return Response.ok(objectMapper.createObjectNode().set<ArrayNode>("items", offers)).build()
     }
 
@@ -536,8 +612,10 @@ class CustomerEdgeResource(
         )
         if (catalog.status != 200) return termDepositCatalogueUnavailable()
         val products = parseJson(catalog)?.takeIf { it.isArray } ?: return termDepositCatalogueUnavailable()
+        val businessProfile = customer.actingFor != null
         val offers = objectMapper.createArrayNode()
-        products.forEach { product -> termDepositOffer(product)?.let(offers::add) }
+        products.filter { isEligibleForProfile(it, businessProfile) }
+            .forEach { product -> termDepositOffer(product)?.let(offers::add) }
         return Response.ok(objectMapper.createObjectNode().set<ArrayNode>("items", offers)).build()
     }
 
@@ -2533,7 +2611,8 @@ class CustomerEdgeResource(
         if (resp.status != 200) return emptyList()
         val grants = runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") }.getOrNull()
             ?.takeIf { it.isArray } ?: return emptyList()
-        return grants.asSequence()
+        var mismatched = 0
+        val result = grants.asSequence()
             .filter { it.path("status").asText() == "ACTIVE" }
             .filter { it.path("resourceType").asText() == "ACCOUNT" }
             .filter { g ->
@@ -2542,11 +2621,15 @@ class CustomerEdgeResource(
             .mapNotNull { it.path("resourceId").asText(null) }
             .distinct()
             .mapNotNull { id -> runCatching { UUID.fromString(id) }.getOrNull() }
-            // Fetch as the OWNER's party: account-service scopes by id and the header is advisory,
-            // but sending the grantee's party id on someone else's account would be a lie in the
-            // audit trail. The grant is the authority, and it was just checked above.
-            .mapNotNull { id -> fetchAccount(id, partyId) }
-            .mapNotNull { body -> runCatching { objectMapper.readTree(body) }.getOrNull() }
+            // Fetched with the GRANTEE's party id in X-Customer-Party-Id: account-service scopes by
+            // id and the header is advisory there, so the grant (checked above) is the authority,
+            // not this header. The body must come back for the id the grant names, or it is dropped.
+            .mapNotNull { id ->
+                fetchAccount(id, partyId)
+                    ?.let { body -> runCatching { objectMapper.readTree(body) }.getOrNull() }
+                    ?.takeIf { it.path("id").asText(null) == id.toString() }
+                    .also { if (it == null) mismatched++ }
+            }
             .map { node ->
                 // Mark it, so the app can say "shared with you" rather than presenting someone
                 // else's account as the customer's own. Silently blending the two would let a
@@ -2554,6 +2637,11 @@ class CustomerEdgeResource(
                 (node as com.fasterxml.jackson.databind.node.ObjectNode).put("sharedWithMe", true)
             }
             .toList()
+        if (mismatched > 0) {
+            org.jboss.logging.Logger.getLogger(CustomerEdgeResource::class.java)
+                .warnf("Dropped %d shared account(s) whose body did not match the granted id", mismatched)
+        }
+        return result
     }
 
     /**
@@ -5342,18 +5430,15 @@ class CustomerEdgeResource(
                 .type(MediaType.APPLICATION_JSON)
                 .build()
         }
-        val consumeBody = objectMapper.createObjectNode().apply {
-            // The challenge was raised and decided by the human (SCA is theirs, not the entity's).
-            put("partyId", customer.human.toString())
-            // Null only for an SDD mandate (#10281): it has no amount, and its challenge links none.
-            amount?.let { put("amount", it) }
-            currency?.let { put("currency", it) }
-            creditor?.let { put("creditor", it) }
-        }
-        val consume = upstream.post(
-            "$scaServiceUrl/api/v1/sca/challenges/$challengeId/consume",
+        // The challenge was raised and decided by the human (SCA is theirs, not the entity's).
+        // amount is null only for an SDD mandate (#10281): it has no amount, and its challenge links none.
+        val consume = ScaConsume.consume(
+            upstream,
+            scaServiceUrl,
+            challengeId,
             customer.partyId.toString(),
-            objectMapper.writeValueAsString(consumeBody),
+            customer.human,
+            mapOf("amount" to amount, "currency" to currency, "creditor" to creditor),
         )
         if (consume.statusInfo.family != Response.Status.Family.SUCCESSFUL) {
             audit.emit(
@@ -5474,7 +5559,13 @@ class CustomerEdgeResource(
         val catalog = upstream.get("$productCatalogUrl/api/v1/products/$productId", customer.partyId.toString())
         if (catalog.status == 404) return TermDepositResolution.NotFound
         if (catalog.status != 200) return TermDepositResolution.Unavailable
-        return parseJson(catalog)?.let(::termDepositOffer)?.let(TermDepositResolution::Found)
+        // ADR-0284 D10: a single-offer fetch must apply the same segment gate as the list —
+        // otherwise a personal-only offer stays reachable by id under a business profile (and
+        // vice versa) and the list filter is decorative.
+        return parseJson(catalog)
+            ?.takeIf { isEligibleForProfile(it, customer.actingFor != null) }
+            ?.let(::termDepositOffer)
+            ?.let(TermDepositResolution::Found)
             ?: TermDepositResolution.NotFound
     }
 
@@ -5665,6 +5756,28 @@ class CustomerEdgeResource(
             product.path("id").asText().isNotBlank() &&
             product.path("currency").asText().isNotBlank()
 
+    /**
+     * ADR-0284 D10 — the eligibility-segment gate applied on top of discoverability.
+     *
+     * Under a business profile (`X-Acting-For` resolved to an entity) only products whose
+     * `eligibilitySegments` include BUSINESS — or ALL, the catalogue's segment-agnostic default —
+     * are visible; a retail-only product must not leak into the company context. In the personal
+     * profile the mirror rule holds: a BUSINESS-only product is not offered to a natural person.
+     * A missing or empty `eligibilitySegments` reads as ALL, matching the catalogue domain
+     * default, so legacy catalogue entries stay visible in every profile.
+     */
+    private fun isEligibleForProfile(product: JsonNode, businessProfile: Boolean): Boolean {
+        val segments = product.path("eligibilitySegments").takeIf { it.isArray }
+            ?.mapNotNull { segment -> segment.takeIf { it.isTextual }?.asText() }
+            ?.ifEmpty { listOf(ELIGIBILITY_SEGMENT_ALL) }
+            ?: listOf(ELIGIBILITY_SEGMENT_ALL)
+        return if (businessProfile) {
+            ELIGIBILITY_SEGMENT_BUSINESS in segments || ELIGIBILITY_SEGMENT_ALL in segments
+        } else {
+            segments != listOf(ELIGIBILITY_SEGMENT_BUSINESS)
+        }
+    }
+
     private fun productCatalogueUnavailable(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
         .entity(mapOf("error" to "Product catalogue unavailable"))
         .build()
@@ -5726,6 +5839,10 @@ class CustomerEdgeResource(
          * to take it. A new type becomes customer-visible by being added here, on purpose.
          */
         internal val CUSTOMER_PRODUCT_TYPES = setOf("CURRENT", "SAVINGS", "TERM_DEPOSIT")
+
+        /** EligibilitySegment names as the catalogue serialises them (ADR-0284 D10 gate). */
+        private const val ELIGIBILITY_SEGMENT_ALL = "ALL"
+        private const val ELIGIBILITY_SEGMENT_BUSINESS = "BUSINESS"
 
         /**
          * The ADR-0269 credit consents, as the app's field name → the consent-service scope.

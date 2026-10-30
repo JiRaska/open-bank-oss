@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+# The watcher is watched: LivenessSentinelHeartbeatAbsent fires when the sentinel's heartbeat
+# series is missing, even while OTHER workflows still report (so the fleet-wide absent() rule is
+# quiet), and stays silent while the sentinel reports.
+rule_files:
+  - prometheus-rules-workflow-liveness.yaml
+
+evaluation_interval: 5m
+
+tests:
+  # Positive: another workflow reports, the sentinel does not.
+  - interval: 5m
+    input_series:
+      - series: 'openbank_workflow_last_success_age_seconds{workflow="campaign-bulk-admission",namespace="campaign"}'
+        values: '1+0x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: LivenessSentinelHeartbeatAbsent
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: LivenessSentinelHeartbeatAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              workflow: liveness-sentinel-check
+            exp_annotations:
+              summary: "The control-liveness-sentinel reports no heartbeat"
+              description: "No openbank_workflow_last_success_age_seconds series exists for workflow=\"liveness-sentinel-check\". The sentinel is down, not scraped, or its scheduler never registered. While this fires, an empty findings table means \"nothing is looking\", not \"no stale controls\"."
+      # The fleet-wide rule stays quiet: it is exactly the gap this rule closes.
+      - eval_time: 40m
+        alertname: WorkflowLivenessHeartbeatAbsent
+        exp_alerts: []
+  # Negative: the sentinel reports.
+  - interval: 5m
+    input_series:
+      - series: 'openbank_workflow_last_success_age_seconds{workflow="liveness-sentinel-check",namespace="liveness"}'
+        values: '1+0x30'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: LivenessSentinelHeartbeatAbsent
+        exp_alerts: []

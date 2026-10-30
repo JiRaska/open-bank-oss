@@ -65,7 +65,7 @@ function aggregate(snapshots: ServiceSnapshot[]): ComponentAggregate[] {
       const info = snap.info?.stack ? read(snap.info.stack) : null
       if (!info) continue
       const list = byVersion.get(info.version) ?? []
-      list.push(snap.name)
+      list.push(snap.namespace ? `${snap.namespace}/${snap.name}` : snap.name)
       byVersion.set(info.version, list)
       // Capture LTS / supportUntil from any service that reports it (they
       // should all agree if aligned; if they differ, the drift table flags it).
@@ -98,6 +98,7 @@ export default function TechInventoryPage() {
   const inFlight = useRef(false)
   /** CVE lookups keyed by `${component}@${version}`. Lazy, fetched after snapshot refresh. */
   const [cveByComponent, setCveByComponent] = useState<Record<string, CveEvidence>>({})
+  const sbomServices = Array.from(new Map(snapshots.map(snapshot => [snapshot.name, snapshot])).values())
 
   const refresh = useCallback(async (spinner = false) => {
     if (inFlight.current) return
@@ -328,7 +329,7 @@ export default function TechInventoryPage() {
               padding: '12px 16px',
               display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '8px',
             }}>
-              {snapshots.map(s => (
+              {sbomServices.map(s => (
                 <SbomViewer key={s.name} serviceName={s.name} />
               ))}
             </div>

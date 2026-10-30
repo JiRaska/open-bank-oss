@@ -42,7 +42,7 @@ import rego.v1
 # a participant's contract by holding ROLE_OPERATOR.
 allowed_reasons contains "operator-pension-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action in {"pension.contract.inspect", "pension.exit.inspect", "pension.operator.exit-read", "pension.simulation.run"}
@@ -52,7 +52,7 @@ allowed_reasons contains "operator-pension-read" if {
 # never the customer edge. Four-eyes (registrar != approver) is enforced in the DeathClaim aggregate.
 allowed_reasons contains "operator-pension-death-claim" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action in {
@@ -67,7 +67,7 @@ allowed_reasons contains "operator-pension-death-claim" if {
 # prefix, so a future provider-side action is not reachable from the edge the day it is written.
 allowed_reasons contains "edge-service-pension" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"pension.contract.inspect",
 		"pension.contract.strategy",
@@ -118,7 +118,7 @@ allowed_reasons contains "receiving-provider-transfer-request" if {
 # not relay a ceding provider's answer or a contribution (#3765/#3734).
 allowed_reasons contains "operator-pension-onboarding" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action in {"pension.operator.inspect", "pension.operator.contribution", "pension.operator.transfer"}
@@ -127,7 +127,7 @@ allowed_reasons contains "operator-pension-onboarding" if {
 # Compliance reads the operator views, never acts.
 allowed_reasons contains "compliance-pension-onboarding-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	"ROLE_COMPLIANCE" in input.principal.roles
 	input.action == "pension.operator.inspect"
 }
@@ -159,7 +159,7 @@ allowed_reasons contains "edge-service-pension-funding" if {
 # Real staff read any contract's funding.
 allowed_reasons contains "operator-pension-funding-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action == "pension.funding.inspect"
@@ -169,7 +169,7 @@ allowed_reasons contains "operator-pension-funding-read" if {
 # ROLE_OPERATOR (#3765) must not drive the unmatched queue or file claims.
 allowed_reasons contains "operator-pension-funding-operate" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "pension.funding.operate"
@@ -179,7 +179,7 @@ allowed_reasons contains "operator-pension-funding-operate" if {
 # is a follow-up and will get its own named service-account rule, not a role grant.
 allowed_reasons contains "operator-pension-funding-ingest" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
 	role in input.principal.roles
 	input.action == "pension.funding.ingest"
@@ -226,7 +226,7 @@ allowed_reasons contains "edge-service-pension-annuity" if {
 # Real staff read the marketplace; compliance included (comparison-fairness review).
 allowed_reasons contains "operator-pension-annuity-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action in {"pension.annuity.inspect", "pension.operator.annuity-read"}
@@ -236,7 +236,7 @@ allowed_reasons contains "operator-pension-annuity-read" if {
 # ROLE_OPERATOR (#3765/#3734), never the edge.
 allowed_reasons contains "operator-pension-annuity-manage" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action in {
@@ -247,6 +247,29 @@ allowed_reasons contains "operator-pension-annuity-manage" if {
 }
 
 # ---------------------------------------------------------------------------------------------
+# #12425 — participant aggregates for the ČNB returns (ParticipantReportingResource).
+#   pension.reporting.aggregate  — GET /pension/reporting/participant-aggregates
+# Counts and sums only. The verb is deliberately NOT `.read`/`.list`: base rest.rego's
+# operator-read-any and compliance-read-any grant every such action to any HUMAN holding the role,
+# and the shared service-account is HUMAN with ROLE_OPERATOR — so a `.read` name would hand these
+# figures to every backend service unless an exclusion list (absent on this base) vetoed it.
+# Served to real staff and to tax-reporting-service's OWN client, and to nothing else.
+# ---------------------------------------------------------------------------------------------
+allowed_reasons contains "staff-pension-reporting-read" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR"}
+	role in input.principal.roles
+	input.action == "pension.reporting.aggregate"
+}
+
+allowed_reasons contains "service-tax-reporting-participant-aggregates" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-tax-reporting"
+	"ROLE_API" in input.principal.roles
+	input.action == "pension.reporting.aggregate"
+}
+
 # Participant valuation + operator mandates list (#12350, ADR-0334 final integration).
 #   pension.contract.inspect          — GET /contracts/{id}/valuation, /contracts/{id}/transactions
 #                                    (edge for the participant, staff as readers; rules above)
@@ -256,7 +279,7 @@ allowed_reasons contains "operator-pension-annuity-manage" if {
 # ---------------------------------------------------------------------------------------------
 allowed_reasons contains "operator-pension-mandate-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action == "pension.operator.mandate-read"
@@ -274,7 +297,7 @@ allowed_reasons contains "operator-pension-mandate-read" if {
 # ---------------------------------------------------------------------------------------------
 allowed_reasons contains "operator-pension-participant-inspect" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action in {"pension.onboarding.inspect", "pension.transfer.inspect", "pension.death.inspect"}

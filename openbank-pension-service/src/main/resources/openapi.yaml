@@ -21,7 +21,11 @@ info:
   #        SCA and cooling-off. No deprecation window either, for the same reason, and no
   #        exemption applies (check-api-contract.py has none for an undeployed service). /api/v1
   #        is therefore not served at all; every route moved unchanged to /api/v2.
-  version: 2.0.0
+  # 2.1.0: additive (#12425) — participant aggregates for the ČNB statutory returns, one read route.
+  # 2.2.0: additive — GET /contracts gains the optional staff free-text search parameter `q`
+  #        (contract/participant party id fragment, participant birth date, product line, payment
+  #        reference) and Contract gains `participantBirthDate`. MINOR per ADR-0048.
+  version: 2.3.0
   description: |
     Participant-side pension contracts (ADR-0334). A contract is created under the jurisdiction
     pack in force on its creation date and PINS that pack version for life; incentive evaluation
@@ -44,10 +48,42 @@ tags:
   - name: Pension simulation
   - name: Pension contract changes
   - name: Pension annuity
+  - name: Reporting
 security:
   - bearerAuth: []
 
 paths:
+  /api/v2/pension/reporting/participant-aggregates:
+    get:
+      tags: [Reporting]
+      operationId: getParticipantAggregates
+      summary: Participant aggregates for one period (ČNB returns, #12425)
+      description: |
+        Counts and sums only — no contract, party or participant attribute is returned. Counts of
+        contracts in force at the period end by product line, age band and status at period end;
+        contributions by source for the period and year to date; state contributions; payouts by
+        form; transfers in and out. Payouts include only SETTLED instructions, bucketed by
+        domestic-payment's persisted SETTLED transition time (`settledAt` on its status event),
+        not instruction creation, event creation or pension-service consumption time. Domestic
+        records that time after transaction-service booking; it is not an external rail timestamp.
+        Dates are a closed interval, bucketed by UTC date.
+        Late status events
+        can correct an earlier period. Served to staff and to
+        tax-reporting-service's own client only (`pension.reporting.aggregate`).
+      parameters:
+        - { name: periodStart, in: query, required: true, schema: { type: string, format: date } }
+        - { name: periodEnd, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The aggregates
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ParticipantAggregates' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: The period books more than one currency or a settled payout lacks a verifiable domestic transition time
   /api/v2/pension/contracts:
     get:
       tags: [Pension]
@@ -63,6 +99,14 @@ paths:
           in: query
           required: false
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: q
+          in: query
+          required: false
+          description: >-
+            Staff free-text search - a fragment of the contract or participant party id, the
+            participant birth date (ISO or bare digits, e.g. 1985-04 or 850425), the product
+            line, or the contract payment reference. Ignored for participant callers.
+          schema: { type: string, minLength: 1, maxLength: 64 }
       responses:
         '200':
           description: Contracts
@@ -1326,7 +1370,7 @@ paths:
     post:
       tags: [Pension funding operations]
       operationId: fileReturnReport
-      summary: File the monthly return report with every DUE return (ZDPS §18(4))
+      summary: File the monthly return reports with every DUE return, one per currency (ZDPS §18(4))
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -2735,6 +2779,7 @@ components:
       properties:
         contractId: { type: string, format: uuid }
         participantPartyId: { type: string, format: uuid }
+        participantBirthDate: { type: string, format: date, description: Participant birth date; the operator-facing disambiguator for staff search results. }
         productLine: { $ref: '#/components/schemas/ProductLine' }
         jurisdiction: { type: string }
         packVersion: { type: integer }
@@ -3262,14 +3307,22 @@ components:
         channelReference: { type: [string, 'null'], description: 'MANUAL:sha256:… means nothing was transmitted' }
         resultApplied: { type: boolean }
         createdAt: { type: string, format: date-time }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: 'ISO 4217 currency of every line and of the total; a report is single-currency' }
+        total: { type: number, description: Sum of this report's lines, all in its currency }
     ReturnReportRun:
       type: object
       properties:
         filed: { type: boolean }
         report:
+          deprecated: true
+          description: The first of reports; kept for clients written before multi-currency reports
           oneOf:
             - $ref: '#/components/schemas/ReturnReport'
             - type: 'null'
+        reports:
+          type: array
+          description: One report per currency with DUE returns; never sums amounts across currencies
+          items: { $ref: '#/components/schemas/ReturnReport' }
     StateContributionDeadlines:
       type: object
       properties:
@@ -3773,3 +3826,65 @@ components:
         proposedBy: { type: [string, 'null'] }
         activationRequestedBy: { type: [string, 'null'] }
         updatedAt: { type: string, format: date-time }
+    ContributionAggregate:
+      type: object
+      required: [participant, employer, state, transferIn, total]
+      properties:
+        participant: { type: number }
+        employer: { type: number }
+        state: { type: number }
+        transferIn: { type: number, description: Savings moved in from another provider; not part of total }
+        total: { type: number, description: participant + employer + state }
+    PayoutAggregate:
+      type: object
+      required: [total, cases, taxWithheld, byForm]
+      properties:
+        total: { type: number }
+        cases: { type: integer, format: int64, description: Distinct contracts paid }
+        taxWithheld: { type: number }
+        byForm:
+          type: object
+          additionalProperties:
+            type: object
+            required: [amount, count]
+            properties:
+              amount: { type: number }
+              count: { type: integer, format: int64 }
+    ParticipantAggregates:
+      type: object
+      required: [periodStart, periodEnd, currency, participants, contributions, contributionsYtd, stateContributions, payouts, payoutsYtd, transfers]
+      properties:
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        currency: { type: string }
+        participants:
+          type: object
+          required: [inForce, newInPeriod, exitedInPeriod, contributing, pensioners, byProductLine, byAgeBand, byStatusAtPeriodEnd]
+          properties:
+            inForce: { type: integer, format: int64 }
+            newInPeriod: { type: integer, format: int64 }
+            exitedInPeriod: { type: integer, format: int64 }
+            contributing: { type: integer, format: int64 }
+            pensioners: { type: integer, format: int64 }
+            byProductLine: { type: object, additionalProperties: { type: integer, format: int64 } }
+            byAgeBand: { type: object, additionalProperties: { type: integer, format: int64 } }
+            byStatusAtPeriodEnd: { type: object, additionalProperties: { type: integer, format: int64 } }
+        contributions: { $ref: '#/components/schemas/ContributionAggregate' }
+        contributionsYtd: { $ref: '#/components/schemas/ContributionAggregate' }
+        stateContributions:
+          type: object
+          required: [claimed, received, returned]
+          properties:
+            claimed: { type: number }
+            received: { type: number }
+            returned: { type: number }
+        payouts: { $ref: '#/components/schemas/PayoutAggregate' }
+        payoutsYtd: { $ref: '#/components/schemas/PayoutAggregate' }
+        transfers:
+          type: object
+          required: [inCount, inAmount, outCount, outAmount]
+          properties:
+            inCount: { type: integer, format: int64 }
+            inAmount: { type: number }
+            outCount: { type: integer, format: int64 }
+            outAmount: { type: number }

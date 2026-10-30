@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.3...sdd-service-v0.14.4) (2026-10-19)
+
+
+### Bug Fixes
+
+* **account:** preserve booking proof across transaction client consumers ([#13222](https://github.com/JiRaska/open-bank-oss/issues/13222)) ([427ce5a](https://github.com/JiRaska/open-bank-oss/commit/427ce5a055719d8e5f0cc805f44b581b9bf5c55f))
+
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.2...sdd-service-v0.14.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
 ## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.1...sdd-service-v0.14.2) (2026-10-14)
 
 

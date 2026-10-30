@@ -38,7 +38,8 @@ test('keeps a failed audit retry bound to the same aggregate and recovers', asyn
   })
 
   await page.goto('/audit')
-  await page.getByLabel(/ID agregátu|Aggregate ID/).fill(AGGREGATE_ID)
+  await page.getByRole('button', { name: /Technické ID \(pokročilé\)|Technical ID \(advanced\)/ }).click()
+  await page.getByLabel(/Technické ID \(pokročilé\)|Technical ID \(advanced\)/).fill(AGGREGATE_ID)
   await page.getByRole('button', { name: /Vyhledat auditní záznam|Search audit trail/ }).click()
   await expect(page.getByText('UPDATED', { exact: true })).toBeVisible()
   await expect(page.getByText(AGGREGATE_ID, { exact: true })).toBeVisible()
@@ -66,7 +67,8 @@ test('never attributes an older audit snapshot to a different aggregate', async 
   )
 
   await page.goto('/audit')
-  const input = page.getByLabel(/ID agregátu|Aggregate ID/)
+  await page.getByRole('button', { name: /Technické ID \(pokročilé\)|Technical ID \(advanced\)/ }).click()
+  const input = page.getByLabel(/Technické ID \(pokročilé\)|Technical ID \(advanced\)/)
   await input.fill(AGGREGATE_ID)
   await page.getByRole('button', { name: /Vyhledat auditní záznam|Search audit trail/ }).click()
   await expect(page.getByText('UPDATED', { exact: true })).toBeVisible()

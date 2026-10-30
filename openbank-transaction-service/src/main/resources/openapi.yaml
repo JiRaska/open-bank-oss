@@ -17,7 +17,15 @@ info:
   # 1.17.0 -> 1.18.0 (#9145): additive — the shared spend-category vocabulary, plus
   # `category`/`categorySource` on TransactionResponse. This branch still carried 1.16.0, which
   # #8838 and then #9115 have both since passed.
-  version: 1.19.0
+  # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
+  # payloadRef — all optional) on ApprovalResponse; no breaking change.
+  # 1.20.0 -> 1.21.0 (ADR-0319): description-only. Four `'400': {description: a, b, c}` flow
+  # mappings on the merchant routes were unquoted, so YAML parsed each comma as a new key and the
+  # document failed spec validation in openapi-generator (8 errors); the descriptions are now quoted.
+  # Also additive: TransactionPage.pagination now declares the fields the server actually sends
+  # (limit, hasNextPage, previousCursor, totalCount - libs `PageInfo`); `hasMore`, which the server
+  # never sent, is kept and labelled. No path, parameter or status code changes.
+  version: 1.21.1
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -73,7 +81,12 @@ paths:
               $ref: '#/components/schemas/InitiateTransactionRequest'
       responses:
         '201':
-          description: Transaction created
+          description: >-
+            Transaction created or existing transaction replayed (both HTTP 201). The
+            idempotency key is unique across all booking dates. A replay returns the
+            existing ID and current stored status, including PENDING, PROCESSING,
+            FAILED or REVERSED; a successful HTTP response does not imply COMPLETED.
+            Replays do not start another payment workflow.
           content:
             application/json:
               schema:
@@ -445,7 +458,7 @@ paths:
       responses:
         '200': {description: Entry replaced}
         '201': {description: Entry created}
-        '400': {description: Key normalises to nothing, cleanName missing, or only one coordinate}
+        '400': {description: "Key normalises to nothing, cleanName missing, or only one coordinate"}
     delete:
       tags: [Merchant catalogue]
       summary: Remove a catalogue entry
@@ -564,7 +577,7 @@ paths:
             image/png:
               schema: {type: string, format: binary}
         '304': {description: The client's cached copy is current}
-        '400': {description: Key normalises to nothing, or an unsupported size}
+        '400': {description: "Key normalises to nothing, or an unsupported size"}
         '404': {description: No logo stored for this merchant}
     put:
       tags: [Merchant catalogue]
@@ -609,7 +622,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MerchantLogoWritten'}
-        '400': {description: Missing body, unsupported format, oversized upload, or implausible dimensions}
+        '400': {description: "Missing body, unsupported format, oversized upload, or implausible dimensions"}
         '404': {description: No catalogue entry under that key to attach a logo to}
     delete:
       tags: [Merchant catalogue]
@@ -668,7 +681,7 @@ paths:
       responses:
         '200': {description: Location replaced}
         '201': {description: Location created}
-        '400': {description: Key or town normalises to nothing, unknown precision, or EXACT without a terminalId}
+        '400': {description: "Key or town normalises to nothing, unknown precision, or EXACT without a terminalId"}
     delete:
       tags: [Merchant catalogue]
       summary: Remove one town's location for a merchant
@@ -893,6 +906,46 @@ components:
         decidedBy:
           type: string
           nullable: true
+        summary:
+          type: string
+          nullable: true
+          description: >-
+            Bounded human-readable description of the paused request, persisted with the
+            approval (ADR-0227 D1). Null when the approval was created by application code
+            rather than by the intercepting pause.
+        domain:
+          type: string
+          nullable: true
+          description: >-
+            The service's domain in the unified approval inbox (ADR-0227 D1), derived from
+            quarkus.application.name. Informational; the inbox keys items off its own source
+            list.
+        amount:
+          type: string
+          nullable: true
+          description: >-
+            The maker's original request amount, when a future phase persists one (ADR-0227
+            D1). Always null today - the request body is not persisted, only its SHA-256
+            fingerprint. Absent never means zero.
+        currency:
+          type: string
+          nullable: true
+          description: ISO 4217 currency of `amount`, when an amount is present. Null today.
+        riskClass:
+          type: string
+          nullable: true
+          enum: [MONEY_PATH, DESTRUCTIVE, OPERATIONAL, UNKNOWN]
+          description: >-
+            Coarse action-class risk (ADR-0227 D1/D3). UNKNOWN from the service side - the
+            authoritative classification lives in rules.yaml four_eyes metadata the store
+            cannot see; the admin-UI BFF re-derives it per action.
+        payloadRef:
+          type: string
+          nullable: true
+          description: >-
+            Retrievable pointer to the maker's original request payload, when a future phase
+            persists one. Null today - the persisted fingerprint is an integrity digest, not
+            a payload pointer.
     MergeSweepRequest:
       type: object
       required:
@@ -1179,11 +1232,28 @@ components:
         pagination:
           type: object
           properties:
+            limit:
+              type: integer
+              description: The page size the server applied.
+            hasNextPage:
+              type: boolean
+              description: Whether another page follows. This is the field the server sends.
             nextCursor:
               type: string
               nullable: true
+            previousCursor:
+              type: string
+              nullable: true
+            totalCount:
+              type: integer
+              format: int64
+              nullable: true
             hasMore:
               type: boolean
+              description: >
+                GATE-CONSTRAINED (oasdiff response-property-removed): the server has never sent this
+                field - use `hasNextPage`. It stays declared only because removing a published
+                response property is a breaking change under ADR-0048.
 
     TransactionSearchResult:
       type: object

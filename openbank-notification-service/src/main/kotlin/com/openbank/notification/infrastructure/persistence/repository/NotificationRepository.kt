@@ -17,6 +17,15 @@ import java.util.UUID
 @Suppress("TooManyFunctions") // query methods per read/write path; grows with notification features
 class NotificationRepository : PanacheRepository<NotificationEntity> {
 
+    fun findByDeduplicationKey(key: UUID): Uni<NotificationEntity?> = Panache.withSession {
+        find("deduplicationKey", key).firstResult()
+    }
+
+    /** Includes ambiguous provider handoffs; no terminal outcome has been committed for these rows. */
+    fun countStalePending(cutoff: Instant): Uni<Long> = Panache.withSession {
+        count("status = ?1 and createdAt < ?2", "PENDING", cutoff)
+    }
+
     suspend fun listAll(page: Int, size: Int): List<NotificationEntity> =
         Panache.withSession { findAll().page(page, size).list() }.awaitSuspending()
 
@@ -58,17 +67,6 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
 
     suspend fun deleteByPartyId(partyId: UUID): Long =
         Panache.withTransaction { delete("partyId", partyId) }.awaitSuspending()
-
-    /**
-     * ContactPolicyGate's `sendsInWindow` counter (ADR-0219 D4/D1), backed by this service's own
-     * durable log — same "slice 1" convention as campaign-service's send log, since no shared
-     * Valkey counter exists yet. [templates] narrows to one [com.openbank.notification.domain.model.NotificationCategory]'s
-     * template names (MARKETING today) rather than every send, matching the gate's own send cap
-     * being a marketing-specific budget, not a count of every notification this party received.
-     */
-    suspend fun countSince(partyId: UUID, templates: List<String>, since: Instant): Int = Panache.withSession {
-        count("partyId = ?1 and template in ?2 and createdAt >= ?3", partyId, templates, since)
-    }.awaitSuspending().toInt()
 
     /**
      * Mark one notification read (idempotent). partyId scopes the UPDATE so the edge's

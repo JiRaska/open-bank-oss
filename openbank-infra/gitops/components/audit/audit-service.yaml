@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-audit-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "e10801606caee586"
+        openbank.tech/policy-checksum: "b343fe2619a56f53"
     spec:
       serviceAccountName: audit-service
       securityContext:
@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: audit-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-audit-service:sandbox-1a7bd7e3
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-audit-service:sandbox-78902925@sha256:2124e43e683a107c22b9d7a1ebde758cee70b1cbcb8aebabee479b18bdc96470
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -123,6 +123,14 @@ spec:
             # warns and continues.
             - name: QUARKUS_CONFIG_LOCATIONS
               value: /mnt/msg-config/override.properties
+            # D5 AI-attribution provenance (#12256): consume openbank.agent.audit.events so
+            # agent-service's AI-audit events persist to audit_entries in the live cluster.
+            # The baked application.yaml default stays `false` (fail-closed for local dev and
+            # tests with no broker); THIS env is the deployment decision. group.id /
+            # auto.offset.reset for this channel come from the msg-override ConfigMap above —
+            # never as dotted YAML keys (SmallRye quotes them inertly, #686).
+            - name: AUDIT_AGENT_AUDIT_KAFKA_ENABLED
+              value: "true"
             # ADR-0031 D5: the asymmetric signing key is held by KMS; the alias is only
             # the signing input. AuditAnchorService records KMS's immutable returned key id
             # with each anchor so verification remains correct across key rotation.

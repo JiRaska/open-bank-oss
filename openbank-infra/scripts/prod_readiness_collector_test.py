@@ -25,6 +25,7 @@ the code under test.
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import sys
 import tempfile
 import unittest
@@ -134,20 +135,36 @@ class CollectorScorerTest(unittest.TestCase):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("money_path_services:\n" + "".join(f"    - {e}\n" for e in entries))
 
+    def runnable_module(self, name):
+        module = self.root / name
+        (module / "src" / "main").mkdir(parents=True, exist_ok=True)
+        (module / "build.gradle.kts").write_text(
+            'plugins { id("openbank.quarkus-service") }\n'
+            'implementation(project(":openbank-libs-runtime"))\n'
+        )
+        return module
+
     def test_all_services_includes_a_money_path_module_the_glob_would_miss(self):
         """openbank-sepa-payment has no `-service` suffix, so the glob alone dropped it — and with
         it every headline the matrix printed (#2364)."""
         self.write_rules()
-        (self.root / "openbank-ledger-service").mkdir(exist_ok=True)
-        (self.root / "openbank-sepa-payment").mkdir(exist_ok=True)
+        self.runnable_module("openbank-ledger-service")
+        self.runnable_module("openbank-sepa-payment")
         services = self.mod.all_services()
         self.assertIn("sepa-payment", services)
         self.assertIn("ledger", services)
 
-    def test_all_services_skips_a_declared_module_with_no_directory(self):
+    def test_all_services_fails_closed_for_a_declared_money_path_module_without_runnable_marker(self):
         self.write_rules(("openbank-ledger-service", "openbank-ghost-service"))
-        (self.root / "openbank-ledger-service").mkdir(exist_ok=True)
-        self.assertNotIn("ghost", self.mod.all_services())
+        self.runnable_module("openbank-ledger-service")
+        with self.assertRaisesRegex(RuntimeError, "ghost"):
+            self.mod.all_services()
+
+    def test_all_services_keeps_runnable_module_without_gitops_workload(self):
+        self.write_rules(("openbank-ledger-service",))
+        self.runnable_module("openbank-ledger-service")
+        self.runnable_module("openbank-analytics-sink")
+        self.assertEqual(self.mod.all_services(), ["analytics-sink", "ledger"])
 
     def test_money_path_comes_from_rules_yaml_not_a_literal(self):
         """The hardcoded set named 14 while rules.yaml declared 20, so six declared money-path
@@ -161,6 +178,28 @@ class CollectorScorerTest(unittest.TestCase):
         self.assertEqual(self.mod.money_path(), {"alpha"})
         self.write_rules(("openbank-beta-service",))
         self.assertEqual(self.mod.money_path(), {"beta"})
+
+    def test_snapshot_records_full_collection_provenance_and_exact_scope_without_rescoring(self):
+        result = self.mod.ServiceReadiness(service="widget", money_path=True)
+        result.scores = {code: 2 for code, _ in self.mod.DIMENSIONS}
+        result.evidence = {code: "fixture evidence" for code, _ in self.mod.DIMENSIONS}
+        result.gate = "NO-GO"
+        payload = self.mod.build_snapshot(
+            [result], "2026-10-19", "2026-10-19T12:34:56Z", "a" * 40,
+        )
+
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertEqual(payload["generated_for"], "2026-10-19")
+        self.assertEqual(payload["collected_at"], "2026-10-19T12:34:56Z")
+        self.assertEqual(payload["source_sha"], "a" * 40)
+        self.assertEqual(payload["scope"], {
+            "kind": "service-module-matrix-v1",
+            "service_count": 1,
+            "money_path_count": 1,
+            "roster_sha256": hashlib.sha256(b"widget:true").hexdigest(),
+        })
+        self.assertEqual(payload["services"][0]["gate"], "NO-GO")
+        self.assertEqual(payload["services"][0]["scores"]["C1"], 2)
 
     def test_a_money_path_service_needs_three_on_the_critical_cells(self):
         """The stricter gate is what the six leniently-scored services were missing."""

@@ -9,29 +9,9 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,OPTIONS
       headers: Content-Type,Authorization,X-Session-Id
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   # Health/metrics on a separate management port, matching the fleet convention and the
   # Deployment's `management` containerPort that startup/liveness/readiness probes target.
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
 
   # Customer session JWT arrives via the customer edge (ADR-0065).
   redis:
@@ -45,6 +25,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_copilots}
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_copilots}
   hibernate-orm:
@@ -101,6 +84,8 @@ quarkus:
   rest-client:
     customer-edge:
       url: ${CUSTOMER_EDGE_URL:http://localhost:8128}
+      connect-timeout: 2000
+      read-timeout: 5000
     # ADR-0269 rule 5. These two are NOT called with the propagated customer bearer, unlike the edge
     # above: "did this customer grant this scope" is not a question their own token may answer about
     # itself, and analytics-sink's profile route is an internal operator surface. The customer's

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.2](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v1.0.1...pension-fund-service-v1.0.2) (2026-10-16)
+
+
+### Security
+
+* **opa:** authorize machines by the verified service_account flag (phase 2 of 2, gated on [#12538](https://github.com/JiRaska/open-bank-oss/issues/12538) rollout) ([#12537](https://github.com/JiRaska/open-bank-oss/issues/12537)) ([abf3aff](https://github.com/JiRaska/open-bank-oss/commit/abf3aff4f24fd170a6e1641b3008f9e4648a9572))
+
+## [1.0.1](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v1.0.0...pension-fund-service-v1.0.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
 ## [1.0.0](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v0.5.0...pension-fund-service-v1.0.0) (2026-10-14)
 
 

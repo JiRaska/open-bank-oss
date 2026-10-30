@@ -141,7 +141,31 @@ class BalancePactProviderVerificationTest {
         if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
             testIdentityAssociation.setTestIdentity(null)
         }
+        // ADR-0340 B1 (mirror of the git-pact twin): the CRS/FATCA balance replay must present
+        // the verified service-account-openbank-tax-reporting identity — rego admits
+        // balance.read for that principal only.
+        if (context != null && context.interaction.description.contains("CRS FATCA")) {
+            testIdentityAssociation.setTestIdentity(taxReportingIdentity())
+        }
         context?.verifyInteraction()
+    }
+
+    /** Mirror of the git-pact twin's helper (ADR-0340 B1) — see there for the claim shape. */
+    private fun taxReportingIdentity(): io.quarkus.security.runtime.QuarkusSecurityIdentity {
+        val name = "service-account-openbank-tax-reporting"
+        val jwt = object : org.eclipse.microprofile.jwt.JsonWebToken {
+            private val claims = mapOf(
+                "azp" to "openbank-tax-reporting",
+                "preferred_username" to name,
+                "sub" to "tax-reporting-sa-subject",
+            )
+
+            override fun getName(): String = name
+            override fun getClaimNames(): Set<String> = claims.keys
+            override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+        }
+        return io.quarkus.security.runtime.QuarkusSecurityIdentity.builder().setPrincipal(jwt)
+            .addRole("ROLE_API").build()
     }
 
     @State(NEGATIVE_AUTH_STATE)

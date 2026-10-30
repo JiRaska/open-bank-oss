@@ -46,10 +46,16 @@ interface AccountingDayRepository {
      * outbox row in the SAME database transaction: either the day moves and the event is queued, or
      * neither happens. The update is conditional on the expected previous version, so two operators
      * racing the same transition cannot both win.
+     *
+     * With [requiredParticipants], the day-close completeness is re-read in the SAME transaction under
+     * the per-day participation lock and the transition is refused with
+     * [com.openbank.ledger.domain.model.CloseParticipantsPendingException] when any of them is missing
+     * or REFUSED.
      */
     suspend fun saveTransition(
         record: AccountingDayRecord,
         expectedVersion: Long,
         outbox: OutboxMessage,
+        requiredParticipants: Set<String>? = null,
     ): AccountingDayRecord
 }

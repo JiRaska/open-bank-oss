@@ -15,6 +15,7 @@ import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.interest.infrastructure.client.AccountBalanceClientResponse
+import com.openbank.interest.infrastructure.client.AccountDetailClientResponse
 import com.openbank.interest.infrastructure.client.AccountServiceClient
 import com.openbank.interest.infrastructure.client.ActiveAccountsClientResponse
 import io.restassured.RestAssured.given
@@ -34,10 +35,11 @@ import java.util.UUID
  * the quiet failure this contract turns into a red build. Each account row binds `id`,
  * `productId`, `accountType` and `currencyCode` non-null.
  *
- * It also covers the client's second method, `GET /api/v1/accounts/{id}/balance`, the per-account
- * booked-balance read. [AccountBalanceClientResponse] defaults every field too, so a renamed
+ * It also covers the client's other two reads, `GET /api/v1/accounts/{id}/balance` (the per-account
+ * booked-balance read) and `GET /api/v1/accounts/{id}` (the account detail the ADR-0339 B
+ * tax-profile resolution chains account→partyId on). [AccountBalanceClientResponse] defaults every field too, so a renamed
  * `currentBalance` arrives as null and the run accrues on nothing; the provider state seeds the
- * account and gives account-service's in-memory balance port a CZK balance for it. Both reads live
+ * account and gives account-service's in-memory balance port a CZK balance for it. All reads live
  * in this one class because `pact.writer.overwrite=true` makes each test class rewrite the whole
  * interest-service -> account-service pact file.
  *
@@ -190,6 +192,52 @@ class ActiveAccountsPactConsumerTest {
         assertThat(balance.currencyCode).isEqualTo("CZK")
     }
 
+    // --- account-detail read (ADR-0339 B). Same consumer->provider pair, so it lives in this class:
+    // pact.writer.overwrite=true makes each test class rewrite the whole pact file, and a second
+    // class for openbank-interest-service -> openbank-account-service would erase this one's
+    // interactions (or this one would erase it), whichever ran last.
+    //
+    // The tax-profile resolution (PartyTaxProfileProvider) chains account → partyId → party type →
+    // AML profile; this pins the first hop. partyId binds non-null — a renamed field would arrive
+    // as null and every resolution would fail safe to the conservative default, silently.
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun accountDetailPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("an ACTIVE CZK account exists for tax-profile resolution")
+        .uponReceiving("GET the account's detail to resolve its party for tax profiling")
+        .path(EXPECTED_DETAIL_PATH)
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.uuid("id", UUID.fromString(PACT_DETAIL_ACCOUNT_ID))
+                o.stringValue("accountType", "SAVINGS")
+                o.uuid("partyId", UUID.fromString(PACT_PARTY_ID))
+                o.stringValue("currencyCode", "CZK")
+                o.stringValue("status", "ACTIVE")
+            }.build(),
+        )
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "accountDetailPact")
+    fun `the account detail binds into AccountDetailClientResponse with the partyId the tax resolution chains on`(
+        mockServer: MockServer,
+    ) {
+        assertThat(clientDerivedDetailPath())
+            .describedAs("AccountServiceClient's @Path no longer produces the path this pact pins")
+            .isEqualTo(EXPECTED_DETAIL_PATH)
+
+        val raw = given().baseUri(mockServer.getUrl())
+            .get(clientDerivedDetailPath()).then().statusCode(200).extract().asString()
+
+        val detail = mapper.readValue(raw, AccountDetailClientResponse::class.java)
+        assertThat(detail.id).isEqualTo(UUID.fromString(PACT_DETAIL_ACCOUNT_ID))
+        assertThat(detail.partyId).isEqualTo(UUID.fromString(PACT_PARTY_ID))
+    }
+
     private fun assertClientPathMatchesContract() {
         assertThat(clientDerivedActivePath())
             .describedAs(
@@ -231,6 +279,21 @@ class ActiveAccountsPactConsumerTest {
             val method = AccountServiceClient::class.java.methods.single { it.name == "getBalance" }
                 .getAnnotation(Path::class.java).value
             return (base + method).replace("{accountId}", PACT_ACCOUNT_ID)
+        }
+
+        /** The party the tax-resolution chain continues into (party-service's pact fixture). */
+        const val PACT_PARTY_ID = "61000000-0000-0000-0000-000000000061"
+
+        const val PACT_DETAIL_ACCOUNT_ID = "60000000-0000-0000-0000-000000000060"
+
+        /** LITERAL, retyped from account-service's `AccountResource` — never derived from the client. */
+        const val EXPECTED_DETAIL_PATH = "/api/v1/accounts/$PACT_DETAIL_ACCOUNT_ID"
+
+        fun clientDerivedDetailPath(): String {
+            val base = AccountServiceClient::class.java.getAnnotation(Path::class.java).value
+            val method = AccountServiceClient::class.java.methods.single { it.name == "getAccount" }
+                .getAnnotation(Path::class.java).value
+            return (base + method).replace("{accountId}", PACT_DETAIL_ACCOUNT_ID)
         }
     }
 }
