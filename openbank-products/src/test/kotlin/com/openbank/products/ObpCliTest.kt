@@ -141,6 +141,11 @@ class ObpCliTest {
         assertThat(run(*args, "--from", "2026-02-01", "--to", "2026-01-01").first).isEqualTo(Obp.EXIT_USAGE)
         assertThat(run(*args, "--threshold", "-1").first).isEqualTo(Obp.EXIT_USAGE)
         assertThat(run(*args, "--from", "monday").first).isEqualTo(Obp.EXIT_USAGE)
+        // A RESOLVED range that is empty or too long is a usage error, never an internal one: --to alone
+        // before the earliest openedOn, --from alone after the last fixture day, and a span over 36525 days.
+        assertThat(run(*args, "--to", "2025-12-31").first).isEqualTo(Obp.EXIT_USAGE)
+        assertThat(run(*args, "--from", "2026-06-01").first).isEqualTo(Obp.EXIT_USAGE)
+        assertThat(run(*args, "--from", "1900-01-01", "--to", "2200-01-01").first).isEqualTo(Obp.EXIT_USAGE)
 
         assertThat(run("diff", a.toString(), b.toString()).first).isEqualTo(Obp.EXIT_USAGE)
         assertThat(run("diff", a.toString(), "--behavioural", "--portfolio", portfolio).first).isEqualTo(Obp.EXIT_USAGE)
