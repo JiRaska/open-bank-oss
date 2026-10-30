@@ -520,8 +520,8 @@ EOF
 "This deploy PR pins services that an owner holds on${block_list}, so it will not be armed. The owner hold on${block_list} must be recorded in main's \`rules.yaml: deploy_holds\` (or${block_list} released) before this PR can deploy. $BLOCK_NOTICE_MARKER"; then
       echo "::warning::supersede: could not post the owner-hold block notice on #$KEEP."
     fi
-    # rc 3, distinct from every other refusal: deploy-window-flush falls through to the other
-    # deploy kind ONLY on this one, so a held gitops PR can no longer starve admin-ui.
+    # rc 3, distinct from the other refusals, so a log or caller can tell an owner hold apart.
+    # deploy-window-flush falls through to the other deploy kind on any refusal.
     return 3
   fi
   if [ "$stale_keep" -ne 0 ]; then
@@ -904,7 +904,7 @@ HOOK
   for path_name in coverage-skip:$OLD diverged:$CCC; do
     path_sha="${path_name#*:}"
     out="$(ov_run owner 13061 13060 "$path_sha" 2>&1)" && rc=0 || rc=$?
-    # rc 3 exactly: the flush workflow keys its fall-through to the other deploy kind on it.
+    # rc 3 exactly: an owner-hold refusal is distinguishable from a rollback or unreadable evidence.
     if [ "$rc" -ne 3 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' \
        || [ "$(keep_noticed 13061)" != 1 ] || grep -q '^pr close' "$hev"; then
       echo "SELF-TEST FAIL case 37 (${path_name%%:*}): owner hold + overlap did not block #13061; rc=$rc notices=$(keep_noticed 13061)"; ok=1; dump_out "$out"

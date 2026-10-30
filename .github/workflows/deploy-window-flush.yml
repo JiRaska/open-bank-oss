@@ -9,7 +9,7 @@
 # what lands it. A workflow_run trigger handles new PRs and the schedule recovers missed runs.
 # Each run offers the newest PR of each deploy kind, longest-waiting kind first, once the window
 # has elapsed and nothing else is armed, re-runs supersede-deploy-prs.sh on it (ancestry + coverage
-# — a rollback PR is refused, never armed; a kind refused for an owner hold falls through), and arms auto-merge with the same App token the deploy
+# — a rollback PR is refused, never armed; any refused kind falls through to the next), and arms auto-merge with the same App token the deploy
 # workflows use. A successful manual dispatch of either producer expedites only its matching PR.
 # An open PR labelled merge-priority:repair defers new arming, including manual expedition.
 # Draft/blocked repairs retain priority until an owner removes the label or closes the PR.
@@ -85,11 +85,12 @@ jobs:
           "${RUNNER_TEMP}/deploy-hold-venv/bin/python" -m pip install --quiet --require-hashes \
             -r .github/scripts/pyyaml-requirements.txt
 
-      # One candidate per deploy kind, longest-waiting kind first. For each: GitOps image freshness,
-      # then supersede-deploy-prs.sh (refuses a rollback). supersede rc 3 = an owner hold overlaps
-      # this candidate, so fall through to the next kind: 2026-10-24..29 a held gitops PR failed
-      # 160 of 300 runs and admin-ui never armed. Any other refusal still fails the run, unarmed.
-      - name: Verify, close superseded PRs, fall through a held kind
+      # One candidate per deploy kind, longest-waiting kind first. deploy-window.py select runs
+      # GitOps image freshness, then supersede-deploy-prs.sh (refuses a rollback), per candidate,
+      # and ANY per-kind refusal falls through to the next kind: an owner hold (2026-10-24..29) and
+      # a stale audit-service pin (2026-10-30) each starved admin-ui. A refused PR is never armed;
+      # the run fails only when every kind is refused.
+      - name: Verify, close superseded PRs, fall through a refused kind
         id: select
         if: steps.pick.outputs.candidates != ''
         env:
@@ -98,35 +99,10 @@ jobs:
           DEPLOY_HOLD_PYTHON: ${{ runner.temp }}/deploy-hold-venv/bin/python
         run: |
           set -euo pipefail
-          fetched=""
-          for c in $CANDIDATES; do
-            arm="${c%%:*}"
-            head="${c#*:}"
-            case "$head" in
-              chore/gitops-auto-deploy-*) prefix=chore/gitops-auto-deploy- ;;
-              chore/admin-ui-deploy-*)    prefix=chore/admin-ui-deploy- ;;
-              *) echo "::error::unexpected deploy head ${head}"; exit 1 ;;
-            esac
-            if [ "$prefix" = chore/gitops-auto-deploy- ]; then
-              if [ -z "$fetched" ]; then
-                git fetch --depth=100 origin main
-                git reset --hard origin/main
-                fetched=1
-              fi
-              gh pr diff "$arm" --repo "$GITHUB_REPOSITORY" \
-                | python3 .github/scripts/deploy-window.py verify --root .
-            fi
-            rc=0
-            bash .github/scripts/supersede-deploy-prs.sh "$prefix" "$arm" || rc=$?
-            if [ "$rc" -eq 0 ]; then
-              echo "arm=$arm" >>"$GITHUB_OUTPUT"
-              exit 0
-            fi
-            [ "$rc" -eq 3 ] || exit "$rc"
-            echo "::warning::deploy PR #${arm} is refused for an owner hold - trying the next deploy kind."
-          done
-          echo "::error::every deploy kind is refused for an owner hold - nothing armed."
-          exit 1
+          git fetch --depth=100 origin main
+          git reset --hard origin/main
+          python3 .github/scripts/deploy-window.py select --root . --candidates "$CANDIDATES" \
+            >>"$GITHUB_OUTPUT"
 
       - name: Enable auto-merge
         if: steps.select.outputs.arm != ''

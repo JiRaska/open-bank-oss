@@ -222,6 +222,28 @@ def verify_pins(diff: str, fresh: Callable[[str, str], bool]) -> list[str]:
     return []
 
 
+def select_candidate(cands: list[dict], verify: Callable[[dict], list[str]],
+                     supersede: Callable[[dict], int]) -> dict | None:
+    """First candidate that passes freshness verify and supersede, or None.
+
+    Any per-kind refusal falls through to the next kind: kinds are independent, and a refused
+    PR is never armed. 2026-10-24..29 an owner hold, and from 2026-10-30 a stale audit-service
+    pin, refused the gitops kind on every run while admin-ui was never tried.
+    """
+    for c in cands:
+        stale = verify(c) if c["head"].startswith(DEPLOY_PREFIXES[0]) else []
+        if stale:
+            for pin in stale:
+                print(f"::error::stale GitOps image pin in #{c['number']}: {pin}", file=sys.stderr)
+        else:
+            rc = supersede(c)
+            if rc == 0:
+                return c
+            print(f"::warning::supersede refused #{c['number']} (rc {rc})", file=sys.stderr)
+        print(f"::warning::deploy PR #{c['number']} not armable - trying the next deploy kind.", file=sys.stderr)
+    return None
+
+
 def last_deploy_from_commits(commits: list[dict]) -> int | None:
     """commits: [{message, epoch}] newest-first, as the caller reads them from main."""
     for c in commits:
@@ -269,6 +291,22 @@ def self_test() -> int:
           [p["number"] for p in cands] == [14, 12])
     check("candidates are empty while the window is closed", flush_candidates(prs2, T, T - 60, W) == [])
     check("flush() is the head of flush_candidates()", flush(prs2, T, T - W, W) is cands[0])
+    cand_g = {"number": 12, "head": DEPLOY_PREFIXES[0] + "b"}
+    cand_a = {"number": 11, "head": DEPLOY_PREFIXES[1] + "a"}
+    tried = []
+    def sup(rc_by_number):
+        return lambda c: (tried.append(c["number"]), rc_by_number.get(c["number"], 0))[1]
+    check("stale gitops pin falls through to admin-ui (never runs supersede on the stale PR)",
+          select_candidate([cand_g, cand_a], lambda c: ["openbank-audit-service:sandbox-x"], sup({}))
+          is cand_a and tried == [11])
+    check("owner-hold refusal falls through to admin-ui",
+          select_candidate([cand_g, cand_a], lambda c: [], sup({12: 3})) is cand_a)
+    check("any supersede refusal falls through (rollback rc 1)",
+          select_candidate([cand_g, cand_a], lambda c: [], sup({12: 1})) is cand_a)
+    check("every kind refused -> nothing armed",
+          select_candidate([cand_g, cand_a], lambda c: ["x"], sup({11: 1})) is None)
+    check("first armable candidate wins, later kinds untouched",
+          select_candidate([cand_a, cand_g], lambda c: ["x"], sup({})) is cand_a)
     check("flush never arms a second PR while one is armed",
           flush(prs + [{"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}], T, None, W) is None)
     repair = {"number": 30, "head": "fix/repair", "created_at": "a", "armed": False,
@@ -421,6 +459,9 @@ def main() -> int:
     c = sub.add_parser("carry")
     c.add_argument("--root", default=".")
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
+    sel = sub.add_parser("select", help="arm-candidate fall-through: verify + supersede per kind")
+    sel.add_argument("--root", default=".")
+    sel.add_argument("--candidates", required=True, help="space-separated number:head pairs from flush")
     v = sub.add_parser("verify")
     v.add_argument("--root", default=".")
     for p in (d, f):
@@ -448,6 +489,33 @@ def main() -> int:
         for line in carry(a.root, sys.stdin.read(), set(a.skip_images.split()),
                           lambda image, tag: image_source_is_current(a.root, image, tag)):
             print(f"  [carried] {line}")
+        return 0
+    if a.cmd == "select":
+        repo = os.environ["GITHUB_REPOSITORY"]
+        cands = []
+        for pair in a.candidates.split():
+            number, _, head = pair.partition(":")
+            if not number.isdigit() or not head.startswith(DEPLOY_PREFIXES):
+                print(f"::error::unexpected deploy candidate {pair}", file=sys.stderr)
+                return 1
+            cands.append({"number": int(number), "head": head})
+
+        def verify(c):
+            diff = subprocess.run(["gh", "pr", "diff", str(c["number"]), "--repo", repo],
+                                  capture_output=True, text=True, check=True).stdout
+            return verify_pins(diff, lambda image, tag: image_source_is_current(a.root, image, tag))
+
+        def supersede(c):
+            prefix = next(x for x in DEPLOY_PREFIXES if c["head"].startswith(x))
+            # stdout -> stderr: this command's own stdout is the step's GITHUB_OUTPUT.
+            return subprocess.run(["bash", ".github/scripts/supersede-deploy-prs.sh", prefix, str(c["number"])],
+                                  stdout=sys.stderr).returncode
+
+        pick = select_candidate(cands, verify, supersede)
+        if pick is None:
+            print("::error::every deploy kind was refused - nothing armed.", file=sys.stderr)
+            return 1
+        print(f"arm={pick['number']}")
         return 0
     if a.cmd == "verify":
         stale = verify_pins(sys.stdin.read(),
