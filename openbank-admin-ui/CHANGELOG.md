@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.15.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.14.0...admin-ui-v3.15.0) (2026-10-30)
+
+
+### Features
+
+* **admin-ui:** make Test Intelligence readable at a glance ([#14272](https://github.com/JiRaska/open-bank-oss/issues/14272)) ([76d73e6](https://github.com/JiRaska/open-bank-oss/commit/76d73e6f2840125b62fdccea3e3ef84af683632a))
+* **admin-ui:** render cluster and regulatory pages bilingually, guard Czech UI literals ([#14277](https://github.com/JiRaska/open-bank-oss/issues/14277)) ([ab7bebc](https://github.com/JiRaska/open-bank-oss/commit/ab7bebc0ef096be7dec8679ea4d8cd3facd10e38))
+* **product-catalog,admin-ui:** Studio product IR editor with server-side lint (ADR-0352 5b, part 1) ([#14253](https://github.com/JiRaska/open-bank-oss/issues/14253)) ([40c80c7](https://github.com/JiRaska/open-bank-oss/commit/40c80c700aba881f05069999c34647b9c2912bf5))
+
 ## [3.14.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.13.1...admin-ui-v3.14.0) (2026-10-28)
 
 

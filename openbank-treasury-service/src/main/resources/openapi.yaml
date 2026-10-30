@@ -55,6 +55,18 @@ info:
   #         /portfolio/statements (custodian semt.002; a correction supersedes, the prior version is
   #         kept), GET /portfolio/statements?date= (the version trail) and GET
   #         /portfolio/period-end?date= (tax-reporting's PSP 34-12 PS source; 409 when no statement).
+  # 1.23.0: additive — ADR-0344 phase 2: every product is drafted and settles, accrues, pays and
+  #         matures through the posting-rule matrix (GET /posting-rules). Every product with
+  #         counterparty credit risk consumes its line by CreditExposure (derivatives |notional| x a
+  #         conversion factor, repos net of the collateral haircut): 422 CONVERSION_FACTOR_MISSING /
+  #         COLLATERAL_HAIRCUT_MISSING / COLLATERAL_PRICE_MISSING when the measure has no effective
+  #         record or no ACTIVE market-data price of the collateral ISIN, and
+  #         COLLATERAL_PRICE_OUT_OF_TOLERANCE when the deal's own collateral price is too far from it
+  #         (collateral is always valued at the bank's price, never the deal's). GET
+  #         /day-completion/{date}, close-of-day position snapshots (/positions/close-of-day,
+  #         ROLE_TREASURY_BACK_OFFICE) and saved blotter filters (/views/deal-filters).
+  # 1.24.0: additive — POST /deals/{id}/posting-intent/close (operator close of a lifecycle posting
+  #         intent that cannot complete; ADR-0344 / #13883 intent-first posting).
   version: 1.24.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
@@ -238,7 +250,13 @@ paths:
         '404': { description: No such deal }
         '409': { $ref: '#/components/responses/InvalidState' }
         '422':
-          description: PRODUCT_LIMIT_BREACHED — the deal is outside its product limit (ADR-0315 D4)
+          description: >-
+            PRODUCT_LIMIT_BREACHED — the deal is outside its product limit (ADR-0315 D4);
+            CONVERSION_FACTOR_MISSING / COLLATERAL_HAIRCUT_MISSING / COLLATERAL_PRICE_MISSING — a
+            derivative or repo whose credit measure has no effective reference record or collateral
+            price; COLLATERAL_PRICE_OUT_OF_TOLERANCE — the deal's collateral price is outside the
+            tolerance of the bank's own; LIMIT_BREACHED — the line moved past the
+            vetted headroom before the locked write
           content:
             application/json:
               schema:
@@ -260,8 +278,13 @@ paths:
         '422':
           description: >-
             FOUR_EYES_VIOLATION (approver created or submitted the deal), LIMIT_BREACHED (counterparty
-            limit, not covered by a senior override) or PRODUCT_LIMIT_BREACHED (the deal is outside its
-            product limit as declared NOW — re-checked at approval; not overridable)
+            limit, not covered by a senior override; also when the line moved past the vetted headroom
+            before the locked write), PRODUCT_LIMIT_BREACHED (the deal is outside its product limit as
+            declared NOW — re-checked at approval; not overridable), or CONVERSION_FACTOR_MISSING /
+            COLLATERAL_HAIRCUT_MISSING / COLLATERAL_PRICE_MISSING (a derivative or repo whose credit
+            measure has no effective reference record or collateral price: refused, never measured as
+            zero), or COLLATERAL_PRICE_OUT_OF_TOLERANCE (the deal's collateral price is outside the
+            tolerance of the bank's own)
           content:
             application/json:
               schema:
@@ -924,6 +947,36 @@ paths:
                 items: { $ref: '#/components/schemas/JournalRef' }
         '404': { description: No such deal }
 
+  /api/v1/treasury/posting-rules:
+    get:
+      tags: [Treasury]
+      operationId: listPostingRules
+      summary: 'The posting-rule matrix: (product, event, IFRS 9 category) to journal template (ADR-0344 D7)'
+      responses:
+        '200':
+          description: Every posting rule of every product, versioned
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 10000
+                items: { $ref: '#/components/schemas/PostingRule' }
+
+  /api/v1/treasury/day-completion/{date}:
+    get:
+      tags: [Treasury]
+      operationId: getDayCompletion
+      summary: "The treasury accounting day's completion record: every step with its last outcome (ADR-0344 D7)"
+      parameters:
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Every step of the day; a step with no recorded run is PENDING
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DayCompletion' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/v1/treasury/reference/{kind}:
     get:
       tags: [Treasury]
@@ -1160,6 +1213,85 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/InvalidState' }
         '422': { description: FOUR_EYES_VIOLATION }
+
+  /api/v1/treasury/positions/close-of-day:
+    post:
+      tags: [Treasury]
+      operationId: closePositions
+      summary: Record a close-of-day position snapshot (ROLE_TREASURY_BACK_OFFICE)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PositionCloseRequest' }
+      responses:
+        '201':
+          description: The recorded close
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PositionClose' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/treasury/positions/close-of-day/special:
+    post:
+      tags: [Treasury]
+      operationId: closePositionsSpecial
+      summary: Record a special (out-of-cycle or scenario) position close (ROLE_TREASURY_BACK_OFFICE)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PositionCloseRequest' }
+      responses:
+        '201':
+          description: The recorded close
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PositionClose' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/treasury/views/deal-filters:
+    get:
+      tags: [Treasury]
+      operationId: listDealFilters
+      summary: The caller's saved blotter filters
+      responses:
+        '200':
+          description: Saved filters
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SavedDealFilter' } }
+    post:
+      tags: [Treasury]
+      operationId: saveDealFilter
+      summary: Save (or replace by name) one of the caller's blotter filters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SavedDealFilter' }
+      responses:
+        '201':
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SavedDealFilter' }
+        '400': { description: Blank name or a filter that is not an object }
+
+  /api/v1/treasury/views/deal-filters/{name}:
+    delete:
+      tags: [Treasury]
+      operationId: deleteDealFilter
+      summary: Delete one of the caller's saved filters
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted }
+        '404': { description: No such filter for the caller }
 
   /api/v1/treasury/calendar:
     get:
@@ -1735,7 +1867,9 @@ components:
           description: >-
             FOUR_EYES_VIOLATION, LIMIT_BREACHED, PRODUCT_LIMIT_BREACHED, ACTOR_NOT_PERMITTED,
             INVALID_STATE, NOT_FOUND, REFERENCE_NOT_EFFECTIVE, REFERENCE_BACKDATED, SENIOR_APPROVAL_REQUIRED, SCHEDULE_ENGINE_UNAVAILABLE,
-            DEAL_CHANGED, FLOW_NOT_OVERRIDABLE, FLOW_ALREADY_IN_PAYMENT, FLOW_CHANGED
+            DEAL_CHANGED, FLOW_NOT_OVERRIDABLE, FLOW_ALREADY_IN_PAYMENT, FLOW_CHANGED,
+            CONVERSION_FACTOR_MISSING, COLLATERAL_HAIRCUT_MISSING, COLLATERAL_PRICE_MISSING,
+            COLLATERAL_PRICE_OUT_OF_TOLERANCE
         message:
           type: [string, 'null']
         breaches:
@@ -2681,6 +2815,81 @@ components:
       properties:
         period: { type: string, pattern: '^[0-9]+x[0-9]+$', examples: ['3x6'] }
         settlementConvention: { type: string, enum: [ADVANCE_DISCOUNTED, ARREARS] }
+    PostingRule:
+      type: object
+      required: [product, event, recognition, lines, version]
+      properties:
+        product: { $ref: '#/components/schemas/ProductType' }
+        event:
+          type: string
+          x-extensible-enum: [SETTLED, ACCRUED, MATURED, REVERSED, TRADE, SETTLEMENT, ACCRUAL, FIXING, PAYMENT,
+                              AMORTISATION, REVALUATION, MATURITY, EARLY_TERMINATION, CORRECTION]
+        ifrs9Category: { type: [string, 'null'], enum: [AMORTISED_COST, FVOCI, FVTPL, null], description: 'null = every category' }
+        recognition: { type: string, enum: [TRADE_DATE, SETTLEMENT_DATE] }
+        flowKind: { type: [string, 'null'], description: 'the flow kind the row applies to; null = any' }
+        flowDirection: { type: [string, 'null'], enum: [IN, OUT, null] }
+        lines:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            properties:
+              side: { type: string, enum: [DEBIT, CREDIT] }
+              accountingClass: { type: string, maxLength: 64, description: 'ledger accounting class (ADR-0341 D3); DEBT_SECURITY resolves by the book''s IFRS 9 category. The ledger maps class + role + currency to a GL account.' }
+              accountingRole: { type: string, maxLength: 32 }
+              amountExpression: { type: string }
+        version: { type: integer }
+    PositionCloseRequest:
+      type: object
+      required: [date]
+      properties:
+        date: { type: string, format: date }
+        bookId: { type: [string, 'null'] }
+        scenario: { type: [string, 'null'] }
+    PositionClose:
+      type: object
+      properties:
+        snapshotId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        bookId: { type: [string, 'null'] }
+        scenario: { type: [string, 'null'] }
+        special: { type: boolean }
+        closedBy: { type: string }
+        closedAt: { type: string, format: date-time }
+        positions: { type: array, items: { type: object, additionalProperties: true } }
+    SavedDealFilter:
+      type: object
+      required: [name, filter]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        filter: { type: object, additionalProperties: true, description: The GET /deals query parameters }
+        updatedAt: { type: string, format: date-time }
+    DayCompletion:
+      type: object
+      required: [date, steps]
+      properties:
+        date: { type: string, format: date }
+        steps:
+          type: array
+          maxItems: 16
+          items:
+            type: object
+            required: [step, status, journals, refused]
+            properties:
+              step:
+                type: string
+                x-extensible-enum: [FIXINGS, ACCRUALS, PAYMENTS, REVALUATION, CORRECTIONS, MATURITIES]
+              status:
+                type: string
+                description: >-
+                  DONE; REFUSED (the only failures were the ledger refusing a closed accounting day,
+                  409 ACCOUNTING_DAY_CLOSED); FAILED (any other failure); PENDING (no run recorded)
+                x-extensible-enum: [DONE, SKIPPED, FAILED, REFUSED, PENDING]
+              count: { type: [integer, 'null'], minimum: 0 }
+              journals: { type: integer, minimum: 0 }
+              refused: { type: integer, minimum: 0 }
+              detail: { type: [string, 'null'], maxLength: 500 }
+              at: { type: [string, 'null'], format: date-time }
     TreasuryEvent:
       type: object
       required: [date, type, description, dealId]

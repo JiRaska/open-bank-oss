@@ -24,6 +24,7 @@ import com.openbank.treasury.application.port.out.NostroBreakRepository
 import com.openbank.treasury.application.port.out.NostroStatementRepository
 import com.openbank.treasury.application.port.out.PortfolioStatementRepository
 import com.openbank.treasury.application.port.out.ReferenceRepository
+import com.openbank.treasury.application.usecase.BookCategories
 import com.openbank.treasury.application.usecase.CashFlowService
 import com.openbank.treasury.application.usecase.NostroBreakService
 import com.openbank.treasury.application.usecase.NostroReconciliationService
@@ -85,6 +86,8 @@ class TreasuryServiceProducer {
         productLimits: ProductLimitConfig,
         schedules: ScheduleService,
         references: ReferenceRepository,
+        cashFlows: CashFlowRepository,
+        marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
         meters: io.micrometer.core.instrument.MeterRegistry,
         intents: com.openbank.treasury.application.port.out.PostingIntentPort,
         @ConfigProperty(name = "openbank.treasury.posting-intent.max-resume-age", defaultValue = "PT4H")
@@ -110,6 +113,9 @@ class TreasuryServiceProducer {
             productLimits.toPolicy(),
             schedules,
             ProductMandate(references, productLimits.toPolicy(), clock)::policy,
+            cashFlows,
+            BookCategories(references, clock)::of,
+            com.openbank.treasury.application.usecase.CreditTermsSource(references, marketData)::on,
             // ADR-0342 (#13882): a journal first recorded for a day that has already ended.
             { event -> meters.counter("openbank.treasury.close.late_journals", "event", event.name).increment() },
             // #13883: settle, mature and reverse record a posting intent before contacting the ledger.
@@ -136,6 +142,7 @@ class TreasuryServiceProducer {
         marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
         objectMapper: ObjectMapper,
         clock: Clock,
+        dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository,
     ): com.openbank.treasury.application.usecase.FixingService =
         com.openbank.treasury.application.usecase.FixingService(
             flows,
@@ -144,6 +151,7 @@ class TreasuryServiceProducer {
             marketData,
             objectMapper,
             clock,
+            dayCompletion = dayCompletion,
         )
 
     /** ADR-0344 D5: no feed ingests the interbank indices yet; the port is where one plugs in. */

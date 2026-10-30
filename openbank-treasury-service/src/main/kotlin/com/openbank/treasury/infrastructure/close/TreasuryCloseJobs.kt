@@ -6,6 +6,7 @@ package com.openbank.treasury.infrastructure.close
 
 import com.openbank.libs.close.AccountingDayClosed
 import com.openbank.libs.close.CloseJobRun
+import com.openbank.treasury.application.port.out.AccountingDayClosedException
 import com.openbank.treasury.application.port.out.CloseJobRunPort
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.WebApplicationException
@@ -56,18 +57,21 @@ object TreasuryCloseJobs {
 
     /**
      * True when the ledger's closed-day 409 (ADR-0342 D4) is anywhere in [failure]'s cause chain. The
-     * REST client surfaces it as a [WebApplicationException] carrying the ledger's response.
+     * REST client surfaces it as a [WebApplicationException] carrying the ledger's response; the
+     * posting adapter translates it to [AccountingDayClosedException] (ADR-0344 day completion), whose
+     * own body read has already consumed the response, so that type counts on its own.
      */
     fun isClosedDayRejection(failure: Throwable): Boolean = generateSequence(failure) { it.cause }
-        .filterIsInstance<WebApplicationException>()
-        .any { e ->
-            val status = e.response?.status ?: return@any false
-            status == HTTP_CONFLICT &&
-                (
-                    AccountingDayClosed.isClosedDayRejection(status, bodyOf(e)) ||
-                        AccountingDayClosed.isClosedDayRejection(status, e.message)
-                    )
-        }
+        .any { it is AccountingDayClosedException || (it is WebApplicationException && isClosedDay409(it)) }
+
+    private fun isClosedDay409(e: WebApplicationException): Boolean {
+        val status = e.response?.status ?: return false
+        return status == HTTP_CONFLICT &&
+            (
+                AccountingDayClosed.isClosedDayRejection(status, bodyOf(e)) ||
+                    AccountingDayClosed.isClosedDayRejection(status, e.message)
+                )
+    }
 
     private fun bodyOf(e: WebApplicationException): String? = runCatching {
         e.response.readEntity(String::class.java)

@@ -5,8 +5,10 @@
 package com.openbank.treasury.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonInclude
+import com.openbank.libs.close.AccountingDayClosed
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.web.SyntheticTaintClientFilter
+import com.openbank.treasury.application.port.out.AccountingDayClosedException
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.PostedJournal
 import com.openbank.treasury.domain.model.JournalSpec
@@ -22,6 +24,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
@@ -137,7 +140,19 @@ class LedgerPostingAdapter @Inject constructor(
             },
             createdBy = SYSTEM_ACTOR,
         )
-        val response = client.postJournal(request).awaitSuspending()
+        val response = try {
+            client.postJournal(request).awaitSuspending()
+        } catch (e: WebApplicationException) {
+            val status = e.response?.status ?: 0
+            val body = runCatching { e.response?.readEntity(String::class.java) }.getOrNull()
+            if (AccountingDayClosed.isClosedDayRejection(status, body)) {
+                throw AccountingDayClosedException(
+                    "ledger day ${request.entryDate} is closed: ${spec.idempotencyKey} (value $valueDate) refused",
+                    e,
+                )
+            }
+            throw e
+        }
         return PostedJournal(response.id, resolvedAccounts(spec, response))
     }
 

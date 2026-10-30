@@ -17,12 +17,14 @@ import com.openbank.treasury.application.port.`in`.PositionBasis
 import com.openbank.treasury.application.port.`in`.PositionReport
 import com.openbank.treasury.application.port.`in`.SimulatedMarketRun
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
+import com.openbank.treasury.application.port.out.CashFlowRepository
 import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealChangedException
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.DealRepository
+import com.openbank.treasury.application.port.out.ExposureGuard
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LateJournalMeter
@@ -38,6 +40,9 @@ import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.CashFlowGenerated
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
+import com.openbank.treasury.domain.model.CreditExposure
+import com.openbank.treasury.domain.model.CreditMeasure
+import com.openbank.treasury.domain.model.CreditTerms
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealBooked
 import com.openbank.treasury.domain.model.DealCalendars
@@ -49,6 +54,8 @@ import com.openbank.treasury.domain.model.DealSettled
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitCheck
+import com.openbank.treasury.domain.model.MatrixPostings
+import com.openbank.treasury.domain.model.NoPostingRuleException
 import com.openbank.treasury.domain.model.PinnedReversal
 import com.openbank.treasury.domain.model.PostedJournalRecord
 import com.openbank.treasury.domain.model.PostingEvent
@@ -57,6 +64,7 @@ import com.openbank.treasury.domain.model.ProductLimitApplied
 import com.openbank.treasury.domain.model.ProductLimitPolicy
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
+import com.openbank.treasury.domain.reference.Ifrs9Category
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.math.BigDecimal
@@ -108,6 +116,16 @@ class TreasuryDealService(
     private val schedules: ScheduleService? = null,
     /** ADR-0344 catalogue: the product mandate from the reference store (config seeds the rest). */
     private val mandate: (suspend () -> ProductLimitPolicy)? = null,
+    /** ADR-0344 D7: the stored cash-flow ledger the posting-rule matrix posts from. */
+    private val cashFlows: CashFlowRepository? = null,
+    /** ADR-0344 D7: the IFRS 9 category of a deal's book (reference `book` record); amortised cost when none. */
+    private val bookCategory: suspend (bookId: String?) -> Ifrs9Category = { Ifrs9Category.AMORTISED_COST },
+    /**
+     * ADR-0315 D4: the conversion factors and collateral haircuts effective on a date (reference
+     * data). Without them a derivative or a collateralised repo is refused, never measured as zero.
+     */
+    private val creditTerms: suspend (asOf: LocalDate, collateralIsin: String?) -> CreditTerms =
+        { _, _ -> CreditTerms.NONE },
     /** ADR-0342: counts first-recorded journals valued on a day that has already ended. */
     private val lateJournals: LateJournalMeter = LateJournalMeter.NONE,
     /** #13883: posting intents. [PostingIntentPort.NONE] only in unit tests of the lifecycle alone. */
@@ -135,8 +153,7 @@ class TreasuryDealService(
     override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, DRAFT, null)?.let { return it } }
         // ADR-0344 delivery phases: a product is drafted only once its phase has landed (400, never a
-        // 500 later). A delivered leg-described product still settles only through the posting-rule
-        // matrix (phase 2), which settle and mature check.
+        // 500 later). Phase 2 delivers every product through the posting-rule matrix and CreditExposure.
         require(command.product in ProductType.DELIVERED) { NOT_DELIVERED.format(command.product) }
         counterparties.findById(command.counterpartyId) ?: throw UnknownCounterpartyException(command.counterpartyId)
         val now = clock.instant()
@@ -252,6 +269,9 @@ class TreasuryDealService(
             command = cmd(key, SUBMIT, dealId),
             schedule = generated?.write,
             extraEvents = events,
+            // A submission that fits consumes the line now: serialised with every other write on it.
+            // One that breaches goes to review (PENDING_APPROVAL) and is re-guarded at approval.
+            limitGuard = check.takeIf { submitted.consumesLimit && !it.breached }?.let { ExposureGuard.of(it) },
         )
     }
 
@@ -292,7 +312,10 @@ class TreasuryDealService(
                 ),
             ),
         )
-        return deals.save(booked, event = event, command = cmd(key, APPROVE, dealId))
+        val guard = check.takeIf {
+            booked.consumesLimit
+        }?.let { ExposureGuard.of(it, booked.limitOverride?.coversExposureUpTo) }
+        return deals.save(booked, event = event, command = cmd(key, APPROVE, dealId), limitGuard = guard)
     }
 
     override suspend fun overrideLimit(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {
@@ -343,13 +366,16 @@ class TreasuryDealService(
         key?.let { k -> replay(k, SETTLE, dealId)?.let { return it } }
         val deal = load(dealId)
         val settled = deal.settle(actor, bankToday(), clock.instant(), confirmationRequired)
-        check(settled.product.legacy) { NOT_DELIVERED.format(settled.product) }
-        val ref = postIntended(
-            PostingRules.settlement(settled),
-            settled.valueDate,
-            "treasury ${settled.product} settlement",
-            Intended(PostingIntentAction.SETTLE, actor, key),
-        )
+        val ref = if (settled.product.legacy) {
+            postIntended(
+                PostingRules.settlement(settled),
+                settled.valueDate,
+                "treasury ${settled.product} settlement",
+                Intended(PostingIntentAction.SETTLE, actor, key),
+            )
+        } else {
+            matrixSettlement(settled)
+        }
         val event = DealEvent(
             DealSettled.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -390,13 +416,16 @@ class TreasuryDealService(
                 )
             }
         }
-        check(matured.product.legacy) { NOT_DELIVERED.format(matured.product) }
-        val ref = postIntended(
-            PostingRules.maturity(matured, accruedSoFar(deal)),
-            matured.maturityDate,
-            "treasury ${matured.product} maturity",
-            Intended(PostingIntentAction.MATURE, actor, key),
-        )
+        val ref = if (matured.product.legacy) {
+            postIntended(
+                PostingRules.maturity(matured, accruedSoFar(deal)),
+                matured.maturityDate,
+                "treasury ${matured.product} maturity",
+                Intended(PostingIntentAction.MATURE, actor, key),
+            )
+        } else {
+            matrixMaturity(matured)
+        }
         val event = DealEvent(
             DealMatured.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -630,14 +659,15 @@ class TreasuryDealService(
      * Post each day after the last accrued one, up to and including [through], checking [deadline]
      * before EVERY day: a deal with a long gap cannot run a pass past its budget, which is what makes
      * `TreasuryCloseJobs.staleAfter` a true bound on a live pass (#13882 review). Each journal is
-     * valued on its accrual day; the posting adapter books it in the open day (ADR-0342).
+     * valued on its accrual day; the posting adapter books it in the open day (ADR-0342). A posting
+     * matrix product (ADR-0344 D7) accrues and pays through [matrixAccrueAndPay] under the same deadline.
      */
     private suspend fun accrueThrough(
         deal: Deal,
         through: LocalDate,
         deadline: Instant = Instant.MAX,
     ): AccrualProgress {
-        if (!deal.product.legacy) return AccrualProgress(0, true)
+        if (!deal.product.legacy) return matrixAccrueAndPay(deal, through, deadline)
         // #13883 review: a deal is not accrued while a reversal or maturity of it may already hold a
         // journal in the ledger: an OPEN intent of any kind, or a reversal/maturity intent an
         // operator CLOSED (the ledger may have its journal although the deal still reads SETTLED).
@@ -762,6 +792,73 @@ class TreasuryDealService(
     /** Σ of the posted dailies — exactly the cumulative accrual at the last recorded day. */
     private suspend fun accruedSoFar(deal: Deal): BigDecimal =
         lastAccrued(deal)?.let { PostingRules.accruedThrough(deal, it) } ?: BigDecimal.ZERO
+
+    // ── ADR-0344 D7: the posting-rule matrix products ─────────────────────────────────────
+
+    private suspend fun ledgerOf(deal: Deal) =
+        checkNotNull(cashFlows) { "no cash-flow store wired" }.flows(deal.id, null)
+
+    /** The commitment memo (trade-date products) and the value-date settlement; the last one is the deal's ref. */
+    private suspend fun matrixSettlement(deal: Deal): LedgerJournalRef {
+        val flows = ledgerOf(deal)
+        val category = bookCategory(deal.bookId)
+        val trade = MatrixPostings.trade(deal)?.let { post(it, deal.valueDate, "treasury ${deal.product} commitment") }
+        val settlement = MatrixPostings.settlement(deal, flows, category)
+            ?.let { post(it, deal.valueDate, "treasury ${deal.product} settlement") }
+        return settlement ?: trade ?: throw NoPostingRuleException("${deal.product} settles with nothing to post")
+    }
+
+    /**
+     * Accrue every day through [through] and post the flows paid by then, in day order, checking
+     * [deadline] before each posting: the next pass recomputes the run from the journals recorded,
+     * so stopping between two postings leaves nothing half-done. [post] records each journal.
+     */
+    private suspend fun matrixAccrueAndPay(
+        deal: Deal,
+        through: LocalDate,
+        deadline: Instant = Instant.MAX,
+    ): AccrualProgress {
+        val flows = ledgerOf(deal)
+        val journals = deals.journals(deal.id)
+        val run = MatrixPostings.run(
+            deal,
+            flows,
+            bookCategory(deal.bookId),
+            lastMatrixAccrual(journals),
+            paidFlows(journals),
+            through,
+        )
+        var posted = 0
+        for ((spec, day) in run) {
+            if (clock.instant().isAfter(deadline)) return AccrualProgress(posted, false)
+            post(spec, day, "treasury ${deal.product} ${spec.event.key} $day")
+            posted++
+        }
+        return AccrualProgress(posted, true)
+    }
+
+    /**
+     * Every flow still unposted is paid (the last one can fall after the unadjusted maturity date),
+     * then the final exchange or principal, the memo release and any residual amortisation.
+     */
+    private suspend fun matrixMaturity(deal: Deal): LedgerJournalRef {
+        val flows = ledgerOf(deal)
+        matrixAccrueAndPay(deal, MatrixPostings.lastPaymentDate(deal, flows))
+        val category = bookCategory(deal.bookId)
+        val accruedTo = lastMatrixAccrual(deals.journals(deal.id)) ?: deal.valueDate
+        val spec =
+            MatrixPostings.maturity(deal, flows, category, MatrixPostings.amortisedThrough(deal, flows, accruedTo))
+                ?: throw NoPostingRuleException("${deal.product} matures with nothing to post")
+        return post(spec, deal.maturityDate, "treasury ${deal.product} maturity")
+    }
+
+    private fun lastMatrixAccrual(journals: List<LedgerJournalRef>): LocalDate? = journals
+        .filter { it.event == PostingEvent.ACCRUAL }
+        .maxOfOrNull { LocalDate.parse(it.idempotencyKey.substringAfterLast(':')) }
+
+    private fun paidFlows(journals: List<LedgerJournalRef>): Set<UUID> = journals
+        .filter { it.event == PostingEvent.PAYMENT || it.event == PostingEvent.AMORTISATION }
+        .map { UUID.fromString(it.idempotencyKey.substringAfterLast(':')) }.toSet()
 
     /**
      * A reversal offsets, per GL account, exactly what the deal's own journals posted to that account,
@@ -1106,9 +1203,12 @@ class TreasuryDealService(
 
     private suspend fun limitCheck(deal: Deal): LimitCheck {
         val cp = counterparties.findById(deal.counterpartyId) ?: throw UnknownCounterpartyException(deal.counterpartyId)
-        val consumes = deal.product.isAsset || deal.product == ProductType.FX_SPOT
+        // One measure for the pre-trade check and the locked line query (which sums the stored figure).
+        val terms = creditTerms(deal.tradeDate, deal.header.collateral?.securityIsin)
+        val dealAmount = CreditExposure.of(deal, deal.tradeDate, terms)
+        val consumes = CreditMeasure.of(deal.product) != CreditMeasure.NONE
         val exposure = if (consumes) deals.exposure(cp.id, deal.limitCurrency, deal.id) else BigDecimal.ZERO
-        return LimitCheck.of(cp, deal, exposure)
+        return LimitCheck.of(cp, deal, exposure, dealAmount)
     }
 
     private suspend fun load(dealId: UUID): Deal = deals.findById(dealId) ?: throw DealNotFoundException(dealId)

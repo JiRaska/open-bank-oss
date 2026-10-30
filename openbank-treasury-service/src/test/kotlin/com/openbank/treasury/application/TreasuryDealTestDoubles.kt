@@ -271,6 +271,7 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
         schedule: com.openbank.treasury.application.port.out.ScheduleWrite?,
         extraEvents: List<DealEvent>,
         releaseClaim: String?,
+        limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
     ): Deal {
         // As the real save: the claim must still be OPEN, and is released with the state change.
         releaseClaim?.let { key ->
@@ -290,6 +291,14 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
         if (failNextSave) {
             failNextSave = false
             error("simulated: the state-change transaction rolled back")
+        }
+        limitGuard?.let { g ->
+            val others = exposure(g.counterpartyId, g.currency, deal.id)
+            if (others > g.maxOthers) {
+                throw com.openbank.treasury.application.port.out.CorrectionLimitBreachedException(
+                    "${g.counterpartyId} ${g.currency}: $others exceeds ${g.maxOthers}",
+                )
+            }
         }
         rows[deal.id] = deal
         journal?.let { intents?.complete(it.idempotencyKey) }
