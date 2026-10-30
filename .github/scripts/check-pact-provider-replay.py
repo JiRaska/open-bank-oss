@@ -89,7 +89,7 @@ class VerificationClass:
 
     @property
     def selected_by_task(self) -> bool:
-        # providerPactTest compiles only this filename suffix from src/test/kotlin.
+        # Same suffix rule check_provider_task_selection (#10801) enforces; this only feeds runs_on_pr.
         return self.path.endswith("ProviderVerificationTest.kt")
 
     @property
@@ -229,12 +229,6 @@ def check_no_orphan_providers(pacts: dict[str, str], classes: list[VerificationC
             )
 
 
-def check_task_selection(classes: list[VerificationClass]) -> None:
-    for c in classes:
-        if not c.selected_by_task:
-            fail(f"{c.path} is an @Provider class excluded by the providerPactTest filename filter")
-
-
 def check_allowlist_is_live(pacts: dict[str, str], allow: set[str]) -> None:
     for pact in sorted(allow):
         if pact not in pacts:
@@ -329,7 +323,7 @@ def selftest() -> int:
     run("pact whose replay is @Disabled", lambda: check_coverage(one_pact, [gated_folder], set()))
     run("pact whose replay is excluded by build.gradle.kts", lambda: check_coverage(one_pact, [build_excluded], set()))
     run("pact whose replay is excluded by task filename filter", lambda: check_coverage(one_pact, [unselected], set()))
-    run("unselected @Provider class is rejected", lambda: check_task_selection([unselected]))
+    run("NegativeAuth-style provider class excluded by filename", lambda: check_provider_task_selection([unselected]))
     run("pact with no @Provider class at all", lambda: check_coverage(one_pact, [], set()))
     run("covered pact still in KNOWN_UNCOVERED", lambda: check_coverage(one_pact, [folder], {"pacts/c-p.json"}))
     run("KNOWN_UNCOVERED names a pact that no longer exists", lambda: check_allowlist_is_live(one_pact, {"pacts/gone.json"}))
@@ -403,7 +397,6 @@ def selftest() -> int:
             VerificationClass("a/BrokerProviderVerificationTest.kt", "p", "broker"),
         ])
         check_broker_publication(one_pact, [folder, broker_ok], set())
-        check_task_selection([folder, broker_ok])
         accepted = not errors
     finally:
         errors = saved
@@ -428,7 +421,6 @@ def main() -> int:
     check_provider_task_selection(classes)
     check_coverage(pacts, classes, KNOWN_UNCOVERED)
     check_no_orphan_providers(pacts, classes)
-    check_task_selection(classes)
     check_allowlist_is_live(pacts, KNOWN_UNCOVERED)
     check_broker_publication(pacts, classes, KNOWN_NO_BROKER_PUBLICATION)
     check_broker_allowlist_is_live(pacts, KNOWN_NO_BROKER_PUBLICATION)
