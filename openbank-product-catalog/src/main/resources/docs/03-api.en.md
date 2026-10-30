@@ -196,3 +196,5 @@ the posting path. The API contract version is 2.9.0; the change is additive.
 - `403`: the caller holds none of the roles above.
 
 The API contract version is 2.10.0; the change is additive.
+
+Catalog request bodies are decoded strictly: a body that repeats a JSON object key is rejected with `400` instead of the last value silently winning. The 1 MiB size and nesting-depth bounds on the IR lint body are unchanged.
