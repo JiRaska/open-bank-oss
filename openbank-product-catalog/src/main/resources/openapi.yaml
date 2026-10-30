@@ -12,7 +12,9 @@ info:
   # action catalog.publish-ir). The plain publish refuses an IR-bearing revision with 409.
   # 2.9.0 -> 2.10.0 (ADR-0352 phase 5b): additive POST /api/v2/product-ir/lint, the Studio IR editor's
   # dry-run of the same parser a revision write runs; stores nothing.
-  version: 2.10.0
+  # 2.10.0 -> 2.11.0 (ADR-0352 phase 5b): additive POST .../revisions/{revisionId}/behaviour-diff,
+  # the approval panel's backtest (ProductBehaviourDiff, the document `obp diff --behavioural` prints).
+  version: 2.11.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -666,6 +668,36 @@ paths:
         '428': { $ref: '#/components/responses/PreconditionRequired' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/offerings/{offeringId}/revisions/{revisionId}/behaviour-diff:
+    post:
+      tags: [Catalog V2]
+      summary: Backtest a revision's product IR against a base revision over a portfolio
+      description: >-
+        ADR-0352 §11.4 and phase 5b. Replays the portfolio under the base revision (by default the
+        offering's revision published now) and under this revision with the shared
+        ProductBehaviourDiff, and returns its schema-v1 document (`product-ir/behaviour-diff.v1`)
+        unchanged together with its canonical JSON bytes, the same document `obp diff --behavioural`
+        prints. Stores, signs and approves nothing. The run is bounded: at most 500 accounts, 1000
+        postings per account and 200000 account-days.
+      operationId: behaviourDiffRevisionV2
+      parameters:
+        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BehaviourDiffRequest' }
+      responses:
+        '200':
+          description: The behavioural diff; `diff.valid` false means an interpreter defect, never a result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BehaviourDiffResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
   /api/v2/offerings/{offeringId}/revisions/{revisionId}/approvals:
     get:
       tags: [Revision Approvals]
@@ -1005,6 +1037,35 @@ components:
       properties:
         attributes: { type: object, additionalProperties: true }
       required: [attributes]
+    BehaviourDiffRequest:
+      type: object
+      additionalProperties: false
+      required: [portfolio, from, to]
+      properties:
+        baseRevisionId:
+          type: [string, 'null']
+          format: uuid
+          description: Revision to compare against; default the offering's revision published now.
+        portfolio:
+          type: object
+          additionalProperties: true
+          description: >-
+            {"accounts": [{"id", "state": {"currency", "balance", "accruedInterest", "openedOn"},
+            "postings": [{"on": "YYYY-MM-DD", "kind", "direction", "amount"}]}]}
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        zone: { type: string, maxLength: 64, default: UTC }
+        materialityThreshold: { type: string, pattern: '^[0-9]{1,15}(\.[0-9]{1,12})?$' }
+    BehaviourDiffResponse:
+      type: object
+      additionalProperties: false
+      required: [diff, canonicalJson]
+      properties:
+        diff:
+          type: object
+          additionalProperties: true
+          description: The ProductBehaviourDiff document, schema openbank.product-behaviour-diff.v1.
+        canonicalJson: { type: string }
     LintProductIrRequest:
       type: object
       additionalProperties: false

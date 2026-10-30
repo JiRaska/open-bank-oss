@@ -8,11 +8,14 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
+import com.openbank.libs.product.replay.DiffOptions
+import com.openbank.libs.product.replay.ReplayRange
 import com.openbank.libs.security.Roles
 import com.openbank.productcatalog.application.CatalogForbiddenException
 import com.openbank.productcatalog.application.CatalogNotFoundException
 import com.openbank.productcatalog.application.CatalogPreconditionRequiredException
 import com.openbank.productcatalog.application.GenericCatalogService
+import com.openbank.productcatalog.application.RevisionBehaviourDiffService
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.EligibilityOperator
 import com.openbank.productcatalog.domain.catalog.EligibilityRule
@@ -31,6 +34,7 @@ import com.openbank.productcatalog.domain.catalog.RevisionContent
 import com.openbank.productcatalog.domain.catalog.SchemaRef
 import com.openbank.productcatalog.domain.catalog.TaxTreatment
 import com.openbank.productcatalog.generated.api.CatalogV2Api
+import com.openbank.productcatalog.generated.model.BehaviourDiffRequest
 import com.openbank.productcatalog.generated.model.LintProductIrRequest
 import com.openbank.productcatalog.generated.model.OfferingRequest
 import com.openbank.productcatalog.generated.model.PublishRequest
@@ -39,16 +43,20 @@ import com.openbank.productcatalog.generated.model.SpecificationRequest
 import com.openbank.productcatalog.generated.model.ValidateCatalogRequest
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
 import com.openbank.productcatalog.infrastructure.catalog.CatalogSchemaProfile
+import com.openbank.productcatalog.infrastructure.catalog.toPlainTree
 import com.openbank.productcatalog.infrastructure.security.CatalogRoles
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.core.EntityTag
 import jakarta.ws.rs.core.Response
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.UUID
+import com.openbank.productcatalog.generated.model.BehaviourDiffResponse as GeneratedBehaviourDiffResponse
 import com.openbank.productcatalog.generated.model.CatalogSchema as GeneratedCatalogSchema
 import com.openbank.productcatalog.generated.model.IrSignature as GeneratedIrSignature
 import com.openbank.productcatalog.generated.model.LintProductIrResponse as GeneratedLintProductIrResponse
@@ -75,6 +83,7 @@ class GenericCatalogResource(
     private val schemaProfile: CatalogSchemaProfile,
     private val identity: SecurityIdentity,
     private val clock: Clock,
+    private val behaviourDiff: RevisionBehaviourDiffService,
 ) : CatalogV2Api {
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
     @Authorize(action = "catalog.read")
@@ -124,6 +133,34 @@ class GenericCatalogResource(
                 canonicalIr = result.canonicalJson,
             ),
         ).build()
+    }
+
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
+    @Authorize(action = "catalog.read", resource = "#offeringId")
+    override suspend fun behaviourDiffRevisionV2(
+        offeringId: UUID,
+        revisionId: UUID,
+        request: BehaviourDiffRequest,
+    ): Response {
+        val portfolioNode = mapper.valueToTree<JsonNode>(request.portfolio)
+        schemaProfile.requireValidInstance(portfolioNode)
+        val zone = runCatching { ZoneId.of(request.zone ?: "UTC") }.getOrElse {
+            throw IllegalArgumentException("zone must be an IANA zone id")
+        }
+        val diff = behaviourDiff.diff(
+            offeringId = offeringId,
+            revisionId = revisionId,
+            baseRevisionId = request.baseRevisionId,
+            portfolio = RevisionBehaviourDiffService.parsePortfolio(catalogJson.toObject(portfolioNode).toPlainTree()),
+            range = ReplayRange(request.from, request.to, zone),
+            options = request.materialityThreshold?.let { DiffOptions(BigDecimal(it)) } ?: DiffOptions(),
+        )
+
+        // The generated model types the free-form object as Map<String, Any>; the document's null members
+        // (a recorded portfolio's `seed`) serialise as JSON null exactly as in canonicalJson.
+        @Suppress("UNCHECKED_CAST")
+        val tree = diff.tree as Map<String, Any>
+        return Response.ok(GeneratedBehaviourDiffResponse(diff = tree, canonicalJson = diff.canonicalJson)).build()
     }
 
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.AUTHOR)
