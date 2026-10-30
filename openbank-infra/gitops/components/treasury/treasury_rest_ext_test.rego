@@ -47,6 +47,7 @@ approver_writes := {
 	"treasury.deal.settle",
 	"treasury.deal.mature",
 	"treasury.deal.reverse",
+	"treasury.posting-intent.close",
 }
 
 all_writes := (dealer_writes | approver_writes) | {"treasury.deal.cancel"}

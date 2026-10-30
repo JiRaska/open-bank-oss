@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: card-issuance-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "684c307574cc2762"
+    openbank.tech/policy-checksum: "3b567c5b89972224"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1350,6 +1350,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*
