@@ -70,6 +70,13 @@ interface DealRepository {
         schedule: ScheduleWrite? = null,
         /** Further outbox events of the same change (e.g. treasury.cashflow.generated). */
         extraEvents: List<DealEvent> = emptyList(),
+        /**
+         * #13883: an unposted reversal's claim. In the SAME transaction as the state change it must
+         * still be OPEN (locked FOR UPDATE; else [DealChangedException], nothing written) and is then
+         * released (REFUSED: no journal exists under it), so a claim released by a reconciler can
+         * never be followed by the state change it was guarding.
+         */
+        releaseClaim: String? = null,
     ): Deal
 
     /** The command previously recorded under [key], if any. */

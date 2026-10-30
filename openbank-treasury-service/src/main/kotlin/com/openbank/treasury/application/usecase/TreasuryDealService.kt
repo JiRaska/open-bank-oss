@@ -57,6 +57,8 @@ import com.openbank.treasury.domain.model.ProductLimitApplied
 import com.openbank.treasury.domain.model.ProductLimitPolicy
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Duration
@@ -439,9 +441,10 @@ class TreasuryDealService(
         // lifecycle slot while it decides, so a settlement cannot post in between and leave its
         // journal behind a REVERSED deal: the one-open-per-deal index refuses whichever is second.
         val claim = if (rule == null) claimUnpostedReversal(reversed, actor, key, reason) else null
-        // The claim is released on EVERY path: once the state change commits (no journal exists),
-        // and when anything before or in the save throws (the save's row-version check is also the
-        // re-check that the deal did not change since it was read; nothing was posted either way).
+        // The claim is this attempt's own row (a per-attempt key), so this call only ever releases a
+        // claim it created. The save requires it still OPEN and releases it in the SAME transaction as
+        // the state change: a reconciler that released it first makes the save abort (no state
+        // change). Any other failure releases it here; nothing was posted either way.
         val saved = try {
             val event = DealEvent(
                 DealReversed.EVENT_TYPE,
@@ -462,17 +465,21 @@ class TreasuryDealService(
                     ),
                 ),
             )
-            deals.save(reversed, ref, event, cmd(key, REVERSE, dealId))
+            deals.save(reversed, ref, event, cmd(key, REVERSE, dealId), releaseClaim = claim)
         } catch (e: kotlinx.coroutines.CancellationException) {
-            claim?.let { intents.refuse(it, UNPOSTED_REVERSAL_ABANDONED) }
+            // A cancelled coroutine cannot suspend: release under NonCancellable so the UPDATE runs.
+            claim?.let { withContext(NonCancellable) { intents.refuse(it, UNPOSTED_REVERSAL_ABANDONED) } }
             throw e
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Exception, // released, then rethrown unchanged
         ) {
-            claim?.let { intents.refuse(it, "$UNPOSTED_REVERSAL_ABANDONED: ${describe(e)}") }
+            claim?.let {
+                intents.refuse(it, "$UNPOSTED_REVERSAL_ABANDONED: ${describe(e)}".take(MAX_ERROR_LENGTH))
+            }
             throw e
         }
-        claim?.let { intents.refuse(it, UNPOSTED_REVERSAL) }
+        // No release left here: the save released the claim in its own transaction, so nothing that
+        // runs after the commit can fail the caller or leave the claim behind.
         return saved
     }
 
@@ -721,7 +728,9 @@ class TreasuryDealService(
      */
     private suspend fun claimUnpostedReversal(reversed: Deal, actor: Actor, key: String?, reason: String): String {
         // Its own key, never the posted reversal's: a resume can then tell a claim (never replayed)
-        // from a reversal that may hold a ledger journal (replayed under its key).
+        // from a reversal that may hold a ledger journal (replayed under its key). Unique per attempt,
+        // so a second, concurrent reversal cannot reuse (and later release) this attempt's claim:
+        // the one-open-per-deal index refuses it, and it answers 409.
         val claimKey = claimKey(reversed.id)
         intents.open(
             PostingIntent(
@@ -741,7 +750,7 @@ class TreasuryDealService(
         return claimKey
     }
 
-    private fun claimKey(dealId: UUID) = lifecycleKey(dealId, PostingEvent.REVERSED) + CLAIM_SUFFIX
+    private fun claimKey(dealId: UUID) = lifecycleKey(dealId, PostingEvent.REVERSED) + CLAIM_MARKER + UUID.randomUUID()
 
     private fun lifecycleKey(dealId: UUID, event: PostingEvent) = "treasury:$dealId:${event.key}"
 
@@ -887,7 +896,19 @@ class TreasuryDealService(
                 .onFailure { e ->
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     failures += e
-                    intents.failed(intent.idempotencyKey, describe(e))
+                    if (e is AccrualPreparationFailed && intent.attempts + 1 >= MAX_ACCRUAL_PREPARATION_ATTEMPTS) {
+                        // A deterministic failure before the ledger (the deal or the posting table
+                        // cannot produce the day) would otherwise retry forever and hold the deal's
+                        // slot. Escalated: OPEN, holding its day, alerting (stuck intent), for a person.
+                        // A ledger failure never gets here: an outage is resumed however long it lasts.
+                        escalated++
+                        intents.escalate(
+                            intent.idempotencyKey,
+                            "escalated after ${intent.attempts + 1} attempts: ${describe(e)}".take(MAX_ERROR_LENGTH),
+                        )
+                    } else {
+                        intents.failed(intent.idempotencyKey, describe(e))
+                    }
                 }
         }
         return IntentReconciliation(completed, failures, escalated)
@@ -941,11 +962,12 @@ class TreasuryDealService(
         PostingIntentAction.SETTLE -> settle(intent.dealId, intent.actor, intent.commandKey)
         PostingIntentAction.MATURE -> mature(intent.dealId, intent.actor, intent.commandKey)
         PostingIntentAction.REVERSE ->
-            if (intent.idempotencyKey.endsWith(CLAIM_SUFFIX)) {
+            if (CLAIM_MARKER in intent.idempotencyKey) {
                 // An unposted reversal's claim is NEVER replayed: re-running reverse() now would decide a
                 // privileged action against whatever the deal has become (a posting rule may apply by
-                // now). The claim is released either way; nothing was posted under it. If the state
-                // change did not commit, the reversal is simply not done and is re-issued by a person.
+                // now). The claim is released; nothing was posted under it. If its reversal is still in
+                // flight, that save then finds the claim released and aborts with no state change, so
+                // the release can never be followed by the change it guarded; a person re-issues it.
                 val deal = load(intent.dealId)
                 intents.refuse(
                     intent.idempotencyKey,
@@ -963,9 +985,16 @@ class TreasuryDealService(
                 )
             }
         PostingIntentAction.ACCRUE -> {
-            // Re-post the day under its key; recording the journal completes the intent.
-            val deal = load(intent.dealId)
-            val spec = PostingRules.accrual(deal, intent.valueDate)
+            // Re-post the day under its key; recording the journal completes the intent. Preparing the
+            // day (the deal, the posting table) is told apart from posting it, so only the former can
+            // escalate: a ledger outage is resumed however long it lasts.
+            @Suppress("TooGenericExceptionCaught")
+                val (deal, spec) = try {
+                val d = load(intent.dealId)
+                d to PostingRules.accrual(d, intent.valueDate)
+            } catch (e: Exception) {
+                throw AccrualPreparationFailed(e)
+            }
             if (spec == null) {
                 intents.refuse(intent.idempotencyKey, "the posting table yields no accrual for ${intent.valueDate}")
             } else {
@@ -1032,12 +1061,13 @@ class TreasuryDealService(
         const val MAX_ERROR_LENGTH = 1000
         const val DEFAULT_MAX_RESUME_HOURS = 4L
         const val DEFAULT_CLAIM_BATCH = 100
+        const val MAX_ACCRUAL_PREPARATION_ATTEMPTS = 3
         const val UNPOSTED_REVERSAL = "reversal of an unsettled deal: no journal, claim released"
         const val UNPOSTED_REVERSAL_ABANDONED =
             "reversal of an unsettled deal did not commit: no journal, claim released"
 
-        /** Suffix of an unposted reversal's claim key (#14220 review): never replayed by a resume. */
-        const val CLAIM_SUFFIX = ":claim"
+        /** Marks an unposted reversal's claim key, `...:reversed:claim:<attempt>`: never replayed. */
+        const val CLAIM_MARKER = ":claim:"
 
         /** The actor an accrual day's posting intent is recorded under. */
         val ACCRUAL_ACTOR = Actor("system:interest-accrual", com.openbank.treasury.domain.model.ActorType.SYSTEM)
@@ -1073,3 +1103,7 @@ class TreasuryDealService(
         val LIMIT_VIEW_KINDS = setOf(CounterpartyKind.BANK, CounterpartyKind.CENTRAL_BANK)
     }
 }
+
+/** An accrual day that cannot even be prepared (deal or posting table), before any ledger call. */
+private class AccrualPreparationFailed(cause: Throwable) :
+    IllegalStateException("accrual day could not be prepared: ${cause.message}", cause)

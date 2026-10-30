@@ -437,8 +437,8 @@ class PostingIntentReconcileIT {
         val id = reverseRaceId
         action(id, "approve").then().statusCode(200)
         action(id, "confirm").then().statusCode(200)
-        val claimKey = "treasury:$id:reversed"
-        insertOpenIntent(id, claimKey, "REVERSED", "REVERSE") // a reversal deciding, not yet committed
+        val claimKey = "treasury:$id:reversed:claim:${UUID.randomUUID()}"
+        insertOpenIntent(id, claimKey, "REVERSED", "REVERSE") // an unposted reversal's claim, deciding
         action(id, "settle").then().statusCode(409)
         assertThat(
             ledger.calls,

@@ -189,10 +189,13 @@ class DealRepositoryImpl(
         command: CommandKey?,
         schedule: ScheduleWrite?,
         extraEvents: List<DealEvent>,
+        releaseClaim: String?,
     ): Deal {
         val actor = deal.history.lastOrNull()?.actor?.id ?: deal.createdBy.id
         val storedVersion = Panache.withTransaction {
-            val row = find("dealId", deal.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
+            val row = requireOpenClaim(releaseClaim).flatMap {
+                find("dealId", deal.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
+            }
             row.flatMap { existing ->
                 if (existing != null && existing.rowVersion != deal.rowVersion) {
                     throw DealChangedException(
@@ -228,6 +231,7 @@ class DealRepositoryImpl(
                             }
                         }
                     }
+                    .flatMap { releaseClaimSql(releaseClaim) }
                     // Flush inside the transaction: the @Version bump is what the returned copy carries.
                     .flatMap { Panache.getSession().flatMap { it.flush() } }
                     .map { entity.rowVersion }
@@ -507,6 +511,36 @@ class DealRepositoryImpl(
         return true
     }
 
+    /** Locks the claim; a claim no longer OPEN (released by a reconciler) aborts the whole save. */
+    private fun requireOpenClaim(key: String?): Uni<Void> = if (key == null) {
+        Uni.createFrom().voidItem()
+    } else {
+        lockOpenClaim(key)
+    }
+
+    private fun lockOpenClaim(key: String): Uni<Void> = Panache.getSession().flatMap { session ->
+        session.createNativeQuery<Any>(
+            "SELECT 1 FROM deal_posting_intent WHERE idempotency_key = ?1 AND status = 'OPEN' FOR UPDATE",
+        ).setParameter(1, key).resultList
+    }.map { rows ->
+        if (rows.isEmpty()) {
+            throw DealChangedException("the reversal's claim $key was released before it committed; re-issue it")
+        }
+    }.replaceWithVoid()
+
+    private fun releaseClaimSql(key: String?): Uni<Void> = if (key == null) {
+        Uni.createFrom().voidItem()
+    } else {
+        releaseOpenClaim(key)
+    }
+
+    private fun releaseOpenClaim(key: String): Uni<Void> = Panache.getSession().flatMap { session ->
+        session.createNativeQuery<Int>(RELEASE_CLAIM_SQL)
+            .setParameter(1, OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))
+            .setParameter(2, key)
+            .executeUpdate()
+    }.replaceWithVoid()
+
     private fun completeAccrueIntent(key: String): Uni<Void> = completeIntent(key, accrueOnly = true)
 
     override suspend fun journals(dealId: UUID): List<LedgerJournalRef> = Panache.withSession {
@@ -661,6 +695,14 @@ class DealRepositoryImpl(
         val POSTABLE_PRODUCT_NAMES = ProductType.entries.filter { it.legacy }.map { it.name }
 
         val LEGS_TYPE = object : TypeReference<List<LegSpec>>() {}
+
+        const val RELEASE_CLAIM_SQL =
+            "WITH u AS (UPDATE deal_posting_intent SET status = 'REFUSED', closed_at = ?1, " +
+                "last_error = 'reversal of an unsettled deal committed: no journal, claim released' " +
+                "WHERE idempotency_key = ?2 AND status = 'OPEN' RETURNING idempotency_key, value_date, actor_id) " +
+                "INSERT INTO deal_posting_intent_history " +
+                "(idempotency_key, at, transition, actor_id, reason, value_date) " +
+                "SELECT idempotency_key, ?1, 'REFUSED', actor_id, 'unposted reversal committed', value_date FROM u"
 
         /** Restricts [COMPLETE_INTENT_SQL] / [APPLIED_AFTER_CLOSE_SQL] to accrual-day intents. */
         const val ACCRUE_ONLY = "AND action = 'ACCRUE' "

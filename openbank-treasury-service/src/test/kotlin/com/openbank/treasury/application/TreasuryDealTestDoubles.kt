@@ -232,6 +232,9 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
     /** When true, the next save throws (nothing of it is kept), as a rolled-back transaction. */
     var failNextSave = false
 
+    /** When true, the next save throws CancellationException (the caller's coroutine was cancelled). */
+    var cancelNextSave = false
+
     val schedules = mutableListOf<com.openbank.treasury.application.port.out.ScheduleWrite>()
 
     override suspend fun save(
@@ -241,7 +244,18 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
         command: CommandKey?,
         schedule: com.openbank.treasury.application.port.out.ScheduleWrite?,
         extraEvents: List<DealEvent>,
+        releaseClaim: String?,
     ): Deal {
+        // As the real save: the claim must still be OPEN, and is released with the state change.
+        releaseClaim?.let { key ->
+            if (intents?.status(key) != InMemoryIntents.Status.OPEN) {
+                throw com.openbank.treasury.application.port.out.DealChangedException("claim $key was released")
+            }
+        }
+        if (cancelNextSave) {
+            cancelNextSave = false
+            throw kotlinx.coroutines.CancellationException("simulated: the caller was cancelled mid-save")
+        }
         if (failNextSave) {
             failNextSave = false
             error("simulated: the state-change transaction rolled back")
@@ -253,6 +267,7 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
         events += extraEvents
         schedule?.let { schedules += it }
         command?.let { commands[it.key] = it }
+        releaseClaim?.let { intents?.refuse(it, "unposted reversal committed") }
         return deal
     }
 

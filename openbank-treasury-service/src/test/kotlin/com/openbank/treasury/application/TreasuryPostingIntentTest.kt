@@ -29,6 +29,9 @@ import java.time.Duration
 import java.time.ZoneOffset
 
 /** #13883: settle, mature and reverse record a posting intent before the ledger is contacted. */
+// LargeClass: one scenario per review finding on a single shared fixture; the split of the service
+// itself (#14232) is the natural point to split this suite along the same lines.
+@Suppress("LargeClass")
 class TreasuryPostingIntentTest {
     private val monday = DealFixtures.MONDAY
     private var clock: Clock = Clock.fixed(monday.atTime(9, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
@@ -639,7 +642,7 @@ class TreasuryPostingIntentTest {
         val b = book()
         deals.failNextSave = true
         assertThatThrownBy { runBlocking { service.reverse(b.id, "never traded", DealFixtures.approver) } }
-        val claim = intents.rows.values.single { it.first.idempotencyKey.endsWith(":claim") }
+        val claim = intents.rows.values.single { ":claim:" in it.first.idempotencyKey }
         assertThat(claim.second).isEqualTo(InMemoryIntents.Status.REFUSED)
         assertThat(claim.first.lastError).contains("did not commit")
         assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.BOOKED)
@@ -652,7 +655,7 @@ class TreasuryPostingIntentTest {
         runBlocking {
             val b = book()
             service.settle(b.id, DealFixtures.approver) // a reversal now WOULD post a journal
-            val claimKey = "treasury:${b.id}:reversed:claim"
+            val claimKey = "treasury:${b.id}:reversed:claim:leaked"
             intents.rows[claimKey] = com.openbank.treasury.application.port.out.PostingIntent(
                 idempotencyKey = claimKey,
                 dealId = b.id,
@@ -669,6 +672,70 @@ class TreasuryPostingIntentTest {
             assertThat(intents.status(claimKey)).isEqualTo(InMemoryIntents.Status.REFUSED)
             assertThat(ledger.posted.map { it.event }).doesNotContain(PostingEvent.REVERSED)
             assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.SETTLED)
+        }
+
+    @Test
+    fun `a reconciler releasing an in-flight reversal's claim makes that reversal abort with no state change`(): Unit =
+        runBlocking {
+            val b = book()
+            intents.afterOpen = {
+                intents.afterOpen = {}
+                // The reconciler (past the grace) releases the claim while the reversal is still deciding.
+                later(Duration.ofMinutes(5))
+                assertThat(service.reconcilePostingIntents(clock.instant()).failures).isEmpty()
+            }
+            assertThatThrownBy { runBlocking { service.reverse(b.id, "never traded", DealFixtures.approver) } }
+                .isInstanceOf(com.openbank.treasury.application.port.out.DealChangedException::class.java)
+            assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.BOOKED)
+            assertThat(intents.rows.values.single { ":claim:" in it.first.idempotencyKey }.second)
+                .isEqualTo(InMemoryIntents.Status.REFUSED)
+        }
+
+    @Test
+    fun `a second concurrent reversal answers 409 and leaves the first one's claim alone`(): Unit = runBlocking {
+        val b = book()
+        var second: Throwable? = null
+        var firstClaimDuringSecond: InMemoryIntents.Status? = null
+        intents.afterOpen = {
+            intents.afterOpen = {}
+            second = runCatching { service.reverse(b.id, "me too", DealFixtures.approver) }.exceptionOrNull()
+            firstClaimDuringSecond = intents.rows.values.single { ":claim:" in it.first.idempotencyKey }.second
+        }
+        assertThat(service.reverse(b.id, "never traded", DealFixtures.approver).state).isEqualTo(DealState.REVERSED)
+        assertThat(second).isInstanceOf(com.openbank.treasury.application.port.out.DealChangedException::class.java)
+        assertThat(firstClaimDuringSecond).isEqualTo(InMemoryIntents.Status.OPEN)
+        // Exactly one claim existed, the first one's, released with its state change.
+        assertThat(intents.rows.values.filter { ":claim:" in it.first.idempotencyKey }.map { it.second })
+            .containsExactly(InMemoryIntents.Status.REFUSED)
+    }
+
+    @Test
+    fun `a cancelled reversal still releases its claim`(): Unit = runBlocking {
+        val b = book()
+        deals.cancelNextSave = true
+        assertThatThrownBy { runBlocking { service.reverse(b.id, "never traded", DealFixtures.approver) } }
+            .isInstanceOf(kotlinx.coroutines.CancellationException::class.java)
+        assertThat(intents.rows.values.single { ":claim:" in it.first.idempotencyKey }.second)
+            .isEqualTo(InMemoryIntents.Status.REFUSED)
+    }
+
+    @Test
+    fun `an accrual day that cannot be prepared escalates after three attempts, freeing the reconciler`(): Unit =
+        runBlocking {
+            val b = book()
+            service.settle(b.id, DealFixtures.approver)
+            later(Duration.ofDays(1))
+            ledger.loseAnswerFor = b.id
+            service.accrueInterest(monday.plusDays(1))
+            val key = intents.rows.values.single { it.first.action.name == "ACCRUE" }.first.idempotencyKey
+            deals.rows.remove(b.id) // deterministic: the deal can no longer be loaded
+            val runs = (1..4).map {
+                later(Duration.ofMinutes(5))
+                service.reconcilePostingIntents(clock.instant())
+            }
+            assertThat(runs.map { it.escalated }).containsExactly(0, 0, 1, 0)
+            assertThat(intents.escalated).contains(key)
+            assertThat(intents.status(key)).isEqualTo(InMemoryIntents.Status.OPEN)
         }
 
     private fun settlementKeyOf(deal: Deal, event: PostingEvent) =
