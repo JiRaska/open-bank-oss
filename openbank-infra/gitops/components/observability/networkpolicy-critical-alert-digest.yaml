@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Egress allow-list for the critical-alert digest CronJob (#6432). HAND-WRITTEN:
+# gen-network-policies.py derives edges from long-lived Deployments and cannot see a
+# CronJob (same reason as networkpolicy-fx-synthetic-journey.yaml).
+#
+# The pod needs exactly three things: DNS, the Alertmanager API in this namespace, and
+# HTTPS to the Slack webhook on the internet. Private ranges are excluded from the
+# internet rule so it cannot become a path to anything else inside the VPC.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: critical-alert-digest-egress
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: critical-alert-digest
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
+      ports:
+        - protocol: TCP
+          port: 9093
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

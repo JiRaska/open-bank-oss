@@ -104,6 +104,7 @@ spec:
               or 7200 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="7200"}
               or 32400 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="32400"}
               or 46800 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="46800"}
+              or 93600 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="93600"}
               or 180000 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="180000"}
               or 352800 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="352800"}
               or 1296000 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="1296000"}
