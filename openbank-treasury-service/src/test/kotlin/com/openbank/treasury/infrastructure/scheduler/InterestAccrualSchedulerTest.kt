@@ -130,6 +130,16 @@ class InterestAccrualSchedulerTest {
         }
 
     @Test
+    fun `a deal deferred by a posting intent refuses the DAY but not the pass's liveness or healing`(): Unit =
+        runBlocking {
+            coEvery { deals.accrueInterest(any(), any()) } returns AccrualRun(1, emptyList(), deals = 2, deferred = 1)
+            scheduler(CLOCK).run()
+            val run = evidence.runs.getValue(DAY to TreasuryCloseJobs.ACCRUAL)
+            assertThat(run.refused).isEqualTo(1)
+            assertThat(run.refusalReason).isEqualTo("1 ${TreasuryCloseJobs.REASON_ACCRUAL_DEFERRED}")
+        }
+
+    @Test
     fun `a pass that ran out of budget with deals left is REFUSED`(): Unit = runBlocking {
         coEvery { deals.accrueInterest(any(), any()) } returns AccrualRun(1, emptyList(), deals = 1, unassessed = 4)
         scheduler(CLOCK).run()
