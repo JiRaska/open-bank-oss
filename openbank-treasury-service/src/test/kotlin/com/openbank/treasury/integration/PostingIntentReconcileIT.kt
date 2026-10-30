@@ -66,6 +66,9 @@ class PostingIntentReconcileIT {
     @Inject
     lateinit var meters: io.micrometer.core.instrument.MeterRegistry
 
+    @Inject
+    lateinit var repo: com.openbank.treasury.application.port.out.DealRepository
+
     private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
 
     private fun <T> onContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
@@ -152,6 +155,8 @@ class PostingIntentReconcileIT {
         settleRaceId = draftAndSubmit("4328.00")
         reverseRaceId = draftAndSubmit("4329.00")
         blockedReopenId = draftAndSubmit("4330.00")
+        releasedClaimId = draftAndSubmit("4331.00")
+        lockedClaimId = draftAndSubmit("4332.00")
     }
 
     @Test
@@ -485,6 +490,92 @@ class PostingIntentReconcileIT {
         assertThat(intent(settleKey).first).isEqualTo("REFUSED")
     }
 
+    private val operatorActor = com.openbank.treasury.domain.model.Actor(
+        "adam.approver",
+        com.openbank.treasury.domain.model.ActorType.HUMAN,
+    )
+
+    /** The reversal an unposted reverse() would save, computed from the stored deal. */
+    private fun reversedCopy(id: String) = onContext {
+        requireNotNull(repo.findById(UUID.fromString(id))).reverse(operatorActor, "never traded", Instant.now())
+    }
+
+    @Test
+    @Order(20)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `20 - a claim released before the reversal's save makes the save abort, the deal unchanged`() {
+        val id = releasedClaimId
+        action(id, "approve").then().statusCode(200)
+        val claim = "treasury:$id:reversed:claim:${UUID.randomUUID()}"
+        insertOpenIntent(id, claim, "REVERSED", "REVERSE")
+        val reversed = reversedCopy(id)
+        jdbcUpdate("update deal_posting_intent set status = 'REFUSED' where idempotency_key = ?", claim) // a reconciler
+        assertThatThrownBy { onContext { repo.save(reversed, releaseClaim = claim) } }
+            .hasRootCauseInstanceOf(com.openbank.treasury.application.port.out.DealChangedException::class.java)
+        assertThat(state(id)).isEqualTo("BOOKED")
+    }
+
+    @Test
+    @Order(21)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `21 - while the reversal's save holds its claim FOR UPDATE, a concurrent release blocks until it commits`() {
+        val id = lockedClaimId
+        action(id, "approve").then().statusCode(200)
+        val claim = "treasury:$id:reversed:claim:${UUID.randomUUID()}"
+        insertOpenIntent(id, claim, "REVERSED", "REVERSE")
+        val reversed = reversedCopy(id)
+        val cfg = ConfigProvider.getConfig()
+        fun connect() = DriverManager.getConnection(
+            cfg.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            cfg.getValue("quarkus.datasource.username", String::class.java),
+            cfg.getValue("quarkus.datasource.password", String::class.java),
+        )
+        val pool = Executors.newSingleThreadExecutor()
+        connect().use { holder ->
+            // Hold the DEAL row so the save stops right after locking its claim (it locks the claim first).
+            holder.autoCommit = false
+            holder.prepareStatement("select 1 from deals where deal_id = ? for update").use { ps ->
+                ps.setObject(1, UUID.fromString(id))
+                ps.executeQuery().close()
+            }
+            val save = pool.submit(Callable { onContext { repo.save(reversed, releaseClaim = claim) } })
+            // Wait until the save is blocked on the deal row, i.e. it holds the claim lock.
+            val deadline = System.currentTimeMillis() + 10_000
+            while (System.currentTimeMillis() < deadline && !saveWaitsOnLock()) Thread.sleep(50)
+            assertThat(saveWaitsOnLock()).describedAs("the save is waiting on the deal row").isTrue()
+
+            connect().use { releaser ->
+                releaser.createStatement().use { it.execute("set lock_timeout = '500ms'") }
+                assertThatThrownBy {
+                    releaser.prepareStatement(
+                        "update deal_posting_intent set status = 'REFUSED' where idempotency_key = ?",
+                    ).use { ps ->
+                        ps.setString(1, claim)
+                        ps.executeUpdate()
+                    }
+                }.describedAs(
+                    "a release must block while the save holds the claim",
+                ).hasMessageContaining("lock timeout")
+            }
+            holder.commit()
+            save.get(30, java.util.concurrent.TimeUnit.SECONDS)
+        }
+        pool.shutdown()
+        assertThat(state(id)).isEqualTo("REVERSED")
+        assertThat(intent(claim).first).isNotEqualTo("OPEN")
+    }
+
+    private fun saveWaitsOnLock(): Boolean = jdbc { c ->
+        c.createStatement().use { st ->
+            st.executeQuery(
+                "select count(*) from pg_stat_activity where wait_event_type = 'Lock' and query like '%deals%'",
+            ).use { rs ->
+                rs.next()
+                rs.getInt(1) > 0
+            }
+        }
+    }
+
     private fun insertOpenIntent(id: String, key: String, event: String, action: String) = jdbc { c ->
         c.prepareStatement(
             "insert into deal_posting_intent (idempotency_key, deal_id, event, action, value_date, actor_id, " +
@@ -637,5 +728,7 @@ class PostingIntentReconcileIT {
         lateinit var settleRaceId: String
         lateinit var reverseRaceId: String
         lateinit var blockedReopenId: String
+        lateinit var releasedClaimId: String
+        lateinit var lockedClaimId: String
     }
 }

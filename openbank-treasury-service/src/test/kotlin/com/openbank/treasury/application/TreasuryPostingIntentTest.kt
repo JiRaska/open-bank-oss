@@ -19,6 +19,8 @@ import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.infrastructure.LegWireJackson
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -712,11 +714,37 @@ class TreasuryPostingIntentTest {
     @Test
     fun `a cancelled reversal still releases its claim`(): Unit = runBlocking {
         val b = book()
-        deals.cancelNextSave = true
-        assertThatThrownBy { runBlocking { service.reverse(b.id, "never traded", DealFixtures.approver) } }
-            .isInstanceOf(kotlinx.coroutines.CancellationException::class.java)
+        // A REAL cancellation: the reversal suspends inside its save, and its job is cancelled there.
+        deals.suspendNextSave = kotlinx.coroutines.CompletableDeferred()
+        val job = launch { service.reverse(b.id, "never traded", DealFixtures.approver) }
+        deals.saveEntered.await()
+        job.cancelAndJoin()
+        assertThat(job.isCancelled).isTrue()
+        // The release ran although the coroutine was cancelled (it suspends: only NonCancellable lets it).
         assertThat(intents.rows.values.single { ":claim:" in it.first.idempotencyKey }.second)
             .isEqualTo(InMemoryIntents.Status.REFUSED)
+        assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.BOOKED)
+    }
+
+    @Test
+    fun `a cancelled reconciler does not count an accrual-day attempt`(): Unit = runBlocking {
+        val b = book()
+        service.settle(b.id, DealFixtures.approver)
+        later(Duration.ofDays(1))
+        ledger.loseAnswerFor = b.id
+        service.accrueInterest(monday.plusDays(1))
+        val key = intents.rows.values.single { it.first.action.name == "ACCRUE" }.first.idempotencyKey
+        repeat(3) {
+            later(Duration.ofMinutes(5))
+            deals.cancelNextFind = true
+            assertThatThrownBy { runBlocking { service.reconcilePostingIntents(clock.instant()) } }
+                .isInstanceOf(kotlinx.coroutines.CancellationException::class.java)
+        }
+        assertThat(intents.rows.getValue(key).first.attempts).isZero()
+        assertThat(intents.escalated).doesNotContain(key)
+        // Uncancelled, it then completes.
+        later(Duration.ofMinutes(5))
+        assertThat(service.reconcilePostingIntents(clock.instant()).completed).isEqualTo(1)
     }
 
     @Test

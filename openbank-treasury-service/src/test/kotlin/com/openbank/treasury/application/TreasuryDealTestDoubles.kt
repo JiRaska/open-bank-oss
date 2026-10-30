@@ -137,6 +137,8 @@ internal class InMemoryIntents : PostingIntentPort {
     }
 
     override suspend fun refuse(key: String, reason: String) {
+        // A real store suspends here: in a cancelled coroutine (outside NonCancellable) this throws.
+        kotlinx.coroutines.yield()
         rows[key]?.takeIf { it.second == Status.OPEN }?.let {
             rows[key] = it.first.copy(lastError = reason) to Status.REFUSED
             record(key, "REFUSED", null, reason)
@@ -235,6 +237,10 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
     /** When true, the next save throws CancellationException (the caller's coroutine was cancelled). */
     var cancelNextSave = false
 
+    /** When set, the next save suspends on it (after completing [saveEntered]) until cancelled. */
+    var suspendNextSave: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    val saveEntered = kotlinx.coroutines.CompletableDeferred<Unit>()
+
     val schedules = mutableListOf<com.openbank.treasury.application.port.out.ScheduleWrite>()
 
     override suspend fun save(
@@ -251,6 +257,11 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
             if (intents?.status(key) != InMemoryIntents.Status.OPEN) {
                 throw com.openbank.treasury.application.port.out.DealChangedException("claim $key was released")
             }
+        }
+        suspendNextSave?.let { gate ->
+            suspendNextSave = null
+            saveEntered.complete(Unit)
+            gate.await() // suspends until the test cancels the caller's job
         }
         if (cancelNextSave) {
             cancelNextSave = false
@@ -273,7 +284,16 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
 
     override suspend fun findCommand(key: String) = commands[key]
 
-    override suspend fun findById(dealId: UUID) = rows[dealId]
+    /** When true, the next findById throws CancellationException (the reconciler's coroutine is cancelled). */
+    var cancelNextFind = false
+
+    override suspend fun findById(dealId: UUID): Deal? {
+        if (cancelNextFind) {
+            cancelNextFind = false
+            throw kotlinx.coroutines.CancellationException("simulated: cancelled while loading")
+        }
+        return rows[dealId]
+    }
     override suspend fun list(state: DealState?) = rows.values.filter { state == null || it.state == state }
     override suspend fun dueForSettlement(today: LocalDate, states: Set<DealState>) =
         rows.values.filter { it.state in states && !it.valueDate.isAfter(today) }

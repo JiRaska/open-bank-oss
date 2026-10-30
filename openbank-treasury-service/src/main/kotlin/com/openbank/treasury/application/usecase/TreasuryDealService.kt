@@ -992,6 +992,8 @@ class TreasuryDealService(
                 val (deal, spec) = try {
                 val d = load(intent.dealId)
                 d to PostingRules.accrual(d, intent.valueDate)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // a cancellation is not a failed attempt, and must never escalate a healthy day
             } catch (e: Exception) {
                 throw AccrualPreparationFailed(e)
             }
