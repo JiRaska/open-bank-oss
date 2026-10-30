@@ -1633,6 +1633,56 @@ test_catalog_publish_ir_denies_human_without_operator_role if {
 		with data.rules as rules_real
 }
 
+# ---------------------------------------------------------------------------------------
+# catalog-backtest (ADR-0352 §7, phase 5b): running the behavioural-diff backtest RECORDS the
+# evidence that unlocks publish-ir and IR role approvals, so it is an approver's action, not a read:
+# a human publish-ir checker (operator/admin) or a human holding a revision-approval authority.
+# A reader, and a service account whatever it holds, may not.
+# ---------------------------------------------------------------------------------------
+test_catalog_backtest_allows_human_operator if {
+	decision := rest.allow with input as {
+		"principal": {"service_account": false, "id": "user-7", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "catalog.backtest",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.rules as rules_real
+	decision.allow
+	decision.reason == "catalog-backtest"
+}
+
+test_catalog_backtest_allows_human_revision_approver if {
+	decision := rest.allow with input as {
+		"principal": {"service_account": false, "id": "user-8", "type": "HUMAN", "roles": ["CATALOG_REVISION_APPROVER"]},
+		"action": "catalog.backtest",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.rules as rules_real
+	decision.allow
+}
+
+test_catalog_backtest_denies_reader if {
+	not rest.allow with input as {
+		"principal": {"service_account": false, "id": "user-9", "type": "HUMAN", "roles": ["CATALOG_SCOPE_READ"]},
+		"action": "catalog.backtest",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.rules as rules_real
+}
+
+test_catalog_backtest_denies_service_account_with_every_role if {
+	not rest.allow with input as {
+		"principal": {
+			"service_account": true,
+			"id": "service-account-openbank-services",
+			"type": "HUMAN",
+			"roles": ["ROLE_OPERATOR", "ROLE_ADMIN", "CATALOG_REVISION_APPROVER"],
+		},
+		"action": "catalog.backtest",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.rules as rules_real
+}
+
 test_pension_catalog_approval_allows_role_qualified_human if {
 	decision := rest.allow with input as {
 		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["PENSION_LEGAL_APPROVER"]},

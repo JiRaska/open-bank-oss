@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: dispute-service
     app.kubernetes.io/part-of: dispute
   annotations:
-    openbank.tech/policy-checksum: "84673bdde4c56385"
+    openbank.tech/policy-checksum: "be1c72f1d41c742a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -420,6 +420,20 @@ data:
     	role in input.principal.roles
     	not principal_is_machine
     	input.action == "catalog.publish-ir"
+    }
+
+    # ADR-0352 §7 (phase 5b): the behavioural-diff backtest RECORDS the evidence that unlocks publish-ir
+    # and the role approval of an IR-bearing revision, so running it is an approver's action, not a read.
+    # A human publish-ir checker (operator/admin) or a human holding a revision-approval authority (the
+    # derived CATALOG_REVISION_APPROVER marker); never a machine, whatever roles it carries. product-catalog
+    # separately binds the evidence to the caller's JWT issuer/subject and the revision's digest.
+    allowed_reasons contains "catalog-backtest" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "CATALOG_REVISION_APPROVER"}
+    	role in input.principal.roles
+    	not principal_is_machine
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "catalog.backtest"
     }
 
     # Pension catalog approval is a distinct human decision, never a generic publish grant.
