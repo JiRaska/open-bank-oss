@@ -33,12 +33,16 @@
 # config_ordinal=500 forces this source to outrank the baked application.yaml (~254). Loaded via
 # QUARKUS_CONFIG_LOCATIONS on the Deployment (audit-service.yaml).
 #
-# agent-audit-events-in's group.id/auto.offset.reset override is NOT added here yet — the
-# `AgentAuditConsumer` that declares that channel hasn't deployed. Declaring the channel in
-# gitops config before the image that names it is exactly SRMSG00071 (a configured channel
-# with no connector is a hard boot failure), the same sequencing hazard #5661 hit for
-# notification-service's delegation-events-in. Add the two lines back once the image with
-# `AgentAuditConsumer` is live (mirrors #5700's restoration of that override).
+# agent-audit-events-in (D5 AI-attribution provenance, #12256): enabled in the Deployment via
+# AUDIT_AGENT_AUDIT_KAFKA_ENABLED=true (the flip is the deployment decision; the baked
+# application.yaml default stays `false` so local dev and tests stay fail-closed with no
+# broker). The deployed image (sandbox-bc607f53) contains AgentAuditConsumer, so the
+# SRMSG00071 sequencing hazard called out below no longer applies — the channel declared in
+# application.yaml has a live handler. group.id=audit-service-agent-provenance matches the
+# KafkaUser group Read ACL in kafka-audit-mtls.yaml (#5745); without this override the group
+# silently falls back to quarkus.application.name (openbank-audit-service), which that ACL
+# does NOT grant — every poll would get a silent GroupAuthorizationException, the exact
+# #686 defect this ConfigMap exists for, on the D5 stream this time.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -52,3 +56,5 @@ data:
     config_ordinal=500
     mp.messaging.incoming.audit-events-in.group.id=audit-service
     mp.messaging.incoming.audit-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.agent-audit-events-in.group.id=audit-service-agent-provenance
+    mp.messaging.incoming.agent-audit-events-in.auto.offset.reset=earliest

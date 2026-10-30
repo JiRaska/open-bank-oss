@@ -92,6 +92,18 @@ Content-Type: application/json
 - `POTENTIAL_HIT` → block pending manual compliance review
 - `HIT` or `ESCALATED` → block; do not proceed
 
+**Subject-bound clearance (#11694):**
+- Send the stable party identifier as optional `subjectId`, separately from the per-attempt
+  `idempotencyKey`. A new account-opening attempt uses a new key and is screened against the
+  current lists; only an identical key replays the original result.
+- A `WHITELISTED` review is valid for 90 days (`clearanceExpiresAt`) and only for exactly the same
+  `subjectId`, entity type, name, aliases, date of birth, nationality and identifiers.
+- The clearance covers only the reviewed match identities: `(listType, matchedId)`, or
+  `(listType, matchedName)` when the entry has no external id. A new uncovered hit, changed subject
+  or expired clearance keeps the fresh blocking result.
+- Legacy checks without `subjectId` cannot newly receive `WHITELISTED`. Screen the subject again
+  with its explicit id and review that new check instead.
+
 ### Submit a manual review decision
 
 ```http
