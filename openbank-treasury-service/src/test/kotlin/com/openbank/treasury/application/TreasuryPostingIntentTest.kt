@@ -634,6 +634,43 @@ class TreasuryPostingIntentTest {
                 .containsExactly("OPENED", "REFUSED", "JOURNAL_APPLIED_AFTER_CLOSE")
         }
 
+    @Test
+    fun `an unposted reversal whose save fails releases its claim`(): Unit = runBlocking {
+        val b = book()
+        deals.failNextSave = true
+        assertThatThrownBy { runBlocking { service.reverse(b.id, "never traded", DealFixtures.approver) } }
+        val claim = intents.rows.values.single { it.first.idempotencyKey.endsWith(":claim") }
+        assertThat(claim.second).isEqualTo(InMemoryIntents.Status.REFUSED)
+        assertThat(claim.first.lastError).contains("did not commit")
+        assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.BOOKED)
+        // The slot is free again: the settlement goes through.
+        assertThat(service.settle(b.id, DealFixtures.approver).state).isEqualTo(DealState.SETTLED)
+    }
+
+    @Test
+    fun `a leaked reversal claim is released by the reconciler, never replayed against a deal that now posts`(): Unit =
+        runBlocking {
+            val b = book()
+            service.settle(b.id, DealFixtures.approver) // a reversal now WOULD post a journal
+            val claimKey = "treasury:${b.id}:reversed:claim"
+            intents.rows[claimKey] = com.openbank.treasury.application.port.out.PostingIntent(
+                idempotencyKey = claimKey,
+                dealId = b.id,
+                event = PostingEvent.REVERSED,
+                action = com.openbank.treasury.application.port.out.PostingIntentAction.REVERSE,
+                valueDate = monday,
+                actor = DealFixtures.approver,
+                reason = "never traded",
+                createdAt = clock.instant(),
+            ) to InMemoryIntents.Status.OPEN
+            later(Duration.ofMinutes(5))
+            val run = service.reconcilePostingIntents(clock.instant())
+            assertThat(run.failures).isEmpty()
+            assertThat(intents.status(claimKey)).isEqualTo(InMemoryIntents.Status.REFUSED)
+            assertThat(ledger.posted.map { it.event }).doesNotContain(PostingEvent.REVERSED)
+            assertThat(deals.rows.getValue(b.id).state).isEqualTo(DealState.SETTLED)
+        }
+
     private fun settlementKeyOf(deal: Deal, event: PostingEvent) =
         intents.rows.values.map { it.first }.first { it.dealId == deal.id && it.event == event }.idempotencyKey
 

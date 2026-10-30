@@ -439,26 +439,39 @@ class TreasuryDealService(
         // lifecycle slot while it decides, so a settlement cannot post in between and leave its
         // journal behind a REVERSED deal: the one-open-per-deal index refuses whichever is second.
         val claim = if (rule == null) claimUnpostedReversal(reversed, actor, key, reason) else null
-        val event = DealEvent(
-            DealReversed.EVENT_TYPE,
-            objectMapper.writeValueAsString(
-                DealReversed(
-                    dealId = reversed.id,
-                    product = reversed.product,
-                    counterpartyId = reversed.counterpartyId,
-                    currency = reversed.currency,
-                    principal = reversed.principal,
-                    reversedBy = actor.id,
-                    reason = reason,
-                    ledgerJournalId = ref?.journalId,
-                    occurredAt = reversed.updatedAt,
-                    fxSide = reversed.fx?.side,
-                    counterAmount = reversed.fx?.counterAmount,
-                    kind = reversed.kind,
+        // The claim is released on EVERY path: once the state change commits (no journal exists),
+        // and when anything before or in the save throws (the save's row-version check is also the
+        // re-check that the deal did not change since it was read; nothing was posted either way).
+        val saved = try {
+            val event = DealEvent(
+                DealReversed.EVENT_TYPE,
+                objectMapper.writeValueAsString(
+                    DealReversed(
+                        dealId = reversed.id,
+                        product = reversed.product,
+                        counterpartyId = reversed.counterpartyId,
+                        currency = reversed.currency,
+                        principal = reversed.principal,
+                        reversedBy = actor.id,
+                        reason = reason,
+                        ledgerJournalId = ref?.journalId,
+                        occurredAt = reversed.updatedAt,
+                        fxSide = reversed.fx?.side,
+                        counterAmount = reversed.fx?.counterAmount,
+                        kind = reversed.kind,
+                    ),
                 ),
-            ),
-        )
-        val saved = deals.save(reversed, ref, event, cmd(key, REVERSE, dealId))
+            )
+            deals.save(reversed, ref, event, cmd(key, REVERSE, dealId))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            claim?.let { intents.refuse(it, UNPOSTED_REVERSAL_ABANDONED) }
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception, // released, then rethrown unchanged
+        ) {
+            claim?.let { intents.refuse(it, "$UNPOSTED_REVERSAL_ABANDONED: ${describe(e)}") }
+            throw e
+        }
         claim?.let { intents.refuse(it, UNPOSTED_REVERSAL) }
         return saved
     }
@@ -707,7 +720,9 @@ class TreasuryDealService(
      * between, the reconciler finds the deal already REVERSED and releases it the same way.
      */
     private suspend fun claimUnpostedReversal(reversed: Deal, actor: Actor, key: String?, reason: String): String {
-        val claimKey = lifecycleKey(reversed.id, PostingEvent.REVERSED)
+        // Its own key, never the posted reversal's: a resume can then tell a claim (never replayed)
+        // from a reversal that may hold a ledger journal (replayed under its key).
+        val claimKey = claimKey(reversed.id)
         intents.open(
             PostingIntent(
                 idempotencyKey = claimKey,
@@ -725,6 +740,8 @@ class TreasuryDealService(
         )
         return claimKey
     }
+
+    private fun claimKey(dealId: UUID) = lifecycleKey(dealId, PostingEvent.REVERSED) + CLAIM_SUFFIX
 
     private fun lifecycleKey(dealId: UUID, event: PostingEvent) = "treasury:$dealId:${event.key}"
 
@@ -924,12 +941,17 @@ class TreasuryDealService(
         PostingIntentAction.SETTLE -> settle(intent.dealId, intent.actor, intent.commandKey)
         PostingIntentAction.MATURE -> mature(intent.dealId, intent.actor, intent.commandKey)
         PostingIntentAction.REVERSE ->
-            if (load(intent.dealId).state == DealState.REVERSED &&
-                deals.journals(intent.dealId).none { it.idempotencyKey == intent.idempotencyKey }
-            ) {
-                // An unposted reversal's claim whose state change committed: release it.
-                intents.refuse(intent.idempotencyKey, UNPOSTED_REVERSAL)
-                load(intent.dealId)
+            if (intent.idempotencyKey.endsWith(CLAIM_SUFFIX)) {
+                // An unposted reversal's claim is NEVER replayed: re-running reverse() now would decide a
+                // privileged action against whatever the deal has become (a posting rule may apply by
+                // now). The claim is released either way; nothing was posted under it. If the state
+                // change did not commit, the reversal is simply not done and is re-issued by a person.
+                val deal = load(intent.dealId)
+                intents.refuse(
+                    intent.idempotencyKey,
+                    if (deal.state == DealState.REVERSED) UNPOSTED_REVERSAL else UNPOSTED_REVERSAL_ABANDONED,
+                )
+                deal
             } else {
                 reverse(
                     intent.dealId,
@@ -1011,6 +1033,11 @@ class TreasuryDealService(
         const val DEFAULT_MAX_RESUME_HOURS = 4L
         const val DEFAULT_CLAIM_BATCH = 100
         const val UNPOSTED_REVERSAL = "reversal of an unsettled deal: no journal, claim released"
+        const val UNPOSTED_REVERSAL_ABANDONED =
+            "reversal of an unsettled deal did not commit: no journal, claim released"
+
+        /** Suffix of an unposted reversal's claim key (#14220 review): never replayed by a resume. */
+        const val CLAIM_SUFFIX = ":claim"
 
         /** The actor an accrual day's posting intent is recorded under. */
         val ACCRUAL_ACTOR = Actor("system:interest-accrual", com.openbank.treasury.domain.model.ActorType.SYSTEM)
