@@ -934,16 +934,54 @@ class TreasuryDealService(
         actor: Actor,
         key: String?,
     ): PostingIntentCloseOutcome {
+        requireClosable(reason, actor, key)
+        // The request's fingerprint: what a replay must repeat exactly (deal, event, reason, actor).
+        // Never the intent key: a reversal's claim row is keyed per attempt, so "the key this close
+        // should have touched" cannot be recomputed from the request.
+        val fingerprint = closeFingerprint(dealId, event, reason, actor)
+        val intent = intents.openFor(dealId).firstOrNull { it.event == event }
+        if (intent != null) {
+            // Segregation of duties (#14220 review): the person who decided the posting, and the
+            // approver who booked the deal, may not also release the posting's day-close hold.
+            if (actor.id == intent.actor.id || actor.id == load(dealId).approvedBy?.id) {
+                throw com.openbank.treasury.domain.model.FourEyesViolationException(
+                    "the actor who decided this posting or approved the deal may not close its posting intent",
+                )
+            }
+        }
+        key?.let { k -> replayedClose(k, fingerprint)?.let { return it } }
+        intent ?: return PostingIntentCloseOutcome.NOT_OPEN
+        // Not while its own command or a reconciler may still be posting it: younger than the grace,
+        // or under a live claim, the close is refused (IN_FLIGHT) rather than raced.
+        val outcome = intents.closeByOperator(
+            intent.idempotencyKey,
+            actor,
+            reason,
+            clock.instant().minus(grace),
+            key,
+            fingerprint,
+        )
+        return if (key == null) outcome else resolveRace(outcome, key, fingerprint)
+    }
+
+    /**
+     * A concurrent close with the same key won the race (NOT_OPEN), or the key was recorded by another
+     * request in between (DUPLICATE_KEY): the stored row decides, never a 500.
+     */
+    private suspend fun resolveRace(
+        outcome: PostingIntentCloseOutcome,
+        key: String,
+        fingerprint: String,
+    ): PostingIntentCloseOutcome = when (outcome) {
+        PostingIntentCloseOutcome.NOT_OPEN -> replayedClose(key, fingerprint) ?: outcome
+        PostingIntentCloseOutcome.DUPLICATE_KEY -> replayedClose(key, fingerprint) ?: throw keyReused()
+        else -> outcome
+    }
+
+    private fun requireClosable(reason: String, actor: Actor, key: String?) {
         key?.let { k ->
             require(k.isNotBlank() && k.length <= MAX_KEY_LENGTH) {
                 "Idempotency-Key must be 1..$MAX_KEY_LENGTH characters"
-            }
-            intents.closedBy(k)?.let { closed ->
-                // A replay of this very close answers as it did; the key on another request is a client bug.
-                require(closed == lifecycleKey(dealId, event)) {
-                    "Idempotency-Key was already used for another request"
-                }
-                return PostingIntentCloseOutcome.CLOSED
             }
         }
         require(reason.isNotBlank()) { "a reason is required to close a posting intent" }
@@ -952,19 +990,21 @@ class TreasuryDealService(
                 "only a person may close a posting intent",
             )
         }
-        val intent = intents.openFor(dealId).firstOrNull { it.event == event }
-            ?: return PostingIntentCloseOutcome.NOT_OPEN
-        // Segregation of duties (#14220 review): the person who decided the posting, and the approver
-        // who booked the deal, may not also release the posting's day-close hold.
-        if (actor.id == intent.actor.id || actor.id == load(dealId).approvedBy?.id) {
-            throw com.openbank.treasury.domain.model.FourEyesViolationException(
-                "the actor who decided this posting or approved the deal may not close its posting intent",
-            )
-        }
-        // Not while its own command or a reconciler may still be posting it: younger than the grace,
-        // or under a live claim, the close is refused (IN_FLIGHT) rather than raced.
-        return intents.closeByOperator(intent.idempotencyKey, actor, reason, clock.instant().minus(grace), key)
     }
+
+    /** CLOSED for a replay of the same close; 400 for the key on another request; null when unused. */
+    private suspend fun replayedClose(key: String, fingerprint: String): PostingIntentCloseOutcome? {
+        val stored = intents.closedBy(key) ?: return null
+        if (stored != fingerprint) throw keyReused()
+        return PostingIntentCloseOutcome.CLOSED
+    }
+
+    private fun keyReused() = IllegalArgumentException("Idempotency-Key already used for a different request")
+
+    private fun closeFingerprint(dealId: UUID, event: PostingEvent, reason: String, actor: Actor): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest("$dealId|${event.name}|${actor.id}|$reason".toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 
     /**
      * Re-runs the intent's command as its original actor and client key. The domain transition is

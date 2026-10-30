@@ -786,6 +786,83 @@ class TreasuryPostingIntentTest {
             }.isInstanceOf(IllegalArgumentException::class.java)
         }
 
+    private suspend fun lostSettlement(): Deal {
+        val b = book()
+        ledger.loseAnswerFor = b.id
+        assertThatThrownBy {
+            runBlocking { service.settle(b.id, com.openbank.treasury.domain.model.Actor.SIMULATED_MARKET) }
+        }
+        later(Duration.ofMinutes(5))
+        return b
+    }
+
+    @Test
+    fun `a REVERSED close of a reversal's claim row is replayed as 204, never 400`(): Unit = runBlocking {
+        val b = book()
+        val claimKey = "treasury:${b.id}:reversed:claim:attempt-1"
+        intents.rows[claimKey] = com.openbank.treasury.application.port.out.PostingIntent(
+            idempotencyKey = claimKey,
+            dealId = b.id,
+            event = PostingEvent.REVERSED,
+            action = com.openbank.treasury.application.port.out.PostingIntentAction.REVERSE,
+            valueDate = monday,
+            actor = com.openbank.treasury.domain.model.Actor.SIMULATED_MARKET,
+            reason = "stuck",
+            createdAt = clock.instant(),
+        ) to InMemoryIntents.Status.OPEN
+        later(Duration.ofMinutes(5))
+        val close =
+            suspend { service.closePostingIntent(b.id, PostingEvent.REVERSED, "stuck claim", operator, "close-r") }
+        assertThat(close()).isEqualTo(PostingIntentCloseOutcome.CLOSED)
+        assertThat(close()).isEqualTo(PostingIntentCloseOutcome.CLOSED)
+    }
+
+    @Test
+    fun `the same key with a different reason or actor is refused`(): Unit = runBlocking {
+        val b = lostSettlement()
+        val other = com.openbank.treasury.domain.model.Actor(
+            "pavel.backoffice",
+            com.openbank.treasury.domain.model.ActorType.HUMAN,
+        )
+        assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "none", operator, "k-1"))
+            .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+        assertThatThrownBy {
+            runBlocking { service.closePostingIntent(b.id, PostingEvent.SETTLED, "changed", operator, "k-1") }
+        }
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("different request")
+        assertThatThrownBy {
+            runBlocking { service.closePostingIntent(b.id, PostingEvent.SETTLED, "none", other, "k-1") }
+        }
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("different request")
+    }
+
+    @Test
+    fun `two concurrent closes with one key - the loser answers 204, not 404`(): Unit = runBlocking {
+        val b = lostSettlement()
+        intents.beforeClose = {
+            intents.beforeClose = {}
+            // The twin request wins the race between this one's lookup and its update.
+            assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "none", operator, "twin"))
+                .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+        }
+        assertThat(service.closePostingIntent(b.id, PostingEvent.SETTLED, "none", operator, "twin"))
+            .isEqualTo(PostingIntentCloseOutcome.CLOSED)
+    }
+
+    @Test
+    fun `a key recorded by another request meanwhile answers 400, never 500`(): Unit = runBlocking {
+        val b = lostSettlement()
+        intents.beforeClose = {
+            intents.beforeClose = {}
+            intents.closeCommands["raced"] = "someone else's fingerprint"
+        }
+        assertThatThrownBy {
+            runBlocking { service.closePostingIntent(b.id, PostingEvent.SETTLED, "none", operator, "raced") }
+        }
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("different request")
+        assertThat(intents.status(settlementKey(b))).isEqualTo(InMemoryIntents.Status.OPEN)
+    }
+
     private fun settlementKeyOf(deal: Deal, event: PostingEvent) =
         intents.rows.values.map { it.first }.first { it.dealId == deal.id && it.event == event }.idempotencyKey
 

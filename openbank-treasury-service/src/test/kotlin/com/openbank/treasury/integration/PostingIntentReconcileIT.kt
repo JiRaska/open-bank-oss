@@ -258,6 +258,7 @@ class PostingIntentReconcileIT {
 
         close(closeId, "SETTLED", "no key", key = null).then().statusCode(400)
         val closeKey = UUID.randomUUID().toString()
+        usedCloseKey = closeKey
         close(closeId, "SETTLED", "ledger confirmed to hold no journal", closeKey).then().statusCode(204)
         // A replay of the same close (same Idempotency-Key) answers the same, and acts no more.
         close(closeId, "SETTLED", "ledger confirmed to hold no journal", closeKey).then().statusCode(204)
@@ -573,6 +574,30 @@ class PostingIntentReconcileIT {
         assertThat(intent(claim).first).isNotEqualTo("OPEN")
     }
 
+    @Inject
+    lateinit var intentStore: com.openbank.treasury.application.port.out.PostingIntentPort
+
+    @Test
+    @Order(22)
+    fun `22 - a close reusing a recorded Idempotency-Key hits the UNIQUE - DUPLICATE_KEY, never 500`() {
+        val openKey = "treasury:$blockedReopenId:reversed" // OPEN since step 19
+        assertThat(intent(openKey).first).isEqualTo("OPEN")
+        val outcome = onContext {
+            intentStore.closeByOperator(
+                openKey,
+                operatorActor,
+                "reusing a key",
+                Instant.now().plusSeconds(60),
+                usedCloseKey, // recorded by step 9's close
+                "f".repeat(64),
+            )
+        }
+        assertThat(
+            outcome,
+        ).isEqualTo(com.openbank.treasury.application.port.out.PostingIntentCloseOutcome.DUPLICATE_KEY)
+        assertThat(intent(openKey).first).describedAs("the close rolled back with the violation").isEqualTo("OPEN")
+    }
+
     private fun saveWaitsOnLock(): Boolean = jdbc { c ->
         c.createStatement().use { st ->
             st.executeQuery(
@@ -739,5 +764,6 @@ class PostingIntentReconcileIT {
         lateinit var blockedReopenId: String
         lateinit var releasedClaimId: String
         lateinit var lockedClaimId: String
+        lateinit var usedCloseKey: String
     }
 }

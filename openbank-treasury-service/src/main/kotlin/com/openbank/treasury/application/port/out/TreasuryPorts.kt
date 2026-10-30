@@ -187,7 +187,14 @@ data class PostingIntent(
 )
 
 /** What an operator's close did (#13883): closed it, found none OPEN, or found it still in flight. */
-enum class PostingIntentCloseOutcome { CLOSED, NOT_OPEN, IN_FLIGHT }
+enum class PostingIntentCloseOutcome {
+    CLOSED,
+    NOT_OPEN,
+    IN_FLIGHT,
+
+    /** The Idempotency-Key was recorded by another close meanwhile (unique on the history row). */
+    DUPLICATE_KEY,
+}
 
 /** OPEN intents at a glance, for the gauges: how many, and since when the oldest has waited. */
 data class OpenIntentSummary(val count: Int, val oldestCreatedAt: Instant?)
@@ -256,9 +263,11 @@ interface PostingIntentPort {
         createdBefore: Instant,
         /** The client's Idempotency-Key, recorded with the close (unique). */
         commandKey: String? = null,
+        /** The request fingerprint a replay under [commandKey] must match. */
+        fingerprint: String? = null,
     ): PostingIntentCloseOutcome
 
-    /** The intent key a close under [commandKey] closed, or null when no close used it. */
+    /** The request fingerprint of the close recorded under [commandKey], or null when none used it. */
     suspend fun closedBy(commandKey: String): String?
 
     companion object {
@@ -279,6 +288,7 @@ interface PostingIntentPort {
                 reason: String,
                 createdBefore: Instant,
                 commandKey: String?,
+                fingerprint: String?,
             ) = PostingIntentCloseOutcome.NOT_OPEN
             override suspend fun closedBy(commandKey: String): String? = null
         }

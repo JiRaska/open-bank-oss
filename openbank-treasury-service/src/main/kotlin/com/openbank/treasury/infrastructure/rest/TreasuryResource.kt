@@ -425,6 +425,10 @@ class TreasuryResource {
                 .entity(mapOf("error" to "NOT_FOUND", "message" to "no open posting intent for $event on deal $id"))
                 .type(MediaType.APPLICATION_JSON)
                 .build()
+            // Resolved by the service (a replay is CLOSED, a reuse 400); listed for exhaustiveness.
+            PostingIntentCloseOutcome.DUPLICATE_KEY -> throw IllegalArgumentException(
+                "Idempotency-Key already used for a different request",
+            )
             PostingIntentCloseOutcome.IN_FLIGHT -> Response.status(Response.Status.CONFLICT)
                 .entity(
                     mapOf(

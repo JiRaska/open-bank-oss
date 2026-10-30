@@ -77,7 +77,9 @@ CREATE TABLE deal_posting_intent_history (
     -- CLOSED_BY_OPERATOR), which the late journal did NOT overwrite.
     prior_status    VARCHAR(24),
     -- CLOSED_BY_OPERATOR only: the client's Idempotency-Key of the close (a replay answers CLOSED).
-    command_key     VARCHAR(128)  UNIQUE,
+    command_key     VARCHAR(128)  CONSTRAINT uq_deal_posting_intent_history_command_key UNIQUE,
+    -- sha256 of (deal, event, actor, reason) of that close: a replay under command_key must match it.
+    request_fingerprint CHAR(64),
     value_date      DATE          NOT NULL
 );
 

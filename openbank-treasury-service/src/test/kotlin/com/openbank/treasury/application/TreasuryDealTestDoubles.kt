@@ -86,7 +86,12 @@ internal class InMemoryIntents : PostingIntentPort {
     val rows = linkedMapOf<String, Pair<PostingIntent, Status>>()
     val closedBy = mutableMapOf<String, String>()
     val escalated = mutableSetOf<String>()
+
+    /** Idempotency-Key -> request fingerprint, as the history row's unique command_key. */
     val closeCommands = mutableMapOf<String, String>()
+
+    /** Runs before a close (a test races a concurrent close in here). */
+    var beforeClose: suspend () -> Unit = {}
 
     override suspend fun closedBy(commandKey: String) = closeCommands[commandKey]
 
@@ -199,14 +204,18 @@ internal class InMemoryIntents : PostingIntentPort {
         reason: String,
         createdBefore: Instant,
         commandKey: String?,
+        fingerprint: String?,
     ): PostingIntentCloseOutcome {
+        beforeClose()
         val open = rows[key]?.takeIf { it.second == Status.OPEN } ?: return PostingIntentCloseOutcome.NOT_OPEN
+        // As the real UNIQUE on the history row's command_key (checked after the OPEN row, as the UPDATE does).
+        if (commandKey != null && commandKey in closeCommands) return PostingIntentCloseOutcome.DUPLICATE_KEY
         val row =
             open.takeIf { it.first.createdAt.isBefore(createdBefore) } ?: return PostingIntentCloseOutcome.IN_FLIGHT
         rows[key] = row.first to Status.CLOSED_BY_OPERATOR
         closedBy[key] = actor.id
         record(key, "CLOSED_BY_OPERATOR", actor.id, reason)
-        commandKey?.let { closeCommands[it] = key }
+        commandKey?.let { closeCommands[it] = requireNotNull(fingerprint) }
         return PostingIntentCloseOutcome.CLOSED
     }
 

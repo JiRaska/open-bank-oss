@@ -86,14 +86,22 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
      * CompositeException, Hibernate's PersistenceException), so every cause, suppressed and
      * composite member is walked; the match is SQLState 23505 on this index, or its name.
      */
-    private fun isOnePerDealViolation(e: Throwable): Boolean {
+    private fun isOnePerDealViolation(e: Throwable): Boolean = isViolationOf(e, ONE_PER_DEAL_INDEX)
+
+    /**
+     * A unique violation on [constraint]. The reactive stack wraps the driver's error in whatever it
+     * likes (CompletionException, Mutiny's CompositeException, Hibernate's PersistenceException), so
+     * every cause, suppressed and composite member is walked; the match is SQLState 23505 on that
+     * constraint, or its name in the message.
+     */
+    private fun isViolationOf(e: Throwable, constraint: String): Boolean {
         val seen = mutableSetOf<Throwable>()
         val queue = ArrayDeque(listOf(e))
         while (queue.isNotEmpty() && seen.size < MAX_CAUSES) {
             val t = queue.removeFirst()
             if (!seen.add(t)) continue
-            if (t is PgException && t.sqlState == UNIQUE_VIOLATION && t.constraint == ONE_PER_DEAL_INDEX) return true
-            if (t.message?.contains(ONE_PER_DEAL_INDEX) == true) return true
+            if (t is PgException && t.sqlState == UNIQUE_VIOLATION && t.constraint == constraint) return true
+            if (t.message?.contains(constraint) == true) return true
             t.cause?.let(queue::add)
             queue.addAll(t.suppressed)
             if (t is io.smallrye.mutiny.CompositeException) queue.addAll(t.causes)
@@ -143,10 +151,20 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
         reason: String,
         createdBefore: Instant,
         commandKey: String?,
+        fingerprint: String?,
     ): PostingIntentCloseOutcome {
-        if (update(CLOSE_SQL, utc(clock.instant()), actor.id, reason, key, utc(createdBefore), commandKey) == 1) {
-            return PostingIntentCloseOutcome.CLOSED
+        val closed = try {
+            update(CLOSE_SQL, utc(clock.instant()), actor.id, reason, key, utc(createdBefore), commandKey, fingerprint)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception, // classified below; anything else rethrown
+        ) {
+            // The key was recorded by another close meanwhile; the whole statement rolled back.
+            if (isViolationOf(e, COMMAND_KEY_UNIQUE)) return PostingIntentCloseOutcome.DUPLICATE_KEY
+            throw e
         }
+        if (closed == 1) return PostingIntentCloseOutcome.CLOSED
         val stillOpen = sf.withSession { s ->
             s.createNativeQuery<Any>("SELECT 1 FROM deal_posting_intent WHERE idempotency_key = ?1 AND status = 'OPEN'")
                 .setParameter(1, key)
@@ -189,7 +207,7 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
 
     override suspend fun closedBy(commandKey: String): String? = sf.withSession { s ->
         s.createNativeQuery<Any>(
-            "SELECT idempotency_key FROM deal_posting_intent_history WHERE command_key = ?1",
+            "SELECT request_fingerprint FROM deal_posting_intent_history WHERE command_key = ?1",
         ).setParameter(1, commandKey).resultList
     }.awaitSuspending().firstOrNull()?.toString()
 
@@ -261,6 +279,7 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
         const val ONE_PER_DEAL_INDEX = "uq_deal_posting_intent_one_open_per_deal"
         const val MAX_CAUSES = 32
         const val UNIQUE_VIOLATION = "23505"
+        const val COMMAND_KEY_UNIQUE = "uq_deal_posting_intent_history_command_key"
 
         // ON CONFLICT with no target: a clash on the key (a retry) AND a clash on the one-open-per-deal
         // index (another settlement, reversal, maturity or accrual day in flight) both insert nothing. The SELECT
@@ -307,8 +326,8 @@ class PostingIntentRepository(private val sf: Mutiny.SessionFactory, private val
                 "WHERE idempotency_key = ?4 AND status = 'OPEN' AND created_at < ?5 " +
                 "AND (claimed_until IS NULL OR claimed_until < ?1) RETURNING idempotency_key, value_date) " +
                 "INSERT INTO deal_posting_intent_history " +
-                "(idempotency_key, at, transition, actor_id, reason, command_key, value_date) " +
-                "SELECT idempotency_key, ?1, 'CLOSED_BY_OPERATOR', ?2, ?3, ?6, value_date FROM u"
+                "(idempotency_key, at, transition, actor_id, reason, command_key, request_fingerprint, value_date) " +
+                "SELECT idempotency_key, ?1, 'CLOSED_BY_OPERATOR', ?2, ?3, ?6, ?7, value_date FROM u"
 
         const val CLAIM_SQL =
             "UPDATE deal_posting_intent SET claim_token = ?1, claimed_until = ?2 WHERE idempotency_key IN (" +
