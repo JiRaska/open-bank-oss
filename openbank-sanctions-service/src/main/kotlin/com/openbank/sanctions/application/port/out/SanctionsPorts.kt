@@ -36,6 +36,9 @@ interface SanctionsRepository {
 
     suspend fun findByIdempotencyKey(key: String): SanctionsCheck?
 
+    /** Analyst-reviewed WHITELISTED checks for an explicit subject; freshness is checked by the use case. */
+    suspend fun findWhitelistsForSubject(subjectId: String): List<SanctionsCheck>
+
     suspend fun findByStatus(status: SanctionsCheckStatus): List<SanctionsCheck>
 
     suspend fun listChecks(): List<SanctionsCheck>

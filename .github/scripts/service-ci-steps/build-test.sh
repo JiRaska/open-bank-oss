@@ -38,7 +38,7 @@ deploy_options=()
 if [ "${DEPLOY_ARTIFACT_PILOT:-false}" = true ]; then
   [ "$SERVICE" = openbank-context-service ] || { echo 'Invalid deployment artifact pilot' >&2; exit 1; }
   export ANALYTICS_SINK_TYPE=clickhouse AGENT_SVID_NONCE_STORE=redis
-  deploy_tasks+=(":${SERVICE}:cyclonedxBom")
+  deploy_tasks+=(":${SERVICE}:verifyPackagedLibrarySbom")
   deploy_options+=(-Dquarkus.package.jar.type=fast-jar)
 fi
 # Cache healing replays this command only if verification fails before

@@ -63,3 +63,86 @@ se nemění.
 `FixingApiIT` pokrývá zrušení potvrzené po načtení splatných toků a před zamčeným zápisem:
 odpověď uvádí nulový počet fixovaných toků i selhání, projektované toky zůstanou nezměněné,
 událost fixingu nevznikne a čítač odmítnutí se zvýší o jedna.
+
+## Účast na uzávěrce dne (ADR-0342, #13167)
+
+Treasury je účastníkem uzávěrky dne v ledgeru pod jménem `treasury`.
+`TreasuryCloseParticipationScheduler` běží každou hodinu ve 40. minutě, Europe/Prague
+(`openbank.treasury.close.report-cron`). Při každém běhu znovu nabídne posledních
+`openbank.treasury.close.lookback-days` (3) dokončených účetních dnů přes
+`PUT /api/v1/ledger/accounting-days/{date}/participants/treasury`. Hlásí na vlastní m2m identitě treasury
+(`service-account-openbank-treasury`), kterou ledger pustí pod `ledger.close.participate` jen pro tohoto
+účastníka.
+
+- **Doklad.** Každý průchod hodinového časového rozlišení (`InterestAccrualScheduler`) pracuje k jednomu
+  pražskému účetnímu dni. Než cokoli udělá, označí se v `treasury_close_job_run` (V26) jako
+  rozběhnutý. Po skončení zapíše počet posouzených obchodů. Odmítnutí zapíše, když se obchod nepodařilo
+  rozlišit, když ledger odpověděl `409 ACCOUNTING_DAY_CLOSED`, když vyčerpal rozpočet a obchody zbyly,
+  nebo když průchod selhal. Odmítnutí uzavřeným dnem má vlastní kategorii. Pokud nejde zapsat značka
+  rozběhnutí, průchod se nespustí.
+- **Datování žurnálů.** Ledger přijímá účtování jen do otevřeného dne. Každý žurnál treasury se
+  proto účtuje s `entryDate` = dnešní otevřený pražský den a nese svůj ekonomický den jako `valueDate`
+  (den rozlišení, datum valuty vypořádání). Stejně se rozhodl lending. Dohánění za dřívější den tak už
+  nemůže narazit na `409 ACCOUNTING_DAY_CLOSED` jen proto, že ten den přešel do CUTOFF. Každý žurnál
+  se zapisuje do `deal_journals` se svým dnem valuty (V26 `value_date`).
+- **Jak se den nahlásí.** Pozdržení kvůli outboxu a kontrola DEAD běží vždy, ať je splatné cokoli.
+  - Je-li rozlišení vypnuté, den je REFUSED při událostech DEAD, RAN má-li žurnály, a SKIPPED jen
+    tehdy, když nemá ani jedno.
+  - Je-li rozlišení zapnuté a pro den žádný průchod nedoběhl, nehlásí se nic a ledger den drží
+    v CUTOFF.
+  - Jinak rozhoduje poslední průchod: RAN, nebo REFUSED se spočtenými důvody.
+  - Počet žurnálů je počet řádků `deal_journals` s daným dnem VALUTY: rozlišení, vypořádání,
+    splatnosti a storna.
+- **Pozdní žurnály.** Žurnál s valutou do již skončeného dne se počítá pod tento den a zvýší
+  `openbank.treasury.close.late_journals`. Další běh den nahlásí znovu s novým počtem a ledger hlášení
+  za uzavřený den uloží jako pozdní.
+- **Pozdržení.** Den drží kterékoli z těchto:
+  - průchod, který ještě běží;
+  - událost `treasury.deal.settled|matured|reversed.v1` přiřazená přes stejný obchod a druh životního
+    přechodu ke dni valuty žurnálu, dokud je v `treasury_outbox` ve stavu PENDING, DISPATCHING nebo
+    FAILED (událost DEAD udělá z dne REFUSED). Událost bez odpovídajícího datovaného žurnálu drží den vytvoření;
+  - potvrzený žurnál životního přechodu bez odpovídajícího potvrzeného přechodu obchodu. Pozdější stav
+    obchodu nezneplatňuje jeho dřívější potvrzený přechod;
+  - vypořádání nebo splatnost s valutou ten den, zapsané až po startu posledního dokončeného průchodu
+    rozlišení. Počítá se i průchod zapsaný pod pozdější den, protože po půlnoci rozliší i tento den.
+- **Práh zastarání.** Je odvozený, nikdy se nenastavuje samostatně. Průchod kontroluje
+  `openbank.treasury.accrual.pass-budget` (20 minut) před každým obchodem i před každým dnem rozlišení.
+  Rozpočet tak nemůže překročit o víc než jedno účtování, a `TreasuryCloseJobs.staleAfter` je proto
+  rozpočet plus 30 minut. Starší značka znamená, že průchod zemřel, a den se nahlásí jako REFUSED
+  (`pass started and never completed`).
+- **Hojení.** Úplný průchod (žádný obchod neselhal ani nezbyl) rozlišil i všechny dřívější dny.
+  Každý den v okně zpětného pohledu, který je REFUSED nebo nezapsaný, proto znovu zapíše jako RAN,
+  ledaže jeho vlastní průchod ještě běží.
+- **Zapsáno před potvrzením.** Vypořádání, splatnost a storno zapíšou žurnál ve vlastní transakci,
+  jakmile ho ledger přijme, ještě před potvrzením změny stavu obchodu. Když se toto potvrzení vrátí
+  zpět, žurnál se přesto započítá, ale den čeká na potvrzení odpovídajícího přechodu. Opakování účtuje pod stejným idempotentním klíčem, dostane zpět
+  původní žurnál a najde ho zapsaný. Zbývá okno pádu mezi odpovědí ledgeru a tímto zápisem; řešení
+  „záměr napřed“ se sleduje zvlášť.
+- **Provoz.** V režimu `shadow` ledger pozdržení jen počítá. V režimu `enforce` operátor den REFUSED
+  posoudí a na stránce konce dne v ledgeru mu udělí výjimku (waiver).
+
+## Odsouhlasení nostra podle data valuty (#13886)
+
+Výpis korespondenta je datován dnem, kdy pohyb zaúčtoval. Jeho zůstatky OPBD a CLBD jsou
+zaúčtované zůstatky: OPBD plus pohyby zaúčtované v období se rovná CLBD. Treasury tento den
+zapisuje jako **datum valuty** řádku ledgeru. Pozdní vypořádání zapíše do otevřeného dne ledgeru
+(datum zápisu), ale valutuje ho jeho ekonomickým dnem. Řádky se proto párují podle data valuty
+a stejně se porovnávají i oba zůstatky.
+
+- **Čtené okno.** Pro období výpisu `(openingDate, statementDate]` se čtou řádky ledgeru zapsané
+  ve třech rozsazích:
+  - 7 dní zápisu do `openingDate` včetně;
+  - samotné období;
+  - 7 dní zápisu po `statementDate`.
+
+  Řádky s valutou uvnitř období patří k období, ať byly zapsány kterýkoli den.
+- **Posun zůstatku.** Ledger vrací zůstatky podle data zápisu. Každý zůstatek (k `openingDate`
+  i k `statementDate`) se z už načtených řádků převede na zůstatek podle valuty. Přičtou se řádky
+  zapsané po dni zůstatku s valutou k tomuto dni nebo dříve. Odečtou se řádky zapsané k tomuto dni
+  nebo dříve s valutou později. Počítají se jen řádky v měně výpisu. Nic se neúčtuje a ledger se
+  nevolá navíc.
+- **Co se neposune.** Tyto řádky se dál ukážou jako rozdíl zůstatku, nikdy jako falešná shoda:
+  - řádek zapsaný o víc než 7 dní později než jeho valuta;
+  - řádek zapsaný víc než 7 dní před `openingDate` s valutou po něm;
+  - pohyb, který korespondent zaúčtoval jiný den, než je valuta zapsaná bankou. Takový řádek
+    zůstane i nespárovaný.
