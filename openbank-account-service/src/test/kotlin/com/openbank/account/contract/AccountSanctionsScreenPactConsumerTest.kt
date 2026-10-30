@@ -47,9 +47,14 @@ class AccountSanctionsScreenPactConsumerTest {
 
     private val mapper = jacksonObjectMapper()
 
-    /** Exactly what SanctionsScreeningAdapter sends: INDIVIDUAL, the legal name, no aliases. */
-    private fun request(name: String, key: String) = mapper.writeValueAsString(
-        SanctionsScreenRequest(idempotencyKey = key, entityType = "INDIVIDUAL", name = name),
+    /** Exactly what SanctionsScreeningAdapter sends: INDIVIDUAL, legal name, party id, no aliases. */
+    private fun request(name: String, key: String, subjectId: String = CLEAR_SUBJECT_ID) = mapper.writeValueAsString(
+        SanctionsScreenRequest(
+            idempotencyKey = key,
+            entityType = "INDIVIDUAL",
+            name = name,
+            subjectId = subjectId,
+        ),
     )
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
@@ -79,7 +84,7 @@ class AccountSanctionsScreenPactConsumerTest {
         .path(EXPECTED_SCREEN_PATH)
         .method("POST")
         .headers(mapOf("Content-Type" to "application/json"))
-        .body(request(SANCTIONED_NAME, HIT_KEY))
+        .body(request(SANCTIONED_NAME, HIT_KEY, HIT_SUBJECT_ID))
         .willRespondWith()
         .status(201)
         .headers(mapOf("Content-Type" to "application/json"))
@@ -135,12 +140,17 @@ class AccountSanctionsScreenPactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "hitPact")
     fun `a sanctioned name binds as HIT with its matched name`(mockServer: MockServer) {
-        val response = screen(mockServer, SANCTIONED_NAME, HIT_KEY)
+        val response = screen(mockServer, SANCTIONED_NAME, HIT_KEY, HIT_SUBJECT_ID)
         assertThat(response.status).isEqualTo("HIT")
         assertThat(response.matches.first().matchedName).isEqualTo(SANCTIONED_NAME)
     }
 
-    private fun screen(mockServer: MockServer, name: String, key: String): SanctionsScreenResponse {
+    private fun screen(
+        mockServer: MockServer,
+        name: String,
+        key: String,
+        subjectId: String = CLEAR_SUBJECT_ID,
+    ): SanctionsScreenResponse {
         assertThat(clientDerivedScreenPath())
             .describedAs(
                 "SanctionsServiceClient's @Path no longer produces the path this pact pins — fix the " +
@@ -150,7 +160,7 @@ class AccountSanctionsScreenPactConsumerTest {
         val raw = given()
             .baseUri(mockServer.getUrl())
             .contentType("application/json")
-            .body(request(name, key))
+            .body(request(name, key, subjectId))
             .post(clientDerivedScreenPath())
             .then()
             .statusCode(201)
@@ -170,8 +180,10 @@ class AccountSanctionsScreenPactConsumerTest {
         const val SANCTIONED_NAME = "Vladimir Putin"
 
         /** AccountService's key shape: `account-open:<partyId>:<idempotencyKey>`. */
-        const val CLEAR_KEY = "account-open:33333333-3333-4333-8333-333333333333:pact-clear"
-        const val HIT_KEY = "account-open:44444444-4444-4444-8444-444444444444:pact-hit"
+        const val CLEAR_SUBJECT_ID = "33333333-3333-4333-8333-333333333333"
+        const val HIT_SUBJECT_ID = "44444444-4444-4444-8444-444444444444"
+        const val CLEAR_KEY = "account-open:$CLEAR_SUBJECT_ID:pact-clear"
+        const val HIT_KEY = "account-open:$HIT_SUBJECT_ID:pact-hit"
 
         /** LITERAL, retyped from sanctions-service's resource — never derived from the client. */
         const val EXPECTED_SCREEN_PATH = "/api/v1/sanctions/screen"
