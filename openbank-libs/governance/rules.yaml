@@ -4036,7 +4036,7 @@ product_ir_authoring_parity:
     - "ReferenceProductsTest compiles each DSL product and asserts its canonical JSON equals the committed file byte for byte (JVM half)"
     - "the parity test exists, is not disabled and iterates ReferenceProducts.all"
     - "ProductIrAuthoringParityTest runs one fixture per reference product (keys reverse-ordered) through the obp CLI and the MCP handlers for lint, compile, simulate and explain, including invalid-IR and unknown-rule failures, and asserts identical raw bytes and that MCP isError holds exactly when the CLI exits non-zero (surface half, phase 5a)"
-    - "IrLintContractTest lints every committed ir/<name>.json through the catalog endpoint the Studio IR editor uses and asserts canonicalIr equals the file byte for byte and revisionHash equals the shared parser's (Studio surface, phase 5b)"
+    - "IrLintContractTest lints every committed ir/<name>.json through the catalog endpoint the Studio IR editor uses and asserts canonicalIr equals the file byte for byte and revisionHash equals the shared parser's (Studio surface, phase 5b), also for each IR fed reordered and pretty-printed; its JUnit report is checked by the parity script in the product-catalog module job (_service-ci.yml)"
   gate: product-ir-authoring-parity
   enforced: advisory
   target_enforce_date: "2026-12-31"   # ADR-0144; CLI+MCP surfaces in scope since phase 5a, Studio since phase 5b

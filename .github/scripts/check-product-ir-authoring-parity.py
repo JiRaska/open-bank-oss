@@ -30,15 +30,22 @@ TWO HALVES, AND WHERE EACH RUNS
     `IrLintContractTest` (openbank-product-catalog): for every committed `ir/<name>.json` the lint's
     `canonicalIr` must equal the file byte for byte and its `revisionHash` the shared parser's. With
     ReferenceProductsTest (DSL == file) and the CLI/MCP test (CLI == MCP over the same DSL), all three
-    surfaces meet at the committed bytes. This script requires that test to exist, not be disabled and
-    carry those comparisons.
+    surfaces meet at the committed bytes; a second case feeds each IR reordered and pretty-printed, so
+    a lint that echoed its input could not pass. Statically this script requires the test to exist, not
+    be disabled and ASSERT both comparisons (the assertion, not a token); with --studio-junit-xml it
+    requires both cases PASSED in IrLintContractTest's report — a divergence is a finding.
+
+WHERE EACH HALF RUNS. The gate shard (gates.yaml) has no test results, so it runs the static half.
+The JUnit halves run in _service-ci.yml ("Product IR authoring parity (JUnit half)") of the
+openbank-products (--junit-xml) and openbank-product-catalog (--studio-junit-xml) module jobs.
 
 SCOPE is derived from the filesystem (every *.json under openbank-products/ir/) and from the DSL
 source. Prints SUBJECTS=<n committed IR files>.
 
 MODES: advisory (::warning, exit 0) unless --enforce. rules.yaml: product_ir_authoring_parity.
 
-Usage: check-product-ir-authoring-parity.py [--root DIR] [--junit-xml DIR] [--enforce] | --self-test
+Usage: check-product-ir-authoring-parity.py [--root DIR] [--junit-xml DIR] [--studio-junit-xml DIR] [--enforce]
+       | --self-test
 """
 
 from __future__ import annotations
@@ -63,8 +70,16 @@ SURFACE_TEST = "openbank-agent-service/src/test/kotlin/com/openbank/agent/applic
 SURFACE_TOKENS = ("Obp.run(", '"product_compile"', '"product_lint"', '"product_simulate"', '"product_explain"',
                   "isEqualTo(cli.first != 0)", "ReferenceProducts.all")
 STUDIO_TEST = "openbank-product-catalog/src/test/kotlin/com/openbank/productcatalog/contract/IrLintContractTest.kt"
-STUDIO_TOKENS = ('"/api/v2/product-ir/lint"', '"openbank-products", "ir"', "canonicalIr", "revisionHash",
-                 "ProductIrParser.parse(")
+STUDIO_TOKENS = ('"/api/v2/product-ir/lint"', '"openbank-products", "ir"', "canonicalIr", "ProductIrParser.parse(")
+STUDIO_CLASS = "IrLintContractTest"
+# The two dynamic claims the Studio surface rests on: the committed bytes round-trip, and a reordered,
+# pretty-printed input still canonicalises to them (so the lint is not merely echoing its input).
+STUDIO_CASES = ("every committed reference IR lints to its own bytes and hash",
+                "a reordered, pretty-printed IR lints to the committed canonical bytes")
+# The COMPARISONS, not their tokens: the lint's canonicalIr asserted equal to the committed text (both
+# cases), and its revisionHash asserted equal to the shared parser's.
+STUDIO_BYTES_RE = re.compile(r"assertThat\(\s*canonical\w*\s*\)[^\n;]*?\.isEqualTo\(\s*committed\s*\)")
+STUDIO_HASH_RE = re.compile(r'body\(\s*"revisionHash"\s*,\s*equalTo\(\s*expected\.revisionHash\s*\)')
 STUDIO_COVERED = "surface (c) Studio form: covered by IrLintContractTest (catalog lint canonicalIr == committed IR)"
 DISABLED_RE = re.compile(r"^\s*@(?:org\.junit\.jupiter\.api\.)?Disabled\b", re.M)
 
@@ -163,6 +178,11 @@ def findings(root: pathlib.Path) -> tuple[list[str], list[str]]:
         for token in STUDIO_TOKENS:
             if token not in code:
                 f.append(f"{STUDIO_TEST}: no `{token}` — it does not compare the Studio lint with the committed IR")
+        if len(STUDIO_BYTES_RE.findall(code)) < len(STUDIO_CASES):
+            f.append(f"{STUDIO_TEST}: never asserts the lint's canonicalIr equals the committed file in each of its "
+                     f"{len(STUDIO_CASES)} parity cases (assertThat(canonical…).isEqualTo(committed))")
+        if not STUDIO_HASH_RE.search(code):
+            f.append(f"{STUDIO_TEST}: never asserts revisionHash equals the shared parser's (expected.revisionHash)")
     build = root / MODULE_BUILD
     if build.is_file():
         code = strip_kotlin_comments(build.read_text(encoding="utf-8"))
@@ -187,10 +207,33 @@ def junit_findings(junit_dir: pathlib.Path, names: list[str]) -> list[str]:
     return f
 
 
-def run(root: pathlib.Path, junit: pathlib.Path | None, enforce: bool) -> int:
+def studio_junit_findings(junit_dir: pathlib.Path) -> list[str]:
+    """The Studio half's JUnit report: both byte-parity cases present and PASSED (a skip is not a pass)."""
+    reports = list(junit_dir.glob(f"TEST-*{STUDIO_CLASS}.xml"))
+    if not reports:
+        return [f"{junit_dir}: no JUnit report for {STUDIO_CLASS} — the Studio half did not run"]
+    verdicts: dict[str, str] = {}
+    for r in reports:
+        for case in ET.parse(r).getroot().iter("testcase"):
+            name = case.get("name", "")
+            bad = next((tag for tag in ("failure", "error", "skipped") if case.find(tag) is not None), None)
+            verdicts[name] = bad or "passed"
+    out: list[str] = []
+    for wanted in STUDIO_CASES:
+        got = next((v for n, v in verdicts.items() if wanted in n), None)
+        if got != "passed":
+            out.append(f"{STUDIO_CLASS}: '{wanted}' {got or 'absent'} — the Studio lint's canonical bytes are not "
+                       "proven equal to the committed IR")
+    return out
+
+
+def run(root: pathlib.Path, junit: pathlib.Path | None, enforce: bool,
+        studio_junit: pathlib.Path | None = None) -> int:
     f, names = findings(root)
     if junit is not None:
         f += junit_findings(junit, names)
+    if studio_junit is not None:
+        f += studio_junit_findings(studio_junit)
     print(f"SUBJECTS={len(names)}")
     print(f"product-ir-authoring-parity: {STUDIO_COVERED}")
     if not names:
@@ -216,8 +259,12 @@ GOOD_TEST = (
 )
 GOOD_STUDIO = (
     "class IrLintContractTest {\n  val dir = Path.of(\"..\", \"openbank-products\", \"ir\")\n"
-    "  fun x() { val e = ProductIrParser.parse(t); post(\"/api/v2/product-ir/lint\"); "
-    "body(\"revisionHash\", e.revisionHash); getString(\"canonicalIr\") }\n}\n"
+    "  fun x() { val expected = ProductIrParser.parse(committed); post(\"/api/v2/product-ir/lint\");\n"
+    "    body(\"revisionHash\", equalTo(expected.revisionHash))\n"
+    "    val canonical = getString(\"canonicalIr\")\n"
+    "    assertThat(canonical).describedAs(file.fileName.toString()).isEqualTo(committed) }\n"
+    "  fun y() { val canonical = getString(\"canonicalIr\")\n"
+    "    assertThat(canonical).describedAs(name).isEqualTo(committed) }\n}\n"
 )
 GOOD_SURFACE = (
     "class ProductIrAuthoringParityTest {\n  fun x() = ReferenceProducts.all.map { Obp.run(listOf()); "
@@ -322,6 +369,15 @@ def self_test() -> int:
     case("Studio tokens only in a comment are red", 1, '`"/api/v2/product-ir/lint"`', {"a": _ir()}, ["a"],
          studio_text="/* " + GOOD_STUDIO + " */")
     case("the Studio surface is no longer reported pending", 0, "Studio form: covered", {"a": _ir()}, ["a"])
+    # The comparison itself, not its tokens: dropping the byte assertion while keeping every token is red.
+    case("a Studio test that reads canonicalIr but never asserts it equals the file is red", 1,
+         "never asserts the lint's canonicalIr equals the committed file", {"a": _ir()}, ["a"],
+         studio_text=GOOD_STUDIO.replace(".isEqualTo(committed)", ".isNotNull()"))
+    case("a Studio test that asserts the bytes once but drops the reordered-input case is red", 1,
+         "never asserts the lint's canonicalIr equals the committed file", {"a": _ir()}, ["a"],
+         studio_text=GOOD_STUDIO.replace("describedAs(name).isEqualTo(committed)", "describedAs(name).isNotNull()"))
+    case("a Studio test that never compares the hash to the parser's is red", 1, "never asserts revisionHash", {"a": _ir()}, ["a"],
+         studio_text=GOOD_STUDIO.replace("equalTo(expected.revisionHash)", "notNullValue()"))
     # The JUnit half: a missing report and a report with no case for a product are both findings.
     with tempfile.TemporaryDirectory() as d:
         root = pathlib.Path(d)
@@ -337,6 +393,24 @@ def self_test() -> int:
         if junit_findings(junit, ["a"]) or not junit_findings(junit, ["z"]):
             failures += 1
             print("SELF-TEST FAIL: JUnit pass/fail per product misread", file=sys.stderr)
+    # The Studio JUnit half: a missing report, a failed byte case and a skipped one are all findings.
+    with tempfile.TemporaryDirectory() as d:
+        junit = pathlib.Path(d)
+        if not studio_junit_findings(junit):
+            failures += 1
+            print("SELF-TEST FAIL: a missing IrLintContractTest report must be a finding", file=sys.stderr)
+        report = junit / f"TEST-com.openbank.productcatalog.contract.{STUDIO_CLASS}.xml"
+        ok = "".join(f'<testcase name="{c}()"/>' for c in STUDIO_CASES)
+        report.write_text(f"<testsuite>{ok}</testsuite>", encoding="utf-8")
+        if studio_junit_findings(junit):
+            failures += 1
+            print("SELF-TEST FAIL: a passing IrLintContractTest report must be clean", file=sys.stderr)
+        for verdict in ("<failure/>", "<skipped/>"):
+            bad = ok.replace(f'<testcase name="{STUDIO_CASES[1]}()"/>', f'<testcase name="{STUDIO_CASES[1]}()">{verdict}</testcase>')
+            report.write_text(f"<testsuite>{bad}</testsuite>", encoding="utf-8")
+            if not any("canonical bytes" in f for f in studio_junit_findings(junit)):
+                failures += 1
+                print(f"SELF-TEST FAIL: a {verdict} byte-parity case must be a finding", file=sys.stderr)
     if failures:
         print(f"self-test: {failures} failure(s)")
         return 1
@@ -347,13 +421,16 @@ def self_test() -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", default=".")
-    ap.add_argument("--junit-xml", default=None)
+    ap.add_argument("--junit-xml", default=None, help="openbank-products test results (ReferenceProductsTest)")
+    ap.add_argument("--studio-junit-xml", default=None,
+                    help="openbank-product-catalog test results (IrLintContractTest)")
     ap.add_argument("--enforce", action="store_true")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
     if a.self_test:
         return self_test()
-    return run(pathlib.Path(a.root).resolve(), pathlib.Path(a.junit_xml) if a.junit_xml else None, a.enforce)
+    return run(pathlib.Path(a.root).resolve(), pathlib.Path(a.junit_xml) if a.junit_xml else None, a.enforce,
+               pathlib.Path(a.studio_junit_xml) if a.studio_junit_xml else None)
 
 
 if __name__ == "__main__":

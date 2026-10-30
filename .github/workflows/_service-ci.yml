@@ -380,6 +380,19 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      # ADR-0352 §5/§11 `product-ir-authoring-parity`, its JVM halves. The gate shard (gates.yaml)
+      # runs only the static half: it has no test results. Each half's JUnit report exists only in
+      # the module job that produced it, so the check that a Studio lint (product-catalog) or a DSL
+      # compile (products) diverged from the committed IR bytes runs here. Advisory until the rule's
+      # target_enforce_date (::warning, exit 0); --enforce flips it.
+      - name: Product IR authoring parity (JUnit half)
+        if: ${{ !cancelled() && (inputs.service == 'openbank-products' || inputs.service == 'openbank-product-catalog') }}
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: |
+          if [ "$SERVICE" = openbank-products ]; then flag=--junit-xml; else flag=--studio-junit-xml; fi
+          python3 .github/scripts/check-product-ir-authoring-parity.py --root . "$flag" "$SERVICE/build/test-results/test"
+
       # Only on failure: a passing build's test reports are never looked at, but uploading
       # them on EVERY service build was a dominant driver of GitHub Actions artifact-storage
       # churn — bursts during a full-fleet rebuild hit the quota and failed unrelated uploads.

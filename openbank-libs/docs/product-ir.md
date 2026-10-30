@@ -183,6 +183,32 @@ the `ProductArithmetic` port as an argument; both surfaces pass `FinanceProductA
 Nothing in the toolkit signs, approves or publishes. `obp sign` is CLI-only and accepts only an
 offline test key; there is no MCP sign or publish tool at all.
 
+## Approval backtest and `obp diff` (phase 5b)
+
+The repricing backtest of ADR-0352 §11.4 has one engine, one portfolio reader and two surfaces:
+
+- `ReplayPortfolioJson` (`com.openbank.libs.product.replay`) reads a portfolio document: the golden
+  scenario's `state` + `steps` grammar of `openbank-products/portfolios/<name>.json`, plain dated
+  `postings`, or both. A step with a `posting` is a customer movement on its calendar day in the
+  portfolio `zone`; scheduled steps are skipped, because the replay runs the schedules each revision
+  registers in `onOpen`. Keys are closed and amounts are plain decimals (at most 15 integer digits,
+  12 decimals; no exponent form), so one number cannot sidestep the replay's bounds.
+- `obp diff <revA> <revB> --behavioural --portfolio <file> [--from D] [--to D] [--threshold X]`
+  prints the `ProductBehaviourDiff` document (schema `openbank.product-behaviour-diff.v1`) unchanged.
+  The range defaults to the earliest `openedOn` through the last fixture day; a resolved range that is
+  empty or longer than `ReplayLimits.MAX_DAYS` exits 64, and a replay that does not conserve money
+  exits 1.
+- The catalog's `POST /api/v2/offerings/{id}/revisions/{revisionId}/behaviour-diff` runs the same
+  engine on the same reader (base: the revision published now, unless `baseRevisionId` names one) and
+  Studio's approval panel renders that document — per account, per rule, instruction counts, and the
+  accounts that changed sign or crossed the materiality threshold. It is bounded (500 accounts, 1000
+  events per account, 200 000 account-days) and admits a few concurrent runs; the rest get 429.
+
+**Breaking for `obp diff` consumers.** Until phase 5b `obp diff --behavioural` printed a CLI-local
+report (`accounts` as a count, `changedRules`, `rules[].accounts[].customerDepositDelta`). It now
+prints the schema-v1 document above, so a script that read those members must read
+`changedAccounts`, `aggregate.posted[].deltaNet` and `accounts[].outcome` instead.
+
 ## Testing
 
 openbank-libs-testing holds the golden-scenario runner, `ProductArb` property

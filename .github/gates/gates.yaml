@@ -7212,7 +7212,11 @@ gates:
   # committed ir/<name>.json has a DSL product of that name and that both JVM halves exist, are not
   # disabled and cover their set — ReferenceProductsTest (DSL == committed IR) and, since phase 5a,
   # ProductIrAuthoringParityTest (obp CLI == MCP product_compile, byte for byte) and, since phase 5b,
-  # IrLintContractTest (the Studio editor's catalog lint returns each committed IR's own bytes).
+  # IrLintContractTest (the Studio editor's catalog lint returns each committed IR's own bytes, also
+  # for a reordered, pretty-printed input). This shard has no test results, so it runs the STATIC half
+  # (the tests exist, run, and assert the byte comparison); the JUnit half — a Studio lint or DSL
+  # compile that diverged from the committed bytes — runs in _service-ci.yml's "Product IR authoring
+  # parity (JUnit half)" step of the products / product-catalog module jobs, where the reports exist.
   - id: product-ir-authoring-parity
     name: "committed product IR equals the DSL, and the CLI, MCP and Studio surfaces yield the same bytes (ADR-0352, advisory)"
     group: kotlin
