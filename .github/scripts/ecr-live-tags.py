@@ -61,8 +61,15 @@ def live_tag(digest: str) -> str:
     return LIVE_PREFIX + digest.split(":", 1)[1][:12]
 
 
-def plan(protected: dict[str, set[str]], live_now: dict[str, dict[str, str]]):
-    """protected: repo -> digests; live_now: repo -> {live tag: digest}. Returns (add, remove)."""
+def plan(protected: dict[str, set[str]], live_now: dict[str, dict[str, str]],
+         all_tags: dict[str, dict[str, str]] | None = None):
+    """protected: repo -> digests; live_now: repo -> {live tag: digest}. Returns (add, remove).
+
+    A live- tag is removed only when its image carries another tag. BatchDeleteImage deletes an
+    image whose LAST tag it removes, so a live-only image (a digest pin whose tag moved) keeps its
+    tag rather than being deleted here; it is reported instead.
+    """
+    all_tags = all_tags if all_tags is not None else live_now
     add, remove = [], []
     for repo, digests in sorted(protected.items()):
         have = set(live_now.get(repo, {}).values())
@@ -71,7 +78,8 @@ def plan(protected: dict[str, set[str]], live_now: dict[str, dict[str, str]]):
     for repo, tags in sorted(live_now.items()):
         keep = protected.get(repo, set())
         for t, d in sorted(tags.items()):
-            if d not in keep:
+            others = [x for x, xd in all_tags.get(repo, {}).items() if xd == d and x != t]
+            if d not in keep and others:
                 remove.append((repo, t))
     return add, remove
 
@@ -165,7 +173,7 @@ def main() -> int:
     for repo, ds in head.items():
         protected.setdefault(repo, set()).update(ds)
     current = live_tags(tags_by_repo)
-    add, remove = plan(protected, current)
+    add, remove = plan(protected, current, tags_by_repo)
 
     for u in head_unresolved:
         print(f"::warning::HEAD reference not resolvable: {u}")
@@ -204,11 +212,13 @@ def selftest() -> int:
     assert got == want, got
     assert live_tag(d1) == "live-aaaaaaaaaaaa"
     # Known positive: an unprotected live tag is removed, a protected digest is tagged.
-    add, remove = plan({"r": {d1}}, {"r": {"live-bbbbbbbbbbbb": d2}})
+    add, remove = plan({"r": {d1}}, {"r": {"live-bbbbbbbbbbbb": d2}}, {"r": {"live-bbbbbbbbbbbb": d2, "sandbox-x": d2}})
     assert add == [("r", d1)] and remove == [("r", "live-bbbbbbbbbbbb")], (add, remove)
+    # A live- tag that is its image's only tag is never removed (removal would delete the image).
+    assert plan({"r": set()}, {"r": {"live-bbbbbbbbbbbb": d2}}, {"r": {"live-bbbbbbbbbbbb": d2}}) == ([], [])
     # Known negative: already tagged and protected -> nothing to do.
     assert plan({"r": {d1}}, {"r": {live_tag(d1): d1}}) == ([], [])
-    print("SUBJECTS=4")
+    print("SUBJECTS=5")
     print("ecr-live-tags selftest: OK")
     return 0
 

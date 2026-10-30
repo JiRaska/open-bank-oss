@@ -190,8 +190,10 @@ data "aws_iam_policy_document" "ecr_live_tagger_assume" {
       variable = "${local.ci_oidc_host}:sub"
       values   = ["repo:${local.ci_github_repo}:ref:refs/heads/main"]
     }
+    # StringEquals, not IfExists: the job runs on GitHub-hosted runners, which always send the
+    # claim, so a token without it is not one this role should accept.
     condition {
-      test     = "StringEqualsIfExists"
+      test     = "StringEquals"
       variable = "${local.ci_oidc_host}:job_workflow_ref"
       values   = ["${local.ci_github_repo}/.github/workflows/ecr-live-tags.yml@refs/heads/main"]
     }
