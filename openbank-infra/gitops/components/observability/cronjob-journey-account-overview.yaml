@@ -7,10 +7,13 @@
 #
 # READ-ONLY. Nothing is written, posted or tainted beyond the read calls. The one write the
 # journey depends on is the FIXTURE, created once by the owner (see the PR that introduced this
-# file): a single ACTIVE account of the canary's SYNTHETIC party whose balance was seeded by one
-# tainted posting (x-openbank-synthetic: true -> ledger journal_entries.synthetic = true, kept out
-# of FINREP/COREP by LedgerScope's default) and which no journey ever moves. A shared real account
-# would make the balance assertion nondeterministic; a journey that moved its own balance would be
+# file): the PINNED ACTIVE account (FIXTURE_ACCOUNT_ID below) of the canary's SYNTHETIC party,
+# seeded by one tainted posting (x-openbank-synthetic: true -> ledger journal_entries.synthetic
+# = true, kept out of FINREP/COREP by LedgerScope's default) and which no journey ever moves.
+# The canary identity is shared with onboarding journeys that legitimately open further
+# accounts, so another ACTIVE account is tolerated only while it holds no money: a funded extra
+# account is drift this journey flags red (#14173). A shared real account would make the
+# balance assertion nondeterministic; a journey that moved its own balance would be
 # a payment journey and belongs to domestic-payment, not here.
 #
 # What the checks pin, and what they deliberately do not:
@@ -59,6 +62,10 @@ data:
     const CLIENT_SECRET = __ENV.SYNTHETIC_CLIENT_SECRET || '';
     const FIXTURE_BALANCE = Number(__ENV.FIXTURE_BALANCE);
     const FIXTURE_CURRENCY = __ENV.FIXTURE_CURRENCY || '';
+    // Pinned, not inferred (issue #14173): the canary identity is shared with onboarding journeys
+    // that legitimately open further accounts, so a bare "exactly one ACTIVE" rule cried wolf on
+    // empty residue while a FUNDED extra account — the real drift signal — hid among it.
+    const FIXTURE_ACCOUNT_ID = __ENV.FIXTURE_ACCOUNT_ID || '';
 
     const CHECKS = [
       'an unauthenticated account list is refused',
@@ -109,9 +116,27 @@ data:
       if (res.status !== expected) console.error(`account-overview ${step}: status=${res.status} expected=${expected}`);
     }
 
+    const num = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
+
+    // Balance field names moved with the balance kernel (#12056 era): bookedAmount/availableAmount/
+    // reservedAmount today, currentBalance/availableBalance/reservedBalance on the old wire. The
+    // seeded-fixture assertion reads the BOOKED amount — available can differ legitimately.
+    const booked = (r) => (r.bookedAmount !== undefined ? r.bookedAmount : r.currentBalance);
+    const available = (r) => (r.availableAmount !== undefined ? r.availableAmount : r.availableBalance);
+    const reserved = (r) => (r.reservedAmount !== undefined ? r.reservedAmount : r.reservedBalance);
+
+    // balance-service answers {balances: [...]}, one row per currency (bare array is the legacy
+    // shape): unwrap, then pick the fixture currency's row. No match leaves the result null,
+    // which fails the 'served' check below by name.
+    function fixtureBalanceRow(res) {
+      const body = res && res.status === 200 ? json(res) : null;
+      const rows = Array.isArray(body) ? body : (body && Array.isArray(body.balances) ? body.balances : null);
+      return Array.isArray(rows) ? (rows.find((r) => r && r.currency === FIXTURE_CURRENCY) || null) : null;
+    }
+
     export default function () {
-      if (!Number.isFinite(FIXTURE_BALANCE) || !FIXTURE_CURRENCY) {
-        console.error('account-overview fixture contract absent: FIXTURE_BALANCE / FIXTURE_CURRENCY are not set on the CronJob');
+      if (!Number.isFinite(FIXTURE_BALANCE) || !FIXTURE_CURRENCY || !FIXTURE_ACCOUNT_ID) {
+        console.error('account-overview fixture contract absent: FIXTURE_BALANCE / FIXTURE_CURRENCY / FIXTURE_ACCOUNT_ID are not set on the CronJob');
         failAll();
         return;
       }
@@ -128,11 +153,30 @@ data:
       // 1. list
       const listed = http.get(`${CUSTOMER_BASE}/customer/v1/accounts`, params('accounts-list'));
       report('list', listed, 200);
-      const accounts = listed.status === 200 ? json(listed) : null;
+      const accountsBody = listed.status === 200 ? json(listed) : null;
+      // customer-edge passes the account-service page object through since #13881: {data, pagination}.
+      // The bare array is the pre-page legacy shape; accept both so one script serves a mixed fleet.
+      const accounts = Array.isArray(accountsBody) ? accountsBody
+        : (accountsBody && Array.isArray(accountsBody.data) ? accountsBody.data : null);
       const active = Array.isArray(accounts) ? accounts.filter((a) => a && a.status === 'ACTIVE') : [];
       const owners = new Set(Array.isArray(accounts) ? accounts.map((a) => a && a.partyId) : []);
-      const fixture = active.length === 1 ? active[0] : null;
-      const id = fixture && fixture.id;
+      // The pinned fixture must be among the listed accounts and ACTIVE; every other ACTIVE
+      // account gets its own balance probe below.
+      const fixture = Array.isArray(accounts) ? (accounts.find((a) => a && a.id === FIXTURE_ACCOUNT_ID) || null) : null;
+      const id = fixture && fixture.status === 'ACTIVE' ? fixture.id : null;
+      const extraActive = active.filter((a) => a && a.id !== FIXTURE_ACCOUNT_ID);
+      // An extra ACTIVE account is tolerated only while it holds no money: onboarding residue is
+      // noise, an extra account with a non-zero booked balance is funded drift a human must
+      // resolve. Fixture ownership is a deliberate human act, drift is not (#14173).
+      const fundedExtras = [];
+      for (const extra of extraActive) {
+        const eb = http.get(`${CUSTOMER_BASE}/customer/v1/balances/${extra.id}`, params('balance-extra'));
+        const row = fixtureBalanceRow(eb);
+        const extraBooked = row ? num(booked(row)) : NaN;
+        if (eb.status !== 200 || !Number.isFinite(extraBooked) || Math.abs(extraBooked) > 0.005) {
+          fundedExtras.push(extra.id);
+        }
+      }
 
       // 2. the account itself, 3. its balance
       const account = id ? http.get(`${CUSTOMER_BASE}/customer/v1/accounts/${id}`, params('account-get')) : null;
@@ -140,29 +184,29 @@ data:
       const accountBody = account && account.status === 200 ? json(account) : null;
       const balance = id ? http.get(`${CUSTOMER_BASE}/customer/v1/balances/${id}`, params('balance-get')) : null;
       if (balance) report('balance', balance, 200);
-      // balance-service answers a JSON ARRAY of BalanceResponse, one per currency: pick the fixture
-      // currency's row. No match leaves b null, which fails the 'served' check below by name.
-      const balanceRows = balance && balance.status === 200 ? json(balance) : null;
-      const b = Array.isArray(balanceRows) ? (balanceRows.find((r) => r && r.currency === FIXTURE_CURRENCY) || null) : null;
+      const b = fixtureBalanceRow(balance);
 
       // 4. negative path: a well-formed id the caller does not own is refused (403, not 404:
       // the edge deliberately gives no existence oracle)
       const foreign = http.get(`${CUSTOMER_BASE}/customer/v1/accounts/00000000-0000-4000-8000-${`${Date.now()}`.slice(-12).padStart(12, '0')}`, params('account-foreign'));
 
-      const num = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
       check(null, {
         'an unauthenticated account list is refused': () => anon.status === 401,
-        // exactly one ACTIVE account, and every listed account belongs to one party: a second
-        // account appearing is a fixture change a human must make deliberately, not drift.
-        'the canary lists exactly its own ACTIVE fixture account': () => !!fixture && owners.size === 1,
+        // the PINNED fixture account is ACTIVE, every listed account belongs to the one canary
+        // party, and no other ACTIVE account holds money: a funded extra account is drift that
+        // needs a human, empty onboarding residue is tolerated noise.
+        'the canary lists exactly its own ACTIVE fixture account': () => !!fixture
+          && fixture.status === 'ACTIVE'
+          && owners.size === 1
+          && fundedExtras.length === 0,
         'the account can be opened by id': () => !!accountBody && accountBody.id === id,
         // fails when the array has no element with currency === FIXTURE_CURRENCY (or the body is not an array)
         'the balance is served for the account': () => !!b && b.accountId === id,
         'the balance is in the fixture currency and internally consistent': () => !!b
           && b.currency === FIXTURE_CURRENCY
-          && Number.isFinite(num(b.currentBalance)) && Number.isFinite(num(b.availableBalance))
-          && num(b.reservedBalance) >= 0 && num(b.availableBalance) <= num(b.currentBalance) + 0.005,
-        'the balance equals the seeded fixture balance': () => !!b && Math.abs(num(b.currentBalance) - FIXTURE_BALANCE) < 0.005,
+          && Number.isFinite(num(booked(b))) && Number.isFinite(num(available(b)))
+          && num(reserved(b)) >= 0 && num(available(b)) <= num(booked(b)) + 0.005,
+        'the balance equals the seeded fixture balance': () => !!b && Math.abs(num(booked(b)) - FIXTURE_BALANCE) < 0.005,
         'an account the caller does not own is refused': () => foreign.status === 403,
       });
     }
@@ -214,6 +258,10 @@ spec:
               args:
                 - run
                 - --quiet
+                - -o
+                - experimental-prometheus-rw
+                - --tag
+                - journey=account-overview
                 - /scripts/journey.js
               env:
                 # Optional on purpose: an unprovisioned identity must yield a red run with an
@@ -231,6 +279,20 @@ spec:
                   value: "1000"
                 - name: FIXTURE_CURRENCY
                   value: "CZK"
+                # Pinned identity of the fixture account (issue #14173): the canary party is shared
+                # with onboarding journeys that legitimately open further accounts, so the journey
+                # asserts on THIS account and treats any other ACTIVE account as drift only when it
+                # holds money. Changing this value is a deliberate human fixture act.
+                - name: FIXTURE_ACCOUNT_ID
+                  value: "6c53a70d-88f1-479d-b784-dd70ef32191b"
+                # Runtime perf evidence for the test-intelligence matrix (mirrors
+                # cronjob-journey-public-edge.yaml). A remote-write failure does NOT fail
+                # the run — k6 still exits 0 — so the kube-state-metrics Job verdict stays
+                # authoritative for alerting (prometheus-rules-journey.yaml).
+                - name: K6_PROMETHEUS_RW_SERVER_URL
+                  value: http://kube-prometheus-stack-prometheus.observability.svc:9090/api/v1/write
+                - name: K6_PROMETHEUS_RW_TREND_STATS
+                  value: "p(95),p(99),avg,max"
               volumeMounts:
                 - name: script
                   mountPath: /scripts

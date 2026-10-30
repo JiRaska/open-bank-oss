@@ -31,6 +31,7 @@ import com.openbank.productcatalog.domain.catalog.RevisionContent
 import com.openbank.productcatalog.domain.catalog.SchemaRef
 import com.openbank.productcatalog.domain.catalog.TaxTreatment
 import com.openbank.productcatalog.generated.api.CatalogV2Api
+import com.openbank.productcatalog.generated.model.LintProductIrRequest
 import com.openbank.productcatalog.generated.model.OfferingRequest
 import com.openbank.productcatalog.generated.model.PublishRequest
 import com.openbank.productcatalog.generated.model.RevisionRequest
@@ -50,8 +51,10 @@ import java.time.ZoneOffset
 import java.util.UUID
 import com.openbank.productcatalog.generated.model.CatalogSchema as GeneratedCatalogSchema
 import com.openbank.productcatalog.generated.model.IrSignature as GeneratedIrSignature
+import com.openbank.productcatalog.generated.model.LintProductIrResponse as GeneratedLintProductIrResponse
 import com.openbank.productcatalog.generated.model.MarketContext as GeneratedMarketContext
 import com.openbank.productcatalog.generated.model.Offering as GeneratedOffering
+import com.openbank.productcatalog.generated.model.ProductIrProblem as GeneratedProductIrProblem
 import com.openbank.productcatalog.generated.model.ProductRevision as GeneratedProductRevision
 import com.openbank.productcatalog.generated.model.RevisionApprovalPolicy as GeneratedRevisionApprovalPolicy
 import com.openbank.productcatalog.generated.model.RevisionApprovalRole as GeneratedRevisionApprovalRole
@@ -97,6 +100,28 @@ class GenericCatalogResource(
             GeneratedValidateCatalogResponse(
                 violations.isEmpty(),
                 violations.map { GeneratedSchemaViolation(it.instancePath, it.schemaPath, it.keyword, it.message) },
+            ),
+        ).build()
+    }
+
+    /**
+     * ADR-0352 phase 5b: dry-run lint for the Studio IR editor. The bound and the parser are the ones
+     * a revision write applies to `behaviour` (see [toContent]), so the editor and the write agree.
+     */
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.AUTHOR)
+    @Authorize(action = "catalog.author")
+    override suspend fun lintProductIrV2(request: LintProductIrRequest): Response {
+        val node = mapper.valueToTree<JsonNode>(request.ir)
+        schemaProfile.requireValidInstance(node)
+        val result = service.lintIr(catalogJson.toObject(node))
+        return Response.ok(
+            GeneratedLintProductIrResponse(
+                valid = result.ir != null,
+                problems = result.problems.map { GeneratedProductIrProblem(it.path, it.message) },
+                productCode = result.ir?.productCode,
+                irVersion = result.ir?.irVersion,
+                revisionHash = result.ir?.revisionHash,
+                canonicalIr = result.canonicalJson,
             ),
         ).build()
     }

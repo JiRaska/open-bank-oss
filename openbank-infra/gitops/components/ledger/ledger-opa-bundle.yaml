@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "6dc45b5f30f01672"
+    openbank.tech/policy-checksum: "02ff8fd585f51fa1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -482,6 +482,16 @@ data:
     	input.action == "catalog.read"
     }
 
+    # Account opening reads a published revision with its verified account-owned identity only.
+    allowed_reasons contains "account-catalog-m2m-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.service_account == true
+    	machine_named("service-account-openbank-account")
+    	"ROLE_API" in input.principal.roles
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    	input.action == "catalog.read"
+    }
+
     allowed_reasons contains "pension-catalog-m2m-read-approval" if {
         input.principal.type == "HUMAN"
         input.principal.id == "service-account-openbank-pension"
@@ -939,6 +949,22 @@ data:
         role in input.principal.roles
         not principal_is_machine
         input.action == "ledger.close.draft"
+    }
+
+    # #12906: journal-approval queue reads and checker decisions are human-only. The
+    # explicit machine veto is required for reads because base operator-read-any would
+    # otherwise admit a client_credentials principal carrying ROLE_OPERATOR.
+    allowed_reasons contains "operator-journal-approval" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action in {"ledger.approval.read", "ledger.approval.decide"}
+    }
+
+    prohibited if {
+        principal_is_machine
+        input.action in {"ledger.approval.read", "ledger.approval.decide"}
     }
 
     # Year-close attestation (ledger.approve) is deliberately its OWN rule, not folded into

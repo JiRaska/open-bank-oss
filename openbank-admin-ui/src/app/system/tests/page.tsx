@@ -10,6 +10,9 @@ import {
 } from 'lucide-react'
 import { useLanguage, type Language } from '@/lib/i18n/LanguageContext'
 import { aggregateEvidenceState } from '@/lib/test-intelligence-state'
+import {
+  STALE_AFTER_SECONDS, ageSeconds, buildTestOverview, formatRelativeAge, lastRunFor, stateLabel, type TestOverview,
+} from '@/lib/test-intelligence-last-run'
 import { filterTestCases, type TestTriageFilter } from '@/lib/test-intelligence-triage'
 import type {
   ComponentTestPosture, EvidenceKind, EvidenceState, RequiredTestControl, TestCaseHistory, TestIntelligenceReport,
@@ -51,7 +54,82 @@ function evidenceTone(state: EvidenceState): Tone {
 }
 
 function StateBadge({ state }: { state: EvidenceState }) {
-  return <SharedStatusBadge status={state} tone={evidenceTone(state)} label={state} withDot />
+  const { language } = useLanguage()
+  return <SharedStatusBadge status={state} tone={evidenceTone(state)} label={stateLabel(state, language)} withDot />
+}
+
+/** Wall-clock captured once per mount, so render stays pure. */
+function useNow(): number {
+  return useState(() => Date.now())[0]
+}
+
+const VERDICT_TONE: Record<TestOverview['verdict'], Tone> = { healthy: 'success', attention: 'warning', failing: 'danger', 'no-data': 'neutral' }
+
+/**
+ * The first thing every reader sees. One sentence a business owner can repeat, then the four
+ * numbers QA, DEV and OPS ask first. Every figure counts executed tests only.
+ */
+function TestOverviewPanel({ report, selectTab }: { report: TestIntelligenceReport; selectTab: (tab: Tab) => void }) {
+  const { t, language } = useLanguage()
+  const now = useNow()
+  const overview = buildTestOverview(report, now)
+  const lastAge = ageSeconds(overview.lastRunAt, now)
+  const passRate = overview.executed > 0 ? Math.round(overview.passed / overview.executed * 1000) / 10 : null
+  const headline = {
+    healthy: t('Testy jsou zelené a čerstvé.', 'Tests are green and current.'),
+    attention: t('Nic neselhává, ale část testů je stará nebo chybí.', 'Nothing is failing, but some tests are old or missing.'),
+    failing: t(`Selhávají testy v ${overview.failingComponents.length} komponentách.`, `Tests are failing in ${overview.failingComponents.length} component${overview.failingComponents.length === 1 ? '' : 's'}.`),
+    'no-data': t('Výsledky testů nejsou k dispozici.', 'Test results are unavailable.'),
+  }[overview.verdict]
+  const tone = VERDICT_TONE[overview.verdict]
+  const tiles: Array<{ label: string; value: string; hint: string; tone?: Tone; tab: Tab }> = [
+    {
+      label: t('Poslední běh', 'Last run'), tab: 'history',
+      value: overview.lastRunAt ? t(`před ${formatRelativeAge(lastAge, language)}`, `${formatRelativeAge(lastAge, language)} ago`) : t('nikdy', 'never'),
+      hint: overview.lastRunAt ? formatTimestamp(overview.lastRunAt, language) : t('žádný uchovaný běh', 'no retained run'),
+      tone: lastAge !== null && lastAge > STALE_AFTER_SECONDS ? 'warning' : undefined,
+    },
+    {
+      label: t('Spuštěné testy', 'Tests executed'), tab: 'execution',
+      value: overview.executed.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB'),
+      hint: passRate === null ? t('bez počtů', 'no counts reported') : t(`${passRate} % prošlo`, `${passRate}% passed`),
+    },
+    {
+      label: t('Selhávající testy', 'Failing tests'), tab: 'tests',
+      value: String(overview.failed), tone: overview.failed ? 'danger' : 'success',
+      hint: overview.failingComponents.length ? overview.failingComponents.slice(0, 3).join(', ') : t('nic neselhává', 'nothing failing'),
+    },
+    {
+      label: t('Nestabilní (flaky)', 'Flaky'), tab: 'tests',
+      value: String(overview.flaky), tone: overview.flaky ? 'warning' : 'success',
+      hint: t('prošly až po opakování', 'passed only on retry'),
+    },
+    {
+      label: t('Testováno za 7 dní', 'Tested in last 7 days'), tab: 'posture',
+      value: `${overview.componentsRecentlyRun}/${overview.components}`,
+      tone: overview.componentsRecentlyRun < overview.components ? 'warning' : 'success',
+      hint: t('komponent s čerstvým během', 'components with a recent run'),
+    },
+    {
+      label: t('Peněžní toky', 'Money paths'), tab: 'posture',
+      value: `${overview.moneyPath.allGreen}/${overview.moneyPath.total}`,
+      tone: overview.moneyPath.allGreen < overview.moneyPath.total ? 'warning' : 'success',
+      hint: t('komponent plně zelených', 'components fully green'),
+    },
+  ]
+  return <section aria-label={t('Přehled testů', 'Test overview')} style={{ marginBottom: 18, border: '1px solid var(--border)', borderRadius: 14, padding: 18, background: 'var(--surface-1)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+      <SharedStatusBadge status={overview.verdict} tone={tone} label={{ healthy: t('V pořádku', 'Healthy'), attention: t('Pozor', 'Attention'), failing: t('Selhává', 'Failing'), 'no-data': t('Bez dat', 'No data') }[overview.verdict]} withDot />
+      <strong className={TONE_TEXT_CLASS[tone]} style={{ fontSize: 18 }}>{headline}</strong>
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+      {tiles.map(tile => <button key={tile.label} type="button" onClick={() => selectTab(tile.tab)} style={{ textAlign: 'left', cursor: 'pointer', padding: 14, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface-2)' }}>
+        <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{tile.label}</div>
+        <div className={tile.tone ? TONE_TEXT_CLASS[tile.tone] : undefined} style={{ fontSize: 24, fontWeight: 750, margin: '4px 0' }}>{tile.value}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tile.hint}</div>
+      </button>)}
+    </div>
+  </section>
 }
 
 function TestCaseStateBadge({ state }: { state: TestCaseHistory['state'] }) {
@@ -195,13 +273,27 @@ function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceRepor
   if (gaps.length === 0) return null
   return <section aria-label={t('Fronta mezer důkazů', 'Evidence gap queue')} style={{ marginBottom: 18, border: '1px solid color-mix(in srgb, var(--warning-border) 40%, var(--border))', borderRadius: 14, padding: 16, background: 'linear-gradient(135deg, color-mix(in srgb, var(--warning-bg) 70%, var(--surface-1)), var(--surface-1))' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', marginBottom: 10 }}><div><strong>{t('Fronta skutečných mezer důkazů', 'Real evidence-gap queue')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Odvozeno z aktuálního reportu — ne backlog podle dojmu. Otevři položku pro zdroj, plán a hranici tvrzení.', 'Derived from the current report — not an impression-based backlog. Open an item for its source, plan and claim boundary.')}</div></div><span style={{ color: 'var(--warning-text)', fontWeight: 750 }}>{gaps.length}</span></div>
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 9 }}>{gaps.map(gap => <button key={gap.id} type="button" onClick={() => selectTab(gap.tab)} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, padding: 11, textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 9, background: 'var(--surface-1)' }}><span><strong style={{ fontSize: 12 }}>{gap.title}</strong><span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.35, marginTop: 4 }}>{gap.detail}</span></span><StateBadge state={gap.state} /></button>)}</div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 9 }}>{gaps.map(gap => <button key={gap.id} type="button" onClick={() => selectTab(gap.tab)} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'start', gap: 8, padding: 11, textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 9, background: 'var(--surface-1)' }}><span><strong style={{ fontSize: 12 }}>{gap.title}</strong><span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.35, marginTop: 4 }}>{gap.detail}</span></span><StateBadge state={gap.state} /></button>)}</div>
   </section>
 }
 
-function EvidenceCell({ component, kind }: { component: ComponentTestPosture; kind: EvidenceKind }) {
-  const states = component.evidence.filter(item => item.kind === kind).map(item => item.state)
-  return <StateBadge state={aggregateEvidenceState(states, 'not-run')} />
+/**
+ * Shows when this kind last really ran, not only whether the current posture carries it.
+ * A run found only in retained history is labelled as such and greys out once it ages.
+ */
+function EvidenceCell({ report, component, kind }: { report: TestIntelligenceReport; component: ComponentTestPosture; kind: EvidenceKind }) {
+  const { t, language } = useLanguage()
+  const now = useNow()
+  const last = lastRunFor(report, component.component, kind)
+  if (!last) return <span title={t('Tento druh testu u komponenty nikdy neběžel.', 'This test kind has never run for this component.')} style={{ color: 'var(--text-tertiary)' }}>—</span>
+  const age = ageSeconds(last.observedAt, now)
+  const aging = last.source === 'history' || (age !== null && age > STALE_AFTER_SECONDS)
+  return <div title={last.observedAt ? formatTimestamp(last.observedAt, language) : undefined} style={{ opacity: aging ? 0.7 : 1 }}>
+    <StateBadge state={last.state} />
+    <div style={{ color: aging ? 'var(--warning-text)' : 'var(--text-tertiary)', fontSize: 10, marginTop: 3, whiteSpace: 'nowrap' }}>
+      {last.source === 'history' ? t('naposledy ', 'last ') : ''}{t(`před ${formatRelativeAge(age, language)}`, `${formatRelativeAge(age, language)} ago`)}
+    </div>
+  </div>
 }
 
 const tableStyle = { width: '100%', borderCollapse: 'collapse' as const, fontSize: 12 }
@@ -251,7 +343,7 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
                     {component.running.match === false && component.running.storeStatus !== 'hit' ? ` · ${t('neshoda', 'mismatch')} (${component.running.storeStatus})` : ''}
                   </div>}
                 </td>
-                {KINDS.map(kind => <td key={kind} data-component={component.component} data-evidence-kind={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
+                {KINDS.map(kind => <td key={kind} data-component={component.component} data-evidence-kind={kind} style={tdStyle}><EvidenceCell report={report} component={component} kind={kind} /></td>)}
                 <td style={tdStyle}>{component.coverage.lines.percentage === null ? <StateBadge state={component.coverage.state} /> : `${component.coverage.lines.percentage}%`}</td>
               </tr>
             ))}</tbody>
@@ -636,9 +728,10 @@ export default function TestIntelligencePage() {
       actions={<button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>}
     />
     {report && <EvidenceFreshness evidence={report.evidence} components={report.components.length} />}
-    {report && <TestIntelligenceFlow report={report} />}
+    {report && <TestOverviewPanel report={report} selectTab={setTab} />}
     {report && <AssuranceBoard report={report} selectTab={setTab} />}
     {report && <EvidenceGapQueue report={report} selectTab={setTab} />}
+    {report && <details style={{ marginBottom: 18 }}><summary style={{ cursor: 'pointer', fontWeight: 650, color: 'var(--text-secondary)', marginBottom: 10 }}>{t('Jak testování funguje (architektura vrstev)', 'How testing works (layer architecture)')}</summary><TestIntelligenceFlow report={report} /></details>}
     {report?.warnings.length ? <div style={{ marginBottom: 16, border: '1px solid var(--warning-border)', borderRadius: 8, padding: 12, color: 'var(--warning-text)', background: 'var(--warning-bg)', fontSize: 12 }}><TriangleAlert size={14} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />{report.warnings.join(' · ')}</div> : null}
     <div role="group" aria-label={t('Přepínač pohledů kvality kódu', 'Code quality view')} style={{ display: 'flex', gap: 2, overflowX: 'auto', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>{tabs.map(tabDef => <button key={tabDef.id} type="button"
             aria-pressed={tab === tabDef.id} onClick={() => setTab(tabDef.id)} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '9px 13px', whiteSpace: 'nowrap', border: 'none', borderBottom: tab === tabDef.id ? '2px solid var(--accent)' : '2px solid transparent', background: 'none', color: tab === tabDef.id ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', fontWeight: tab === tabDef.id ? 650 : 450 }}><span aria-hidden="true">{tabDef.icon}</span>{tabDef.label}</button>)}</div>
