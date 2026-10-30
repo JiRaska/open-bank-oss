@@ -1062,7 +1062,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "secret": "__ACCOUNT_CLIENT_SECRET__"
     },
@@ -1987,6 +1988,18 @@
       "realmRoles": [
         "ROLE_VIEWER",
         "ROLE_DEMO"
+      ]
+    },
+    {
+      "username": "e2e-operator@openbank.local",
+      "email": "e2e-operator@openbank.local",
+      "firstName": "E2E",
+      "lastName": "Operator",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": [
+        "ROLE_VIEWER",
+        "ROLE_AUDITOR"
       ]
     },
     {

@@ -20,7 +20,8 @@ import com.openbank.products.dsl.postingComparison
 import com.openbank.products.dsl.product
 
 /**
- * The public reference product library (ADR-0352 §11.3): savings, current account, term deposit.
+ * The public reference product library (ADR-0352 §11.3): savings, current account, term deposit, and
+ * the CZK savings shape the interest-service shadow is held to.
  * Each compiles to `ir/<name>.json` (committed; `ReferenceProductsTest` fails on drift) and has a
  * golden scenario under `product-golden/` that doubles as a public conformance vector.
  *
@@ -72,6 +73,33 @@ object ReferenceProducts {
         }
         onParameterChange {
             notify("reprice.notify", "rate-changed", mapOf("productCode" to "SAVINGS-FIXED"))
+        }
+    }
+
+    /**
+     * Exactly what openbank-interest-service computes today, and nothing it does not (ADR-0352 phase 3,
+     * the interest shadow's parity product): one FIXED annual rate on the whole balance, ACT/365 day
+     * count (the service's `ACT_365`, i.e. the kernel's ACT/365 Fixed), a daily accrual rounded to
+     * scale 6 after a scale-10 daily rate (`INTEREST_ACCRUAL`), and a monthly capitalisation rounded
+     * once to the currency (`LEDGER_POSTING`). No bonus, no fee, no posting rules: the service has none.
+     *
+     * Withholding tax at capitalisation (ADR-0033) is NOT here, because IR v1 has no construct for it;
+     * the interest shadow compares the GROSS capitalisation and leaves tax to the legacy path.
+     */
+    val savingsCzk: ProductDefinition = product("savings-czk", "SAVINGS-CZK", "CZK") {
+        interest("interest.base") {
+            rate = "0.0300"
+            dayCount = IrDayCount.ACT_365_FIXED
+            accrualCadence = Cadence.DAILY
+            capitalisationCadence = Cadence.MONTHLY
+        }
+        onOpen {
+            schedule("open.schedule-accrual", tag = "ACCRUAL", cadence = Cadence.DAILY)
+            schedule("open.schedule-capitalisation", tag = "CAPITALISATION", cadence = Cadence.MONTHLY)
+        }
+        scheduled {
+            accrueInterest("scheduled.accrue", trigger = "ACCRUAL")
+            capitaliseInterest("scheduled.capitalise", trigger = "CAPITALISATION")
         }
     }
 
@@ -129,7 +157,7 @@ object ReferenceProducts {
         }
     }
 
-    val all: List<ProductDefinition> = listOf(savingsFixed, currentAccount, termDeposit)
+    val all: List<ProductDefinition> = listOf(savingsFixed, currentAccount, termDeposit, savingsCzk)
 
     fun byName(name: String): ProductDefinition? = all.firstOrNull { it.name == name }
 }

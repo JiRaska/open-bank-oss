@@ -336,6 +336,14 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # ADR-0031 D9: AML and sanctions oversight wake-ups carry their producer in sourceService.
+      # Read-only audit subscription; the shared topic is declared in components/agent/kafka-topic.yaml.
+      - resource:
+          type: topic
+          name: openbank.oversight-triggers
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       - resource:
           type: group
           name: audit-service

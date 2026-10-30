@@ -147,6 +147,8 @@ KafkaSanctionsOutboxEventPublisher sends to openbank.sanctions.screening.event
 audit-service + aml-service consume the event
 ```
 
+A `SanctionChecked` event that meets `SanctionsCheck.isHighRisk()` also fans out from the same durable outbox row to `openbank.oversight-triggers` (ADR-0031 D9). The trigger body contains only `sourceService` and `occurredAt`, with the original `ce-id`/`ce-type` headers for correlation. Screened names, identifiers, match details and list data are not copied to the oversight topic. CLEAR results, lower-scoring potential hits, reviews and list-change events stay on the domain topic only.
+
 ## Components from `openbank-libs`
 
 | Module | Use here |

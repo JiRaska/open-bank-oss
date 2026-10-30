@@ -88,7 +88,7 @@ class ObpCliTest {
         val report = json(out)
         assertThat(report["ok"]).isEqualTo(true)
         assertThat(report["failed"].toString()).isEqualTo("0")
-        assertThat(report["scenarios"].toString()).isEqualTo("3")
+        assertThat(report["scenarios"].toString()).isEqualTo(ReferenceProducts.all.size.toString())
     }
 
     @Test
