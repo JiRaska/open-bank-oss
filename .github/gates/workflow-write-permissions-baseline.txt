@@ -249,7 +249,6 @@ services-ci.yml|job:build_pr_openbank_treasury_service|id-token
 services-ci.yml|job:build_pr_openbank_vop_service|id-token
 services-ci.yml|job:build_pr_openbank_wealth_service|id-token
 services-ci.yml|job:nightly-health-alert|issues
-standing-critical-digest.yml|job:digest|issues
 substrate-tofu.yml|job:apply|id-token
 substrate-tofu.yml|job:infracost|pull-requests
 substrate-tofu.yml|job:plan|id-token

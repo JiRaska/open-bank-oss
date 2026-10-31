@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Daily standing-critical alert digest (ADR-0241 D1/D3, #6432).
+#
+# Replaces the retired GitHub workflow of the same name, which failed every run: a
+# GitHub-hosted runner can reach Alertmanager only through the admin edge, and that edge
+# (httproute-tools-gate.yaml) admits an admin-UI session cookie and nothing else, so no
+# repository secret could ever have made it work. In-cluster the job reads the
+# Alertmanager service directly on the pod network: no public machine-token path, the
+# gate stays cookie-only. Same-namespace ingress to Alertmanager is already allowed by
+# alertmanager-ingress-allow-list (networkpolicy-tools-gate.yaml).
+#
+# The logic is .github/scripts/standing-critical-digest.py, unchanged and self-tested on
+# every PR; configmap-critical-alert-digest.yaml is a byte-for-byte generated copy of it.
+#
+# Output: the digest goes to Slack, and the observation envelope is logged as one JSON
+# line (event=standing-critical-observation) so it lands in Loki.
+#
+# Liveness: openbank.tech/max-success-age-seconds 93600 (26h) feeds CronJobSuccessStale
+# (prometheus-rules-jobs.yaml) from kube_cronjob_status_last_successful_time, so a digest
+# that stops succeeding, for any reason, alerts within a day instead of failing quietly.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: critical-alert-digest
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: critical-alert-digest
+  annotations:
+    openbank.tech/max-success-age-seconds: "93600"
+spec:
+  schedule: "30 8 * * *"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  # A digest started hours late reports the wrong morning; let it stay visibly stale.
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 300
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: critical-alert-digest
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: digest
+              # python:3.14.8-slim, pinned by index digest.
+              image: docker.io/library/python:3.14.8-slim@sha256:fbecd461fc72d21b2143c6eaba25143738079154a6d0ea3da3aec724f50eed4a
+              command: ["python", "-I", "/app/standing-critical-digest.py", "--publish-slack"]
+              env:
+                # routePrefix is /tools/alertmanager (apps/kube-prometheus-stack.yaml).
+                - name: ALERTMANAGER_URL
+                  value: "http://kube-prometheus-stack-alertmanager.observability.svc:9093/tools/alertmanager"
+                - name: DIGEST_ALERTS_OUTPUT
+                  value: "-"
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: SLACK_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: critical-alert-digest-slack
+                      key: SLACK_WEBHOOK_URL
+                      optional: true
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /app
+                  readOnly: true
+          volumes:
+            - name: script
+              configMap:
+                name: critical-alert-digest-script
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule
