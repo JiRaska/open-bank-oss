@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.0...treasury-service-v0.20.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **treasury:** alias SettlementRail to the iso20022 library enum ([#14381](https://github.com/JiRaska/open-bank-oss/issues/14381)) ([b2d7745](https://github.com/JiRaska/open-bank-oss/commit/b2d774577f4fb02619ef3483ad7f7d52d4f0f5f7))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.19.1...treasury-service-v0.20.0) (2026-10-30)
 
 
