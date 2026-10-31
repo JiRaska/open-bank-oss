@@ -7,6 +7,11 @@
 //   * clock: Date is frozen, so "3 minutes ago" renders the same text on every run
 //   * theme + language: set before first paint (localStorage + cookie), not by clicking
 //   * motion: reducedMotion + toHaveScreenshot({ animations: 'disabled' })
+//   * server: all four pages are 'use client'; their route layouts read no data and no clock,
+//     and the root layout reads only the cookies minted here. Every data fetch is therefore a
+//     browser /api call (pinned above). SSR may format a time with the real clock, but the
+//     client re-renders under the frozen clock before the screenshot. Re-check this if a page
+//     becomes a server component or a layout starts fetching.
 // A failure therefore means the rendered page changed. Update baselines only through
 // `npm run test:visual:update` (container), never with a host-local --update-snapshots.
 
@@ -42,7 +47,7 @@ const testIntelligence = {
       evidence: [
         { kind: 'unit', state: 'passed', observedAt: run.observedAt, source: 'JUnit:test', environment: 'ci', counts: counts(1900), run },
         { kind: 'e2e', state: 'failed', observedAt: run.observedAt, source: 'test-intelligence-run:v1', environment: 'ci', counts: counts(240, 1), run },
-        { kind: 'visual', state: 'passed', observedAt: run.observedAt, source: 'playwright-visual:admin-ui', environment: 'ci', detail: '8/8 screenshots matched committed baselines', run },
+        { kind: 'visual', state: 'passed', observedAt: run.observedAt, source: 'playwright-visual:openbank-admin-ui', environment: 'ci', detail: '8/8 screenshots matched committed baselines', run },
       ],
       coverage: { state: 'not-run', observedAt: null, source: null, lines: { covered: 0, missed: 0, percentage: null }, branches: { covered: 0, missed: 0, percentage: null } },
       testInfrastructure: { declared: [], observed: [] },

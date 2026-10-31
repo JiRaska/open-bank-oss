@@ -19,6 +19,10 @@ export default defineConfig({
   timeout: 60_000,
   // A retry would turn a nondeterministic screenshot into a green one. Flake must be visible.
   retries: 0,
+  // Never write a baseline implicitly. Playwright's default ('missing') would record the first
+  // render of a new or deleted baseline and pass, so the lane would compare nothing. A baseline
+  // is created only by `scripts/visual.sh --update` (which passes --update-snapshots=all).
+  updateSnapshots: 'none',
   workers: 2,
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
