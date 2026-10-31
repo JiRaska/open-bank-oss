@@ -11,8 +11,9 @@
 import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { ChevronLeft, ShieldAlert, ShieldCheck, AlertTriangle, FileText } from 'lucide-react'
-import { loadThreatModelIndex, missingThreatModels } from '@/lib/governance/docs'
+import { loadThreatModelRegistry } from '@/lib/governance/docs'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,12 +21,13 @@ export default async function ThreatModelRegistryPage() {
   const lang = (await cookies()).get('openbank-admin-lang')?.value === 'cs' ? 'cs' : 'en'
   const t = (cs: string, en: string) => (lang === 'cs' ? cs : en)
 
-  const [models, missing] = await Promise.all([loadThreatModelIndex(), missingThreatModels()])
+  const { items: models, missing, classificationAvailable, contentSource } = await loadThreatModelRegistry()
   const moneyPathCovered = models.filter(m => m.moneyPath).length
   const moneyPathTotal = moneyPathCovered + missing.length
 
   return (
     <div>
+      <ContentSourceNote source={contentSource} />
       <DocsPageHeader
         crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
@@ -34,10 +36,10 @@ export default async function ThreatModelRegistryPage() {
             <span className="breadcrumb-current">{t('Threat modely', 'Threat models')}</span>
           </>}
         title={t('Registr threat modelů', 'Threat Model Registry')}
-        subtitle={t(
+        subtitle={classificationAvailable ? t(
               `STRIDE threat modely pro služby na peněžní cestě (ADR-0030). Pokrytí money-path: ${moneyPathCovered}/${moneyPathTotal}.`,
               `STRIDE threat models for money-path services (ADR-0030). Money-path coverage: ${moneyPathCovered}/${moneyPathTotal}.`,
-            )}
+            ) : t('Threat modely (ADR-0030). Pokrytí money-path je neznámé: klasifikační katalog není dostupný.', 'Threat models (ADR-0030). Money-path coverage is unknown: the classification catalog is unavailable.')}
         icon={<ShieldAlert aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
         actions={<Link href="/docs" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <ChevronLeft size={14} />

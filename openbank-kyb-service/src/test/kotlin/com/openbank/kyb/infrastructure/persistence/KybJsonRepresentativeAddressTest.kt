@@ -53,6 +53,6 @@ class KybJsonRepresentativeAddressTest {
             verification = ExtractVerification.VERIFIED,
             fetchedAt = Instant.parse("2026-09-01T10:00:00Z"),
         )
-        assertThat(KybJson.readExtract(KybJson.write(ex)).representatives.single().address).isEqualTo(address)
+        assertThat(KybJson.readExtract(KybJson.writeExtract(ex)).representatives.single().address).isEqualTo(address)
     }
 }

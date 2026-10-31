@@ -1,0 +1,13 @@
+# Pension-fund domain (ADR-0037: domain = namespace). App plane. Holds pension-fund-service plus
+# its single-owner CNPG Postgres. pension-fund-service is the PROVIDER side of ADR-0334: segregated
+# funds, strategies, NAV and the unit register. Fund assets belong to the participants and are
+# never posted into treasury or the bank ledger.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pension-fund
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

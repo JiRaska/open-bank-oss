@@ -4,62 +4,25 @@
 
 package com.openbank.party.infrastructure.client
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.clients.transaction.api.TransactionsApi
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
-import io.smallrye.mutiny.Uni
-import jakarta.ws.rs.Consumes
-import jakarta.ws.rs.GET
-import jakarta.ws.rs.Path
-import jakarta.ws.rs.Produces
-import jakarta.ws.rs.QueryParam
-import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
-import java.util.UUID
 
 /**
  * Typed client for transaction-service's list-by-account endpoint, used by the GDPR Art. 20
  * portability export (ADR-0204 D2) to assemble the subject's transaction history.
  * `GET /api/v1/transactions?accountId=` is `@RolesAllowed(API/VIEWER/OPERATOR/ADMIN)`, so the
- * call carries the same M2M bearer as the other party-service outbound clients
- * ([OidcClientRequestReactiveFilter] on the `openbank-services` client_credentials grant).
+ * call carries an M2M bearer minted by the NAMED oidc-client `m2m`.
+ *
+ * Operations and DTOs are GENERATED from transaction-service's own `openapi.yaml`
+ * (`openbank-client-transaction`, ADR-0319). The page wrapper is a `CursorPage`, i.e. rows arrive
+ * under `data` - there is no `items` key - which is what the generated `TransactionPage` models.
  */
 @RegisterRestClient(configKey = "transaction-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 // #10486 batch 5: the transaction list (transaction.list) is minted by the NAMED oidc-client `m2m` -
 // Keycloak client `openbank-party` (ROLE_API only) - never the shared `openbank-services` one.
 @OidcClientFilter("m2m")
-@Path("/api/v1/transactions")
-@Produces(MediaType.APPLICATION_JSON)
-@Consumes(MediaType.APPLICATION_JSON)
-interface TransactionServiceRestClient {
-
-    @GET
-    fun listByAccount(
-        @QueryParam("accountId") accountId: UUID,
-        @QueryParam("limit") limit: Int,
-    ): Uni<TransactionPageResponse>
-}
-
-/**
- * The page wrapper transaction-service returns is a `CursorPage`, i.e. the rows arrive under
- * `data` — there is no `items` key. Field names below mirror its `TransactionResponse`
- * one-for-one; do not rename them to match the export model, or every renamed field silently
- * deserializes to null (`@JsonIgnoreProperties(ignoreUnknown = true)` makes that soundless).
- */
-@JsonIgnoreProperties(ignoreUnknown = true)
-data class TransactionPageResponse(val data: List<TransactionItemResponse> = emptyList())
-
-@JsonIgnoreProperties(ignoreUnknown = true)
-data class TransactionItemResponse(
-    val id: String? = null,
-    val referenceNumber: String? = null,
-    val bookingDate: String? = null,
-    val amount: String? = null,
-    val currencyCode: String? = null,
-    val type: String? = null,
-    val status: String? = null,
-    val description: String? = null,
-)
+interface TransactionServiceRestClient : TransactionsApi

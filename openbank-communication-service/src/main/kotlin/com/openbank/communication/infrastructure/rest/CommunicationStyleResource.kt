@@ -31,10 +31,15 @@ data class DraftStyleVersionRequest(
     val preferredTerms: Map<String, String?> = emptyMap(),
     val forbiddenTerms: List<String?> = emptyList(),
     val signature: String? = null,
+    val uiMessages: Map<String, String?> = emptyMap(),
+    val basePublishedVersion: Int? = null,
 ) {
     /** Validates every element is non-null and returns the caller-facing non-nullable shape. */
     fun validatedPreferredTerms(): Map<String, String> =
         preferredTerms.mapValues { (k, v) -> requireNotNull(v) { "preferredTerms['$k'] must not be null" } }
+
+    fun validatedUiMessages(): Map<String, String> =
+        uiMessages.mapValues { (k, v) -> requireNotNull(v) { "uiMessages['$k'] must not be null" } }
 
     fun validatedForbiddenTerms(): List<String> =
         forbiddenTerms.mapIndexed { i, v -> requireNotNull(v) { "forbiddenTerms[$i] must not be null" } }
@@ -46,13 +51,19 @@ data class DraftStyleVersionRequest(
  * `ROLE_COMMS_APPROVER` (D6's checker role) AND are four-eyes-gated (D3) — the second control
  * on top of the role check, so a lone `ROLE_COMMS_APPROVER` cannot publish their own draft.
  */
-@Path("/api/v1/personas")
+@Path("/api/v2/personas")
 @ApplicationScoped
 class CommunicationStyleResource(
     private val service: CommunicationStyleService,
     private val identity: SecurityIdentity,
 ) {
     private fun actor() = identity.principal.name
+
+    @GET
+    @Path("/{personaKey}/editor-state")
+    @RolesAllowed("ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "ROLE_ADMIN")
+    suspend fun editorState(@PathParam("personaKey") personaKey: String): Response =
+        Response.ok(service.editorState(personaKey)).build()
 
     @POST
     @Path("/{personaKey}/style-versions")
@@ -70,6 +81,10 @@ class CommunicationStyleResource(
                     forbiddenTerms = req.validatedForbiddenTerms(),
                     signature = req.signature,
                     maker = actor(),
+                    uiMessages = req.validatedUiMessages(),
+                    basePublishedVersion = requireNotNull(req.basePublishedVersion) {
+                        "basePublishedVersion is required"
+                    },
                 ),
             ),
         ).build()
@@ -100,7 +115,7 @@ class CommunicationStyleResource(
      */
     @GET
     @Path("/{personaKey}/published")
-    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER")
     suspend fun published(@PathParam("personaKey") personaKey: String): Response {
         val style = service.published(personaKey)
         return Response.ok(style).tag(style.styleVersion.toString()).build()

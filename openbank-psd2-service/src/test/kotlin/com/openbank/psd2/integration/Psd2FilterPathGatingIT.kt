@@ -49,6 +49,16 @@ class Psd2FilterPathGatingIT {
     }
 
     @Test
+    fun `both domestic PIS surfaces reject missing TPP identification before parsing a payment`() {
+        listOf("/v1/payments/domestic-cz", "/open-banking/v2/payments/domestic-cz").forEach { path ->
+            Given { contentType("application/json").body("{}") } When { post(path) } Then {
+                statusCode(401)
+                body("tppMessages[0].code", equalTo("CERTIFICATE_MISSING"))
+            }
+        }
+    }
+
+    @Test
     fun `the eIDAS filter rejects a TPP the registry does not authorise`() {
         Given { header("X-TPP-ID", "TPP-IT-UNKNOWN") } When { get(consentPath) } Then {
             statusCode(401)

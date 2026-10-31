@@ -99,13 +99,16 @@ resource "helm_release" "karpenter" {
     }
   }
 
-  name                = "karpenter"
-  namespace           = "kube-system"
-  repository          = "oci://public.ecr.aws/karpenter"
-  repository_username = data.aws_ecrpublic_authorization_token.karpenter_chart.user_name
-  repository_password = data.aws_ecrpublic_authorization_token.karpenter_chart.password
-  chart               = "karpenter"
-  version             = var.karpenter_version
+  name      = "karpenter"
+  namespace = "kube-system"
+  # Registry auth is on the helm PROVIDER (`registries`, providers.tf), not here: a
+  # resource-level repository_password is persisted in state, and the ECR Public token
+  # is new on every run, so it was a perpetual in-place diff (#11370). Provider config
+  # is never stored or diffed, and still logs in on every plan/apply — including the
+  # chart fetch for a karpenter_version bump.
+  repository = "oci://public.ecr.aws/karpenter"
+  chart      = "karpenter"
+  version    = var.karpenter_version
 
   set = [
     # Single replica for sandbox FinOps; prod should run 2 for HA.
@@ -236,13 +239,17 @@ locals {
   # Measured 2026-09-30 on the live cluster: summed container REQUESTS of those 26
   # clusters' 52 instance pods, grouped by the AZ each pod runs in. Grouped by AZ
   # because it cannot be pooled across AZs: a CNPG instance is bound to its EBS
-  # volume, and the volume to its AZ. Total 5.80 vCPU / 15.25 GiB (memory raised by #11621, sanctions-db by #11782);
+  # volume, and the volume to its AZ. Total 6.40 vCPU / 16.75 GiB (memory raised by #11621, sanctions-db by #11782;
+  # pension-db's two instances added from their DECLARED requests, not measured -- the cluster
+  # did not exist yet -- assumed split over 1a and 1c by its zone spread constraint, #12350);
   # check-stateful-not-on-spot.py fails when the requests those 26 Clusters declare
   # in gitops outgrow this table, so the limit below cannot silently fall behind.
   stateful_load_by_zone = {
-    "eu-north-1a" = { cpu = 0.55, memory_gib = 1.375, pods = 4 }
-    "eu-north-1b" = { cpu = 4.25, memory_gib = 11.5, pods = 41 }
-    "eu-north-1c" = { cpu = 1.00, memory_gib = 2.375, pods = 7 }
+    "eu-north-1a" = { cpu = 0.75, memory_gib = 1.875, pods = 5 }
+    # 1b includes pension-fund-db (ADR-0334, 2 x 100m / 256Mi) as DECLARED, not measured: it is
+    # not deployed yet, and its AZ is unknown until its volumes bind. Re-measure after first deploy.
+    "eu-north-1b" = { cpu = 4.45, memory_gib = 12.0, pods = 43 }
+    "eu-north-1c" = { cpu = 1.20, memory_gib = 2.875, pods = 8 }
   }
   # One xlarge m-family node as the sizing unit (2xlarge is also admitted and is
   # exactly two units, so the limit below bounds both). USABLE = kubelet allocatable
@@ -552,12 +559,18 @@ resource "kubectl_manifest" "nodepool_default" {
         budgets = [
           # Standard 5-field cron: no disruption 20:00–07:00 UTC daily
           { schedule = "0 20 * * *", duration = "11h", nodes = "0%" },
-          { nodes = "50%" },
+          # Waves: 89 of 150 CNPG pods live on this spot pool; one 24h sample (2026-10-23)
+          # logged 60 disruptions incl. Underutilized deletes recreating ~10 DB clusters at
+          # once. ONE node at a time for every reason (was 50%); DBs stay on spot (#11608).
+          { nodes = "1" },
           # #11304: drift (AMI release, kubelet/NodeClass change) replaces ONE node at a
-          # time. Karpenter applies the most restrictive matching budget, so consolidation
-          # keeps its 50% while a fleet-wide drift can no longer take out half the pool at
-          # once -- the 2026-09-28 wedge landed on top of a fleet-wide CNPG bump.
+          # time. Karpenter applies the most restrictive matching budget.
           { nodes = "1", reasons = ["Drifted"] },
+          # Drift only inside the maintenance window 07:00-09:00 UTC (09:00-11:00 Prague
+          # CEST, 08:00-10:00 CET), right after the overnight freeze ends. The budget below
+          # is active 09:00 -> 07:00 UTC (22h) and forbids Drifted replacements. Karpenter
+          # schedules are UTC. Consolidation (Underutilized/Empty) is NOT affected.
+          { schedule = "0 9 * * *", duration = "22h", nodes = "0", reasons = ["Drifted"] },
         ]
       }
       # Hard cap against runaway provisioning: without it Karpenter once

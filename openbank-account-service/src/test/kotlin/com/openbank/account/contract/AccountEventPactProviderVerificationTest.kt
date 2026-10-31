@@ -111,6 +111,11 @@ class AccountEventPactProviderVerificationTest {
         private val DELEGATION_GRANTOR_PARTY_ID = UUID.fromString("33333333-4444-4555-8666-777777777777")
         private val DELEGATE_PARTY_ID = UUID.fromString("44444444-5555-4666-8777-888888888888")
         private val DELEGATION_GRANT_ID = UUID.fromString("55555555-6666-4777-8888-999999999999")
+
+        // Must match ActiveAccountsPactConsumerTest's PACT_DETAIL_ACCOUNT_ID / PACT_PARTY_ID
+        // (openbank-interest-service, ADR-0339 B tax-profile resolution).
+        private val TAX_PROFILE_ACCOUNT_ID = UUID.fromString("60000000-0000-0000-0000-000000000060")
+        private val TAX_PROFILE_PARTY_ID = UUID.fromString("61000000-0000-0000-0000-000000000061")
     }
 
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
@@ -172,7 +177,31 @@ class AccountEventPactProviderVerificationTest {
         if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
             testIdentityAssociation.setTestIdentity(null)
         }
+        // ADR-0340 B1 (mirror of the git-pact twin): the CRS/FATCA roster replay must present the
+        // verified service-account-openbank-tax-reporting identity — rego admits account.list
+        // for that principal only.
+        if (context != null && context.interaction.description.contains("CRS FATCA")) {
+            testIdentityAssociation.setTestIdentity(taxReportingIdentity())
+        }
         context?.verifyInteraction()
+    }
+
+    /** Mirror of the git-pact twin's helper (ADR-0340 B1) — see there for the claim shape. */
+    private fun taxReportingIdentity(): io.quarkus.security.runtime.QuarkusSecurityIdentity {
+        val name = "service-account-openbank-tax-reporting"
+        val jwt = object : org.eclipse.microprofile.jwt.JsonWebToken {
+            private val claims = mapOf(
+                "azp" to "openbank-tax-reporting",
+                "preferred_username" to name,
+                "sub" to "tax-reporting-sa-subject",
+            )
+
+            override fun getName(): String = name
+            override fun getClaimNames(): Set<String> = claims.keys
+            override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+        }
+        return io.quarkus.security.runtime.QuarkusSecurityIdentity.builder().setPrincipal(jwt)
+            .addRole("ROLE_API").build()
     }
 
     @State(NEGATIVE_AUTH_STATE)
@@ -195,6 +224,12 @@ class AccountEventPactProviderVerificationTest {
     @State("no account exists for the IBAN")
     fun noAccountForIban() {
         // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
+    }
+
+    @State("no account exists for the requested account")
+    fun noAccountForRequestedAccount() {
+        // Deliberately empty: AmlAccountOwnershipPactConsumerTest's 404 leg requests a UUID no
+        // state in this class ever seeds, so the provider's real not-found path answers.
     }
 
     @State("an account has been created")
@@ -329,5 +364,32 @@ class AccountEventPactProviderVerificationTest {
     @State("no account exists for the unknown IBAN")
     fun noAccountForUnknownIban() {
         // Intentionally empty.
+    }
+
+    /** Empty-party list state, matching the folder twin: the requested party is never seeded. */
+    @State("no account exists for the requested party")
+    fun noAccountForRequestedParty() {
+        // No seed: the requested party id is one this provider test never creates.
+    }
+
+    /** Mirror of the git-pact twin's handler — see there for why the findById guard is needed. */
+    @State("an ACTIVE CZK account exists for tax-profile resolution")
+    fun activeCzkAccountForTaxProfileResolution() = runOnVertxContext {
+        if (accountRepository.findById(TAX_PROFILE_ACCOUNT_ID) != null) return@runOnVertxContext
+        accountRepository.save(
+            Account(
+                id = TAX_PROFILE_ACCOUNT_ID,
+                accountNumber = Iban("CZ1108000000192000145401"),
+                accountType = AccountType.SAVINGS,
+                partyId = TAX_PROFILE_PARTY_ID,
+                productId = UUID.fromString("99999999-8888-4777-8666-555555555555"),
+                currency = CurrencyCode("CZK"),
+                status = AccountStatus.ACTIVE,
+                openedAt = Instant.parse("2026-01-01T00:00:00Z"),
+                closedAt = null,
+                version = 0,
+            ),
+        )
+        Unit
     }
 }

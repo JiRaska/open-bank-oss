@@ -48,6 +48,11 @@
 
 **Neměnnost:** PostgreSQL pravidla `DO INSTEAD NOTHING` tiše zahodí jakýkoli `UPDATE`/`DELETE`. Stopa je fyzicky append-only; oprava se dělá připojením nového kompenzačního záznamu, nikdy editací.
 
+U událostí ze SEPA Instant outboxu používá auditní záznam hlavičku Kafka `ce-id` jako
+stabilní identitu, pokud payload nemá vlastní ID události. Opakování na jiném Kafka
+offsetu proto použije stejné `entry_id`. Konzument přijme shodné opakování, při porovnání
+ignoruje pouze nový čas ingestu, a odmítne stejné ID s jinými uloženými údaji.
+
 ## PII & klasifikace dat
 
 Auditní stopa ukládá **doslovný payload** každé upstream události, takže tranzitivně obsahuje jakékoli PII, které producenti emitují (id účtů, IBANy, id klientů, případně detail transakce). Další přímo osobní pole zachytávaná na této vrstvě:
@@ -65,3 +70,8 @@ Viz [06 — Compliance](./06-compliance.md) pro analýzu právního základu a v
 
 - **10 let**, vynucováno dvěma způsoby: per-row `retention_until = occurred_at + INTERVAL '10 years'` nastavené triggerem `trg_audit_retention`, a property služby `openbank.gdpr.audit-retention-days: 3650`.
 - Smazání před `retention_until` není jen politika — delete pravidlo na úrovni DB ho zcela blokuje. Purge po expiraci je provozní záležitost (samostatný auditovaný maintenance job), ne ad-hoc `DELETE`.
+
+
+## Stav vlastních převodů banky (ADR-0344, fáze 1b)
+
+audit-service čte také `openbank.swift.institution-transfers`, stav každého vlastního převodu banky ze swift-service. Je to money-path: každý stav popisuje převod, který kanál provedl. Záznamy se přiřazují `swift-service` přes sdílenou tabulku `TopicProducers` a KafkaUser auditu má na topik oprávnění Read (`kafka-audit-mtls.yaml`).

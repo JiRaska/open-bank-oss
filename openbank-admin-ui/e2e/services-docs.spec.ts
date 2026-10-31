@@ -15,8 +15,16 @@ import { signInAsOperator } from './helpers/auth'
 // The console gates every route on an Auth.js session (src/proxy.ts); there is no
 // Keycloak in this environment, so each test signs in via a minted session cookie instead
 // of a real OIDC flow (see helpers/auth.ts for why this is safe).
-test.beforeEach(async ({ context, baseURL }) => {
+test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
+  await page.route('**/api/catalog/services', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ available: true, services: [{
+      name: 'openbank-account-service', short: 'account-service', kind: 'service',
+      runnable: true, port: 8081, apiTitle: 'Account Service',
+    }] }),
+  }))
 })
 
 // Minimal DocsIndex payload that satisfies hasDocs=true (items.length > 0)
@@ -34,9 +42,9 @@ const DOCS_INDEX = {
 
 test.describe('/services — Service Documentation page', () => {
   test('shows correct coverage count when all services have docs', async ({ page }) => {
-    // Mock health (static, empty — page uses STATIC_CANDIDATES as the list)
+    // Empty off-cluster health falls back to the mocked build catalog.
     await page.route('**/api/services/health', route =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static', discoveryStatus: 'static' }) })
     )
     // All docs requests return docs
     await page.route('**/api/services/*/docs', route =>
@@ -60,7 +68,7 @@ test.describe('/services — Service Documentation page', () => {
 
   test('shows 0/N when no services have docs', async ({ page }) => {
     await page.route('**/api/services/health', route =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static', discoveryStatus: 'static' }) })
     )
     // All docs requests return 404 (no docs)
     await page.route('**/api/services/*/docs', route =>
@@ -79,7 +87,7 @@ test.describe('/services — Service Documentation page', () => {
 
   test('documented services appear in the documented section', async ({ page }) => {
     await page.route('**/api/services/health', route =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static', discoveryStatus: 'static' }) })
     )
     // Playwright uses LIFO: last-registered handler wins for a given URL.
     // Register the catch-all 404 first so the specific account handler (registered
@@ -94,12 +102,12 @@ test.describe('/services — Service Documentation page', () => {
 
     await page.goto('/services')
     // Wait for the documented section to appear
-    await expect(page.getByText(/Account Service/i)).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('main a[href="/services/account/docs"]').filter({ hasText: 'Account' })).toBeVisible({ timeout: 10_000 })
   })
 
   test('page renders inside app shell (sidebar + header)', async ({ page }) => {
     await page.route('**/api/services/health', route =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static', discoveryStatus: 'static' }) })
     )
     await page.route('**/api/services/*/docs', route =>
       route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found', service: 'x' }) })
@@ -131,11 +139,12 @@ test.describe('/services — Service Documentation page', () => {
   test('shows a newly cataloged service with its running build provenance', async ({ page }) => {
     await page.route('**/api/catalog/services', route =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        available: true,
         services: [{ name: 'openbank-example-service', short: 'example-service', kind: 'service', runnable: true, apiTitle: 'Example Service' }],
       }) })
     )
     await page.route('**/api/services/health', route =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static', discoveryStatus: 'static' }) })
     )
     await page.route('**/api/services/*/docs', route =>
       route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })

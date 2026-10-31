@@ -176,7 +176,9 @@ def main() -> int:
         sys.stderr.write(f"::error::no realm template found under {REALM_GLOB} — cannot run blind\n")
         return 1
     live = dict(load_live(s) for s in args.live)
-    sites = {} if args.skip_annotations else annotation_roles(root)
+    # Scanning every Kotlin source is useful only when a declared role is absent
+    # from the live realm and we need to name its affected call sites.
+    sites = {} if args.skip_annotations else None
 
     findings, report = [], {"realms": {}}
     for realm in sorted(set(declared) | set(live)):
@@ -200,6 +202,8 @@ def main() -> int:
             findings.append(f"realm `{realm}` is live but no template in git declares it")
         missing = sorted(want - have)
         extra = sorted(have - want)
+        if missing and sites is None:
+            sites = annotation_roles(root)
         # Only the realm the platform authenticates against carries @RolesAllowed names.
         unreachable = sorted(r for r in missing if r in sites) if want else []
         report["realms"][realm] = {

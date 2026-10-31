@@ -17,6 +17,7 @@ Build is fast-jar (never uber-jar — see root CLAUDE.md GitOps rules). Generic 
 | Concern | Value | Source |
 |---|---|---|
 | App HTTP port | `8113` | `quarkus.http.port` |
+| East-west mTLS port | `8443` (private-CA cert `audit-service-internal-tls`, client certificate required; `%prod` only) | `QUARKUS_HTTP_SSL_*` env, `quarkus.http.ssl.client-auth` (build time) |
 | Management port | `8085`, root-path `/q` | `quarkus.management.*` |
 | Datasource | `postgresql://localhost:5432/openbank_audit` | `quarkus.datasource` |
 | Flyway | `migrate-at-start: true`, 10 connect retries | `quarkus.flyway` |
@@ -25,6 +26,8 @@ Build is fast-jar (never uber-jar — see root CLAUDE.md GitOps rules). Generic 
 | OIDC | `…/realms/openbank`, client `openbank-services` | `quarkus.oidc` |
 | OTel | OTLP `http://localhost:4317` | `quarkus.otel` |
 | Rate limit | enabled, max 200 concurrent | `openbank.rate-limit` |
+
+The 8443 listener exists for lending-service's evidence-bundle read (#11900), which carries a person's bearer token; HTTP/8113 stays for existing callers and the probes (`quarkus.http.insecure-requests: enabled`).
 
 Secrets (`POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`) carry `CHANGE_ME_LOCAL_DEV_ONLY` placeholders; production injects real values (Vault, ADR-0017). Never ship the placeholders.
 
@@ -76,3 +79,32 @@ GitOps via ArgoCD (manifests in `gitops/`). On merge-conflict for image tags, ta
 ## ČNB policy-rate evidence
 
 The audit consumer subscribes to `openbank.fx.cnb-policy-rate.published` alongside the existing FX topics. Keep this topic in the configured `audit-events-in` subscription when changing the consumer list: a newly published or revised policy-rate fact then has the same retained audit path as other business events. If records are absent, inspect the audit consumer group's lag and the topic's retention before replay.
+
+## API identity on the mTLS listener
+
+The audit API uses bearer authentication on both HTTP and mTLS listeners in production. A trusted client certificate is required for the TLS handshake but cannot replace the caller's bearer token. Missing bearer credentials return HTTP 401; route roles and OPA still decide what an authenticated caller may read. The listener parity test reads the production listener configuration and verifies no-certificate, certificate-only and valid-bearer requests over real HTTP.
+
+## Treasury payments and bank-own transfers in the audit stream
+
+The consumer also subscribes to `openbank.treasury.payments` (bank-own payment releases, attributed
+to treasury-service) and `openbank.swift.institution-transfers` (bank-own transfer status:
+ACCEPTED, SENT, SETTLED, REJECTED, attributed to swift-service). Both are money-path topics. A new
+topic has no committed offset, so the first subscription reads it from its retention start.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Kafka consumer group override
+
+The consumer group id and offset reset for this service's Kafka channels are not set as YAML keys in `application.yaml`, because SmallRye Config quotes dotted leaf keys and the connector never reads them. They are supplied by a properties-file override ConfigMap loaded through `QUARKUS_CONFIG_LOCATIONS`. The reference pattern for this is card-issuance-service's `party-events-in` channel; the `application.yaml` comments point at it. This is a documentation and comment change only. No configuration value or runtime behaviour changes.
+
+## Agent provenance stream (D5)
+
+The `agent-audit-events-in` channel consumes `openbank.agent.audit.events`, the AI-attribution events that agent-service produces, and appends them to the audit store. The deployed Deployment sets `AUDIT_AGENT_AUDIT_KAFKA_ENABLED=true`; the baked `application.yaml` default stays `false`, so local runs and tests without a broker remain fail-closed. The consumer group is `audit-service-agent-provenance` and the offset reset is `earliest`, both supplied by the properties-file override ConfigMap described above.
+
+`AgentAuditConsumer` acknowledges a record only after the audit store has committed it. On failure it NACKs rather than rethrowing, because this handler uses manual acknowledgment and a rethrown exception would cancel the Kafka source instead of parking the record. The channel's `failure-strategy` is `dead-letter-queue`, with records parked on `openbank.dlq.audit.agent-audit-events-in`. A redelivery of an event id that is already stored is de-duplicated. `AgentAuditKafkaPersistenceIT` proves persistence of a sample event, the DLQ path and recovery against a real broker and PostgreSQL.

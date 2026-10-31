@@ -70,11 +70,11 @@ components:
       payload:
         type: object
         required: [eventId, eventType, schemaVersion, sourceService, aggregateType, aggregateId,
-                   actorId, actorType, action, makerId, status, createdAt, expiresAt, occurredAt]
+                   actorId, actorType, action, makerId, makerActorKind, status, createdAt, expiresAt, occurredAt]
         properties:
           eventId: {type: string, format: uuid}
           eventType: {type: string, const: SETTLEMENT_OPERATOR_APPROVAL_CHANGED}
-          schemaVersion: {type: integer, const: 1}
+          schemaVersion: {type: integer, const: 2}
           sourceService: {type: string, const: settlement-service}
           aggregateType: {type: string, const: SETTLEMENT_OPERATOR_APPROVAL}
           aggregateId: {type: string, format: uuid}
@@ -83,6 +83,7 @@ components:
           action: {type: string}
           resourceId: {type: [string, 'null']}
           makerId: {type: string}
+          makerActorKind: {type: string, enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]}
           status: {type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED]}
           requestFingerprint: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$'}
           createdAt: {type: string, format: date-time}

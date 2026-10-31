@@ -120,6 +120,33 @@ journeys:
       This is deliberately credential-free. A separate least-privilege canary identity is still
       required before an authenticated operator journey can be claimed.
 
+  - id: fx-rates-read
+    title: "Customer FX rate sheet"
+    capability: >-
+      The published FX rate sheet — the rates every customer quote, payment and ledger
+      revaluation reads — is served to an authenticated least-privilege caller as a JSON array,
+      proving the deployed fx-service REST edge, its RBAC + OPA authorization path and the
+      rate projection together, not merely that a pod answers.
+    status: active
+    severity: page
+    money_moving: false
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-fx-read.yaml
+    schedule: "*/10 * * * *"
+    falsification: >-
+      Set the FX_BASE env on the CronJob's container to a host that resolves but serves 502,
+      remove FX_SCOPE_READ from FxResource's @RolesAllowed (or delete FxScopeIdentityAugmentor
+      so no token can carry it), or delete the `synthetic-fx-read-journey` rule from
+      fx_rest_ext.rego: each variant must exit non-zero within one schedule interval. The
+      script reads FX_BASE / TOKEN_URL from __ENV with the production Service DNS as
+      defaults, so this is executable rather than a description. A 200 carrying a non-JSON
+      or non-array body fails the checks rather than reading as availability.
+    runtime_note: >-
+      The journey authenticates as the synthetic-only client openbank-synthetic-fx-read
+      (fx:read scope → FX_SCOPE_READ, no realm role; mirrors product-catalog-read #7324). Its
+      secret is an OPTIONAL ExternalSecret ref from Vault KV openbank/keycloak/synthetic-fx-read
+      (runbook 0009): until the owner seeds that entry the CronJob starts and the run goes red
+      with an explicit "credential absent" error — red, never a crash loop and never a green.
+
   - id: admin-ui-security-excellence
     title: "Security Excellence auth boundary"
     capability: >-
@@ -187,34 +214,59 @@ journeys:
   - id: customer-authentication
     title: "Customer login and strong authentication"
     capability: >-
-      A customer can authenticate, obtain the intended scopes and complete an SCA challenge
-      without a real person's credentials or device being used as monitoring infrastructure.
-    status: planned
-    severity: page
+      A customer can authenticate and obtain the intended scopes, and the edge accepts that
+      session and refuses a wrong, missing or tampered credential -- without a real person's
+      credentials or device being used as monitoring infrastructure. Completing an SCA challenge
+      is NOT yet checked (needs the phase-3 canary authenticator, #4348).
+    status: active
+    severity: ticket
     money_moving: false
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-customer-authentication.yaml
+    schedule: "2,17,32,47 * * * *"
     target_schedule: "*/15 * * * *"
+    runtime_note: >-
+      Runs the authentication HALF of the capability: token issuance for the canary
+      (openbank-synthetic-retail, ADR-0331), the claims customer-edge trusts, the edge resolving
+      the same party, three refusal paths (wrong secret, no token, tampered token) and the
+      passkey ceremony's reachability. It does NOT complete an SCA challenge or a passkey
+      assertion: ADR-0066 forbids a customer password and ADR-0331 states the identity does not
+      unlock SCA. That needs the phase-3 canary authenticator (#4348), so the SCA half of the
+      capability above is still UNCHECKED and must not be read as covered by this journey. If the
+      secret is missing the script logs "credential absent" and fails every check.
     falsification: >-
-      Remove the synthetic client's SCA policy or break the challenge callback route: the
-      journey must fail on the missing authenticated session, not merely accept an OIDC redirect.
-    blocked_by: >-
-      ADR-0252 phase 1 and phase 3 (#4348) — requires a bank-owned synthetic identity plus a
-      canary authenticator whose secrets are held outside the script and whose sessions are tainted.
+      Remove ROLE_CUSTOMER from the canary's service-account user or the party_id mapper from its
+      client: "the token has the customers-realm issuer, ROLE_CUSTOMER..." or "the token names one
+      party" must fail. Point CUSTOMER_BASE at a host answering 200 to every path: the three
+      refusal checks must fail rather than read as availability.
 
   - id: account-overview
     title: "Account overview and balances"
     capability: >-
       An authenticated customer can list their accounts and see a balance consistent with the
       ledger after the read-model propagation window.
-    status: planned
-    severity: page
+    status: active
+    severity: ticket
     money_moving: false
+    covers:
+      - openbank-account-service
+      - openbank-balance-service
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-account-overview.yaml
+    schedule: "5,20,35,50 * * * *"
     target_schedule: "*/15 * * * *"
+    runtime_note: >-
+      Authenticates as the canary customer openbank-synthetic-retail (ADR-0331) through the
+      public token endpoint and public customer edge. Read-only, but it depends on a durable
+      FIXTURE the owner creates once: one ACTIVE account of the canary's SYNTHETIC party whose
+      balance equals FIXTURE_BALANCE / FIXTURE_CURRENCY on the CronJob, seeded by a single
+      tainted posting and never moved by any journey. Until the fixture exists the listing and
+      balance checks fail, which is missing fixture evidence and not a balance-service result.
+      Severity is `ticket` until the fixture is seeded and the first green run is observed.
     falsification: >-
-      Pause the balance projection consumer: authentication and account listing may still pass,
-      but the journey must fail when the expected ledger-backed balance does not converge.
-    blocked_by: >-
-      ADR-0252 phase 1 (#4348) — needs a durable synthetic party/account fixture and a cleanup
-      contract; a shared real account would make the assertion nondeterministic.
+      Pause the balance projection consumer, or change FIXTURE_BALANCE on the CronJob by one
+      cent: authentication and the account listing still pass, but "the balance equals the
+      seeded fixture balance" must fail. Opening a second ACTIVE account for the canary party
+      must fail the listing check, and pointing CUSTOMER_BASE at a host that serves 200 for
+      every path must fail the 401 and 403 negative checks rather than read as availability.
 
   - id: sepa-credit-transfer
     title: "SEPA credit-transfer lifecycle"
@@ -333,20 +385,40 @@ journeys:
     capability: >-
       A least-privilege bank-owned operator can complete the sandbox SSO flow and reach the
       Test Intelligence workspace with the intended role boundary. This proves the deployed
-      admin browser path, independently of the Admin UI's CI Playwright evidence.
-    status: planned
+      admin browser path: the browser targets the live sandbox URL and the deployed Keycloak
+      realm, and only the harness runs from CI — the same vantage the credential-free
+      admin-ui-sso-boundary and admin-ui-security-excellence journeys already run from.
+    status: active
     severity: ticket
     money_moving: false
-    target_schedule: "*/30 * * * *"
+    workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    workflow_name: Admin UI browser synthetic
+    browser_variants: [chromium]
+    schedule: "13 */2 * * *"
+    environment: sandbox
     falsification: >-
       Remove the operator role mapping, break the SSO callback, or deny the Test Intelligence
       API: the journey must fail after authentication on the missing protected workspace or its
       authorization boundary, not pass merely because the public login page returned HTML.
-    blocked_by: >-
-      Needs a least-privilege bank-owned Keycloak canary identity plus a browser-capable,
-      digest-pinned runner isolated from the current protocol-only k6 CronJob. The existing
-      read-only k6 pod has no Chromium runtime; adding one without a separate security and
-      credential boundary would turn a monitoring gap into a privileged browser foothold.
+    runtime_note: >-
+      Authenticated phase of the admin browser path, run by the existing digest-pinned
+      Playwright lane against the DEPLOYED sandbox (admin.open-bank.tech, realm openbank) —
+      not against PR HEAD. The canary identity is the bank-owned synthetic operator
+      (openbank-synthetic-operator, ROLE_OPERATOR and nothing else, provisioned by the owner
+      via openbank-infra/scripts/provision-synthetic-operator.sh; the two workflow secrets
+      carry only its username/password). Until the identity AND the secrets exist, the script
+      logs "credential absent" and fails every check — red, never green. It proves, in order:
+      the auth gate bounces an unauthenticated operator to /auth/login with the callback
+      preserved; Keycloak SSO authenticates the canary and the Admin UI callback completes;
+      the Test Intelligence workspace page and its /api/test-intelligence data plane serve
+      this operator (schemaVersion 1 report); and an admin-only BFF route
+      (/api/context/assignments/pending) answers 403 to the operator session — a canary
+      holding ROLE_ADMIN, or a BFF that stopped checking roles, fails that check green-side.
+      The in-cluster vantage (a digest-pinned Chromium runner inside the sandbox, isolated
+      from the protocol-only k6 pod by its own namespace, NetworkPolicy and credential
+      boundary) remains deliberate follow-up: it re-proves the same flow from inside the
+      cluster network, and is tracked as the second phase of this journey, not a reason to
+      leave the authenticated half unevidenced until then.
 
   - id: wealth-declared-holding
     title: "Declared holding appears in net worth"
@@ -459,6 +531,12 @@ money_path_accountability:
         off in every deployed environment. When the journey lands it should assert the posted
         transaction by its ledger key (card-clearing:<authorizationId>:<key> once #11990 lands), not the HTTP status
         — a SKIPPED_DISABLED posting also answers 200.
+    - service: openbank-pension-service
+      note: >-
+        ADR-0334 S1 (#12350). Listed as money-path from the bootstrap; S1 itself moves no money
+        (contract lifecycle and pack evaluation only). A journey belongs with the first slice that
+        collects a contribution or pays out, and is then blocked by the default blocker like the
+        other posting services until the SYNTHETIC taint reaches the ledger.
     - service: openbank-treasury-service
       note: >-
         ADR-0315. A journey here would book, approve and settle a deal, which posts a real journal
@@ -466,3 +544,8 @@ money_path_accountability:
         ledger that is a synthetic movement in the balance sheet. The sandbox simulated market
         (ADR-0315 D9) already drives settle/mature end to end, so the journey, when it lands,
         should assert the posted journal by its idempotency key, not the HTTP status.
+    - service: openbank-pension-fund-service
+      note: >-
+        ADR-0334 S4. A journey would subscribe, publish a NAV with two principals and assert the
+        settled units by order id; it moves participants' units, not bank money, and has no
+        customer-facing caller until pension-service's FundAdministrationPort adapter lands.

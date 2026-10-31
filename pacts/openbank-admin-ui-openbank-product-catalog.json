@@ -183,6 +183,13 @@
         "body": {
           "reason": "independent commercial approval"
         },
+        "generators": {
+          "path": {
+            "dataType": "STRING",
+            "expression": "/api/v2/offerings/${publishOfferingId}/revisions/${publishRevisionId}/publish",
+            "type": "ProviderState"
+          }
+        },
         "headers": {
           "Accept": "application/json",
           "Content-Type": "application/json",
@@ -300,6 +307,19 @@
           }
         },
         "status": 201
+      }
+    },
+    {
+      "description": "Product Studio rejects an unknown schema version",
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/product-types/org.openbank.insurance.term-life/versions/999"
+      },
+      "response": {
+        "status": 404
       }
     },
     {

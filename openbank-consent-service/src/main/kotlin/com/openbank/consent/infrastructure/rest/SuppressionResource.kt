@@ -11,6 +11,7 @@ import com.openbank.consent.domain.model.SuppressionReason
 import com.openbank.consent.domain.model.SuppressionScope
 import com.openbank.libs.authz.Authorize
 import io.quarkus.security.identity.SecurityIdentity
+import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
@@ -48,12 +49,22 @@ data class SuppressionResponse(
  * ADR-0219 D3 suppression administration (#3656 slice 2): the granular do-not-contact that is not
  * a consent revocation. Operator-managed (admin-ui surfaces: preference centre, complaints flow,
  * RM workbench); the contact-policy gate reads the active list per party.
+ *
+ * Authentication is the outer gate and `@Authorize` (OPA) the fine-grained one — the same split
+ * as [ConsentResource]. Before the `@RolesAllowed` below, this resource carried `@Authorize`
+ * alone, so an unauthenticated request reached the PDP as an ANONYMOUS principal: denied (403)
+ * only while `AUTHZ_ENFORCE=true`, and served (200) wherever the interceptor runs advisory. The
+ * class gate admits the shared M2M client's `ROLE_API` because campaign-service's contact-policy
+ * gate reads the list through it; writes are narrowed to operators per method, mirroring
+ * `operator-suppression-write` in consent_rest_ext.rego.
  */
 @Path("/api/v1/suppressions")
 @ApplicationScoped
+@RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
 class SuppressionResource(private val service: SuppressionService, private val identity: SecurityIdentity) {
 
     @POST
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "suppression.manage", resource = "#request.partyId")
     suspend fun create(request: CreateSuppressionRequest): Response = runCatching {
         val created = service.create(
@@ -77,6 +88,7 @@ class SuppressionResource(private val service: SuppressionService, private val i
 
     @POST
     @Path("/{id}/revoke")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "suppression.manage", resource = "#id")
     suspend fun revoke(@PathParam("id") id: UUID): Response = runCatching {
         Response.ok(SuppressionResponse.from(service.revoke(id, identity.principal?.name ?: "unknown"))).build()

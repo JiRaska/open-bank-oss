@@ -37,11 +37,11 @@ rules_mock := {
 	"shared_m2m_write_prohibition": {"reasons": []},
 }
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- the regressions this file exists to prevent ---
 
@@ -139,6 +139,34 @@ test_operator_may_create_close_draft if {
 		with data.rules as rules_mock
 }
 
+# #12906: the four-eyes workbench is staff-only. Without these grants both actions deny
+# every caller; without the prohibition base operator-read-any still admits an M2M reader.
+test_operator_may_read_and_decide_journal_approvals if {
+	every action in {"ledger.approval.read", "ledger.approval.decide"} {
+		decision := rest.allow with input as {"principal": operator, "action": action, "resource": "approval-1"}
+			with data.rules as rules_mock
+		decision.allow == true
+		"operator-journal-approval" in rest.allowed_reasons with input as {"principal": operator, "action": action, "resource": "approval-1"}
+			with data.rules as rules_mock
+	}
+}
+
+test_service_accounts_may_not_read_or_decide_journal_approvals if {
+	every p in [edge, services_m2m] {
+		every action in {"ledger.approval.read", "ledger.approval.decide"} {
+			rest.allow == false with input as {"principal": p, "action": action, "resource": "approval-1"}
+				with data.rules as rules_mock
+		}
+	}
+}
+
+test_wrong_role_may_not_read_or_decide_journal_approvals if {
+	every action in {"ledger.approval.read", "ledger.approval.decide"} {
+		rest.allow == false with input as {"principal": no_role, "action": action, "resource": "approval-1"}
+			with data.rules as rules_mock
+	}
+}
+
 # Known-positive that the base policy and the extension are both loaded: a negative suite would
 # pass vacuously without them. operator-ledger-write is the EXTENSION's reason, so its presence
 # proves the ext; the matrix-mock wiring is proven by the edge denials flipping red under
@@ -148,18 +176,43 @@ test_extension_is_loaded if {
 		with data.rules as rules_mock
 }
 
+# --- #14058: synthetic seed identity for the account-overview journey fixture ---
+# ROLE_API only (the seed must pass postJournal's RBAC); the identity rule is its whole grant.
+
+ledger_seed_m2m := {"service_account": true, "client_id": "openbank-synthetic-ledger-seed", "type": "HUMAN", "id": "service-account-openbank-synthetic-ledger-seed", "roles": ["ROLE_API"]}
+
+test_ledger_seed_may_create_via_its_identity_rule if {
+	decision := rest.allow with input as {"principal": ledger_seed_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"synthetic-ledger-seed-post" in rest.allowed_reasons with input as {"principal": ledger_seed_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
+test_ledger_seed_may_not_perform_any_other_ledger_action if {
+	every action in {"ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft", "ledger.read", "ledger.list", "ledger.close.inspect"} {
+		rest.allow == false with input as {"principal": ledger_seed_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_ledger_seed_identity_rule_does_not_admit_the_shared_client if {
+	not "synthetic-ledger-seed-post" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "ledger.create"}
+		with data.rules as rules_mock
+}
+
 # --- #10486: interest-service's own machine identity (ROLE_API only) ---
 # The identity carries ROLE_API and nothing else, exactly as the realm template grants it. The
 # matrix mock grants ROLE_OPERATOR only, so no role-based reason can admit these principals: the
 # identity rule is the whole grant, and everything else must deny.
 
-interest_m2m := {"type": "HUMAN", "id": "service-account-openbank-interest", "roles": ["ROLE_API"]}
+interest_m2m := {"service_account": true, "client_id": "openbank-interest", "type": "HUMAN", "id": "service-account-openbank-interest", "roles": ["ROLE_API"]}
 
 # Any OTHER service account holding ROLE_API. LedgerResource.postJournal now admits ROLE_API at the
 # RBAC layer, so OPA is the only thing between this principal and a book-of-record write.
-other_role_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+other_role_api_sa := {"service_account": true, "client_id": "openbank-mcp-service", "type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
 
-no_role := {"type": "HUMAN", "id": "u-nobody", "roles": []}
+no_role := {"service_account": false, "type": "HUMAN", "id": "u-nobody", "roles": []}
 
 test_interest_may_create_via_its_identity_rule if {
 	decision := rest.allow with input as {"principal": interest_m2m, "action": "ledger.create"}
@@ -200,9 +253,9 @@ test_interest_identity_rule_does_not_admit_the_shared_client if {
 
 # --- #10486 batch 1: lending-service and clearing-service own identities (ROLE_API only) ---
 
-lending_m2m := {"type": "HUMAN", "id": "service-account-openbank-lending", "roles": ["ROLE_API"]}
+lending_m2m := {"service_account": true, "client_id": "openbank-lending", "type": "HUMAN", "id": "service-account-openbank-lending", "roles": ["ROLE_API"]}
 
-clearing_m2m := {"type": "HUMAN", "id": "service-account-openbank-clearing", "roles": ["ROLE_API"]}
+clearing_m2m := {"service_account": true, "client_id": "openbank-clearing", "type": "HUMAN", "id": "service-account-openbank-clearing", "roles": ["ROLE_API"]}
 
 test_lending_may_create_via_its_identity_rule if {
 	decision := rest.allow with input as {"principal": lending_m2m, "action": "ledger.create"}
@@ -242,13 +295,66 @@ test_batch1_identity_rules_do_not_cross_admit if {
 		with data.rules as rules_mock
 }
 
+# --- ledger.close.participate: day-close participation (ADR-0342 D2, #13167) ---
+
+participate(p, participant) := {"principal": p, "action": "ledger.close.participate", "resource": participant}
+
+test_each_participant_account_may_report_its_own_participant if {
+	rest.allow.allow with input as participate(interest_m2m, "interest") with data.rules as rules_mock
+	rest.allow.allow with input as participate(lending_m2m, "lending") with data.rules as rules_mock
+	"service-close-participation" in rest.allowed_reasons with input as participate(lending_m2m, "lending")
+		with data.rules as rules_mock
+}
+
+# Remove the `input.resource == participant` line and this goes red: an account reports for its
+# own participant only.
+test_a_participant_account_may_not_report_for_another_participant if {
+	not rest.allow.allow with input as participate(interest_m2m, "lending") with data.rules as rules_mock
+	not rest.allow.allow with input as participate(lending_m2m, "interest") with data.rules as rules_mock
+	not rest.allow.allow with input as participate(lending_m2m, "billing") with data.rules as rules_mock
+}
+
+# Nobody else reaches the action: not the shared client, not another ROLE_API account, not staff.
+test_no_other_principal_may_participate if {
+	every p in [services_m2m, other_role_api_sa, clearing_m2m, operator, edge] {
+		every participant in {"interest", "lending", "billing", "treasury"} {
+			not rest.allow.allow with input as participate(p, participant) with data.rules as rules_mock
+		}
+	}
+}
+
+# --- #13709: billing-service's own identity reports participation and NOTHING else ---
+
+billing_m2m := {"service_account": true, "client_id": "openbank-billing", "type": "HUMAN", "id": "service-account-openbank-billing", "roles": ["ROLE_API"]}
+
+test_billing_may_report_its_own_participant if {
+	rest.allow.allow with input as participate(billing_m2m, "billing") with data.rules as rules_mock
+	"service-close-participation" in rest.allowed_reasons with input as participate(billing_m2m, "billing")
+		with data.rules as rules_mock
+}
+
+test_billing_may_not_report_for_another_participant if {
+	every participant in {"interest", "lending", "treasury"} {
+		not rest.allow.allow with input as participate(billing_m2m, participant) with data.rules as rules_mock
+	}
+}
+
+# Billing's own identity must not post, reverse or read journals: the participation map is its
+# whole ledger grant. Add billing to any journal rule and this goes red.
+test_billing_has_no_journal_grant if {
+	every action in {"ledger.create", "ledger.reverse", "ledger.read", "ledger.list", "ledger.approve", "ledger.trigger", "ledger.replay", "ledger.close.draft"} {
+		not rest.allow.allow with input as {"principal": billing_m2m, "action": action, "resource": "billing"}
+			with data.rules as rules_mock
+	}
+}
+
 # --- #10486 batch 2: transaction-service and settlement-service own identities (ROLE_API only) ---
 
-transaction_m2m := {"type": "HUMAN", "id": "service-account-openbank-transaction", "roles": ["ROLE_API"]}
+transaction_m2m := {"service_account": true, "client_id": "openbank-transaction", "type": "HUMAN", "id": "service-account-openbank-transaction", "roles": ["ROLE_API"]}
 
-settlement_m2m := {"type": "HUMAN", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]}
+settlement_m2m := {"service_account": true, "client_id": "openbank-settlement", "type": "HUMAN", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]}
 
-other_role_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+other_role_api_sa := {"service_account": true, "client_id": "openbank-mcp-service", "type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
 
 test_transaction_may_create_and_reverse_via_its_identity_rule if {
 	every action in {"ledger.create", "ledger.reverse"} {
@@ -308,7 +414,7 @@ test_batch2_identity_rules_do_not_cross_admit if {
 
 # --- ADR-0315: treasury-service's own identity (ROLE_API only), ledger.create alone ---
 
-treasury_m2m := {"type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]}
+treasury_m2m := {"service_account": true, "client_id": "openbank-treasury", "type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]}
 
 test_treasury_may_create_via_its_identity_rule if {
 	decision := rest.allow with input as {"principal": treasury_m2m, "action": "ledger.create"}
@@ -336,6 +442,28 @@ test_treasury_identity_rule_admits_no_other_role_api_account if {
 	}
 }
 
+# --- #13167: treasury-service reports day-close participation for ITS participant only ---
+
+test_treasury_may_report_its_own_participant if {
+	rest.allow.allow with input as participate(treasury_m2m, "treasury") with data.rules as rules_mock
+	"service-close-participation" in rest.allowed_reasons with input as participate(treasury_m2m, "treasury")
+		with data.rules as rules_mock
+}
+
+# Remove the `input.resource == participant` binding and this goes red.
+test_treasury_may_not_report_for_another_participant if {
+	every participant in {"interest", "lending", "billing"} {
+		not rest.allow.allow with input as participate(treasury_m2m, participant) with data.rules as rules_mock
+	}
+}
+
+# Nobody else reports for treasury: no other participant's account, no shared client, no staff.
+test_no_other_principal_may_report_for_treasury if {
+	every p in [interest_m2m, lending_m2m, billing_m2m, services_m2m, other_role_api_sa, clearing_m2m, operator, edge] {
+		not rest.allow.allow with input as participate(p, "treasury") with data.rules as rules_mock
+	}
+}
+
 # Nostro reconciliation (#10896): treasury reads journals + trial balance, and only its own identity.
 test_treasury_may_read_the_ledger_for_nostro_reconciliation if {
 	every action in {"ledger.list", "ledger.read"} {
@@ -350,5 +478,59 @@ test_treasury_read_rule_admits_no_other_role_api_account if {
 			not "service-treasury-ledger-read" in rest.allowed_reasons with input as {"principal": p, "action": action}
 				with data.rules as rules_mock
 		}
+	}
+}
+
+# --- ledger.close.inspect: the frozen statutory trial balance (ADR-0337, #12496) ---
+
+inspect_input(p) := {"principal": p, "action": "ledger.close.inspect", "resource": "2026-06-30"}
+
+# Every audience the endpoint had under ledger.read keeps it under its own action.
+test_close_inspect_keeps_every_previous_staff_reader if {
+	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_VIEWER", "ROLE_AUDITOR"] {
+		p := {"type": "HUMAN", "id": "u-staff", "roles": [role]}
+		decision := rest.allow with input as inspect_input(p) with data.rules as rules_mock
+		decision.allow == true
+		"ledger-close-inspect-read" in rest.allowed_reasons with input as inspect_input(p) with data.rules as rules_mock
+	}
+}
+
+# finrep-service reads the frozen TB through the shared openbank-services client.
+test_close_inspect_admits_the_shared_client_finrep_uses if {
+	decision := rest.allow with input as inspect_input(services_m2m) with data.rules as rules_mock
+	decision.allow == true
+	"service-ledger-close-inspect" in rest.allowed_reasons with input as inspect_input(services_m2m) with data.rules as rules_mock
+}
+
+# Not a read verb: no base *-read-any rule may reach it implicitly. ROLE_COMPLIANCE
+# (compliance-read-any is keyed on `.read`) and a party self-service principal stay denied.
+test_close_inspect_is_not_reached_by_base_read_rules if {
+	rest.allow == false with input as inspect_input({"type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]})
+		with data.rules as rules_mock
+	rest.allow == false with input as inspect_input({"type": "HUMAN", "id": "2026-06-30", "roles": ["ROLE_CUSTOMER"]})
+		with data.rules as rules_mock
+}
+
+# Machines other than the shared client: denied, including ones holding a staff role, and
+# including every identity that holds ledger.read today (settlement, treasury).
+test_close_inspect_denies_every_other_machine if {
+	every p in [
+		edge,
+		other_role_api_sa,
+		settlement_m2m,
+		treasury_m2m,
+		{"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]},
+		{"type": "HUMAN", "id": "service-account-openbank-x", "roles": ["ROLE_VIEWER", "ROLE_AUDITOR", "ROLE_ADMIN"]},
+	] {
+		rest.allow == false with input as inspect_input(p) with data.rules as rules_mock
+	}
+}
+
+# The narrowing is one-directional: holding ledger.close.inspect grants no other ledger action.
+# The shared client keeps its pre-existing reads (service-ledger-read) and gains nothing else.
+test_close_inspect_grant_reaches_no_write if {
+	every action in {"ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"} {
+		rest.allow == false with input as {"principal": services_m2m, "action": action}
+			with data.rules as rules_mock
 	}
 }

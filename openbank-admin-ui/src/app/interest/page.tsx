@@ -13,6 +13,7 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { ShortId } from '@/components/ui'
 import { parseInterestAccruals, statusTone, type AccrualRecord } from '@/lib/interest/interestAccrualContract'
 
 type AccessBlock = 'unauthorized' | 'forbidden'
@@ -106,6 +107,7 @@ export default function InterestPage() {
                   idle: t('interest-service spí (scale-to-zero), probouzí se…', 'interest-service idle (scaled to zero), waking…'),
                   down: t('interest-service neodpovídá', 'interest-service is not responding'),
                   checking: t('Zjišťuji stav služby…', 'Checking service…'),
+                  unknown: t('Stav nasazení nelze ověřit', 'Deployment status is unknown'),
                 }}
               />
             )}
@@ -220,7 +222,7 @@ export default function InterestPage() {
                 <tr key={a.id} style={{ borderBottom: '1px solid var(--border)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                   onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                  <td style={{ padding: '12px 16px', fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{a.accountId}</td>
+                  <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-primary)' }}><ShortId value={a.accountId} copyLabel={t('Kopírovat ID účtu', 'Copy account ID')} /></td>
                   <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{a.accrualDate}</td>
                   <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{(a.accruedAmount ?? 0).toLocaleString(numberLocale, { minimumFractionDigits: 4 })}</td>
                   <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{a.currency}</td>

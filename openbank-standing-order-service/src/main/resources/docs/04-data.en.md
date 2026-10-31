@@ -47,6 +47,14 @@ erDiagram
   }
 ```
 
+## Failed transition and outbox
+
+On the third consecutive execution failure, `failure_count = 3` and status `FAILED` are
+persisted in the same transaction as the `standing-order.failed.v1` outbox row. If the outbox
+insert fails, the status and failure count roll back together; no failure event is committed.
+The PostgreSQL regression reloads the committed count and compares transaction IDs, and
+forces an outbox insert failure to verify rollback before a successful retry.
+
 ## Migrations
 
 Flyway, immutable historical scripts, forward-only (`migrate-at-start: true`):
@@ -94,3 +102,13 @@ The whole dataset is classified **confidential** (`governance.yaml: dataClassifi
 
 - **Upstream identifiers** (`party_id`, `debit_account_id`) are foreign references with **no DB-level FK** — services are isolated; integrity is maintained at the application boundary.
 - **Downstream** (`governance.yaml: lineage.downstream`): `transaction-service` consumes the order events and creates the actual payment; this service `dependentDatabases: [openbank_transactions]`.
+
+## Outbox retention (SENT rows)
+
+`standing_order_outbox` is a delivery buffer, not a record. Rows that reached the broker (`status = 'SENT'`) are deleted once their `sent_at` is older than `openbank.outbox.retention.sent-days` (default **7**), by libs-runtime's shared `OutboxSentRetentionJob` (ADR-0329, ADR-0327 D8). The repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`.
+
+- Runs nightly (`openbank.outbox.retention.cron`, default `0 17 3 * * ?`) on every replica; each delete is bounded (`batch-size` 5 000, at most `max-batches` 200 per run), so a long-unpurged table drains over several nights.
+- PENDING, FAILED, DISPATCHING and DEAD rows are never touched — DEAD rows are the producer-side DLQ.
+- Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
+- Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
+- Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.

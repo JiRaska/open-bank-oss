@@ -9,6 +9,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured
 import io.restassured.response.Response
 import jakarta.inject.Inject
@@ -22,7 +24,7 @@ import javax.sql.DataSource
 
 /**
  * `POST /api/v1/domestic-payments` builds a kernel `Money` from `amount` + `currency` (#11604) and
- * requires it to be strictly positive, BEFORE the Idempotency-Key is looked up or bound. On main
+ * requires it to be strictly positive and CZK-only (#12059), BEFORE the Idempotency-Key is bound. On main
  * before this change every refused case below answered 201 and persisted a payment, an outbox
  * event and a started workflow — including negative and zero amounts and sub-haléř amounts that the
  * settlement adapter later rounded. Each refusal is pinned as the whole problem body, and is shown
@@ -38,6 +40,17 @@ class DomesticPaymentMoneyBoundaryIT {
     @Inject
     lateinit var dataSource: DataSource
 
+    @Test
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_VIEWER"])
+    fun `a viewer cannot create a domestic payment or consume an idempotency key`() {
+        val key = "money-boundary-it-denied-${UUID.randomUUID()}"
+
+        val refused = post(key, body("10.00", "CZK"))
+
+        assertThat(refused.statusCode).isEqualTo(403)
+        assertThat(countPayments(key)).isZero()
+    }
+
     @ParameterizedTest(name = "{0} {1} -> 400 {2}")
     @CsvSource(
         "100.005, CZK, AMOUNT_SCALE_EXCEEDED, amount",
@@ -45,13 +58,23 @@ class DomesticPaymentMoneyBoundaryIT {
         "10.00, XYZ, CURRENCY_UNSUPPORTED, currency",
         "10.00, CZ, CURRENCY_UNSUPPORTED, currency",
         "10.00, XAU, CURRENCY_UNSUPPORTED, currency",
+        "10.00, EUR, CURRENCY_NOT_ALLOWED, currency",
+        "10.00, USD, CURRENCY_NOT_ALLOWED, currency",
+        "10.00, gbp, CURRENCY_NOT_ALLOWED, currency",
         "1E+19, CZK, VALIDATION_ERROR, amount",
         "-5.00, CZK, VALIDATION_ERROR, amount",
         "0, CZK, VALIDATION_ERROR, amount",
         "0.00, CZK, VALIDATION_ERROR, amount",
     )
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
-    fun `an amount Money cannot hold or a non-positive amount is refused and consumes nothing`(
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
+    fun `an invalid amount or a currency outside the domestic scheme is refused and consumes nothing`(
         amount: String,
         currency: String,
         code: String,
@@ -75,6 +98,13 @@ class DomesticPaymentMoneyBoundaryIT {
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
     fun `an absent amount is a 400 naming the field`() {
         val key = "money-boundary-it-absent-${UUID.randomUUID()}"
         val response = post(key, body(null, "CZK"))
@@ -85,6 +115,13 @@ class DomesticPaymentMoneyBoundaryIT {
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
     fun `a valid amount is stored unchanged and read back at the currency scale`() {
         val key = "money-boundary-it-ok-${UUID.randomUUID()}"
 
@@ -115,6 +152,11 @@ class DomesticPaymentMoneyBoundaryIT {
                 "urn:openbank:error:currency-unsupported",
                 "The currency is not supported",
                 "Currency must be an ISO 4217 code with a minor unit",
+            )
+            "CURRENCY_NOT_ALLOWED" -> Triple(
+                "urn:openbank:error:currency-not-allowed",
+                "The currency is not allowed by the payment scheme",
+                "Czech domestic payments accept CZK only",
             )
             else -> Triple(
                 "urn:openbank:error:validation-error",

@@ -86,10 +86,20 @@ export function OperationalEvidence() {
     }
   }, [load])
 
-  const budgets = pyrra.data?.objectives.flatMap(objective => objective.budgetRemaining === null ? [] : [objective]) ?? []
+  const budgets = pyrra.failed ? [] : pyrra.data?.objectives.filter(objective =>
+    typeof objective.budgetRemaining === 'number' && Number.isFinite(objective.budgetRemaining)) ?? []
+  const configuredJourneys = Number.isSafeInteger(pyrra.data?.configured) && (pyrra.data?.configured ?? -1) >= 0
+    ? pyrra.data!.configured : null
+  const budgetNames = budgets.flatMap(objective => typeof objective.name === 'string' && objective.name.trim()
+    ? [objective.name.trim()] : [])
+  const observedBudgetCount = new Set(budgetNames).size
+  const duplicateBudgetNames = observedBudgetCount !== budgetNames.length
+  const completeBudgetCoverage = configuredJourneys !== null && configuredJourneys > 0
+    && budgetNames.length === budgets.length && !duplicateBudgetNames && observedBudgetCount === configuredJourneys
   const worstBudget = budgets.toSorted((a, b) => (a.budgetRemaining ?? 0) - (b.budgetRemaining ?? 0))[0]
   const budgetPct = worstBudget?.budgetRemaining == null ? null : Math.round(worstBudget.budgetRemaining * 100)
-  const pyrraStatus = budgetPct === null ? 'neutral' : budgetPct < 0 ? 'bad' : budgetPct < 25 ? 'warn' : 'good'
+  const negativeBudget = worstBudget?.budgetRemaining != null && worstBudget.budgetRemaining < 0
+  const pyrraStatus = budgetPct === null ? 'neutral' : negativeBudget ? 'bad' : !completeBudgetCoverage || budgetPct < 25 ? 'warn' : 'good'
 
   const workflows = temporal.data?.metrics?.workflows
   const workflowProblems = workflows ? workflows.failed1h + workflows.timedOut1h : null
@@ -115,7 +125,10 @@ export function OperationalEvidence() {
       </div>
       <div className={styles.grid}>
         <EvidenceCard
-          icon={<Scale size={15} aria-hidden="true" />} source="Pyrra" hint={t('30denní SLO', '30-day SLO')}
+          icon={<Scale size={15} aria-hidden="true" />} source="Pyrra" hint={t(
+            `30denní SLO · rozpočty pro ${observedBudgetCount}/${configuredJourneys ?? '?'} vybraných zákaznických cest`,
+            `30-day SLO · budgets for ${observedBudgetCount}/${configuredJourneys ?? '?'} selected customer journeys`,
+          )}
           loading={pyrra.loading} status={pyrraStatus} statusLabel={sourceLabel(pyrraStatus, t)}
           value={budgetPct === null ? '—' : `${budgetPct}%`}
           label={pyrra.failed

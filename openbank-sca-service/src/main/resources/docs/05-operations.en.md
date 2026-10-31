@@ -20,7 +20,16 @@ Coverage floor (kover): LINE ≥ 40 (money-path baseline; ratchet-only, target 7
 | Port | Purpose |
 |---|---|
 | 8110 | application HTTP (`/api/v1/sca/**`) |
+| 8443 | production HTTPS listener with required client certificate |
 | 8085 | management — health, metrics, docs (`root-path /q`) |
+
+The production HTTPS listener requires a trusted client certificate for the TLS connection. For
+`/api/*`, the certificate does not authenticate the API caller: the `bearer-only` HTTP permission
+requires a valid OIDC bearer token on both HTTPS and HTTP listeners. A certificate with no bearer
+must receive HTTP 401 after TLS negotiation; a client with no certificate cannot complete the HTTPS
+handshake. Route roles still apply; OPA decisions are enforced only when `AUTHZ_ENFORCE=true`. The
+`ScaListenerAuthParityIT` test exercises these cases against both listeners using the production
+listener and authentication settings.
 
 ## Health probes
 
@@ -86,3 +95,16 @@ OTP store, idempotency, and decision store fail. Challenges cannot be created/ve
 
 ### Flyway checksum mismatch on startup
 Set `QUARKUS_FLYWAY_REPAIR_AT_START=true` in the gitops env, let the pod start, then remove it. Never edit an applied migration.
+
+
+## Integration tests and the fail-closed service-account flag
+
+OPA treats any principal whose token is not verifiably a person as a service account (`input.principal.service_account`, fail closed). A plain `@TestSecurity` identity carries no JWT, so it counts as a machine and loses human-only grants. Integration tests that act as real staff therefore add `@OidcSecurity` human claims, which is why this module tests with `quarkus-test-security-oidc`.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

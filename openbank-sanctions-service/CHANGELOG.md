@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.2...sanctions-service-v0.18.3) (2026-10-29)
+
+
+### Bug Fixes
+
+* **aml:** publish high-risk oversight triggers ([#14151](https://github.com/JiRaska/open-bank-oss/issues/14151)) ([f7d1363](https://github.com/JiRaska/open-bank-oss/commit/f7d1363da164ac94e18dcc044be210b3d50a7ff5))
+
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.1...sanctions-service-v0.18.2) (2026-10-27)
+
+
+### Bug Fixes
+
+* **sanctions:** preserve JSONB payloads in reactive persistence ([#13084](https://github.com/JiRaska/open-bank-oss/issues/13084)) ([acc9f60](https://github.com/JiRaska/open-bank-oss/commit/acc9f60c8bed588c2a611436473e13abbf7fc1c2))
+* **sanctions:** src/main touched -&gt; patch release. Refs [#11948](https://github.com/JiRaska/open-bank-oss/issues/11948) ([acc9f60](https://github.com/JiRaska/open-bank-oss/commit/acc9f60c8bed588c2a611436473e13abbf7fc1c2))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.0...sanctions-service-v0.18.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **fraud:** share the financial-crime vocabulary in openbank-libs-fincrime ([#13770](https://github.com/JiRaska/open-bank-oss/issues/13770)) ([bc45331](https://github.com/JiRaska/open-bank-oss/commit/bc4533123a2d8b52ba0b5e3bdfefaa91a712d6f2))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.17.0...sanctions-service-v0.18.0) (2026-10-18)
+
+
+### Features
+
+* **sanctions:** workflow-liveness heartbeats for five scheduled jobs ([#13153](https://github.com/JiRaska/open-bank-oss/issues/13153)) ([c352a0e](https://github.com/JiRaska/open-bank-oss/commit/c352a0ec0d75d439a85132070a1e77aa4e8052b4))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.16.1...sanctions-service-v0.17.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.16.0...sanctions-service-v0.16.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.4...sanctions-service-v0.16.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
+## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.3...sanctions-service-v0.15.4) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.2...sanctions-service-v0.15.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* **sanctions:** fence list publication across pods ([#11558](https://github.com/JiRaska/open-bank-oss/issues/11558)) ([6a30656](https://github.com/JiRaska/open-bank-oss/commit/6a3065680e62cbb2f0445a6b5632fde992ddbe7e))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.1...sanctions-service-v0.15.2) (2026-10-04)
 
 

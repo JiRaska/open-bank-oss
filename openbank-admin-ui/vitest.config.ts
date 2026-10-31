@@ -2,6 +2,26 @@
 import { defineConfig } from 'vitest/config'
 import path from 'path'
 
+const aliases = {
+  '@': path.resolve(__dirname, './src'),
+  // `server-only` is a Next.js RSC marker package absent from node_modules.
+  'server-only': path.resolve(__dirname, './src/test/stubs/server-only.ts'),
+}
+
+// These suites depend on process-level mocking, CJS/ESM loading, or timing that
+// Vitest's isolated VM worker cannot reproduce. Keep their established fork pool.
+const forkOnly = [
+  'src/test/loyalty-console.guard.test.ts',
+  'src/test/mermaid-labels.test.ts',
+  'src/test/markdown-view-security.test.tsx',
+  'src/test/audience-library.test.tsx',
+  'src/test/compliance-packs-console.test.tsx',
+  'src/test/document-template-editor-dialog.test.tsx',
+  'src/test/document-template-lifecycle-dialog.test.tsx',
+  'src/test/iaops-rca-route.test.ts',
+  'src/test/render-smoke.test.tsx',
+]
+
 export default defineConfig({
   test: {
     environment: 'jsdom',
@@ -15,6 +35,17 @@ export default defineConfig({
     // regresses, the 81-page smoke suite vanishes and coverage drops through the
     // ratchet below, so the failure is loud instead of silent.
     include: ['src/test/**/*.{test,spec}.{ts,tsx}'],
+    projects: [
+      { test: { name: 'isolated-vm', pool: 'vmThreads', exclude: forkOnly } },
+      {
+        extends: false,
+        resolve: { alias: aliases },
+        test: {
+          name: 'process-forks', pool: 'forks', environment: 'jsdom', globals: true,
+          setupFiles: ['./src/test/setup.ts'], include: forkOnly,
+        },
+      },
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary', 'html'],
@@ -52,12 +83,5 @@ export default defineConfig({
       },
     },
   },
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-      // `server-only` is a Next.js RSC marker package not present in node_modules;
-      // stub it so server-only libs (e.g. src/lib/docs/releases.ts) import under Vitest.
-      'server-only': path.resolve(__dirname, './src/test/stubs/server-only.ts'),
-    },
-  },
+  resolve: { alias: aliases },
 })

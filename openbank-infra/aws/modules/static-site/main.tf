@@ -108,6 +108,22 @@ resource "aws_cloudfront_origin_access_control" "oac" {
   signing_protocol                  = "sigv4"
 }
 
+resource "aws_cloudfront_cache_policy" "api_no_cache" {
+  count       = var.api_origin_domain_name == null ? 0 : 1
+  name        = "${replace(var.domain, ".", "-")}-api-no-cache"
+  min_ttl     = 0
+  default_ttl = 0
+  max_ttl     = 0
+  parameters_in_cache_key_and_forwarded_to_origin {
+    # CloudFront rejects Accept-Encoding flags when all TTLs are zero.
+    enable_accept_encoding_brotli = false
+    enable_accept_encoding_gzip   = false
+    cookies_config { cookie_behavior = "none" }
+    headers_config { header_behavior = "none" }
+    query_strings_config { query_string_behavior = "none" }
+  }
+}
+
 # --- security response headers --------------------------------------------
 resource "aws_cloudfront_response_headers_policy" "sec" {
   name = "${replace(var.domain, ".", "-")}-security-headers"
@@ -196,6 +212,21 @@ resource "aws_cloudfront_distribution" "cdn" {
     origin_access_control_id = aws_cloudfront_origin_access_control.oac.id
   }
 
+  dynamic "origin" {
+    for_each = var.api_origin_domain_name == null ? [] : [var.api_origin_domain_name]
+    content {
+      domain_name              = origin.value
+      origin_id                = "status-api"
+      origin_access_control_id = var.api_origin_access_control_id
+      custom_origin_config {
+        http_port              = 80
+        https_port             = 443
+        origin_protocol_policy = "https-only"
+        origin_ssl_protocols   = ["TLSv1.2"]
+      }
+    }
+  }
+
   default_cache_behavior {
     target_origin_id           = "s3-site"
     viewer_protocol_policy     = "redirect-to-https"
@@ -206,12 +237,29 @@ resource "aws_cloudfront_distribution" "cdn" {
     response_headers_policy_id = aws_cloudfront_response_headers_policy.sec.id
   }
 
+  dynamic "ordered_cache_behavior" {
+    for_each = var.api_origin_domain_name == null ? [] : [1]
+    content {
+      path_pattern               = "api/*"
+      target_origin_id           = "status-api"
+      viewer_protocol_policy     = "https-only"
+      allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+      cached_methods             = ["GET", "HEAD"]
+      compress                   = true
+      cache_policy_id            = aws_cloudfront_cache_policy.api_no_cache[0].id
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.sec.id
+    }
+  }
+
   # Pretty 404 -> serve index (SPA-style is not needed; keep explicit 404 page if added later)
-  custom_error_response {
-    error_code            = 403
-    response_code         = 404
-    response_page_path    = "/index.html"
-    error_caching_min_ttl = 10
+  dynamic "custom_error_response" {
+    for_each = var.serve_missing_as_index ? [1] : []
+    content {
+      error_code            = 403
+      response_code         = 404
+      response_page_path    = "/index.html"
+      error_caching_min_ttl = 10
+    }
   }
 
   restrictions {

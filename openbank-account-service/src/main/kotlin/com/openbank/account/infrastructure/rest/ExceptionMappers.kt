@@ -9,6 +9,8 @@ import com.openbank.account.application.usecase.AccountNotEmptyException
 import com.openbank.account.application.usecase.AccountOpeningBlockedByScreeningException
 import com.openbank.account.application.usecase.AuthorizationNotFoundException
 import com.openbank.account.application.usecase.AuthorizationNotOnAccountException
+import com.openbank.account.application.usecase.ProductCatalogUnavailableException
+import com.openbank.account.application.usecase.ProductRevisionNotPublishedException
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.security.AuthenticationFailedException
@@ -174,6 +176,47 @@ class AccountScreeningUnavailableExceptionMapper : ExceptionMapper<AccountScreen
             )
             .build()
     }
+}
+
+// ADR-0341 D1: no product revision could be pinned because the catalog could not be asked. 503 with
+// Retry-After, like the sanctions outage above: the request is fine, the dependency is not.
+@Provider
+class ProductCatalogUnavailableExceptionMapper : ExceptionMapper<ProductCatalogUnavailableException> {
+    private val log = Logger.getLogger(ProductCatalogUnavailableExceptionMapper::class.java)
+
+    override fun toResponse(exception: ProductCatalogUnavailableException): Response {
+        log.warnf("account opening refused, no product revision pin: %s", exception.message)
+        return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .header("Retry-After", "30")
+            .entity(
+                ApiError(
+                    traceId = Ids.randomId().toString(),
+                    status = Response.Status.SERVICE_UNAVAILABLE.statusCode,
+                    code = "PRODUCT_CATALOG_UNAVAILABLE",
+                    message = "The product catalog is temporarily unavailable; retry later",
+                    timestamp = Instant.now(),
+                ),
+            )
+            .build()
+    }
+}
+
+// ADR-0341 D1: the product exists but has no PUBLISHED revision to pin. A well-formed request
+// against a product that cannot be opened yet: 422, never retried into success by waiting.
+@Provider
+class ProductRevisionNotPublishedExceptionMapper : ExceptionMapper<ProductRevisionNotPublishedException> {
+    override fun toResponse(exception: ProductRevisionNotPublishedException): Response =
+        Response.status(UNPROCESSABLE_ENTITY)
+            .entity(
+                ApiError(
+                    traceId = Ids.randomId().toString(),
+                    status = UNPROCESSABLE_ENTITY,
+                    code = "PRODUCT_REVISION_NOT_PUBLISHED",
+                    message = exception.message ?: "The product has no published revision",
+                    timestamp = Instant.now(),
+                ),
+            )
+            .build()
 }
 
 // Security-abort responses must be the JSON error envelope like every other error here.

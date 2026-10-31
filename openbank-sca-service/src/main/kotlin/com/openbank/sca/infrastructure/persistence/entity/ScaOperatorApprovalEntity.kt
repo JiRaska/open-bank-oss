@@ -5,6 +5,7 @@
 package com.openbank.sca.infrastructure.persistence.entity
 
 import com.openbank.libs.approval.ApprovalStatus
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.PendingApproval
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.Column
@@ -30,6 +31,10 @@ class ScaOperatorApprovalEntity : PanacheEntityBase() {
 
     @Column(name = "maker_id", nullable = false)
     lateinit var makerId: String
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "maker_actor_kind", nullable = false)
+    var makerActorKind: MakerActorKind = MakerActorKind.UNKNOWN
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
@@ -62,6 +67,7 @@ class ScaOperatorApprovalEntity : PanacheEntityBase() {
         action = action,
         resourceId = resourceId,
         makerId = makerId,
+        makerActorKind = makerActorKind,
         status = status,
         createdAt = createdAt,
         decidedBy = decidedBy,

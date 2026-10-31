@@ -4,6 +4,42 @@
   },
   "interactions": [
     {
+      "description": "POST a welcome bonus with a missing or expired token",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 50.00,
+          "baseAmount": null,
+          "baseCurrencyCode": null,
+          "bookingDate": null,
+          "currencyCode": "CZK",
+          "description": "V\u00EDtac\u00ED bonus za zalo\u017Een\u00ED \u00FA\u010Dtu",
+          "idempotencyKey": "welcome-bonus-f6f6f6f6-f6f6-f6f6-f6f6-f6f6f6f6f6f6",
+          "initiatedByPartyId": null,
+          "instructionType": null,
+          "rail": null,
+          "scaChallengeId": null,
+          "scaExemption": null,
+          "sourceAccountId": null,
+          "targetAccountId": "f6f6f6f6-f6f6-f6f6-f6f6-f6f6f6f6f6f6",
+          "type": "CREDIT",
+          "valueDate": "2026-01-15"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "POST initiate a CREDIT welcome bonus transaction",
       "providerStates": [
         {
@@ -13,9 +49,18 @@
       "request": {
         "body": {
           "amount": 50.00,
+          "baseAmount": null,
+          "baseCurrencyCode": null,
+          "bookingDate": null,
           "currencyCode": "CZK",
           "description": "V\u00EDtac\u00ED bonus za zalo\u017Een\u00ED \u00FA\u010Dtu",
           "idempotencyKey": "welcome-bonus-f6f6f6f6-f6f6-f6f6-f6f6-f6f6f6f6f6f6",
+          "initiatedByPartyId": null,
+          "instructionType": null,
+          "rail": null,
+          "scaChallengeId": null,
+          "scaExemption": null,
+          "sourceAccountId": null,
           "targetAccountId": "f6f6f6f6-f6f6-f6f6-f6f6-f6f6f6f6f6f6",
           "type": "CREDIT",
           "valueDate": "2026-01-15"

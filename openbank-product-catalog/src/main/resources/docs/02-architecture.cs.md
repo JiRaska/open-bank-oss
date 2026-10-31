@@ -107,3 +107,25 @@ Toto poskytuje `GET /api/v1/fees`, takže admin UI vykreslí ceny bez opětovné
 ## Události / outbox
 
 Každá přijatá v2 změna perzistuje doménový stav, auditní záznam a verzovanou obálku `CatalogChangeEvent` ve stejné PostgreSQL transakci. Publikace navíc zapisuje schválení maker-checker. Publikované revize, audit a outbox jsou na úrovni databáze neměnné. Dispatcher do Kafky není součástí tohoto řezu; outbox zůstává transportně neutrální.
+
+## Manifesty packů a schvalovací politika revizí (ADR-0345)
+
+Každý pack obsahuje soubor `catalog-packs/<pack>/pack.json`. Manifest uvádí schémata packu v pořadí
+registrace a u každé verze schématu může mít volitelnou `approvalPolicy`. Politika má tři části:
+
+- kódy rolí, z nichž každý je navázaný na interní autoritu;
+- volitelné `requireEffectiveFrom`;
+- povinné hodnoty atributů nejvyšší úrovně.
+
+Seeder si zapnuté packy najde podle jejich manifestů, takže kernel nejmenuje žádný pack, schéma, roli
+ani autoritu. Zaregistrovaná politika je pro danou verzi schématu jen append-only.
+
+Revize schématu s politikou se publikuje až tehdy, když přesný digest obsahu schválí každá deklarovaná
+role. Každou roli musí schválit jiný principal, a nikdy maker. Schválení probíhá přes
+`/api/v2/offerings/{o}/revisions/{r}/approvals/{role}`. `/pension-approvals` je zastaralý alias.
+
+Konfigurace nasazení váže každou autoritu na scope a realm roli, které musí nést tentýž token:
+`openbank.catalog.approval.authorities.<AUTHORITY>`.
+
+Gate `catalog-kernel-industry-neutral` drží oborový slovník mimo kernel. Zároveň hlídá zmrazené
+hodnoty enumů `/api/v1`.

@@ -8,6 +8,8 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
@@ -29,6 +31,13 @@ class CardPartyListLimitIT {
 
     @Test
     @TestSecurity(user = "card-list-reader", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "card-list-reader"),
+            Claim(key = "preferred_username", value = "card-list-reader"),
+        ],
+    )
     fun `party card list returns a bounded newest slice and keeps legacy full reads`() {
         val partyId = UUID.randomUUID()
         val oldest = seedCard(partyId, Instant.parse("2026-01-01T00:00:00Z"))

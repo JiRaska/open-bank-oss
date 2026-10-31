@@ -9,28 +9,15 @@ quarkus:
     limits:
       max-body-size: 10M
 
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
-
   datasource:
     db-kind: postgresql
     username: openbank
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_balances
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_balances
 
@@ -61,9 +48,13 @@ quarkus:
   rest-client:
     ledger-service:
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     account-service:
       url: ${ACCOUNT_SERVICE_URL:http://localhost:8102}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
 
   smallrye-reactive-messaging:
@@ -93,11 +84,6 @@ quarkus:
     always-include: true
     path: /api/docs
 
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -122,7 +108,20 @@ mp:
         client.id: balance-outbox-service-${quarkus.uuid}
         topic: openbank.balance.events
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      notification-requests-out:
+        connector: smallrye-kafka
+        topic: openbank.notification.requests
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
+      balance-alerts-in:
+        connector: smallrye-kafka
+        topic: openbank.balance.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.balance.balance-alerts-in
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
       # ADR-0039 Phase D: ledger journal stream (all journal events on one topic; the consumer
       # filters by eventType and only projects AccountBookedChanged). Gated OFF by
       # openbank.balance.projection.enabled until the Phase D-2 cutover removes the saga debit.
@@ -196,6 +195,9 @@ mp:
       password: openbank_secret
       reactive:
         url: vertx-reactive:postgresql://localhost:5432/openbank_balances_it
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_balances_it
     management:
@@ -210,6 +212,11 @@ mp:
       enabled: false
 
 openbank:
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:

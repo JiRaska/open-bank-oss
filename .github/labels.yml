@@ -15,6 +15,14 @@
 # namespace (`runs-on`, rules.yaml: ci_runners) and are NOT issue labels — keep them out.
 
 labels:
+  # --- PR span (rules.yaml: pr_span_limits, check-pr-component-span.py) -------------------
+  - name: integration-branch
+    color: "fbca04"
+    description: "PR into a long-lived integration branch; exempt from the span limit, never based on main."
+  # --- merge train (ADR-0343, merge-train.yml) -----------------------------------------
+  - name: merge-train
+    color: "0e8a16"
+    description: "Merge-train carrier PR (ADR-0343): verifies a batch as one tree; auto-closed, never merge."
   # --- VEX / vulnerability triage (ADR-0030 D1, vex-triage.yml) -------------------------
   - name: vex-triage
     color: "b60205"
@@ -72,6 +80,9 @@ labels:
   - name: deploy-drift
     color: "b60205"
     description: "Dedup marker for the deployed==main drift watch. One open issue per drifted service."
+  - name: deploy-code-lag
+    color: "b60205"
+    description: "Dedup marker for the deployed-code-lag watch. One open issue per service past the hours threshold."
   - name: main-red
     color: "b60205"
     description: "main-red watch (#4019): one open issue per watched workflow, closed when main goes green."
@@ -145,3 +156,7 @@ labels:
   - name: deps-freshness
     color: "0e8a16"
     description: "Standing dependency-freshness report issue (ADR-0279 #15), bot-maintained."
+
+  - name: "merge-priority:repair"
+    color: "d93f0b"
+    description: "Defer new deploy auto-merges while this repair PR is open; remove to release."

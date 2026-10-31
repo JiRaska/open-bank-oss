@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-import { isUuid } from '@/lib/party/resolveParty'
+import { isUuid } from '@/lib/party/contracts'
 import type { ApprovalDomain, DomainApprovalItem } from '@/lib/approvals/triage'
 
 export interface AgentProposal {
@@ -38,6 +38,10 @@ export const APPROVAL_DOMAINS = [
 ] as const
 const DOMAIN_SET = new Set<string>(APPROVAL_DOMAINS)
 const SOURCE_STATES = new Set<ApprovalSourceState>(['ok', 'forbidden', 'unavailable', 'not-configured'])
+const MAKER_ACTOR_KINDS = new Set(['HUMAN', 'AI_AGENT', 'SERVICE_ACCOUNT', 'CUSTOMER_PARTY', 'UNKNOWN'])
+// ADR-0227 D1 projection facets — optional on the wire (older BFFs and pre-projection sources
+// simply lack them); validated when present.
+const RISK_CLASSES = new Set(['MONEY_PATH', 'DESTRUCTIVE', 'OPERATIONAL'])
 
 function nonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
@@ -89,9 +93,16 @@ function parseInboxItem(value: unknown): ApprovalInboxItem | null {
   if (
     !nonEmpty(item.id) || !nonEmpty(item.domain) || !DOMAIN_SET.has(item.domain) ||
     !nonEmpty(item.action) || !nullableString(item.resourceId) || !nullableString(item.maker) ||
-    !nullableString(item.proposedAt) || (item.proposedAt !== null && !instant(item.proposedAt))
+    !nullableString(item.proposedAt) || (item.proposedAt !== null && !instant(item.proposedAt)) ||
+    (item.makerActorKind !== undefined &&
+      (typeof item.makerActorKind !== 'string' || !MAKER_ACTOR_KINDS.has(item.makerActorKind))) ||
+    (item.summary !== undefined && !nullableString(item.summary)) ||
+    (item.amount !== undefined && !nullableString(item.amount)) ||
+    (item.currency !== undefined && !nullableString(item.currency)) ||
+    (item.payloadRef !== undefined && !nullableString(item.payloadRef)) ||
+    (item.riskClass !== undefined && !RISK_CLASSES.has(String(item.riskClass)))
   ) return null
-  return item as unknown as ApprovalInboxItem
+  return { ...item, makerActorKind: item.makerActorKind ?? 'UNKNOWN' } as ApprovalInboxItem
 }
 
 export function parseApprovalInbox(value: unknown): ApprovalInbox | null {

@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.notification.integration
 
+import com.openbank.notification.application.OperatorDispatchStatus
 import com.openbank.notification.application.OperatorMessageRejected
 import com.openbank.notification.application.OperatorMessageRequest
 import com.openbank.notification.application.OperatorMessageService
@@ -77,7 +78,8 @@ class OperatorMessageServiceIT {
             )
         }
 
-        assertThat(notificationId).isNotNull()
+        assertThat(notificationId.id).isNotNull()
+        assertThat(notificationId.dispatchStatus).isEqualTo(OperatorDispatchStatus.SENT)
 
         val sent = mailbox.getMailMessagesSentTo("followup@example.com")
         assertThat(sent).hasSize(1)

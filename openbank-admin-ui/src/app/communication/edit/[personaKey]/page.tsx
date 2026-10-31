@@ -26,6 +26,7 @@ import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { classifyBffFailure } from '@/lib/services/bff'
+import { UiMessageEditor } from '@/components/communication/UiMessageEditor'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 interface StyleVersionDraft {
@@ -50,6 +51,7 @@ interface GoldenSetEntry {
 }
 
 const PROXY_BASE = '/api/svc/communication-service/api/v1/personas'
+const STYLE_WRITE_BASE = '/api/svc/communication-service/api/v2/personas'
 
 export default function CommunicationStyleEditorPage() {
   const { t } = useLanguage()
@@ -61,6 +63,46 @@ export default function CommunicationStyleEditorPage() {
   const [formOfAddress, setFormOfAddress] = useState('')
   const [signature, setSignature] = useState('')
   const [maxLength, setMaxLength] = useState('')
+  const [uiMessages, setUiMessages] = useState<Record<string, string>>({})
+  const [preferredTerms, setPreferredTerms] = useState<Record<string, string>>({})
+  const [forbiddenTerms, setForbiddenTerms] = useState<string[]>([])
+  const [loadingPublished, setLoadingPublished] = useState(true)
+  const [publishedLoaded, setPublishedLoaded] = useState(false)
+  const [basePublishedVersion, setBasePublishedVersion] = useState<number | null>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setLoadingPublished(true)
+    setPublishedLoaded(false)
+    setBasePublishedVersion(null)
+    setTone(''); setFormality(''); setFormOfAddress(''); setSignature(''); setMaxLength('')
+    setUiMessages({}); setPreferredTerms({}); setForbiddenTerms([])
+    fetch(`${STYLE_WRITE_BASE}/${encodeURIComponent(personaKey)}/editor-state`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]) })
+      .then(async res => {
+        if (!res.ok) throw new Error('Editor state unavailable')
+        const state = await res.json()
+        if (controller.signal.aborted) return
+        if (!Number.isInteger(state.basePublishedVersion) || state.basePublishedVersion < 0) throw new Error('Invalid published style generation')
+        const published = state.published
+        if (published && (!Number.isInteger(published.styleVersion) || published.styleVersion !== state.basePublishedVersion)) throw new Error('Inconsistent editor state')
+        setBasePublishedVersion(state.basePublishedVersion)
+        if (!published) { setPublishedLoaded(true); return }
+        setTone(published.tone ?? '')
+        setFormality(published.formality ?? '')
+        setFormOfAddress(published.formOfAddress ?? '')
+        setSignature(published.signature ?? '')
+        setMaxLength(published.maxLength == null ? '' : String(published.maxLength))
+        setUiMessages(published.uiMessages ?? {})
+        setPreferredTerms(published.preferredTerms ?? {})
+        setForbiddenTerms(published.forbiddenTerms ?? [])
+        setPublishedLoaded(true)
+      })
+      .catch(() => { if (!controller.signal.aborted) setUnavailable({ kind: 'unreachable' }) })
+      .finally(() => { if (!controller.signal.aborted) setLoadingPublished(false) })
+    return () => controller.abort()
+  }, [personaKey, loadAttempt])
 
   const [saving, setSaving] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -68,7 +110,6 @@ export default function CommunicationStyleEditorPage() {
   const [lintViolations, setLintViolations] = useState<string[] | null>(null)
   const [draft, setDraft] = useState<StyleVersionDraft | null>(null)
   const [draftId, setDraftId] = useState('')
-  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
 
   // Checker's initiate-publish state — deliberately separate from the maker's `draft` above:
   // an approver deciding to publish typically was not the one who just drafted it in this
@@ -82,7 +123,7 @@ export default function CommunicationStyleEditorPage() {
   const saveDraft = useCallback(async () => {
     setSaving(true); setError(null); setLintViolations(null)
     try {
-      const res = await fetch(`${PROXY_BASE}/${encodeURIComponent(personaKey)}/style-versions`, {
+      const res = await fetch(`${STYLE_WRITE_BASE}/${encodeURIComponent(personaKey)}/style-versions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -91,8 +132,10 @@ export default function CommunicationStyleEditorPage() {
           formOfAddress,
           signature: signature || null,
           maxLength: maxLength ? Number(maxLength) : null,
-          preferredTerms: {},
-          forbiddenTerms: [],
+          preferredTerms,
+          forbiddenTerms,
+          uiMessages,
+          basePublishedVersion,
         }),
       })
       if (res.status === 400) {
@@ -115,13 +158,13 @@ export default function CommunicationStyleEditorPage() {
     } catch {
       setUnavailable({ kind: 'unreachable' })
     } finally { setSaving(false) }
-  }, [personaKey, tone, formality, formOfAddress, signature, maxLength, t])
+  }, [personaKey, tone, formality, formOfAddress, signature, maxLength, preferredTerms, forbiddenTerms, uiMessages, basePublishedVersion, t])
 
   const submitForReview = useCallback(async () => {
     if (!draft) return
     setSubmitting(true); setError(null)
     try {
-      const res = await fetch(`${PROXY_BASE}/style-versions/${encodeURIComponent(draft.id)}/submit`, {
+      const res = await fetch(`${STYLE_WRITE_BASE}/style-versions/${encodeURIComponent(draft.id)}/submit`, {
         method: 'POST',
       })
       if (!res.ok) {
@@ -142,7 +185,7 @@ export default function CommunicationStyleEditorPage() {
     try {
       const headers: Record<string, string> = {}
       if (approvalId) headers['x-approval-id'] = approvalId
-      const res = await fetch(`${PROXY_BASE}/style-versions/${encodeURIComponent(id)}/publish`, {
+      const res = await fetch(`${STYLE_WRITE_BASE}/style-versions/${encodeURIComponent(id)}/publish`, {
         method: 'POST',
         headers,
       })
@@ -156,6 +199,18 @@ export default function CommunicationStyleEditorPage() {
             'Publikace pozastavena — čeká na jiného schvalovatele na nástěnce.',
             'Publish paused — waiting for a different approver on the workbench.',
           ),
+        })
+        return
+      }
+      if (res.status === 409) {
+        const body = await res.json().catch(() => null)
+        const reason: string = typeof body?.error === 'string' ? body.error : ''
+        const stale = reason.includes('published style changed') || reason.includes('no known published base')
+        setPublishResult({
+          ok: false,
+          text: stale
+            ? t('Koncept vychází ze starší verze. Načtěte aktuální text a připravte nový koncept.', 'This draft is based on an older version. Reload the current copy and prepare a new draft.')
+            : t('Publikace byla odmítnuta. Ověřte stav verze a schvalovatele.', 'Publish was refused. Check the version status and approver.'),
         })
         return
       }
@@ -240,7 +295,7 @@ export default function CommunicationStyleEditorPage() {
       <div className="page">
         <PageHeader title={t('Editor stylu', 'Style editor')} />
         <DataUnavailable kind={unavailable.kind} service="Communication" feature={t('editor stylu', 'style editor')}>
-          <button type="button" className="btn btn-secondary" onClick={() => setUnavailable(null)}>
+          <button type="button" className="btn btn-secondary" onClick={() => { setUnavailable(null); if (!publishedLoaded) setLoadAttempt(v => v + 1) }}>
             {t('Zkusit znovu', 'Try again')}
           </button>
         </DataUnavailable>
@@ -271,32 +326,36 @@ export default function CommunicationStyleEditorPage() {
             <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
               {t('Tón', 'Tone')}
               <input className="input" value={tone} onChange={e => setTone(e.target.value)}
-                placeholder={t('např. vřelý a uklidňující', 'e.g. warm and reassuring')} disabled={!!draft} />
+                placeholder={t('např. vřelý a uklidňující', 'e.g. warm and reassuring')} disabled={!!draft || loadingPublished} />
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
               {t('Formálnost', 'Formality')}
               <input className="input" value={formality} onChange={e => setFormality(e.target.value)}
-                placeholder={t('např. neformální, tykání', 'e.g. informal, first-name basis')} disabled={!!draft} />
+                placeholder={t('např. neformální, tykání', 'e.g. informal, first-name basis')} disabled={!!draft || loadingPublished} />
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
               {t('Oslovení', 'Form of address')}
               <input className="input" value={formOfAddress} onChange={e => setFormOfAddress(e.target.value)}
-                placeholder={t('např. tykání', 'e.g. informal "you"')} disabled={!!draft} />
+                placeholder={t('např. tykání', 'e.g. informal "you"')} disabled={!!draft || loadingPublished} />
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
               {t('Podpis', 'Signature')}
               <input className="input" value={signature} onChange={e => setSignature(e.target.value)}
-                placeholder={t('nepovinné', 'optional')} disabled={!!draft} />
+                placeholder={t('nepovinné', 'optional')} disabled={!!draft || loadingPublished} />
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
               {t('Maximální délka (znaky)', 'Max length (characters)')}
               <input className="input" type="number" min={1} value={maxLength}
-                onChange={e => setMaxLength(e.target.value)} placeholder={t('nepovinné', 'optional')} disabled={!!draft} />
+                onChange={e => setMaxLength(e.target.value)} placeholder={t('nepovinné', 'optional')} disabled={!!draft || loadingPublished} />
             </label>
+
+            {personaKey === 'customer-copilot' && (
+              <UiMessageEditor value={uiMessages} onChange={setUiMessages} disabled={!!draft || loadingPublished} />
+            )}
 
             {lintViolations && lintViolations.length > 0 && (
               <div className="badge badge-danger" style={{ display: 'block', whiteSpace: 'pre-wrap' }}>
@@ -310,7 +369,7 @@ export default function CommunicationStyleEditorPage() {
 
             <div style={{ display: 'flex', gap: '8px' }}>
               {!draft && (
-                <button type="button" className="btn btn-primary" onClick={saveDraft} disabled={saving || !tone || !formality || !formOfAddress}>
+                <button type="button" className="btn btn-primary" onClick={saveDraft} disabled={saving || !publishedLoaded || basePublishedVersion === null || !tone || !formality || !formOfAddress}>
                   <Save size={14} /> {saving ? t('Ukládám…', 'Saving…') : t('Uložit koncept', 'Save draft')}
                 </button>
               )}

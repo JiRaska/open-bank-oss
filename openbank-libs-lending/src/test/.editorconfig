@@ -1,0 +1,6 @@
+# ktlint reads this for the jqwik property-test sources: backtick sentence names are
+# the fleet's test-naming convention, and ktlint only exempts them on functions annotated
+# with a KNOWN test annotation — jqwik's @Property is not in that list (build.gradle.kts
+# testImplementation net.jqwik:jqwik). Scope the exemption to this source set's .kt files.
+[*.kt]
+ktlint_function_naming_ignore_when_annotated_with = Property, Example

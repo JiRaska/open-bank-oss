@@ -1,0 +1,37 @@
+{
+  "$comment": "Pack manifest (ADR-0257, #13429): the schemas this pack contributes, in registration order, and any revision approval policy. Data, not kernel code.",
+  "pack": "retirement",
+  "schemas": [
+    {
+      "id": "org.openbank.retirement.pension-savings",
+      "version": 1,
+      "resource": "pension-savings-v1.schema.json"
+    },
+    {
+      "id": "org.openbank.retirement.pension-savings",
+      "version": 2,
+      "resource": "pension-savings-v2.schema.json",
+      "approvalPolicy": {
+        "roles": [
+          {
+            "code": "LEGAL_COUNSEL",
+            "authority": "PENSION_LEGAL_APPROVER"
+          },
+          {
+            "code": "PRODUCT_OWNER",
+            "authority": "PENSION_PRODUCT_OWNER"
+          }
+        ],
+        "requireEffectiveFrom": true,
+        "requiredAttributes": {
+          "reviewStatus": "LEGAL_AND_COMMERCIAL_REVIEWED"
+        }
+      }
+    },
+    {
+      "id": "org.openbank.retirement.pension-savings",
+      "version": 3,
+      "resource": "pension-savings-v3.schema.json"
+    }
+  ]
+}

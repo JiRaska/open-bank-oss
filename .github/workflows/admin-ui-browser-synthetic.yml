@@ -13,6 +13,7 @@ on:
     branches: [main]
     paths:
       - 'openbank-admin-ui/scripts/admin-login-synthetic.mjs'
+      - 'openbank-admin-ui/scripts/admin-operator-journey.mjs'
       - '.github/workflows/admin-ui-browser-synthetic.yml'
       # The security-excellence probe below must run when its page changes, not just
       # when the probe script does.
@@ -31,7 +32,7 @@ jobs:
         browser: [chromium, firefox]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
           cache: npm
@@ -58,10 +59,59 @@ jobs:
             --browser-vitals openbank-admin-ui/build/test-intelligence/browser-vitals-${{ matrix.browser }}.json \
             --out openbank-admin-ui/build/test-intelligence/run-${{ matrix.browser }}.json
       - if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-intelligence-run-openbank-admin-ui-browser-${{ matrix.browser }}-${{ github.run_id }}-a${{ github.run_attempt }}
           path: openbank-admin-ui/build/test-intelligence/run-${{ matrix.browser }}.json
+          retention-days: 30
+          if-no-files-found: error
+
+  # Authenticated operator journey (journeys.yaml: admin-operator-access, ADR-0252). A
+  # least-privilege bank-owned canary operator completes the deployed sandbox SSO flow in a
+  # real browser, reaches the Test Intelligence workspace, and is REFUSED on an admin-only
+  # BFF route. Fail-closed by contract: until the owner provisions the canary identity
+  # (openbank-infra/scripts/provision-synthetic-operator.sh) and sets the two workflow
+  # secrets, the script logs "credential absent" and fails every check — red, never green.
+  # Chromium only: the realm 'openbank' login ceremony is template-verified on Chromium, and
+  # the role-boundary assertion is one verdict, not a per-engine matrix.
+  admin-operator-access:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+      - working-directory: openbank-admin-ui
+        run: npm ci --no-audit --no-fund
+      - working-directory: openbank-admin-ui
+        run: npx playwright install --with-deps chromium
+      - id: synthetic
+        working-directory: openbank-admin-ui
+        env:
+          OPENBANK_BROWSER: chromium
+          OPENBANK_SYNTHETIC_JOURNEY: admin-operator-access
+          SYNTHETIC_OPERATOR_USERNAME: ${{ secrets.SYNTHETIC_OPERATOR_USERNAME }}
+          SYNTHETIC_OPERATOR_PASSWORD: ${{ secrets.SYNTHETIC_OPERATOR_PASSWORD }}
+          ADMIN_UI_EXPECTED_BUILD_SHA: ${{ inputs.expected_build_sha }}
+          OPENBANK_BROWSER_VITALS_OUTPUT: build/test-intelligence/browser-vitals-admin-operator-access.json
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: build/test-results/e2e/admin-operator-journey.xml
+        run: node scripts/admin-operator-journey.mjs
+      - if: always()
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service openbank-admin-ui --component openbank-admin-ui \
+            --synthetic-journey admin-operator-access \
+            --synthetic-variant chromium \
+            --browser-vitals openbank-admin-ui/build/test-intelligence/browser-vitals-admin-operator-access.json \
+            --out openbank-admin-ui/build/test-intelligence/run-admin-operator-access.json
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-intelligence-run-openbank-admin-ui-admin-operator-access-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: openbank-admin-ui/build/test-intelligence/run-admin-operator-access.json
           retention-days: 30
           if-no-files-found: error
 
@@ -78,7 +128,7 @@ jobs:
         browser: [chromium, firefox]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
           cache: npm
@@ -107,7 +157,7 @@ jobs:
             --browser-vitals openbank-admin-ui/build/test-intelligence/browser-vitals-security-excellence-${{ matrix.browser }}.json \
             --out openbank-admin-ui/build/test-intelligence/run-security-excellence-${{ matrix.browser }}.json
       - if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-intelligence-run-openbank-admin-ui-security-excellence-${{ matrix.browser }}-${{ github.run_id }}-a${{ github.run_attempt }}
           path: openbank-admin-ui/build/test-intelligence/run-security-excellence-${{ matrix.browser }}.json

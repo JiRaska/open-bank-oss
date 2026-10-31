@@ -3,7 +3,9 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Async Event API
-  version: 2.3.0
+  # 2.4.0 -> 2.5.0 (#13179): additive minimal oversight-trigger channel and payload.
+  # 2.5.0 -> 2.6.0 (#10760): additive CZ_TERRORISTS value on sanctions list enums.
+  version: 2.6.0
   description: |
     Kafka event streams across OpenBank services.
 
@@ -75,9 +77,9 @@ info:
       those topics trigger, so those rows assert a business time nobody measured (#3883).
 
     Known gaps this document now records rather than hides: `openbank.accounts.account.created`
-    carries four structurally unrelated bodies; sepa-instant emits no `ce-type`, no `ce-id` and no
-    partition key at all (ADR-0003 N2/N3 violation) and drops every subtype-specific field before
-    the wire; and the interest payloads carry no event time of any kind.
+    carries four structurally unrelated bodies; sepa-instant carries `ce-type` and stable `ce-id`
+    but no partition key, and drops every subtype-specific field before the wire; and the interest
+    payloads carry no event time of any kind.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -105,12 +107,13 @@ channels:
       not on the `...account.status-changed` topic their call sites name — that topic does not
       exist, has no Kafka resource, and nothing consumes it.
 
-      Mixed relay. Three of the four are published by a **direct emitter**
+      Mixed relay. `AccountStatusChanged` and `AccountClosed` are published by a **direct emitter**
       (`KafkaAccountEventPublisher`, `writeValueAsString(event)`) which sets no headers at all;
-      `SavingsWithdrawalApproved` is outbox-relayed and so also carries `ce-type`. All four
-      serialise a `DomainEvent` subclass, so all four do carry a **body eventType** — this is one
-      of the few channels where the body-field idiom is genuinely correct. Discriminate on the body
-      field here; `ce-type` is present only on the withdrawal event.
+      `AccountCreated` (since ADR-0341 D1) and `SavingsWithdrawalApproved` are outbox-relayed and so
+      also carry `ce-type`. All four serialise a `DomainEvent` subclass, so all four do carry a
+      **body eventType** — this is one of the few channels where the body-field idiom is genuinely
+      correct. Discriminate on the body field here; `ce-type` is present only on the outbox-relayed
+      events.
     messages:
       AccountCreated:
         $ref: '#/components/messages/AccountCreated'
@@ -160,21 +163,21 @@ channels:
   sepa-instant-events:
     address: openbank.sepa.instant.events
     description: |
-      SCT Inst lifecycle. **A direct emitter** — one of the very few producers on this platform
-      that bypasses the outbox entirely (`KafkaSctInstEventPublisher`, a bare `MutinyEmitter`).
-      Consequences a consumer must plan for: there is **no `ce-type` header, no `ce-id`, no
-      `idempotency-key` and no record key**, so these events cannot be deduplicated at-least-once
-      and are not ordered per aggregate (ADR-0003 N2/N3).
+      SCT Inst lifecycle. Payment state and its event are committed together, then relayed from
+      the outbox with retry. The relay preserves the existing body and sends `ce-type`, stable
+      `ce-id` and `idempotency-key` headers. The record is keyed by the payment id, so order per payment is
+      preserved within its partition. Consumers can use `ce-id` to deduplicate a retried send.
 
       The discriminator is the body key **`type`** — spelled `type`, not `eventType` — whose value
       is a Kotlin class simple name (`SctInstPaymentSubmitted`, `SctInstPaymentSettled`,
       `SctInstPaymentRejected`, `SctInstPaymentTimeout`, `SctInstPaymentRecalled`), not a dotted
       event name like every other channel here.
 
-      **The wire body is three keys and nothing else.** The publisher builds its own map and
+      **The wire body is four keys and nothing else.** The publisher builds its own map and
       discards every subtype-specific field of the domain event — `debtorIban`, `creditorIban`,
       `amount`, `currency`, `endToEndId`, `settledAt`, `reason`, `recallReason` never reach the
-      wire. A consumer needing any of them must call back into the service.
+      wire. `sourceService` is `sepa-instant`. A consumer needing a subtype-specific field must
+      call back into the service.
     messages:
       SctInstEvent:
         $ref: '#/components/messages/SctInstEvent'
@@ -203,6 +206,19 @@ channels:
     messages:
       TransactionInitiated:
         $ref: '#/components/messages/TransactionInitiated'
+
+  fraud-shadow-velocity:
+    address: openbank.fraud.shadow.velocity.v1
+    description: >-
+      Opt-in Kafka Streams direct emitter of shadow bucket snapshots, discriminated by
+      body eventType=FraudShadowVelocity and schemaVersion=1. Key is accountId:window:windowStartEpochMillis.
+      This is a diagnostic projection, not a decision or arbitrary point-in-time feature value.
+      One-hour grace follows each UTC bucket end; updates may arrive out of order across buckets.
+      Original input topic/partition/offset and outbox ce-id survive account repartition.
+      No fraud verdict path or existing Redis feature store consumes this topic.
+    messages:
+      FraudShadowVelocity:
+        $ref: '#/components/messages/FraudShadowVelocity'
 
   balance-events:
     address: openbank.balance.events
@@ -244,6 +260,18 @@ channels:
         $ref: '#/components/messages/AmlCaseCreated'
       AmlCaseStatusChanged:
         $ref: '#/components/messages/AmlCaseStatusChanged'
+
+  oversight-triggers:
+    address: openbank.oversight-triggers
+    description: |
+      Minimal wake-up notifications for agent-service's immediate compliance sweep (ADR-0031 D9).
+      aml-service produces HIGH/CRITICAL case-creation triggers; sanctions-service produces
+      high-risk screening triggers. Both fan out from their durable outbox and preserve the source
+      event's `ce-id`, `ce-type` and partition key. The body deliberately excludes customer,
+      screening and match PII; the consumer needs no payload fields to start its sweep.
+    messages:
+      OversightTrigger:
+        $ref: '#/components/messages/OversightTrigger'
 
   party-events:
     address: openbank.party.events
@@ -480,6 +508,12 @@ channels:
         $ref: '#/components/messages/SanctionsListChangeStorm'
 
 operations:
+  publishFraudShadowVelocity:
+    action: send
+    channel:
+      $ref: '#/channels/fraud-shadow-velocity'
+    summary: fraud-service emits opt-in H1/H24 bucket snapshots without changing verdict inputs
+
   publishAccountEvents:
     action: send
     channel:
@@ -504,13 +538,26 @@ operations:
     action: send
     channel:
       $ref: '#/channels/sepa-instant-events'
-    summary: sepa-instant publishes SCT Inst lifecycle events directly, with no headers
+    summary: sepa-instant relays SCT Inst lifecycle events with stable ce-id and ce-type headers
 
   publishDomesticPaymentEvent:
     action: send
     channel:
       $ref: '#/channels/domestic-payment-events'
     summary: domestic-payment publishes created / status-changed, discriminated by ce-type
+
+  consumeDomesticPaymentStatusForPensionSettlement:
+    action: receive
+    channel:
+      $ref: '#/channels/domestic-payment-events'
+    messages:
+      - $ref: '#/channels/domestic-payment-events/messages/DomesticPaymentStatusChanged'
+    summary: >-
+      pension-service (channel domestic-payment-events-in, group pension-service-domestic-payment)
+      reads ce-type domestic.payment.status-changed and writes SETTLED / REJECTED onto the payout
+      instruction whose payment reference is paymentId; other types and other payments are
+      ignored. Rethrown failures dead-letter to openbank.dlq.pension.domestic-payment-events-in
+      (#12378).
 
   publishTransactionEvent:
     action: send
@@ -606,10 +653,18 @@ operations:
 
 components:
   messages:
+    FraudShadowVelocity:
+      name: FraudShadowVelocity
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/FraudShadowVelocityPayload'
     AccountCreated:
       name: AccountCreated
       title: Account Created
-      description: 'Direct emitter. Body `eventType` = `AccountCreated`. No Kafka headers are set.'
+      description: >-
+        OUTBOX-relayed since ADR-0341 D1 (written in the account-opening transaction), so it now
+        carries `ce-type`, `ce-id` and `idempotency-key` like SavingsWithdrawalApproved. Body
+        `eventType` = `AccountCreated`; consumers keep discriminating on the body field.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/AccountCreatedPayload'
@@ -636,8 +691,8 @@ components:
       name: SavingsWithdrawalApproved
       title: Savings Withdrawal Approved
       description: >-
-        The only OUTBOX-relayed event on this topic, so the only one carrying `ce-type`, `ce-id`
-        and `idempotency-key`. Written by `WithdrawalProposalRepositoryImpl`.
+        OUTBOX-relayed (like AccountCreated), so it carries `ce-type`, `ce-id` and
+        `idempotency-key`. Written by `WithdrawalProposalRepositoryImpl`.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/SavingsWithdrawalApprovedPayload'
@@ -686,8 +741,8 @@ components:
     SctInstEvent:
       name: SctInstEvent
       description: >-
-        Direct emitter, no headers of any kind. The discriminator is the body key `type` (a Kotlin
-        class simple name). Three keys total.
+        Outbox-relayed with stable `ce-id`, `ce-type` and `idempotency-key` headers. The body
+        discriminator is `type` (a Kotlin class simple name). Four body keys total.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/SctInstEventPayload'
@@ -743,6 +798,13 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/AmlCaseStatusChangedPayload'
+
+    OversightTrigger:
+      name: OversightTrigger
+      description: 'Minimal sourceService + occurredAt wake-up; source ce-id/ce-type headers are retained.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/OversightTriggerPayload'
 
     PartyEvent:
       name: PartyEvent
@@ -983,6 +1045,48 @@ components:
         $ref: '#/components/schemas/SanctionsListChangeStormPayload'
 
   schemas:
+    FraudShadowVelocityPayload:
+      type: object
+      required: [eventType, schemaVersion, accountId, eventId, occurredAt, sourceTopic, sourcePartition, sourceOffset, window, windowStart, windowEndExclusive, count]
+      properties:
+        eventType:
+          type: string
+          const: FraudShadowVelocity
+        schemaVersion:
+          type: integer
+          const: 1
+        accountId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+          description: Last contributing outbox ce-id, not the independently generated body eventId.
+        occurredAt:
+          type: string
+          format: date-time
+          description: Business time of the last contributing input, not an as-of watermark.
+        sourceTopic:
+          type: string
+          const: openbank.transactions.transaction.initiated
+        sourcePartition:
+          type: integer
+          minimum: 0
+        sourceOffset:
+          type: integer
+          minimum: 0
+        window:
+          type: string
+          enum: [H1, H24]
+        windowStart:
+          type: string
+          format: date-time
+        windowEndExclusive:
+          type: string
+          format: date-time
+        count:
+          type: integer
+          minimum: 1
     SanctionsListChangedPayload:
       type: object
       required: [aggregateId, aggregateType, listType, changedExternalIds, deactivatedExternalIds, changeCount, publicationId, chunkIndex, chunkCount, occurredAt]
@@ -996,7 +1100,7 @@ components:
           enum: [SanctionsList]
         listType:
           type: string
-          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, PEP_GLOBAL, FATF_HIGH_RISK, CNB_DOMESTIC]
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, PEP_GLOBAL, FATF_HIGH_RISK, CNB_DOMESTIC, CZ_TERRORISTS]
         changedExternalIds:
           type: array
           maxItems: 64
@@ -1107,6 +1211,20 @@ components:
               type: string
             currency:
               type: string
+            productRevision:
+              description: >-
+                The published catalog revision the account was opened under (ADR-0341 D1). Additive;
+                null only for an account with no pin.
+              type: [object, 'null']
+              properties:
+                offeringId: { type: string, format: uuid }
+                productCode: { type: string }
+                revisionId: { type: string, format: uuid }
+                revisionNumber: { type: integer, minimum: 1 }
+                contentHash: { type: [string, 'null'] }
+                irRevisionHash: { type: [string, 'null'] }
+                irVersion: { type: [integer, 'null'] }
+                pinnedAt: { type: string, format: date-time }
 
     AccountStatusChangedPayload:
       allOf:
@@ -1294,10 +1412,10 @@ components:
           const: sepa-payment
 
     SctInstEventPayload:
-      # Three keys, and that is the whole message. The publisher builds this map by hand and
+      # Four keys, and that is the whole message. The publisher builds this map by hand and
       # discards every other field of the domain event before it reaches the wire.
       type: object
-      required: [type, paymentId, occurredAt]
+      required: [type, paymentId, occurredAt, sourceService]
       properties:
         type:
           type: string
@@ -1309,13 +1427,16 @@ components:
             - SctInstPaymentRecalled
           description: >-
             The discriminator, spelled `type` rather than `eventType`, and valued with a Kotlin
-            class simple name rather than a dotted event name. No `ce-type` header exists here.
+            class simple name rather than a dotted event name. Also carried as `ce-type`.
         paymentId:
           type: string
           format: uuid
         occurredAt:
           type: string
           format: date-time
+        sourceService:
+          type: string
+          const: sepa-instant
 
     DomesticPaymentCreatedPayload:
       type: object
@@ -1510,6 +1631,18 @@ components:
           type: [string, 'null']
         matchedEntity:
           type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+
+    OversightTriggerPayload:
+      type: object
+      additionalProperties: false
+      required: [sourceService, occurredAt]
+      properties:
+        sourceService:
+          type: string
+          enum: [aml-service, sanctions-service]
         occurredAt:
           type: string
           format: date-time
@@ -1913,7 +2046,7 @@ components:
           format: uuid
         channel:
           type: string
-          enum: [EMAIL, PUSH]
+          enum: [EMAIL, PUSH, INBOX]
         template:
           type: string
           description: Closed notification-service template identifier.
@@ -2205,7 +2338,7 @@ components:
           type: array
           items:
             type: string
-            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC, CZ_TERRORISTS]
         reviewedBy:
           type: [string, 'null']
           description: Populated only on `SanctionReviewed`.
@@ -2231,7 +2364,7 @@ components:
       properties:
         listType:
           type: string
-          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC, CZ_TERRORISTS]
         matchType:
           type: string
           enum: [EXACT, FUZZY, PHONETIC, ALIAS]

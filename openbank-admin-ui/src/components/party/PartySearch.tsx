@@ -35,8 +35,17 @@ export interface PartyHit {
   legalName?: string | null
   tradingName?: string | null
   email?: string | null
+  dateOfBirth?: string | null
   status?: string | null
   kycStatus?: string | null
+}
+
+/** ISO `yyyy-mm-dd` → `15. 6. 1985` (cs) / `1985-06-15` (en); the field is a plain date, no TZ. */
+export function formatBirthDate(iso: string | null | undefined, language: string): string {
+  if (!iso) return '—'
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!m) return iso
+  return language === 'cs' ? `${Number(m[3])}. ${Number(m[2])}. ${m[1]}` : iso
 }
 
 export function partyDisplayName(p: PartyHit): string {
@@ -127,7 +136,7 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
             value={term}
             onChange={e => setTerm(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') run() }}
-            placeholder={placeholder ?? t('Jméno nebo název firmy (nebo UUID party)', 'Name or company name (or party UUID)')}
+            placeholder={placeholder ?? t('Jméno, příjmení, rodné číslo / národní identifikátor, telefon nebo jméno + datum narození', 'Name, surname, national ID (birth number, SSN, PESEL…), phone, or name + date of birth')}
             aria-label={t('Vyhledat stranu', 'Search parties')}
             aria-controls="party-search-results"
             style={{
@@ -196,6 +205,7 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
             <thead>
               <tr>
                 <th>{t('Jméno', 'Name')}</th>
+                <th>{t('Datum narození', 'Date of birth')}</th>
                 <th>{t('E-mail', 'Email')}</th>
                 <th>{t('Stav', 'Status')}</th>
                 <th>KYC</th>
@@ -206,6 +216,7 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
               {hits.map(p => (
                 <tr key={p.id} style={{ background: selectedId === p.id ? 'var(--surface-hover)' : undefined }}>
                   <td style={{ fontWeight: 600 }}>{partyDisplayName(p)}</td>
+                  <td>{formatBirthDate(p.dateOfBirth, language)}</td>
                   <td style={{ color: 'var(--text-secondary)' }}>{p.email || '—'}</td>
                   <td>{p.status ? <StatusBadge status={p.status} withDot /> : '—'}</td>
                   <td>{p.kycStatus ? <StatusBadge status={p.kycStatus} /> : '—'}</td>

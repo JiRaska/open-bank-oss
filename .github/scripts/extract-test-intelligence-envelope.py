@@ -2,24 +2,38 @@
 """Select one main-branch Test Intelligence envelope from an Actions artifact ZIP."""
 
 import io
+import importlib.util
 import json
 import re
 import sys
 import tempfile
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 ENVELOPE_NAME = re.compile(r"(?:^|/)run(?:-[a-z0-9-]+)?\.json$")
+COLLECTOR_PATH = Path(__file__).with_name("collect-test-run-evidence.py")
+SPEC = importlib.util.spec_from_file_location("test_run_evidence_collector", COLLECTOR_PATH)
+assert SPEC and SPEC.loader
+COLLECTOR = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(COLLECTOR)
 
 
 def validate(payload: bytes) -> bytes:
     envelope = json.loads(payload)
-    if not isinstance(envelope, dict) or envelope.get("schemaVersion") != 1 or not isinstance(envelope.get("run"), dict):
+    if not isinstance(envelope, dict) or envelope.get("schemaVersion") not in (1, 2) or not isinstance(envelope.get("run"), dict):
         raise ValueError("run envelope has no supported schema or provenance")
+    COLLECTOR.validate_envelope(envelope)
     if envelope["run"].get("branch") != "main":
         raise ValueError("run envelope is not main-branch evidence")
     return payload
+
+
+def validate_component(path: Path, component: str) -> None:
+    envelope = json.loads(validate(path.read_bytes()))
+    if envelope["component"] != component:
+        raise ValueError("run envelope component differs from the staged service")
 
 
 def extract(archive: bytes) -> bytes:
@@ -52,15 +66,43 @@ def self_test() -> None:
                 zipped.writestr(name, content)
         return buffer.getvalue()
 
-    good = json.dumps({"schemaVersion": 1, "run": {"branch": "main"}}).encode()
+    example = {
+        "schemaVersion": 1, "component": "openbank-example-service", "suites": [],
+        "coverage": None, "testInfrastructure": {"declared": [], "observed": []},
+        "run": {"id": "123", "attempt": 1, "commit": "abcdef012345",
+                "branch": "main", "workflow": "Services CI", "url": "",
+                "observedAt": datetime.now(timezone.utc).isoformat()},
+    }
+    good = json.dumps(example).encode()
+    v2 = json.dumps(example | {"schemaVersion": 2}).encode()
     for name in ("run.json", "run-chromium.json", "nested/run-security-excellence-firefox.json"):
         assert extract(archive({name: good})) == good
+        assert extract(archive({name: v2})) == v2
+    with tempfile.TemporaryDirectory() as staged:
+        path = Path(staged) / "run.json"
+        for payload in (good, v2):
+            path.write_bytes(payload)
+            validate_component(path, "openbank-example-service")
+            try:
+                validate_component(path, "openbank-other-service")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("wrong service envelope was accepted")
+        path.write_bytes(json.dumps(example | {"schemaVersion": 3}).encode())
+        try:
+            validate_component(path, "openbank-example-service")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("future schema was accepted by deploy staging")
     for files in (
         {"run.json": good, "run-firefox.json": good},
         {"report.json": good},
         {"run.json": b"not-json"},
         {"run.json": b"[]"},
-        {"run.json": json.dumps({"schemaVersion": 1, "run": {"branch": "feature"}}).encode()},
+        {"run.json": json.dumps(example | {"run": example["run"] | {"branch": "feature"}}).encode()},
+        {"run.json": json.dumps(example | {"schemaVersion": 3}).encode()},
     ):
         try:
             extract(archive(files))
@@ -72,7 +114,7 @@ def self_test() -> None:
         cache = Path(temp)
         (cache / "valid.json").write_bytes(good)
         (cache / "wrong-branch.json").write_bytes(
-            json.dumps({"schemaVersion": 1, "run": {"branch": "feature"}}).encode()
+            json.dumps(example | {"run": example["run"] | {"branch": "feature"}}).encode()
         )
         (cache / "malformed.json").write_bytes(b"not-json")
         (cache / ".staged-ids").write_text("42\n43\n")
@@ -86,6 +128,12 @@ def self_test() -> None:
 if __name__ == "__main__":
     if sys.argv[1:] == ["--self-test"]:
         self_test()
+    elif len(sys.argv) == 4 and sys.argv[1] == "--validate-component":
+        try:
+            validate_component(Path(sys.argv[2]), sys.argv[3])
+        except (OSError, ValueError, UnicodeError, TypeError) as error:
+            print(f"Test Intelligence envelope rejected: {error}", file=sys.stderr)
+            sys.exit(1)
     elif len(sys.argv) == 3 and sys.argv[1] == "--prune-cache":
         try:
             removed = prune_cache(Path(sys.argv[2]))
@@ -100,5 +148,5 @@ if __name__ == "__main__":
             print(f"Test Intelligence envelope rejected: {error}", file=sys.stderr)
             sys.exit(1)
     else:
-        print("usage: extract-test-intelligence-envelope.py ARCHIVE OUTPUT | --prune-cache DIRECTORY", file=sys.stderr)
+        print("usage: extract-test-intelligence-envelope.py ARCHIVE OUTPUT | --prune-cache DIRECTORY | --validate-component PATH COMPONENT", file=sys.stderr)
         sys.exit(2)

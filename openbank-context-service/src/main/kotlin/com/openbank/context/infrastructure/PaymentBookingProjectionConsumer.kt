@@ -3,6 +3,7 @@ package com.openbank.context.infrastructure
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -224,7 +225,9 @@ private data class BookingNode(
     val version: Long,
 ) {
     fun values(bankScope: String, generation: Long, recordedAt: Instant): Map<String, Any> = mapOf(
-        "rowId" to UUID.nameUUIDFromBytes("$bankScope|$generation|$key".toByteArray(StandardCharsets.UTF_8)),
+        // Idempotency is the natural-key conflict target. A deterministic surrogate ID
+        // creates a competing primary-key conflict when channels insert the same node.
+        "rowId" to Ids.newId(),
         "key" to key,
         "bankScope" to bankScope,
         "generation" to generation,

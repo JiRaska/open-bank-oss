@@ -65,11 +65,14 @@ spec:
     - name: openbank.workload.availability
       rules:
         # Argo Rollouts — the gap the chart defaults leave completely open.
+        # argo-rollouts exports `namespace` = the CONTROLLER's namespace (argo-rollouts) and puts the
+        # Rollout's own in `exported_namespace`; the label_replace maps it back, or every alert is
+        # labelled argo-rollouts and the runbook kubectl hints point at the wrong namespace.
         - alert: RolloutNoAvailableReplicas
           expr: |
-            max by (namespace, name) (rollout_info_replicas_available) == 0
+            max by (namespace, name) (label_replace(rollout_info_replicas_available, "namespace", "$1", "exported_namespace", "(.+)")) == 0
               and on (namespace, name)
-            max by (namespace, name) (rollout_info_replicas_desired) > 0
+            max by (namespace, name) (label_replace(rollout_info_replicas_desired, "namespace", "$1", "exported_namespace", "(.+)")) > 0
           for: 15m
           labels:
             severity: critical

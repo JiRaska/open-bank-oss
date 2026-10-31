@@ -111,10 +111,19 @@ spec:
         request.kind.kind != 'Pod' ||
         !('cnpg.io/cluster' in object.metadata.?labels.orValue({}))
     # Inline, not a variable: autogen rewrites `object.spec` here to the pod template.
+    # UPDATE must not migrate unchanged legacy images: Job templates are immutable,
+    # and metadata/finalizer or replica-only updates must not cause an image rollout.
+    # Keep oldObject reads inline so autogen rewrites both current and old template paths.
     - name: has-rewritable-image
       expression: >-
-        (object.spec.?containers.orValue([]) + object.spec.?initContainers.orValue([])).exists(c,
-          variables.prefixes.exists(p, c.image.startsWith(p[0])))
+        object.spec.?containers.orValue([]).exists(c,
+          variables.prefixes.exists(p, c.image.startsWith(p[0])) &&
+          (request.operation != 'UPDATE' ||
+            !oldObject.spec.?containers.orValue([]).exists(old, old.name == c.name && old.image == c.image))) ||
+        object.spec.?initContainers.orValue([]).exists(c,
+          variables.prefixes.exists(p, c.image.startsWith(p[0])) &&
+          (request.operation != 'UPDATE' ||
+            !oldObject.spec.?initContainers.orValue([]).exists(old, old.name == c.name && old.image == c.image)))
   mutations:
     - patchType: ApplyConfiguration
       applyConfiguration:
@@ -122,7 +131,9 @@ spec:
           Object{
             spec: Object.spec{
               containers: object.spec.?containers.orValue([])
-                .filter(c, variables.prefixes.exists(p, c.image.startsWith(p[0])))
+                .filter(c, variables.prefixes.exists(p, c.image.startsWith(p[0])) &&
+                  (request.operation != 'UPDATE' ||
+                    !oldObject.spec.?containers.orValue([]).exists(old, old.name == c.name && old.image == c.image)))
                 .map(c, Object.spec.containers{
                   name: c.name,
                   image: variables.prefixes
@@ -137,7 +148,9 @@ spec:
           Object{
             spec: Object.spec{
               initContainers: object.spec.?initContainers.orValue([])
-                .filter(c, variables.prefixes.exists(p, c.image.startsWith(p[0])))
+                .filter(c, variables.prefixes.exists(p, c.image.startsWith(p[0])) &&
+                  (request.operation != 'UPDATE' ||
+                    !oldObject.spec.?initContainers.orValue([]).exists(old, old.name == c.name && old.image == c.image)))
                 .map(c, Object.spec.initContainers{
                   name: c.name,
                   image: variables.prefixes

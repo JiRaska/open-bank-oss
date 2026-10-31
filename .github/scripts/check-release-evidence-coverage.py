@@ -54,6 +54,11 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gatelib  # noqa: E402
+from release_evidence_assets import (
+    REQUIRED_ASSET_SUFFIXES,
+    expected_release_assets,
+    missing_release_assets,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "release-please-config.json"
@@ -71,7 +76,8 @@ CONFIG = ROOT / "release-please-config.json"
 KNOWN_UNCOVERED: dict[str, str] = {
     "openbank-campaign-service": "#7597 — release-please-config.json has no `component`; adding one "
     "changes the release tag name, a repo-owner decision, not a drive-by fix",
-    "openbank-tax-reporting-service": "#7597 — same as openbank-campaign-service",
+    # openbank-tax-reporting-service is OFF this list as of #5760: it gained `component:
+    # tax-reporting-service` when it was first deployed (it had never produced a tag).
 }
 
 errors: list[str] = []
@@ -150,26 +156,6 @@ def check_baseline_is_live(
                 "all — that is a worse problem than a missing component, see the 'no entry' error"
             )
 
-
-REQUIRED_ASSET_SUFFIXES = (
-    ".cdx.json",
-    ".cdx.json.sig",
-    ".cdx.json.intoto.jsonl",
-    ".slsa.json",
-    ".slsa.json.sig",
-    ".vex.json",
-    ".vex.json.sig",
-    ".evidence.json",
-    ".evidence.json.sig",
-)
-
-
-def expected_release_assets(tag: str) -> set[str]:
-    return {f"{tag}{suffix}" for suffix in REQUIRED_ASSET_SUFFIXES}
-
-
-def missing_release_assets(tag: str, actual: set[str]) -> list[str]:
-    return sorted(expected_release_assets(tag) - actual)
 
 
 def fetch_release_assets(repository: str, tag: str, runner=None) -> tuple[dict[str, int] | None, str | None]:

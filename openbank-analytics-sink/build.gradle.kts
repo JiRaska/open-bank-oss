@@ -2,6 +2,8 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import java.util.zip.ZipFile
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.allopen)
@@ -11,11 +13,62 @@ plugins {
     // Static analysis gate (detekt + ktlint, ratchet via baselines) — same
     // convention the services get through openbank.quarkus-service.
     id("openbank.static-analysis")
+    id("openbank.packaged-library-sbom")
     // Fleet-wide Netty/Jackson/etc. patch-version floors (issue #461).
     id("openbank.dependency-vulnerability-pins")
 }
 group = "com.openbank"
 version = "0.1.0-SNAPSHOT"
+
+// This service does not apply openbank.quarkus-service because it has no OLTP database.
+// Publish the same exact-source build fact as the convention-managed services.
+val sourceCommit = providers.environmentVariable("SOURCE_COMMIT").map { it.trim() }.filter { it.isNotEmpty() }
+    .orElse(providers.environmentVariable("GITHUB_SHA").map { it.trim() }.filter { it.isNotEmpty() })
+    .orElse(
+        providers.exec {
+            commandLine("git", "rev-parse", "HEAD")
+            isIgnoreExitValue = true
+        }.standardOutput.asText.map { it.trim() },
+    )
+val generatedBuildInfo = layout.buildDirectory.file("generated/service-build-info/openbank-service-build.properties")
+val generateServiceBuildInfo by tasks.registering {
+    inputs.property("sourceCommit", sourceCommit)
+    outputs.file(generatedBuildInfo)
+    doLast {
+        val commit = sourceCommit.get().trim()
+        check(Regex("[0-9a-fA-F]{40}").matches(commit)) {
+            "${project.name}: a full source commit is required (SOURCE_COMMIT, GITHUB_SHA, or git HEAD)"
+        }
+        generatedBuildInfo.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText("git.commit=$commit\n")
+        }
+    }
+}
+tasks.named<Copy>("processResources") {
+    from(generatedBuildInfo)
+    dependsOn(generateServiceBuildInfo)
+}
+val verifyServiceBuildInfo by tasks.registering {
+    group = "verification"
+    description = "Verify that the running analytics sink JAR contains its full source commit."
+    dependsOn("quarkusBuild")
+    doLast {
+        val appJars = layout.buildDirectory.dir("quarkus-app/app").get().asFile
+            .listFiles { file -> file.extension == "jar" }.orEmpty()
+        check(appJars.size == 1) { "${project.name}: expected one Quarkus application JAR" }
+        ZipFile(appJars.single()).use { jar ->
+            val packagedCommit = jar.getEntry("openbank-service-build.properties")
+                ?.let { jar.getInputStream(it).bufferedReader().readText() }
+                ?.let { Regex("(?m)^git\\.commit=([0-9a-fA-F]{40})$").find(it)?.groupValues?.get(1) }
+            check(packagedCommit == sourceCommit.get().trim()) {
+                "${project.name}: full source commit was not packaged in the application JAR"
+            }
+        }
+    }
+}
+tasks.named("check") { dependsOn(verifyServiceBuildInfo) }
+
 repositories {
     // GCS mirror of Maven Central first (#849) — shared NAT egress IP gets
     // 429-throttled by Central during fleet-wide build storms; 404 falls through.
@@ -89,13 +142,6 @@ allOpen {
 tasks.test {
     useJUnitPlatform { if (!project.hasProperty("withDocker")) excludeTags("integration") }
     systemProperty("java.util.logging.manager", "org.jboss.logmanager.LogManager")
-}
-
-tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
-    setIncludeConfigs(listOf("runtimeClasspath"))
-    setSkipConfigs(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
-    setProjectType("application")
-    setSchemaVersion("1.5")
 }
 
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had no kover

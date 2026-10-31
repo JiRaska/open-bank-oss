@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,OPTIONS
       headers: Content-Type,Authorization
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -30,6 +15,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_audit
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_audit
   flyway:
@@ -63,11 +51,6 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -106,8 +89,12 @@ mp:
         topic: openbank.agent.audit.events
         # #5745, same reasoning as `audit-events-in` below. This channel needs it MORE, not less:
         # it is the strict path — AgentAuditConsumer acknowledges only after append-only
-        # persistence succeeds, so it rethrows by design, and SmallRye's default `fail` would stop
+        # persistence succeeds and NACKs on failure, and SmallRye's default `fail` would stop
         # the D5 provenance stream on the first bad record. Explicit and NESTED (#686).
+        # (The handler NACKs in a catch rather than rethrowing: this method infers MANUAL
+        # acknowledgment, and a rethrown exception bypasses message.nack entirely — the stream
+        # cancels instead of parking the record. Verified against Redpanda in
+        # AgentAuditKafkaPersistenceIT, #12256.)
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.audit.agent-audit-events-in
@@ -126,8 +113,8 @@ mp:
       # the audit-service KafkaUser ACL (kafka-audit-mtls.yaml) does NOT grant Read on (only
       # "audit-service" is granted) — every consumer poll got a silent
       # org.apache.kafka.common.errors.GroupAuthorizationException. A properties file (not an env
-      # var) is used here, matching the pattern already established for transaction-service's
-      # payment-scheme-accepted channel; it carries the exact hyphenated/dotted property name
+      # var) is used here, matching the pattern already established for card-issuance-service's party-events-in
+      # channel; it carries the exact hyphenated/dotted property name
       # unambiguously, avoiding any reliance on MicroProfile Config's env-var-name reverse-mapping
       # for channel discovery. See issue #686.
       #
@@ -234,12 +221,16 @@ mp:
         # three topics added above carry `retention.ms: 604800000` (7 days) in their KafkaTopic
         # CRs, so the backfill is bounded at one week of history per topic -- a one-time
         # first-subscribe load spike worth knowing about, not an unbounded replay.
+        # Contract 9.2: openbank.swift.institution-transfers — money-path (bank-own transfers
+        # ACCEPTED/SENT/SETTLED/REJECTED), attributed to swift-service by TopicAttribution.
         # ADR-0315 (#10618): openbank.treasury.deal.events — money-path (treasury deals post GL
         # journals). New topic, no committed offset: read from its retention start on first
         # subscribe, which is the intended audit behaviour.
         # openbank.card.processing.events — ADR-0283 phase 1: card-processing-service. New
         # topic, no committed offset: same first-subscribe-from-retention-start behaviour.
-        topics: openbank.settlement.events,openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.fx.fixing.published,openbank.fx.cnb-policy-rate.published,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events,openbank.delegation.spend-reservation-state,openbank.delegation.approval-events,openbank.delegation.approval-group-revisions,openbank.ledger.journal.posted,openbank.sdd.event,openbank.interest.accrual.event,openbank.fraud.hold.changed,openbank.billing.fee.event,openbank.standing-orders.order.event,openbank.treasury.deal.events,openbank.card.processing.events
+        # ADR-0344 contract 9.1: openbank.treasury.payments — bank-own payment releases, money-path,
+        # attributed to treasury-service by TopicProducers. New topic, read from retention start.
+        topics: openbank.settlement.events,openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.fx.fixing.published,openbank.fx.cnb-policy-rate.published,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events,openbank.delegation.spend-reservation-state,openbank.delegation.approval-events,openbank.delegation.approval-group-revisions,openbank.ledger.journal.posted,openbank.sdd.event,openbank.interest.accrual.event,openbank.fraud.hold.changed,openbank.billing.fee.event,openbank.standing-orders.order.event,openbank.treasury.deal.events,openbank.treasury.payments,openbank.card.processing.events,openbank.swift.institution-transfers,openbank.oversight-triggers
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":
   quarkus:
@@ -317,3 +308,24 @@ opa:
   url: "${OPA_URL:http://localhost:8181}"
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
+
+"%prod":
+  quarkus:
+    http:
+      # East-west mTLS (#11900): the 8443 listener must VALIDATE the caller's certificate.
+      # `quarkus.http.ssl.client-auth` is BUILD TIME, so it lives here (baked into the image by
+      # quarkusBuild under `prod`), not in the container env. Under `%prod` only: with no
+      # certificate configured, `test`/`dev` would refuse to start. Same shape as consent-service.
+      ssl:
+        client-auth: required
+      # Keep plain HTTP/8113 for existing callers and the probes: with client-auth REQUIRED Quarkus
+      # otherwise defaults insecure-requests to `disabled` and drops that listener (#10441).
+      insecure-requests: enabled
+      # A trusted workload certificate is transport identity, not an API login (#12511).
+      # Keep route-level role and OPA checks; select bearer as their caller identity.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer

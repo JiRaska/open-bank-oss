@@ -21,7 +21,7 @@ Dedikovaná PostgreSQL databáze **`openbank_ledger`** (reaktivní PG klient pro
 
 ### Naseedované účty HK
 
-V1 seeduje hotovostní/vkladové/úrokové/poplatkové účty (1000, 1001, 2000, 2001, 2002, 3000, 4000, 4001). V3 přidává well-known účty se stabilním UUID (1100 cash clearing, 2100 deposit control CZK). V5 přidává per-měnové deposit-control (2101 EUR, 2102 USD, 2103 GBP), FX position účty (1990–1993), výsledkový účet kurzových rozdílů (5900) a FX margin income (4002). V6 přidává per-měnové CZK counter-value účty (1995–1997) pro denní revalvaci.
+V1 seeduje hotovostní/vkladové/úrokové/poplatkové účty (1000, 1001, 2000, 2001, 2002, 3000, 4000, 4001). V3 přidává well-known účty se stabilním UUID (1100 cash clearing, 2100 deposit control CZK). V5 přidává per-měnové deposit-control (2101 EUR, 2102 USD, 2103 GBP), FX position účty (1990–1993), výsledkový účet kurzových rozdílů (5900) a FX margin income (4002). V6 přidává per-měnové CZK counter-value účty (1995–1997) pro denní revalvaci. V15 přidává stabilní účet výnosů z poplatků 4003 (CZK); V34 přidává jeho per-měnové sourozence 4004 (EUR), 4005 (USD), 4006 (GBP) a mapuje na ně `FEE_INCOME_ACCOUNT`, takže se výnos z poplatku účtuje v původní měně (#13226).
 
 ## Flyway migrace
 
@@ -36,6 +36,7 @@ V1 seeduje hotovostní/vkladové/úrokové/poplatkové účty (1000, 1001, 2000,
 | `V6__fx_revaluation_counter_value_accounts` | CZK counter-value účty 1995–1997 (ADR-0046) | smazat naseedované řádky |
 | `V7__add_sub_account_id_to_journal_lines` | nullable `sub_account_id` + partial index (ADR-0039 fáze B) | dokumentováno v souboru: drop indexu + sloupce (zpětně kompatibilní) |
 | `V8__journal_partition_lifecycle` | pre-create partitionů 2027/2028, tabulka `partition_lifecycle_audit` | drop partitionů/tabulky |
+| `V34__per_currency_fee_income_accounts` | výnosy z poplatků 4004 EUR / 4005 USD / 4006 GBP + řádky mapy `FEE_INCOME_ACCOUNT`; selže, pokud se měny výnosů z poplatků a deposit-control liší (#13226) | smazat řádky mapy a účty, jen před prvním odkazem z účetního řádku |
 
 **Nikdy needituj migraci po aplikaci na živou DB** — Flyway checksum mismatch shodí startup (dočasná náprava `QUARKUS_FLYWAY_REPAIR_AT_START=true`, poté odstranit).
 
@@ -58,3 +59,19 @@ Re-identifikace (spojení `sub_account_id`/`transaction_id` zpět na zákazníka
 - Append-only, ročně partitionovaná kniha dělá z retence operaci životního cyklu partitionů: partitiony starší než retenční horizont jsou DETACHovány (DROP jen za vědomého, auditovaného přepnutí flagu — `partition.drop-enabled` + zrušení `dry-run`).
 - `partition_lifecycle_audit` je sama neměnná a uchovávaná po stejnou zákonnou dobu — je to důkazní stopa každého detach/drop.
 - `evidenceExported: true` — důkazy z knihy/předvahy lze exportovat pro auditory.
+
+## Retence outboxu (řádky SENT)
+
+`ledger_outbox` je doručovací buffer, ne záznam. Řádky, které už dorazily do brokeru (`status = 'SENT'`), se mažou, jakmile je jejich `sent_at` starší než `openbank.outbox.retention.sent-days` (výchozí **7**), sdíleným jobem `OutboxSentRetentionJob` z libs-runtime (ADR-0329, ADR-0327 D8). Repozitář se zapojuje delegací `SentOutboxRetention` na `PanacheOutboxRetention`.
+
+- Běží každou noc (`openbank.outbox.retention.cron`, výchozí `0 17 3 * * ?`) na každé replice; každé mazání je omezené (`batch-size` 5 000, nejvýš `max-batches` 200 za běh), takže dlouho nečištěná tabulka se vyprázdní během několika nocí.
+- Řádků PENDING, FAILED, DISPATCHING a DEAD se nikdy nedotkne — DEAD řádky jsou DLQ na straně producenta.
+- Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
+- Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
+- Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
+
+## Životní cyklus mezipaměti historie
+
+V36 přidává volitelné údaje o původu a neměnné manifesty, řádky a provenienci snímků. Jedna transakce repeatable-read kopíruje potvrzená data z jednoho SQL/MVCC pohledu; maximum sekvence není důkazem potvrzení transakcí. Provenience zahrnuje i zdroje počátečního součtu. Smazání zdrojového zápisu či řádku a změna údajů o původu transakčně zneplatní odvozené kopie. Čtení odmítá nedostupné připojené zdroje; stávající údržba partition takové kopie fyzicky odstraní. Prázdný výsledek bez zdrojů se neukládá. Nevzniká nová samostatná retenční lhůta, mazání zdrojů ani změna právního pozastavení výmazu; dostupnost kopie následuje všechny původní zdroje. Nejde o nový zákonný doklad uzávěrky.
+
+V37 přidává atomický záznam o zachycení historie poté, co V36 vytvoří odkazované snímky. V35 zůstává stávající migrací nástrojových účtů treasury beze změny. Rozšíření může souběžně existovat s předchozí aplikací, která nový endpoint ani tabulky nepoužívá. Při návratu nejprve nasaďte předchozí aplikaci a vypněte nový endpoint; zachycená data a záznamy uchovejte do posouzení retence před případným zvlášť schváleným destruktivním návratem schématu. Součástí nasazení není Flyway repair ani přepis kontrolních součtů.

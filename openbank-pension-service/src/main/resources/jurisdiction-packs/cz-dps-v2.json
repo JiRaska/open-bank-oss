@@ -1,0 +1,103 @@
+{
+  "jurisdiction": "CZ",
+  "productLine": "DPS",
+  "version": 2,
+  "effectiveFrom": "2026-01-01",
+  "currency": "CZK",
+  "legalReview": {
+    "status": "REQUIRES_LEGAL_REVIEW",
+    "note": "Reference values modelled on Act 427/2011 Coll. as amended from 2024 and the Income Tax Act; every value must be confirmed by legal review before any production use.",
+    "sources": [
+      "v2 supersedes v1 from 2026-01-01 (v1 ends 2025-12-31, so exactly one version is in force on any date) only to add the whole-crown rounding of §14(4) and the cz-mf-state-contribution-v1 channel; v1 is left unchanged as the record of what was modelled; its agency-monthly-batch-v0 claim format has no channel, so V12 re-pins every CZ/DPS v1 contract to v2 (both model the same statute; v2 only corrects it).",
+      "state-contribution: rate 0.20 from 500 CZK, cap 340 CZK reached at 1700 CZK (ZDPS 427/2011 §14(1)-(2)), rounded down to whole CZK (§14(4)); quarterly claim to MF (§16), returns (§18). VERIFIED against https://www.zakonyprolidi.cz/cs/2011-427 on 2026-10-09; see docs/research/cz-state-pension-contribution.md. Wire format cz-mf-state-contribution-v1 is a PLACEHOLDER: MF's technical specification is not public."
+    ]
+  },
+  "eligibility": {
+    "minAge": 18,
+    "minorsWithGuardian": true,
+    "residency": {
+      "required": true,
+      "allowedCountries": ["CZ"],
+      "alternativeEvidence": ["PUBLIC_HEALTH_INSURANCE_CZ"]
+    }
+  },
+  "permittedProviderTypes": ["PENSION_COMPANY"],
+  "incentives": [
+    {
+      "id": "state-contribution",
+      "type": "MATCHING",
+      "period": "MONTH",
+      "rate": 0.20,
+      "minContribution": 500,
+      "amountCap": 340,
+      "roundDownToUnit": 1,
+      "claimChannel": "STATE_AGENCY_BATCH",
+      "claimFormat": "cz-mf-state-contribution-v1",
+      "clawback": { "mode": "RETURN_ALL" }
+    },
+    {
+      "id": "income-tax-deduction",
+      "type": "TAX_RELIEF",
+      "threshold": 20400,
+      "annualCap": 48000,
+      "sharedCapGroup": "retirement-products-deduction",
+      "indicativeTaxRate": 0.15,
+      "claimChannel": "TAX_RETURN",
+      "clawback": { "mode": "RECAPTURE_YEARS", "recaptureYears": 10 }
+    },
+    {
+      "id": "employer-contribution-exemption",
+      "type": "EMPLOYER_EXEMPTION",
+      "annualCap": 50000,
+      "sharedCapGroup": "employer-retirement-exemption",
+      "claimChannel": "PAYROLL"
+    }
+  ],
+  "payout": {
+    "minAge": 60,
+    "minDurationMonths": 120,
+    "allowedForms": ["LUMP_SUM", "ANNUITY", "PHASED_WITHDRAWAL", "FIXED_PERIOD_PENSION", "EARLY_WITHDRAWAL", "SURRENDER"],
+    "earlyWithdrawalAllowed": true
+  },
+  "transfer": {
+    "allowed": true,
+    "freeAfterMonths": 60,
+    "maxFee": 800,
+    "deadlineDays": 30,
+    "carriesIncentiveHistory": true
+  },
+  "exit": {
+    "termination": { "noticePeriodDays": 30, "quoteValidityDays": 7, "feeRate": 0, "fixedFee": 0 },
+    "tax": {
+      "byForm": {
+        "LUMP_SUM": { "base": "GAINS", "withholdingRate": 0.15 },
+        "PHASED_WITHDRAWAL": { "base": "GAINS", "withholdingRate": 0.15 },
+        "EARLY_WITHDRAWAL": { "base": "GAINS", "withholdingRate": 0.15 },
+        "ANNUITY": { "base": "NONE" },
+        "FIXED_PERIOD_PENSION": { "base": "NONE" }
+      },
+      "deductionRecapture": { "rate": 0.15, "years": 10 },
+      "employerExemptRecapture": { "rate": 0.15, "years": 10 }
+    },
+    "partialWithdrawal": {
+      "allowed": true, "requiresPayoutConditions": true, "minAmount": 1000,
+      "maxShareOfValue": 0.5, "maxPerCalendarYear": 1
+    },
+    "phasedWithdrawal": { "minMonths": 12, "maxMonths": 360 },
+    "fixedPeriodPension": { "minMonths": 120, "maxMonths": 360 },
+    "death": { "estateWhenNoBeneficiary": true, "clawbackOnDeath": false, "beneficiaryTax": { "base": "NONE" } },
+    "annuity": {
+      "permittedTypes": ["LIFELONG", "FIXED_TERM", "GUARANTEE_PERIOD", "JOINT_LIFE", "INDEXED"],
+      "refusedPremiumDestination": "CONTRACT",
+      "quoteValidityMinHours": 24
+    }
+  },
+  "contributionLimits": {
+    "minMonthly": 100,
+    "allowedFrequencies": ["MONTHLY", "QUARTERLY", "ANNUALLY"],
+    "minDayOfMonth": 1,
+    "maxDayOfMonth": 28,
+    "changeNoticeDays": 3,
+    "maxStartAheadDays": 366
+  }
+}

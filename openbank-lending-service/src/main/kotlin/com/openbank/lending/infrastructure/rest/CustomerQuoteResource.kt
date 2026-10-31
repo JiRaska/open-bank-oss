@@ -9,6 +9,7 @@ import com.openbank.lending.domain.model.CreditOfferDecision
 import com.openbank.lending.domain.model.OfferSurface
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.CreditQuote
@@ -118,7 +119,7 @@ class CustomerQuoteResource(
     private fun refuse(partyHeader: String?, request: CustomerQuoteRequest): Response? {
         if (!config.enabled) return error(HTTP_FORBIDDEN, "customer self-service intake is disabled")
         val permitted = config.callerPrincipal.orElse("")
-        if (permitted.isBlank() || identity.principal?.name != permitted) {
+        if (!ServiceAccountIdentity.isPrincipal(identity, permitted)) {
             return error(HTTP_FORBIDDEN, "caller is not the customer-edge intake principal")
         }
         val partyId = partyHeader?.let { runCatching { UUID.fromString(it) }.getOrNull() }

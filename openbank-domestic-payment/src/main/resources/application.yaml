@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -30,6 +15,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_domestic_payments
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_domestic_payments
   flyway:
@@ -71,24 +59,38 @@ quarkus:
   rest-client:
     sanctions-service:
       url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     aml-service:
       url: ${AML_SERVICE_URL:http://localhost:8117}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     fraud-service:
       url: ${FRAUD_SERVICE_URL:http://localhost:8133}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     clearing-simulator:
       url: ${CLEARING_SIMULATOR_URL:http://localhost:8139}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     account-service:
       url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts.svc:8100}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     document-service:
       url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
   redis:
     hosts: redis://localhost:6379
@@ -111,11 +113,6 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -193,6 +190,11 @@ mp:
       worker:
         enabled: false
 openbank:
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:
@@ -222,18 +224,11 @@ openbank:
     scheme-submission:
       # ADR-0104 D4 Czech clearing pilot. OFF by default; when off, behaviour is exactly as before.
       enabled: ${DOMESTIC_SCHEME_SUBMISSION_ENABLED:false}
-    # fraud.enforcement-enabled was REMOVED here (#4221 layer 3). It is not a disabled feature —
-    # it had no reader. The enforcement path it named (`DomesticPaymentService.applyFraudGate`)
-    # was deleted by the Temporal migration (#1917) along with the in-service orchestration; the
-    # key, ADR-0084 §4.2 and the threat-model row survived it, so the runbook offered an operator a
-    # flip that would have changed nothing and reported nothing, and the threat model credited a
-    # mitigation that no longer existed. Both are corrected in this change.
-    #
-    # Re-introducing enforcement is NOT a config key: the verdict now reaches a Temporal activity
-    # (`shadowFraudScore`, returns Unit), so acting on it needs a decision returned to
-    # `DomesticPaymentWorkflow` and a hold state for the payment. Tracked in #4403 — do not
-    # re-add this key without that path, and see FraudEnforcementFlagRetiredTest, which fails if
-    # the key comes back with nothing reading it.
+    # fraud.enforcement-enabled is deliberately NOT declared here. #4221 removed the old key because
+    # nothing read it; #4403 brought enforcement back as a workflow decision, and the flag is now read
+    # by `DomesticPaymentActivitiesImpl.fraudGate` with `@ConfigProperty(defaultValue = "false")`.
+    # Set OPENBANK_DOMESTIC_FRAUD_ENFORCEMENT_ENABLED=true only after shadow calibration on
+    # openbank_fraud_enforcement_decisions_total{mode="shadow"} (ADR-0084 §4.2).
   temporal:
     enabled: false
     server-url: temporal-frontend.temporal.svc.cluster.local:7233
@@ -283,6 +278,10 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 "%prod":
   quarkus:
+    http:
+      ssl:
+        client-auth: required
+      insecure-requests: enabled
     # PaymentConfirmationRenderAdapter calls document-service. Production uses a named TLS bucket over
     # document-service's private-CA mTLS listener (8443, client auth REQUIRED), the same shape as
     # notification-service's party-authority bucket. Local/test fixtures speak plain HTTP, so this

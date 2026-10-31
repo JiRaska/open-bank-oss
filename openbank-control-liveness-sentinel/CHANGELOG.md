@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.8.0...control-liveness-sentinel-v0.9.0) (2026-10-18)
+
+
+### Features
+
+* **control-liveness-sentinel:** carry the caller's trace into Temporal activities ([#13163](https://github.com/JiRaska/open-bank-oss/issues/13163)) ([3892d17](https://github.com/JiRaska/open-bank-oss/commit/3892d1738e89506f18ae3e86d29f3d44490e7c9a))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.7.7...control-liveness-sentinel-v0.8.0) (2026-10-18)
+
+
+### Features
+
+* **sanctions:** workflow-liveness heartbeats for five scheduled jobs ([#13153](https://github.com/JiRaska/open-bank-oss/issues/13153)) ([c352a0e](https://github.com/JiRaska/open-bank-oss/commit/c352a0ec0d75d439a85132070a1e77aa4e8052b4))
+
+## [0.7.7](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.7.6...control-liveness-sentinel-v0.7.7) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.7.5...control-liveness-sentinel-v0.7.6) (2026-10-12)
+
+
+### Bug Fixes
+
+* **egress:** allow-list third-party hosts and bound in-cluster HTTP responses ([#11740](https://github.com/JiRaska/open-bank-oss/issues/11740)) ([d81d1d8](https://github.com/JiRaska/open-bank-oss/commit/d81d1d8e362f49be4883bfca884f967c742de5d0))
+
 ## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.7.4...control-liveness-sentinel-v0.7.5) (2026-10-04)
 
 

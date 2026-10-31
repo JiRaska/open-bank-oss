@@ -75,7 +75,7 @@ RULES = REPO / "openbank-libs" / "governance" / "rules.yaml"
 REGISTER_KEY = "shared_m2m_matrix_write_grants"
 REST_REGO = REPO / "openbank-libs" / "governance" / "policies" / "rest.rego"
 MATRIX_RULE = re.compile(r'allowed_reasons contains "matrix-allows" if \{(.*?)\n\}', re.S)
-SA_EXCLUSION = 'not startswith(input.principal.id, "service-account-")'
+SA_EXCLUSION = 'not principal_is_machine'
 
 # The last dot-segment of a read action. Everything else is treated as a write.
 READ_VERBS = {"list", "read", "readonly"}
@@ -256,10 +256,10 @@ def self_test() -> int:
 
     # (8) the exclusion is read from the matrix-allows rule itself, not from anywhere in the file
     with_ex = ('allowed_reasons contains "matrix-allows" if {\n\tinput.principal.type == "HUMAN"\n'
-               '\tnot startswith(input.principal.id, "service-account-")\n\tmatrix_grants(a, r)\n}\n')
-    without = with_ex.replace('\tnot startswith(input.principal.id, "service-account-")\n', "")
+               '\tnot principal_is_machine\n\tmatrix_grants(a, r)\n}\n')
+    without = with_ex.replace('\tnot principal_is_machine\n', "")
     elsewhere = without + ('allowed_reasons contains "other" if {\n'
-                           '\tnot startswith(input.principal.id, "service-account-")\n}\n')
+                           '\tnot principal_is_machine\n}\n')
     if not matrix_allows_excludes_service_accounts(with_ex):
         print("::error::self-test: the exclusion was not detected"); ok = False
     if matrix_allows_excludes_service_accounts(without):

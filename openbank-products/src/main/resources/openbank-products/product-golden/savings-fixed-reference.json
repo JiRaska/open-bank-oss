@@ -1,0 +1,318 @@
+{
+  "name": "savings-fixed-reference",
+  "description": "SAVINGS-FIXED on 500 EUR: an overdraft is rejected before it posts, 2.50 % ACT/365 accrues 0.034247 a day without the loyalty bonus (balance under 1000), the 2.00 fee is charged below the 5000 waiver threshold and waived above it after a 6000 deposit, month-end capitalisation posts 0.03.",
+  "revision": {
+    "irVersion": 1,
+    "productCode": "SAVINGS-FIXED",
+    "currency": "EUR",
+    "interest": {
+      "ruleId": "interest.base",
+      "rateType": "FIXED",
+      "rate": "0.0250",
+      "dayCount": "ACT_365_FIXED",
+      "accrualCadence": "DAILY",
+      "capitalisationCadence": "MONTHLY",
+      "accrualRounding": "INTEREST_ACCRUAL",
+      "postingRounding": "LEDGER_POSTING",
+      "bonus": {
+        "ruleId": "interest.loyalty-bonus",
+        "rate": "0.0100",
+        "predicate": {
+          "type": "and",
+          "operands": [
+            {
+              "type": "noEvents",
+              "kind": "WITHDRAWAL",
+              "window": {
+                "days": 30
+              }
+            },
+            {
+              "type": "balanceMin",
+              "window": {
+                "days": 30
+              },
+              "operator": "GTE",
+              "amount": "1000.00"
+            }
+          ]
+        }
+      }
+    },
+    "fees": [
+      {
+        "ruleId": "fee.maintenance",
+        "feeCode": "MAINT",
+        "amount": "2.00",
+        "cadence": "MONTHLY",
+        "accountingClass": "FEE_INCOME",
+        "waiver": {
+          "type": "comparison",
+          "attribute": "BALANCE",
+          "operator": "GTE",
+          "threshold": "5000.00",
+          "currency": "EUR"
+        }
+      }
+    ],
+    "hooks": {
+      "onOpen": [
+        {
+          "ruleId": "open.schedule-accrual",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "ACCRUAL",
+            "cadence": "DAILY"
+          }
+        },
+        {
+          "ruleId": "open.schedule-capitalisation",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "CAPITALISATION",
+            "cadence": "MONTHLY"
+          }
+        },
+        {
+          "ruleId": "open.schedule-fee",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "FEE_MAINT",
+            "cadence": "MONTHLY"
+          }
+        },
+        {
+          "ruleId": "open.welcome",
+          "action": {
+            "type": "NOTIFY",
+            "templateId": "savings-welcome",
+            "variables": {
+              "productCode": "SAVINGS-FIXED"
+            }
+          }
+        }
+      ],
+      "prePosting": [
+        {
+          "ruleId": "posting.no-overdraft",
+          "when": {
+            "type": "postingComparison",
+            "attribute": "PROJECTED_BALANCE",
+            "operator": "LT",
+            "threshold": "0.00"
+          },
+          "action": {
+            "type": "REJECT",
+            "reasonCode": "INSUFFICIENT_FUNDS"
+          }
+        }
+      ],
+      "scheduled": [
+        {
+          "ruleId": "scheduled.accrue",
+          "trigger": "ACCRUAL",
+          "action": {
+            "type": "ACCRUE_INTEREST"
+          }
+        },
+        {
+          "ruleId": "scheduled.capitalise",
+          "trigger": "CAPITALISATION",
+          "action": {
+            "type": "CAPITALISE_INTEREST"
+          }
+        },
+        {
+          "ruleId": "scheduled.fee",
+          "trigger": "FEE_MAINT",
+          "action": {
+            "type": "CHARGE_FEE",
+            "feeRuleId": "fee.maintenance"
+          }
+        }
+      ],
+      "onParameterChange": [
+        {
+          "ruleId": "reprice.notify",
+          "action": {
+            "type": "NOTIFY",
+            "templateId": "rate-changed",
+            "variables": {
+              "productCode": "SAVINGS-FIXED"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "clock": {
+    "zone": "UTC"
+  },
+  "state": {
+    "currency": "EUR",
+    "balance": "500.00",
+    "accruedInterest": "0.000000",
+    "openedOn": "2026-01-01"
+  },
+  "steps": [
+    {
+      "at": "2026-01-01T00:00:00Z",
+      "hook": "onOpen",
+      "expected": [
+        {
+          "type": "SCHEDULE",
+          "ruleId": "open.schedule-accrual",
+          "irVersion": 1,
+          "hook": "scheduled",
+          "tag": "ACCRUAL",
+          "cadence": "DAILY",
+          "at": null
+        },
+        {
+          "type": "SCHEDULE",
+          "ruleId": "open.schedule-capitalisation",
+          "irVersion": 1,
+          "hook": "scheduled",
+          "tag": "CAPITALISATION",
+          "cadence": "MONTHLY",
+          "at": null
+        },
+        {
+          "type": "SCHEDULE",
+          "ruleId": "open.schedule-fee",
+          "irVersion": 1,
+          "hook": "scheduled",
+          "tag": "FEE_MAINT",
+          "cadence": "MONTHLY",
+          "at": null
+        },
+        {
+          "type": "NOTIFY",
+          "ruleId": "open.welcome",
+          "irVersion": 1,
+          "templateId": "savings-welcome",
+          "variables": {
+            "productCode": "SAVINGS-FIXED"
+          }
+        }
+      ]
+    },
+    {
+      "at": "2026-01-05T10:00:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "WITHDRAWAL",
+        "direction": "DEBIT",
+        "amount": "20000.00"
+      },
+      "expected": [
+        {
+          "type": "REJECT",
+          "ruleId": "posting.no-overdraft",
+          "irVersion": 1,
+          "reasonCode": "INSUFFICIENT_FUNDS"
+        }
+      ]
+    },
+    {
+      "at": "2026-01-05T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "ACCRUAL",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "interest.base",
+          "irVersion": 1,
+          "narrative": "interest accrual",
+          "lines": [
+            {
+              "accountingClass": "INTEREST_EXPENSE",
+              "direction": "DEBIT",
+              "amount": "0.034247",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "CREDIT",
+              "amount": "0.034247",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-01-31T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "FEE_MAINT",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "scheduled.fee",
+          "irVersion": 1,
+          "narrative": "fee MAINT",
+          "lines": [
+            {
+              "accountingClass": "CUSTOMER_DEPOSIT",
+              "direction": "DEBIT",
+              "amount": "2.00",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "FEE_INCOME",
+              "direction": "CREDIT",
+              "amount": "2.00",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-01-31T23:30:00Z",
+      "hook": "scheduled",
+      "tag": "CAPITALISATION",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "scheduled.capitalise",
+          "irVersion": 1,
+          "narrative": "interest capitalisation",
+          "lines": [
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "DEBIT",
+              "amount": "0.03",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "CUSTOMER_DEPOSIT",
+              "direction": "CREDIT",
+              "amount": "0.03",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-02-01T10:00:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "DEPOSIT",
+        "direction": "CREDIT",
+        "amount": "6000.00"
+      },
+      "expected": []
+    },
+    {
+      "at": "2026-02-28T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "FEE_MAINT",
+      "expected": []
+    }
+  ]
+}

@@ -69,8 +69,6 @@ PROSE_DIRS = ("docs/adr", "docs/threat-models", "openbank-libs/docs")
 PROSE_ALLOWLIST: dict[tuple[str, str], str] = {
     ("docs/adr/0016-virtual-threads-not-adopted-yet.md", "RunOnVirtualThread"):
         "the ADR's whole subject is the decision NOT to adopt it; its absence is the outcome",
-    ("docs/adr/0016-virtual-threads-not-adopted-yet.md", "Transactional"):
-        "contrasted against the reactive stack that ADR chose; imperative JTA is not used here",
     ("docs/adr/0048-decouple-api-contract-version-from-service-release-version.md",
      "ApplicationPath"):
         "illustrative JAX-RS snippet showing where a version prefix would live",
@@ -85,14 +83,9 @@ PROSE_ALLOWLIST: dict[tuple[str, str], str] = {
     ("docs/threat-models/openbank-dispute-service.md", "RateLimited"):
         "named in the residual-risk column as the control that is still OPEN, not as a mitigation",
 }
-# The libs docs show adopters the MicroProfile REST Client call-site shape for
-# BearerTokenClientHeadersFactory. The annotation is third-party and no service imports it
-# yet, so source derivation cannot see it; the docs are not claiming libs implements it.
-for _f in ("01-overview", "03-api"):
-    for _s in ("", ".en", ".cs"):
-        PROSE_ALLOWLIST[(f"openbank-libs/docs/{_f}{_s}.md", "RegisterClientHeaders")] = (
-            "MicroProfile REST Client annotation shown as the adopter's call-site shape"
-        )
+# (The MicroProfile @RegisterClientHeaders exemptions were removed when lending-service's
+# AuditEvidenceRestClient became the first service to import it, #11900: source derivation now
+# sees the annotation, so the libs docs' call-site sample needs no exemption.)
 # Same shape for the JPA converter sample: jakarta.persistence.@Convert is applied by adopters,
 # and this repo's own converters set autoApply, so no source here imports the name.
 for _s in ("", ".en", ".cs"):

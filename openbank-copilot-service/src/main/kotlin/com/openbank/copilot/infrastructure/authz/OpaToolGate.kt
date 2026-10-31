@@ -64,18 +64,18 @@ class OpaToolGate(
             .build()
 
         val response = runCatching { http.send(request, HttpResponse.BodyHandlers.ofString()) }
-            .getOrElse { e ->
-                log.warnf(e, "OpaToolGate: sidecar unreachable for tool=%s", toolName)
+            .getOrElse {
+                log.warn("OpaToolGate: sidecar unreachable")
                 return ToolPolicyDecision.denied("opa-unreachable")
             }
 
         if (response.statusCode() !in HTTP_OK_RANGE) {
-            log.warnf("OpaToolGate: OPA returned HTTP %d for tool=%s", response.statusCode(), toolName)
+            log.warnf("OpaToolGate: OPA returned HTTP %d", response.statusCode())
             return ToolPolicyDecision.denied("opa-error: HTTP ${response.statusCode()}")
         }
 
         if (!parseAllowed(response.body())) {
-            log.warnf("OpaToolGate: tool=%s denied for customer=%s", toolName, customerId)
+            log.warn("OpaToolGate: policy denied request")
             return ToolPolicyDecision.denied("opa-denied: policy")
         }
 

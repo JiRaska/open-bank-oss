@@ -8,6 +8,7 @@ import io.vertx.core.json.JsonObject
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
+import jakarta.persistence.IdClass
 import jakarta.persistence.Table
 import jakarta.persistence.Version
 import org.hibernate.annotations.JdbcTypeCode
@@ -112,6 +113,12 @@ class CatalogRevisionEntity {
     @Column(name = "content_hash")
     var contentHash: String? = null
 
+    @Column(name = "approval_digest")
+    var approvalDigest: String? = null
+
+    @Column(name = "approved_effective_to")
+    var approvedEffectiveTo: Instant? = null
+
     @Column(name = "created_at")
     lateinit var createdAt: Instant
 
@@ -145,6 +152,10 @@ class CatalogPriceEntity {
 
     @Column(name = "effective_to")
     var effectiveTo: Instant? = null
+
+    /** #13230; null on components authored before roles existed. */
+    @Column(name = "role")
+    var role: String? = null
 }
 
 @Entity
@@ -178,6 +189,45 @@ class CatalogApprovalEntity {
     @Column(name = "approved_at")
     lateinit var approvedAt: Instant
 }
+
+@Entity
+@Table(name = "catalog_revision_role_approvals")
+class RevisionRoleApprovalEntity {
+    @Id lateinit var id: UUID
+
+    @Column(name = "revision_id")
+    lateinit var revisionId: UUID
+    lateinit var role: String
+    lateinit var issuer: String
+    lateinit var subject: String
+    lateinit var digest: String
+    lateinit var reason: String
+
+    @Column(name = "approved_at")
+    lateinit var approvedAt: Instant
+}
+
+@Entity
+@Table(name = "catalog_schema_approval_policies")
+@IdClass(SchemaApprovalPolicyKey::class)
+class SchemaApprovalPolicyEntity {
+    @Id
+    @Column(name = "schema_id")
+    lateinit var schemaId: String
+
+    @Id
+    @Column(name = "schema_version")
+    var schemaVersion: Int = 0
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    lateinit var policy: JsonObject
+
+    @Column(name = "registered_at")
+    lateinit var registeredAt: Instant
+}
+
+data class SchemaApprovalPolicyKey(var schemaId: String = "", var schemaVersion: Int = 0) : java.io.Serializable
 
 @Entity
 @Table(name = "catalog_audit")
@@ -268,4 +318,24 @@ class BankV1ProductMappingEntity {
     private companion object {
         const val UNINITIALISED_DRAFT_REVISION = -2L
     }
+}
+
+/** ADR-0352 §4: the publish-path signature over an IR-bearing revision's canonical hash (V16). */
+@Entity
+@Table(name = "catalog_revision_ir_signatures")
+class CatalogRevisionIrSignatureEntity {
+    @Id
+    @Column(name = "revision_id")
+    lateinit var revisionId: UUID
+
+    @Column(name = "revision_hash")
+    lateinit var revisionHash: String
+
+    @Column(name = "key_id")
+    lateinit var keyId: String
+    lateinit var algorithm: String
+    lateinit var signature: String
+
+    @Column(name = "signed_at")
+    lateinit var signedAt: Instant
 }

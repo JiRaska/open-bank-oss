@@ -15,7 +15,7 @@ import dependency_snapshot as subject
 SHA = '1' * 40
 IDENTITY = {'version': 0, 'sha': SHA, 'ref': 'refs/heads/example',
                 'job': {'id': '123', 'correlator': 'Dependency submission-submit'},
-                'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.4.2',
+                'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.0',
                               'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
 
 
@@ -52,6 +52,15 @@ class MergeTests(unittest.TestCase):
             part[key] = 'wrong'
             with self.subTest(key=key), self.assertRaises(ValueError):
                 self.merge({'one': snapshot(), 'two': part})
+
+    def test_unexpected_detector_is_rejected(self):
+        for detector in ({'name': 'other', 'version': '1.5.0', 'url': IDENTITY['detector']['url']},
+                         {'name': IDENTITY['detector']['name'], 'version': 'latest', 'url': IDENTITY['detector']['url']},
+                         {'name': IDENTITY['detector']['name'], 'version': '1.5.0', 'url': 'https://example.invalid'}):
+            part = snapshot()
+            part['detector'] = detector
+            with self.subTest(detector=detector), self.assertRaisesRegex(ValueError, 'detector'):
+                self.merge({'one': part, 'two': snapshot()})
 
     def test_conflicting_package_or_manifest(self):
         part = snapshot()
@@ -96,7 +105,7 @@ class RunnerTests(unittest.TestCase):
     def run_case(self, case):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for i in range(5):
+            for i in range(17):
                 module = root / f'openbank-test-{i}'
                 module.mkdir()
                 (module / 'build.gradle.kts').write_text('')
@@ -127,19 +136,23 @@ class RunnerTests(unittest.TestCase):
                 if case == 'second-fails' and len(calls) == 2:
                     raise RuntimeError('producer failed')
                 coverage = Path(child_env['DEPENDENCY_GRAPH_COVERAGE_DIR'])
-                tasks = [arg for arg in command if arg.endswith(':ForceDependencyResolutionPlugin_resolveProjectDependencies')]
+                tasks = [arg for arg in command if arg.endswith(':OpenBankResolveDependencyGraph')]
                 for index, task in enumerate(tasks):
                     if case == 'missing-receipt' and index == 0:
                         continue
-                    project = task.removesuffix(':ForceDependencyResolutionPlugin_resolveProjectDependencies') or ':'
+                    project = task.removesuffix(':OpenBankResolveDependencyGraph') or ':'
                     receipt = {'version': 1, 'sha': SHA, 'project': project, 'configurations': ['runtimeClasspath']}
                     if case == 'wrong-receipt':
                         receipt['sha'] = '2' * 40
                     (coverage / f'{index}.json').write_text(json.dumps(receipt))
                 reports = Path(child_env['DEPENDENCY_GRAPH_REPORT_DIR'])
                 part = snapshot()
+                if case == 'mixed-detector' and len(calls) == 2:
+                    part['detector']['version'] = '1.5.1'
                 if case == 'wrong-snapshot':
                     part['sha'] = '2' * 40
+                if case == 'wrong-detector':
+                    part['detector']['version'] = 'unexpected'
                 (reports / 'snapshot.json').write_text(json.dumps(part))
                 if case == 'duplicate-snapshot':
                     (reports / 'other.json').write_text(json.dumps(part))
@@ -154,13 +167,26 @@ class RunnerTests(unittest.TestCase):
                     result = subject.generate(root, output, env)
                     self.assertEqual(result['sha'], SHA)
                     self.assertEqual(len(calls), 2)
+                    self.assertEqual([sum(arg.endswith(':OpenBankResolveDependencyGraph')
+                                              for arg in command) for command in calls], [17, 1])
+                    self.assertCountEqual(
+                        [arg for command in calls for arg in command
+                         if arg.endswith(':OpenBankResolveDependencyGraph')],
+                        [':OpenBankResolveDependencyGraph',
+                         *(f':openbank-test-{i}:OpenBankResolveDependencyGraph' for i in range(17))],
+                    )
                     self.assertEqual(timeouts, [240, 10] if case == 'budget-truncated' else [240, 180])
                     self.assertTrue((output / 'merged.json').is_file())
                     self.assertTrue(all('--continue' not in cmd for cmd in calls))
+                    self.assertTrue(all('--stacktrace' in cmd for cmd in calls))
+                    self.assertTrue(all('--configure-on-demand' in cmd for cmd in calls))
+                    self.assertTrue(all('--no-configure-on-demand' not in cmd for cmd in calls))
                 else:
                     with self.assertRaises((ValueError, RuntimeError)):
                         subject.generate(root, output, env)
                     self.assertFalse((output / 'merged.json').exists())
+                    if case in ('wrong-snapshot', 'wrong-detector'):
+                        self.assertEqual(len(calls), 1, 'reject the first bad shard before resolving the fleet')
                     if case == 'budget-expired':
                         self.assertEqual(len(calls), 1)
                         self.assertEqual(timeouts, [240])
@@ -188,7 +214,8 @@ class RunnerTests(unittest.TestCase):
 
     def test_failed_or_incomplete_generation_never_publishes_candidate(self):
         for case in ('second-fails', 'wrong-checkout', 'filtered', 'missing-receipt',
-                     'wrong-receipt', 'wrong-snapshot', 'duplicate-snapshot', 'merge-ref'):
+                     'wrong-receipt', 'wrong-snapshot', 'wrong-detector',
+                     'duplicate-snapshot', 'merge-ref', 'mixed-detector'):
             with self.subTest(case=case):
                 self.run_case(case)
 

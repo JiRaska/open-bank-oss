@@ -146,6 +146,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -228,6 +232,14 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-1",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-2",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension",pod="pension-db-1",job="pension-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension",pod="pension-db-2",job="pension-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-2",job="pid-db"}'
@@ -287,6 +299,10 @@ tests:
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
@@ -364,6 +380,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -381,6 +399,10 @@ tests:
       - series: 'kube_namespace_created{namespace="party"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="payments"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension-fund"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
@@ -406,6 +428,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
@@ -425,7 +449,7 @@ tests:
               origin: manifest
             exp_annotations:
               summary: "CNPG cluster accounts/accounts-db is deployed but NOT scraped"
-              description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Set spec.monitoring.enablePodMonitor: true on the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
+              description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Add a PodMonitor selecting cnpg.io/cluster=<name> on port metrics next to the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
       # MIRROR: the namespace exists, so the not-deployed half must stay silent. Both
       # directions, or the split is untested.
       - eval_time: 40m
@@ -574,6 +598,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -656,6 +684,14 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-1",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-2",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension",pod="pension-db-1",job="pension-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension",pod="pension-db-2",job="pension-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-2",job="pid-db"}'
@@ -715,6 +751,10 @@ tests:
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
@@ -792,6 +832,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -809,6 +851,10 @@ tests:
       - series: 'kube_namespace_created{namespace="party"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="payments"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension-fund"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
@@ -833,6 +879,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -979,6 +1027,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -1061,6 +1113,14 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-1",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-2",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension",pod="pension-db-1",job="pension-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension",pod="pension-db-2",job="pension-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-2",job="pid-db"}'
@@ -1120,6 +1180,10 @@ tests:
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
@@ -1199,6 +1263,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -1216,6 +1282,10 @@ tests:
       - series: 'kube_namespace_created{namespace="party"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="payments"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension-fund"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
@@ -1240,6 +1310,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -1390,6 +1462,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -1472,6 +1548,14 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-1",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-2",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension",pod="pension-db-1",job="pension-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension",pod="pension-db-2",job="pension-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-2",job="pid-db"}'
@@ -1531,6 +1615,10 @@ tests:
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
@@ -1608,6 +1696,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -1625,6 +1715,10 @@ tests:
       - series: 'kube_namespace_created{namespace="party"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="payments"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension-fund"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
@@ -1649,6 +1743,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -1804,6 +1900,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -1886,6 +1986,14 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-1",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-2",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension",pod="pension-db-1",job="pension-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension",pod="pension-db-2",job="pension-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-2",job="pid-db"}'
@@ -1945,6 +2053,10 @@ tests:
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
@@ -2020,6 +2132,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -2037,6 +2151,10 @@ tests:
       - series: 'kube_namespace_created{namespace="party"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="payments"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension-fund"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
@@ -2061,6 +2179,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -2209,6 +2329,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -2291,6 +2415,14 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-1",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-2",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension",pod="pension-db-1",job="pension-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension",pod="pension-db-2",job="pension-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-2",job="pid-db"}'
@@ -2350,6 +2482,10 @@ tests:
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
@@ -2425,6 +2561,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -2442,6 +2580,10 @@ tests:
       - series: 'kube_namespace_created{namespace="party"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="payments"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension-fund"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
@@ -2467,6 +2609,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
@@ -2486,7 +2630,7 @@ tests:
               origin: manifest
             exp_annotations:
               summary: "CNPG cluster ai-platform/langfuse-db is deployed but NOT scraped"
-              description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Set spec.monitoring.enablePodMonitor: true on the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
+              description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Add a PodMonitor selecting cnpg.io/cluster=<name> on port metrics next to the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
       - eval_time: 40m
         alertname: PostgresClusterDeclaredNotDeployed
         exp_alerts:

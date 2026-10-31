@@ -4,22 +4,19 @@
 
 package com.openbank.vop.infrastructure.client
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.clients.account.api.AccountsApi
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
-import io.smallrye.mutiny.Uni
-import jakarta.ws.rs.Consumes
-import jakarta.ws.rs.GET
-import jakarta.ws.rs.Path
-import jakarta.ws.rs.PathParam
-import jakarta.ws.rs.Produces
-import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 
 /**
  * Hop 1 of the VoP name resolution (ADR-0171 §4): IBAN → the owning party's id.
  * `openbank-account-service` holds no holder name of its own — only the link to a party.
+ *
+ * The operations and DTOs are GENERATED from account-service's own `openapi.yaml`
+ * (`openbank-client-account`, ADR-0319, #13169); this interface only attaches what is specific to this
+ * consumer. Callers wrap it in `AccountClient`, never call the generated operations directly.
  *
  * We deliberately do NOT send the `X-Customer-Party-Id` header account-service uses for
  * owner-scoping: VoP is a service-to-service check on behalf of a payer who is *not* the account
@@ -28,21 +25,4 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 @RegisterRestClient(configKey = "account-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
-@Path("/api/v1/accounts")
-@Produces(MediaType.APPLICATION_JSON)
-@Consumes(MediaType.APPLICATION_JSON)
-interface AccountServiceClient {
-
-    @GET
-    @Path("/iban/{iban}")
-    fun getAccountByIban(@PathParam("iban") iban: String): Uni<AccountSummary>
-}
-
-/**
- * Subset of account-service's `AccountResponse` that VoP acts on — a local mirror, never a shared
- * type, so account-service's DTO can evolve without breaking us. Fields are nullable here even
- * where account-service declares them non-null: an unknown-field-tolerant mirror must not blow up
- * on a partial payload.
- */
-@JsonIgnoreProperties(ignoreUnknown = true)
-data class AccountSummary(val id: String? = null, val partyId: String? = null, val status: String? = null)
+interface AccountServiceClient : AccountsApi

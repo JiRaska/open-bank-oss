@@ -1,5 +1,68 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.14.0...swift-service-v0.14.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **swift:** preserve institution transfer safeguards on current main ([#13838](https://github.com/JiRaska/open-bank-oss/issues/13838)) ([a9d9549](https://github.com/JiRaska/open-bank-oss/commit/a9d954930bf32a32340faece398777838ded4992))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.4...swift-service-v0.14.0) (2026-10-26)
+
+
+### Features
+
+* **swift:** bank-own institution transfers over the clearing rails ([#13904](https://github.com/JiRaska/open-bank-oss/issues/13904)) ([71a4532](https://github.com/JiRaska/open-bank-oss/commit/71a4532011239330fd12f6387777b5f2a6657864))
+
+## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.3...swift-service-v0.13.4) (2026-10-24)
+
+
+### Bug Fixes
+
+* **swift:** re-drive an accepted MT103 whose settlement booking is unproven ([#13696](https://github.com/JiRaska/open-bank-oss/issues/13696)) ([2bf26c9](https://github.com/JiRaska/open-bank-oss/commit/2bf26c915898e624056fec3d0f471968de5783e3))
+
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.2...swift-service-v0.13.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* **swift:** alert on an unbooked MT103 the scheme accepted ([#13689](https://github.com/JiRaska/open-bank-oss/issues/13689)) ([7228d8f](https://github.com/JiRaska/open-bank-oss/commit/7228d8f107ce0f790196afcb69faf374ddf03781)), closes [#13623](https://github.com/JiRaska/open-bank-oss/issues/13623)
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.1...swift-service-v0.13.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **swift:** settle only a COMPLETED 201 that matches the request ([#13622](https://github.com/JiRaska/open-bank-oss/issues/13622)) ([fad71f4](https://github.com/JiRaska/open-bank-oss/commit/fad71f4593cbd0f39cb852529f96b6e3a6802bea))
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.0...swift-service-v0.13.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **swift:** send valueDate as ISO so MT103 settlement can book ([#13232](https://github.com/JiRaska/open-bank-oss/issues/13232)) ([220e2b5](https://github.com/JiRaska/open-bank-oss/commit/220e2b536fd890a406ef4f93086d1eabf6aa9c11))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.12.3...swift-service-v0.13.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
+## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.12.2...swift-service-v0.12.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.12.1...swift-service-v0.12.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
 ## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.12.0...swift-service-v0.12.1) (2026-10-04)
 
 

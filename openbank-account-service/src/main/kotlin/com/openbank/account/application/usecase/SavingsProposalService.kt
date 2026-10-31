@@ -17,6 +17,7 @@ import com.openbank.account.domain.model.SavingsWithdrawalScaReference
 import com.openbank.account.domain.model.WithdrawalProposal
 import com.openbank.account.domain.model.WithdrawalProposalStatus
 import com.openbank.libs.approval.ApprovalStore
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.NotFoundException
@@ -225,6 +226,7 @@ class SavingsProposalService(
             action = ACTION_EXECUTE,
             resourceId = proposal.id.toString(),
             makerId = command.delegatePartyId.toString(),
+            makerActorKind = MakerActorKind.CUSTOMER_PARTY,
         )
         return ProposalCreated(proposalRepository.save(proposal.copy(approvalId = approval.id)), approval.id)
     }

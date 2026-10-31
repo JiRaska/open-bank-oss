@@ -33,6 +33,12 @@ Build používá convention plugin `openbank.quarkus-service` (ADR-0049 D1). Kov
 
 Management endpointy jsou na dedikovaném **management portu 8085** (`quarkus.management.root-path: /q`); obchodní API je na **8101**.
 
+### Ověření API na produkčních listenerech
+
+Produkční HTTPS listener vyžaduje důvěryhodný klientský certifikát pro TLS spojení. Pro každý požadavek `/api/*` vyžaduje tento i nešifrovaný HTTP listener OIDC bearer token: samotný certifikát nevytváří identitu volajícího pro API. Požadavek pouze s certifikátem musí vrátit 401; platný bearer token pokračuje do stávajících kontrol rolí a oprávnění. Integrační test parity používá nastavení obou produkčních listenerů.
+
+Toto pravidlo listeneru samo nezapíná vynucování OPA. `AUTHZ_ENFORCE` má v `application.yaml` výchozí hodnotu `false`; nasazení ji musí výslovně nastavit na `true`, aby rozhodnutí OPA blokovala požadavky. Vynucování čtyř očí se zapíná samostatně a také má výchozí hodnotu `false`.
+
 ## Konfigurace
 
 | Env proměnná | Výchozí | Účel |
@@ -110,3 +116,36 @@ Denní běh automatizuje `FxRevaluationScheduler`. Opakování pro obchodní den
 ## Deploy / release
 
 Per-service path-scoped CI (buildují se jen změněné služby). Release osu vlastní **release-please** z Conventional Commits — needitovat ručně `version.txt`/`CHANGELOG.md` (aktuální release `1.2.0`). CD: ArgoCD sleduje tag image v deployment manifestu. U konfliktů tagu image v GitOpsu vždy `--ours`.
+
+
+### FINREP Pact fixture
+
+Broker ověření FINREP odvozuje reportovaný měsíc z požadavků vybraného kontraktu a používá vlastní testovací databázi. Reset fixture odmítne cizí closed-period ID a ponechá zapnutý trigger neměnné evidence. Regresní testy pokrývají historický červen 2026 i současný červen 2000 v obou pořadích, včetně odmítnutí DELETE evidence. Produkční validace frozen evidence se nemění.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Účastníci uzávěrky dne: autorizace (#13167)
+
+`PUT /api/v1/ledger/accounting-days/{date}/participants/{participant}` se autorizuje vlastní akcí
+`ledger.close.participate`, nikdy `ledger.create`. `ledger_rest_ext.rego: close_participant_accounts`
+přiřazuje každému strojovému účtu JEDINÉHO účastníka, za kterého smí hlásit (interest, lending, billing, treasury); use
+case pak ověří volajícího proti `openbank.ledger.close.participants.<name>.principal`. Přidání
+účastníka jsou tedy tři úpravy: `rules.yaml: close_participants`, mapa v `application.yaml` ledgeru a
+položka v rego mapě (pak přegenerovat bundly). Deklarovaní účastníci: interest, lending, billing, treasury. Režim: `shadow`.
+
+Billing se připojuje jako účastník uzávěrky pro svůj měsíční cyklus. Hlásí na vlastní identitě,
+klientovi Keycloak `openbank-billing` (`service-account-openbank-billing`), nikoli pod sdíleným
+principalem `openbank-services`, kterým účtuje své žurnály. Vymezený grant `ledger.close.participate`
+pro `participants/billing` je jediným ledger grantem tohoto účtu; vlastní `ledger.create` nemá.
+
+Treasury se připojuje jako účastník uzávěrky pro hodinové časové rozlišení úroků z obchodů a pro
+žurnály obchodů daného dne. Hlásí na identitě, kterou už účtuje žurnály, klientovi Keycloak
+`openbank-treasury` (`service-account-openbank-treasury`). Jeho položka v mapě přidává
+`ledger.close.participate` jen pro `participants/treasury`; stávající granty `ledger.create` a čtení pro
+nostro se nemění a za jiného účastníka hlásit nemůže.

@@ -77,7 +77,7 @@ com.openbank.domestic/
 │   ├── model/                 DomesticPayment, enumy stav / priorita / scope / důvod zamítnutí,
 │   │                          transitionTo() + canTransitionTo() (stavový automat)
 │   ├── event/                 DomesticPaymentCreatedEvent, DomesticPaymentStatusChangedEvent
-│   └── screening/             ScreeningPolicy (čisté rozhodnutí), ScreeningResult, ScreeningDecision
+│   └── screening/             (moved to openbank-libs-fincrime, ADR-0353)
 │
 ├── application/               ◄── orchestrace use-case
 │   ├── port/in/               DomesticPaymentUseCase + příkazy / dotazy
@@ -90,7 +90,6 @@ com.openbank.domestic/
     ├── persistence/           implementace repository, JPA entity, mappery
     ├── outbox/                DomesticPaymentOutboxDispatcher (scheduled, fault-tolerant)
     ├── kafka/                 KafkaDomesticPaymentEventPublisher
-    ├── approval/              ApprovalConfig (pouze four-eyes workflow v Redisu)
     ├── client/               SanctionsServiceClient + adaptér, AmlServiceClient + adaptér
     └── authz/                AuthzProducer (OPA, ADR-0034)
 ```
@@ -181,3 +180,11 @@ sequenceDiagram
 3. **Fail closed** — výpadek sanctions-service drží platbu v `RECEIVED`; nikdy se automaticky neuvolní.
 4. **Žádné vzdálené volání uvnitř perzistenční transakce** — screening a volání AML případu probíhají mezi transakcemi.
 5. **Trvalá idempotence svázaná s aktérem** — `Idempotency-Key` je povinný; Postgres uloží otisk normalizovaného požadavku atomicky s platbou/outboxem, přesný replay vrátí tento řádek a odlišný požadavek skončí 409.
+
+## Omezení iniciátoři plateb (ADR-0335 D5)
+
+`rules.yaml: scoped_payment_initiators` deklaruje pension-service pro `domestic-payment.create`.
+Doména odvodí z principálu `InitiatorScope`: pension smí platit jen z jednoho nakonfigurovaného
+debetního účtu (`OPENBANK_DOMESTIC_PAYMENT_SCOPED_INITIATORS_PENSION_DEBTOR_ACCOUNT_ID`), nenastavená
+hodnota nepovolí nic a každý jiný stroj jen s ROLE_API je `Undeclared` a nesmí platit z žádného účtu.
+Rozsah se kontroluje před uplatněním `Idempotency-Key`.

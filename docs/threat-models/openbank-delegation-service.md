@@ -195,6 +195,8 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `delegation_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-09-27** — **Party-eligibility client resilience values now sourced from the shared
   `READ` profile** (ADR-0321, PR #11072). `ResilientPartyEligibilityClient.eligibilityOf` is
   annotated `@ResilienceProfile(READ)` and its `@Timeout`/`@Retry`/`@CircuitBreaker` arguments
@@ -204,7 +206,7 @@ gap closes only with a consumer pact or a run against a deployed stack.
   its fail-closed eligibility gate (T3) are as before. Rollback: revert.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -264,7 +266,7 @@ gap closes only with a consumer pact or a run against a deployed stack.
   `AUTHZ_FOUR_EYES_ENFORCE` today would therefore gate nothing while appearing to gate two
   money-path actions, which is a worse state than being visibly off. Prerequisite: an
   `ApprovalStore` of the kind account-, balance- and billing-service carry
-  (`infrastructure/approval/ApprovalConfig.kt`). One decision to take deliberately at that point:
+  (a per-service ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`)). One decision to take deliberately at that point:
   `delegation.reserve.release` is a routine customer spending action that matches the `release`
   verb by accident of naming, so inheriting the money-path default would put a second approver in
   front of ordinary customer traffic.
@@ -367,3 +369,9 @@ schema/decision-ledger path is healthy; rollback flips the flag before reverting
   or its revision/threshold differs from the one pinned on the grant (T40). Risk class: elevation
   of privilege / tampering. Rollback: flip the flag off first (new offers refused, existing
   proposals keep their snapshots), then revert; migrations V29–V32 are additive.
+
+## Machine-caller identity binding (#12448)
+
+Recertification confirmation (`POST /recertifications/{id}/confirm`) admits only customer-edge, recognised by `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT with `azp` = `openbank-edge` and `preferred_username` = `service-account-openbank-edge`. It is never recognised by the principal name, which Quarkus takes from a username claim. A token carrying that username but issued to another client is refused with 403.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.

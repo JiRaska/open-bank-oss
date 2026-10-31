@@ -4,10 +4,10 @@
 
 package com.openbank.risk.domain.cashflow
 
+import com.openbank.libs.domain.calendar.BusinessCalendar
 import com.openbank.risk.domain.curve.BigMath
 import java.math.BigDecimal
 import java.math.RoundingMode
-import java.time.DayOfWeek
 import java.time.LocalDate
 
 /**
@@ -76,7 +76,7 @@ object NonMaturityDepositCashFlows {
 
         val out = ArrayList<CashFlow>()
         if (volatile.signum() != 0) {
-            out += CashFlow(nextBusinessDay(asOf), currency, CashFlowKind.PRINCIPAL, volatile.negate())
+            out += CashFlow(nextWeekday(asOf), currency, CashFlowKind.PRINCIPAL, volatile.negate())
         }
         val slices = model.coreRunoffYears * MONTHS_PER_YEAR
         val slice = core.divide(BigDecimal(slices), BigMath.MC).setScale(scale, RoundingMode.HALF_EVEN)
@@ -95,9 +95,9 @@ object NonMaturityDepositCashFlows {
         return out
     }
 
-    fun nextBusinessDay(date: LocalDate): LocalDate {
-        var d = date.plusDays(1)
-        while (d.dayOfWeek == DayOfWeek.SATURDAY || d.dayOfWeek == DayOfWeek.SUNDAY) d = d.plusDays(1)
-        return d
-    }
+    /**
+     * The next weekday after [date] — the kernel's weekend-only calendar, so this model keeps its
+     * phase-0 meaning (no holidays) without a local business-day rule (ADR-0344 gate).
+     */
+    fun nextWeekday(date: LocalDate): LocalDate = BusinessCalendar.weekendOnly().nextBusinessDay(date)
 }

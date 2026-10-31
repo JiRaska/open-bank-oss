@@ -11,7 +11,7 @@
     "com.openbank.libs.benchmarks.FingerprintBench.ofDto": 3555.5,
     "com.openbank.libs.benchmarks.IbanBench.isValid": 1816.0,
     "com.openbank.libs.benchmarks.IbanBench.ofSpaced": 2072.0,
-    "com.openbank.libs.benchmarks.Iso20022Bench.buildPacs008": 63432.3,
+    "com.openbank.libs.benchmarks.Iso20022Bench.buildPacs008": 20864.2,
     "com.openbank.libs.benchmarks.Iso20022Bench.readPacs008": 132918.9,
     "com.openbank.libs.benchmarks.Iso20022Bench.validatePacs008": 194420.8,
     "com.openbank.libs.benchmarks.MoneyBench.of": 48.0,
@@ -19,6 +19,12 @@
     "com.openbank.libs.benchmarks.MoneyBench.round": 24.0,
     "com.openbank.libs.benchmarks.PiiMaskBench.email": 248.0,
     "com.openbank.libs.benchmarks.PiiMaskBench.iban": 352.0,
-    "com.openbank.libs.benchmarks.PiiMaskBench.pan": 1256.0
+    "com.openbank.libs.benchmarks.PiiMaskBench.pan": 1256.0,
+    "com.openbank.libs.benchmarks.ProductInterpreterBench.evaluateGoldenSet": 15251.6
+  },
+  "latency_bounds": {
+    "com.openbank.libs.benchmarks.ProductInterpreterBench.evaluateGoldenSet": {
+      "p99_ms": 2.0
+    }
   }
 }

@@ -1,6 +1,6 @@
 ---
 date: 2026-08-04
-decision-status: proposed
+decision-status: accepted
 delivery-status: shipped
 authors: [Jiri Raska]
 supersedes: []
@@ -16,6 +16,12 @@ summary: "Add an advisory k6 HTTP performance gate to CI: boot a service via qua
 product-catalog smoke script weekly/manual, performs a real-route preflight, enforces k6
 thresholds, uploads the summary artifact, and raises an issue for scheduled failures. Money-path
 promotion and enforcement remain future work and are not claimed here.
+
+**Correction (2026-10-14, recorded on acceptance):** decision point 4's shared helper module
+(`openbank-infra/k6/k6-lib.js`) was never created — the pilot script is self-contained (k6
+stdlib imports only, BASE_URL from `__ENV` as decided in point 7). Nothing else in the decision
+changes; the helper module is revisited when a second service adopts the gate, at which point
+the shared code will have two real consumers to abstract from.
 
 ## Context
 

@@ -86,6 +86,11 @@ That a value is CORRECT, or that a non-empty `defaultValue` is a sensible one. A
 value defined as empty by a source outside this repo (a ConfigMap literal ""), because there is
 nothing here to read.
 
+Quarkus supplies `quarkus.application.name` and `quarkus.application.version` from the project
+identity in a built application. They need no application.yaml or workload env declaration;
+requiring one would also invite a stale version override. An explicit empty YAML value still fails
+the defined-as-empty check above.
+
 Usage:  check-configproperty-supplied.py [--enforce] [--self-test]
 """
 
@@ -105,6 +110,7 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 COMPONENTS = REPO / "openbank-infra/gitops/components"
 WORKLOADS = {"Deployment", "Rollout", "StatefulSet", "DaemonSet"}
 SKIP_PREFIXES = ("openbank-libs",)
+QUARKUS_PROJECT_DEFAULTS = {"quarkus.application.name", "quarkus.application.version"}
 
 # Known-and-accepted defined-as-empty injections, if any ever need to be. Empty today (#5946
 # closed the only one). An entry needs `path::property  # reason` and is reported when it stops
@@ -296,7 +302,7 @@ def findings(repo: pathlib.Path = REPO) -> tuple[list[str], int, int]:
                 if (("defaultValue" in params and not empty_default) or is_optional(type_name)):
                     continue
                 required += 1
-                if prop in keys or env_key(prop) in supplied_env:
+                if prop in QUARKUS_PROJECT_DEFAULTS or prop in keys or env_key(prop) in supplied_env:
                     continue
                 out.append(
                     f"{rel}: @ConfigProperty(\"{prop}\") is required — not Optional, no "
@@ -378,9 +384,18 @@ def selftest() -> int:
     edge_supplied = "openbank:\n  upstream:\n    client-secret: ${UPSTREAM_SECRET:changeme}\n"
     const_default = ('@ConfigProperty(name = "opa.url", defaultValue = DEFAULT_BASE_URL)\n'
                      '    lateinit var opaUrl: String\n')
+    project_version = '@ConfigProperty(name = "quarkus.application.version") version: String\n'
+    project_name = '@ConfigProperty(name = "quarkus.application.name") name: String\n'
+    unknown_quarkus = '@ConfigProperty(name = "quarkus.application.unknown") value: String\n'
+    empty_project_version = "quarkus:\n  application:\n    version: ${APP_VERSION:}\n"
 
     cases = [
         ("required and supplied", required, supplied, 1, 0),
+        ("Quarkus project version has a build default", project_version, empty, 1, 0),
+        ("Quarkus project name has a build default", project_name, empty, 1, 0),
+        ("explicit empty project version still fails", project_version,
+         empty_project_version, 0, 1),
+        ("unknown Quarkus property remains required", unknown_quarkus, empty, 1, 1),
         # -- #5946 --
         ("yaml defines it as empty, target is a plain String — THE #5844 SHAPE",
          anchor, anchor_yaml, 0, 1),
@@ -421,7 +436,7 @@ def selftest() -> int:
     print(f"selftest OK: {len(cases)} fixture(s) — supplied, profile-scoped, unsupplied, "
           f"comment-only, defaultValue, Optional, the #5844 defined-as-empty shape and its "
           f"#5944 fix, a YAML null, a real fallback, an FQN Optional, a bare empty "
-          f"defaultValue, plus the empty-scan guard.")
+          f"defaultValue, Quarkus project defaults, plus the empty-scan guard.")
     return 0
 
 

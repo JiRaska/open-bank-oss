@@ -51,6 +51,7 @@ The edge is a proxy: it emits **no events of its own**. The "upstream" column na
 | List my accounts | `GET /accounts` | account-service |
 | Get one of my accounts | `GET /accounts/{accountId}` | account-service (ownership enforced here) |
 | Get a balance | `GET /balances/{accountId}` | balance-service (ownership enforced here) |
+| Manage my low-balance alert | `GET,PUT /balances/{accountId}/{currency}/low-balance-alert` | balance-service (owner only; opt-in inbox alert) |
 | List my transactions | `GET /transactions?accountId=…` | transaction-service (ownership enforced here) |
 | List statement periods | `GET /statements/{accountId}` | statement-service (ownership enforced here) |
 | Render a statement (camt.053/MT940/PDF) | `GET /statements/{accountId}/{currency}/{legalSequence}` | statement-service |

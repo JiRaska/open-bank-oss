@@ -7,8 +7,10 @@ package com.openbank.notification.application
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.notification.infrastructure.client.PartyMergeResolver
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -76,6 +78,36 @@ class NotificationConsumerRejectionTest {
         // so an allowed route on the wrong channel is still a malformed request.
         val payload = """{"partyId":"$partyId","channel":"EMAIL","template":"WELCOME",""" +
             """"recipient":"a@b.example","variables":{"name":"Ada"},"deepLink":"openbank://home"}"""
+
+        consumer.consume(payload).await().indefinitely()
+
+        verify(exactly = 0) { mergeResolver.resolve(any()) }
+    }
+
+    /**
+     * #12392 positive twin: the exact envelope pension-service's ParticipantNotificationPublisher
+     * sends passes validation and reaches dispatch (the strict resolver is called). Before the
+     * PENSION_* templates existed this was dropped as an unknown template.
+     */
+    @Test
+    fun `a pension participant notice in the producer's envelope is accepted for dispatch`() {
+        every { mergeResolver.resolve(partyId) } returns Uni.createFrom().failure(IllegalStateException("reached"))
+        val payload = json(
+            "PENSION_PAYOUT_ACCOUNT_CHANGED",
+            """{"contractId":"c-1","accountLast4":"1234","effectiveFrom":"2026-11-01"}""",
+        )
+
+        runCatching { consumer.consume(payload).await().indefinitely() }
+
+        verify(exactly = 1) { mergeResolver.resolve(partyId) }
+    }
+
+    @Test
+    fun `a pension notice carrying a variable its template does not declare is rejected`() {
+        val payload = json(
+            "PENSION_PAYOUT_ACCOUNT_CHANGED",
+            """{"contractId":"c-1","accountLast4":"1234","effectiveFrom":"2026-11-01","iban":"CZ65"}""",
+        )
 
         consumer.consume(payload).await().indefinitely()
 

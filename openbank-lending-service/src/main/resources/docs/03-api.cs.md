@@ -4,6 +4,14 @@ REST kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.
 
 Základní cesta: `/api/v1/lending`. Všechny endpointy vyžadují Keycloak bearer JWT (`bearerAuth`).
 
+V produkci používá `/api/*` na běžném HTTP i na mTLS portu 8443 autentizační mechanismus bearer.
+Port 8443 nadále vyžaduje důvěryhodný klientský certifikát při TLS handshake, ale samotný
+certifikát volajícího k API nepřihlásí: požadavek s certifikátem a bez bearer tokenu vrací 401.
+Platný bearer token poskytuje identitu pro API. Kontrola rolí na trasách zůstává povinná;
+zamítavé rozhodnutí OPA blokuje požadavek jen při `AUTHZ_ENFORCE=true` (`authz.enforce` má
+výchozí hodnotu `false`). Autentizace přenosu tak zůstává oddělená od identity v API, aniž by
+se změnilo stávající nastavení autorizace.
+
 ## Autorizace
 
 Třída resource je role-gated; **jednající principal je vždy ověřený JWT subjekt** (`SecurityIdentity.principal.name`), nikdy pole z requestu. Role na úrovni třídy: `ROLE_LENDING_OFFICER`, `ROLE_CREDIT_RISK`, `ROLE_COMPLIANCE`, `ROLE_ADMIN`. Per-endpoint override toto zužuje:
@@ -54,7 +62,10 @@ historie nepovažoval za provedený přechod.
 - **DecisionRequest** — `approve` (bool, povinné), `reason` (string, nullable). **Žádné `decidedBy`** — checker je JWT subjekt.
 - **CollateralRequest** — `type` (string), `description` (nullable), `marketValue` (Money), `haircut` (number, výchozí 0, validováno na `[0,1]`).
 - **WriteOffRequest** — `reason` (string, nullable). Jednající principal je JWT subjekt.
-- **Money** — `{ amount: number, currency: ISO-4217 }`.
+- **Money v požadavku** — publikované schéma zůstává `{ amount: number, currency: ISO-4217 }`. Čtečka zachovává také kompatibilitu s desetinným řetězcem a starším vnořeným tvarem měny.
+- **Money v odpovědi** — dosavadní tvar je `{ amount: number, currency: { code: "EUR", defaultFractionDigits: 2 }, isNonNegative: boolean, isZero: boolean, isNegative: boolean, isPositive: boolean }`. Schéma OpenAPI `MoneyResponse` jej popisuje samostatně, aby generovaný klient nepovažoval vstupní řetězec měny za zaručený tvar odpovědi.
+- **Splátkový kalendář a výsledek splátky** — `LoanInstallment` používá stejný tvar `MoneyResponse` pro počáteční zůstatek, jistinu, úrok, splátku a konečný zůstatek.
+- **Další peněžní odpovědi** — nabídka předčasného splacení obsahuje pět polí `MoneyResponse`; zajištění takto vrací `marketValue`. Přechody stavu úvěru vracejí `Loan` s jistinou `MoneyResponse` a postup či rozhodnutí o žádosti vrací `LoanApplicationResponse` s požadovanou částkou.
 
 Validace (aplikační služba): požadovaná částka musí být kladná, term ≥ 1 období, nominální sazba ≥ 0, identita navrhovatele neprázdná, haircut v `[0,1]`.
 

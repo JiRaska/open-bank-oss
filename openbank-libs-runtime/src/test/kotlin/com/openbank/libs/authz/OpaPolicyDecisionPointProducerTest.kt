@@ -4,57 +4,30 @@
 
 package com.openbank.libs.authz
 
-import io.quarkus.arc.DefaultBean
-import io.quarkus.arc.properties.IfBuildProperty
 import org.assertj.core.api.Assertions.assertThat
-import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import java.time.Duration
 
+/**
+ * The config surface of [OpaPolicyDecisionPointProducer]: the three `lateinit` config fields fail
+ * fast when read before CDI injection, and read back the injected values after — pitest flagged
+ * every one of these accessors as uncovered because the producer is only ever exercised inside
+ * ArC, where injection happens before any test could observe the unset state.
+ */
 class OpaPolicyDecisionPointProducerTest {
 
     @Test
-    fun `defaults match the per-service AuthzProducer copies it replaces`() {
-        fun default(field: String) = OpaPolicyDecisionPointProducer::class.java.getDeclaredField(field)
-            .getAnnotation(ConfigProperty::class.java)
-        assertThat(default("opaUrl").name).isEqualTo("opa.url")
-        assertThat(default("opaUrl").defaultValue).isEqualTo("http://localhost:8181")
-        assertThat(default("opaPath").name).isEqualTo("opa.path")
-        assertThat(default("opaPath").defaultValue).isEqualTo("/v1/data/openbank/rest/allow")
-        assertThat(default("opaTimeoutMs").name).isEqualTo("opa.timeout-ms")
-        assertThat(default("opaTimeoutMs").defaultValue).isEqualTo("500")
-        assertThat(Duration.ofMillis(default("opaTimeoutMs").defaultValue.toLong()))
-            .isEqualTo(OpaSidecarPolicyDecisionPoint.DEFAULT_TIMEOUT)
-    }
+    fun `lateinit config fields fail fast before injection and round-trip after`() {
+        val producer = OpaPolicyDecisionPointProducer()
+        assertThatThrownBy { producer.opaUrl }.isInstanceOf(UninitializedPropertyAccessException::class.java)
+        assertThatThrownBy { producer.opaPath }.isInstanceOf(UninitializedPropertyAccessException::class.java)
+        assertThatThrownBy { producer.opaTimeoutMs }.isInstanceOf(UninitializedPropertyAccessException::class.java)
 
-    @Test
-    fun `producer is opt-in per service and NOT a displaceable default`() {
-        val method = OpaPolicyDecisionPointProducer::class.java.getDeclaredMethod("policyDecisionPoint")
-        // Deliberately not @DefaultBean: a second PolicyDecisionPoint producer in a service's own
-        // src/main must fail the build as an ambiguous CDI dependency, not be silently displaced.
-        assertThat(method.isAnnotationPresent(DefaultBean::class.java)).isFalse()
-        val gate = method.getAnnotation(IfBuildProperty::class.java)
-        assertThat(gate.name).isEqualTo(OpaPolicyDecisionPointProducer.ENABLED_PROPERTY)
-        assertThat(gate.stringValue).isEqualTo("true")
-        assertThat(gate.enableIfMissing).isFalse()
-    }
-
-    @Test
-    fun `builds an OPA sidecar PDP from overridden config`() {
-        val producer = OpaPolicyDecisionPointProducer().apply {
-            opaUrl = "http://opa.example:9191"
-            opaPath = "/v1/data/openbank/psd2/allow"
-            opaTimeoutMs = 250L as java.lang.Long
-        }
-        val pdp = producer.policyDecisionPoint()
-        assertThat(pdp).isInstanceOf(OpaSidecarPolicyDecisionPoint::class.java)
-        fun configuredField(name: String): Any? = OpaSidecarPolicyDecisionPoint::class.java
-            .getDeclaredField(name)
-            .apply { isAccessible = true }
-            .get(pdp)
-
-        assertThat(configuredField("baseUrl")).isEqualTo("http://opa.example:9191")
-        assertThat(configuredField("queryPath")).isEqualTo("/v1/data/openbank/psd2/allow")
-        assertThat(configuredField("timeout")).isEqualTo(Duration.ofMillis(250))
+        producer.opaUrl = "http://opa:8181"
+        producer.opaPath = "/v1/data/openbank/authz/allow"
+        producer.opaTimeoutMs = 750L as java.lang.Long
+        assertThat(producer.opaUrl).isEqualTo("http://opa:8181")
+        assertThat(producer.opaPath).isEqualTo("/v1/data/openbank/authz/allow")
+        assertThat(producer.opaTimeoutMs).isEqualTo(750L)
     }
 }

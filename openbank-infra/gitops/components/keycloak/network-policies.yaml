@@ -56,6 +56,9 @@ spec:
               kubernetes.io/metadata.name: analytics
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: arc-runners
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: audit
         - namespaceSelector:
             matchLabels:
@@ -137,6 +140,9 @@ spec:
               kubernetes.io/metadata.name: ledger
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: ledger-pension-co
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: lending
         - namespaceSelector:
             matchLabels:
@@ -153,6 +159,12 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: payments
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pension
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pension-fund
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: pid
@@ -186,6 +198,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: statements
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tax-reporting
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: tpp-registry

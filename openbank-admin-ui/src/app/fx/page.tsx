@@ -96,7 +96,7 @@ const FX_CONFIGURATION_WRITABLE = false
 // fx-service is on the FinOps scaledown allowlist, so "not reachable" usually means
 // "intentionally idle", not "broken". Map the /api/fx/rates status to a calm badge:
 // scale-to-zero is amber "asleep", never a red "down". null = still checking.
-type FxStatus = 'up' | 'scaled_to_zero' | 'down' | 'not_deployed'
+type FxStatus = 'up' | 'scaled_to_zero' | 'down' | 'not_deployed' | 'unknown'
 function fxBadge(status: FxStatus | null, t: (cs: string, en: string) => string) {
   switch (status) {
     case 'up':
@@ -107,6 +107,8 @@ function fxBadge(status: FxStatus | null, t: (cs: string, en: string) => string)
       return { icon: XCircle, bg: 'var(--danger-bg)', fg: 'var(--danger-text)', border: 'var(--danger-border)', label: t('fx-service neodpovídá', 'fx-service is not responding') }
     case 'not_deployed':
       return { icon: XCircle, bg: 'var(--surface-3)', fg: 'var(--text-tertiary)', border: 'var(--border)', label: t('fx-service není nasazen', 'fx-service not deployed') }
+    case 'unknown':
+      return { icon: Clock, bg: 'var(--warning-bg)', fg: 'var(--warning-text)', border: 'var(--warning-border)', label: t('Stav fx-service nelze ověřit', 'fx-service status could not be verified') }
     default:
       return { icon: Clock, bg: 'var(--surface-3)', fg: 'var(--text-tertiary)', border: 'var(--border)', label: t('fx-service — zjišťuji…', 'fx-service — checking…') }
   }

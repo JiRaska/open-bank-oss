@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -30,6 +15,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_lending
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_lending
   flyway:
@@ -98,6 +86,12 @@ quarkus:
       url: ${ANALYTICS_SINK_URL:http://localhost:8110}
       connect-timeout: 2000
       read-timeout: 3000
+    # ADR-0214 D3 evidence bundle (#11900). Called with the CALLER's own token
+    # (CallerTokenClientHeadersFactory), never the m2m client: audit-service admits humans only.
+    audit-service:
+      url: ${AUDIT_SERVICE_URL:http://localhost:8113}
+      connect-timeout: 2000
+      read-timeout: 5000
   redis:
     hosts: redis://localhost:6379
   shutdown:
@@ -153,8 +147,18 @@ quarkus:
       # fail boot on Connection refused). Workflow tests drive their own TestWorkflowEnvironment.
       worker:
         enabled: false
+  # No ledger under @QuarkusTest: the close reporter stays off; LendingCloseParticipationSchedulerCronIT
+  # switches it back on from its own profile.
+  lending:
+    close:
+      report-cron: "0 0 0 1 1 ? 2099"
 
 openbank:
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:
@@ -175,6 +179,13 @@ openbank:
     poll-interval: 5s
     initial-delay: 5s
     dispatch-enabled: true
+    # SENT-row retention (ADR-0329) is wired (LendingOutboxRepositoryImpl implements
+    # SentOutboxRetention) but HELD OFF here until the parity check in
+    # src/main/resources/docs/05-operations.en.md confirms the audit chain holds every event this
+    # outbox ever sent (#11900). The evidence bundle no longer reads this table, so once parity is
+    # confirmed nothing reads a SENT row and this switch is the only thing left to flip.
+    retention:
+      enabled: ${LENDING_OUTBOX_RETENTION_ENABLED:false}
   temporal:
     # ADR-0211 D2 durable origination timers.
     #
@@ -286,6 +297,14 @@ lending:
     cycle:
       every: ${LENDING_PROVISIONING_EVERY:24h} # immutable daily reporting snapshots
       batch-size: ${LENDING_PROVISIONING_BATCH_SIZE:500}
+  # Day-close participation (ADR-0342, #13167): LendingCloseParticipationScheduler reports each
+  # completed accounting day (RAN / SKIPPED / REFUSED, from lending_close_job_run) to ledger-service
+  # as participant `lending`, re-offering the last `lookback-days` days every tick. The ledger
+  # declares the participant in its own application.yaml; rules.yaml: close_participants is the
+  # source both are checked against (check-close-participants.py).
+  close:
+    report-cron: ${LENDING_CLOSE_REPORT_CRON:0 40 * * * ?}
+    lookback-days: ${LENDING_CLOSE_LOOKBACK_DAYS:3}
 
 # Build-time adapter selection for the PACKAGED IMAGE. `quarkusBuild` augments with the `prod`
 # profile active, so these — not the offline defaults above — are what ArC bakes in. Kept as a
@@ -310,6 +329,19 @@ lending:
       # readiness probe and every in-cluster plaintext caller get `connection refused`.
       # mTLS applies to the 8443 listener only. Runtime property; see #10505.
       insecure-requests: enabled
+      # Listener parity (#12511, the #12506 pattern): with client-auth on, Quarkus ALSO registers its
+      # mTLS authentication mechanism, which turns any trusted client certificate into an authenticated
+      # SecurityIdentity of its own — on 8443 only. The API must be authenticated identically on both
+      # listeners, by the OIDC bearer OPA decides on, so /api/* accepts the bearer mechanism ONLY; the
+      # certificate stays transport authentication. Measured before this: a fleet-CA certificate with no
+      # bearer reached the API as an authenticated principal (403 from authz, not 401).
+      # LendingListenerAuthParityIT holds both listeners to it with the production listener shape.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
     # RestCatalogLoanProfilePort calls product-catalog. Production uses a named TLS bucket over
     # product-catalog's private-CA mTLS listener (8443, client auth REQUIRED). Local/test fixtures
     # speak plain HTTP, so this stays under %prod: the client cert only exists in the cluster.
@@ -334,11 +366,24 @@ lending:
           pem:
             certs: /mnt/consent-tls/ca.crt
         protocols: TLSv1.3
+      # #11900: audit-service's 8443 mTLS listener, same private CA and client identity as above.
+      audit-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/audit-tls/tls.crt
+              key: /mnt/audit-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/audit-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       product-catalog:
         tls-configuration-name: catalog-authority
       consent-service:
         tls-configuration-name: consent-authority
+      audit-service:
+        tls-configuration-name: audit-authority
   lending:
     ledger:
       backend: ${LENDING_LEDGER_BACKEND:rest}
