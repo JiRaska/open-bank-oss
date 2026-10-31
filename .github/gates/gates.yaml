@@ -1431,7 +1431,7 @@ gates:
       OPENBANK_SECURITY_HONEY_PATHS, and HoneytokenFilter must stay @PreMatching — without it
       the filter was never called for an unrouted path, which is why it had never counted a hit.
       It also pins the scheduled-drill role to deception-drill.yml on main (no IfExists, no PR
-      trigger) and requires the Chatbot channel to carry a non-admin guardrail.
+      trigger).
     review_after: "2027-04-29"
     min_subjects: 4   # deploy-prod SA + canary IAM user + customer-edge honey paths + drill role (2026-10-31)
     selftest_inputs:

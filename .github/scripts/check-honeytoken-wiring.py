@@ -31,9 +31,7 @@ Checks:
   - the scheduled-drill role (aws_iam_role.deception_drill) trusts only
     deception-drill.yml on main by StringEquals on sub AND job_workflow_ref (never IfExists),
     and that workflow triggers on schedule/workflow_dispatch only - a pull_request trigger would
-    hand a lure-reading role to PR code;
-  - the Chatbot channel carries an explicit guardrail that is not AdministratorAccess (the
-    service applies AdministratorAccess when none is given).
+    hand a lure-reading role to PR code.
 
 Usage:
     check-honeytoken-wiring.py             # scan
@@ -229,12 +227,6 @@ def scan(gitops: Path, tofu: Path, filter_src: Path = FILTER, workflow: Path = D
             findings.append("HoneytokenFilter is not @PreMatching — it is never called for an unrouted honey path")
     drill, n_drill = drill_findings(text, blocks, workflow)
     findings += drill
-    for t, n, b in blocks:
-        if t == "aws_chatbot_slack_channel_configuration":
-            if "guardrail_policy_arns" not in b:
-                findings.append(f"{t}.{n} has no guardrail - the service default is AdministratorAccess")
-            elif "AdministratorAccess" in b:
-                findings.append(f"{t}.{n} guardrail is AdministratorAccess")
     return findings, len(sas) + len(users) + len(workloads) + n_drill
 
 
@@ -293,10 +285,6 @@ def selftest() -> int:
             "tofu", "deception-delivery.tf",
             lambda s: s.replace(':ref:refs/heads/main"]', ':ref:refs/*"]', 1),
             "ref:refs/heads/main only"),
-        "chatbot guardrail admin": (
-            "tofu", "deception-delivery.tf",
-            lambda s: s.replace("policy/CloudWatchReadOnlyAccess", "policy/AdministratorAccess", 1),
-            "guardrail is AdministratorAccess"),
     }
     for label, (tree, rel, mutate, expect) in cases.items():
         with tempfile.TemporaryDirectory() as tmp:

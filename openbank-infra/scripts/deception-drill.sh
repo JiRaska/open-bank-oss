@@ -21,7 +21,7 @@
 #   openbank-infra/scripts/deception-drill.sh --scope aws      # scheduled run (deception-drill.yml)
 # --scope aws fires only what an identity without Kubernetes or Loki access can: the decoy (its
 # 401 only) and the canary key, and additionally asserts the honeytoken SNS topic DELIVERED a
-# notification (Slack via Chatbot, email). The honey-SA and Loki rows print SKIPPED, never PASS.
+# notification (email). The honey-SA and Loki rows print SKIPPED, never PASS.
 # Needs: aws, curl, python3 (+ kubectl for the full scope). Portable: GNU and BSD userland, and
 # the stock macOS bash 3.2 (no associative arrays, on purpose). TIMEOUT and POLL override the
 # window and the poll interval (the self-test uses them).
@@ -126,5 +126,5 @@ for k in decoy canary delivery honeysa; do
   elif [[ "$k" == honeysa && "$SCOPE" == aws ]]; then printf '%-10s %-10s %s\n' "$k" SKIPPED "(--scope aws: monthly manual drill)"
   else printf '%-10s %-10s %s\n' "$k" FAIL ">${TIMEOUT}"; rc=1; fi
 done
-echo "Seconds measure signal-in-AWS/Loki. delivery = the SNS topic handed the canary alert to its subscribers (Slack via Chatbot, email)."
+echo "Seconds measure signal-in-AWS/Loki. delivery = the SNS topic handed the canary alert to its subscribers (email)."
 exit $rc

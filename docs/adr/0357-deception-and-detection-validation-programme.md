@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [security-ops, observability, infrastructure, gitops]
-followup: "#14163 — layers 0-1, the drill, an armed HoneytokenFilter, Slack delivery and the weekly drill ship; regional EventBridge coverage, OpenBao/S3/Keycloak/DB lures, GoAlert paging and Stratus are open"
+followup: "#14163 — layers 0-1, the manual and weekly drills and an armed HoneytokenFilter ship; regional EventBridge coverage, OpenBao/S3/Keycloak/DB lures, Slack/GoAlert delivery of the AWS signals and Stratus are open"
 summary: "Deception is a layered programme on existing telemetry: edge decoys, then cloud and cluster honeytokens whose any use is an alert, each mapped to ATT&CK, gated as wired and powerless, and proven by a timed drill. Under 1 USD/month."
 ---
 
@@ -176,18 +176,17 @@ give: the request is seen inside the service's namespace whether it came through
 in-cluster caller that skipped it. `honeytoken-wiring` now fails if `HoneyEndpointHit` exists
 while no workload sets `OPENBANK_SECURITY_HONEY_PATHS`, or if the filter loses `@PreMatching`.
 
-**Paging: Slack through AWS Chatbot (owner decision 2026-10-31).** GoAlert is cluster-internal
-(ADR-0056) and an SNS HTTPS subscription needs a public endpoint, so the honeytoken topics could
-reach a human only by email. AWS Chatbot subscribes to the same two topics from AWS's side and
-posts into Slack: no Lambda, no webhook secret, nothing listening on the internet
-(`deception-delivery.tf`). Its channel role carries no policy and its guardrail is read-only
-CloudWatch, because the service applies AdministratorAccess when no guardrail is given. Chatbot
-renders CloudWatch alarms natively and other messages only in its custom-notification JSON, so
-the canary rule's input template now emits that shape (email receives the same JSON). Slack
-workspace and channel ids are tofu variables with no default and never enter git; the workspace
-is authorised once in the Chatbot console before the first apply. GoAlert paging stays out of
-reach without new surface. `EdgeDecoyTargetedHit` and `HoneyEndpointHit` stay `warning` (Slack)
-until a drill hit has been seen there end to end.
+**Paging stays email (owner decision 2026-10-31).** GoAlert is cluster-internal (ADR-0056) and
+an SNS HTTPS subscription needs a public endpoint, so the honeytoken topics reach a human by
+email. The estate's existing Slack path is Loki/Grafana -> Alertmanager, and it cannot see
+CloudTrail or CloudWatch: no CloudTrail data is ingested into Loki and Grafana has no CloudWatch
+datasource. Bridging them would be a new component (a managed chat integration, a function, an
+exporter pod or new log ingestion), and the rule for this programme is to reuse what already
+runs and add a component only when it is free or lowers cost, after a written evaluation and the
+owner's approval. A managed chat integration was built and withdrawn on that rule: it duplicated
+the Slack path and saved nothing. The in-cluster signals (`EdgeDecoyTargetedHit`,
+`HoneyEndpointHit`) already reach Slack through that path and stay `warning` until a drill hit
+has been seen there end to end.
 
 **Scheduled drill (owner decision 2026-10-31).** `.github/workflows/deception-drill.yml` runs
 weekly and on dispatch, never on a pull request, on a GitHub-hosted runner. It assumes
@@ -201,8 +200,7 @@ and the Loki half of the decoy need cluster access this role deliberately lacks;
 proves on the runner itself that silence exits 1 and a signal exits 0. Stratus Red Team is not
 run: every technique that adds coverage beyond our own lures needs rights to create or change
 AWS resources, which a lure-reading role must not hold. `honeytoken-wiring` fails if the trust
-loses either pin, gains `IfExists` or a wider `sub`, if the workflow gains any other trigger, or
-if the Chatbot guardrail is missing or AdministratorAccess.
+loses either pin, gains `IfExists` or a wider `sub`, or if the workflow gains any other trigger.
 
 ### Delivery check
 

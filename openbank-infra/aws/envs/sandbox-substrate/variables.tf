@@ -29,18 +29,3 @@ variable "admin_access_principal_arns" {
   type        = list(string)
   default     = []
 }
-
-# ADR-0357 slice 2: Slack delivery of the honeytoken topics via AWS Chatbot. Deliberately no
-# defaults and never committed: pass them from a tfvars file outside the repository. Unset
-# (null) leaves the Chatbot channel uncreated and email the only delivery.
-variable "deception_slack_team_id" {
-  description = "Slack workspace (team) id authorised once in the AWS Chatbot console. Keep out of git."
-  type        = string
-  default     = null
-}
-
-variable "deception_slack_channel_id" {
-  description = "Slack channel id that receives honeytoken alerts. Keep out of git."
-  type        = string
-  default     = null
-}

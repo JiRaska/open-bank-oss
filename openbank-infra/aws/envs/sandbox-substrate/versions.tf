@@ -59,23 +59,3 @@ provider "aws" {
     }
   }
 }
-
-# AWS Chatbot (Amazon Q Developer in chat apps) is a global service whose control-plane API is
-# not served from eu-north-1. Used only by deception-delivery.tf. If the owner's first plan
-# rejects the region, any Chatbot API region works; the SNS topics it subscribes stay where
-# they are (ADR-0357 slice 2).
-provider "aws" {
-  alias  = "chatbot"
-  region = "us-west-2"
-
-  default_tags {
-    tags = {
-      Project     = "openbank"
-      ManagedBy   = "opentofu"
-      Env         = "sandbox"
-      Environment = "sandbox"
-      Service     = "openbank"
-      Adr         = "0027"
-    }
-  }
-}
