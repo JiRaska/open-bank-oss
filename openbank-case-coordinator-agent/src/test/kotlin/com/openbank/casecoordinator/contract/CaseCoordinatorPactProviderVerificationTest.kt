@@ -78,6 +78,13 @@ class CaseCoordinatorPactProviderVerificationTest {
     @State("a closed case with a thread exists")
     fun seedClosedCase() = seedCase(status = "CLOSED", contestedRate = "0.5")
 
+    @State(KILL_SWITCH_INACTIVE_STATE)
+    fun stateNoActiveKillSwitch() {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement("DELETE FROM case_kill_switch").use { it.executeUpdate() }
+        }
+    }
+
     private fun seedCase(status: String, contestedRate: String) {
         val caseUuid = UUID.nameUUIDFromBytes(WORKFLOW_ID.toByteArray(StandardCharsets.UTF_8))
         dataSource.connection.use { conn ->
@@ -168,3 +175,6 @@ class CaseCoordinatorPactProviderVerificationTest {
  * The unauthenticated half of the coordinator's git-pact verification (ADR-0279 #3).
  */
 const val NEGATIVE_AUTH_STATE = "no valid identity is presented"
+
+/** Provider state of the positive kill-switch status read: the projection holds no active scope. */
+const val KILL_SWITCH_INACTIVE_STATE = "no kill-switch scope is active"
