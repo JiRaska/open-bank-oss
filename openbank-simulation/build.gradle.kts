@@ -74,6 +74,12 @@ dependencies {
     // than a re-model of either. The domain package is framework-free (ADR-0002), so only the
     // domain POJOs land on the classpath, not a runtime.
     implementation(project(":openbank-domestic-payment"))
+    // REAL clearing-service domain aggregates — `ClearingItem`/`ClearingBatch`/
+    // `SettlementPosition` and the `ClearingStatus`/`PaymentRail` vocabularies, with the batch
+    // totals computed by the same kernel-Money fold production's ClearingService uses — rather
+    // than a re-model of the clearing cycle. The domain package is framework-free (ADR-0002),
+    // so only the domain POJOs land on the classpath, not a runtime.
+    implementation(project(":openbank-clearing-service"))
 
     // ADR-0143 phase 2d: the harness drives the REAL billing-service domain value objects
     // (AssessedFee, FeeJournalCommand, FeeReversalCommand — com.openbank.billing.domain) so

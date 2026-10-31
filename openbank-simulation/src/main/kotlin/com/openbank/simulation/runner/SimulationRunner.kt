@@ -8,6 +8,7 @@ import com.openbank.simulation.engine.FaultProfile
 import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.Invariant
 import com.openbank.simulation.invariants.MoneyPathInvariants
+import com.openbank.simulation.scenario.ClearingCycleScenario
 import com.openbank.simulation.scenario.DelegatedSpendScenario
 import com.openbank.simulation.scenario.DomesticClearingScenario
 import com.openbank.simulation.scenario.FeeBillingScenario
@@ -63,6 +64,9 @@ class SimulationRunner(
             // Czech domestic clearing domain-class binding into the same seeded run so it
             // shares the fault profile and is checked by the same invariant sweep every step.
             DomesticClearingScenario.step(world)
+            // clearing-cycle domain-class binding into the same seeded run so it shares the
+            // fault profile and is checked by the same invariant sweep every step.
+            ClearingCycleScenario.step(world)
             context.scheduler.drain()
             // ADR-0143 phase 2d/2e: interleave the billing fee-charge (+ seeded reversal) path
             // so MoneyPathInvariants.billingFeeConservation is actually exercised every step,
