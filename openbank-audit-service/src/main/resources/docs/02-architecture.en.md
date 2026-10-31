@@ -33,7 +33,7 @@ The service follows the hexagonal (ports & adapters) layout mandated by [ADR-000
 
 ## Ingest flow (consume)
 
-1. A producer (account, transaction, balance, party, kyc, consent service) emits a domain event to its Kafka topic.
+1. A producer emits a domain event to its Kafka topic. The subscribed topics include `openbank.oversight-triggers`, which carries independent oversight requests from both aml-service and sanctions-service.
 2. `AuditConsumer` receives it on the shared `audit-events-in` channel (consumer group `audit-service`, `auto.offset.reset=earliest`).
 3. The payload is parsed; aggregate identity is inferred; a new `AuditEntry` with a fresh `entry_id` UUID and `recordedAt = now` is built.
 4. `AuditRepository.save` persists it transactionally. The DB trigger stamps `retention_until = occurred_at + 10 years`; immutability rules block any later mutation.
@@ -61,3 +61,7 @@ emerges, design it against that consumer, not by resurrecting this apparatus spe
 - **Reactive everywhere** — Hibernate Reactive + Mutiny, bridged to Kotlin coroutines via `awaitSuspending`.
 - **Observability** — Micrometer/Prometheus metrics and OpenTelemetry tracing (OTLP exporter), SmallRye Health probes.
 - **Security headers** — strict set configured globally (CSP `default-src 'self'`, HSTS, `X-Frame-Options: DENY`, nosniff, referrer/permissions policy).
+
+## Scheduled-job heartbeat
+
+The audit hash-chain verification registers the fleet workflow-liveness heartbeat `audit-chain-verify` (`DomainMetrics.registerWorkflowLiveness`, seeded at startup) and records a success only on its success path: a completed verification counts even when it finds a broken chain (the heartbeat answers whether the control ran; `openbank.audit.chain.intact` answers whether it passed), a verification that throws does not. `WorkflowLivenessStale` alerts when the age exceeds twice the expected interval.

@@ -3,46 +3,20 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextResponse } from 'next/server'
-import { promises as fs } from 'fs'
-import path from 'path'
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
+import { getEksLifecycle, getPlatformView } from '@/lib/live-platform-versions'
+import { versionText } from '@/lib/platform-view'
+import { componentVersion, platformVersions } from '@/lib/platform-versions'
+import { postgresEol, postgresPins } from '@/lib/postgres-platform-lifecycle'
 
 export const dynamic = 'force-dynamic'
-
-interface EksVersionEntry {
-  eks_release: string
-  end_of_standard_support: string
-  end_of_extended_support: string
-}
-
-interface EksLifecycleJson {
-  _meta: { pricing_note: string; last_refreshed: string }
-  versions: Record<string, EksVersionEntry>
-}
 
 const STANDARD_RATE = 0.10  // $/cluster-hr
 const EXTENDED_RATE = 0.60  // $/cluster-hr (6× penalty per ADR-0054)
 const HOURS_PER_MONTH = 730
 const HOURS_PER_YEAR = 8760
 const MIN_RUNWAY_DAYS = 180 // ADR-0054: ≥6 months standard support required
-
-// Embedded fallback — matches eks-version-lifecycle.json at 2026-06-01.
-// Update when AWS publishes new minor versions.
-const EMBEDDED_LIFECYCLE: EksLifecycleJson = {
-  _meta: { pricing_note: 'standard: $0.10/hr; extended: $0.60/hr (6× penalty)', last_refreshed: '2026-06-01' },
-  versions: {
-    '1.30': { eks_release: '2024-05-23', end_of_standard_support: '2025-07-23', end_of_extended_support: '2026-07-23' },
-    '1.31': { eks_release: '2024-09-26', end_of_standard_support: '2025-11-26', end_of_extended_support: '2026-11-26' },
-    '1.32': { eks_release: '2025-01-23', end_of_standard_support: '2026-03-23', end_of_extended_support: '2027-03-23' },
-    '1.33': { eks_release: '2025-05-29', end_of_standard_support: '2026-07-29', end_of_extended_support: '2027-07-29' },
-    '1.34': { eks_release: '2025-10-02', end_of_standard_support: '2026-12-02', end_of_extended_support: '2027-12-02' },
-    '1.35': { eks_release: '2026-01-27', end_of_standard_support: '2027-03-27', end_of_extended_support: '2028-03-27' },
-  },
-}
-
-function lifecycleFilePath(): string {
-  if (process.env.OPENBANK_FINOPS_LIFECYCLE) return process.env.OPENBANK_FINOPS_LIFECYCLE
-  return path.resolve(process.cwd(), '..', 'openbank-infra', 'aws', 'finops', 'eks-version-lifecycle.json')
-}
 
 function daysBetween(from: Date, to: Date): number {
   return Math.round((to.getTime() - from.getTime()) / 86_400_000)
@@ -55,16 +29,18 @@ function runwayStatus(days: number): 'ok' | 'warn' | 'critical' {
 }
 
 export async function GET() {
-  let lifecycle = EMBEDDED_LIFECYCLE
-  let dataSource: 'file' | 'embedded' = 'embedded'
-
-  try {
-    const raw = await fs.readFile(lifecycleFilePath(), 'utf-8')
-    const parsed = JSON.parse(raw) as EksLifecycleJson
-    if (parsed?.versions) { lifecycle = parsed; dataSource = 'file' }
-  } catch { /* use embedded */ }
-
-  const currentVersion = process.env.KUBERNETES_VERSION ?? '1.35'
+  // EKS support dates: endoflife.date at runtime (24h cache), falling back to the build-time
+  // snapshot. The running version is LIVE (Prometheus) with the declared value alongside; if neither
+  // is known the route reports unavailable instead of guessing a cluster version.
+  const [view, eol] = await Promise.all([getPlatformView(), getEksLifecycle()])
+  const k8s = view.items.kubernetes
+  const liveMinor = k8s.live?.[0]?.version.split('.').slice(0, 2).join('.') ?? null
+  const currentVersion = liveMinor ?? k8s.declared
+  if (!eol || !currentVersion) {
+    return NextResponse.json({ error: 'platform_versions_unavailable' }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
+  }
+  const lifecycle = eol.lifecycle
+  const dataSource = eol.source === 'snapshot' ? 'snapshot' as const : 'live' as const
   const now = new Date()
 
   const versions = Object.entries(lifecycle.versions)
@@ -101,49 +77,81 @@ export async function GET() {
   const hourlyDelta = EXTENDED_RATE - STANDARD_RATE
   const onStandard = currentTier === 'standard'
 
-  // Platform components actually running in the sandbox (ADR-0010 GitOps stack).
-  // These are NOT AWS-managed services — the data plane is self-hosted in-cluster
-  // via operators (CloudNativePG, Strimzi), so we report the management model
-  // honestly. A formal support-lifecycle countdown only exists where upstream
-  // publishes one (EKS, PostgreSQL major). Self-hosted operators roll versions
-  // continuously, so `standardEnd`/`daysRemaining` are null (rendered "rolling")
-  // rather than a fabricated date. Versions overridable via env for other envs.
+  // The infra lifecycle collector refreshes this endoflife.date snapshot before image build.
+  // If it is missing or lacks the pinned major, report unknown rather than a fabricated EOL.
+  let infraLifecycle: unknown = null
+  try {
+    infraLifecycle = JSON.parse(await fs.readFile(
+      process.env.OPENBANK_INFRA_LIFECYCLE ?? path.resolve(process.cwd(), 'infra-lifecycle.json'),
+      'utf8',
+    ))
+  } catch { /* lifecycle state is explicitly unknown below */ }
+
+  // Include every running version and every declared GitOps pin. The live query may be unavailable,
+  // while an extra running version may have no matching declared pin. Neither case is hidden.
+  const declaredPins = postgresPins(platformVersions?.components.postgres ?? null)
+  const livePins = view.items.postgres?.live ?? []
+  const postgresVersions = [...new Set([
+    ...declaredPins.map(pin => pin.version),
+    ...livePins.map(pin => pin.version),
+  ])]
+  const postgresComponents = postgresVersions.map(version => {
+    const declared = declaredPins.find(pin => pin.version === version)?.manifests
+    const live = livePins.find(pin => pin.version === version)?.count
+    const counts = [
+      ...(live === undefined ? [] : [`${live} running ${live === 1 ? 'pod' : 'pods'}`]),
+      ...(declared === undefined ? [] : [`${declared} GitOps ${declared === 1 ? 'manifest' : 'manifests'}`]),
+    ]
+    const standardEnd = postgresEol(version, infraLifecycle)
+    const daysRemaining = standardEnd ? daysBetween(now, new Date(`${standardEnd}T00:00:00Z`)) : null
+    return {
+      name: `PostgreSQL (${counts.join('; ')})`,
+      kind: 'database',
+      version,
+      tier: daysRemaining === null ? 'unknown' : daysRemaining > 0 ? 'supported' : 'end_of_life',
+      managedBy: 'CloudNativePG (in-cluster operator)',
+      standardEnd,
+      daysRemaining,
+    }
+  })
+  if (postgresComponents.length === 0) {
+    postgresComponents.push({
+      name: 'PostgreSQL', kind: 'database', version: componentVersion('postgres'),
+      tier: 'unknown', managedBy: 'CloudNativePG (in-cluster operator)',
+      standardEnd: null, daysRemaining: null,
+    })
+  }
+
+  // GitOps image pins express desired versions, not live pod state. Only EKS and PostgreSQL
+  // have a dated lifecycle in these snapshots; unknown dates must remain unknown.
   const components = [
     {
       name: 'Amazon EKS', kind: 'kubernetes',
-      version: currentVersion, tier: currentTier,
+      version: versionText(k8s), tier: currentTier,
       managedBy: 'AWS-managed control plane',
       standardEnd: current?.standardSupportEnds ?? null,
       daysRemaining: current?.daysToStandardEnd ?? null,
     },
-    {
-      name: 'PostgreSQL', kind: 'database',
-      version: process.env.POSTGRES_VERSION ?? '16.4',
-      tier: 'supported',
-      managedBy: 'CloudNativePG (in-cluster operator)',
-      // PostgreSQL 16 community EOL (postgresql.org/support/versioning)
-      standardEnd: '2028-11-09',
-      daysRemaining: daysBetween(now, new Date('2028-11-09')),
-    },
+    ...postgresComponents,
     {
       name: 'Apache Kafka', kind: 'messaging',
-      version: process.env.KAFKA_VERSION ?? '4.2.0',
+      version: versionText(view.items.kafka),
       tier: 'rolling',
-      managedBy: 'Strimzi 1.2.0 (in-cluster operator)',
+      managedBy: `Strimzi ${versionText(view.items.strimziOperator)} (in-cluster operator)`,
       standardEnd: null,
       daysRemaining: null,
     },
     {
       name: 'Apicurio Registry', kind: 'messaging',
-      version: process.env.APICURIO_VERSION ?? '2.6.2',
+      version: versionText(view.items.apicurio),
       tier: 'rolling',
       managedBy: 'Schema registry (in-cluster)',
       standardEnd: null,
       daysRemaining: null,
     },
     {
-      name: 'Redis', kind: 'cache',
-      version: process.env.REDIS_VERSION ?? '7.4.9',
+      name: 'Valkey (Redis-compatible)', kind: 'cache',
+      version: versionText(view.items.valkey),
       tier: 'rolling',
       managedBy: 'Self-hosted (in-cluster)',
       standardEnd: null,
@@ -167,6 +175,7 @@ export async function GET() {
     versions,
     components,
     dataSource,
+    platform: view,
     lastRefreshed: lifecycle._meta.last_refreshed,
     adrRef: 'ADR-0054',
   }, { headers: { 'Cache-Control': 'no-store' } })

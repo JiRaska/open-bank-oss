@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest'
 
 const docsRoot = path.resolve(__dirname, '../app/docs')
 const pages = [
-  'page.tsx',
   'adr/page.tsx',
   'adr/[slug]/page.tsx',
   'api/page.tsx',
@@ -23,10 +22,13 @@ const pages = [
   'qrlesspay-readiness/page.tsx',
   'release-notes/[service]/page.tsx',
   'service-map/page.tsx',
+  'spayd-uri/page.tsx',
   'threat-models/page.tsx',
   'threat-models/[service]/page.tsx',
   'zero-trust/page.tsx',
 ].map(file => readFileSync(path.join(docsRoot, file), 'utf8'))
+// The hub's markup lives in a component (the route is a thin server page that counts BPMN manifests).
+pages.push(readFileSync(path.resolve(__dirname, '../components/docs/DocsHub.tsx'), 'utf8'))
 
 const sharedHeader = readFileSync(path.resolve(__dirname, '../components/docs/DocsPageHeader.tsx'), 'utf8')
 const processView = readFileSync(path.resolve(__dirname, '../components/docs/ProcessView.tsx'), 'utf8')

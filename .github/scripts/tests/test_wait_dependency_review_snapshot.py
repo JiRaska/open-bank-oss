@@ -2,8 +2,11 @@
 import base64
 import importlib.util
 import json
+import os
+import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "wait_dependency_review_snapshot.py"
 SPEC = importlib.util.spec_from_file_location("wait_dependency_review_snapshot", SCRIPT)
@@ -23,7 +26,87 @@ def response(base=None, head=None):
     return f"HTTP/2.0 200 OK\n{warning}\n[]"
 
 
+def missing_response(side):
+    message = f"No snapshots were found for the {side} SHA {'a' * 40}."
+    warning = base64.b64encode(message.encode()).decode()
+    return f"HTTP/2.0 200 OK\nX-GitHub-Dependency-Graph-Snapshot-Warnings: {warning}\n\n[]"
+
+
 class SnapshotWaitTests(unittest.TestCase):
+    def test_head_producer_finishes_before_index_wait_begins(self):
+        producer = MODULE.PRODUCER
+        replies = iter([
+            json.dumps({"check_runs": [{"name": producer, "status": "in_progress"}]}),
+            json.dumps({"check_runs": [{"name": producer, "status": "completed", "conclusion": "success"}]}),
+        ])
+        sleeps = []
+        self.assertTrue(MODULE.wait_for_head_producer(lambda: next(replies), sleeps.append, (0, 60)))
+        self.assertEqual(sleeps, [60])
+
+    def test_head_producer_failure_is_not_an_indexing_delay(self):
+        failed = json.dumps({"check_runs": [
+            {"name": MODULE.PRODUCER, "status": "completed", "conclusion": "failure"}
+        ]})
+        calls = []
+
+        def query():
+            calls.append(1)
+            return failed
+
+        with self.assertRaises(MODULE.TerminalHeadGraphError):
+            MODULE.wait_for_head_producer(query, lambda _: None, (0, 60))
+        self.assertEqual(len(calls), 2)
+
+    def test_head_producer_rerun_can_replace_a_terminal_check(self):
+        def page(status, conclusion=None):
+            return json.dumps({"check_runs": [
+                {"name": MODULE.PRODUCER, "status": status, "conclusion": conclusion}
+            ]})
+
+        replies = iter([page("completed", "failure"), page("queued"), page("completed", "success")])
+        self.assertTrue(
+            MODULE.wait_for_head_producer(lambda: next(replies), lambda _: None, (0, 60, 120))
+        )
+
+    def test_missing_head_producer_is_bounded(self):
+        calls = []
+
+        def query():
+            calls.append(1)
+            return json.dumps({"check_runs": []})
+
+        self.assertFalse(MODULE.wait_for_head_producer(query, lambda _: None))
+        self.assertEqual(len(calls), 10)
+        self.assertEqual(sum(MODULE.PRODUCER_DELAYS), 1800)
+        self.assertLessEqual(max(MODULE.PRODUCER_DELAYS), 300)
+        probe_seconds = [
+            sum(MODULE.PRODUCER_DELAYS[:i])
+            for i in range(1, len(MODULE.PRODUCER_DELAYS) + 1)
+        ]
+        self.assertIn(960, probe_seconds)
+
+    def test_main_queries_head_producer_before_snapshot(self):
+        base = "a" * 40
+        head = "b" * 40
+        calls = []
+
+        def fake_gh(*args):
+            calls.append(args)
+            if "/compare/" in args[0]:
+                return json.dumps({"merge_base_commit": {"sha": base}})
+            if "check-runs" in args[-1]:
+                return json.dumps({"check_runs": [
+                    {"name": MODULE.PRODUCER, "status": "completed", "conclusion": "success"}
+                ]})
+            return response()
+
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "o/r", "BASE_SHA": base, "HEAD_SHA": head}), \
+             patch.object(sys, "argv", ["wait_dependency_review_snapshot.py"]), \
+             patch.object(MODULE, "_gh", side_effect=fake_gh):
+            self.assertEqual(MODULE.main(), 0)
+        self.assertIn(f"repos/o/r/commits/{head}/check-runs?per_page=100", calls[1])
+        self.assertIn("dependency-graph/compare", calls[2][-1])
+
     def test_missing_head_waits_then_accepts_indexed_graph(self):
         replies = iter([response(1, 0), response(1, 0), response()])
         sleeps = []
@@ -31,6 +114,31 @@ class SnapshotWaitTests(unittest.TestCase):
             MODULE.wait_for_snapshot(lambda: next(replies), sleeps.append, (0, 60, 120))
         )
         self.assertEqual(sleeps, [60, 120])
+
+    def test_current_github_missing_head_warning_then_indexed(self):
+        replies = iter([missing_response("head"), response()])
+        sleeps = []
+        self.assertTrue(
+            MODULE.wait_for_snapshot(
+                lambda: next(replies), sleeps.append, MODULE.FINAL_DELAYS[:2]
+            )
+        )
+        self.assertEqual(sleeps, [10])
+
+    def test_current_github_missing_base_warning_fails_closed(self):
+        self.assertEqual(MODULE._snapshot_state(missing_response("base")), "missing_base")
+        self.assertFalse(
+            MODULE.wait_for_snapshot(
+                lambda: missing_response("base"), lambda _: None, MODULE.FINAL_DELAYS
+            )
+        )
+
+    def test_similar_unrecognised_warning_is_not_accepted(self):
+        message = f"No snapshots were found for the head SHA {'x' * 40}."
+        warning = base64.b64encode(message.encode()).decode()
+        reply = f"HTTP/2.0 200 OK\nX-GitHub-Dependency-Graph-Snapshot-Warnings: {warning}\n\n[]"
+        with self.assertRaisesRegex(ValueError, "unknown dependency snapshot warning"):
+            MODULE._snapshot_state(reply)
 
     def test_missing_graph_is_bounded_and_fails_closed(self):
         calls = []
@@ -42,6 +150,10 @@ class SnapshotWaitTests(unittest.TestCase):
         self.assertFalse(MODULE.wait_for_snapshot(query, lambda _: None))
         self.assertEqual(len(calls), 7)
         self.assertEqual(sum(MODULE.DELAYS), 1800)
+
+    def test_single_missing_snapshot_warning_is_classified(self):
+        self.assertEqual(MODULE._snapshot_state(missing_response("base")), "missing_base")
+        self.assertEqual(MODULE._snapshot_state(missing_response("head")), "missing_head")
 
     def test_unknown_or_malformed_response_is_not_success(self):
         for reply in [

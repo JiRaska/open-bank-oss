@@ -66,6 +66,7 @@ NO_CORPUS = {
     "can-i-deploy-block-classifier-unit-test",
     "can-i-deploy-version-selector-unit-test",
     "co-deploy-set-derivation-unit-test",
+    "deploy-code-lag-report-unit-test",
     "deploy-window-decision",
     "ensure-ecr-repository",
     "gate-runner-self-test",
@@ -96,8 +97,8 @@ NO_CORPUS = {
     # drifts upward normally and floors here catch collapse, not drift.
     "governance-script-unit-tests",
 
-    # VALIDATES ONE NAMED FILE, fail-closed. Not a test suite: it reads
-    # .github/workflows/_service-ci.yml and greps its `build:` job. Its corpus is exactly 1, and a
+    # VALIDATES TWO FIXED NAMED FILES, fail-closed. Not a test suite: it reads
+    # _service-ci.yml and its exact PR projection _service-ci-pr.yml, and checks each `build:` job. A
     # `build:` job it cannot locate is returned as a finding ("missing build job fails closed"),
     # which is the collapse case a floor would otherwise cover.
     "pr-build-cloud-credentials",
@@ -108,6 +109,10 @@ NO_CORPUS = {
     # "did not look" stay distinguishable in the log. This is the shape to copy for any future
     # entry here that prints nothing at all about what it looked at.
     "openapi-version-not-taken",
+
+    # DYNAMIC HOLD SET: zero held services is the desired steady state. The gate validates
+    # the configured holds and the PR diff; a positive floor would prevent releasing the last hold.
+    "deploy-hold-image-pins",
 
     # FORBIDDEN-PATTERN gate whose TARGET state is an empty finding set. Its subjects are
     # `Instant = Instant.EPOCH` occurrences plus the baseline entries excusing them; the burn-down

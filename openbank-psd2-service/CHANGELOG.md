@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.11.10](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.9...psd2-service-v0.11.10) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.11.9](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.8...psd2-service-v0.11.9) (2026-10-09)
+
+
+### Bug Fixes
+
+* **psd2:** reject non-CZK domestic-cz initiation and fix the v2 request schema ([#12307](https://github.com/JiRaska/open-bank-oss/issues/12307)) ([9162be0](https://github.com/JiRaska/open-bank-oss/commit/9162be0368bcf6b106a7a5c539e57b9846276035))
+
 ## [0.11.8](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.7...psd2-service-v0.11.8) (2026-09-29)
 
 

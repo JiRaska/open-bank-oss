@@ -8,8 +8,10 @@ import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
 import com.openbank.psd2.application.port.`in`.InitiatePaymentCommand
 import com.openbank.psd2.application.port.`in`.PaymentInitiationUseCase
+import com.openbank.psd2.domain.model.DomesticCzPayment
 import com.openbank.psd2.domain.model.ObLinks
 import com.openbank.psd2.domain.model.PaymentInitiationResponse
+import com.openbank.psd2.domain.model.PaymentProduct
 import com.openbank.psd2.domain.model.PaymentStatus
 import com.openbank.psd2.infrastructure.client.TppAuthorizationGuard
 import com.openbank.psd2.infrastructure.client.TppAuthorizationResponse
@@ -105,10 +107,15 @@ class PisIdempotencyFingerprintIT {
     @ApplicationScoped
     class RecordingPis : PaymentInitiationUseCase {
         val calls = ConcurrentHashMap<String, AtomicInteger>()
+        val domesticCurrencies = ConcurrentHashMap<String, String>()
         val failuresFor = ConcurrentHashMap.newKeySet<String>()
 
         override suspend fun initiatePayment(command: InitiatePaymentCommand): PaymentInitiationResponse {
             calls.computeIfAbsent(command.idempotencyKey) { AtomicInteger() }.incrementAndGet()
+            if (command.product == PaymentProduct.DOMESTIC_CZ) {
+                domesticCurrencies[command.idempotencyKey] =
+                    (command.payment as DomesticCzPayment).instructedAmount.currency
+            }
             if (failuresFor.remove(command.idempotencyKey)) error("downstream failure")
             val id = UUID.randomUUID().toString()
             return PaymentInitiationResponse(id, PaymentStatus.RCVD, "received", ObLinks(self = "/p/$id"))
@@ -132,6 +139,14 @@ class PisIdempotencyFingerprintIT {
          "creditorName":"$creditor"}
     """.trimIndent()
 
+    private fun domestic(currency: String) = """
+        {"endToEndIdentification":"e2e-cz",
+         "debtorAccount":{"iban":"CZ6508000000192000145399"},
+         "instructedAmount":{"currency":"$currency","amount":10.00},
+         "creditorAccount":{"iban":"CZ1234567890123456789012"},
+         "creditorName":"Acme CZ","variableSymbol":"123"}
+    """.trimIndent()
+
     private fun bespoke(key: String, body: String, consent: String = "consent-1") = given()
         .contentType("application/json")
         .header("X-TPP-ID", tpp)
@@ -147,6 +162,46 @@ class PisIdempotencyFingerprintIT {
         .header("X-Request-ID", requestId)
         .body(body)
         .post("/v1/payments/sepa-credit-transfers")
+
+    private fun bespokeDomestic(key: String, body: String) = given()
+        .contentType("application/json")
+        .header("X-TPP-ID", tpp)
+        .header("Consent-ID", "consent-1")
+        .header("Idempotency-Key", key)
+        .body(body)
+        .post("/open-banking/v2/payments/domestic-cz")
+
+    private fun berlinDomestic(requestId: String, body: String) = given()
+        .contentType("application/json")
+        .header("X-TPP-ID", tpp)
+        .header("Consent-ID", "consent-1")
+        .header("X-Request-ID", requestId)
+        .body(body)
+        .post("/v1/payments/domestic-cz")
+
+    @Test
+    fun `bespoke domestic rejects EUR without reserving key and accepts corrected CZK retry`() {
+        val key = UUID.randomUUID().toString()
+        bespokeDomestic(key, domestic("EUR")).then().statusCode(400)
+            .body("tppMessages[0].code", equalTo("FORMAT_ERROR"))
+        assertThat(pis.count(key)).isZero()
+
+        bespokeDomestic(key, domestic(" czk ")).then().statusCode(201)
+        assertThat(pis.count(key)).isEqualTo(1)
+        assertThat(pis.domesticCurrencies[key]).isEqualTo("CZK")
+    }
+
+    @Test
+    fun `Berlin domestic rejects EUR without reserving request ID and accepts corrected CZK retry`() {
+        val requestId = UUID.randomUUID().toString()
+        berlinDomestic(requestId, domestic("EUR")).then().statusCode(400)
+            .body("tppMessages[0].code", equalTo("FORMAT_ERROR"))
+        assertThat(pis.count(requestId)).isZero()
+
+        berlinDomestic(requestId, domestic(" czk ")).then().statusCode(201)
+        assertThat(pis.count(requestId)).isEqualTo(1)
+        assertThat(pis.domesticCurrencies[requestId]).isEqualTo("CZK")
+    }
 
     @Test
     fun `same key and same body replays the first response and executes once`() {

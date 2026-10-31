@@ -13,21 +13,6 @@ quarkus:
     auth:
       proactive: false
 
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
     limits:
       max-body-size: 10M
     idle-timeout: 60S
@@ -39,6 +24,9 @@ quarkus:
     password: ${QUARKUS_DATASOURCE_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: ${QUARKUS_DATASOURCE_REACTIVE_URL:postgresql://localhost:5432/openbank_pid}
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: ${QUARKUS_DATASOURCE_JDBC_URL:jdbc:postgresql://localhost:5432/openbank_pid}
 
@@ -87,11 +75,6 @@ quarkus:
     console:
       format: "%d{HH:mm:ss} %-5p [%c{2.}] (%t) %s%e%n"
 
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -188,6 +171,8 @@ openbank:
         # Absent ⇒ inert (only the static trusted-issuers-json applies). Fail-closed: a bad/unsigned list
         # never widens or empties trust. Modelled as a JWT (typ=trustedlist+jwt) for the EUDIW profile.
         url: "${OPENBANK_PID_EUDI_TRUSTED_LIST_URL:}"
+        # ADR-0320 P1: the url host must be listed here (comma-separated) or nothing is fetched.
+        allowed-hosts: "${OPENBANK_PID_EUDI_TRUSTED_LIST_ALLOWED_HOSTS:}"
         inline: "${OPENBANK_PID_EUDI_TRUSTED_LIST_INLINE:}"
         anchor-jwks: "${OPENBANK_PID_EUDI_TRUSTED_LIST_ANCHOR_JWKS:}"
         refresh: "${OPENBANK_PID_EUDI_TRUSTED_LIST_REFRESH:1h}"

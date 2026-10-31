@@ -20,10 +20,10 @@ function proxyServesUnauthenticated(pathname: string): boolean {
 }
 
 // Paths that must be reachable without a session, and paths that must not be.
-const PUBLIC_PAGES = ['/auth', '/auth/login', '/auth/error', '/auth/forbidden', '/privacy']
+const PUBLIC_PAGES = ['/auth', '/auth/login', '/auth/error', '/auth/forbidden', '/privacy', '/r/AbCdEfGhIjKlMnOp']
 const PROTECTED_PAGES = ['/dashboard', '/ledger', '/payments', '/settings', '/customer-360']
 // Prefix traps: a future route whose name merely STARTS WITH a public one.
-const LOOKALIKES = ['/authentication-policy', '/auth-settings', '/authorization', '/privacy-settings']
+const LOOKALIKES = ['/authentication-policy', '/auth-settings', '/authorization', '/privacy-settings', '/reporting']
 
 describe('public-surface parity between the proxy gate and the provider boundary', () => {
   it.each(PUBLIC_PAGES)('%s is public to both the proxy and the provider boundary', p => {

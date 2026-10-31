@@ -10,28 +10,19 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     // product-catalog entitlement lookup (#4): RestClient + the openbank-services M2M bearer,
     // same shape as account-service's / document-service's ProductCatalogClient.
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.redis.client)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.cache)
     implementation(libs.kotlinx.coroutines.core)
@@ -41,10 +32,8 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
     implementation(libs.quarkus.scheduler)
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.rest.assured.kotlin)
-    testImplementation(libs.assertj)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.mockk)
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
@@ -75,6 +64,17 @@ dependencies {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// Test-JVM heap: the trace-contract IT adds a second full Quarkus boot (OTel SDK) to this
+// module's already-large @QuarkusTest suite. Modules where that second boot landed on the Gradle
+// default ~512m heap died with java.lang.OutOfMemoryError and then hung until Quarkus'
+// hang-detection timeout killed the executor (interest-service, sepa-payment, account-service —
+// all measured 2026-10-15). Bump pre-emptively, same per-module-not-fleet-default rationale as
+// account-service's maxHeapSize comment: nothing measures test heap anywhere, so a global bump
+// would be an unmeasured ratchet across ~50 modules to fix one.
+tasks.withType<Test> {
+    maxHeapSize = "2g"
+}
 
 kover {
     reports {

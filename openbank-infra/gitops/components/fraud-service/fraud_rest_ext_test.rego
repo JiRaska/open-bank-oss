@@ -24,6 +24,7 @@ import data.openbank.rest
 rules_mock := {
 	"authz": {"role_action_matrix": {"ROLE_OPERATOR": {"grant": [
 		"fraud.score",
+		"fraud.review.read",
 	]}}},
 	"money_path_services": [],
 	"money_path_action_prefixes": {},
@@ -32,11 +33,11 @@ rules_mock := {
 	"shared_m2m_write_prohibition": {"reasons": []},
 }
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- the regressions this file exists to prevent ---
 
@@ -84,4 +85,70 @@ test_operator_may_score if {
 test_extension_is_loaded if {
 	"operator-fraud-write" in rest.allowed_reasons with input as {"principal": operator, "action": "fraud.score"}
 		with data.rules as rules_mock
+}
+
+# Review reads must be denied at the final decision even when the generic role
+# rule (or a future matrix grant) independently admits them.
+test_machine_review_queue_denied if {
+	every principal in [
+		edge,
+		services_m2m,
+		{"type": "HUMAN", "id": "unknown-marker", "roles": ["ROLE_OPERATOR"]},
+		{"type": "HUMAN", "id": "invalid-marker", "roles": ["ROLE_OPERATOR"], "service_account": "false"},
+		{"type": "HUMAN", "id": "renamed-machine", "roles": ["ROLE_OPERATOR"], "service_account": true},
+		{"type": "HUMAN", "id": "renamed-admin", "roles": ["ROLE_ADMIN"], "service_account": true},
+	] {
+		rest.allow == false with input as {"principal": principal, "action": "fraud.review.read"}
+			with data.rules as rules_mock
+	}
+}
+
+test_verified_staff_review_queue_allowed if {
+	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"] {
+		principal := {"type": "HUMAN", "id": "staff", "roles": [role], "service_account": false}
+		decision := rest.allow with input as {"principal": principal, "action": "fraud.review.read"}
+			with data.rules as rules_mock
+		decision.allow == true
+	}
+}
+
+test_review_veto_preserves_other_machine_reads if {
+	decision := rest.allow with input as {"principal": services_m2m, "action": "unrelated.read"}
+		with data.rules as rules_mock
+	decision.allow == true
+}
+
+# --- ADR-0347 threshold-set administration ---
+
+test_risk_and_compliance_may_administer_thresholds if {
+	every role in ["ROLE_RISK", "ROLE_COMPLIANCE"] {
+		principal := {"type": "HUMAN", "id": "risk-staff", "roles": [role], "service_account": false}
+		every action in ["fraud.thresholds.propose", "fraud.thresholds.decide", "fraud.thresholds.read"] {
+			decision := rest.allow with input as {"principal": principal, "action": action}
+				with data.rules as rules_mock
+			decision.allow == true
+		}
+	}
+}
+
+# The blanket operator-fraud-write reason must not reach the threshold set: changing a fraud
+# control's figures is not an ops action.
+test_operator_may_not_change_thresholds if {
+	every action in ["fraud.thresholds.propose", "fraud.thresholds.decide"] {
+		rest.allow == false with input as {"principal": operator, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_machine_may_not_touch_thresholds if {
+	every principal in [
+		edge,
+		services_m2m,
+		{"type": "HUMAN", "id": "renamed-risk", "roles": ["ROLE_RISK"], "service_account": true},
+	] {
+		every action in ["fraud.thresholds.propose", "fraud.thresholds.decide", "fraud.thresholds.read"] {
+			rest.allow == false with input as {"principal": principal, "action": action}
+				with data.rules as rules_mock
+		}
+	}
 }

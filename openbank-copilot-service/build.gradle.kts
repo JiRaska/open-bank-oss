@@ -8,25 +8,15 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
 
     // Customer session is a Keycloak JWT arriving via the customer edge (ADR-0065).
-    implementation(libs.quarkus.oidc)
     // Downstream tool calls run as the scoped customer via on-behalf-of token exchange
     // (ADR-0089 D5). REST clients reuse the new reactive client's OIDC filter.
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.oidc.client.reactive.filter)
 
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
 
     implementation(libs.kotlinx.coroutines.core)
@@ -50,8 +40,6 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
 
-    testImplementation(libs.quarkus.junit5)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
@@ -59,7 +47,6 @@ dependencies {
     // The custom pgvector lifecycle resources emit the same secret-free runtime evidence as the
     // shared Testcontainers kit; this remains strictly on the test classpath.
     testImplementation(project(":openbank-libs-testing"))
-    testImplementation(libs.rest.assured.kotlin)
     // Consumer-driven contract with customer-edge (ADR-0063, issue #2322).
     testImplementation(libs.pact.consumer)
 }

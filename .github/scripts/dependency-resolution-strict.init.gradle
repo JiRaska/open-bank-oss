@@ -30,8 +30,9 @@ gradle.beforeProject { project ->
     project.tasks.register('VerifyBuildscriptFreeMarker') {
         doLast { verifyBuildscriptFreeMarker(project) }
     }
+    project.tasks.register('OpenBankResolveDependencyGraph')
     project.tasks.configureEach { task ->
-        if (task.name == 'ForceDependencyResolutionPlugin_resolveProjectDependencies') {
+        if (task.name == 'OpenBankResolveDependencyGraph') {
             task.dependsOn('VerifyBuildscriptFreeMarker')
             task.doLast {
                 def excluded = java.util.regex.Pattern.compile(System.getenv('DEPENDENCY_GRAPH_EXCLUDE_CONFIGURATIONS') ?: '')

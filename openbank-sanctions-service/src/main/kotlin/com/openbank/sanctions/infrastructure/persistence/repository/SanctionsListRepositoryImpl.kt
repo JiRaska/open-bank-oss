@@ -4,7 +4,9 @@
 
 package com.openbank.sanctions.infrastructure.persistence.repository
 
+import com.openbank.sanctions.application.port.out.SanctionsPublicationPermit
 import com.openbank.sanctions.domain.model.SanctionsList
+import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.infrastructure.persistence.entity.SanctionsListEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
@@ -16,6 +18,7 @@ import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // fenced and ordinary update paths share the repository's transaction boundary
 class SanctionsListRepositoryImpl(private val clock: Clock) : PanacheRepository<SanctionsListEntity> {
 
     fun listSanctionsListsUni(): Uni<List<SanctionsList>> =
@@ -29,15 +32,36 @@ class SanctionsListRepositoryImpl(private val clock: Clock) : PanacheRepository<
         listType: String,
         entryCount: Int,
         updatedAt: Instant = Instant.now(clock),
+        permit: SanctionsPublicationPermit? = null,
+        completed: Boolean = true,
     ): Uni<SanctionsList?> = Panache.withTransaction {
-        find("listType", listType).firstResult().invoke { entity ->
+        fun updateRow(): Uni<SanctionsListEntity?> = find("listType", listType).firstResult().invoke { entity ->
             if (entity != null) {
-                entity.lastUpdatedAt = updatedAt
-                entity.lastEntryCount = entryCount
+                if (completed) {
+                    entity.lastUpdatedAt = updatedAt
+                    entity.lastEntryCount = entryCount
+                    entity.refreshRequestedAt = null
+                } else {
+                    // A partial import still owes a complete retry before its journal can publish.
+                    entity.refreshRequestedAt = updatedAt
+                }
                 entity.updatedAt = updatedAt
-                // #9048: the refresh the flag asked for has now run — clear it, or the scheduler
-                // would re-import the list on every tick forever.
-                entity.refreshRequestedAt = null
+            }
+        }
+        if (permit == null) {
+            updateRow()
+        } else {
+            permit.checkFor(SanctionsListType.valueOf(listType))
+            Panache.getSession().chain { session ->
+                session.createNativeQuery(
+                    "SELECT refresh_generation FROM sanctions_change_publication " +
+                        "WHERE list_type = :type AND refresh_active = TRUE FOR SHARE",
+                    Long::class.java,
+                ).setParameter("type", listType).singleResult
+                    .invoke { generation ->
+                        check(generation == permit.generation) { "Stale sanctions refresh for $listType" }
+                    }
+                    .chain { _: Long -> updateRow() }
             }
         }
     }.map { it?.toDomain() }
@@ -91,4 +115,13 @@ class SanctionsListRepositoryImpl(private val clock: Clock) : PanacheRepository<
 
     suspend fun markUpdated(listType: String, entryCount: Int): SanctionsList? =
         markUpdatedUni(listType, entryCount).awaitSuspending()
+
+    suspend fun markUpdatedFenced(
+        listType: String,
+        entryCount: Int,
+        permit: SanctionsPublicationPermit,
+    ): SanctionsList? = markUpdatedUni(listType, entryCount, permit = permit).awaitSuspending()
+
+    suspend fun markRetryPendingFenced(listType: String, permit: SanctionsPublicationPermit): SanctionsList? =
+        markUpdatedUni(listType, 0, permit = permit, completed = false).awaitSuspending()
 }

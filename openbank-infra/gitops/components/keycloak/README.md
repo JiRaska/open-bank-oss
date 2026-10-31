@@ -73,6 +73,50 @@ prints nothing useful.
 - A user needs `firstName`/`lastName`/`email`, or Keycloak 26 answers "Account is not
   fully set up" with no hint why.
 
+### Client scopes and the reserved `openid` protocol scope
+
+Every `defaultClientScopes` / `optionalClientScopes` entry must resolve to a
+`clientScopes[].name` in the same template (rule R12). An explicit realm import does not
+make an undeclared reference work: Keycloak logs `Referenced client scope ... doesn't
+exist` and silently drops the assignment. In particular, `openid` is the reserved OIDC
+**protocol** scope, not a client scope to define or assign. Clients still request it in the
+authorization request's `scope` parameter; removing its invalid client-scope assignment
+does not remove OIDC authentication or the `openid` token scope. Built-in client scopes
+such as `email` and `offline_access`, by contrast, need their standard definitions when an
+explicit template assigns them.
+
+## Role scope: `fullScopeAllowed: false` plus explicit `scopeMappings`
+
+Keycloak 26 deprecates the per-client "Full scope allowed" switch and logs a WARN for every
+client that leaves it on (its default). Every client in both templates therefore sets
+`fullScopeAllowed: false`, and the top-level `scopeMappings` array grants each of those
+clients every realm role the template declares. That is deliberately the same set full
+scope allowed: a token still carries exactly the user's effective realm roles, and a role
+added to a user later still reaches the token.
+
+**Turning the switch off without the mapping strips every role from every token** — M2M
+and user alike — and every `@RolesAllowed` endpoint answers 403. So:
+
+- A new realm role must be appended to every `scopeMappings` entry in the same change.
+  `check-realm-template-importable.py` rule R11 enforces it: roles added after the first
+  version of this note (`ROLE_MARKETING`, `ROLE_MERGE_RECORDER`) were missing from all 41
+  entries until it did, and a cold-start import would have dropped them from every token.
+- A new client gets `fullScopeAllowed: false` and its own `scopeMappings` entry.
+  `openbank-synthetic-catalog-read` is the one client with no entry: it is meant to carry
+  no realm roles at all.
+
+The equivalence was measured, not argued: import the template before and after into a
+local Keycloak at the `keycloak.yaml` version, then for every client × every user
+(service-account users included) call
+`GET /admin/realms/<r>/clients/<id>/evaluate-scopes/generate-example-access-token?userId=<u>`
+and compare `realm_access`, `resource_access`, `aud` and `scope`. All 1,769 pairs were
+identical. With `scopeMappings` removed, all 1,435 pairs that carry roles lost every one of
+them, which shows the comparison can see the failure it guards against.
+
+Like everything else here, this is a cold-start-only change. A running realm keeps its
+current switches until someone applies the same mapping with `kcadm` (see
+`openbank-infra/CLAUDE.md`). Add the mappings **before** you turn the switch off.
+
 ## Secrets
 
 Every client secret and user password is a `__PLACEHOLDER__` token. **This repo is
@@ -130,6 +174,48 @@ Removing it from that list switches the canary back to real, which is the contai
 
 The five comments removed from `customers-realm-template.json`, by path.
 
+### `identityProviders[kubernetes]` (realm-template.json, ADR-0177 Phase 1)
+
+First identity provider in either template: the cluster's Kubernetes OIDC issuer,
+trusted so a pod's projected ServiceAccount token can be submitted to the native
+JWT Authorization Grant, followed by standard RFC 8693 exchange of the returned
+Keycloak access token (see `docs/adr/0177-workload-identity-m2m-auth.md`).
+The import shape is verified against Keycloak 26.8.0 (`firstBrokerLoginFlowAlias`,
+not the `…FlowId` a realm export from older versions shows). `config.issuer` and
+`config.jwksUrl` carry `__KUBERNETES_OIDC_ISSUER__` — the cluster's
+`--service-account-issuer` URL, which is deployment-specific, so the owner supplies it
+at render time (it becomes one more required env var in
+`render-verify-keycloak-realm-import.sh` runs). `config.clientSecret` is a placeholder
+for the same reason; if the API server does not authenticate JWKS clients, any non-empty
+value works — Keycloak requires the key to exist, the cluster does not check it. The IdP
+is `enabled: true` and `hideOnLogin: true`: workload authentication remains available
+without a Kubernetes sign-in button. The EKS JWKS path is `<issuer>/keys`.
+The JWT grant validates `RS256`, requires a pre-provisioned federated user and checks
+the audience; `disableTypeClaimCheck` stays false. Assertion reuse is allowed for
+kubelet rotation, maximum assertion age is 7200 seconds, and access-token lifetime
+is capped by assertion expiration.
+
+### `clients[openbank-agent].attributes[standard.token.exchange.enabled]` + `authorizationSettings` (realm-template.json, ADR-0177 Phase 1)
+
+The client enables the native JWT grant for the `kubernetes` IdP. Its
+`oauth2.jwt.authorization.grant.audience` is serialized as
+`[{"key":"kubernetes","value":"keycloak"}]`, not `["keycloak"]`.
+The projected JWT itself correctly carries `aud: ["keycloak"]`.
+`users[wl-openbank-agent]` supplies the explicit ServiceAccount federation link and
+only `ROLE_API`. Unknown subjects are rejected instead of registered.
+
+The returned access token can be exchanged using standard token exchange V2 on
+`openbank-agent`; this path needs neither `subject_issuer` nor FGAP IdP permissions.
+The existing `authorizationSettings` block is not what authorizes the native path.
+Client authentication and the `__AGENT_CLIENT_SECRET__` client-credentials fallback
+remain available; this configuration does not switch the service's outbound client.
+
+Run `python3 openbank-infra/e2e/keycloak_workload_identity_test.py` before changing
+this contract. It exercises real Keycloak with synthetic assertions, including
+negative audience, identity and signature cases. Apply the reviewed attributes to
+the live realm separately; persist the verified template using runbook 0009 so a
+fresh realm has the same behavior. No custom provider or image rebuild is needed.
+
 ### `clients[openbank-app].protocolMappers[sub]`
 
 This realm import defines explicit (non-default) client scopes, so Keycloak does NOT
@@ -180,8 +266,9 @@ server-side enforcement without custom OTel processors.
 back. They are **runtime-derived internal roles, not grantable realm roles**:
 `CatalogScopeIdentityAugmentor` in openbank-product-catalog synthesises them per request
 from the token's OAuth `scope` claim (`catalog:read` / `catalog:author` /
-`catalog:publish`), and its own KDoc says why — *"without trusting a tenant claim or
-OPA"*. The scope-to-role mapping is meant to be the only path to those roles.
+`catalog:publish`). The narrow pension-review exception below derives READ from a
+verified, named human realm approver role. Neither path grants a realm role named
+`CATALOG_SCOPE_READ`.
 
 Declaring them in the realm makes them assignable in the Keycloak admin console, so an
 operator could grant `CATALOG_SCOPE_PUBLISH` to a user directly and reach every
@@ -194,17 +281,26 @@ Removing them also clears three `check-realm-role-parity` findings that had been
 the `keycloak-realm-drift` CronJob (`declaredNotLive` + `namedByCodeButNotLive`, 9/1/15
 `@RolesAllowed` sites respectively).
 
-**Separate and still open — the reason those 25 sites are unreachable is NOT these
-roles.** `catalog:read|author|publish` is not declared as a client scope in either realm
-template: `realm-template.json` has `clientScopes: []`, and `customers-realm-template.json`
-carries `profile`, `accounts:read`, `payments:initiate`, `statements:read`,
-`sca:enroll-device`, `sca:decide`, `telemetry:rum` — no catalog scope. So no token from a
-cold-started realm can carry the scope the augmentor reads, and the augmentor returns the
-identity unchanged. Whether the *live* realm has such a scope is unverified here on
-purpose: `check-realm-role-parity` states its own blind spot (`doesNotVerify:
-"client-role assignments; group membership; …"`) and client scopes are outside it, so
-nothing in this repo currently measures it. Wiring the scope is an authorization design
-decision (default vs optional scope, and which clients may request it), not a drift fix.
+Pension revision approval uses two separately assignable human realm roles,
+`PENSION_LEGAL_APPROVER` and `PENSION_PRODUCT_OWNER`. Neither role is assigned to a
+user, group, or client by the committed templates. Product Catalog derives its internal
+`CATALOG_SCOPE_READ` role for a verified human token carrying either approver role;
+Admin UI makes the same display-only derivation. A service-account identity cannot use
+those roles to decide an approval. Assign the two roles to separately authorized people
+through the approved identity process and verify their live access tokens and the
+two-person approval flow before enabling publication. Do not make either approval role
+or `catalog:read` a default scope of the Admin UI client.
+
+**Catalog read and write grants remain separate.** `catalog:read` is declared in the
+staff realm imports and assigned to `openbank-admin-ui` as an optional scope in both
+Docker and GitOps. The Admin UI explicitly requests it during login; it is not a default
+grant. This enables a cold staff realm to issue the read scope consumed by the augmentor.
+`catalog:author` and `catalog:publish` are still absent, and no catalog scope is assigned
+by the customer realm. Write-scope provisioning remains a separate authorization decision.
+
+These source declarations and their offline parity regression do not establish the live
+realm's assignments or a deployed Admin UI image. The role-parity gate does not verify
+client-scope assignments; runtime access and import reconciliation require separate evidence.
 
 ### `clients[openbank-edge-webauthn].description`
 

@@ -10,6 +10,7 @@ import com.openbank.libs.approval.ApprovalRequestBinding
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.InvalidApprovalStateException
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.domain.identifiers.Ids
@@ -56,6 +57,7 @@ class PostgresApprovalStore(
         makerId: String,
         ttlSeconds: Long,
         binding: ApprovalRequestBinding?,
+        makerActorKind: MakerActorKind,
     ): PendingApproval {
         require(ttlSeconds > 0) { "Approval TTL must be positive" }
         require(action.isNotBlank() && makerId.isNotBlank()) { "Approval action and maker are required" }
@@ -77,6 +79,7 @@ class PostgresApprovalStore(
                         it.action = action
                         it.resourceId = resourceId
                         it.makerId = makerId
+                        it.makerActorKind = makerActorKind
                         it.status = ApprovalStatus.PENDING
                         it.createdAt = now
                         it.expiresAt = now.plusSeconds(ttlSeconds)
@@ -162,7 +165,7 @@ class PostgresApprovalStore(
         val payload = mapOf(
             "eventId" to eventId.toString(),
             "eventType" to "SCA_OPERATOR_APPROVAL_CHANGED",
-            "schemaVersion" to 1,
+            "schemaVersion" to 2,
             "sourceService" to "sca-service",
             "aggregateType" to "SCA_OPERATOR_APPROVAL",
             "aggregateId" to entity.id.toString(),
@@ -171,6 +174,7 @@ class PostgresApprovalStore(
             "action" to entity.action,
             "resourceId" to entity.resourceId,
             "makerId" to entity.makerId,
+            "makerActorKind" to entity.makerActorKind.name,
             "status" to entity.status.name,
             "requestFingerprint" to entity.requestFingerprint,
             "createdAt" to entity.createdAt.toString(),

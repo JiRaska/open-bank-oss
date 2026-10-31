@@ -19,7 +19,7 @@ import java.util.UUID
 /**
  * The human-triggered catalog review endpoint. Its whole job beyond delegation is input
  * validation and mapping the two failure modes onto distinguishable statuses: a malformed
- * request (400) versus no eligible self-hosted model (503), which an operator must be able to
+ * request (400) versus no capability-approved model (503), which an operator must be able to
  * tell apart from a bad request.
  */
 class CatalogReviewResourceTest {
@@ -29,6 +29,23 @@ class CatalogReviewResourceTest {
 
     private val offeringId = UUID.randomUUID().toString()
     private val revisionId = UUID.randomUUID().toString()
+
+    @Test
+    fun `capability exposes only service-approved options and the configured default`() {
+        io.mockk.every { reviews.capability() } returns CatalogReviewService.Capability(
+            available = true,
+            mode = "sandbox-hosted",
+            defaultModel = "configured-default",
+            models = listOf(CatalogReviewService.ModelOption("configured-default", "openai-compat", "HOSTED")),
+        )
+
+        val response = resource.capability()
+
+        assertThat(response.available).isTrue()
+        assertThat(response.mode).isEqualTo("sandbox-hosted")
+        assertThat(response.defaultModel).isEqualTo("configured-default")
+        assertThat(response.models.map { it.id }).containsExactly("configured-default")
+    }
 
     private fun result(): CatalogReviewService.Result = CatalogReviewService.Result(
         proposal = AgentProposal(
@@ -122,7 +139,7 @@ class CatalogReviewResourceTest {
     }
 
     @Test
-    fun `no eligible self-hosted model is 503, distinguishable from a bad request`() {
+    fun `no capability-approved model is 503, distinguishable from a bad request`() {
         coEvery { reviews.review(offeringId, revisionId, null) } throws
             CatalogReviewService.ModelUnavailableException()
 

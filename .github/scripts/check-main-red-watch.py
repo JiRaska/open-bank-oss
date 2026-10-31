@@ -89,6 +89,8 @@ Self-test:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import re
@@ -118,10 +120,6 @@ NOT_WATCHED: dict[str, str] = {
         "already exits 0 when the ping cannot be sent -- the mobile app's own schedule is what "
         "guarantees the drift is noticed -- so a red here would only ever be infrastructure, and "
         "paging on a lost optimisation is how an issue label gets filtered."
-    ),
-    "Admin-UI deploy": (
-        "Deploy lane, not a verdict on main's tree. Its drift is already escalated by "
-        "deploy-drift-watch.yml against the committed image pin."
     ),
     "Platform OpenTofu": (
         "Infrastructure apply against live AWS. A red here is an operational event with its own "
@@ -283,9 +281,23 @@ def gh_api(path: str) -> object:
 def fetch_jobs_scoped(repo: str, run_id: int, attempt: int) -> list[dict]:
     """R4 lives here: the URL is attempt-scoped, always. Never `/runs/<id>/jobs`."""
     docs = gh_api(f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")
+    if not docs or not isinstance(docs[0], dict):
+        raise ValueError("empty or malformed attempt-scoped Jobs API response")
+    expected = docs[0].get("total_count")
+    if not isinstance(expected, int) or isinstance(expected, bool) or expected < 0:
+        raise ValueError("invalid attempt-scoped Jobs API total_count")
     jobs: list[dict] = []
     for doc in docs:
-        jobs.extend(doc.get("jobs", []) if isinstance(doc, dict) else [])
+        if not isinstance(doc, dict) or doc.get("total_count") != expected:
+            raise ValueError("inconsistent attempt-scoped Jobs API page")
+        batch = doc.get("jobs")
+        if not isinstance(batch, list) or not all(isinstance(job, dict) for job in batch):
+            raise ValueError("malformed attempt-scoped Jobs API job list")
+        jobs.extend(batch)
+    ids = [job.get("id") for job in jobs]
+    if len(jobs) != expected or any(not isinstance(id_, int) or isinstance(id_, bool) for id_ in ids) \
+            or len(set(ids)) != len(ids):
+        raise ValueError("incomplete or duplicate attempt-scoped Jobs API inventory")
     return jobs
 
 
@@ -334,7 +346,7 @@ def check_attempt_scoped_fetch() -> list[str]:
 
     def _record(path: str) -> object:
         seen.append(path)
-        return []
+        return [{"total_count": 0, "jobs": []}]
 
     global gh_api
     original = gh_api
@@ -374,6 +386,11 @@ def classify_run(run: dict, jobs: list[dict]) -> dict:
         "html_url": run.get("html_url"),
         "conclusion": conclusion,
         "failing": [],
+        "successful_jobs": [
+            {"job": j["name"], "steps": [s["name"] for s in (j.get("steps") or [])
+                                          if s.get("conclusion") == "success" and isinstance(s.get("name"), str)]}
+            for j in jobs if j.get("conclusion") == "success" and isinstance(j.get("name"), str)
+        ],
         "status": None,
     }
 
@@ -463,6 +480,21 @@ def render(verdict: dict) -> str:
 STATUS_EXIT = {"green": 0, "not-a-verdict": 0, "unanswerable": 1, "red": 2, "transient": 3}
 
 
+def classify_api_failure(exc: BaseException) -> tuple[int, str]:
+    """(exit code, workflow-command level) for an API failure. Pure — prints nothing.
+
+    Split out of `api_failure_exit` because the self-test must be able to drive this branch
+    WITHOUT its `::error::`/`::warning::` output reaching the shard log: a passing self-test
+    that prints `::error::` lines renders red annotations in the Actions UI on every PR whose
+    diff makes the self-test run, and reads as a gate failure to anyone (or anything) scanning
+    the log — observed on #12537, where these fixture strings were reported as the gate's CI
+    failure while the gate itself was green.
+    """
+    if gatelib.is_gh_transient(str(exc)):
+        return STATUS_EXIT["transient"], "warning"
+    return STATUS_EXIT["unanswerable"], "error"
+
+
 def api_failure_exit(exc: BaseException) -> int:
     """Decide which kind of "could not answer" an API failure is, and say so.
 
@@ -471,15 +503,16 @@ def api_failure_exit(exc: BaseException) -> int:
     online path, which is exactly the shape that goes untested and then behaves differently from
     the comment above it.
     """
-    if gatelib.is_gh_transient(str(exc)):
-        print(f"::warning::main-red-watch could not REACH the API: {exc}")
+    code, level = classify_api_failure(exc)
+    if code == STATUS_EXIT["transient"]:
+        print(f"::{level}::main-red-watch could not REACH the API: {exc}")
         print(
             "main-red-watch: NOT A VERDICT. The API refused to answer, so this run says nothing "
             "about main — neither green nor red. Exit 3."
         )
-        return STATUS_EXIT["transient"]
-    print(f"::error::main-red-watch could not answer: {exc}")
-    return STATUS_EXIT["unanswerable"]
+        return code
+    print(f"::{level}::main-red-watch could not answer: {exc}")
+    return code
 
 
 # --------------------------------------------------------------------------------------------
@@ -550,6 +583,13 @@ def self_test() -> int:
     check("a green run classifies green", green["status"] == "green")
     check("exit code for green is 0", STATUS_EXIT[green["status"]] == 0)
     check("a green run escalates nothing", green["failing"] == [])
+    check("a green run records successful steps from jobs that actually ran",
+          green["successful_jobs"] == [{"job": "build", "steps": ["Test"]}])
+    skipped_provider = classify_run(_run("success"), [
+        _job("build", "success", [("Setup", "success"), ("Provider verification", "skipped")])
+    ])
+    check("a successful job does not prove its skipped provider step recovered",
+          skipped_provider["successful_jobs"] == [{"job": "build", "steps": ["Setup"]}])
 
     # THE log-grep trap, made unreachable by construction. This job carries a `_log` body full of
     # the exact strings a naive grep would match -- including a step's own `run:` script echoing
@@ -583,7 +623,7 @@ def self_test() -> int:
     def _stub(path):
         seen_urls.append(path)
         attempt = int(re.search(r"/attempts/(\d+)/", path).group(1)) if "/attempts/" in path else 1
-        return [{"jobs": attempts[attempt]}]
+        return [{"total_count": len(attempts[attempt]), "jobs": attempts[attempt]}]
 
     _original_gh_api = gh_api
     try:
@@ -602,6 +642,23 @@ def self_test() -> int:
         "the fetch URL is never the unscoped /runs/<id>/jobs",
         not any(re.search(r"/runs/\d+/jobs", u) for u in seen_urls),
     )
+
+    # A partial or duplicated page must not hide a failing job from the verdict.
+    for label, pages in (
+        ("missing second page", [{"total_count": 2, "jobs": [attempts[1][0]]}]),
+        ("duplicate job id", [{"total_count": 2, "jobs": [attempts[1][0], attempts[1][0]]}]),
+        ("inconsistent page count", [{"total_count": 1, "jobs": [attempts[1][0]]},
+                                     {"total_count": 2, "jobs": []}]),
+    ):
+        try:
+            gh_api = lambda path, pages=pages: pages  # type: ignore[assignment]
+            fetch_jobs_scoped("o/r", 1, 1)
+        except ValueError:
+            check(f"{label} fails closed", True)
+        else:
+            check(f"{label} fails closed", False)
+        finally:
+            gh_api = _original_gh_api  # type: ignore[assignment]
 
     cancelled = classify_run(_run("cancelled"), [])
     check("a cancelled run is not this watch's business", cancelled["status"] == "not-a-verdict")
@@ -729,6 +786,12 @@ def self_test() -> int:
     # Both directions, because the dangerous one is the WIDENING: a message wrongly called
     # transient degrades this watch to "said nothing", and a permission misconfiguration would
     # then never be reported by the control whose job is to report.
+    #
+    # stdout is captured on every call: these fixtures exercise the REAL printing function, and
+    # the checks below assert both the exit code and the workflow-command level — a passing
+    # self-test must emit zero `::error::` lines, otherwise every PR that makes this self-test
+    # run (it fires on gates.yaml / runner changes, universal inputs) carries red annotations
+    # from a green gate (#12537).
     for msg in (
         "gh api repos/x/actions/runs/1/attempts/1 failed: gh: API rate limit exceeded for "
         "installation ... (HTTP 403)",
@@ -737,8 +800,13 @@ def self_test() -> int:
         "HTTP 503",
         "error connecting to api.github.com: connection reset by peer",
     ):
-        check(f"transient -> exit 3: {msg[:40]!r}",
-              api_failure_exit(RuntimeError(msg)) == 3)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = api_failure_exit(RuntimeError(msg))
+        out = buf.getvalue()
+        check(f"transient -> exit 3: {msg[:40]!r}", code == 3)
+        check(f"transient -> ::warning::, never ::error::: {msg[:40]!r}",
+              "::warning::" in out and "::error::" not in out)
 
     for msg in (
         "Must have admin rights to Repository.",
@@ -746,8 +814,12 @@ def self_test() -> int:
         "Not Found (HTTP 404)",
         "Bad credentials",
     ):
-        check(f"NOT transient -> exit 1: {msg[:40]!r}",
-              api_failure_exit(RuntimeError(msg)) == 1)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = api_failure_exit(RuntimeError(msg))
+        out = buf.getvalue()
+        check(f"NOT transient -> exit 1: {msg[:40]!r}", code == 1)
+        check(f"NOT transient -> ::error::: {msg[:40]!r}", "::error::" in out)
 
     # An unanswerable RUN is still exit 1 — the watch read it and the run cannot support a
     # verdict. That is a defect, not weather, and the new state must not have absorbed it.

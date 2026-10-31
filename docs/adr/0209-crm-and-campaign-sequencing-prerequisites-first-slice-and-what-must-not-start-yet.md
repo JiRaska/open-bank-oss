@@ -1,14 +1,14 @@
 ---
 date: 2026-07-26
-decision-status: proposed
-delivery-status: partial
+decision-status: accepted
+delivery-status: shipped
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [governance, architecture, ml, analytics]
 summary: "Sequences ADR-0199/0200/0201: extract the 14×-duplicated Temporal wiring into libs first, ship crm-service then campaign-service with deterministic segments only, and do not start the NBA model until ADR-0140 phase 2 exists."
-followup: "#2749 — crm-service and the NBA model (D4/D5) have not started, exactly as sequenced here; ADR-0140 phase 2 (offline snapshotter, as-of join) still does not exist"
+followup: "#12749 — docs close-out of this ADR; #12750 — ADR-0140 phase 2 (offline snapshotter, as-of join), the D4 gate for ADR-0201 D5 NBA, blocked on ADR-0139 phase 2"
 ---
 
 # ADR-0209 — CRM and campaign sequencing: prerequisites, first slice, and what must not start yet
@@ -20,6 +20,18 @@ and the NBA model (ADR-0201 D4/D5) have not started — both still correctly blo
 by the same missing ADR-0140 phase-2 offline store this ADR's Context section identifies. The
 "Fact 1" paragraph below (zero files, nothing built) is therefore a snapshot of 2026-07-26 and is
 no longer current; left unedited as the historical record this ADR was written against.
+
+**Close-out note (2026-10-14).** This sequencing ADR's own actionable items are now all shipped or
+superseded: D1 shipped as `openbank-libs-temporal` (#2585), D3 as `openbank-campaign-service`
+(#2751), D5 as the `count_marketing_consents` MCP tool (#2639), and D2 is superseded by ADR-0210
+(Customer 360 as a query over the ClickHouse silver layer — `openbank-crm-service` was never built
+and never should be; ADR-0199's `superseded-by: [0210]` now records the link, the correction this
+ADR's D2 text predates). D4 stands unchanged — ADR-0210 D7 explicitly confirms it — but its
+follow-up has moved out of this ADR: ADR-0140 phase 2 (offline snapshotter + as-of join) is tracked
+as #12750, itself blocked on ADR-0139 phase 2. `delivery-status` is therefore `shipped`: this ADR
+sequences nothing further, and the D4 gate lives on via #12750 rather than via this file's
+frontmatter. `decision-status` moves `proposed` → `accepted` now that the outcome of the sequencing
+it proposed is verifiably the state of the tree. Close-out tracked in #12749.
 
 ## Context
 
@@ -77,11 +89,30 @@ it is mechanical enough to be verified by "every service still builds and its wo
 and doing it *after* campaign-service means migrating 15 copies instead of 14 while a new service is
 still in flux.
 
+**Shipped (2026-08, PR #2585, issue #2572) — with a module-shape correction.** The extraction
+shipped as a separate top-level module, `openbank-libs-temporal`, **not** inside
+`openbank-libs-runtime` as this decision point literally states. The producer was first written
+into libs-runtime and broke every non-Temporal service (~40 of them) at build time: libs-runtime is
+Jandex-indexed and every service consumes it, so Arc resolves the type closure of every producer it
+contains — including a return type (`io.temporal.client.WorkflowClient`) that a service without
+temporal-sdk cannot find; `compileOnly` hides the dependency from consumers' classpaths but not the
+producer from the index. The rule this encodes (recorded in the header of
+`openbank-libs-temporal/build.gradle.kts`): a Jandex-indexed library consumed by all services may
+only declare producers of types all services have; a producer for an optional dependency belongs
+in a module only its users depend on. All 14 duplicates migrated, and 18 services now consume the
+module.
+
 **D2 — Then ADR-0199's `crm-service`, unchanged.** Its shape is already correct — a projection that
 owns no facts, with ADR-0118 erasure by direct anonymisation on `PARTY_ERASED` rather than replay
 (D4's corrected mechanism, which is right: every topic is `retention.ms: 604800000` with
 `cleanup.policy: delete`, so a rebuild is impossible for any customer older than a week). Nothing in
 this ADR changes it.
+
+**Superseded (2026-08-18).** ADR-0210 (accepted/shipped) replaced the new-`crm-service` approach of
+ADR-0199 with Customer 360 as a query over analytics-sink's existing ClickHouse silver layer; ADR-0199
+now records `superseded-by: [0210]` (the dated superseded-note there, same convention as this one).
+`openbank-crm-service` does not exist and must not be built. This decision point is therefore
+discharged as *superseded*, not shipped.
 
 **D3 — Then ADR-0200's `campaign-service`, with deterministic segments only.** ADR-0201 D2 already
 establishes that a rule-based segment is the floor and "means ADR-0200 can ship with no model at all".
@@ -89,6 +120,11 @@ This ADR makes that the *required* first shape rather than an available option: 
 with rule-based segments, both consent mechanisms (pull before every send, push on
 `consent.revoked`), delivery via notification-service, catalogue templates only, and
 `campaign.activate` four-eyes. No model, no NBA, no feature-store dependency.
+
+**Shipped (PR #2751).** `openbank-campaign-service` exists with exactly this shape: deterministic
+rule segments, both consent mechanisms (pull before every send, push on `consent.revoked`), delivery
+via notification-service, catalogue templates, `campaign.activate` four-eyes, and no model or
+feature-store dependency.
 
 **D4 — ADR-0201 D5 (the NBA model) must not start until ADR-0140 phase 2 is built and merged.** This
 is the load-bearing constraint of this ADR. Not a preference: without an offline store there is no
@@ -98,11 +134,21 @@ becomes its own tracked work item with its own issue, sequenced before any NBA w
 port's type boundary (ADR-0201 D5's structural bar against credit decisions) is designed at that point
 rather than retrofitted.
 
+**Stands (2026-10-14).** ADR-0140 phase 2 (offline snapshotter + as-of join) is still not built —
+it is itself blocked on ADR-0139 phase 2 (model registry/drift, also unbuilt) — and no tracking
+issue existed until now. It is tracked as **#12750**, which is the issue this decision point's
+"own tracked work item with its own issue" sentence promised; the gate now lives there rather than
+in this ADR's frontmatter. ADR-0210 D7 explicitly confirms "ADR-0209 D4 stands unchanged".
+
 **D5 — The campaign-copilot slice is an MCP tool registration, not a service.** Register read-only
 tools against the existing `McpToolRegistry` (which already carries `list_consents`), governed by the
 existing ADR-0195 consent binding and per-call audit. This delivers the "copilot" value in ADR-0203
 without waiting on D2 or D3, and it is explicitly barred from acquiring a write tool: a copilot that
 can enrol or send is a campaign-service concern gated by D3's four-eyes, not a tool.
+
+**Shipped (PR #2639).** Delivered as the `count_marketing_consents` tool in `McpToolRegistry`,
+read-only, under the ADR-0195 consent binding and per-call audit. It was deliberately left
+PDP-denied pending charter authorisation — registered as D5 prescribes, not yet callable.
 
 **D6 — Nothing here authorises starting D2 or D3.** This ADR sequences work; it does not schedule it.
 Three services' worth of build is a business decision about spend, and each of D1–D5 is separately

@@ -12,6 +12,8 @@ The REST contract is described in [`openapi.yaml`](../openapi.yaml) (`info.versi
 
 All endpoints require a **Keycloak Bearer token** (realm `openbank`). Per-endpoint roles (`@RolesAllowed`):
 
+In production, `/api/*` selects the bearer authentication mechanism on both the HTTP and mTLS listeners. A trusted client certificate is required to establish the TLS connection on port 8443, but it does not identify an API caller by itself: a certificate without a bearer receives 401. A client needs both its certificate and a valid bearer on that listener; the existing HTTP listener still requires the bearer. This prevents a workload holding a trusted transport certificate from gaining an API identity without a token (#12511). `PartyListenerAuthParityIT` checks both listeners using real HTTP requests. This mechanism selection does not change the OPA advisory setting or the per-endpoint role checks below.
+
 | Endpoint | Roles |
 |---|---|
 | `GET /parties`, `GET /parties/search`, `GET /parties/{id}`, `GET /parties/{id}/documents` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC`, `ROLE_API` |
@@ -76,7 +78,11 @@ GET /api/v1/parties/search?q=Novak&limit=20&cursor=<opaque>
 ```
 
 - **List** is page/size paginated (size clamped to `[1,100]`); optional `status` filter (PENDING_KYC / ACTIVE / SUSPENDED / CLOSED) powers the onboarding cockpit funnel (ADR-0068). Response echoes `statusFilter`. The handler sets a cosmetic `X-Party-List-Mode: enriched|standard` header driven by the `party-list-enriched` flag.
-- **Search** (ADR-0055) is a case-insensitive trigram substring match over legal/trading name, keyset-cursor paginated. A blank/`*`/sub-2-char term returns an empty page (no full-table enumeration). Gated by the `party-search` feature flag (`@FeatureFlag`). Returns a **data-minimised** summary; **birth number is never searchable**.
+- **Search** (ADR-0055) is keyset-cursor paginated and gated by the `party-search` feature flag (`@FeatureFlag`). A blank/`*`/sub-2-char term returns an empty page (no full-table enumeration). It is country-agnostic and answers what an operator actually holds:
+  - **Name / surname** — accent- and case-insensitive, per word and partial (`novak ja` finds `Jan Novák`; every word must match). Backed by `party_fold()` + trigram indexes (Flyway `V27`).
+  - **National / personal identifier** of any country (birth number, PESEL, SSN, NINO, tax id…) — an **exact** match after stripping separators, never a substring, so identifiers cannot be enumerated by prefix. A CZ/SK birth number also resolves through the RČ blind index; the raw birth number is never compared in SQL. A phone number matches on its last 9 digits.
+  - **Name + date of birth** (`Novák 15.6.1985`, `Smith 1985-06-15`, `Doe 12/31/1985`; an ambiguous d/m vs m/d matches both) — the date narrows the name match; a bare date returns nothing.
+  - Returns a **data-minimised** summary including `dateOfBirth`, so namesakes can be told apart.
 
 ### Update party
 
@@ -155,3 +161,7 @@ Incoming topics consumed (group `openbank-party-service`, `auto.offset.reset=ear
 - **API version in URL** (`/api/v1/...`); `openbank.api.version=1`. Breaking changes ⇒ `/api/v2`.
 - **OpenAPI contract axis** is independent of the release `version.txt` (ADR-0048).
 - **Events** are additive-only on `openbank.party.events`; breaking changes would use a new topic.
+
+## Party caller identity
+
+Party creation admits the named KYB and customer-edge service accounts through a verified JWT client id, subject and matching Keycloak service-account username; staff roles require a verified interactive user session. The customer AML declaration accepts only the configured customer-edge service account. A generic `ROLE_API` token, even when granted to another workload, cannot submit a declaration for a customer.

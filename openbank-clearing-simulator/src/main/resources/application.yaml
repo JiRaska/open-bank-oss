@@ -38,6 +38,8 @@ quarkus:
   rest-client:
     sepa-payment-service:
       url: ${SEPA_PAYMENT_SERVICE_URL:http://localhost:8108}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
   shutdown:
     timeout: 30S
@@ -95,6 +97,9 @@ openbank:
   # every scenario is reproducible in tests and demos. Non-production only.
   clearing-simulator:
     settlement-lag-seconds: 0
+    # Bank-own (pacs.009) transfers with amount remainder 03 are answered ACSP and settle (ACSC)
+    # this many seconds later — the synthetic case for asynchronous settlement.
+    fi-settlement-lag-seconds: 30
 
 # OPA sidecar (ADR-0034). Advisory by default.
 opa:

@@ -26,6 +26,7 @@ import { readdirSync, statSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { parse as parseYaml } from 'yaml'
+import { runnableModules } from './service-inventory.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const args = process.argv.slice(2)
@@ -39,6 +40,16 @@ const OUT = path.resolve(getArg('--out', path.resolve(__dirname, '..', 'catalog.
 
 function readText(p) {
   try { return readFileSync(p, 'utf-8') } catch { return null }
+}
+
+function releaseRegistered(name) {
+  try {
+    const config = JSON.parse(readText(path.join(REPO, 'release-please-config.json')) ?? '{}')
+    const manifest = JSON.parse(readText(path.join(REPO, '.release-please-manifest.json')) ?? '{}')
+    return Object.hasOwn(config.packages ?? {}, name) && Object.hasOwn(manifest, name)
+  } catch {
+    return false
+  }
 }
 
 // Money-path set + (optional) data-domain hints from the single governance source.
@@ -71,7 +82,26 @@ function readOpenapi(serviceDir) {
   }
 }
 
+// Listener ports, read from the service's own application.yaml (the single place a
+// port is declared). `${ENV:8101}` expressions yield their default; anything that is
+// not a plain port yields null — never a guess.
+function readPorts(serviceDir) {
+  const raw = readText(path.join(serviceDir, 'src', 'main', 'resources', 'application.yaml'))
+  if (raw == null) return { port: null, mgmtPort: null }
+  try {
+    const y = parseYaml(raw)
+    const toPort = v => {
+      const m = /^(?:\$\{[^:}]+:)?(\d{2,5})\}?$/.exec(String(v ?? '').trim())
+      return m ? Number(m[1]) : null
+    }
+    return { port: toPort(y?.quarkus?.http?.port), mgmtPort: toPort(y?.quarkus?.management?.port) }
+  } catch {
+    return { port: null, mgmtPort: null }
+  }
+}
+
 const gov = loadGovernance()
+const runnableNames = new Set(runnableModules(REPO).map(module => module.name))
 
 // Discover service modules: every top-level openbank-* dir that is a Gradle
 // module (has version.txt OR an openapi spec OR a build.gradle.kts). admin-ui and
@@ -91,16 +121,15 @@ for (const name of entries) {
   }
   const { hasOpenapi, apiVersion, apiTitle } = readOpenapi(dir)
   const isService = name.endsWith('-service') || name.endsWith('-payment') || name.endsWith('-instant')
-  // The convention plugin identifies a runnable Quarkus module more reliably
-  // than its name: risk-engine and product-catalog have no -service suffix.
-  const buildScript = readText(path.join(dir, 'build.gradle.kts')) ?? ''
-  const runnable = /^\s*(?:plugins\s*\{\s*)?id\(["']openbank\.quarkus-service["']\)/m.test(buildScript)
-    && (buildScript.includes('project(":openbank-libs-runtime")') || buildScript.includes('project(":openbank-libs")'))
+  const runnable = runnableNames.has(name)
+  const { port, mgmtPort } = readPorts(dir)
   const moneyPath = gov.moneyPath.has(name)
 
   // Genuine gaps (NOT version drift, which ADR-0048 makes legitimate):
   const gaps = []
-  if (isService && !releaseVersion) gaps.push('missing version.txt')
+  if ((isService || runnable) && !releaseVersion) gaps.push('missing version.txt')
+  if (runnable && !releaseRegistered(name)) gaps.push('runnable backend component is not release-registered')
+  if (runnable && !readText(path.join(dir, 'governance.yaml'))) gaps.push('runnable backend component has no governance.yaml')
   if (moneyPath && !hasOpenapi) gaps.push('money-path service with no OpenAPI spec')
 
   services.push({
@@ -108,6 +137,8 @@ for (const name of entries) {
     short: name.replace(/^openbank-/, ''),
     kind: name === 'openbank-admin-ui' ? 'ui' : name === 'openbank-libs' ? 'library' : isService ? 'service' : 'component',
     runnable,
+    port,
+    mgmtPort,
     releaseVersion,
     apiVersion,
     apiTitle,
@@ -134,6 +165,20 @@ const catalog = {
   collectedAt: null,
   totals,
   services,
+}
+
+// Duplicate listener ports among runnable modules are real in application.yaml; warn (never fail)
+// so they are visible instead of silently hidden by a hand-typed, accidentally-unique list.
+{
+  const byPort = new Map()
+  for (const s of services.filter(m => m.runnable && m.port != null)) {
+    byPort.set(s.port, [...(byPort.get(s.port) ?? []), s.name])
+  }
+  const dups = [...byPort.entries()].filter(([, names]) => names.length > 1)
+  if (dups.length > 0) {
+    console.warn(`[generate-catalog] WARNING: ${dups.length} duplicate listener port(s) among runnable modules:`)
+    for (const [port, names] of dups) console.warn(`  - ${port}: ${names.join(', ')}`)
+  }
 }
 
 writeFileSync(OUT, JSON.stringify(catalog, null, 2) + '\n')

@@ -12,23 +12,14 @@ tasks.test {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.redis.client)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.cache)
     implementation(libs.kotlinx.coroutines.core)
@@ -36,6 +27,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    // ADR-0353: the financial-crime published language, declared once for producers and rails.
+    implementation(project(":openbank-libs-fincrime"))
     implementation(project(":openbank-libs-runtime"))
     implementation(libs.quarkus.scheduler)
     // #3413: account -> party lookup for the resolution sweep (sweep-only; never on the
@@ -43,10 +36,9 @@ dependencies {
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.oidc.client.reactive.filter)
-    testImplementation(libs.quarkus.junit5)
-    testImplementation(libs.assertj)
+    // #13169: the account-service operations and DTOs are generated from its openapi.yaml (ADR-0319).
+    implementation(project(":openbank-client-account"))
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
 
     // CI infra sweep (#578): isolated PostgreSQL + Valkey(Redis) per test JVM.
@@ -60,7 +52,11 @@ dependencies {
     // Pact provider verification (issue #2255, C3): fx-service is a consumer of
     // POST /api/v1/aml/cases. @TestSecurity supplies the operator role Pact replays with.
     testImplementation(libs.pact.provider)
+    // Pact consumer: AmlAccountOwnershipPactConsumerTest pins the party-resolution read
+    // against account-service (GET /api/v1/accounts/{id}, issue #3413 sweep).
+    testImplementation(libs.pact.consumer)
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
 }
 
 // Pact: replay the committed git-pact contracts (ADR-0063) and forward broker config when CI

@@ -9,10 +9,13 @@ import com.openbank.libs.xml.SecureXml
 import com.openbank.sanctions.application.port.out.ListImportOutcome
 import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsEntryRepository
+import com.openbank.sanctions.application.port.out.SanctionsPublicationPermit
 import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.SanctionsEntry
 import com.openbank.sanctions.domain.model.SanctionsListType
+import com.openbank.sanctions.infrastructure.importer.CzAntiTerrorismCsvParser
 import com.openbank.sanctions.infrastructure.importer.EuFsfSaxParser
+import com.openbank.sanctions.infrastructure.importer.StreamingCsv
 import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -34,6 +37,21 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
+private suspend fun SanctionsEntryRepository.upsertForRefresh(
+    entries: List<SanctionsEntry>,
+    permit: SanctionsPublicationPermit?,
+): Int = if (permit == null) upsertAll(entries) else upsertAllFenced(entries, permit)
+
+private suspend fun SanctionsEntryRepository.deactivateMissingForRefresh(
+    listType: SanctionsListType,
+    presentExternalIds: Set<String>,
+    permit: SanctionsPublicationPermit?,
+): Int = if (permit == null) {
+    deactivateMissing(listType, presentExternalIds)
+} else {
+    deactivateMissingFenced(listType, presentExternalIds, permit)
+}
+
 /**
  * Downloads, parses and upserts sanctions/PEP list entries.
  *
@@ -42,6 +60,8 @@ import java.util.UUID
  *  - EU_CONSOLIDATED → official EU FSF XML (first-party) by default; OpenSanctions CSV selectable
  *  - PEP_GLOBAL / UN / HM / CNB_DOMESTIC → OpenSanctions targets.simple.csv — BufferedReader streaming,
  *    batch upsert (CNB_DOMESTIC is the Czech national list kept by MZV, mirrored as cz_national_sanctions)
+ *  - CZ_TERRORISTS → official e-Sbírka SPARQL CSV for Regulation 210/2008 Coll.; the small legal
+ *    snapshot is fully validated before the first upsert and stays separate from CNB_DOMESTIC
  *  - FATF         → country-risk, not entity-based — skipped
  *
  * Every import attempt returns a [ListImportResult] whose outcome is one of the
@@ -87,9 +107,13 @@ class SanctionsImportService(
      * named non-success (see [ListImportResult]); the caller must key its bookkeeping on the
      * outcome, never on "count > 0".
      */
-    suspend fun importList(listType: SanctionsListType, sourceUrl: String): ListImportResult {
+    suspend fun importList(
+        listType: SanctionsListType,
+        sourceUrl: String,
+        permit: SanctionsPublicationPermit? = null,
+    ): ListImportResult {
         Log.infof("Importing %s from %s", listType, sourceUrl)
-        val result = runImport(listType, sourceUrl)
+        val result = runImport(listType, sourceUrl, permit)
         metrics?.sanctionsListImport(listType.name, result.outcome.name.lowercase())
         if (result.outcome != ListImportOutcome.IMPORTED) {
             Log.warnf(
@@ -103,30 +127,41 @@ class SanctionsImportService(
     }
 
     @Suppress("TooGenericExceptionCaught")
-    private suspend fun runImport(listType: SanctionsListType, sourceUrl: String): ListImportResult = try {
+    private suspend fun runImport(
+        listType: SanctionsListType,
+        sourceUrl: String,
+        permit: SanctionsPublicationPermit?,
+    ): ListImportResult = try {
         when (listType) {
             // OFAC SDN: official Treasury XML — SAX streaming
-            SanctionsListType.OFAC_SDN -> importedOrEmpty(importOfacSdn(sourceUrl))
+            SanctionsListType.OFAC_SDN -> importedOrEmpty(importOfacSdn(sourceUrl, permit))
             // EU consolidated list: first-party EU FSF XML by default (issue #8362);
             // OpenSanctions CSV stays selectable for rollback; `seed` = the non-production
             // Flyway sample entries (local dev only).
             SanctionsListType.EU_CONSOLIDATED -> when (euSource) {
-                EU_SOURCE_OPENSANCTIONS -> importedOrEmpty(importOpenSanctionsCsv(sourceUrl, listType, EU_PROGRAMS))
+                EU_SOURCE_OPENSANCTIONS -> importedOrEmpty(
+                    importOpenSanctionsCsv(
+                        sourceUrl,
+                        listType,
+                        EU_PROGRAMS,
+                        permit,
+                    ),
+                )
                 EU_SOURCE_SEED -> ListImportResult.seedFallback(
                     "openbank.sanctions.eu.source=seed — EU list runs on the Flyway V6 sample " +
                         "entries; NON-PRODUCTION configuration",
                 )
-                else -> importedOrEmpty(importEuFsf())
+                else -> importedOrEmpty(importEuFsf(permit))
             }
             // OpenSanctions-normalised CSV for PEP, UN, HM — stream line-by-line
             SanctionsListType.PEP_GLOBAL -> importedOrEmpty(
-                importOpenSanctionsCsv(sourceUrl, listType, listOf("PEP")),
+                importOpenSanctionsCsv(sourceUrl, listType, listOf("PEP"), permit),
             )
             SanctionsListType.UN_CONSOLIDATED -> importedOrEmpty(
-                importOpenSanctionsCsv(sourceUrl, listType, listOf("UN-SANCTIONS")),
+                importOpenSanctionsCsv(sourceUrl, listType, listOf("UN-SANCTIONS"), permit),
             )
             SanctionsListType.HM_TREASURY -> importedOrEmpty(
-                importOpenSanctionsCsv(sourceUrl, listType, listOf("HMT-SANCTIONS")),
+                importOpenSanctionsCsv(sourceUrl, listType, listOf("HMT-SANCTIONS"), permit),
             )
             SanctionsListType.FATF_HIGH_RISK ->
                 ListImportResult.skippedNotEntityBased("FATF is country-risk — no entity feed")
@@ -135,8 +170,10 @@ class SanctionsImportService(
             // poll; the OpenSanctions mirror (cz_national_sanctions) is stable and refreshed daily.
             // The enum key keeps its historical CNB_ name because it is part of the public API.
             SanctionsListType.CNB_DOMESTIC -> importedOrEmpty(
-                importOpenSanctionsCsv(sourceUrl, listType, CZ_NATIONAL_PROGRAMS),
+                importOpenSanctionsCsv(sourceUrl, listType, CZ_NATIONAL_PROGRAMS, permit),
             )
+            // Separate legal regime: Regulation 210/2008 Coll., sourced only from e-Sbírka (#10760).
+            SanctionsListType.CZ_TERRORISTS -> importedOrEmpty(importCzAntiTerrorism(sourceUrl, permit))
         }
     } catch (ex: Exception) {
         // Deliberately broad: any fetch/parse/store failure means the SAME thing to the
@@ -163,7 +200,7 @@ class SanctionsImportService(
      * deactivateMissing reconciliation sweep runs ONLY after the whole stream parsed — a
      * mid-stream failure propagates and the stored list is left untouched (#1432).
      */
-    private suspend fun importEuFsf(): Int {
+    private suspend fun importEuFsf(permit: SanctionsPublicationPermit?): Int {
         val inputStream = withContext(Dispatchers.IO) { httpGetStream(euFsfUrl) }
         val entities = withContext(Dispatchers.IO) {
             inputStream.use { EuFsfSaxParser.parse(it) }
@@ -188,10 +225,14 @@ class SanctionsImportService(
                     programs = fsf.programmes.ifEmpty { EU_PROGRAMS },
                 )
             }
-            total += entryRepo.upsertAll(entries)
+            total += entryRepo.upsertForRefresh(entries, permit)
         }
 
-        val deactivated = entryRepo.deactivateMissing(SanctionsListType.EU_CONSOLIDATED, seenExternalIds)
+        val deactivated = entryRepo.deactivateMissingForRefresh(
+            SanctionsListType.EU_CONSOLIDATED,
+            seenExternalIds,
+            permit,
+        )
         Log.infof(
             "Imported %d EU FSF entries (%d written, %d no longer present, deactivated)",
             seenExternalIds.size,
@@ -205,120 +246,120 @@ class SanctionsImportService(
     // OFAC SDN  (sdn.xml) — SAX streaming, O(1) peak memory per entry
     // ──────────────────────────────────────────────────────────────────────────
 
-    private suspend fun importOfacSdn(url: String): Int = withContext(Dispatchers.IO) {
-        val inputStream = httpGetStream(url)
-        val allEntries = mutableListOf<SanctionsEntry>()
+    private suspend fun importOfacSdn(url: String, permit: SanctionsPublicationPermit?): Int =
+        withContext(Dispatchers.IO) {
+            val inputStream = httpGetStream(url)
+            val allEntries = mutableListOf<SanctionsEntry>()
 
-        // Remote list content: parsed only through the fleet-wide hardened SAX parser.
-        SecureXml.saxParse(
-            inputStream,
-            object : DefaultHandler() {
-                private var inEntry = false
-                private var inAka = false
-                private var inDobItem = false
-                private val text = StringBuilder()
+            // Remote list content: parsed only through the fleet-wide hardened SAX parser.
+            SecureXml.saxParse(
+                inputStream,
+                object : DefaultHandler() {
+                    private var inEntry = false
+                    private var inAka = false
+                    private var inDobItem = false
+                    private val text = StringBuilder()
 
-                private var uid: String? = null
-                private var firstName: String? = null
-                private var lastName: String? = null
-                private var sdnType: String? = null
-                private val programs = mutableListOf<String>()
-                private val aliases = mutableListOf<String>()
-                private var dob: String? = null
+                    private var uid: String? = null
+                    private var firstName: String? = null
+                    private var lastName: String? = null
+                    private var sdnType: String? = null
+                    private val programs = mutableListOf<String>()
+                    private val aliases = mutableListOf<String>()
+                    private var dob: String? = null
 
-                private var akaFirst: String? = null
-                private var akaLast: String? = null
+                    private var akaFirst: String? = null
+                    private var akaLast: String? = null
 
-                override fun startElement(uri: String, local: String, qName: String, attrs: Attributes) {
-                    text.clear()
-                    when (qName) {
-                        "sdnEntry" -> {
-                            inEntry = true
-                            uid = null
-                            firstName = null
-                            lastName = null
-                            sdnType = null
-                            dob = null
-                            programs.clear()
-                            aliases.clear()
-                        }
-                        "aka" -> {
-                            inAka = true
-                            akaFirst = null
-                            akaLast = null
-                        }
-                        "dateOfBirthItem" -> inDobItem = true
-                    }
-                }
-
-                override fun characters(ch: CharArray, start: Int, length: Int) {
-                    text.append(ch, start, length)
-                }
-
-                override fun endElement(uri: String, local: String, qName: String) {
-                    val t = text.toString().trim()
-                    text.clear()
-                    if (!inEntry) return
-
-                    when {
-                        inAka && qName == "firstName" -> akaFirst = t.takeIf { it.isNotBlank() }
-                        inAka && qName == "lastName" -> akaLast = t.takeIf { it.isNotBlank() }
-                        inAka && qName == "aka" -> {
-                            val fn = akaFirst ?: ""
-                            val ln = akaLast ?: ""
-                            val alias = if (fn.isBlank()) ln else "$fn $ln".trim()
-                            if (alias.isNotBlank()) aliases += alias
-                            inAka = false
-                        }
-                        !inAka && qName == "firstName" -> if (firstName == null) {
-                            firstName = t.takeIf { it.isNotBlank() }
-                        }
-                        !inAka && qName == "lastName" -> if (lastName == null) {
-                            lastName = t.takeIf { it.isNotBlank() }
-                        }
-                        qName == "uid" && uid == null -> uid = t.takeIf { it.isNotBlank() }
-                        qName == "sdnType" -> sdnType = t.takeIf { it.isNotBlank() }
-                        qName == "program" -> if (t.isNotBlank()) programs += t
-                        inDobItem && qName == "dateOfBirth" -> if (dob == null) {
-                            dob = t.takeIf { it.isNotBlank() }
-                        }
-                        qName == "dateOfBirthItem" -> inDobItem = false
-                        qName == "sdnEntry" -> {
-                            inEntry = false
-                            val u = uid ?: return
-                            val fn = firstName ?: ""
-                            val ln = lastName ?: ""
-                            val pn = if (fn.isBlank()) ln else "$fn $ln".trim()
-                            if (pn.isBlank()) return
-                            val et = if (sdnType?.lowercase()?.contains("entity") == true) {
-                                EntityType.ORGANIZATION
-                            } else {
-                                EntityType.INDIVIDUAL
+                    override fun startElement(uri: String, local: String, qName: String, attrs: Attributes) {
+                        text.clear()
+                        when (qName) {
+                            "sdnEntry" -> {
+                                inEntry = true
+                                uid = null
+                                firstName = null
+                                lastName = null
+                                sdnType = null
+                                dob = null
+                                programs.clear()
+                                aliases.clear()
                             }
-                            allEntries += buildEntry(
-                                listType = SanctionsListType.OFAC_SDN,
-                                externalId = "ofac-$u",
-                                entityType = et,
-                                primaryName = pn,
-                                aliases = aliases.toList(),
-                                dateOfBirth = dob,
-                                programs = programs.toList(),
-                            )
+                            "aka" -> {
+                                inAka = true
+                                akaFirst = null
+                                akaLast = null
+                            }
+                            "dateOfBirthItem" -> inDobItem = true
                         }
                     }
-                }
-            },
-            namespaceAware = false,
-        )
+                    override fun characters(ch: CharArray, start: Int, length: Int) {
+                        text.append(ch, start, length)
+                    }
 
-        Log.infof("SAX-parsed %d OFAC SDN entries", allEntries.size)
-        var total = 0
-        for (chunk in allEntries.chunked(IMPORT_BATCH_SIZE)) {
-            total += entryRepo.upsertAll(chunk)
+                    override fun endElement(uri: String, local: String, qName: String) {
+                        val t = text.toString().trim()
+                        text.clear()
+                        if (!inEntry) return
+
+                        when {
+                            inAka && qName == "firstName" -> akaFirst = t.takeIf { it.isNotBlank() }
+                            inAka && qName == "lastName" -> akaLast = t.takeIf { it.isNotBlank() }
+                            inAka && qName == "aka" -> {
+                                val fn = akaFirst ?: ""
+                                val ln = akaLast ?: ""
+                                val alias = if (fn.isBlank()) ln else "$fn $ln".trim()
+                                if (alias.isNotBlank()) aliases += alias
+                                inAka = false
+                            }
+                            !inAka && qName == "firstName" -> if (firstName == null) {
+                                firstName = t.takeIf { it.isNotBlank() }
+                            }
+                            !inAka && qName == "lastName" -> if (lastName == null) {
+                                lastName = t.takeIf { it.isNotBlank() }
+                            }
+                            qName == "uid" && uid == null -> uid = t.takeIf { it.isNotBlank() }
+                            qName == "sdnType" -> sdnType = t.takeIf { it.isNotBlank() }
+                            qName == "program" -> if (t.isNotBlank()) programs += t
+                            inDobItem && qName == "dateOfBirth" -> if (dob == null) {
+                                dob = t.takeIf { it.isNotBlank() }
+                            }
+                            qName == "dateOfBirthItem" -> inDobItem = false
+                            qName == "sdnEntry" -> {
+                                inEntry = false
+                                val u = uid ?: return
+                                val fn = firstName ?: ""
+                                val ln = lastName ?: ""
+                                val pn = if (fn.isBlank()) ln else "$fn $ln".trim()
+                                if (pn.isBlank()) return
+                                val et = if (sdnType?.lowercase()?.contains("entity") == true) {
+                                    EntityType.ORGANIZATION
+                                } else {
+                                    EntityType.INDIVIDUAL
+                                }
+                                allEntries += buildEntry(
+                                    listType = SanctionsListType.OFAC_SDN,
+                                    externalId = "ofac-$u",
+                                    entityType = et,
+                                    primaryName = pn,
+                                    aliases = aliases.toList(),
+                                    dateOfBirth = dob,
+                                    programs = programs.toList(),
+                                )
+                            }
+                        }
+                    }
+                },
+                namespaceAware = false,
+            )
+
+            Log.infof("SAX-parsed %d OFAC SDN entries", allEntries.size)
+            var total = 0
+            for (chunk in allEntries.chunked(IMPORT_BATCH_SIZE)) {
+                total += entryRepo.upsertForRefresh(chunk, permit)
+            }
+            Log.infof("Imported %d OFAC SDN entries (%d written)", allEntries.size, total)
+            allEntries.size
         }
-        Log.infof("Imported %d OFAC SDN entries (%d written)", allEntries.size, total)
-        allEntries.size
-    }
 
     // ──────────────────────────────────────────────────────────────────────────
     // OpenSanctions  targets.simple.csv  (PEP_GLOBAL, EU, UN, HM and others)
@@ -335,15 +376,16 @@ class SanctionsImportService(
         url: String,
         listType: SanctionsListType,
         defaultPrograms: List<String> = listOf("PEP"),
+        permit: SanctionsPublicationPermit?,
     ): Int {
         val inputStream = withContext(Dispatchers.IO) { httpGetStream(url) }
         val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8))
 
-        val headerLine = withContext(Dispatchers.IO) { OpenSanctionsCsv.readRecord(reader) } ?: run {
+        val headerLine = withContext(Dispatchers.IO) { StreamingCsv.readRecord(reader) } ?: run {
             reader.close()
             return 0
         }
-        val headers = OpenSanctionsCsv.parseRecord(headerLine)
+        val headers = StreamingCsv.parseRecord(headerLine)
 
         // Resolve column indexes from actual header (format-safe)
         val idxId = headers.indexOf("id")
@@ -375,10 +417,10 @@ class SanctionsImportService(
 
         try {
             while (true) {
-                val rawLine = withContext(Dispatchers.IO) { OpenSanctionsCsv.readRecord(reader) } ?: break
+                val rawLine = withContext(Dispatchers.IO) { StreamingCsv.readRecord(reader) } ?: break
                 if (rawLine.isBlank()) continue
 
-                val cols = OpenSanctionsCsv.parseRecord(rawLine)
+                val cols = StreamingCsv.parseRecord(rawLine)
                 val id = col(cols, idxId)
                 val schema = col(cols, idxSchema)
                 val name = col(cols, idxName)
@@ -426,7 +468,7 @@ class SanctionsImportService(
                 parsed++
 
                 if (batch.size >= IMPORT_BATCH_SIZE) {
-                    total += entryRepo.upsertAll(batch)
+                    total += entryRepo.upsertForRefresh(batch, permit)
                     batch.clear()
                     if (parsed % 10_000 == 0) Log.infof("OpenSanctions %s: %d entries parsed so far…", listType, parsed)
                 }
@@ -436,12 +478,12 @@ class SanctionsImportService(
         }
 
         if (parsed == 0) return 0
-        if (batch.isNotEmpty()) total += entryRepo.upsertAll(batch)
+        if (batch.isNotEmpty()) total += entryRepo.upsertForRefresh(batch, permit)
 
         // Only reached if the loop above completed without throwing — a mid-stream failure
         // (network drop, malformed line) propagates out of this function instead, and the
         // existing list is left untouched rather than partially wiped.
-        val deactivated = entryRepo.deactivateMissing(listType, seenExternalIds)
+        val deactivated = entryRepo.deactivateMissingForRefresh(listType, seenExternalIds, permit)
         Log.infof(
             "Imported %d OpenSanctions entries for %s (%d written, %d no longer present, deactivated)",
             parsed,
@@ -450,6 +492,32 @@ class SanctionsImportService(
             deactivated,
         )
         return parsed
+    }
+
+    /** Parse the complete, small legal snapshot before making the first database write. */
+    private suspend fun importCzAntiTerrorism(url: String, permit: SanctionsPublicationPermit?): Int {
+        val designations = withContext(Dispatchers.IO) {
+            httpGetStream(url).use { CzAntiTerrorismCsvParser.parse(it) }
+        }
+        if (designations.isEmpty()) return 0
+        val presentExternalIds = designations.map { "cz-210-2008-${it.fragmentId}" }.toSet()
+        val entries = designations.map { designation ->
+            buildEntry(
+                listType = SanctionsListType.CZ_TERRORISTS,
+                externalId = "cz-210-2008-${designation.fragmentId}",
+                entityType = designation.entityType,
+                primaryName = designation.primaryName,
+                aliases = designation.aliases,
+                dateOfBirth = designation.dateOfBirth,
+                programs = CZ_TERRORISM_PROGRAMS,
+            )
+        }
+        for (chunk in entries.chunked(IMPORT_BATCH_SIZE)) {
+            entryRepo.upsertForRefresh(chunk, permit)
+        }
+        entryRepo.deactivateMissingForRefresh(SanctionsListType.CZ_TERRORISTS, presentExternalIds, permit)
+        Log.infof("Imported %d official Czech anti-terrorism designations", entries.size)
+        return entries.size
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -512,53 +580,6 @@ class SanctionsImportService(
 
         private val EU_PROGRAMS = listOf("EU-SANCTIONS")
         private val CZ_NATIONAL_PROGRAMS = listOf("CZ-NATIONAL-SANCTIONS")
-    }
-}
-
-/** Minimal RFC 4180 reader for the OpenSanctions `targets.simple.csv` feeds. */
-private object OpenSanctionsCsv {
-    /**
-     * Read one CSV RECORD, which is not the same as one line: a quoted field may contain line
-     * breaks (gb_fcdo_sanctions puts them in its `sanctions` column), and reading such a record
-     * line by line splits it — the fragments become bogus entries and the real one loses every
-     * column after the break. Keeps appending physical lines while a quote is still open; `""`
-     * inside a quoted field adds two quotes, so an odd running count means "still inside quotes".
-     */
-    fun readRecord(reader: BufferedReader): String? {
-        val first = reader.readLine() ?: return null
-        var record = first
-        var quotes = first.count { it == '"' }
-        while (quotes % 2 != 0) {
-            val next = reader.readLine() ?: break
-            record += "\n" + next
-            quotes += next.count { it == '"' }
-        }
-        return record
-    }
-
-    fun parseRecord(line: String): List<String> {
-        val result = mutableListOf<String>()
-        val current = StringBuilder()
-        var inQuote = false
-        var i = 0
-        while (i < line.length) {
-            val ch = line[i]
-            when {
-                ch == '"' && !inQuote -> inQuote = true
-                ch == '"' && inQuote && i + 1 < line.length && line[i + 1] == '"' -> {
-                    current.append('"')
-                    i++
-                }
-                ch == '"' && inQuote -> inQuote = false
-                ch == ',' && !inQuote -> {
-                    result += current.toString()
-                    current.clear()
-                }
-                else -> current.append(ch)
-            }
-            i++
-        }
-        result += current.toString()
-        return result
+        private val CZ_TERRORISM_PROGRAMS = listOf("CZ-TERR")
     }
 }

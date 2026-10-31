@@ -99,9 +99,12 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
+import os
 import pathlib
 import re
 import subprocess
+from functools import lru_cache
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
@@ -152,10 +155,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'retired by #4221 layer 3; `DomesticPaymentService.kt:125` says so in a comment',
     'openbank-domestic-payment|6. Change log|attemptSettlement':
         'retired by #4221 layer 3; `DomesticPaymentService.kt:125` says so in a comment',
-    'openbank-domestic-payment|6. Change log|fraudEnforcementEnabled':
-        'retired by #4221 layer 3; `FraudEnforcementFlagRetiredTest` locks its absence',
-    'openbank-domestic-payment|6. Change log|openbank.domestic.fraud.enforcement-enabled':
-        'removed by #4221; `application.yaml:174` records the removal in a comment',
     'openbank-fraud-service|6. Change log|fraudServiceUrl':
         'occurs only inside a comment in `fraud_rest_ext.rego`; not a policy input',
     'openbank-ledger-service|8. Change log|ledgerServiceUrl':
@@ -174,19 +173,13 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'test for the outbox dropped by `V4__drop_sct_inst_outbox.sql` (#5126); no such class',
     'openbank-sepa-instant|6. Change log|KafkaSctInstOutboxEventPublisher':
         'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
-    'openbank-sepa-instant|6. Change log|SctInstOutboxDispatcher':
-        'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
     'openbank-sepa-instant|6. Change log|SctInstOutboxPort':
         'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
     'openbank-sepa-payment|6. Change log|settleProcessingPayment':
         'no such function in the tree',
-    'openbank-settlement-service|T1|workflowRunId':
-        'settlement idempotency-key defect #6037, reported from the T1 table row (the original entry)',
     'openbank-settlement-service|T1|activityId':
         'settlement idempotency-key defect #6037, reported from the T1 table row (the original entry)',
     'openbank-settlement-service|T — Tampering|activityId':
-        'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
-    'openbank-settlement-service|T — Tampering|workflowRunId':
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
     'openbank-settlement-service|Residual risks|OpaActivityInterceptor':
         '#6055 — a control that was never built; deliberately left failing by the gate that found it',
@@ -195,8 +188,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
     'openbank-settlement-service|Residual risks|legacySettle':
         'settlement #6037 family; no such function in the tree',
     'openbank-settlement-service|Change log|activityId':
-        'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
-    'openbank-settlement-service|Change log|workflowRunId':
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
     'openbank-transaction-service|5. Residual risks / assumptions|PaymentSagaOrchestrator':
         'retired for Temporal (ADR-0120 Phase 5); survives only in KDoc that says it was removed',
@@ -469,6 +460,11 @@ def is_backend(rel: str) -> bool:
     """
     if rel.startswith("openbank-admin-ui/"):
         return False
+    # Replay histories are captured wire data: activityId and other JSON fields do not
+    # implement the security controls that threat models cite. Keep test code and all
+    # production configuration in scope; only this fixture directory's JSON is excluded.
+    if "/src/test/resources/temporal/" in rel and rel.endswith(".json"):
+        return False
     # A Gradle build file is tracked backend source that no `/src/` path matches, and real
     # mitigations cite it: ledger's §5 names pitest's `targetClasses`, which lives only in
     # `openbank-account-service/build.gradle.kts`. Leaving build files out reported it as a
@@ -499,6 +495,7 @@ class Corpus:
         self.blobs: dict[str, str] = {}
         self.code: dict[str, str] = {}
         self._memo: dict[str, bool] = {}
+        self._stub_memo: dict[str, str | None] = {}
         for f in self.files:
             if f.endswith(DOCISH) or not f.endswith(CODEISH) or not is_backend(f):
                 continue
@@ -612,6 +609,11 @@ class Corpus:
         return hit
 
     def stub_site(self, sym: str) -> str | None:
+        if sym not in self._stub_memo:
+            self._stub_memo[sym] = self._stub_site_uncached(sym)
+        return self._stub_memo[sym]
+
+    def _stub_site_uncached(self, sym: str) -> str | None:
         """A cited symbol whose own DECLARATION opens with a stub marker.
 
         Anchored on the declaration, not on any mention: `paymentId` appears in hundreds of
@@ -742,6 +744,175 @@ def money_path(root: pathlib.Path) -> list[str]:
     return mod.money_path_services(root / "openbank-libs" / "governance" / "rules.yaml")
 
 
+# ---------------------------------------------------------------- test EVIDENCE (issue #13171)
+# `Corpus.resolve` proves a cited test class EXISTS. It cannot tell a green test from one that has
+# been red, skipped or deleted from the CI task for a month. The Test Intelligence run envelopes
+# can: a cited test class must have run, and run green, in the latest evidence for its component.
+TEST_CLASS = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Z][A-Za-z0-9]*(?:Test|Tests|IT|Spec)$")
+
+
+def load_evidence(paths: list[pathlib.Path], trusted_run: dict | None = None) -> dict[str, dict]:
+    """Validate producer envelopes against the independently selected scheduled-main run.
+
+    The newest observation per component from that exact run/attempt wins. Other sources,
+    malformed envelopes and unknown provenance cannot establish a green result.
+    """
+    if not valid_evidence_run(trusted_run):
+        return {}  # caller must supply independently selected scheduled-main run metadata
+    collector = evidence_collector()
+    newest: dict[str, tuple[object, dict]] = {}
+    files: list[pathlib.Path] = []
+    for p in paths:
+        files.extend(sorted(p.rglob("*.json")) if p.is_dir() else [p])
+    for f in files:
+        try:
+            env = json.loads(f.read_text(encoding="utf-8"))
+            collector.validate_envelope(env)
+            if not isinstance(env["component"], str) or not re.fullmatch(r"openbank-[a-z0-9-]+", env["component"]):
+                continue
+            run = env["run"]
+            expected = {"id": str(trusted_run["id"]), "attempt": trusted_run["run_attempt"],
+                        "commit": trusted_run["head_sha"], "branch": "main",
+                        "workflow": trusted_run["name"], "url": trusted_run["html_url"]}
+            if any(run.get(k) != v for k, v in expected.items()):
+                continue
+            comp, seen = env["component"], collector.parse_timestamp(run["observedAt"], "observedAt")
+            if not isinstance(env.get("testCases"), list):
+                continue
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue  # not an envelope, or a malformed one — never a pass, never a crash
+        if comp not in newest or seen > newest[comp][0]:
+            newest[comp] = (seen, env)
+    out: dict[str, dict] = {}
+    for comp, (_, env) in newest.items():
+        classes: dict[str, set[str]] = {}
+        ids: dict[str, set[str]] = {}
+        for case in env.get("testCases", []):
+            qualified = str(case.get("classname", "")).split("$", 1)[0]
+            classes.setdefault(qualified, set()).add(str(case.get("state")))
+            for vid in case.get("verifies", []) or []:
+                ids.setdefault(str(vid), set()).add(str(case.get("state")))
+        out[comp] = {"classes": classes, "verifies": ids}
+    return out
+
+
+def evidence_findings(root: pathlib.Path, services: list[str], corpus: "Corpus",
+                      evidence: dict[str, dict]) -> tuple[list[tuple[str, str, str, str]], int]:
+    """UNVERIFIED findings: a cited test that is absent from, or not green in, the latest run.
+
+    Judged only for components that HAVE an envelope — no evidence for a component is "unknown",
+    never "failed" (the third state: could not read is not a verdict).
+    """
+    findings: list[tuple[str, str, str, str]] = []
+    judged = 0
+    for svc in services:
+        comp = svc if svc.startswith("openbank-") else f"openbank-{svc}"
+        ev = evidence.get(comp)
+        path = root / "docs" / "threat-models" / f"{svc}.md"
+        if ev is None or not path.exists():
+            continue
+        scope = comp.removeprefix("openbank-").removesuffix("-service")
+        for rid, _threat, mitig, kind in claims(path.read_text(encoding="utf-8")):
+            if kind == "prose":
+                continue  # no row id to attribute a verdict to; the register rows are the claims
+            declared = ev["verifies"].get(f"{scope}/{rid}")
+            if declared is not None:
+                judged += 1
+                if declared != {"passed"}:
+                    findings.append(("UNVERIFIED", svc, rid,
+                                     f"`verifies:{scope}/{rid}` ran but not green ({', '.join(sorted(declared))})"))
+            cited = set(citations(mitig))
+            cited.update(re.findall(r"`((?:[a-z_][A-Za-z0-9_]*\.)+[A-Z][A-Za-z0-9]*(?:Test|Tests|IT|Spec))`", mitig))
+            for sym in sorted(cited):
+                if not TEST_CLASS.match(sym) or ("." not in sym and not corpus.resolve(sym)):
+                    continue
+                judged += 1
+                # A simple citation must identify a source declaration in THIS component.
+                # Never let an unrelated package's identically named class witness it.
+                simple = sym.rsplit(".", 1)[-1]
+                qualified = set()
+                for source, blob in corpus.blobs.items():
+                    if not source.startswith(comp + "/src/test/") or pathlib.Path(source).stem != simple:
+                        continue
+                    code = evidence_collector().mask_kotlin_comments(blob, mask_strings=True)
+                    if not re.search(r"\bclass\s+" + re.escape(simple) + r"\b", code):
+                        continue
+                    package = re.search(r"(?m)^\s*package\s+([A-Za-z_][\w.]*)", code)
+                    qualified.add((package.group(1) + "." if package else "") + simple)
+                if "." in sym:
+                    qualified &= {sym}
+                states = ev["classes"].get(next(iter(qualified))) if len(qualified) == 1 else None
+                if states is None:
+                    findings.append(("UNVERIFIED", svc, rid,
+                                     f"cites test `{sym}`, which exists but has no result in the latest "
+                                     f"{comp} run (not executed, or excluded from the CI task)"))
+                elif states != {"passed"}:
+                    findings.append(("UNVERIFIED", svc, rid,
+                                     f"cites test `{sym}`, whose latest result is {', '.join(sorted(states))}"))
+    return findings, judged
+
+
+@lru_cache(maxsize=1)
+def evidence_collector():
+    # Reuse the producer's schema/clock-skew validation rather than inventing a second schema.
+    spec = importlib.util.spec_from_file_location("tm_evidence_collector", REPO / ".github/scripts/collect-test-run-evidence.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def valid_evidence_run(run: dict | None) -> bool:
+    """Metadata from the trusted repository's scheduled Services CI API selection."""
+    if not isinstance(run, dict):
+        return False
+    repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
+    return (run.get("event") == "schedule" and run.get("head_branch") == "main"
+            and run.get("path") == ".github/workflows/services-ci.yml"
+            and isinstance(run.get("repository"), dict)
+            and run["repository"].get("full_name") == repo
+            and isinstance(run.get("head_repository"), dict)
+            and run["head_repository"].get("full_name") == repo
+            and type(run.get("id")) is int and run["id"] > 0
+            and type(run.get("run_attempt")) is int and run["run_attempt"] > 0
+            and isinstance(run.get("head_sha"), str)
+            and re.fullmatch(r"[0-9a-f]{40}", run["head_sha"]) is not None
+            and isinstance(run.get("name"), str) and bool(run["name"])
+            and run.get("html_url") == f"https://github.com/{repo}/actions/runs/{run['id']}"
+            and run.get("status") == "completed")
+
+
+def fetch_latest_evidence(dest: pathlib.Path) -> tuple[list[pathlib.Path], dict | None]:
+    """Select the latest scheduled run regardless of result; never fall back to old green."""
+    repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repo}/actions/workflows/services-ci.yml/runs?branch=main&event=schedule&per_page=1"],
+            capture_output=True, text=True, timeout=60, check=True)
+        run = json.loads(result.stdout)["workflow_runs"][0]
+        if not valid_evidence_run(run):
+            print("UNRESOLVED: newest scheduled run is pending or its provenance is invalid")
+            return [], None
+        print(f"Evidence source: run {run['id']} attempt {run['run_attempt']}, "
+              f"commit {run['head_sha']}, conclusion {run.get('conclusion')}")
+        listing = subprocess.run(
+            ["gh", "api", f"repos/{repo}/actions/runs/{run['id']}/artifacts", "--paginate", "--jq",
+             '.artifacts[] | select(.expired == false and (.name | startswith("test-intelligence-run-"))) | .name'],
+            capture_output=True, text=True, timeout=120, check=True)
+        from concurrent.futures import ThreadPoolExecutor
+
+        def pull(name: str) -> None:
+            if not re.fullmatch(r"test-intelligence-run-[A-Za-z0-9_-]+", name):
+                raise ValueError("invalid artifact name")
+            subprocess.run(["gh", "run", "download", str(run["id"]), "-R", repo, "-n", name,
+                            "-D", str(dest / name)], capture_output=True, text=True, timeout=120, check=True)
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(pull, listing.stdout.split()))
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError, KeyError, TypeError, AttributeError):
+        return [], None
+    return [dest], run
+
+
 def audit(root: pathlib.Path):
     services = subjects_all(root)
     mp = set(money_path(root))
@@ -848,6 +1019,14 @@ def self_test() -> int:
     # ...but a test DOES prove the cited name exists. Without this, three real test classes were
     # reported as phantom controls on the 2026-08-20 corpus run.
     case("a test still counts for existence", is_backend("openbank-x/src/test/kotlin/Foo.kt"), True)
+    case("Temporal replay JSON is wire data, not control implementation",
+         is_backend("openbank-x/src/test/resources/temporal/legacy/history.json"), False)
+    case("Kotlin beneath the Temporal fixture directory stays in scope",
+         is_backend("openbank-x/src/test/resources/temporal/ReplayGuardTest.kt"), True)
+    case("production Temporal JSON stays in scope",
+         is_backend("openbank-x/src/main/resources/temporal/config.json"), True)
+    case("test JSON outside the Temporal fixture directory stays in scope",
+         is_backend("openbank-x/src/test/resources/contracts/control.json"), True)
     case("admin-ui counts for neither",
          is_backend("openbank-admin-ui/src/app/temporal/page.tsx"), False)
     case("service src/main is deployed", is_deployed("openbank-x/src/main/kotlin/Foo.kt"), True)
@@ -969,6 +1148,20 @@ def self_test() -> int:
     case("naming a .rego file in prose, with no block-scalar key, does not resolve",
          prose_only.resolve("legacy_rest_ext.rego"), False)
 
+    # Stub lookup results belong to one immutable corpus, including negative results.
+    for label, symbol, blob, expected in [
+        ("stub declaration remains detected", "StubControl", "class StubControl {\n// TODO\n}", "fixture:1"),
+        ("real implementation is not a stub", "StubControl", "class StubControl {\nreturn 1\n}", None),
+        ("suffix declaration is not the cited symbol", "StubControl", "class OtherStubControl {\n// TODO\n}", None),
+        ("mention next to TODO is not a declaration", "StubControl", "class OtherControl {\nval message = StubControl // TODO\n}", None),
+        ("marker beyond declaration window is not a stub", "StubControl", "class StubControl {\n" + "\n" * 8 + "// TODO\n}", None),
+    ]:
+        stub_corpus = Corpus.__new__(Corpus)
+        stub_corpus.main = {"fixture": blob}
+        stub_corpus._stub_memo = {}
+        case(label, stub_corpus.stub_site(symbol), expected)
+        case(label + " on repeated lookup", stub_corpus.stub_site(symbol), expected)
+
     # (4) DISCRIMINATION. The widening must not simply fail everything: the CORRECTED form of each
     #     red case has to come back clean, or the gate is a blanket and not a check.
     good = _FakeCorpus({"openbank-x/src/test/kotlin/C.kt": "class ClearingSecurityContractTest {",
@@ -983,6 +1176,36 @@ def self_test() -> int:
     #     so falsify it: point the deriver at a directory with no models and it must report none,
     #     rather than reporting clean about files it stopped reading.
     import tempfile
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as td:
+        fixture_root = pathlib.Path(td)
+        fixture_files = {
+            "openbank-x/src/test/resources/temporal/legacy/history.json":
+                '{"activityId":"ReplayOnlyControl"}',
+            "openbank-x/src/test/resources/temporal/ReplayGuardTest.kt":
+                "class ReplayGuardTest",
+            "openbank-x/src/main/resources/temporal/config.json":
+                '{"ProductionControl":true}',
+            "openbank-x/src/test/resources/contracts/control.json":
+                '{"OtherFixtureControl":true}',
+        }
+        for name, body in fixture_files.items():
+            path = fixture_root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+        tracked = subprocess.CompletedProcess([], 0, stdout="\n".join(fixture_files), stderr="")
+        with patch("subprocess.run", return_value=tracked):
+            fixture_corpus = Corpus(fixture_root)
+        case("replay activityId cannot satisfy a mitigation claim",
+             fixture_corpus.resolve("activityId"), False)
+        case("a name mentioned only in replay wire data cannot satisfy a claim",
+             fixture_corpus.resolve("ReplayOnlyControl"), False)
+        case("test Kotlin still satisfies an implementation citation",
+             fixture_corpus.resolve("ReplayGuardTest"), True)
+        case("production JSON still satisfies an implementation citation",
+             fixture_corpus.resolve("ProductionControl"), True)
+        case("JSON outside the approved fixture scope remains visible",
+             fixture_corpus.resolve("OtherFixtureControl"), True)
     with tempfile.TemporaryDirectory() as td:
         empty = pathlib.Path(td)
         case("an empty tree yields no subjects", subjects_all(empty), [])
@@ -1017,6 +1240,55 @@ def self_test() -> int:
         case("the phantom beside a disclaimer is a finding (was silenced row-wide)",
              sorted({d.split('`')[1] for k, _, _, d in got if k == "PHANTOM"}),
              ["PhantomGuardFilter"])
+
+    # --- test EVIDENCE: a cited test must have run GREEN in the latest envelope for its component.
+    import tempfile
+    with tempfile.TemporaryDirectory() as _d:
+        _root = pathlib.Path(_d)
+        (_root / "docs" / "threat-models").mkdir(parents=True)
+        (_root / "docs" / "threat-models" / "openbank-x.md").write_text(
+            "| ID | Threat | Mitigation |\n|----|--------|------------|\n"
+            "| T1 | Replay | `GreenGuardTest` asserts it |\n"
+            "| T2 | Bypass | `RedGuardTest` asserts it |\n"
+            "| T3 | Drift | `GhostGuardTest` asserts it |\n"
+            "| T4 | Tamper | `SkippedGuardTest` asserts it |\n", encoding="utf-8")
+        _corpus = _FakeCorpus({f"openbank-x/src/test/kotlin/{n}.kt": f"package com.openbank.x\nclass {n} {{"
+                               for n in ("GreenGuardTest", "RedGuardTest", "GhostGuardTest", "SkippedGuardTest")})
+        _cases = [{"classname": "com.openbank.x.GreenGuardTest", "state": "passed"},
+                  {"classname": "com.openbank.x.RedGuardTest", "state": "passed"},
+                  {"classname": "com.openbank.x.RedGuardTest", "state": "failed"},
+                  {"classname": "com.openbank.x.SkippedGuardTest", "state": "skipped"}]
+        _trusted = {"id": 1, "run_attempt": 1, "head_sha": "a" * 40, "head_branch": "main",
+                    "event": "schedule", "path": ".github/workflows/services-ci.yml", "name": "Services CI",
+                    "repository": {"full_name": "JiRaska/open-bank-oss"},
+                    "head_repository": {"full_name": "JiRaska/open-bank-oss"},
+                    "html_url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "status": "completed"}
+        def _env(seen, cases):
+            return {"schemaVersion": 1, "component": "openbank-x", "run": {
+                "id": "1", "attempt": 1, "commit": "a" * 40, "branch": "main", "workflow": "Services CI",
+                "url": _trusted["html_url"], "observedAt": seen}, "suites": [], "coverage": None,
+                "testInfrastructure": {"declared": [], "observed": []}, "testCases": [
+                    {"fingerprint": f"{i:024x}", "kind": "unit", "name": "guards", "durationMs": 0, **c}
+                    for i, c in enumerate(cases)]}
+        (_root / "ev").mkdir()
+        (_root / "ev" / "new.json").write_text(json.dumps(_env("2026-10-17T03:00:00Z", _cases)))
+        # An OLDER all-green envelope must not mask the newer red/missing results.
+        (_root / "ev" / "old.json").write_text(json.dumps(_env("2026-10-01T03:00:00Z", [
+            {"classname": "com.openbank.x.RedGuardTest", "state": "passed"},
+            {"classname": "com.openbank.x.GhostGuardTest", "state": "passed"}])))
+        (_root / "ev" / "junk.json").write_text("not json")
+        _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, load_evidence([_root / "ev"], _trusted))
+        _got = sorted(r for _k, _s, r, _d2 in _f)
+        case("evidence: red, absent and skipped cited tests are UNVERIFIED; green is not", _got, ["T2", "T3", "T4"])
+        case("evidence: every cited test was judged", _n, 4)
+        _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, {})
+        case("evidence: no envelope for the component is unknown, never a verdict", (_f, _n), ([], 0))
+        (_root / "ev" / "ids.json").write_text(json.dumps(_env("2026-10-18T03:00:00Z", [
+            {"classname": "com.openbank.x.GreenGuardTest", "state": "passed", "verifies": ["x/T1"]},
+            {"classname": "com.openbank.x.RedGuardTest", "state": "failed", "verifies": ["x/T2"]}])))
+        _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, load_evidence([_root / "ev"], _trusted))
+        case("evidence: a declared verifies id is judged by its own tests",
+             sorted({r for _k, _s, r, _d2 in _f}), ["T2", "T3", "T4"])
 
     for f in fails:
         print(f"SELF-TEST FAIL: {f}")

@@ -217,6 +217,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: ledger-pension-co
+            cluster: ledger-pension-co-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: ledger
             cluster: ledger-db
             origin: manifest
@@ -343,6 +349,18 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: pension-fund
+            cluster: pension-fund-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
+            namespace: pension
+            cluster: pension-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: pid
             cluster: pid-db
             origin: manifest
@@ -429,6 +447,12 @@ spec:
           labels:
             namespace: statements
             cluster: statements-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
+            namespace: tax-reporting
+            cluster: tax-reporting-db
             origin: manifest
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
@@ -615,6 +639,11 @@ spec:
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:
+            namespace: ledger-pension-co
+            cluster: ledger-pension-co-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
             namespace: ledger
             cluster: ledger-db
         - record: openbank:cnpg_cluster_instances_declared
@@ -715,6 +744,16 @@ spec:
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:
+            namespace: pension-fund
+            cluster: pension-fund-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: pension
+            cluster: pension-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
             namespace: pid
             cluster: pid-db
         - record: openbank:cnpg_cluster_instances_declared
@@ -790,6 +829,11 @@ spec:
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:
+            namespace: tax-reporting
+            cluster: tax-reporting-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
             namespace: temporal
             cluster: temporal-db
         - record: openbank:cnpg_cluster_instances_declared
@@ -841,7 +885,7 @@ spec:
             severity: critical
           annotations:
             summary: "CNPG cluster {{ $labels.namespace }}/{{ $labels.cluster }} is deployed but NOT scraped"
-            description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Set spec.monitoring.enablePodMonitor: true on the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
+            description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Add a PodMonitor selecting cnpg.io/cluster=<name> on port metrics next to the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
 
         - alert: PostgresClusterDeclaredNotDeployed
           # The complement of the alert above, over the same unscraped set: the namespace

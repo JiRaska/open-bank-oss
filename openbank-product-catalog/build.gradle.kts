@@ -34,6 +34,10 @@ openApiGenerate {
             "apis" to "CatalogV2,CatalogEvents",
             "models" to listOf(
                 "EligibilityRule",
+                "IrSignature",
+                "LintProductIrRequest",
+                "LintProductIrResponse",
+                "ProductIrProblem",
                 "EligibilityOperator",
                 "ApiError",
                 "CatalogEvent",
@@ -47,6 +51,8 @@ openApiGenerate {
                 "PriceComponent",
                 "ProductRevision",
                 "PublishRequest",
+                "RevisionApprovalPolicy",
+                "RevisionApprovalRole",
                 "RevisionRequest",
                 "RevisionContent",
                 "SchemaRef",
@@ -79,18 +85,9 @@ tasks.configureEach {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     // Resource-server auth (issue #401): validate caller tokens for @Authenticated / @RolesAllowed.
     // The @Authorize interceptor, Roles and the Authorize annotation already arrive transitively via
     // :openbank-libs (which api-exports :openbank-libs-runtime + :openbank-libs-domain).
-    implementation(libs.quarkus.oidc)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation("com.networknt:json-schema-validator:1.5.9")
@@ -112,10 +109,7 @@ dependencies {
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
-    testImplementation(libs.quarkus.junit5)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.quarkus.test.security.oidc)
@@ -137,6 +131,11 @@ tasks.withType<Test> {
     // metadata between profile restarts, so Gradle's 512 MiB test-worker default exhausts the
     // heap before the standalone boot proofs execute. This changes test infrastructure only.
     maxHeapSize = "1536m"
+    val keycloakDockerfile = rootProject.file("openbank-infra/docker/keycloak/Dockerfile")
+    inputs.file(keycloakDockerfile)
+        .withPropertyName("catalogKeycloakImage")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("openbank.test.keycloak-dockerfile", keycloakDockerfile.absolutePath)
 
     // Pact rootDir + Pact Broker property forwarding centralised into
     // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`

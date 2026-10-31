@@ -7,6 +7,7 @@ package com.openbank.document.application.usecase
 import com.openbank.document.application.port.out.TemplatePublishConflictException
 import com.openbank.document.application.port.out.TemplateRenderPort
 import com.openbank.document.application.port.out.TemplateRepositoryPort
+import com.openbank.document.domain.DocumentTemplateSeed
 import com.openbank.document.domain.model.DocumentTemplate
 import com.openbank.document.domain.model.TemplateEngine
 import com.openbank.document.domain.model.TemplateStatus
@@ -117,6 +118,31 @@ class DocumentTemplateServiceTest {
 
         assertThatThrownBy { runBlocking { service.publishTemplate(published.id) } }
             .isInstanceOf(IllegalArgumentException::class.java)
+
+        coVerify(exactly = 0) { repo.publishReplacing(any(), any()) }
+    }
+
+    @Test
+    fun `an unreviewed pension seed cannot be published through the template API`(): Unit = runBlocking {
+        val draft = DocumentTemplateSeed.templates.first { it.code == "pension-dps-key-information-cs" }
+        coEvery { repo.findById(draft.id) } returns draft
+
+        assertThatThrownBy { runBlocking { service.publishTemplate(draft.id) } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("requires legal review")
+
+        coVerify(exactly = 0) { repo.findLatestPublished(any()) }
+        coVerify(exactly = 0) { repo.publishReplacing(any(), any()) }
+    }
+
+    @Test
+    fun `changing an unreviewed draft version does not bypass publication guard`(): Unit = runBlocking {
+        val draft = draftTemplate(version = "2.0.0").copy(bodyHtml = "<!-- LEGAL-REVIEW-REQUIRED -->")
+        coEvery { repo.findById(draft.id) } returns draft
+
+        assertThatThrownBy { runBlocking { service.publishTemplate(draft.id) } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("requires legal review")
 
         coVerify(exactly = 0) { repo.publishReplacing(any(), any()) }
     }

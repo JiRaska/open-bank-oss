@@ -39,6 +39,9 @@ Vyhrazené **management rozhraní** je zapnuté na portu **8085** (`quarkus.mana
 | `OIDC_CLIENT_SECRET` | `CHANGE_ME_LOCAL_DEV_ONLY` | Keycloak client secret |
 | `SLACK_WEBHOOK_ENABLED` | `false` | zapnutí oversight webhooku (ADR-0059) |
 | `SLACK_WEBHOOK_URL` | (nenastaveno) | Slack incoming-webhook URL — injektováno z Vaultu, nikdy v gitu |
+| `OPENBANK_NOTIFICATION_WEBHOOK_TEAMS_ENABLED` | `false` | zapnutí Teams oversight webhooku |
+| `OPENBANK_NOTIFICATION_WEBHOOK_TEAMS_URL` | (nenastaveno) | URL Teams webhooku — injektovat z Vaultu, nikdy neukládat do gitu |
+| `OPENBANK_NOTIFICATION_EGRESS_ALLOWED_HOSTS` | `hooks.slack.com,oauth2.googleapis.com,fcm.googleapis.com` | přesné hosty oddělené čárkou pro Slack, Teams a FCM; před zapnutím Teams přidat host daného tenanta |
 | `FCM_ENABLED` | `false` | zapnutí FCM push adaptéru |
 | `FCM_SERVICE_ACCOUNT_JSON` | (nenastaveno) | FCM service-account JSON (Vault) |
 | `FCM_PROJECT_ID` | (nenastaveno) | volitelné, fallback z JSON |
@@ -48,7 +51,7 @@ Vyhrazené **management rozhraní** je zapnuté na portu **8085** (`quarkus.mana
 | `APNS_SANDBOX` | `false` | true → APNs sandbox host |
 | `BUILD_TIME` / `GIT_COMMIT` | `unknown` | build metadata v `/api/v1/info` |
 
-Push adaptéry a oversight webhook jsou **ve výchozím stavu vypnuté**; vypnutý adaptér zaznamená úspěšný no-op (žádný egress). Přihlašovací údaje jsou za běhu injektované z Vaultu přes ExternalSecret — nikdy commitnuté.
+Push adaptéry a oversight webhooky jsou **ve výchozím stavu vypnuté**. Vypnutý push adaptér vrací `SKIPPED` bez odeslání; nejde o přijatou zprávu. Vypnutý webhook vrací false. Přihlašovací údaje jsou za běhu injektované z Vaultu přes ExternalSecret — nikdy commitnuté. Před zapnutím Teams přidejte přesný host tenanta do seznamu povolených hostů; nepovolený host se odmítne bez odeslání požadavku.
 
 ## Health checky
 
@@ -106,3 +109,11 @@ Neparsovatelný payload se zaloguje a potvrdí (nezaklíní partition). Prozkoum
 - Per-service path-scoped CI; release-please vlastní `version.txt` (aktuálně `0.4.0`) a changelog z Conventional Commits.
 - CI běží testy proti izolovanému PostgreSQL na test JVM přes Testcontainers (#578); Kafka je v testech in-memory (jen `@Incoming` kanál), `@Scheduled` outbox tick je pod testem vypnutý.
 - CD přes ArgoCD při bumpu image tagu (GitOps); u konfliktů image tagu berte `--ours`.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

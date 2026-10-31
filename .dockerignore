@@ -82,6 +82,11 @@
 docs/
 attic/
 *.md
+!docs/
+docs/*
+!docs/bcp/
+docs/bcp/*
+!docs/bcp/bcp-policy.md
 !CONTRIBUTING.md
 !CODE_OF_CONDUCT.md
 !LICENSE

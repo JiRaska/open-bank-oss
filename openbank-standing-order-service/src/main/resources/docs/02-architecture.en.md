@@ -153,3 +153,33 @@ sequenceDiagram
 3. **No remote calls in TX** — synchronous within request-response, async via outbox + Kafka.
 4. **Idempotent creation** — `idempotencyKey` is unique in the DB; a repeat create returns the existing order.
 5. **Decoupled execution** — this service records intent; downstream services execute the payment.
+
+## Internal TLS transport
+
+The production profile builds the HTTPS listener with client authentication required.
+Quarkus fixes this setting at build time: a runtime environment variable cannot add
+client-certificate enforcement to an incompatible image. When the listener receives
+private-CA server key material during deployment, callers must present a trusted client
+certificate. OIDC and policy checks still decide business permissions independently.
+
+The HTTP listener remains enabled during the staged migration. Publish and verify the
+compatible signed image before configuring the HTTPS listener and certificate rotation;
+switch pension callers only after the listener and network policies are ready. Restore
+caller URLs before reverting the provider image or removing its TLS listener.
+
+## transaction-service client (ADR-0319)
+
+The call that hands a due order to transaction-service now goes through the client generated from transaction-service's `openapi.yaml` (module `openbank-client-transaction`, ADR-0319) instead of a hand-written interface. Behaviour is unchanged; a contract drift fails compilation and the consumer pact replay.
+
+## Internal-transfer completion boundary
+
+Own-account DOMESTIC/INTERNAL transfers use the shared transaction client. HTTP 2xx alone
+does not authorize confirmation: a readable COMPLETED transaction is required. Missing,
+unreadable, failed, in-progress or unknown responses propagate as uncertain completion through
+the existing retry and dead-letter path, without confirming execution or recording a definitive
+failure. Every attempt retains the event's deterministic idempotency key. The existing handling
+of HTTP 400/422 and 409 is preserved. This change does not alter the separate SEPA rail path.
+
+## Account-service read (ADR-0319)
+
+The creditor-IBAN lookup (`GET /api/v1/accounts/iban/{iban}`) goes through the client generated from account-service's own `openapi.yaml` (`openbank-client-account`), via its `AccountClient` facade. Only a found account owned by the order's own party becomes an internal transfer target; a 404, any other failure, or another party's account records the execution as failed.

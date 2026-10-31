@@ -58,7 +58,7 @@ class CreditFunnelPublisher(
         try {
             // Low-cardinality by construction: both values come from the closed allow-lists the
             // resource validates before this is reached, so no caller can inflate the label space.
-            meterRegistry.counter("credit_funnel_events", "step", step, "action", action).increment()
+            meterRegistry.counter("openbank.credit.funnel.events", "step", step, "action", action).increment()
 
             val payload = objectMapper.createObjectNode()
             payload.put("partyId", partyId.toString())

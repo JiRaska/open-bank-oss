@@ -116,6 +116,14 @@ class CustomerBusinessResourceTest {
         assertThat(url.captured).isEqualTo("$kyb/api/v1/kyb/schemes")
         resource(upstream).schemes("CZ")
         assertThat(url.captured).isEqualTo("$kyb/api/v1/kyb/schemes?country=CZ")
+        // Case is preserved, as it was when the value was URL-encoded rather than rebuilt.
+        resource(upstream).schemes("cz")
+        assertThat(url.captured).isEqualTo("$kyb/api/v1/kyb/schemes?country=cz")
+        io.mockk.verify(exactly = 3) { upstream.get(any(), any()) }
+        for (bad in listOf("C%5A", "CZ&x=1", "Č1", "CZE")) {
+            assertThatThrownBy { resource(upstream).schemes(bad) }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+        io.mockk.verify(exactly = 3) { upstream.get(any(), any()) }
     }
 
     @Test

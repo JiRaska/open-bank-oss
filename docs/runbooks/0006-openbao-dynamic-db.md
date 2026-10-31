@@ -137,6 +137,7 @@ was removed from the rotation entirely, not just made optional):
 | account | accounts | accounts-db | openbank_accounts |
 | transaction | payments | transaction-db | openbank_transactions |
 | ledger | ledger | ledger-db | openbank_ledger |
+| ledger-pension-co | ledger-pension-co | ledger-pension-co-db | openbank_ledger |
 
 ```sh
 # Replace <namespace>, <cluster>, <dbname>, <password> per the table above.
@@ -251,6 +252,20 @@ kubectl create secret generic openbao-db-admin-passwords -n vault \
   --from-literal=account='<pass>' \
   --from-literal=transaction='<pass>' \
   --from-literal=ledger='<pass>'
+```
+
+**ledger-pension-co (ADR-0337) is added LATER, to the existing Secret — not by recreating it.** Its
+CronJob env is `optional: true` and `configure.sh` skips it while the key is absent, so the fleet's
+rotation never depended on this instance being provisioned. Once §3 and §3a have been run against
+`ledger-pension-co-db` (namespace `ledger-pension-co`, database `openbank_ledger`):
+
+```sh
+kubectl patch secret openbao-db-admin-passwords -n vault --type merge \
+  -p "{\"stringData\":{\"ledger-pension-co\":\"<pass>\"}}"
+kubectl create job -n vault --from=cronjob/openbao-db-rotation-sync db-rotation-sync-manual-$(date +%s)
+# Expected in the job log: "[openbao-db] ledger-pension-co done." (not "... skipped")
+kubectl get externalsecret -n ledger-pension-co ledger-pension-co-db-dynamic
+# Expected: READY True, STATUS SecretSynced
 ```
 
 CNPG primary pod name: `<cluster-name>-1` (e.g. `notifications-db-1`). Use

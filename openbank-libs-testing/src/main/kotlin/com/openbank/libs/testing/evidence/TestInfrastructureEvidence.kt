@@ -10,7 +10,9 @@ import java.util.UUID
 /**
  * Append-only, secret-free runtime evidence emitted by shared Testcontainers resources.
  * CI supplies [EVIDENCE_DIR]; local tests remain unaffected when it is absent.
- * Host names, mapped ports, credentials and container ids are deliberately never recorded.
+ * Host names, mapped ports and credentials are deliberately never recorded. A container id may
+ * appear only in the CI-local raw file to correlate this observation with the Docker event stream;
+ * the collector removes it before publishing an evidence artifact.
  *
  * ## What a record MEANS (issue #7640) — read this before counting them
  *
@@ -24,10 +26,11 @@ import java.util.UUID
  * see the repeat; the state has to outlive them, which is why the suppression lives in this object
  * and not in the ~14 emitters.
  *
- * So: a repeated `started` for the same (resource, image, opaque manager scope) is suppressed
+ * So: a repeated `started` for the same (resource, image, opaque manager scope, container id) is suppressed
  * until a `stopped` closes that lifecycle, and the number of suppressed reprovisions is published
  * on the terminal `stopped` record as `reprovisions` (absent when zero). Legacy emitters without
- * a scope retain the original (resource, image) grouping.
+ * a scope or container identity retain the original (resource, image) grouping. Distinct physical
+ * containers are never collapsed into one lifecycle when their identities are available.
  *
  * ## What this deliberately STOPS observing, and what compensates
  *
@@ -65,12 +68,13 @@ object TestInfrastructureEvidence {
         lifecycle: String,
         resourceScopeId: String? = null,
         observedAt: Instant = Instant.now(),
+        containerId: String? = null,
     ) {
         require(lifecycle == "started" || lifecycle == "stopped") { "unsupported lifecycle" }
         require(resourceScopeId == null || UUID.fromString(resourceScopeId).toString() == resourceScopeId) {
             "resource scope id must be a canonical UUID"
         }
-        val key = listOf(resource, image, resourceScopeId.orEmpty()).joinToString(" ")
+        val key = listOf(resource, image, resourceScopeId.orEmpty(), containerId.orEmpty()).joinToString(" ")
         var reprovisions = 0
         if (lifecycle == "started") {
             val open = openLifecycles[key]
@@ -90,7 +94,7 @@ object TestInfrastructureEvidence {
                 reprovisions = open
             }
         }
-        write(resource, image, lifecycle, resourceScopeId, observedAt, reprovisions)
+        write(resource, image, lifecycle, resourceScopeId, observedAt, reprovisions, containerId)
     }
 
     private fun write(
@@ -100,6 +104,7 @@ object TestInfrastructureEvidence {
         resourceScopeId: String?,
         observedAt: Instant,
         reprovisions: Int,
+        containerId: String?,
     ) {
         val directory = System.getenv(EVIDENCE_DIR)?.takeIf { it.isNotBlank() }
             ?: System.getProperty(EVIDENCE_DIR_PROPERTY)?.takeIf { it.isNotBlank() }
@@ -110,9 +115,11 @@ object TestInfrastructureEvidence {
         val escapedImage = escape(image)
         val scopeField = resourceScopeId?.let { ",\"resourceScopeId\":\"${escape(it)}\"" }.orEmpty()
         val reprovisionField = if (reprovisions > 0) ",\"reprovisions\":$reprovisions" else ""
+        val containerField = containerId?.takeIf { it.isNotBlank() }
+            ?.let { ",\"containerId\":\"${escape(it)}\"" }.orEmpty()
         val line =
             """{"schemaVersion":1,"resource":"$escapedResource","image":"$escapedImage","lifecycle":"$lifecycle",""" +
-                "\"observedAt\":\"$observedAt\"$scopeField$reprovisionField}\n"
+                "\"observedAt\":\"$observedAt\"$scopeField$reprovisionField$containerField}\n"
         Files.writeString(path, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND)
     }
 

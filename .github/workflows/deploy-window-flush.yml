@@ -2,18 +2,25 @@
 #
 # Deploy window flusher (see .github/scripts/deploy-window.py).
 #
-# auto-deploy.yml and admin-ui-deploy.yml open their deploy PR exactly as before, but arm its
-# auto-merge only when the window allows it: at most one bot deploy commit reaches main per
-# window, because each one makes every open PR `behind` under the strict up-to-date rule and
-# restarts its required checks. A deploy they DEFER stays open and unarmed — this workflow is
-# what lands it. Every tick it picks the OLDEST deferred deploy PR once the window has elapsed
+# auto-deploy.yml and admin-ui-deploy.yml open their deploy PR exactly as before. This workflow
+# alone arms auto-merge when the window allows it: at most one bot deploy commit reaches main per
+# window. The App-pinned merge train owns checks, reservations and merging. A deploy they
+# DEFER stays open and unarmed until this workflow queues it; this workflow never merges it. A workflow_run trigger handles new PRs and the schedule recovers missed runs.
+# Each run picks the OLDEST deferred deploy PR once the window has elapsed
 # and nothing else is armed, re-runs supersede-deploy-prs.sh on it (ancestry + coverage — a
 # rollback PR is refused, never armed), and arms auto-merge with the same App token the deploy
-# workflows use. A manual `workflow_dispatch` of either deploy workflow never waits for this.
+# workflows use. A successful manual dispatch of either producer expedites only its matching PR.
+# An open PR labelled merge-priority:repair defers new arming, including manual expedition.
+# Draft/blocked repairs retain priority until an owner removes the label or closes the PR.
+# This does not revoke already-armed auto-merge; owners must disarm those before repair CI.
+# GitHub offers no atomic label-check-and-arm operation; re-reading narrows that race only.
 
 name: Deploy window flush
 
 on:
+  workflow_run:
+    workflows: ["Auto deploy", "Admin-UI deploy"]
+    types: [completed]
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
@@ -47,7 +54,7 @@ jobs:
       - name: Mint a GitHub App installation token
         id: app_token
         if: env.GITOPS_APP_ID != ''
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
@@ -67,7 +74,13 @@ jobs:
           d="$RUNNER_TEMP/deploy-window"
           bash .github/scripts/deploy-window-inputs.sh "$d"
           python3 .github/scripts/deploy-window.py flush --prs-json "$d/prs.json" \
-            --commits-json "$d/commits.json" --now "$(date -u +%s)" | tee -a "$GITHUB_OUTPUT"
+            --commits-json "$d/commits.json" --event-json "$GITHUB_EVENT_PATH" \
+            --now "$(date -u +%s)" | tee "$d/selection" >> "$GITHUB_OUTPUT"
+          arm=$(sed -n 's/^arm=//p' "$d/selection")
+          echo "selected_main=$(cat "$d/main.sha")" >> "$GITHUB_OUTPUT"
+          if [ -n "$arm" ]; then
+            echo "selected_head=$(jq -er --argjson number "$arm" '.[] | select(.number == $number) | .head_sha' "$d/prs.json")" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Verify deferred GitOps image source freshness
         if: steps.pick.outputs.arm != '' && startsWith(steps.pick.outputs.arm_head, 'chore/gitops-auto-deploy-')
@@ -81,12 +94,20 @@ jobs:
           gh pr diff "$ARM" --repo "$GITHUB_REPOSITORY" \
             | python3 .github/scripts/deploy-window.py verify --root .
 
+      - name: Install deploy-hold parser
+        if: steps.pick.outputs.arm != ''
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/deploy-hold-venv"
+          "${RUNNER_TEMP}/deploy-hold-venv/bin/python" -m pip install --quiet --require-hashes \
+            -r .github/scripts/pyyaml-requirements.txt
+
       - name: Close superseded deploy PRs (refuses a rollback)
         if: steps.pick.outputs.arm != ''
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           ARM: ${{ steps.pick.outputs.arm }}
           ARM_HEAD: ${{ steps.pick.outputs.arm_head }}
+          DEPLOY_HOLD_PYTHON: ${{ runner.temp }}/deploy-hold-venv/bin/python
         run: |
           set -euo pipefail
           case "$ARM_HEAD" in
@@ -96,18 +117,16 @@ jobs:
           esac
           bash .github/scripts/supersede-deploy-prs.sh "$prefix" "$ARM"
 
-      - name: Enable auto-merge
+      - name: Arm the verified deployment for the merge train
         if: steps.pick.outputs.arm != ''
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           ARM: ${{ steps.pick.outputs.arm }}
+          SELECTED_MAIN: ${{ steps.pick.outputs.selected_main }}
+          SELECTED_HEAD: ${{ steps.pick.outputs.selected_head }}
         run: |
           set -euo pipefail
-          id="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${ARM}" --jq .node_id)"
-          # shellcheck disable=SC2016  # $id is a GraphQL variable, not a shell one
-          gh api graphql -f query='mutation($id: ID!) {
-            enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
-              pullRequest { number }
-            }
-          }' -f id="$id" >/dev/null
-          echo "auto-merge armed on deferred deploy PR #${ARM}"
+          # The helper repeats the live selection/hold checks, verifies train ownership,
+          # then requests auto-merge only. It never writes a train verdict or merges.
+          python3 .github/scripts/deploy-window-mutate.py --number "$ARM" \
+            --selected-main "$SELECTED_MAIN" --selected-head "$SELECTED_HEAD"

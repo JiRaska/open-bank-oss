@@ -40,6 +40,7 @@ jobs:
           python3 .github/scripts/check-stuck-service-build.py --self-test
           python3 .github/scripts/check-superseded-pr-runs.py --self-test
           python3 .github/scripts/check-stall-watch-handoff.py --self-test
+          python3 .github/scripts/test-superseded-run-live-guard.py
       - name: Classify superseded queued PR runs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -68,7 +69,7 @@ jobs:
             attempt=$(jq -r '.run_attempt' <<<"$run")
             run_url=$(jq -r '.html_url' <<<"$run")
             gh api "repos/${REPO}/actions/runs/${run_id}/attempts/${attempt}/jobs?per_page=100" > /tmp/jobs.json
-            candidates=$(python3 .github/scripts/check-stuck-service-build.py --jobs-json /tmp/jobs.json --now "$now" --timeout-minutes 45 --no-step-timeout-minutes 5)
+            candidates=$(python3 .github/scripts/check-stuck-service-build.py --jobs-json /tmp/jobs.json --now "$now" --timeout-minutes 45 --no-step-timeout-minutes 10)
             jq -c --arg runId "$run_id" --arg attempt "$attempt" --arg runUrl "$run_url" '.[] + {runId:$runId,attempt:$attempt,runUrl:$runUrl}' <<<"$candidates" \
               | while IFS= read -r candidate; do
                   jq --argjson candidate "$candidate" '. + [$candidate]' stalled.json > stalled.next && mv stalled.next stalled.json
@@ -84,9 +85,9 @@ jobs:
       - name: Report dry-run candidates without write credentials
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
         run: |
-          jq -r '.[] | "would force-cancel superseded run \(.runId) for PR #\(.pr)"' superseded-pr-runs.json
+          jq -r '.[] | "would request cancellation of superseded run \(.runId) for PR #\(.pr)"' superseded-pr-runs.json
           jq -r '.[] | "::warning title=CI stalled-build dry run::CI stalled service build: \(.job)"' stalled.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.candidates.outputs.has_candidates == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
         with:
           name: service-build-stall-candidates
@@ -107,7 +108,7 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: service-build-stall-candidates
       - name: Validate handoff before any mutation
@@ -115,7 +116,7 @@ jobs:
           set -euo pipefail
           python3 .github/scripts/check-stall-watch-handoff.py \
             --queued superseded-pr-runs.json --stalled stalled.json
-      - name: Force-cancel only still-superseded queued PR runs
+      - name: Cancel only still-superseded queued PR runs
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -126,30 +127,41 @@ jobs:
             run_id=$(jq -r '.runId' <<<"$candidate")
             pr_number=$(jq -r '.pr' <<<"$candidate")
             stale_sha=$(jq -r '.headSha' <<<"$candidate")
-            live_run=$(gh api "repos/${REPO}/actions/runs/${run_id}")
-            if ! jq -e --arg sha "$stale_sha" --argjson pr "$pr_number" \
-              '.event == "pull_request" and .head_sha == $sha and any(.pull_requests[]; .number == $pr)' \
-              <<<"$live_run" >/dev/null; then
-              echo "retaining run ${run_id}: run identity changed"; continue
-            fi
-            if [ "$(jq -r '.status' <<<"$live_run")" != queued ]; then
-              echo "retaining run ${run_id}: no longer queued"; continue
-            fi
+            # Fail closed: an API/read failure aborts before cancellation. A newly current
+            # head is retained even if the earlier snapshots called it stale.
             live=$(gh api "repos/${REPO}/pulls/${pr_number}")
-            if [ "$(jq -r '.state' <<<"$live")" = open ] && [ "$(jq -r '.head.sha' <<<"$live")" = "$stale_sha" ]; then
-              echo "retaining run ${run_id}: PR #${pr_number} now points at ${stale_sha}"; continue
+            live_state=$(jq -r '.state' <<<"$live")
+            live_sha=$(jq -r '.head.sha' <<<"$live")
+            if [ "$live_state" = open ] && [ "$live_sha" = "$stale_sha" ]; then
+              echo "retaining run ${run_id}: PR #${pr_number} now points at ${stale_sha}"
+              continue
+            fi
+            # A queued snapshot can start while the PR is being checked. Retain any
+            # run no longer queued; API errors abort rather than permit cancellation.
+            live_run=$(gh api "repos/${REPO}/actions/runs/${run_id}")
+            if ! jq -e --arg sha "$stale_sha" --argjson id "$run_id" --argjson pr "$pr_number" \
+              '.id == $id and .status == "queued" and .head_sha == $sha and .event == "pull_request" and any(.pull_requests[]?; .number == $pr)' \
+              <<<"$live_run" >/dev/null; then
+              echo "retaining run ${run_id}: live run is no longer the queued candidate"
+              continue
             fi
             if [ "$DRY_RUN" = true ]; then
-              echo "would force-cancel superseded run ${run_id} for PR #${pr_number} (${stale_sha})"; continue
+              echo "would request cancellation of superseded queued run ${run_id} for PR #${pr_number} (${stale_sha})"
+              continue
             fi
-            if ! cancel_error=$(gh api --method POST "repos/${REPO}/actions/runs/${run_id}/force-cancel" 2>&1); then
+            if ! cancel_error=$(gh api --method POST "repos/${REPO}/actions/runs/${run_id}/cancel" 2>&1); then
+              # A queued run may finish after the snapshots. That is already the desired
+              # terminal state; every other mutation failure remains fatal and visible.
               live_run_status=$(gh api "repos/${REPO}/actions/runs/${run_id}" --jq '.status')
               if [ "$live_run_status" = completed ]; then
-                echo "retaining run ${run_id}: it completed before force-cancel"; continue
+                echo "retaining run ${run_id}: live run is completed"
+                continue
               fi
-              echo "$cancel_error" >&2; exit 1
+              echo "$cancel_error" >&2
+              exit 1
             fi
-            echo "force-cancelled superseded run ${run_id} for PR #${pr_number} (${stale_sha})"
+            # HTTP 202 acknowledges the request; it does not prove terminal cancellation.
+            echo "requested cancellation of superseded queued run ${run_id} for PR #${pr_number} (${stale_sha})"
           done
       - name: Cancel only still-stalled service CI jobs
         env:
@@ -170,9 +182,19 @@ jobs:
             gh api "repos/${REPO}/actions/runs/${run_id}/attempts/${attempt}/jobs?per_page=100" > /tmp/live-jobs.json
             now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             python3 .github/scripts/check-stuck-service-build.py --jobs-json /tmp/live-jobs.json \
-              --now "$now" --timeout-minutes 45 --no-step-timeout-minutes 5 > /tmp/live-stalled.json
+              --now "$now" --timeout-minutes 45 --no-step-timeout-minutes 10 > /tmp/live-stalled.json
             if ! jq -e --arg id "$job_id" 'any(.[]; .jobId == $id)' /tmp/live-stalled.json >/dev/null; then
               echo "retaining run ${run_id}: job ${job_id} is no longer classified stalled"; continue
+            fi
+            if [ "$(jq -r '.reason' <<<"$candidate")" = no-first-step ]; then
+              # A second detail read catches delayed Actions step propagation.
+              sleep 30
+              gh api "repos/${REPO}/actions/runs/${run_id}/attempts/${attempt}/jobs?per_page=100" > /tmp/live-jobs.json
+              python3 .github/scripts/check-stuck-service-build.py --jobs-json /tmp/live-jobs.json \
+                --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --timeout-minutes 45 --no-step-timeout-minutes 10 > /tmp/live-stalled.json
+              if ! jq -e --arg id "$job_id" 'any(.[]; .jobId == $id and .reason == "no-first-step")' /tmp/live-stalled.json >/dev/null; then
+                echo "retaining run ${run_id}: steps appeared on the second live read"; continue
+              fi
             fi
             candidate=$(jq -c --arg id "$job_id" --arg runId "$run_id" --arg attempt "$attempt" \
               --arg runUrl "$(jq -r '.html_url' <<<"$live_run")" \

@@ -7,6 +7,9 @@ import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.OutboxTableShape
+import com.openbank.libs.persistence.outbox.PanacheOutboxRetention
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import com.openbank.sca.application.port.out.ScaOutboxRepository
 import com.openbank.sca.infrastructure.persistence.entity.ScaOutboxEntity
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -22,6 +25,7 @@ import java.util.UUID
 @ApplicationScoped
 class ScaOutboxRepositoryImpl(private val clock: Clock) :
     ScaOutboxRepository,
+    SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("sca_outbox")),
     PanacheRepository<ScaOutboxEntity> {
 
     override suspend fun listProcessable(limit: Int): List<OutboxEntry> = Panache.withSession {

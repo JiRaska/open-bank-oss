@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: PSD2 Open Banking API
-  version: 2.7.0
+  version: 2.8.0
   description: |
     PSD2-compliant open banking — Account Information Service (AIS) and
     Payment Initiation Service (PIS) for Third Party Providers.
@@ -136,7 +136,7 @@ paths:
         - { name: TPP-Signature-Certificate, in: header, required: false, schema: { type: string }, description: 'QSEAL — TPP signing X.509 certificate (PEM)' }
       requestBody:
         required: true
-        description: 'SEPA products use PisPaymentRequest; domestic-cz / sipo use PisCzechPaymentRequest (ČOBS).'
+        description: 'SEPA products use PisPaymentRequest; domestic-cz / sipo use PisCzechPaymentRequest (ČOBS). domestic-cz requires CZK.'
         content:
           application/json:
             schema:
@@ -145,7 +145,7 @@ paths:
                 - $ref: '#/components/schemas/PisCzechPaymentRequest'
       responses:
         '201': { description: 'Payment initiated — transactionStatus (ISO 20022), paymentId, _links (self, status, scaRedirect)' }
-        '400': { description: Missing X-Request-ID / body does not match the payment product }
+        '400': { description: 'FORMAT_ERROR — missing X-Request-ID, invalid product body, or non-CZK domestic-cz amount' }
         '401': { description: Missing TPP credentials or Consent-ID }
         '404': { description: Unknown payment product }
         '409': { $ref: '#/components/responses/IdempotencyConflict' }
@@ -323,10 +323,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PisPaymentRequest'
+              $ref: '#/components/schemas/PisCzechPaymentRequest'
       responses:
         '201':
           description: Payment initiated
+        '400':
+          description: 'FORMAT_ERROR — domestic-cz accepts CZK only'
+        '401':
+          description: Missing or invalid TPP credentials
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
 
@@ -459,7 +463,7 @@ components:
           type: object
           properties:
             amount: { type: string }
-            currency: { type: string }
+            currency: { type: string, description: 'domestic-cz accepts CZK only (case-insensitive; surrounding whitespace ignored)' }
         variableSymbol: { type: string, description: 'ČOBS VS — max 10 digits' }
         specificSymbol: { type: string, description: 'ČOBS SS — max 10 digits' }
         constantSymbol: { type: string, description: 'ČOBS KS — max 4 digits' }

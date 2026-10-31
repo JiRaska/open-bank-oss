@@ -39,6 +39,9 @@ interface SanctionsEntryRepository {
      */
     suspend fun upsertAll(entries: List<SanctionsEntry>): Int
 
+    /** Validate [permit] under the same transaction as each committed import batch. */
+    suspend fun upsertAllFenced(entries: List<SanctionsEntry>, permit: SanctionsPublicationPermit): Int
+
     /**
      * Soft-delete every active entry of [listType] whose `external_id` is NOT in
      * [presentExternalIds] — i.e. it was dropped from the upstream source between this refresh
@@ -59,6 +62,13 @@ interface SanctionsEntryRepository {
      * @return number of rows deactivated.
      */
     suspend fun deactivateMissing(listType: SanctionsListType, presentExternalIds: Set<String>): Int
+
+    /** A stale import may never deactivate entries after a successor takes over. */
+    suspend fun deactivateMissingFenced(
+        listType: SanctionsListType,
+        presentExternalIds: Set<String>,
+        permit: SanctionsPublicationPermit,
+    ): Int
 
     suspend fun countByListType(listType: SanctionsListType): Long
 }

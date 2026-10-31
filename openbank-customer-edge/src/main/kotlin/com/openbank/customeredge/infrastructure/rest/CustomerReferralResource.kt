@@ -114,6 +114,7 @@ class CustomerReferralResource(
                         mapOf(
                             "id" to it.text("id"),
                             "token" to it.text("token"),
+                            "referralLink" to it.text("referralLink"),
                             "expiresAt" to it.text("expiresAt"),
                             "status" to it.text("status"),
                         ),
@@ -244,7 +245,9 @@ class CustomerReferralResource(
 
 /**
  * The referrer-side whitelist projection of one upstream invite. File-level rather than a member so
- * the resource stays one thin method per route.
+ * the resource stays one thin method per route. referralLink is the one deliberately passed-through
+ * field: the persisted shareable link (base URL + token) the referrer must be able to re-read —
+ * it reveals no more than the referrer already got at issue time.
  */
 private fun projectInvite(invite: JsonNode, now: Instant): Map<String, Any?> {
     val stored = invite.text("status")
@@ -257,6 +260,7 @@ private fun projectInvite(invite: JsonNode, now: Instant): Map<String, Any?> {
         "createdAt" to invite.text("createdAt"),
         "expiresAt" to invite.text("expiresAt"),
         "attributedAt" to invite.text("attributedAt"),
+        "referralLink" to invite.text("referralLink"),
         "reward" to reward?.let {
             mapOf(
                 "status" to it.text("status"),

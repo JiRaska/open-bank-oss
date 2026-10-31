@@ -121,18 +121,59 @@ class SanctionsService(
         repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
         val targetLists = resolveTargetLists(cmd)
         val (status, matches) = performScreening(cmd, targetLists)
+        val checkedAt = Instant.now(clock)
+        val clearance = if (status == SanctionsCheckStatus.CLEAR || matches.isEmpty()) {
+            null
+        } else {
+            findCoveringClearance(cmd, matches, checkedAt)
+        }
         val check = SanctionsCheck(
             id = UUID.randomUUID(), idempotencyKey = cmd.idempotencyKey,
             entityType = cmd.entityType, name = cmd.name, aliases = cmd.aliases.filterNotNull(),
             dateOfBirth = cmd.dateOfBirth, nationality = cmd.nationality,
-            identifiers = cmd.identifiers, status = status, matches = matches,
+            identifiers = cmd.identifiers,
+            status = if (clearance == null) status else SanctionsCheckStatus.WHITELISTED,
+            matches = matches,
             overallScore = matches.maxOfOrNull { it.matchScore } ?: 0.0,
             checkedLists = targetLists,
-            reviewedBy = null, reviewNote = null,
-            checkedAt = Instant.now(clock), reviewedAt = null,
+            reviewedBy = clearance?.reviewedBy,
+            reviewNote = clearance?.reviewNote,
+            checkedAt = checkedAt,
+            reviewedAt = clearance?.reviewedAt,
+            subjectId = cmd.subjectId,
+            clearanceExpiresAt = clearance?.clearanceExpiresAt,
         )
         return repo.saveWithEvent(check, EVENT_SCREENED)
     }
+
+    /**
+     * A review never skips a fresh screen. It covers only the same explicit subject and the exact
+     * list-entry identities the analyst reviewed; a new entry, changed subject or expired decision
+     * therefore keeps the fresh blocking result (#11694).
+     */
+    private suspend fun findCoveringClearance(
+        cmd: ScreenEntityCommand,
+        currentMatches: List<SanctionsMatch>,
+        now: Instant,
+    ): SanctionsCheck? {
+        val subjectId = cmd.subjectId?.takeIf { it.isNotBlank() } ?: return null
+        val currentIdentities = currentMatches.map(::matchIdentity).toSet()
+        return repo.findWhitelistsForSubject(subjectId)
+            .filter { clearance ->
+                clearance.clearanceExpiresAt?.isAfter(now) == true &&
+                    clearance.sameSubject(cmd) &&
+                    clearance.matches.map(::matchIdentity).containsAll(currentIdentities)
+            }
+            .maxByOrNull { it.reviewedAt ?: it.checkedAt }
+    }
+
+    private fun SanctionsCheck.sameSubject(cmd: ScreenEntityCommand): Boolean = subjectId == cmd.subjectId &&
+        entityType == cmd.entityType &&
+        name == cmd.name &&
+        aliases == cmd.aliases.filterNotNull() &&
+        dateOfBirth == cmd.dateOfBirth &&
+        nationality == cmd.nationality &&
+        identifiers == cmd.identifiers
 
     companion object {
         private const val HIT_THRESHOLD = 0.85
@@ -167,15 +208,30 @@ class SanctionsService(
          * exists it cannot be retrofitted without a coordinated rollout.
          */
         const val EVENT_REVIEWED = "SanctionReviewed"
+        private const val CLEARANCE_DAYS = 90L
     }
 
     override suspend fun review(cmd: ReviewCommand): SanctionsCheck {
         val check = repo.findById(cmd.checkId) ?: error("Sanctions check not found: ${cmd.checkId}")
+        if (cmd.newStatus == SanctionsCheckStatus.WHITELISTED) {
+            require(!check.subjectId.isNullOrBlank()) {
+                "WHITELISTED requires an explicit subject identity on the screened check"
+            }
+            require(check.matches.isNotEmpty()) {
+                "WHITELISTED requires at least one reviewed match identity"
+            }
+        }
+        val reviewedAt = Instant.now(clock)
         val updated = check.copy(
             status = cmd.newStatus,
             reviewedBy = cmd.reviewedBy,
             reviewNote = cmd.note,
-            reviewedAt = Instant.now(clock),
+            reviewedAt = reviewedAt,
+            clearanceExpiresAt = if (cmd.newStatus == SanctionsCheckStatus.WHITELISTED) {
+                reviewedAt.plus(java.time.Duration.ofDays(CLEARANCE_DAYS))
+            } else {
+                null
+            },
         )
         // updateWithEvent, not saveWithEvent: this check already exists, and the aggregate's id is
         // application-assigned, so the insert path would schedule an INSERT and collide with its
@@ -188,3 +244,6 @@ class SanctionsService(
     override suspend fun listPending() = repo.findByStatus(SanctionsCheckStatus.POTENTIAL_HIT)
     override suspend fun listChecks() = repo.listChecks()
 }
+
+private fun matchIdentity(match: SanctionsMatch): Pair<SanctionsListType, String> =
+    match.listType to (match.matchedId?.let { "id:$it" } ?: "name:${match.matchedName}")

@@ -10,6 +10,8 @@ import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured
 import io.restassured.response.Response
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
@@ -65,6 +67,13 @@ class DomesticPaymentJourneyE2E {
 
     @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR),
+            Claim(key = "preferred_username", value = ACTOR),
+        ],
+    )
     fun `a submitted payment is stored normalised, listed for its debtor, and replays on retry`() {
         val key = "e2e-journey-${UUID.randomUUID()}"
         val debtorAccountId = UUID.randomUUID()
@@ -141,6 +150,13 @@ class DomesticPaymentJourneyE2E {
      */
     @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR),
+            Claim(key = "preferred_username", value = ACTOR),
+        ],
+    )
     fun `the payment observable answers 404 for a payment that was never submitted`() {
         assertThat(
             RestAssured.given().get("/api/v1/domestic-payments/${UUID.randomUUID()}").statusCode,

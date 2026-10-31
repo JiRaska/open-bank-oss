@@ -10,6 +10,7 @@ import fs from 'fs'
 import path from 'path'
 import { execFileSync } from 'child_process'
 import { pathToFileURL } from 'url'
+import { withRequestSendTrace } from './request-send-trace.mjs'
 import { parseStringPromise } from 'xml2js'
 import { moneyPathServices } from './lib/service-inventory.mjs'
 
@@ -243,13 +244,6 @@ export async function fetchPairVerification(baseUrl, auth, consumer, consumerVer
 
   const body = await res.json()
   const rows = Array.isArray(body?.matrix) ? body.matrix : []
-  if (rows.length === 0 && committedPact) {
-    const equivalentVersion = await equivalentMainConsumerVersion(baseUrl, auth, consumer, provider, committedPact)
-    if (equivalentVersion && equivalentVersion !== consumerVersion) {
-      const latest = await fetchPairVerification(baseUrl, auth, consumer, equivalentVersion, provider)
-      return { ...latest, consumerVersion: equivalentVersion }
-    }
-  }
   const verifs = rows.map(r => r?.verificationResult).filter(Boolean)
   const providerVersion = rows.map(r => r?.providerVersion?.number).find(version => typeof version === 'string') ?? null
 
@@ -260,6 +254,15 @@ export async function fetchPairVerification(baseUrl, auth, consumer, consumerVer
   if (verifs.length > 0 && verifs.every(v => v.success === true)) {
     const at = verifs.map(v => v.verifiedAt).filter(Boolean).sort().pop() ?? null
     return { status: 'passed', verifiedAt: at, providerVersion }
+  }
+  // A matrix row can exist without any verification result. Its presence must not
+  // prevent proving that a newer main version published the identical Pact content.
+  if (verifs.length === 0 && committedPact) {
+    const equivalentVersion = await equivalentMainConsumerVersion(baseUrl, auth, consumer, provider, committedPact)
+    if (equivalentVersion && equivalentVersion !== consumerVersion) {
+      const latest = await fetchPairVerification(baseUrl, auth, consumer, equivalentVersion, provider)
+      return { ...latest, consumerVersion: equivalentVersion }
+    }
   }
   if (!(await providerHasMainVersion(baseUrl, auth, provider))) {
     return {
@@ -333,7 +336,7 @@ function buildServiceScores(testResults, mutations, contracts) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-async function main() {
+async function collectQualityReport() {
   console.log(`Collecting quality report from ${REPO_ROOT}`)
 
   // Read existing test-results.json if present (for unit score)
@@ -359,5 +362,10 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch(e => { console.error(e); process.exit(1) })
+  const configured = Boolean(process.env.PACT_BROKER_URL)
+  const authAlias = process.env.PACT_BROKER_USERNAME && process.env.PACT_BROKER_PASSWORD
+    ? 'pact_broker'
+    : 'none'
+  withRequestSendTrace('quality_report', authAlias, configured, collectQualityReport)
+    .catch(e => { console.error(e); process.exit(1) })
 }

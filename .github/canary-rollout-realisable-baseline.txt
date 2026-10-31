@@ -33,7 +33,6 @@
 openbank-infra/gitops/components/accounts/account-service.yaml: Rollout/account-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
 openbank-infra/gitops/components/balances/balance-service.yaml: Rollout/balance-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
 openbank-infra/gitops/components/consent/consent-service.yaml: Rollout/consent-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
-openbank-infra/gitops/components/customer-edge/customer-edge.yaml: Rollout/customer-edge canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
 openbank-infra/gitops/components/fraud-service/fraud-service.yaml: Rollout/fraud-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
 openbank-infra/gitops/components/fx-service/fx-service.yaml: Rollout/fx-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
 openbank-infra/gitops/components/kyc/kyc-service.yaml: Rollout/kyc-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting

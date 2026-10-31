@@ -48,7 +48,9 @@ test('resumes BankID sync without creating the party again', async ({ page }) =>
   await page.locator('#pid-document-expires-at').fill('2034-01-02')
 
   await page.getByRole('button', { name: 'Create', exact: true }).click()
-  await expect(page.getByText(`Record created (ID: ${PARTY_ID})`, { exact: false })).toBeVisible()
+  await expect(page.getByText('Record created, but BankID sync failed temporarily', { exact: false })).toBeVisible()
+  // The operator is told the party exists without being shown its raw id.
+  await expect(page.getByText(PARTY_ID)).toHaveCount(0)
   await expect(page.locator('#pid-bankid-sub')).toBeDisabled()
 
   await page.getByRole('button', { name: 'Retry BankID sync' }).click()

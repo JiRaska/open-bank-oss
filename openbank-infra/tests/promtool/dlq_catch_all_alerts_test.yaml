@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+# Catch-all DLQ alert against the SHIPPED rule: fires per growing DLQ topic (new and legacy
+# names), stays silent for a flat DLQ and for a growing non-DLQ topic.
+rule_files:
+  - prometheus-rules-dlq-catch-all.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      # Positive: audit DLQ gains two records at minute 10.
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.audit.audit-events-in",partition="0"}'
+        values: '0x10 2x170'
+      # Negative: DLQ holds records but is flat.
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.interest.interest-withholding-remitted-in",partition="0"}'
+        values: '5x180'
+      # Negative: ordinary topic growing fast is not a DLQ.
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.payments.events",partition="0"}'
+        values: '0+10x180'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: DeadLetterTopicGrowing
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: DeadLetterTopicGrowing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              topic: openbank.dlq.audit.audit-events-in
+            exp_annotations:
+              subject_period: continuous
+              summary: "Dead-letter topic openbank.dlq.audit.audit-events-in received records"
+              description: "openbank.dlq.audit.audit-events-in gained 2 record(s) in the last hour. A consumer nacked them after retries. Inspect the records and the owning service's logs. This is the fleet-wide catch-all; a dedicated per-topic alert may fire as well."
+      # Arrivals stopped more than an hour ago: clears.
+      - eval_time: 90m
+        alertname: DeadLetterTopicGrowing
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      # Positive (legacy name): grows continuously.
+      - series: 'kafka_topic_partition_current_offset{topic="dead-letter-topic-legacy-in",partition="0"}'
+        values: '0+1x180'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: DeadLetterTopicGrowing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              topic: dead-letter-topic-legacy-in
+            exp_annotations:
+              subject_period: continuous
+              summary: "Dead-letter topic dead-letter-topic-legacy-in received records"
+              description: "dead-letter-topic-legacy-in gained 30 record(s) in the last hour. A consumer nacked them after retries. Inspect the records and the owning service's logs. This is the fleet-wide catch-all; a dedicated per-topic alert may fire as well."

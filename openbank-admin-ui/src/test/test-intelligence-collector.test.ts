@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFile, execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs'
 import { createServer } from 'http'
 import { tmpdir } from 'os'
 import path from 'path'
@@ -20,6 +20,80 @@ const write = (root: string, relative: string, body: string) => {
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })))
 
 describe('test-intelligence collector', () => {
+  it.each([
+    ['passed', 'tests="1" failures="0" errors="0" skipped="0"', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'passed'],
+    ['failed', 'tests="1" failures="1" errors="0" skipped="0"', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'failed'],
+    ['error', 'tests="1" failures="0" errors="1" skipped="0"', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'failed'],
+    ['skipped', 'tests="1" failures="0" errors="0" skipped="1"', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'skipped'],
+    ['empty', 'tests="0" failures="0" errors="0" skipped="0"', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'skipped'],
+    ['embedded', 'tests="1" failures="0" errors="0"', 'prefixOPENBANK_TRACE_CONTRACT_V1:fixture suffix', null],
+    ['missing marker', 'tests="1" failures="0" errors="0"', 'no marker', null],
+    ['missing counts', '', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'unknown'],
+    ['invalid counts', 'tests="invalid" failures="0" errors="0"', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'unknown'],
+  ])('classifies trace XML fallback %s without laundering its verdict', (_, attributes, output, state) => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-trace-fallback-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-alpha-service/build/test-results/test/trace.xml', `<testsuites><testsuite ${attributes}><system-out>${output}</system-out></testsuite></testsuites>`)
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const trace = report.components.find(item => item.component === 'openbank-alpha-service')!.evidence.filter(item => item.kind === 'trace')
+    expect(trace).toEqual(state ? [expect.objectContaining({ state, source: 'trace-contract:fixture' })] : [])
+  })
+
+  it.each(['failure', 'error', 'skipped'])('respects testcase %s elements when aggregate attributes are omitted', element => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-trace-case-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-alpha-service/build/test-results/test/case.xml', `<testsuite tests="1"><testcase><${element}/><system-out>before\nOPENBANK_TRACE_CONTRACT_V1:fixture\nafter</system-out></testcase></testsuite>`)
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components.find(item => item.component === 'openbank-alpha-service')!.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'trace-contract:fixture', state: element === 'skipped' ? 'skipped' : 'failed' }),
+    ]))
+  })
+
+  it('keeps trace fallback failures across files and ages successful observations', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-trace-age-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    const root = 'openbank-alpha-service/build/test-results/test/'
+    write(repo, `${root}failed.xml`, '<testsuite tests="1" failures="1"><system-out>OPENBANK_TRACE_CONTRACT_V1:duplicate</system-out></testsuite>')
+    write(repo, `${root}success.xml`, '<testsuite tests="1" failures="0"><system-out>OPENBANK_TRACE_CONTRACT_V1:duplicate</system-out></testsuite>')
+    write(repo, `${root}old.xml`, '<testsuite tests="1" failures="0"><testcase><system-out>OPENBANK_TRACE_CONTRACT_V1:old</system-out></testcase></testsuite>')
+    const old = new Date('2000-01-01T00:00:00Z')
+    utimesSync(path.join(repo, root, 'old.xml'), old, old)
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components.find(item => item.component === 'openbank-alpha-service')!.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'trace-contract:duplicate', state: 'failed' }),
+      expect.objectContaining({ source: 'trace-contract:old', state: 'stale' }),
+    ]))
+  })
+
+  it('does not extract trace markers from malformed XML or arbitrary XML elements', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-trace-invalid-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-alpha-service/build/test-results/test/broken.xml', '<testsuite><system-out>OPENBANK_TRACE_CONTRACT_V1:fixture')
+    write(repo, 'openbank-alpha-service/build/test-results/test/other.xml', '<report>OPENBANK_TRACE_CONTRACT_V1:fixture</report>')
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components.find(item => item.component === 'openbank-alpha-service')!.evidence.filter(item => item.kind === 'trace')).toEqual([])
+  })
+
   it('retains both Security Excellence browser variants as a distinct governed journey', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-security-browser-'))
     dirs.push(repo)
@@ -481,7 +555,7 @@ journeys:
     expect(report.platformCapabilities).toContainEqual(expect.objectContaining({ id: 'probes', state: 'external-blocked' }))
   })
 
-  it('retains a fixed Pitest lane with the enforced PIT score in the required-control denominator', () => {
+  it('keeps enforced authz and advisory libs-runtime PIT verdicts separate', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-fixed-mutation-'))
     dirs.push(repo)
     write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
@@ -497,7 +571,7 @@ journeys:
             --mutation-report openbank-libs-runtime/build/reports/pitest/mutations.xml \\
             --mutation-threshold 63
 `)
-    write(repo, 'openbank-libs-runtime/build/reports/pitest/mutations.xml', `<?xml version="1.0" encoding="UTF-8"?>
+    write(repo, 'openbank-libs-runtime-authz/build/reports/pitest/mutations.xml', `<?xml version="1.0" encoding="UTF-8"?>
 <mutations>
   <mutation status="KILLED"/>
   <mutation status="KILLED"/>
@@ -509,7 +583,7 @@ journeys:
   <mutation status="SURVIVED"/>
 </mutations>
 `)
-    write(repo, 'openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json', JSON.stringify({
+    write(repo, 'openbank-libs-runtime-authz/build/reports/pitest/test-intelligence-run.json', JSON.stringify({
       schemaVersion: 1,
       run: {
         id: 'mutation-authz-7', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Mutation testing',
@@ -522,31 +596,45 @@ journeys:
         detail: '4/8 killed (50%, target 63%)',
       }],
     }))
+    write(repo, 'openbank-libs-runtime/build/reports/pitest/mutations.xml', `<?xml version="1.0" encoding="UTF-8"?>
+<mutations><mutation status="KILLED"/><mutation status="SURVIVED"/></mutations>
+`)
+    write(repo, 'openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: {
+        id: 'mutation-libs-8', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Mutation testing',
+        url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/mutation-libs-8', observedAt: '2026-09-05T06:01:00Z',
+      },
+      component: 'openbank-libs-runtime', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'mutation', state: 'failed', source: 'mutations.xml', detail: '1/2 detected (50%, target 70%)' }],
+    }))
 
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
 
-    expect(report.components.find(item => item.component === 'openbank-libs-runtime')).toMatchObject({
+    expect(report.components.find(item => item.component === 'openbank-libs-runtime-authz')).toMatchObject({
       released: false,
       evidence: [expect.objectContaining({ kind: 'mutation', state: 'passed', detail: '63% mutation score' })],
     })
     expect(report.mutations).toContainEqual(
-      expect.objectContaining({ component: 'openbank-libs-runtime', killed: 4, timedOut: 1, score: 63 }),
+      expect.objectContaining({ component: 'openbank-libs-runtime-authz', killed: 4, timedOut: 1, score: 63 }),
     )
     expect(report.requiredControls?.filter(control => control.kind === 'mutation')).toEqual([
-      expect.objectContaining({ id: 'openbank-libs-runtime:mutation', state: 'passed', source: 'Pitest:mutations.xml' }),
+      expect.objectContaining({ id: 'openbank-libs-runtime-authz:mutation', state: 'passed', source: 'Pitest:mutations.xml' }),
+      expect.objectContaining({ id: 'openbank-libs-runtime:mutation', state: 'failed', source: 'Pitest:mutations.xml' }),
     ])
-    expect(report.totals).toMatchObject({ requiredControls: 1, requiredControlGaps: 0 })
+    expect(report.totals).toMatchObject({ requiredControls: 2, requiredControlGaps: 1 })
 
-    rmSync(path.join(repo, 'openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json'))
+    rmSync(path.join(repo, 'openbank-libs-runtime-authz/build/reports/pitest/test-intelligence-run.json'))
     const missingEnvelopeOut = path.join(repo, 'report-without-envelope.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', missingEnvelopeOut, '--stale-after-days', '99999'])
     const missingEnvelope = JSON.parse(readFileSync(missingEnvelopeOut, 'utf8')) as TestIntelligenceReport
     expect(missingEnvelope.mutations).toContainEqual(
-      expect.objectContaining({ component: 'openbank-libs-runtime', state: 'unknown', score: 63 }),
+      expect.objectContaining({ component: 'openbank-libs-runtime-authz', state: 'unknown', score: 63 }),
     )
-    expect(missingEnvelope.requiredControls?.find(control => control.id === 'openbank-libs-runtime:mutation')).toEqual(
+    expect(missingEnvelope.requiredControls?.find(control => control.id === 'openbank-libs-runtime-authz:mutation')).toEqual(
       expect.objectContaining({ state: 'unknown', source: 'Pitest:mutations.xml' }),
     )
   }, 15_000)
@@ -611,6 +699,33 @@ capabilities:
     expect(report.components[0].evidence).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'unit', source: 'JUnit:test' }),
     ]))
+  })
+
+  it('projects both Keycloak issuer lifecycles from a v2 run envelope', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-keycloak-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-alpha-service/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 2,
+      run: { id: '42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/42', observedAt: '2026-08-22T10:00:00Z' },
+      component: 'openbank-alpha-service', suites: [], testCases: [], coverage: null,
+      testInfrastructure: { declared: ['keycloak'], observed: [
+        { resource: 'keycloak', image: 'keycloak:27.0.0', lifecycle: 'started', observedAt: '2026-08-22T09:59:00Z', resourceScopeId: '11111111-1111-4111-8111-111111111111' },
+        { resource: 'keycloak', image: 'keycloak:27.0.0', lifecycle: 'started', observedAt: '2026-08-22T09:59:10Z', resourceScopeId: '22222222-2222-4222-8222-222222222222' },
+        { resource: 'keycloak', image: 'keycloak:27.0.0', lifecycle: 'stopped', observedAt: '2026-08-22T09:59:30Z', resourceScopeId: '11111111-1111-4111-8111-111111111111' },
+        { resource: 'keycloak', image: 'keycloak:27.0.0', lifecycle: 'stopped', observedAt: '2026-08-22T09:59:40Z', resourceScopeId: '22222222-2222-4222-8222-222222222222' },
+      ] },
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components[0].testInfrastructure.declared).toEqual(['keycloak'])
+    expect(report.components[0].testInfrastructure.observed).toHaveLength(4)
+    expect(report.requiredControls).toContainEqual(expect.objectContaining({
+      id: 'openbank-alpha-service:runtime:keycloak', state: 'passed', source: 'test-intelligence-run:v2',
+    }))
   })
 
   it('prefers the versioned run envelope and preserves provenance plus Testcontainers runtime proof', () => {
@@ -981,6 +1096,50 @@ capabilities:
         counts: { discovered: 3, executed: 2, passed: 1, failed: 1, skipped: 1, errors: 0 } }),
     ])
     expect(report.components.find(component => component.component === 'openbank-interest-service')?.evidence).toEqual([])
+  })
+
+  it('projects the cross-border and delegated-spend simulation scenarios to their services', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-simulation-new-scenarios-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    const mapped = [
+      ['com.openbank.simulation.scenario.DelegatedSpendScenarioTest', 2, ['openbank-delegation-service']],
+      ['com.openbank.simulation.scenario.SwiftScenarioTest', 4, ['openbank-swift-service']],
+      ['com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest', 7, ['openbank-lending-service']],
+      ['com.openbank.simulation.scenario.StandingOrderScenarioTest', 3, ['openbank-standing-order-service']],
+      ['com.openbank.simulation.scenario.SddCollectionScenarioTest', 4, ['openbank-sdd-service']],
+    ] as const
+    for (const [, , services] of mapped) for (const service of services) {
+      write(repo, `${service}/version.txt`, '1.0.0\n')
+    }
+    const run = { id: '40672119609', attempt: 1, commit: '1c10811abc12', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/40672119609', observedAt: '2026-10-28T11:00:00Z' }
+    const totalCases = mapped.reduce((sum, [, count]) => sum + count, 0)
+    write(repo, 'openbank-simulation/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 1, run, component: 'openbank-simulation',
+      suites: [{ kind: 'simulation', state: 'passed', discovered: totalCases, executed: totalCases, passed: totalCases, failed: 0, skipped: 0, errors: 0, durationMs: 2000 }],
+      testCases: mapped.flatMap(([classname, count]) => Array.from({ length: count }, (_, index) => ({
+        kind: 'simulation', classname, name: `case ${index}`, state: 'passed',
+      }))),
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    for (const [classname, count] of mapped) {
+      const cases = Array.from({ length: count }, (_, index) => `<testcase classname="${classname}" name="case ${index}" time="0.1"/>`).join('')
+      write(repo, `openbank-simulation/build/test-results/test/TEST-${classname}.xml`,
+        `<testsuite name="${classname}" tests="${count}" failures="0" errors="0" skipped="0">${cases}</testsuite>`)
+    }
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const byComponent = new Map(report.components.map(component => [component.component, component]))
+    for (const [classname, count, services] of mapped) for (const service of services) {
+      expect(byComponent.get(service)?.evidence).toEqual([expect.objectContaining({
+        kind: 'simulation', state: 'passed', source: `JUnit:test/TEST-${classname}.xml`,
+        counts: expect.objectContaining({ discovered: count, passed: count }),
+        detail: expect.stringContaining(classname),
+        run: expect.objectContaining({ id: run.id, commit: run.commit, url: run.url }),
+      })])
+    }
   })
 
   it('keeps verdicts but omits outbound provenance from an untrusted run host', () => {

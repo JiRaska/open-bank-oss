@@ -1,0 +1,54 @@
+# Declared debt for check-public-workload-ha.py: publicly routed workloads (behind an Ingress or
+# HTTPRoute) that cannot survive losing one pod today. Two-way: a finding NOT listed here fails,
+# and a line that no longer matches anything fails too (the debt was paid; delete the line).
+# Seeded 2026-10-04 with customer-edge fixed; every other line predates this gate. Raising a
+# workload here to >= 2 replicas is a per-service decision (in-memory state, capacity, canary
+# weights under #3806), not a mechanical sweep.
+openbank-infra/gitops/components/accounts/account-service.yaml: Rollout/account-service is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/accounts/account-service.yaml: Rollout/account-service is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/accounts/account-service.yaml: Rollout/account-service is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/admin-ui/admin-ui.yaml: Deployment/admin-ui is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/admin-ui/admin-ui.yaml: Deployment/admin-ui is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/admin-ui/admin-ui.yaml: Deployment/admin-ui is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/ai-platform/langfuse-v3.yaml: Deployment/langfuse-web is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/ai-platform/langfuse-v3.yaml: Deployment/langfuse-web is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/ai-platform/langfuse-v3.yaml: Deployment/langfuse-web is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/balances/balance-service.yaml: Rollout/balance-service is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/balances/balance-service.yaml: Rollout/balance-service is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/balances/balance-service.yaml: Rollout/balance-service is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/copilot/copilot-service.yaml: Deployment/copilot-service is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/copilot/copilot-service.yaml: Deployment/copilot-service is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/copilot/copilot-service.yaml: Deployment/copilot-service is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/developer-portal/developer-portal.yaml: Deployment/developer-portal is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/developer-portal/developer-portal.yaml: Deployment/developer-portal is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/keycloak/keycloak.yaml: Deployment/keycloak is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/keycloak/keycloak.yaml: Deployment/keycloak is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/keycloak/keycloak.yaml: Deployment/keycloak is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/observability/httproute-glitchtip.yaml: routes to Service observability/glitchtip-web, which no gitops manifest declares — cannot check
+openbank-infra/gitops/components/observability/httproute-rum-gateway.yaml: routes to Service observability/rum-gateway, which no gitops manifest declares — cannot check
+openbank-infra/gitops/components/observability/httproute-tools-gate.yaml: routes to Service observability/kube-prometheus-stack-alertmanager, which no gitops manifest declares — cannot check
+openbank-infra/gitops/components/observability/httproute-tools-gate.yaml: routes to Service observability/kube-prometheus-stack-grafana, which no gitops manifest declares — cannot check
+openbank-infra/gitops/components/observability/pyrra.yaml: Deployment/pyrra-api is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/observability/pyrra.yaml: Deployment/pyrra-api is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/observability/pyrra.yaml: Deployment/pyrra-api is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/pact-broker/pact-broker.yaml: Deployment/pact-broker is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/pact-broker/pact-broker.yaml: Deployment/pact-broker is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/pact-broker/pact-broker.yaml: Deployment/pact-broker is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/domestic-payment is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/domestic-payment is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/domestic-payment is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/sepa-instant is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/sepa-instant is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/sepa-instant is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/sepa-payment is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/sepa-payment is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/sepa-payment is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/transaction-service is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/transaction-service is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/transaction-service is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/pricing/workloads.yaml: Deployment/pricing-console is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/pricing/workloads.yaml: Deployment/pricing-console is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/pricing/workloads.yaml: Deployment/pricing-console is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml: Rollout/sanctions-service is publicly routed and does not spread its pods across nodes
+openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml: Rollout/sanctions-service is publicly routed and no PodDisruptionBudget selects its pods
+openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml: Rollout/sanctions-service is publicly routed and runs 1 replica(s), needs >= 2

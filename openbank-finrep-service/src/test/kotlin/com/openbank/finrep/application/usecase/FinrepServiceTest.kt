@@ -5,6 +5,7 @@
 package com.openbank.finrep.application.usecase
 
 import com.openbank.finrep.application.port.inbound.GetFinrepTemplateQuery
+import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
@@ -61,13 +62,33 @@ class FinrepServiceTest {
             TrialBalanceLineDto(code = "4100", accountType = "INCOME", net = BigDecimal("-120000"), currency = "CZK"),
             TrialBalanceLineDto(code = "5100", accountType = "EXPENSE", net = BigDecimal("80000"), currency = "CZK"),
         )
-        coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(lines, ledgerSays = true)
+        coEvery { ledgerPort.getYearToDateMovements(asOf) } returns snapshot(lines, ledgerSays = true)
         val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
 
         val template = service.getTemplate(GetFinrepTemplateQuery(templateId = "F02.00", asOf = asOf))
 
         assertThat(template.templateId).isEqualTo("F02.00")
         assertThat(template.cells).anyMatch { it.rowRef == "r0670" && it.value == BigDecimal("40000") }
+        coVerify(exactly = 1) { ledgerPort.getYearToDateMovements(asOf) }
+        coVerify(exactly = 0) { ledgerPort.getTrialBalance(any()) }
+    }
+
+    @Test
+    fun `F02 live preview reads period movements rather than cumulative stock`(): Unit = runBlocking {
+        val asOf = LocalDate.of(2026, 6, 30)
+        val movements = listOf(
+            TrialBalanceLineDto("4100", "INCOME", BigDecimal("-120000"), "CZK"),
+            TrialBalanceLineDto("5100", "EXPENSE", BigDecimal("80000"), "CZK"),
+        )
+        coEvery { ledgerPort.getLiveYearToDateMovements(asOf) } returns snapshot(movements, ledgerSays = true)
+
+        val template = FinrepService(ledgerPort, FinrepMetricsAdapter(registry)).getTemplate(
+            GetFinrepTemplateQuery("F02.00", asOf, TrialBalanceEvidence.LIVE_PREVIEW),
+        )
+
+        assertThat(template.cells).anyMatch { it.rowRef == "r0670" && it.value == BigDecimal("40000") }
+        coVerify(exactly = 1) { ledgerPort.getLiveYearToDateMovements(asOf) }
+        coVerify(exactly = 0) { ledgerPort.getLiveTrialBalance(any()) }
     }
 
     @Test

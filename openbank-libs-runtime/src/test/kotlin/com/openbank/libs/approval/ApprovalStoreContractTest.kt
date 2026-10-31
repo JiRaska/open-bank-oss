@@ -39,6 +39,30 @@ abstract class ApprovalStoreContractTest {
     protected abstract fun newStore(namespace: String = "svc-a", maxPendingPerMakerAction: Int = 20): ApprovalStore
 
     @Test
+    fun `maker actor kind survives the approval lifecycle`(): Unit = runBlocking {
+        val store = newStore()
+        val pending = store.create(
+            "sanctions.clear",
+            resourceId = "check-1",
+            makerId = "agent:reviewer",
+            makerActorKind = MakerActorKind.AI_AGENT,
+        )
+
+        assertThat(store.find(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+        store.decide(pending.id, decidedBy = "operator-2", approve = true)
+        assertThat(store.find(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+        store.markExecuted(pending.id)
+        assertThat(store.find(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+    }
+
+    @Test
+    fun `maker actor kind is unknown when creation did not supply provenance`(): Unit = runBlocking {
+        val store = newStore()
+        val pending = store.create("sanctions.clear", resourceId = null, makerId = "maker-1")
+        assertThat(store.find(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.UNKNOWN)
+    }
+
+    @Test
     fun `a maker deciding their own pending approval is refused`(): Unit = runBlocking {
         val store = newStore()
         val pending = store.create("sanctions.clear", resourceId = "check-1", makerId = "operator-1")

@@ -4,15 +4,16 @@
 
 // Server component (ADR-0056). Compliance Control Tower — the regulation →
 // control → evidence matrix. Reads the authored control catalogue and joins
-// live status from the derived security posture (src/lib/governance/compliance.ts).
-// Governance-as-code: a control marked LIVE has its status read from a machine
-// signal, not asserted.
+// observed status from the build-derived security posture. Authored catalogue
+// status and snapshot-derived status are shown separately; this is not a live
+// cluster probe or a legal-compliance determination.
 
 import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { ChevronLeft, ShieldCheck, Radio, FileText } from 'lucide-react'
 import { loadComplianceCatalog, type ControlStatus, type ComplianceControl } from '@/lib/governance/compliance'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,7 +74,8 @@ export default async function ControlTowerPage() {
     byCategory.set(c.category, list)
   }
 
-  const totalEnforced = catalog.controls.filter(c => c.status === 'enforced').length
+  const declaredEnforced = catalog.controls.filter(c => c.declaredStatus === 'enforced').length
+  const snapshotObserved = catalog.controls.filter(c => c.derivedFrom && c.signalState !== 'unknown').length
 
   return (
     <div>
@@ -86,8 +88,8 @@ export default async function ControlTowerPage() {
           </>}
         title={t('Compliance Control Tower', 'Compliance Control Tower')}
         subtitle={t(
-              `Regulace → kontrola → důkaz. ${totalEnforced}/${catalog.controls.length} kontrol vynuceno. Kontroly s odznakem LIVE čtou stav z reálných manifestů, ne z tvrzení.`,
-              `Regulation → control → evidence. ${totalEnforced}/${catalog.controls.length} controls enforced. Controls badged LIVE read their status from real manifests, not from a claim.`,
+              `Katalog deklaruje ${declaredEnforced}/${catalog.controls.length} kontrol jako vynucené; ${snapshotObserved} kontrol má odvozený signál.`,
+              `The catalogue declares ${declaredEnforced}/${catalog.controls.length} controls enforced; ${snapshotObserved} controls have a derived signal.`,
             )}
         icon={<ShieldCheck aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
         actions={<Link href="/docs" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -95,6 +97,14 @@ export default async function ControlTowerPage() {
           {t('Zpět na dokumentaci', 'Back to docs')}
         </Link>}
       />
+
+      <ContentSourceNote source={catalog.contentSource} />
+
+      <p style={{ margin: '-12px 0 20px', color: 'var(--text-tertiary)', fontSize: '11px' }}>
+        {catalog.posture?.collectedAt
+          ? t(`Odvozené signály pocházejí ze snímku manifestů pořízeného ${catalog.posture.collectedAt}; nejde o živou kontrolu clusteru.`, `Derived signals come from a manifest snapshot collected ${catalog.posture.collectedAt}; this is not a live cluster check.`)
+          : t('Snímek odvozených signálů není dostupný; odvozené stavy jsou neznámé.', 'The derived-signal snapshot is unavailable; derived states are unknown.')}
+      </p>
 
       {/* Per-framework coverage */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '10px', marginBottom: '24px' }}>
@@ -106,10 +116,10 @@ export default async function ControlTowerPage() {
               <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '2px' }}>{f.id}</div>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.name}>{f.name}</div>
               <div style={{ height: 6, background: 'var(--surface-2)', borderRadius: 3, overflow: 'hidden', marginBottom: '5px' }}>
-                <div style={{ width: `${pct}%`, height: '100%', background: pct === 100 ? 'var(--success)' : 'var(--accent)' }} />
+                <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent)' }} />
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                {cov.enforced}/{cov.total} {t('vynuceno', 'enforced')}
+                {cov.enforced}/{cov.total} {t('deklarováno/odvozeno jako vynucené', 'catalogued/derived as enforced')}
               </div>
             </div>
           )
@@ -133,10 +143,10 @@ export default async function ControlTowerPage() {
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '6px' }}>
                     <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{c.title}</span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                      {c.live && (
-                        <span title={t('Stav odvozen z reálného manifestu', 'Status derived from a real manifest')}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: 700, color: 'var(--success-text)' }}>
-                          <Radio size={10} /> LIVE
+                          {c.signalState && c.signalState !== 'unknown' && (
+                        <span title={t('Vstupní signál ze zdrojového manifestu; nepotvrzuje běžící cluster', 'Source-manifest input; does not verify the running cluster')}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: 700, color: 'var(--info-text)' }}>
+                          <Radio size={10} /> MANIFEST
                         </span>
                       )}
                       <span style={{
@@ -154,6 +164,10 @@ export default async function ControlTowerPage() {
                         <FileText size={10} /> {c.evidenceSource}
                       </span>
                     )}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '7px' }}>
+                    {t(`Deklarovaný stav: ${c.declaredStatus}; provozní stav: neověřen`, `Declared status: ${c.declaredStatus}; operational status: unverified`)}
+                    {c.derivedFrom ? ` · ${c.derivedFrom}` : ''}
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                     {c.frameworks.map(f => (
