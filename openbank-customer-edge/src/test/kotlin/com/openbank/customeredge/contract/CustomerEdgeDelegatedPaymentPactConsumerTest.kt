@@ -107,6 +107,7 @@ class CustomerEdgeDelegatedPaymentPactConsumerTest {
 
     private fun edgeResource(accountServiceBaseUrl: String): CustomerEdgeResource {
         val upstream = UpstreamClient().apply {
+            tlsConfigurationName = java.util.Optional.empty()
             tokenEndpointBase = "http://127.0.0.1:${tokenServer.address.port}"
             clientId = "openbank-edge"
             clientSecret = "pact"

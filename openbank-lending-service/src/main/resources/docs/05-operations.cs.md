@@ -29,6 +29,8 @@
 
 `LENDING_LEDGER_BACKEND` je **build-time** (`@IfBuildProperty`): vybírá adaptér při sestavení image, ne za běhu.
 
+Zpoždění před prvním plánovaným obnovením compliance balíčků určuje `lending.compliance.refresh-initial-delay` (výchozí `10s`).
+
 ## Porty & probes
 
 - **App:** `8126`. **Management:** `8086`, root-path `/q` (`quarkus.management.enabled=true`).
@@ -59,6 +61,27 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 ### Roste backlog outboxu
 Řádky `lending_outbox.status` uvíznou neodeslané a `attempt_count` stoupá ⇒ zkontroluj Kafka konektivitu a `last_error`. Dispatcher (`@Scheduled every 5s`, batch 25, `SKIP` překryv) opakuje automaticky; trvalý backlog ukazuje na broker nebo topic `openbank.lending.events`. Nemazat řádky — jsou zárukou at-least-once doručení.
 
+### Důkazní balík a retence SENT řádků (#11900)
+`GET /api/v1/lending/applications/{id}/evidence` čte řetězec audit-service (`GET /api/v1/audit/evidence/{id}`, `AUDIT_SERVICE_URL`) s **vlastním tokenem volajícího** — nikdy přes m2m klienta. 401/403 z audit-service se předávají dál; cokoli jiného je **503**. Návrat k `lending_outbox` záměrně neexistuje.
+
+`lending_outbox` maže doručené řádky jako každý jiný outbox (ADR-0329), ale přepínač je tu **vypnutý** (`LENDING_OUTBOX_RETENTION_ENABLED`, výchozí `false`), dokud jednou neprojde tato kontrola shody. audit-service odebírá `openbank.lending.events` od 2026-07-31; události starší než retence topicu v tu chvíli se do řetězce nemusely nikdy dostat a jejich smazání z outboxu by je ztratilo.
+
+1. Přesná shoda podle id události (audit použije `eventId` producenta jako `entry_id`, pokud ho payload nese). Vyexportujte id z lendingu a dohledejte je v auditu:
+   ```sql
+   -- DB lendingu
+   SELECT event_id FROM lending_outbox WHERE status = 'SENT';
+   -- DB auditu, s těmito id v dočasné tabulce `lending_ids(event_id uuid)`
+   SELECT l.event_id FROM lending_ids l LEFT JOIN audit_entries a ON a.entry_id = l.event_id WHERE a.entry_id IS NULL;
+   ```
+2. Pojistka pro payloady bez `eventId` (audit pak záznam klíčuje podle adresy v Kafce): počty na žádost nesmí být v auditu nižší.
+   ```sql
+   -- DB lendingu
+   SELECT aggregate_id, count(*) FROM lending_outbox WHERE status = 'SENT' GROUP BY 1;
+   -- DB auditu
+   SELECT aggregate_id, count(*) FROM audit_entries WHERE source_service LIKE '%lending%' GROUP BY 1;
+   ```
+3. Žádné chybějící id a žádná žádost s menším počtem v auditu ⇒ nastavte `LENDING_OUTBOX_RETENTION_ENABLED=true`. Cokoli chybí ⇒ **nezapínejte**; důkazy těch úvěrů existují jen v outboxu a nejdřív je třeba je přehrát do řetězce.
+
 ### Selhává účetní zápis
 Při `LENDING_LEDGER_BACKEND=rest` jdou zápisy přes `LedgerCallGuard` (fault tolerance) do `ledger-service POST /api/v1/journals`. Selhání se projeví v disburse/repay/writeoff. Ověř `LEDGER_SERVICE_URL`, OIDC token služby a že GL účty `LENDING_GL_*` existují v účtové osnově. Zápisy jsou idempotentní (reference = idempotency key ledgeru), takže je bezpečné je opakovat.
 
@@ -82,9 +105,66 @@ Pro úvěry, jejichž účetní historie se do hlavní knihy nikdy nedostala (#6
 6. **Storno**: každý zápis stornujte v ledger-service (`reverseJournal`) podle klíče `loan:<id>:…`.
 Zápisy se účtují k datu cut-overu, s původním datem události ve `valueDate`. Pouze hlavní kniha: na účet klienta se nic nepřipisuje.
 
+### Pozdní migrace opravných položek V26 (#13026)
+
+V26 se dostala do main až po V27. Při `validate-on-migrate: false` může výchozí pořadí Flyway ponechat V26 neaplikovanou, přestože migrace při startu skončí úspěšně. GitOps Rollout služby dočasně nastavuje `QUARKUS_FLYWAY_OUT_OF_ORDER=true`, aby i databáze s V27 vytvořila `provisioning_cycle_attempt` a `provisioning_cycle_run.current_attempt_id`.
+
+Zachovej deployment holdy a kontroly povýšení image. Před schváleným nasazením ověř `flyway_schema_history` každé cílové databáze; historie zdrojů ani CI nedokládají nasazený stav. Po migraci ověř úspěšné záznamy V26/V27, schéma pokusů a zachování souhrnů opravných položek i podpisových hashů. Opakovaná migrace nesmí zdvojit zpětně doplněné záznamy V26.
+
+Dočasnou proměnnou prostředí z GitOps odstraň až poté, co **každá** cílová databáze eviduje úspěšnou V26. Přesnou výjimku kontroly historického pořadí ponech, dokud Git stále dokládá dřívější příchod V27. Zachovej identity potvrzených SQL migrací; obnova nepoužívá Flyway repair ani přečíslování. Návrat schématu popisuje V26 a před odstraněním vyžaduje export historie pokusů.
+
 ### Flyway checksum mismatch při startu
 Nikdy nepřepisuj nasazenou migraci. Nastav dočasně `QUARKUS_FLYWAY_REPAIR_AT_START=true`, nech DB ustálit a pak odstraň.
+
+## Pojmenování metrik
+
+Vlastní čítače Micrometeru nesou předponu `openbank.` (vynucuje CI brána `metric-name-prefix`). Čítače SLA originace se scrapují jako `openbank_lending_origination_docs_sla_reminder_total` a `openbank_lending_origination_four_eyes_sla_escalation_total`; dřívější názvy `lending_origination_*` bez předpony se po nasazení této verze už nevydávají, takže externí dotazy na ně je nutné upravit.
 
 ## Deploy
 
 GitOps (ArgoCD) dle platformního vzoru. Při konfliktech image-tagů ber `--ours` (čerstvě sestavený tag), `--theirs` pro RBAC/config/env (CLAUDE.md). Verzování a changelog vlastní release-please z Conventional Commits — nikdy ručně needituj `version.txt` ani `CHANGELOG.md`.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Účast na uzávěrce dne (ADR-0342, #13167)
+
+Lending hlásí každý dokončený účetní den (pražský čas) do ledger-service jako účastník `lending`
+(`LendingCloseParticipationScheduler`, každou hodinu v :40; `lending.close.report-cron`, zpětné okno
+`lending.close.lookback-days`, výchozí 3). Podkladem je `lending_close_job_run` (V28): jeden řádek na
+den a úlohu (`accrual`, `provisioning`).
+
+- Obě úlohy proběhly, nic nebylo odmítnuto a deníky opravných položek jsou doručeny: RAN.
+- Úloha neproběhla, právě běží nebo deníky opravných položek čekají v outboxu: zatím se nehlásí nic,
+  ledger den drží.
+- Odmítnutí `409 ACCOUNTING_DAY_CLOSED`, selhání, neúplné pokrytí, DEAD řádek outboxu nebo běh
+  zkrácený dávkovým limitem i po vyčerpání rozpočtu: REFUSED s pevnou kategorií.
+- Značka běhu starší než drain-budget × (lookback + 1) + 30 min (výchozí 70 min): REFUSED `pass started and never completed`; další běh výpočtu úroků ten den dopočítá a zapíše jako RAN.
+- Oba intervaly vypnuté (`off`): SKIPPED.
+
+Výpočet úroků zpracovává zkrácené dávky v rámci rozpočtu (`drain-budget` PT10M, `max-drain-rounds`
+100) a každý běh nejprve dopočítá dřívější dny v okně, které zůstaly REFUSED kvůli zkrácení, a zapíše
+je jako RAN. Den ve stavu REFUSED drží uzávěrku do pozdějšího RAN nebo výjimky operátora v ledgeru.
+Hlášení po uzavření dne se uloží jako `late` a den nepohne.
+
+### Trvalé potvrzení časového rozlišení (#13708)
+
+Před voláním ledgeru uloží `lending_accrual_progress` (V28) úplný datovaný požadavek splátky,
+deterministickou referenci a identitu transakce. Opakování použije stejný požadavek včetně původního
+data a GL účtů, nikoli dnešní hodiny či účtový rozvrh. Potvrzuje jej pouze odpověď POSTED se shodnou
+identitou transakce a datem zápisu. Odmítnutí uzavřeného dne zůstává viditelné; tentýž idempotency klíč
+se nikdy nepřesměruje na jiné datum.
+
+Jediná lokální DB transakce dokončí záměr, označí splátku, uloží existující outbox událost
+`loan.interest_accrued` a zvýší počet položek pracovního dne a journalů skutečného dne potvrzení.
+Selhání další splátky neztratí již potvrzený prefix. Potvrzení ledgeru následované lokálním rollbackem
+ponechá záměr čekající; přesné opakování jej může jednou dokončit. Čekající záměr brání RAN.
+Výmaz nevyřešeného záměru sleduje životní cyklus splátky a zachová pouze agregovanou nejistotu
+`unreconciled` dotčených pracovních/požadovaných dnů, kterou úspěšný běh nesmaže. Dispozici řeší
+existující řízené dorovnání či waiver v ledgeru. Nevzniká zákaznický tombstone ani nová retenční lhůta.
+Rollback zachová tabulky V28 i čekající důkazy; návrat kódu nedokazuje, že vzdálený zápis nenastal.

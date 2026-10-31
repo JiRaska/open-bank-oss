@@ -47,7 +47,7 @@ def classify(
     payload: dict[str, Any],
     now: datetime,
     timeout_minutes: int,
-    no_step_timeout_minutes: int = 5,
+    no_step_timeout_minutes: int = 10,
 ) -> list[dict[str, str]]:
     jobs = payload.get("jobs")
     if not isinstance(jobs, list):
@@ -80,6 +80,9 @@ def classify(
         if build_step is not None and build_step.get("status") == "in_progress":
             # The service build has reached its mandatory command and that command is still live.
             candidate_step = build_step
+            candidate_started = parse_time(build_step.get("started_at"))
+            if candidate_started is None:
+                raise ValueError(f"{name} has an in-progress build step without valid started_at")
         elif not any_progress:
             # started_at is set but no step has moved past "queued" — the exact wedge evidenced
             # in #7477. A healthy job's first step starts within seconds; use a short threshold,
@@ -124,10 +127,12 @@ def self_test() -> int:
     base = {"id": 42, "name": "build (openbank-example-service) / openbank-example-service (build)",
             "status": "in_progress", "started_at": "2026-08-28T11:00:00Z",
             "html_url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1/job/42",
-            "steps": [{"name": "Build + test (:openbank-example-service)", "status": "in_progress"}]}
+            "steps": [{"name": "Build + test (:openbank-example-service)", "status": "in_progress",
+                       "started_at": "2026-08-28T11:00:00Z"}]}
     cases = [
         ("stalled mandatory build is selected", {"jobs": [base]}, 1),
-        ("fresh mandatory build is not selected", {"jobs": [{**base, "started_at": "2026-08-28T11:40:00Z"}]}, 0),
+        ("fresh mandatory build is not selected", {"jobs": [{**base, "started_at": "2026-08-28T11:40:00Z", "steps": [{"name": "Build + test (:openbank-example-service)", "status": "in_progress", "started_at": "2026-08-28T11:40:00Z"}]}]}, 0),
+        ("long setup does not age a fresh build step", {"jobs": [{**base, "steps": [{"name": "Build + test (:openbank-example-service)", "status": "in_progress", "started_at": "2026-08-28T11:40:00Z"}]}]}, 0),
         ("long Kover report is not selected", {"jobs": [{**base, "steps": [{"name": "Build + test (:openbank-example-service)", "status": "completed"}, {"name": "Generate Kover XML report", "status": "in_progress"}]}]}, 0),
         ("stalled post-action after completed build is selected", {"jobs": [{**base, "steps": [{"name": "Build + test (:openbank-example-service)", "status": "completed"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:00:00Z"}]}]}, 1),
         ("fresh post-action is not selected", {"jobs": [{**base, "steps": [{"name": "Build + test (:openbank-example-service)", "status": "completed"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:40:00Z"}]}]}, 0),
@@ -170,7 +175,7 @@ def main() -> int:
     parser.add_argument("--jobs-json", type=Path)
     parser.add_argument("--now")
     parser.add_argument("--timeout-minutes", type=int, default=45)
-    parser.add_argument("--no-step-timeout-minutes", type=int, default=5)
+    parser.add_argument("--no-step-timeout-minutes", type=int, default=10)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:

@@ -12,6 +12,8 @@ import com.openbank.libs.idempotency.IdempotencyStore
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured
 import io.restassured.http.ContentType
 import io.restassured.response.ValidatableResponse
@@ -41,6 +43,13 @@ class DelegationRecertificationApiIT {
 
     @Test
     @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
     fun `customer confirmation and replay record exactly one review`() {
         val cycle = seedCycle()
         confirm(cycle, grantor).statusCode(HTTP_OK)
@@ -51,6 +60,44 @@ class DelegationRecertificationApiIT {
 
     @Test
     @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `the edge's principal name on a token issued to another client cannot confirm (#12448)`() {
+        val cycle = seedCycle()
+        confirm(cycle, grantor).statusCode(HTTP_FORBIDDEN)
+        assertThat(cycleState(cycle)).containsExactly("PENDING", null)
+        assertThat(eventCount(cycle)).isZero()
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "alice"),
+        ],
+    )
+    fun `a human token issued through the edge client cannot confirm (#12448)`() {
+        val cycle = seedCycle()
+        confirm(cycle, grantor).statusCode(HTTP_FORBIDDEN)
+        assertThat(cycleState(cycle)).containsExactly("PENDING", null)
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
     fun `missing and mismatched customer scope are rejected before confirmation or cache replay`() {
         val cycle = seedCycle()
         confirm(cycle, null).statusCode(HTTP_FORBIDDEN)
@@ -83,6 +130,13 @@ class DelegationRecertificationApiIT {
 
     @Test
     @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
     fun `pending inbox excludes obsolete cycles without deleting their evidence`() {
         val current = seedCycle()
         val revoked = seedCycle(status = "REVOKED")

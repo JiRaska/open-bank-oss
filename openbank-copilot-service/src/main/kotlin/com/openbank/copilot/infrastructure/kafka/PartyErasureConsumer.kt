@@ -78,7 +78,13 @@ class PartyErasureConsumer {
         val node = try {
             objectMapper.readTree(payload)
         } catch (e: Exception) {
-            log.errorf(e, "[party-events-in] Failed to parse JSON payload: %.200s", payload)
+            // Never the payload, and never `e` either: a Jackson parse error embeds a payload excerpt in
+            // its message, and a party event carries PII. Length + exception class is enough to triage.
+            log.errorf(
+                "[party-events-in] Failed to parse JSON payload (%d chars): %s",
+                payload.length,
+                e.javaClass.name,
+            )
             return
         }
 
@@ -86,7 +92,7 @@ class PartyErasureConsumer {
 
         val partyId = runCatching { UUID.fromString(node.path("partyId").asText()) }.getOrNull()
         if (partyId == null) {
-            log.warnf("[party-events-in] PARTY_ERASED without a valid partyId, skipping: %.200s", payload)
+            log.warnf("[party-events-in] PARTY_ERASED without a valid partyId, skipping (%d chars)", payload.length)
             return
         }
 

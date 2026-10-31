@@ -33,6 +33,12 @@ The build uses the `openbank.quarkus-service` convention plugin (ADR-0049 D1). K
 
 Management endpoints live on the dedicated **management port 8085** (`quarkus.management.root-path: /q`); the business API is on **8101**.
 
+### API authentication on the production listeners
+
+The production HTTPS listener requires a trusted client certificate for the TLS connection. For every `/api/*` request, both that listener and the plain HTTP listener require an OIDC bearer token: a certificate alone cannot establish the API principal. A certificate-only request must receive 401, while a valid bearer token proceeds to the existing role and authorization checks. The listener parity integration test exercises both paths with production listener settings.
+
+This listener rule does not itself enable OPA enforcement. `AUTHZ_ENFORCE` defaults to `false` in `application.yaml`; the deployment must explicitly set it to `true` for OPA decisions to block requests. The four-eyes enforcement switch is independent and also defaults to `false`.
+
 ## Configuration
 
 | Env var | Default | Purpose |
@@ -87,6 +93,8 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 Treat as a P1 accounting-integrity incident. Per-currency balancing (ADR-0025) is enforced at post time, so a non-zero trial balance points to data corruption or a partition-routing miss. Freeze postings, snapshot the journal, and reconcile against `balance-service` before any correcting entry. Corrections are reversal-only — never edit a posted entry.
 
+The synthetic-dimension HTTP integration test now supplies an OIDC `azp`, subject and service-account username for its trusted canary instead of relying on a test role alone. It checks the journal row's synthetic flag and the default, real-only, synthetic-only and all-population trial balances. This is a local test identity and does not establish that the deployed identity provider has issued the same claims or that live trial-balance filtering has been exercised.
+
 ### FX revaluation missed / re-run
 
 The daily run is automated by `FxRevaluationScheduler`. To re-run for a business day: `POST /api/v1/ledger/fx-revaluation?date=YYYY-MM-DD` (operator). It is idempotent (`fx-reval-{date}`) — one entry per day, same-day re-run is a no-op. A missing ČNB rate for a currency skips only that leg (logged WARN).
@@ -110,3 +118,41 @@ The daily run is automated by `FxRevaluationScheduler`. To re-run for a business
 ## Deploy / release
 
 Per-service path-scoped CI (only changed services build). Release axis is owned by **release-please** from Conventional Commits — do not hand-edit `version.txt`/`CHANGELOG.md` (current release `1.2.0`). CD: ArgoCD tracks the deployment manifest image tag. Always take `--ours` for image-tag merge conflicts in GitOps.
+
+
+### FINREP Pact fixture
+
+Broker FINREP verification derives the reporting month from the selected contract requests and uses a dedicated test database. Fixture reset refuses foreign closed-period IDs and retains the immutable evidence trigger. Regression tests cover historical June 2026 and current June 2000 fixtures in both replay orders, including rejection of evidence DELETE. Production frozen-evidence validation is unchanged.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Switching the Kafka producer off per instance
+
+`mp.messaging.outgoing.ledger-events-out.enabled` is backed by the `LEDGER_EVENTS_OUT_ENABLED` environment variable (default `true`). An instance with no Kafka bus, such as the pension co-instance, sets it to `false`, so no producer is built at boot; the `@Channel` emitter still injects. `lazy-client=true` does not achieve this, because the producer is still created at boot.
+
+## Day-close participants: authorization (#13167)
+
+`PUT /api/v1/ledger/accounting-days/{date}/participants/{participant}` authorizes as its own action,
+`ledger.close.participate`, never `ledger.create`. `ledger_rest_ext.rego: close_participant_accounts`
+maps each machine account to the ONE participant it may report for (interest, lending, billing, treasury); the use case
+then checks the verified caller against `openbank.ledger.close.participants.<name>.principal`. Adding a
+participant is therefore three edits that `check-close-participants.py` keeps in step: `rules.yaml:
+close_participants`, the ledger `application.yaml` map, and the rego map entry (then regenerate the
+bundles). Declared participants today: interest, lending, billing, treasury. Mode: `shadow`.
+
+Billing joins as a close participant for its monthly cycle. It reports on its own identity, the
+Keycloak client `openbank-billing` (`service-account-openbank-billing`), not on the shared
+`openbank-services` principal its journals post with. The scoped `ledger.close.participate` grant for
+`participants/billing` is that account's only ledger grant; it holds no `ledger.create` of its own.
+
+Treasury joins as a close participant for its hourly deal accrual and the day's deal journals. It
+reports on the identity it already posts journals with, the Keycloak client `openbank-treasury`
+(`service-account-openbank-treasury`). Its map entry adds `ledger.close.participate` for
+`participants/treasury` only; its existing `ledger.create` and nostro read grants are unchanged, and it
+cannot report for any other participant.

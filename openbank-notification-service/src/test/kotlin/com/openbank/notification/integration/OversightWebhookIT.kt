@@ -121,6 +121,8 @@ class OversightWebhookIT {
             return mapOf(
                 "openbank.notification.webhook.slack.enabled" to "true",
                 "openbank.notification.webhook.slack.url" to url,
+                // ADR-0320 P1: the WireMock host must be on the egress allow-list.
+                "openbank.notification.egress.allowed-hosts" to "localhost:${URI(url).port};http;private",
                 "SLACK_WEBHOOK_URL" to url,
             )
         }
@@ -145,6 +147,8 @@ class OversightWebhookIT {
             return mapOf(
                 "openbank.notification.webhook.slack.enabled" to "true",
                 "openbank.notification.webhook.slack.url" to url,
+                // ADR-0320 P1: the WireMock host must be on the egress allow-list.
+                "openbank.notification.egress.allowed-hosts" to "localhost:${URI(url).port};http;private",
             )
         }
     }

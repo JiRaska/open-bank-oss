@@ -1,0 +1,70 @@
+{
+  "jurisdiction": "CZ",
+  "productLine": "DIP",
+  "version": 1,
+  "effectiveFrom": "2024-01-01",
+  "currency": "CZK",
+  "legalReview": {
+    "status": "REQUIRES_LEGAL_REVIEW",
+    "note": "Reference values modelled on the Income Tax Act long-term investment product provisions; the permitted provider types in particular must be confirmed by legal review."
+  },
+  "eligibility": {
+    "minAge": 18,
+    "minorsWithGuardian": false,
+    "residency": {
+      "required": false
+    }
+  },
+  "permittedProviderTypes": ["BANK", "INVESTMENT_FIRM", "MANAGEMENT_COMPANY", "PENSION_COMPANY", "INSURANCE_COMPANY"],
+  "incentives": [
+    {
+      "id": "income-tax-deduction",
+      "type": "TAX_RELIEF",
+      "threshold": 0,
+      "annualCap": 48000,
+      "sharedCapGroup": "retirement-products-deduction",
+      "indicativeTaxRate": 0.15,
+      "claimChannel": "TAX_RETURN",
+      "clawback": { "mode": "RECAPTURE_YEARS", "recaptureYears": 10 }
+    },
+    {
+      "id": "employer-contribution-exemption",
+      "type": "EMPLOYER_EXEMPTION",
+      "annualCap": 50000,
+      "sharedCapGroup": "employer-retirement-exemption",
+      "claimChannel": "PAYROLL"
+    }
+  ],
+  "payout": {
+    "minAge": 60,
+    "minDurationMonths": 120,
+    "allowedForms": ["LUMP_SUM", "PHASED_WITHDRAWAL", "SURRENDER"],
+    "earlyWithdrawalAllowed": true
+  },
+  "transfer": {
+    "allowed": true,
+    "deadlineDays": 30,
+    "carriesIncentiveHistory": true
+  },
+  "exit": {
+    "termination": { "noticePeriodDays": 30, "quoteValidityDays": 7, "feeRate": 0, "fixedFee": 0 },
+    "tax": {
+      "byForm": {
+        "LUMP_SUM": { "base": "NONE" },
+        "PHASED_WITHDRAWAL": { "base": "NONE" }
+      },
+      "deductionRecapture": { "rate": 0.15, "years": 10 },
+      "employerExemptRecapture": { "rate": 0.15, "years": 10 }
+    },
+    "phasedWithdrawal": { "minMonths": 12, "maxMonths": 360 },
+    "death": { "estateWhenNoBeneficiary": true, "clawbackOnDeath": false, "beneficiaryTax": { "base": "NONE" } }
+  },
+  "contributionLimits": {
+    "minMonthly": 1,
+    "allowedFrequencies": ["MONTHLY", "QUARTERLY", "ANNUALLY"],
+    "minDayOfMonth": 1,
+    "maxDayOfMonth": 28,
+    "changeNoticeDays": 3,
+    "maxStartAheadDays": 366
+  }
+}

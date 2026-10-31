@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.36.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.36.0...account-service-v0.36.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **account:** preserve cursor order across account types ([#14233](https://github.com/JiRaska/open-bank-oss/issues/14233)) ([ce83d41](https://github.com/JiRaska/open-bank-oss/commit/ce83d41d60edf8991e2f88318738aee2c1e44e7f))
+
+
+### Security
+
+* **account:** enforce bearer while preserving public metadata ([#14262](https://github.com/JiRaska/open-bank-oss/issues/14262)) ([3a3a2ce](https://github.com/JiRaska/open-bank-oss/commit/3a3a2ced5b4aaf19ca84430f6c5481b4ba7e378c))
+
+## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.35.1...account-service-v0.36.0) (2026-10-29)
+
+
+### Features
+
+* **account:** pin the published product revision at account opening (ADR-0341, ADR-0352 phase 3) ([#13869](https://github.com/JiRaska/open-bank-oss/issues/13869)) ([9e34827](https://github.com/JiRaska/open-bank-oss/commit/9e348271857e1b6c63942c46496c7630ab71de37))
+
+## [0.35.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.35.0...account-service-v0.35.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **account:** preserve booking proof across transaction client consumers ([#13222](https://github.com/JiRaska/open-bank-oss/issues/13222)) ([427ce5a](https://github.com/JiRaska/open-bank-oss/commit/427ce5a055719d8e5f0cc805f44b581b9bf5c55f))
+
+## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.34.3...account-service-v0.35.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
+## [0.34.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.34.2...account-service-v0.34.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.34.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.34.1...account-service-v0.34.2) (2026-10-12)
+
+
+### Security
+
+* **account:** authenticate the API by bearer only on the mTLS listener ([#12528](https://github.com/JiRaska/open-bank-oss/issues/12528)) ([d45b332](https://github.com/JiRaska/open-bank-oss/commit/d45b3322edb6c06f6cd8b27981ef78c531a277d9))
+
+## [0.34.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.34.0...account-service-v0.34.1) (2026-10-11)
+
+
+### Security
+
+* **sca:** scoped downstream access for pension-service (ADR-0335) ([#12419](https://github.com/JiRaska/open-bank-oss/issues/12419)) ([21bb0e9](https://github.com/JiRaska/open-bank-oss/commit/21bb0e9d2a9e44394ec9bb1d6eac8ca7f80556a0))
+
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.33.2...account-service-v0.34.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
+## [0.33.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.33.1...account-service-v0.33.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
 ## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.33.0...account-service-v0.33.1) (2026-10-03)
 
 

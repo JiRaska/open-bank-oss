@@ -7,13 +7,10 @@ package com.openbank.notification.domain.model
 import java.time.Instant
 import java.util.UUID
 
-// SMS and IN_APP were declared but never implemented — the dispatch `when` in NotificationConsumer
-// only logged and returned success for either, so a caller requesting them got silent non-delivery
-// with no error (issue #2372). Removed rather than fixed: IN_APP needs a terminal status transition
-// and a wake-signal design, SMS needs a real provider port — both are real builds, not something
-// this narrowing should speculatively half-do.
-enum class NotificationChannel { EMAIL, PUSH }
-enum class NotificationStatus { PENDING, SENT, FAILED, BOUNCED }
+// INBOX is a committed, customer-visible row with its own VISIBLE outcome. It does not claim a
+// push handoff. SMS still has no provider and therefore is not an accepted channel.
+enum class NotificationChannel { EMAIL, PUSH, INBOX }
+enum class NotificationStatus { PENDING, SENT, FAILED, BOUNCED, VISIBLE }
 
 /**
  * A message template and — inseparably — the complete set of variables it accepts.
@@ -38,6 +35,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
     ACCOUNT_FROZEN(setOf("accountNumber", "reason")),
     TRANSACTION_COMPLETED(setOf("amount", "currency")),
     TRANSACTION_FAILED(setOf("amount", "currency", "reason")),
+    LOW_BALANCE_ALERT(emptySet()),
     KYC_APPROVED(emptySet()),
     KYC_REJECTED(setOf("reason")),
     CONSENT_GRANTED(setOf("scope")),
@@ -127,6 +125,29 @@ enum class NotificationTemplate(val variables: Set<String>) {
 
     /** A fully approved payment was refused by the payment rail at release (PAYMENT_RELEASE_FAILED). */
     PAYMENT_RELEASE_FAILED(setOf("entityName", "amountFormatted", "payeeName", "reason")),
+
+    // ── Pension participant notices (ADR-0334, #12392), produced by `openbank-pension-service` on
+    // `openbank.notification.requests`. Copy is rendered in Czech or English by PensionCopy. The
+    // variable sets mirror pension-service's ParticipantNotificationKind exactly; only the last four
+    // IBAN characters (`accountLast4`) ever travel.
+
+    /** A payout account change was signed and is held until `effectiveFrom`. SECURITY: never muted. */
+    PENSION_PAYOUT_ACCOUNT_CHANGED(setOf("contractId", "accountLast4", "effectiveFrom")),
+
+    /** A payout was handed to the payment rail. */
+    PENSION_PAYOUT_EXECUTED(setOf("contractId", "purpose", "amount", "currency", "accountLast4")),
+
+    /** An investment-strategy election takes effect on `effectiveFrom`. */
+    PENSION_STRATEGY_CHANGE_EFFECTIVE(setOf("contractId", "strategyCode", "effectiveFrom")),
+
+    /** A provider transfer reached a status the participant must know about. */
+    PENSION_TRANSFER_STATUS(setOf("contractId", "direction", "status")),
+
+    /** A state incentive was received and credited. */
+    PENSION_INCENTIVE_RECEIVED(setOf("contractId", "period", "amount", "currency")),
+
+    /** A received state incentive was returned to the agency. */
+    PENSION_INCENTIVE_RETURNED(setOf("contractId", "period", "amount", "currency")),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
@@ -154,10 +175,14 @@ enum class NotificationTemplate(val variables: Set<String>) {
             // Same class as TRANSACTION_FAILED: an approved payment did NOT leave, and the people
             // who approved it believe it did. The fallback carries no body, only the prompt.
             PAYMENT_RELEASE_FAILED,
+            // A payout-account change is the account-takeover signal for a pension: a missing device
+            // must not silence it (the fallback carries no body, only the prompt).
+            PENSION_PAYOUT_ACCOUNT_CHANGED,
             -> NotificationChannel.EMAIL
             ACCOUNT_OPENED,
             ACCOUNT_CLOSED,
             TRANSACTION_COMPLETED,
+            LOW_BALANCE_ALERT,
             KYC_APPROVED,
             CONSENT_GRANTED,
             CONSENT_REVOKED,
@@ -178,6 +203,11 @@ enum class NotificationTemplate(val variables: Set<String>) {
             APPROVAL_COMPLETED,
             APPROVAL_REJECTED,
             APPROVAL_EXPIRED,
+            PENSION_PAYOUT_EXECUTED,
+            PENSION_STRATEGY_CHANGE_EFFECTIVE,
+            PENSION_TRANSFER_STATUS,
+            PENSION_INCENTIVE_RECEIVED,
+            PENSION_INCENTIVE_RETURNED,
             -> null
         }
 
@@ -198,17 +228,22 @@ enum class NotificationTemplate(val variables: Set<String>) {
             // A signature request is an authorisation step over company money, like SCA_APPROVAL:
             // muting it would silently stall every payment that needs this person's signature.
             APPROVAL_REQUIRED,
+            // Redirecting where pension money is paid is the takeover path; muting it would hide it.
+            PENSION_PAYOUT_ACCOUNT_CHANGED,
             -> NotificationCategory.SECURITY
-            TRANSACTION_COMPLETED, TRANSACTION_FAILED,
+            TRANSACTION_COMPLETED, TRANSACTION_FAILED, LOW_BALANCE_ALERT,
             APPROVAL_COMPLETED, APPROVAL_REJECTED, APPROVAL_EXPIRED, PAYMENT_RELEASE_FAILED,
+            PENSION_PAYOUT_EXECUTED, PENSION_INCENTIVE_RECEIVED, PENSION_INCENTIVE_RETURNED,
             -> NotificationCategory.PAYMENTS
-            ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT
+            ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME,
+            PENSION_STRATEGY_CHANGE_EFFECTIVE, PENSION_TRANSFER_STATUS,
+            -> NotificationCategory.PRODUCT
             MARKETING_PRODUCT_OFFER -> NotificationCategory.MARKETING
         }
 }
 
 /**
- * Language a template is rendered in. Only the approval templates (#10281) carry Czech copy today;
+ * Language a template is rendered in. The approval (#10281) and pension (#12392) templates carry Czech copy;
  * every older template has English copy only and ignores this. `null` on a request = [EN], which is
  * what every producer that predates the field has always received.
  */

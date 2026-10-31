@@ -12,12 +12,17 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.productcatalog.domain.ProductIds
+import com.openbank.productcatalog.domain.ProductSeed
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
@@ -53,12 +58,16 @@ import org.junit.jupiter.api.extension.ExtendWith
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_products")],
+    restrictToAnnotatedClass = true,
 )
-@TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
+@TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR", "CATALOG_SCOPE_READ"])
 @Provider("openbank-product-catalog")
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class ProductCatalogPactProviderVerificationTest {
+
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
 
     @Inject
     lateinit var catalogFixtures: CatalogPactProviderFixtures
@@ -74,7 +83,9 @@ class ProductCatalogPactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        context?.verifyInteraction()
+        withCatalogPactConsumerIdentity(testIdentityAssociation, context?.consumer?.name) {
+            context?.verifyInteraction()
+        }
     }
 
     /**
@@ -95,28 +106,69 @@ class ProductCatalogPactProviderVerificationTest {
      * catalogue already satisfies "no product exists with this code".
      */
     @State("no product exists with code NO_SUCH_CARD_PRODUCT")
-    fun unknownProductCodeIsAbsent() {
-        // Intentionally empty — see the KDoc above.
+    fun unknownProductCodeNotFound() {
+        // Assert the negative provider state before Pact replays its own 404 interaction.
+        io.restassured.RestAssured.given().get("/api/v1/products/by-code/NO_SUCH_CARD_PRODUCT")
+            .then().statusCode(404)
     }
 
-    /**
-     * No seeding: `CURRENT_PERSONAL` (prod-003) carries four seeded fees in `ProductSeed` on
-     * every boot (`ProductCatalogFeesPactConsumerTest`, ADR-0264 Phase A). Same rationale as
-     * [cardEnabledProductIsSeeded] above — seeding again here would fork a second source of truth
-     * for a product the service already owns.
-     */
+    /** Assert the real seeded schedule; never replace it with consumer-shaped fixture data. */
     @State("a product with fees exists for code CURRENT_PERSONAL")
     fun feeBearingProductIsSeeded() {
-        // Intentionally empty — see the KDoc above.
+        val product = ProductSeed.products.single { it.code == "CURRENT_PERSONAL" }
+        val monthlyFee = product.fees.single { it.name == "Monthly Fee" }
+        val id = ProductIds.canonicalId(product.id)
+        given().accept("application/json").get("/api/v1/products/$id/fees")
+            .then().statusCode(200)
+            .body("find { it.name == 'Monthly Fee' }.type", equalTo(monthlyFee.type))
+            .body("find { it.name == 'Monthly Fee' }.amount", equalTo(monthlyFee.amount.toFloat()))
+            .body("find { it.name == 'Monthly Fee' }.currency", equalTo(monthlyFee.currency))
+            .body("find { it.name == 'Monthly Fee' }.waivable", equalTo(monthlyFee.waivable))
     }
+
+    @State("a published v1-projected deposit revision exists for billing")
+    fun publishedLegacyDepositRevisionExists() = catalogFixtures.publishedLegacyDepositRevisionExists()
 
     /**
      * No seeding: the pact-pinned id is a random UUID never assigned by `ProductSeed`
      * (`ProductCatalogLookupPactConsumerTest`, ADR-0264 Phase A).
      */
     @State("no product exists with id 00000000-0000-0000-0000-000000000fff")
-    fun unknownProductIdIsAbsent() {
+    fun unknownProductIdNotFound() {
         // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * No seeding: `ProductCatalogSeeder` persists the whole canonical catalogue from `ProductSeed`
+     * on first boot, so `list()` already returns products (`AgentCatalogReadPactConsumerTest`,
+     * the assistant's `list_products` tool). The list is a global array, so the consumer pact
+     * pins per-row shape, never count or order — nothing here needs an isolated aggregate.
+     */
+    @State("the canonical catalog products are seeded")
+    fun canonicalCatalogProductsAreSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * No seeding: `prod-001` is `SAVINGS_STANDARD` in `ProductSeed` on every boot — ACTIVE, with
+     * two seeded fees (`AgentCatalogReadPactConsumerTest`, the assistant's `get_product` /
+     * `get_product_fees` tools). Same rationale as [cardEnabledProductIsSeeded] above — reseeding
+     * would fork a second source of truth for a product the service already owns.
+     */
+    @State("a product exists with id prod-001")
+    fun pactProductIsSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * No seeding: the pact-pinned id is a random UUID never assigned by `ProductSeed`
+     * (`AgentCatalogReadPactConsumerTest`, the assistant's `get_product` 404 leg).
+     */
+    @State("no product exists with id 00000000-0000-0000-0000-000000000eee")
+    fun agentUnknownProductIdNotFound() {
+        // Assert the negative provider state before Pact replays its own 404 interaction.
+        io.restassured.RestAssured.given().get("/api/v1/products/00000000-0000-0000-0000-000000000eee")
+            .then().statusCode(404)
     }
 
     @State("trusted insurance term-life schema version 1 is installed")
@@ -144,4 +196,7 @@ class ProductCatalogPactProviderVerificationTest {
 
     @State("a published priced loan revision exists for lending originations")
     fun publishedPricedLoanRevisionExists() = catalogFixtures.publishedPricedLoanRevisionExists()
+
+    @State("a published DIP strategy revision has separate legal and product approvals")
+    fun publishedPensionStrategyApprovalsExist() = catalogFixtures.publishedPensionStrategyApprovalsExist()
 }

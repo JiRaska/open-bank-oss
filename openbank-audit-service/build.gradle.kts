@@ -7,22 +7,13 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.cache)
     implementation(libs.kotlinx.coroutines.core)
@@ -34,11 +25,11 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
     testImplementation(project(":openbank-libs-testing"))
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
+    // Provider-side verification (ADR-0063 git-pact): AuditPactProviderVerificationTest replays the
+    // consumer pacts in pacts/ that name openbank-audit-service (#11900, lending's evidence read).
+    testImplementation(libs.pact.provider)
 
     // #6035: AuditSubscriptionSurfaceIT pushes records INTO the `audit-events-in` channel rather
     // than calling AuditConsumer directly — a direct call cannot tell a registered channel from an
@@ -54,6 +45,13 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
+}
+
+// The production-listener parity profile needs a separate Quarkus boot from the
+// enforced-policy/Pact profiles. The complete suite exhausts Gradle's 512 MiB test default.
+// Bound only this test JVM; production heap and provider-Pact configuration are unchanged.
+tasks.named<Test>("test") {
+    maxHeapSize = "1g"
 }
 
 kover {

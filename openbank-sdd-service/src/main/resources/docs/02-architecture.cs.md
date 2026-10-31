@@ -140,3 +140,11 @@ Dispatcher běží na Vert.x event loopu (vrací `Uni<Void>`), takže reaktivní
 3. **Čistá doména, žádné wall-clock hodiny** — životní cyklus a aritmetika refundu berou explicitní `asOf`/clock seam; žádná vzdálená volání uvnitř transakce.
 4. **Transakční outbox** — zápis mandátu a vložení události sdílí jednu transakci; asynchronní doručení přes dispatcher.
 5. **v1 nikdy nehýbe penězi** — ACCEPT emituje událost pro navazující zaúčtovací cestu; nevratné odepsání/refund je delegováno.
+
+## Omezení iniciátoři mandátů (ADR-0335 D6)
+
+`ScopedMandateService` omezuje pension-service na mandáty, jejichž `creditorIdentifier` je jeho
+nakonfigurovaný SEPA identifikátor věřitele (`OPENBANK_SDD_SCOPED_INITIATORS_PENSION_CREDITOR_IDENTIFIER`).
+Musí uvést `partyId` subjektu a projekce vlastnictví z account-service, volaná přes mTLS, musí potvrdit,
+že debetní IBAN vlastní a má aktivní tato strana a že označuje mandátovaný účet. Pension smí rušit jen
+mandáty svého věřitele. Každé odmítnutí je 403 dřív, než se cokoli uloží.

@@ -26,6 +26,11 @@ class OriginationTimersWorkflowTest {
         private const val TASK_QUEUE = "test-origination-timers"
         private const val OFFER_DAYS = 30L
         private const val DOCS_DAYS = 14L
+
+        // Mirrors OriginationTimersWorkflowImpl's workflow-side constants — the test must move
+        // when the workflow does, or it tests a wait the workflow never arms.
+        private const val KYC_VALIDITY_DAYS = 30L
+        private const val FOUR_EYES_SLA_DAYS = 5L
     }
 
     @BeforeEach
@@ -77,6 +82,54 @@ class OriginationTimersWorkflowTest {
         env.sleep(java.time.Duration.ofDays(OFFER_DAYS + 1))
 
         verify(exactly = 1) { activities.expireIfInState(applicationId, OriginationState.OFFERED.name) }
+    }
+
+    @Test
+    fun `KYC validity expiry fires while still KYC_PENDING`() {
+        val applicationId = UUID.randomUUID()
+        val stub = startWorkflow(applicationId)
+        stub.stateEntered(OriginationState.KYC_PENDING.name, null)
+        env.sleep(java.time.Duration.ofDays(KYC_VALIDITY_DAYS + 1))
+
+        verify(exactly = 1) { activities.expireIfInState(applicationId, OriginationState.KYC_PENDING.name) }
+        verify(exactly = 0) { activities.escalateFourEyesSla(any()) }
+    }
+
+    @Test
+    fun `four-eyes SLA escalates while the decision is still pending`() {
+        val applicationId = UUID.randomUUID()
+        val stub = startWorkflow(applicationId)
+        stub.stateEntered(OriginationState.FOUR_EYES.name, null)
+        env.sleep(java.time.Duration.ofDays(FOUR_EYES_SLA_DAYS + 1))
+
+        verify(exactly = 1) { activities.escalateFourEyesSla(applicationId) }
+        // Escalation is not a decision: nothing may expire or advance as a side effect.
+        verify(exactly = 0) { activities.expireIfInState(any(), any()) }
+        verify(exactly = 0) { activities.advanceIfInState(any(), any()) }
+    }
+
+    @Test
+    fun `a decision before the four-eyes SLA invalidates the escalation timer`() {
+        val applicationId = UUID.randomUUID()
+        val stub = startWorkflow(applicationId)
+        stub.stateEntered(OriginationState.FOUR_EYES.name, null)
+        env.sleep(java.time.Duration.ofDays(FOUR_EYES_SLA_DAYS - 1))
+        stub.stateEntered(OriginationState.OFFERED.name, null)
+        env.sleep(java.time.Duration.ofDays(FOUR_EYES_SLA_DAYS + 10))
+
+        verify(exactly = 0) { activities.escalateFourEyesSla(any()) }
+    }
+
+    @Test
+    fun `KYC progress before the validity elapse invalidates the expiry timer`() {
+        val applicationId = UUID.randomUUID()
+        val stub = startWorkflow(applicationId)
+        stub.stateEntered(OriginationState.KYC_PENDING.name, null)
+        env.sleep(java.time.Duration.ofDays(KYC_VALIDITY_DAYS - 1))
+        stub.stateEntered(OriginationState.ASSESSMENT.name, null)
+        env.sleep(java.time.Duration.ofDays(KYC_VALIDITY_DAYS + 10))
+
+        verify(exactly = 0) { activities.expireIfInState(any(), any()) }
     }
 
     @Test

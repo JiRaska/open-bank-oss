@@ -20,30 +20,28 @@ import com.openbank.notification.application.port.out.OversightWebhookPublisher
 import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.application.port.out.PushMetricsPort
 import com.openbank.notification.application.port.out.PushSender
-import com.openbank.notification.domain.ApprovalCopy
-import com.openbank.notification.domain.HtmlEscape
+import com.openbank.notification.domain.NotificationCopyCatalog
 import com.openbank.notification.domain.RecipientAddress
 import com.openbank.notification.domain.model.EmailSendOutcome
+import com.openbank.notification.domain.model.ManagedNotificationTemplate
 import com.openbank.notification.domain.model.MobileDeepLink
 import com.openbank.notification.domain.model.NotificationCategory
 import com.openbank.notification.domain.model.NotificationChannel
+import com.openbank.notification.domain.model.NotificationLanguage
 import com.openbank.notification.domain.model.NotificationOutcome
 import com.openbank.notification.domain.model.NotificationOutcomeEvent
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationStatus
-import com.openbank.notification.domain.model.NotificationTemplate
-import com.openbank.notification.domain.model.NotificationTemplate.APPROVAL_COMPLETED
-import com.openbank.notification.domain.model.NotificationTemplate.APPROVAL_EXPIRED
-import com.openbank.notification.domain.model.NotificationTemplate.APPROVAL_REJECTED
-import com.openbank.notification.domain.model.NotificationTemplate.APPROVAL_REQUIRED
-import com.openbank.notification.domain.model.NotificationTemplate.PAYMENT_RELEASE_FAILED
 import com.openbank.notification.domain.model.PushPlatform
 import com.openbank.notification.domain.model.PushResult
 import com.openbank.notification.domain.model.PushSendOutcome
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.client.PartyContactClient
 import com.openbank.notification.infrastructure.client.PartyMergeResolver
+import com.openbank.notification.infrastructure.contact.MarketingContactReservationStore
+import com.openbank.notification.infrastructure.contact.MarketingReservationDecision
 import com.openbank.notification.infrastructure.persistence.NotificationDeduplication
+import com.openbank.notification.infrastructure.persistence.PgManagedTemplateStore
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
@@ -73,7 +71,7 @@ import java.util.function.Function
 import java.util.function.Supplier
 
 @ApplicationScoped
-@Suppress("TooManyFunctions") // one delivery path per channel + shared helpers; grows with channels
+@Suppress("TooManyFunctions", "LargeClass") // channel delivery and its shared guards remain one dispatch owner
 class NotificationConsumer @Inject constructor(
     /** See the KDoc on the `mailerMocked` declaration site below (issue #4737). */
     @ConfigProperty(name = "quarkus.mailer.mock", defaultValue = "false")
@@ -114,6 +112,7 @@ class NotificationConsumer @Inject constructor(
         fun marketingScopeFor(channel: NotificationChannel): String = when (channel) {
             NotificationChannel.EMAIL -> "MARKETING_COMMS_EMAIL"
             NotificationChannel.PUSH -> "MARKETING_COMMS_PUSH"
+            NotificationChannel.INBOX -> error("marketing inbox requires a separate impression policy")
         }
 
         /**
@@ -135,7 +134,7 @@ class NotificationConsumer @Inject constructor(
         }
 
         /**
-         * Terminal status of one EMAIL send from its three-state [EmailSendOutcome] (issue #4737).
+         * Terminal status of one EMAIL handoff, or null while provider acceptance is uncertain.
          *
          * Visible for tests, and deliberately a pure function of one value: like [pushOutcomeOf],
          * this mapping *is* the defect. The previous form asked only "did the `Uni` fail?", and a
@@ -149,17 +148,17 @@ class NotificationConsumer @Inject constructor(
          * map to SENT — that is the whole bug, and the sandbox's mock is deliberate (its gitops
          * manifest says so), so the record's honesty has to hold independently of the config.
          */
-        fun emailOutcomeOf(outcome: EmailSendOutcome): NotificationOutcome = when (outcome) {
+        fun emailOutcomeOf(outcome: EmailSendOutcome): NotificationOutcome? = when (outcome) {
             EmailSendOutcome.ACCEPTED -> NotificationOutcome.SENT
             EmailSendOutcome.MOCKED -> NotificationOutcome.SUPPRESSED
-            EmailSendOutcome.FAILED -> NotificationOutcome.FAILED
+            EmailSendOutcome.IN_DOUBT -> null
         }
 
-        /** Reason code accompanying [emailOutcomeOf]; null exactly when the mailer accepted. */
+        /** A terminal reason; unresolved handoffs have no terminal outcome event. */
         fun emailReasonOf(outcome: EmailSendOutcome): String? = when (outcome) {
             EmailSendOutcome.ACCEPTED -> null
             EmailSendOutcome.MOCKED -> NotificationOutcomeEvent.REASON_MAILER_MOCKED
-            EmailSendOutcome.FAILED -> NotificationOutcomeEvent.REASON_MAILER_REFUSED
+            EmailSendOutcome.IN_DOUBT -> null
         }
 
         /** Reason code accompanying [pushOutcomeOf]; null exactly when something was accepted. */
@@ -225,6 +224,10 @@ class NotificationConsumer @Inject constructor(
 
     @Inject lateinit var contactGate: ContactPolicyGate
 
+    @Inject lateinit var marketingReservations: MarketingContactReservationStore
+
+    @Inject lateinit var managedTemplates: PgManagedTemplateStore
+
     /** Resolves the EMAIL envelope address from `partyId` (issue #3581) — see [resolveEmailRecipient]. */
     @Inject
     @RestClient
@@ -278,8 +281,9 @@ class NotificationConsumer @Inject constructor(
         val req = try {
             objectMapper.readValue(payload, NotificationRequest::class.java)
         } catch (e: Exception) {
-            // Un-parseable (poison) payload: log and ack so one bad record can't wedge the partition.
-            log.errorf(e, "Failed to parse notification payload: %s", payload)
+            // Un-parseable (poison) payload: ack so one bad record cannot wedge the partition.
+            // Raw requests and exception messages can contain customer values; log neither.
+            log.errorf("Failed to parse notification request (%s); poison record acknowledged", e.javaClass.simpleName)
             return Uni.createFrom().voidItem()
         }
         // Closed variable schema (ADR-0176 D1, issue #1325). A key the template does not declare
@@ -308,6 +312,14 @@ class NotificationConsumer @Inject constructor(
             log.errorf("Rejected notification with non-bank mobile deep-link for template=%s", req.template.name)
             return Uni.createFrom().voidItem()
         }
+        val invalidInboxRequest = req.template.category == NotificationCategory.MARKETING ||
+            req.recipient != req.partyId.toString() ||
+            req.deduplicationKey == null
+        if (req.channel == NotificationChannel.INBOX && invalidInboxRequest) {
+            // The producer can repair a dead-lettered request. Acknowledging it here would erase
+            // a required customer notice without a row or outcome.
+            return Uni.createFrom().failure(IllegalArgumentException("invalid inbox notification request"))
+        }
         return dispatch(req)
             .onFailure().invoke { e ->
                 // #5745 (sweep of #5698): a processing failure (e.g. transient DB error) used to be
@@ -323,7 +335,7 @@ class NotificationConsumer @Inject constructor(
                 // would insert a second row and could re-send — trading a lost notification for a
                 // duplicated one. A single attempt, then rethrow, hands the decision to the
                 // connector's own failure-strategy (dead-letter-queue, application.yaml) instead.
-                log.errorf(e, "Failed to process notification — rethrowing so it is not acked: %s", payload)
+                log.errorf("Failed to process notification template=%s; record not acknowledged", req.template.name)
             }
     }
 
@@ -342,14 +354,25 @@ class NotificationConsumer @Inject constructor(
         }
 
     private fun dispatchResolved(req: NotificationRequest): Uni<Void> {
-        // #10281: approval templates carry Czech copy and render through ApprovalCopy in the request language.
-        val (subject, body) = ApprovalCopy.renderOrNull(req.template, req.variables, req.language)
-            ?: renderTemplate(req.template, req.variables)
+        if (req.template !in ManagedNotificationTemplate.EDITABLE_TEMPLATES) {
+            val (subject, body) = NotificationCopyCatalog.render(req.template, req.variables, req.language)
+            return dispatchRendered(req, subject, body, null)
+        }
+        return managedTemplates.latestPublished(req.template, req.language ?: NotificationLanguage.EN, req.channel)
+            .chain { copy ->
+                val (subject, body) = copy?.render(req.variables)
+                    ?: NotificationCopyCatalog.render(req.template, req.variables, req.language)
+                dispatchRendered(req, subject, body, copy?.revision)
+            }
+    }
+
+    private fun dispatchRendered(req: NotificationRequest, subject: String, body: String, revision: Long?): Uni<Void> {
         val entity = NotificationEntity().also {
             it.notificationId = Ids.newId()
             it.partyId = req.partyId
             it.channel = req.channel.name
             it.template = req.template.name
+            it.templateRevision = revision
             it.recipient = req.recipient
             it.subject = subject
             // Secret-bearing templates persist a placeholder; `body` below still carries the
@@ -359,6 +382,11 @@ class NotificationConsumer @Inject constructor(
             it.deduplicationKey = req.deduplicationKey
             it.status = "PENDING"
             it.createdAt = Instant.now(clock)
+        }
+        if (req.channel ==
+            NotificationChannel.INBOX
+        ) {
+            return persistInbox(req, entity).call { _ -> publishOversight(req) }
         }
         return persistOnce(entity, req.deduplicationKey)
             .chain { persisted ->
@@ -374,6 +402,7 @@ class NotificationConsumer @Inject constructor(
                     when (req.channel) {
                         NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
                         NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+                        NotificationChannel.INBOX -> error("inbox has its own atomic visibility path")
                     }
                 }
             }
@@ -394,12 +423,50 @@ class NotificationConsumer @Inject constructor(
             .onFailure()
             .recoverWithUni { failure ->
                 if (deduplicationKey != null && failure.isDeduplicationConflict()) {
-                    log.debugf("Skipping duplicate notification fact %s", deduplicationKey)
-                    Uni.createFrom().item(false)
+                    notificationRepo.findByDeduplicationKey(deduplicationKey).chain { existing ->
+                        when (existing?.status) {
+                            null -> Uni.createFrom().failure(failure)
+                            NotificationStatus.PENDING.name -> {
+                                // Reconcile from the durable row; identifiers and provider errors may expose PII.
+                                log.error(
+                                    "notification.dispatch.in_doubt — replay held for reconciliation; " +
+                                        "provider handoff may have happened",
+                                )
+                                Uni.createFrom().failure(
+                                    IllegalStateException("notification dispatch outcome is unresolved"),
+                                )
+                            }
+                            else -> {
+                                log.debug("Skipping completed notification fact")
+                                Uni.createFrom().item(false)
+                            }
+                        }
+                    }
                 } else {
                     Uni.createFrom().failure(failure)
                 }
             }
+
+    /** The inbox row and VISIBLE outcome commit atomically; no provider acceptance is implied. */
+    private fun persistInbox(req: NotificationRequest, entity: NotificationEntity): Uni<Void> {
+        entity.status = NotificationOutcome.VISIBLE.name
+        entity.visibleAt = Instant.now(clock)
+        return Panache.withTransaction {
+            notificationRepo.persist(entity)
+                .chain { _ ->
+                    outboxRepo.persistInTransaction(outcomeMessage(req, entity, NotificationOutcome.VISIBLE, null))
+                }
+        }.replaceWithVoid()
+            // observed-by: a deduplicated replay already has a visible row and outcome in the DB.
+            // Every other failure is rethrown to the Kafka failure strategy.
+            .onFailure().recoverWithUni { failure ->
+                if (req.deduplicationKey != null && failure.isDeduplicationConflict()) {
+                    Uni.createFrom().voidItem()
+                } else {
+                    Uni.createFrom().failure(failure)
+                }
+            }
+    }
 
     /**
      * Hibernate Reactive adapts the Vert.x PgException into a PLAIN [java.sql.SQLException]
@@ -491,21 +558,20 @@ class NotificationConsumer @Inject constructor(
     /**
      * The ADR-0219 D4 contact gate (#2749) — this service's own `consentServiceClient` call was
      * the choke point ADR-0219 D4 names outright ("its consent call becomes this gate call"): one
-     * `ContactPolicyGate.check(...)` now wraps suppression list -> send cap -> quiet hours ->
-     * live consent pull, in the gate's ordering (same composition campaign-service and
-     * engagement-service already reuse), instead of a bespoke consent-only check.
+     * `ContactPolicyGate.check(...)` wraps live suppression, quiet hours and consent. The
+     * send cap is enforced immediately afterward by a PostgreSQL reservation transaction;
+     * a read-only local count could admit concurrent over-cap sends or count this row itself.
      *
      * Bridged into this `Uni` chain via `CoroutineScope(Dispatchers.Unconfined).async {
      * }.asUni()` — the same suspend-into-Uni idiom `CampaignJourneyActivitiesImpl` uses (the
      * gate itself is a `suspend fun`; this dispatch pipeline is Mutiny `Uni`, not coroutines).
      *
-     * Fail-closed in every deny reason, deliberately distinguishable in the audit (#2660 §3,
-     * carried forward): `NO_CONSENT` -> `no_active_consent` (a genuine refusal),
-     * `GATE_UNAVAILABLE` -> `consent_check_unavailable` (a port outage — consent, counter or
-     * suppression) — a gate outage must never read as a grant, and the two numbers must never
-     * merge into one. `SEND_CAP_REACHED`/`QUIET_HOURS`/`SUPPRESSED_LIST` are new reasons this
-     * service could not previously produce; each gets its own outcome code rather than folding
-     * into one of the two above.
+     * Fail-closed in every deny reason. `NO_CONSENT` is a terminal policy refusal;
+     * `GATE_UNAVAILABLE` is a dependency outage and leaves the committed row PENDING, with the
+     * Kafka record failed to its DLQ. It must not be counted as a customer suppression. The
+     * stale-PENDING gauge makes the required reconciliation visible. A reservation-store error
+     * also leaves PENDING with no provider handoff. `SEND_CAP_REACHED`, `QUIET_HOURS` and
+     * `SUPPRESSED_LIST` remain distinct terminal reasons.
      *
      * The check is per send, never cached (ADR-0198). `notification_preference`'s columns
      * (`payments_push` / `product_push` / `marketing_push`) remain a per-channel mute *within* a
@@ -524,14 +590,19 @@ class NotificationConsumer @Inject constructor(
         }.asUni()
         return decisionUni.chain { decision ->
             if (decision.allowed) {
-                when (req.channel) {
-                    NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
-                    NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+                marketingReservations.reserve(entity.notificationId, req.partyId).chain { reservation ->
+                    dispatchReservedMarketing(req, subject, body, entity, reservation)
                 }
             } else {
+                if (decision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
+                    // The row was committed before the gate. No provider was called, but this is
+                    // an unavailable dependency rather than a customer policy refusal. Keep
+                    // PENDING and fail the record into the DLQ for reconciliation/replay.
+                    return@chain Uni.createFrom().failure(IllegalStateException("contact gate unavailable"))
+                }
                 val reason = when (decision.denyReason) {
                     ContactDenyReason.NO_CONSENT -> NotificationOutcomeEvent.REASON_NO_CONSENT
-                    ContactDenyReason.GATE_UNAVAILABLE -> NotificationOutcomeEvent.REASON_CONSENT_UNAVAILABLE
+                    ContactDenyReason.GATE_UNAVAILABLE -> error("handled above")
                     ContactDenyReason.SEND_CAP_REACHED -> NotificationOutcomeEvent.REASON_SEND_CAP_REACHED
                     ContactDenyReason.QUIET_HOURS -> NotificationOutcomeEvent.REASON_QUIET_HOURS
                     ContactDenyReason.SUPPRESSED_LIST -> NotificationOutcomeEvent.REASON_SUPPRESSED_LIST
@@ -551,6 +622,29 @@ class NotificationConsumer @Inject constructor(
                     .invoke { _ -> auditMarketingSuppressed(req, reason) }
             }
         }
+    }
+
+    private fun dispatchReservedMarketing(
+        req: NotificationRequest,
+        subject: String,
+        body: String,
+        entity: NotificationEntity,
+        reservation: MarketingReservationDecision,
+    ): Uni<Void> = when (reservation) {
+        MarketingReservationDecision.RESERVED -> when (req.channel) {
+            NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
+            NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+            NotificationChannel.INBOX -> error("marketing inbox is rejected before dispatch")
+        }
+        MarketingReservationDecision.CAP_REACHED -> markStatus(
+            req,
+            entity,
+            NotificationOutcome.SUPPRESSED,
+            NotificationOutcomeEvent.REASON_SEND_CAP_REACHED,
+        ).invoke { _ -> auditMarketingSuppressed(req, NotificationOutcomeEvent.REASON_SEND_CAP_REACHED) }
+        MarketingReservationDecision.ALREADY_RESERVED -> Uni.createFrom().failure(
+            IllegalStateException("marketing contact reservation is already in doubt"),
+        )
     }
 
     /**
@@ -652,13 +746,14 @@ class NotificationConsumer @Inject constructor(
      *   byte-identical status and telemetry to a working one. Exactly the `PushResult.skipped()`
      *   defect (ADR-0252 phase 0) on the channel #4363 is considering re-routing *to* — and that
      *   one was found by a customer, not by any signal.
-     * - **FAILED** / `mailer_refused` — the mailer rejected the message or the call failed.
+     * - **IN_DOUBT** — the mailer call failed. The relay might already have accepted it, so the
+     *   PENDING row remains unresolved and the record is nacked for dead-letter reconciliation.
      *
      * The deployed sandbox mocks the mailer deliberately, and that stays true; what changes is
      * that the record now says so. A configuration choice must not be able to make the database
      * assert a delivery that never occurred.
      */
-    private fun deliverEmail(
+    internal fun deliverEmail(
         req: NotificationRequest,
         recipient: String,
         subject: String,
@@ -673,30 +768,32 @@ class NotificationConsumer @Inject constructor(
             // Three states, not two (issue #4737). A mocked mailer completes with no failure, so
             // `failure == null` on its own means "the call did not throw", never "the mail left".
             val sendOutcome = when {
-                failure != null -> EmailSendOutcome.FAILED
+                failure != null -> EmailSendOutcome.IN_DOUBT
                 mailerMocked -> EmailSendOutcome.MOCKED
                 else -> EmailSendOutcome.ACCEPTED
             }
             emailMetrics.recordSend(req.template, sendOutcome)
-            if (sendOutcome != EmailSendOutcome.ACCEPTED) {
-                if (failure != null) {
-                    log.warnf(failure, "Email send failed: party=%s template=%s", req.partyId, req.template)
-                } else {
-                    // Not a warning: the sandbox mocks the mailer on purpose. Logged at INFO so the
-                    // no-op is greppable, and counted as MOCKED so it is alertable — a log line is
-                    // not a signal anyone watches, which is how the push channel's identical
-                    // no-op went unnoticed until a customer reported it.
-                    log.infof(
-                        "Email NOT sent: mailer is mocked (quarkus.mailer.mock=true) — party=%s " +
-                            "template=%s recorded SUPPRESSED/%s, never SENT (#4737)",
-                        req.partyId,
-                        req.template,
-                        NotificationOutcomeEvent.REASON_MAILER_MOCKED,
-                    )
-                }
+            if (sendOutcome == EmailSendOutcome.IN_DOUBT) {
+                log.warnf(
+                    "Email handoff in doubt: template=%s cause=%s",
+                    req.template,
+                    failure?.javaClass?.simpleName ?: "unknown",
+                )
+                // A timeout or disconnect can happen after SMTP accepted the message. Terminal
+                // FAILED would invite a second contact on replay; keep PENDING and dead-letter.
+                Uni.createFrom().failure(failure ?: IllegalStateException("email handoff outcome is unresolved"))
+            } else if (sendOutcome == EmailSendOutcome.MOCKED) {
+                // Not a warning: the sandbox mocks the mailer on purpose. Logged at INFO so the
+                // no-op is greppable, and counted as MOCKED so it is alertable.
+                log.infof(
+                    "Email NOT sent: mailer is mocked (quarkus.mailer.mock=true) — " +
+                        "template=%s recorded SUPPRESSED/%s, never SENT (#4737)",
+                    req.template,
+                    NotificationOutcomeEvent.REASON_MAILER_MOCKED,
+                )
                 // sent = false, so `sent_at` stays NULL: the column means "when did this leave the
                 // process", and nothing left it.
-                markStatus(req, entity, emailOutcomeOf(sendOutcome), emailReasonOf(sendOutcome))
+                markStatus(req, entity, requireNotNull(emailOutcomeOf(sendOutcome)), emailReasonOf(sendOutcome))
             } else {
                 markStatus(req, entity, NotificationOutcome.SENT, reason = null, sent = true)
                     .onItem().invoke { _ ->
@@ -1042,6 +1139,7 @@ class NotificationConsumer @Inject constructor(
             outcome = outcome,
             reason = reason,
             occurredAt = now,
+            templateRevision = entity.templateRevision,
         )
         return OutboxMessage(
             eventId = Ids.newId(),
@@ -1051,141 +1149,4 @@ class NotificationConsumer @Inject constructor(
             createdAt = now,
         )
     }
-
-    /**
-     * Renders [template] into a (subject, body) pair.
-     *
-     * Exhaustive by design — there is deliberately **no `else` branch**. The `else` this replaces
-     * dumped every caller-supplied variable into the body (`"$key: $value"`), which is how a
-     * secret could ride an ordinary template into storage (issue #1325), and it silently absorbed
-     * the seven constants nobody had written a render for: they reached real customers as raw
-     * variable dumps. Without the `else`, adding a constant to [NotificationTemplate] is a
-     * COMPILE error here until someone writes its copy — a guard that cannot be forgotten, unlike
-     * the review the classification allow-list depends on (ADR-0176 D1).
-     *
-     * Every `vars[...]` key read here must be declared in that constant's [NotificationTemplate.variables];
-     * anything else is rejected upstream and can never arrive.
-     */
-    // one branch per template — grows with the catalogue; each branch stays a two-line render
-    @Suppress("CyclomaticComplexMethod", "LongMethod")
-    private fun renderTemplate(template: NotificationTemplate, vars: Map<String, String>): Pair<String, String> =
-        when (template) {
-            // #10281: reached only without a language; dispatchResolved routes these via renderOrNull.
-            APPROVAL_REQUIRED, APPROVAL_COMPLETED, APPROVAL_REJECTED, APPROVAL_EXPIRED, PAYMENT_RELEASE_FAILED ->
-                ApprovalCopy.render(template, vars, null)
-            NotificationTemplate.ACCOUNT_OPENED ->
-                "Your OpenBank account is ready" to
-                    "<h2>Welcome to OpenBank!</h2><p>Your account <b>${vars.v(
-                        "accountNumber",
-                    )}</b> has been opened.</p>"
-            NotificationTemplate.ACCOUNT_CLOSED ->
-                "Your OpenBank account has been closed" to
-                    "<h2>Account Closed</h2><p>Your account <b>${vars.v("accountNumber")}</b> has been closed. " +
-                    "Statements and transaction history remain available on request.</p>"
-            NotificationTemplate.ACCOUNT_FROZEN ->
-                "Your OpenBank account has been frozen" to
-                    "<h2>Account Frozen</h2><p>Access to your account <b>${vars.v("accountNumber")}</b> has been " +
-                    "temporarily suspended. Reason: ${vars.v("reason")}. Please contact support.</p>"
-            NotificationTemplate.TRANSACTION_COMPLETED ->
-                "Transaction completed" to
-                    "<p>Transaction of <b>${vars.v("amount")} ${vars.v("currency")}</b> completed successfully.</p>"
-            NotificationTemplate.TRANSACTION_FAILED ->
-                "Transaction failed" to
-                    "<h2>Transaction Failed</h2><p>Your transaction of <b>${vars.v("amount")} " +
-                    "${vars.v("currency")}</b> could not be completed. Reason: ${vars.v("reason")}. " +
-                    "No funds have left your account.</p>"
-            NotificationTemplate.KYC_APPROVED ->
-                "Identity verification approved" to
-                    "<h2>KYC Approved</h2><p>Your identity has been verified. You can now use all OpenBank services.</p>"
-            NotificationTemplate.KYC_REJECTED ->
-                "Identity verification failed" to
-                    "<h2>KYC Rejected</h2><p>We could not verify your identity. Reason: ${vars.v(
-                        "reason",
-                    )}. Please contact support.</p>"
-            NotificationTemplate.CONSENT_GRANTED ->
-                "Access to your account data was granted" to
-                    "<h2>Consent Granted</h2><p>You granted access to your account data " +
-                    "(<b>${vars.v("scope")}</b>). You can withdraw this at any time in the OpenBank app.</p>"
-            NotificationTemplate.CONSENT_REVOKED ->
-                "Access to your account data was withdrawn" to
-                    "<h2>Consent Withdrawn</h2><p>Access to your account data " +
-                    "(<b>${vars.v("scope")}</b>) has been withdrawn. No further data will be shared under it.</p>"
-            NotificationTemplate.OTP_CODE ->
-                "Your OpenBank verification code" to
-                    "<h2>Verification Code</h2><p>Your code is: <b>${vars.v("code")}</b>. Valid for 5 minutes.</p>"
-            NotificationTemplate.WELCOME ->
-                "Welcome to OpenBank" to
-                    "<h2>Welcome!</h2><p>Thank you for joining OpenBank, ${vars.v("name")}.</p>"
-            NotificationTemplate.SCA_APPROVAL ->
-                "Approve your payment" to
-                    "<p>${vars.v("detail").ifBlank { "You have a payment waiting for your approval." }}</p>"
-            NotificationTemplate.MARKETING_PRODUCT_OFFER ->
-                vars.v("offerTitle") to
-                    "<h2>${vars.v("offerTitle")}</h2><p>${vars.v("offerText")}</p>" +
-                    "<p><b>${vars.v("ctaText")}</b></p>" +
-                    "<p style=\"font-size:small;color:#666\">You are receiving this because you opted in to " +
-                    "marketing emails. Manage your preferences in the app.</p>"
-            NotificationTemplate.DELEGATION_OFFERED ->
-                "You have a delegated access offer to review" to
-                    "<h2>Delegated Access Offer</h2><p>Someone has offered you delegated access to their " +
-                    "<b>${vars.v("resourceType")}</b>. Open the OpenBank app to accept or decline.</p>"
-            NotificationTemplate.DELEGATION_ACCEPTED ->
-                "Your delegated access offer was accepted" to
-                    "<h2>Offer Accepted</h2><p>Your delegated access offer for your " +
-                    "<b>${vars.v("resourceType")}</b> was accepted and is now active.</p>"
-            NotificationTemplate.DELEGATION_DECLINED ->
-                "Your delegated access offer was declined" to
-                    "<h2>Offer Declined</h2><p>Your delegated access offer for your " +
-                    "<b>${vars.v("resourceType")}</b> was declined. No access was granted.</p>"
-            NotificationTemplate.DELEGATION_REVOKED ->
-                "Your delegated access was revoked" to
-                    "<h2>Access Revoked</h2><p>Delegated access to a <b>${vars.v("resourceType")}</b> " +
-                    "granted to you has been revoked. You can no longer act on it.</p>"
-            NotificationTemplate.DELEGATION_SUSPENDED ->
-                "Delegated access was suspended" to
-                    "<h2>Access Suspended</h2><p>Delegated access for a <b>${vars.v("resourceType")}</b> " +
-                    "was temporarily suspended by the bank. It cannot be used while suspended.</p>"
-            NotificationTemplate.DELEGATION_REINSTATED ->
-                "Delegated access was restored" to
-                    "<h2>Access Restored</h2><p>Delegated access for a <b>${vars.v("resourceType")}</b> " +
-                    "was restored by the bank and may be used again within its existing scope and conditions.</p>"
-            NotificationTemplate.DELEGATION_RENOUNCED ->
-                "Delegated access was renounced" to
-                    "<h2>Access Renounced</h2><p>The person who held delegated access to your " +
-                    "<b>${vars.v("resourceType")}</b> ended that access. It is no longer active.</p>"
-            NotificationTemplate.DELEGATION_EXPIRED ->
-                "A delegated access grant has expired" to
-                    "<h2>Grant Expired</h2><p>A delegated access grant for a <b>${vars.v("resourceType")}</b> " +
-                    "has reached the end of its validity period and is no longer active.</p>"
-            NotificationTemplate.DELEGATION_FIRST_USE ->
-                "Delegated access was used for a payment" to
-                    "<h2>Delegated Access Used</h2><p>A person you authorised used delegated access " +
-                    "for a confirmed payment. Open the OpenBank app to review your delegated access.</p>"
-            NotificationTemplate.DELEGATION_RECERTIFICATION_DUE ->
-                "Review delegated access" to
-                    "<h2>Review Delegated Access</h2><p>A delegated access grant is due for review " +
-                    "under your <b>${vars.v("audience")}</b> review cadence. Access remains active until " +
-                    "you explicitly keep, narrow or revoke it in the OpenBank app.</p>"
-        }
 }
-
-/**
- * Reads a declared template variable, HTML-escaped, or "" when the caller omitted it.
- *
- * The schema is closed against **undeclared** keys, not against missing ones (see
- * [NotificationTemplate.variables]): rejecting a partial request would silently drop a real
- * message, since poison payloads are acked. An omitted variable renders empty, as it always has.
- *
- * Escaping happens HERE, not per call site (issue #1382): every one of [renderTemplate]'s ~16
- * reads interpolates straight into an HTML body with zero escaping between a domain-event-supplied
- * variable and the mail actually sent — a `reason`, `documentType`, or `scope` containing markup
- * rendered verbatim in the customer's mail client. Escaping the shared accessor closes every call
- * site in one place instead of relying on each of the 16 to remember it. (The escaper also covers
- * the attribute-value context: `"` and `'` are escaped, so a variable remains safe if a template
- * ever interpolates one into an `href="..."` attribute again — the removed PASSWORD_RESET's
- * `resetLink` was the case that originally forced that, #8568.)
- *
- * Top-level rather than a member so `renderTemplate` reads as copy instead of null-handling — the
- * 16 inline `?: ""` reads it replaces were most of that function's cyclomatic complexity.
- */
-private fun Map<String, String>.v(key: String): String = HtmlEscape.escape(this[key] ?: "")

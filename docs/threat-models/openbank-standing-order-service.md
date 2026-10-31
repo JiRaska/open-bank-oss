@@ -41,8 +41,9 @@ openbank-sdd-service.
 
 - **External entities:** customer-edge (authenticated customer), admin-UI (ROLE_OPERATOR),
   sepa-payment / account-service / transaction-service (M2M callees).
-- **Trust boundaries:** edge → service (OIDC + OPA sidecar, currently AUTHZ_ENFORCE=false
-  advisory); service → Kafka (mTLS via Strimzi); service → sepa-payment (OIDC client credentials,
+- **Trust boundaries:** edge → service (OIDC + OPA sidecar; the GitOps manifest declares
+  `AUTHZ_ENFORCE=true` for the `@Authorize` pause action); service → Kafka (mTLS via Strimzi);
+  service → sepa-payment (OIDC client credentials,
   `openbank-services` client, ROLE_OPERATOR accepted by sepa-payment's createPayment); service →
   account-service (same client, ROLE_OPERATOR accepted by `account.read`, read-only IBAN lookup,
   new — #889 follow-up); service → transaction-service (same client, ROLE_OPERATOR accepted by
@@ -54,9 +55,10 @@ openbank-sdd-service.
 
 - All REST endpoints: `@RolesAllowed` (ROLE_CUSTOMER for own orders, ROLE_OPERATOR/ROLE_ADMIN for
   operator surface), verified by `StandingOrderSecurityTest` and `StandingOrderSecurityContractTest`.
-- OPA sidecar deployed (ADR-0034 Phase 5); `AUTHZ_ENFORCE=false` (advisory) — decisions are
-  evaluated and logged but not enforced yet; the flip is a deliberate follow-up with an
-  observation window (rules.yaml AUTHZ_ENFORCE guardrail, issue #3679 cohort).
+- OPA sidecar deployed (ADR-0034 Phase 5); the GitOps manifest declares
+  `AUTHZ_ENFORCE=true` for `standingOrder.pause`, the only `@Authorize` method. The advisory
+  observation window had no pause requests or authorization decisions, so a positive live
+  customer-edge call and PDP availability still need verification after rollout (#12324).
 - Execution calls to sepa-payment are service-to-service (OIDC client credentials via
   `OidcClientRequestReactiveFilter`), not ambient authority.
 - **`standingOrder.pause` is identity-scoped, not role-only (GHSA-58jq-9hq3-66jr, #4228).**
@@ -88,9 +90,10 @@ openbank-sdd-service.
 
 ## 5. Residual risks / assumptions
 
-- **Advisory authz:** `AUTHZ_ENFORCE=false` means the OPA sidecar logs but does not block; RBAC
-  (`@RolesAllowed`) is the only enforced fine-grained gate until the enforce flip (tracked in the
-  #3679 cohort).
+- **Enforcement rollout:** the GitOps manifest sets `AUTHZ_ENFORCE=true`, but this single-replica
+  Deployment has no canary. OPA enforcement applies only to `standingOrder.pause`; the other REST
+  actions remain `@RolesAllowed`-only. Verify the live edge pause path and PDP health before
+  treating the manifest change as an effective authorization control (#12324).
 - **Partially-wired rails (#889):** `DOMESTIC`/`INTERNAL` orders now execute when the creditor IBAN
   resolves to an account of the SAME party as the order (own-account move, transaction-service
   `TRANSFER`, no screening needed — the same case `domestic-payment` itself skips AML/sanctions for).
@@ -105,8 +108,11 @@ openbank-sdd-service.
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `standing_order_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
+- **2026-10-08** — **OPA authorization ENFORCED (`AUTHZ_ENFORCE=true`, #12324).** `standingOrder.pause`, the only `@Authorize` method, now blocks on a deny (403) and fails closed when the PDP is unreachable (503); before this the decision was advisory. Checked with `opa eval` against the deployed `standing-order-opa-bundle` ConfigMap (identical to the repo copy): customer-edge's self-service pause (`service-account-openbank-edge`) is allowed via `m2m-standing-order-pause`, staff `ROLE_OPERATOR`/`ROLE_ADMIN` via `operator-standing-order-pause`; the shared `openbank-services` account (in every realm's role set), every `ROLE_API` per-service account, compliance, viewer, a customer bearer, an AI agent and an anonymous caller are denied. With `standing_order_rest_ext.rego` removed from the bundle, the edge and operator cells turn DENY. Live evidence: zero `openbank_authz_decisions_total` series and zero `pause` requests for this service over the 8-day Prometheus window, so no observed caller is affected. Residual: the workload is a plain Deployment, so there is no canary analysis; resume/cancel/record-execution are still `@RolesAllowed`-only and never consult OPA. Rollback: set `AUTHZ_ENFORCE` back to `"false"` and restore the allowlist entry in `check-authz-enforce-money-path.py`.
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -181,6 +187,7 @@ openbank-sdd-service.
 - **2026-08-03** — Initial lightweight threat model (ADR-0030 D2), written for the
   `money_path_services` classification (issue #2188).
 - **2026-09-21** — **Own machine identity for order execution (#10486 batch 1).** Both execution legs — `TransactionServiceClient` (DOMESTIC/INTERNAL) and `SepaPaymentClient` (SEPA) — now mint their bearer from the NAMED oidc-client `m2m`, Keycloak client `openbank-standing-order` (`ROLE_API` only). transaction-service grants it `transaction.create` (`service-standing-order-transaction-create`) and sepa-payment grants it `sepaPayment.create` (`service-standing-order-sepa-payment-create`), nothing else. **STRIDE-S:** a new credential. Its secret is generated by Keycloak in the live realm, stored by the owner's provisioning script at Vault KV `keycloak/standing-order-service` (`client_secret`), projected by the `standing-order-m2m-oidc` ExternalSecret and never seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod loudly (CreateContainerConfigError) rather than calling with an empty credential. Compromise of this secret reaches only `transaction.create` and `sepaPayment.create`, against the shared secret's 54 money-path writes. **Repudiation improves:** the upstream's OPA decision reason and principal now name this service instead of "some caller on the shared client". The service's other rest-clients stay on the shared `openbank-services` client until their own edges migrate (asserted by `M2mOidcClientIdentityWiringTest`). Rollback: revert the commit (the clients return to the shared token).
+- **2026-10-17** — **`TransactionServiceClient` is now GENERATED from transaction-service's `openapi.yaml` (ADR-0319).** The hand-written interface and DTOs were replaced by a sub-interface of the client built in `openbank-client-transaction`; the outcome of the call is now explicit (`StandingOrderDueConsumer.submitTransfer`): only 400/422 are business rejections recorded as a failed execution; a normal return confirms; everything else - 401/403/404/409, other 4xx, 5xx, timeouts and a response body that does not bind (the 2xx status is then not proven) - is rethrown for retry/DLQ, never confirmed and never recorded (the idempotency key makes a retry converge). `TransactionClientOutcomeIT` drives real 422/503/429/2xx answers. **STRIDE-T/S (trust boundary):** the outbound call is the same route, the same NAMED oidc-client `m2m` (Keycloak client `openbank-standing-order`) and the same `SyntheticTaintClientFilter` registration - `M2mOidcClientIdentityWiringTest`-style wiring assertions and the consumer pact (literal `/api/v1/transactions`, replayed by transaction-service's `@PactFolder` class) pin that. What changes is where the request/response types come from: the provider's own spec, so a spec change now fails this service's compile instead of production, and the request carries the spec's full optional field set serialised as `null` (transaction-service ignores them). No new credential, no new scope, no new network path. Rollback: revert the commit (the hand-written client returns).
 - **2026-10-03** — **SEPA_CREDIT orders refused unless the currency is EUR (#11938).** A
   `SEPA_CREDIT` order executes as an SCT through sepa-payment, which is euro-only and (since #11931)
   refuses any other currency with 400. The order itself accepted any currency, so a non-EUR one was
@@ -194,3 +201,51 @@ openbank-sdd-service.
   CANCELLED), so no stored order is affected and the execution path needs no change — a hypothetical
   legacy row would still be refused by sepa-payment and recorded as a failure. No new endpoint,
   caller, privilege or event. Rollback: revert the commit.
+
+
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Pension contribution scheduling.** This integration adds the `pension` namespace to `standing-order-service-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/standing-orders and DELETE /api/v1/standing-orders/{id}`.
+
+**Threat and required controls.** Creation and cancellation change future payment execution. A supplied party or order id is not proof of ownership; providers must bind the requested action to the entitled party and account. Creation must retain durable idempotency, and cancellation must reject unrelated orders.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.
+
+### Provider TLS build and rollout
+
+The production build requires client certificates for an HTTPS listener when its server
+key material is configured. This property is fixed at build time; setting only a runtime
+environment variable cannot upgrade an image built without it. Preserve the HTTP listener
+during rollout. First publish a compatible signed provider image, then configure the
+private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
+OIDC and policy checks continue to authorize business operations independently of TLS trust.
+Roll back caller URLs before removing the provider listener or reverting its image.
+
+## Parallel private-CA listener preparation
+
+The GitOps workload prepares an additional TLS 1.3 listener on port 8443 using a
+separate server-auth Certificate signed by `openbank-ca`, DNS SANs matching the
+Service name, and a read-only certificate/key/CA mount. Client certificates are
+required; existing OIDC and business authorization remain required independently.
+The HTTP listener remains for existing callers. Pension's HTTP URL is retained
+until the reviewed listener rollout and client configuration are verified, after
+which its HTTPS cutover must regenerate the port-scoped network policies. Current
+policy generation also admits the admin BFF on the
+new port; this does not grant a client certificate or bypass application policy.
+Certificate issuance must precede workload rollout. Rollback removes the parallel
+listener preparation while existing HTTP callers remain unchanged; after caller
+cutover, revert caller URLs and policies before removing the listener.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-31** — **The creditor-IBAN lookup now uses the generated account-service client (#13169, ADR-0319).** The hand-written `GET /api/v1/accounts/iban/{iban}` interface is replaced by `AccountServiceClient : AccountsApi`, generated from account-service's own `openapi.yaml` (`openbank-client-account`), and the consumer reads the answer through its `AccountClient` facade. **No trust-boundary change:** same route, same config key and URL, same M2M OIDC filter, same synthetic-taint filter, no new header. The own-party boundary is preserved: only a found account whose `partyId` equals the order's party yields a transfer target; a 404, any other status, a failed or unreadable lookup, or another party's account still records the execution as failed. **Residual risk:** `id` and `partyId` now bind as UUIDs, as the spec declares; a non-UUID value fails the bind and reads as an unresolved creditor (failure recorded), never as a target. A coroutine cancellation during the lookup is now rethrown instead of being recorded as a failed execution. Rollback: revert the commit.

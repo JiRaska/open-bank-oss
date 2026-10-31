@@ -4,26 +4,43 @@
 
 package com.openbank.swift.infrastructure.client
 
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionCompletionFailure
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.TransactionHttpException
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.swift.application.port.out.SettlementOutcome
 import com.openbank.swift.application.port.out.SettlementPort
 import com.openbank.swift.application.port.out.SettlementUnavailableException
 import com.openbank.swift.domain.model.SwiftMessage
+import com.openbank.swift.infrastructure.observability.SwiftSettlementMetrics
+import com.openbank.swift.infrastructure.observability.SwiftSettlementMetrics.Outcome
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import java.util.UUID
 
 /**
  * Books settled MT103 funds via transaction-service (ADR-0108).
  * Called after the clearing-simulator returns ACSC and swift-service transitions to SENT.
- * Idempotent: uses `swift-settlement-<messageId>` so retries are safe.
+ * Uses the stable `swift-settlement-<messageId>` key for any explicit reconciliation.
+ * The caller retains SENT on uncertainty; `SwiftSettlementRedriveService` re-drives it under the same key (#13686).
  */
 @ApplicationScoped
-class SettlementAdapter(@RestClient private val client: TransactionServiceClient) : SettlementPort {
+class SettlementAdapter(
+    @RestClient private val client: TransactionServiceClient,
+    private val metrics: SwiftSettlementMetrics,
+) : SettlementPort {
 
     private val log = Logger.getLogger(SettlementAdapter::class.java)
+    private val transactions = TransactionClient(client)
 
     @Suppress("TooGenericExceptionCaught")
     override suspend fun settle(message: SwiftMessage): SettlementOutcome {
@@ -35,35 +52,46 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
                 )
             }
 
-        val request = InitiateSettlementRequest(
-            idempotencyKey = "swift-settlement-${message.id}",
-            type = "DEBIT",
-            sourceAccountId = sourceAccountId,
-            amount = message.amount.amount,
-            currencyCode = message.currency,
-            description = "MT103 ${message.remittanceInfo ?: message.transactionReference}",
-            valueDate = message.valueDate,
-            rail = "SWIFT",
-            instructionType = "ONE_OFF",
-        )
+        val request = try {
+            requestFor(message, sourceAccountId)
+        } catch (e: DateTimeParseException) {
+            // SwiftMessage.validate() guarantees YYYYMMDD at creation; a stored value that no longer parses is
+            // bad data, not an outage: nothing is sent and the message stays SENT. It cannot heal, so it is
+            // counted as bad-data and marked permanent: the re-drive stops on it, the open clock keeps alerting.
+            metrics.unsettled(Outcome.BAD_DATA)
+            log.errorf(
+                e,
+                "SWIFT message %s has an unparseable value date '%s'; not booking",
+                message.id,
+                message.valueDate,
+            )
+            return SettlementOutcome(settled = false, transactionId = null, permanent = true)
+        }
 
         return try {
-            val response: Response = client.initiateTransaction(request).awaitSuspending()
-            if (response.status in ACCEPTED_STATUSES) {
-                val transactionId = runCatching {
-                    UUID.fromString(response.readEntity(Map::class.java)["id"]?.toString())
-                }.getOrNull()
-                SettlementOutcome(settled = true, transactionId = transactionId)
-            } else {
-                log.warnf(
-                    "transaction-service returned HTTP %d for SWIFT message %s settlement; " +
-                        "message stays SENT",
-                    response.status,
-                    message.id,
-                )
-                SettlementOutcome(settled = false, transactionId = null)
+            when (val outcome = transactions.initiate(request).awaitSuspending()) {
+                is TransactionCallOutcome.HttpSuccess -> booked(message, request, outcome)
+                // transaction-service WAS reached and refused: the message stays SENT, as it always did.
+                TransactionCallOutcome.Conflict -> refused(message, HTTP_CONFLICT)
+                is TransactionCallOutcome.Rejected -> refused(message, outcome.status)
             }
+        } catch (e: CancellationException) {
+            // Cancellation is not an outage: rethrow so the coroutine unwinds instead of being retried as one.
+            throw e
         } catch (ex: Exception) {
+            val reason = when (ex) {
+                is TransactionCompletionUncertainException -> if (ex.completionFailure ==
+                    TransactionCompletionFailure.FAILED
+                ) {
+                    Outcome.FAILED_REPLAY
+                } else {
+                    Outcome.UNEXPECTED_STATUS
+                }
+                is TransactionHttpException -> Outcome.UNEXPECTED_STATUS
+                else -> Outcome.TRANSPORT_ERROR
+            }
+            metrics.unsettled(reason)
+            // No proven completion (5xx, dropped connection): the caller retains SENT, never decided here.
             throw SettlementUnavailableException(
                 "transaction-service unreachable for SWIFT message ${message.id}",
                 ex,
@@ -71,7 +99,73 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
         }
     }
 
+    // SwiftMessage.valueDate is MT103 basic ISO (YYYYMMDD) while transaction-service parses ISO-8601
+    // (LocalDate.parse(request.valueDate)). Until the generated client typed the field the raw value went
+    // on the wire unchanged and could not be parsed there; THIS conversion is what lets the booking through.
+    private fun requestFor(message: SwiftMessage, sourceAccountId: UUID) = InitiateTransactionRequest(
+        idempotencyKey = "swift-settlement-${message.id}",
+        type = "DEBIT",
+        sourceAccountId = sourceAccountId,
+        amount = message.amount.amount,
+        currencyCode = message.currency,
+        description = "MT103 ${message.remittanceInfo ?: message.transactionReference}",
+        valueDate = LocalDate.parse(message.valueDate, DateTimeFormatter.BASIC_ISO_DATE),
+        rail = "SWIFT",
+        instructionType = "ONE_OFF",
+    )
+
+    /**
+     * HTTP 201 (the provider's answer to a create, including its idempotent replay) with a COMPLETED
+     * transaction that matches the request is the ONLY settlement (#13217): type, source and target account, numeric
+     * amount, currency, rail and instruction type, as sepa-instant's `SettlementAdapter` binds them.
+     * valueDate is not compared - the provider resolves it to a business day. 200/202, a missing id or a
+     * booking for something else leaves the message SENT; the shared facade has already thrown on a
+     * missing, unreadable or non-final body.
+     */
+    private fun booked(
+        message: SwiftMessage,
+        request: InitiateTransactionRequest,
+        outcome: TransactionCallOutcome.HttpSuccess<TransactionResponse>,
+    ): SettlementOutcome {
+        if (outcome.status != HTTP_CREATED) return refused(message, outcome.status)
+        val tx = outcome.body ?: return refused(message, outcome.status)
+        val id = tx.id ?: return unbound(message, "no transaction id")
+        val amount = tx.amount ?: return unbound(message, "no numeric amount")
+        val matchesRequest = tx.status == COMPLETED &&
+            tx.type == request.type &&
+            tx.sourceAccountId == request.sourceAccountId &&
+            tx.targetAccountId == request.targetAccountId &&
+            amount.compareTo(request.amount) == 0 &&
+            tx.currencyCode == request.currencyCode &&
+            tx.rail == request.rail &&
+            tx.instructionType == request.instructionType
+        if (!matchesRequest) return unbound(message, "a booking that does not match the request")
+        return SettlementOutcome(settled = true, transactionId = id)
+    }
+
+    private fun unbound(message: SwiftMessage, reason: String): SettlementOutcome {
+        metrics.unsettled(Outcome.MISMATCH)
+        log.warnf(
+            "transaction-service answered with %s for SWIFT message %s settlement; message stays SENT",
+            reason,
+            message.id,
+        )
+        return SettlementOutcome(settled = false, transactionId = null)
+    }
+
+    private fun refused(message: SwiftMessage, status: Int): SettlementOutcome {
+        metrics.unsettled(if (status == HTTP_CONFLICT) Outcome.CONFLICT else Outcome.UNEXPECTED_STATUS)
+        log.warnf(
+            "transaction-service returned HTTP %d for SWIFT message %s settlement; message stays SENT",
+            status,
+            message.id,
+        )
+        return SettlementOutcome(settled = false, transactionId = null)
+    }
+
     private companion object {
-        val ACCEPTED_STATUSES = setOf(200, 201, 202)
+        const val HTTP_CREATED = 201
+        const val HTTP_CONFLICT = 409
+        const val COMPLETED = "COMPLETED"
     }
 }

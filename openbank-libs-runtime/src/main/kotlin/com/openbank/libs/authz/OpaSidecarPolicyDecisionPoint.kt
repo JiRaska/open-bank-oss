@@ -5,12 +5,12 @@
 package com.openbank.libs.authz
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.security.BoundedBodyHandlers
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
@@ -51,7 +51,7 @@ class OpaSidecarPolicyDecisionPoint(
             .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(mapOf("input" to query.toInput()))))
             .build()
 
-        val response = runCatching { http.send(request, HttpResponse.BodyHandlers.ofString()) }
+        val response = runCatching { http.send(request, BoundedBodyHandlers.ofString()) }
             .getOrElse { throw PolicyDecisionException("OPA call failed: ${it.message}", it) }
 
         if (response.statusCode() !in 200..299) {
@@ -64,12 +64,14 @@ class OpaSidecarPolicyDecisionPoint(
     private fun AuthzQuery.toInput(): Map<String, Any?> = buildMap {
         put(
             "principal",
-            mapOf(
-                "id" to principal.id,
-                "type" to principal.type,
-                "roles" to principal.roles,
-                "attributes" to principal.attributes,
-            ),
+            buildMap {
+                put("id", principal.id)
+                put("type", principal.type)
+                put("roles", principal.roles)
+                put("attributes", principal.attributes)
+                put("service_account", principal.serviceAccount)
+                principal.clientId?.let { put("client_id", it) }
+            },
         )
         put("action", action)
         // `let` rather than a smart cast: AuthzQuery.resource is a public API property of

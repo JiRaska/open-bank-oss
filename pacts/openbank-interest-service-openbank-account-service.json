@@ -48,6 +48,53 @@
       }
     },
     {
+      "description": "GET the account's detail to resolve its party for tax profiling",
+      "providerStates": [
+        {
+          "name": "an ACTIVE CZK account exists for tax-profile resolution"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/60000000-0000-0000-0000-000000000060"
+      },
+      "response": {
+        "body": {
+          "accountType": "SAVINGS",
+          "currencyCode": "CZK",
+          "id": "60000000-0000-0000-0000-000000000060",
+          "partyId": "61000000-0000-0000-0000-000000000061",
+          "status": "ACTIVE"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.partyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "GET the first page of ACTIVE accounts for the accrual run",
       "providerStates": [
         {

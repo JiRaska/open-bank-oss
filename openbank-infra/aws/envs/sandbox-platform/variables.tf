@@ -139,7 +139,23 @@ variable "karpenter_version" {
   # before the chart. The upstream getting-started IAM policy is unchanged
   # between v1.13.1 and v1.14.1 (whitespace-only diff), so karpenter-iam needs
   # no edit.
-  default = "1.14.1"
+  #
+  # 1.14.1 -> 1.15.0: the first line whose compatibility matrix lists K8s 1.37
+  # ("1.15.x"); 1.36 stays in range (">= 1.13"), so this lands BEFORE the
+  # control-plane bump to 1.37. Upgrade guide breaking items are all opt-in or
+  # metric-only: Node Auto Repair (alpha, NodeRepair gate, OFF here) becomes a
+  # voluntary disruption method; three metric label changes (lowercase `reason`
+  # on karpenter_nodepool_allowed_disruptions / _nodes_consuming_budgets,
+  # `consolidation_type` on the queue-failures metric, `unknown` error label).
+  # CRD changes: NodePool budget `reasons` gains "Unhealthy", consolidateAfter
+  # gains default 0s (we always set it), EC2NodeClass gains enclaveOptions and
+  # spec.kubelet becomes a free-form map (our eviction* keys remain valid).
+  # EC2NodeClassHashVersion v5 -> v6: the controller re-stamps the hash on every
+  # NodeClaim that is NOT already Drifted instead of drifting it (see
+  # nodeclass/hash/controller.go), so no fleet-wide roll is triggered by the
+  # upgrade itself. Controller IAM: upstream adds ec2:RebootInstances, used only
+  # by the alpha RebootForRepair gate (off), so karpenter-iam needs no edit.
+  default = "1.15.0"
 }
 
 variable "argocd_version" {

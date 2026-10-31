@@ -16,7 +16,9 @@
 #
 #   So the rule moves to where it runs regardless of who is driving: a required check.
 #   A red required check cannot be cleared by the agent that tripped it, cannot be cleared
-#   by `--auto`. Protected changes require an explicit owner decision on the current head.
+#   by `--auto`. Protected changes require an explicit owner decision on the current head, or on
+#   an earlier head followed ONLY by base-branch merges that leave the PR's net patch
+#   byte-identical (otherwise strict up-to-date checks void every approval forever).
 #   Trust-chain changes remain blocked and require separate maintainer adoption.
 #
 # WHAT IT IS AND IS NOT
@@ -71,6 +73,7 @@
 #   python3 .github/scripts/check-agent-pr-guard.py             # PR number from the environment
 #   python3 .github/scripts/check-agent-pr-guard.py --pr 6410   # explicit
 #   python3 .github/scripts/check-agent-pr-guard.py --self-test
+#   (the gate is read-only: it only GETs from the API and never posts)
 #
 # EXIT CODES
 #   0  out of scope, or in scope and touching nothing protected
@@ -102,12 +105,16 @@ class Undetermined(Exception):
 # --------------------------------------------------------------------------- rules
 
 
-def load_rules(path=RULES):
+def load_rules(path=RULES, text=None):
+    """Parse the rule set. `text` is the content read from the PR's BASE commit (see
+    base_policy); `path` is read from the working tree only for --paths and self-tests."""
     import yaml
 
     try:
-        with open(path) as fh:
-            doc = yaml.safe_load(fh)
+        if text is None:
+            with open(path) as fh:
+                text = fh.read()
+        doc = yaml.safe_load(text)
     except (OSError, yaml.YAMLError) as e:
         raise Undetermined(f"could not read {path}: {e}") from e
     cfg = (doc or {}).get("autonomous_agent_prs")
@@ -369,13 +376,181 @@ def owner_decision_allows(comments, owner, n, head, head_created_at):
     return bool(decisions) and max(decisions)[1] == "approve"
 
 
+def latest_owner_decision(comments, owner, n):
+    """(action, sha, created_at) of the owner's LAST `/agent-pr` command for PR n, any SHA.
+
+    Latest-wins across SHAs: a revoke naming ANY commit of this PR, posted after an approval,
+    withdraws it. That is stricter than the exact-head rule needs, on purpose — an approval
+    that is carried forward across commits must be withdrawable without guessing which SHA
+    the owner meant."""
+    latest = None
+    for comment in comments:
+        user = comment.get("user") or {}
+        if user.get("login", "").lower() != owner.lower() or user.get("type") != "User":
+            continue
+        match = OWNER_DECISION.fullmatch((comment.get("body") or "").strip())
+        if not match or int(match.group(2)) != n:
+            continue
+        key = comment["id"]
+        if latest is None or key > latest[0]:
+            latest = (key, match.group(1), match.group(3), comment.get("created_at") or "")
+    return None if latest is None else latest[1:]
+
+
+# GitHub's compare API returns at most 300 files and then silently stops. A patch set that
+# was cut off cannot be compared, so it is undetermined rather than "equal".
+COMPARE_FILE_CAP = 300
+# Upper bound on base-merge commits walked between an approval and the head. Exceeding it is
+# undetermined, never "no content change".
+MAX_CARRY_OVER_COMMITS = 50
+
+
+def _is_sha(value):
+    return bool(re.fullmatch(r"[0-9a-f]{40}", value or ""))
+
+
+def net_patch(base_sha, sha):
+    """The PR's own change as of `sha`: the diff from merge-base(base, sha) to sha, per file.
+
+    Require both rendered patch text and the complete Git blob identity. GitHub does not
+    attest that a rendered per-file patch is complete; equal rendered prefixes alone cannot
+    prove equal content. A base merge that changes unrelated lines in a PR-touched file may
+    now require re-approval even when the rendered patch is equal. That conservative denial
+    is preferable to carrying approval across an unverified content change."""
+    data = _gh(["api", f"repos/{REPO}/compare/{base_sha}...{sha}"])
+    if data.get("status") not in {"ahead", "diverged"}:
+        raise Undetermined(f"compare {base_sha[:10]}...{sha[:10]} is `{data.get('status')}` — no PR change to compare")
+    files = data.get("files")
+    if not isinstance(files, list) or not files:
+        raise Undetermined(f"compare {base_sha[:10]}...{sha[:10]} returned no file list")
+    if len(files) >= COMPARE_FILE_CAP:
+        raise Undetermined(f"compare {base_sha[:10]}...{sha[:10]} hit the {COMPARE_FILE_CAP}-file cap — possibly truncated")
+    out = []
+    for f in files:
+        if "patch" not in f or f.get("filename") is None or not _is_sha(f.get("sha")):
+            # Binary file, or a patch GitHub declined to render: its content cannot be compared.
+            raise Undetermined(f"compare {sha[:10]}: incomplete file identity for `{f.get('filename')}`")
+        out.append((f["filename"], f.get("status"), f.get("previous_filename"), f["patch"], f["sha"]))
+    return sorted(out, key=lambda t: t[0])
+
+
+# ---- derived content excluded from the CARRY-OVER comparison only -----------------------
+# Merging main into a PR that touches rego regenerates the OPA bundle ConfigMaps and the
+# pod-roll `openbank.tech/policy-checksum:` annotations (regen-derived.sh --all). Main's own
+# policy changes then move hunk offsets and checksum values in those files, so the net patch
+# differs while the author's source change is byte-identical. These files are pure functions
+# of sources that STAY compared (the rego, rules.yaml, agents.yaml, the gen-*opa-bundle*.sh
+# generators), and the required `OPA policy gate` regenerates every bundle + annotation and
+# fails on any diff (opa-policy.yml), so a hand edit that diverges from its source cannot
+# merge. rules-opa-data.yaml is excluded ONLY because rules.yaml itself stays compared and
+# the same gate runs `gen-rules-opa-data.py --check`. Nothing here touches the exact-head
+# route, the merge-shape walk, or the fail-closed truncation/identity checks in net_patch.
+DERIVED_BUNDLE_RE = re.compile(r"openbank-infra/gitops/components/(?:.+/)?[^/]+-opa-bundle\.yaml")
+DERIVED_WHOLE_FILES = frozenset({"openbank-libs/governance/rules-opa-data.yaml"})
+POLICY_CHECKSUM_LINE_RE = re.compile(
+    r"[ +-]\s*openbank\.tech/policy-checksum:\s*\"?[0-9a-fA-F]*\"?\s*")
+
+
+def _is_derived_file(name):
+    return bool(name) and (name in DERIVED_WHOLE_FILES or bool(DERIVED_BUNDLE_RE.fullmatch(name)))
+
+
+def _strip_policy_checksums(patch):
+    """Return (normalised patch, whether any checksum line was seen).
+
+    Hunk headers lose their offsets (main shifts them), a hunk whose only changes were
+    checksum lines disappears, and a checksum line kept as context is normalised. Every
+    other added, removed or context line survives verbatim."""
+    hunks, cur, seen = [], None, False
+    for line in patch.split("\n"):
+        if line.startswith("@@"):
+            cur = []
+            hunks.append(cur)
+            continue
+        if cur is None:
+            cur = []
+            hunks.append(cur)
+        if POLICY_CHECKSUM_LINE_RE.fullmatch(line):
+            seen = True
+            if line[:1] == " ":
+                cur.append(" openbank.tech/policy-checksum: <derived>")
+            continue
+        cur.append(line)
+    kept = [h for h in hunks if any(l[:1] in {"+", "-"} for l in h)]
+    return "\n".join("@@\n" + "\n".join(h) for h in kept), seen
+
+
+def carry_over_view(patch_set):
+    """The part of a net patch the carry-over comparison holds equal. Applied to BOTH sides."""
+    out = []
+    for name, status, prev, text, sha in patch_set:
+        # A rename INTO a derived path from a source path is not derived: keep it compared.
+        if _is_derived_file(name) and (not prev or _is_derived_file(prev)):
+            continue
+        norm, seen = _strip_policy_checksums(text)
+        if not seen:
+            out.append((name, status, prev, text, sha))
+        elif norm:
+            # The blob necessarily differs when a derived value does; the normalised patch
+            # of every non-derived line is what stays compared for this file.
+            out.append((name, status, prev, norm, None))
+        # else: the file's ONLY change is a derived checksum value — nothing to compare.
+    return out
+
+
+def only_base_merges_since(approved, head, base_sha):
+    """Return base-merge SHAs in chronological order if walking FIRST parents from head
+    reaches `approved`; otherwise return None.
+
+    Every walked commit must be a two-parent merge whose SECOND parent is contained in the
+    base branch. Commits pulled in through those second parents are main's own commits.
+    Anything else — a normal commit, octopus, merge of another branch, or force-push —
+    returns None."""
+    cur = head
+    merges = []
+    for _ in range(MAX_CARRY_OVER_COMMITS):
+        if cur == approved:
+            return list(reversed(merges))
+        commit = _gh(["api", f"repos/{REPO}/commits/{cur}"])
+        parents = [p.get("sha") for p in (commit.get("parents") or [])]
+        if len(parents) != 2 or not all(_is_sha(p) for p in parents):
+            return None
+        reach = _gh(["api", f"repos/{REPO}/compare/{base_sha}...{parents[1]}"])
+        if reach.get("status") not in {"behind", "identical"}:
+            return None
+        merges.append(cur)
+        cur = parents[0]
+    if cur == approved:
+        return list(reversed(merges))
+    raise Undetermined(f"more than {MAX_CARRY_OVER_COMMITS} commits between approval and head")
+
+
+def content_unchanged_since(approved, head, base_sha):
+    """Approval at `approved` carries to `head` iff only base merges happened in between AND
+    the PR's net patch and blob identity remain equal after EVERY merge. Checking only the
+    endpoints would allow an evil merge that changes the PR followed by one that restores it."""
+    if not (_is_sha(approved) and _is_sha(head) and _is_sha(base_sha)):
+        raise Undetermined("malformed SHA in carry-over evaluation")
+    merges = only_base_merges_since(approved, head, base_sha)
+    if merges is None:
+        return False
+    approved_patch = carry_over_view(net_patch(base_sha, approved))
+    if not approved_patch:
+        # Nothing non-derived was approved; there is nothing to hold equal.
+        return False
+    for merge in merges:
+        if carry_over_view(net_patch(base_sha, merge)) != approved_patch:
+            return False
+    return True
+
+
 def owner_approval_allows(n, files):
     # This route cannot introduce or amend its own authorization code.
     if any(f in REVIEW_POLICY_PATHS for f in files):
         return False
     pr = _gh(["api", f"repos/{REPO}/pulls/{n}"])
     head = pr["head"]["sha"]
-    if not re.fullmatch(r"[0-9a-f]{40}", head or ""):
+    if not _is_sha(head):
         raise Undetermined("missing or malformed current PR head SHA")
     event_path = os.environ.get("GITHUB_EVENT_PATH")
     if event_path:
@@ -394,7 +569,27 @@ def owner_approval_allows(n, files):
     head_created_at = commits["commit"]["committer"]["date"]
     pages = _gh(["api", f"repos/{REPO}/issues/{n}/comments?per_page=100",
                  "--paginate", "--slurp"])
-    if not owner_decision_allows([c for page in pages for c in page], owner, n, head, head_created_at):
+    comments = [c for page in pages for c in page]
+    latest = latest_owner_decision(comments, owner, n)
+    if latest is None or latest[0] != "approve":
+        return False
+    if owner_decision_allows(comments, owner, n, head, head_created_at):
+        allowed = True
+    elif latest[1] != head:
+        # Carry-over: the owner approved an EARLIER commit; base merges since then must not
+        # void it, any change to the PR's own content must (see content_unchanged_since).
+        approved = latest[1]
+        approved_at = _gh(["api", f"repos/{REPO}/commits/{approved}"])["commit"]["committer"]["date"]
+        if latest[2] < approved_at:
+            return False
+        base_ref = (pr.get("base") or {}).get("ref") or ""
+        if not base_ref:
+            raise Undetermined("PR base branch is unavailable")
+        base_sha = _gh(["api", f"repos/{REPO}/commits/{base_ref}"]).get("sha", "")
+        allowed = content_unchanged_since(approved, head, base_sha)
+    else:
+        allowed = False
+    if not allowed:
         return False
     current = _gh(["api", f"repos/{REPO}/pulls/{n}"])
     if current["head"]["sha"] != head or current.get("state") != "open":
@@ -434,6 +629,12 @@ def parse_name_status_z(raw):
         paths = fields[index:index + width]
         index += width
         path = paths[-1]
+        # A rename has two sides and BOTH are changed: the old path loses its content. Taking
+        # only the destination let an agent move a protected file (e.g. a money-path
+        # migration) out to an ordinary path and pass. A rename destination is also new.
+        if status.startswith("R"):
+            files.append(paths[0])
+            added.add(path)
         files.append(path)
         if status == "A":
             added.add(path)
@@ -483,9 +684,59 @@ def fetch_pr(n):
         raise Undetermined(f"PR #{n}: could not read author/headRefName")
     pages = _gh(["api", f"repos/{REPO}/pulls/{n}/files?per_page=100", "--paginate", "--slurp"])
     flat = [f for page in pages for f in page]
+    # The files API stops at 3000 entries with no error; unseen files are unjudged files.
+    expected = _gh(["api", f"repos/{REPO}/pulls/{n}"]).get("changed_files")
+    if not isinstance(expected, int) or len(flat) != expected or len(flat) >= FILES_API_CAP:
+        raise Undetermined(f"PR #{n}: files API listed {len(flat)} of {expected} changed files — possibly truncated")
     files = [f["filename"] for f in flat]
-    added = frozenset(f["filename"] for f in flat if f.get("status") == "added")
+    # Both sides of a rename are judged (see parse_name_status_z).
+    files += [f["previous_filename"] for f in flat if f.get("previous_filename")]
+    added = frozenset(f["filename"] for f in flat if f.get("status") in {"added", "renamed"})
     return author, is_bot, branch, files, added
+
+
+FILES_API_CAP = 3000
+
+
+def _base_read(ref, path):
+    """Content of `path` at `ref`, or None if absent. git first (CI fetches the merge ref at
+    depth 2, so HEAD^1 = PR_DIFF_BASE is a local commit); the contents API otherwise.
+    Anything else is Undetermined, never 'absent'."""
+    proc = subprocess.run(["git", "cat-file", "-e", f"{ref}^{{commit}}"], capture_output=True)
+    if proc.returncode == 0:
+        proc = subprocess.run(["git", "show", f"{ref}:{path}"], capture_output=True, text=True)
+        if proc.returncode == 0:
+            return proc.stdout
+        ls = subprocess.run(["git", "ls-tree", "--name-only", ref, "--", path], capture_output=True, text=True)
+        if ls.returncode == 0 and not ls.stdout.strip():
+            return None
+        raise Undetermined(f"git show {ref}:{path} failed: {proc.stderr.strip()}")
+    import base64
+    data = _gh(["api", f"repos/{REPO}/contents/{path}?ref={ref}"])
+    if not isinstance(data, dict) or "content" not in data:
+        raise Undetermined(f"contents {path}@{ref} unreadable")
+    return base64.b64decode(data["content"]).decode()
+
+
+def base_ref_for(n):
+    """The commit whose policy judges PR n: PR_DIFF_BASE in CI, else the PR's base SHA."""
+    base = os.environ.get("PR_DIFF_BASE", "").strip()
+    if base:
+        return base
+    sha = ((_gh(["api", f"repos/{REPO}/pulls/{n}"]).get("base") or {}).get("sha") or "")
+    if not _is_sha(sha):
+        raise Undetermined(f"PR #{n}: base SHA unavailable — cannot read policy from the base")
+    return sha
+
+
+def base_policy(ref):
+    """rules.yaml AS OF THE BASE. Read from the PR head, the PR under judgement could
+    rewrite its own scope (move itself from agent_accounts to automation_accounts, prune
+    governance_path_globs or money_path_services) and be judged by the policy it wrote."""
+    text = _base_read(ref, RULES)
+    if text is None:
+        raise Undetermined(f"{RULES} absent at base {ref}")
+    return load_rules(RULES, text=text)
 
 
 def resolve_pr_number(explicit):
@@ -524,6 +775,112 @@ FIXTURE = {
     ],
     "_money_path_services": ["openbank-ledger-service", "openbank-balance-service"],
 }
+
+
+def bypass_self_test(failures):
+    """Regression cases for three authorization bypasses (found reviewing PR #12914). Each
+    must BLOCK (exit 1) or be Undetermined — never exit 0."""
+    global _gh
+    import shutil
+    import tempfile
+
+    bot = "openbank-agent-bot[bot]"
+    ledger_src = "openbank-ledger-service/src/main/kotlin/A.kt"
+
+    # 1. Rename OUT of a protected path: only the destination used to be judged.
+    files, added = parse_name_status_z(
+        "R100\0openbank-ledger-service/src/main/resources/db/migration/V1__x.sql\0docs/V1__x.sql\0")
+    code, msg = verdict(bot, True, "agent/x", files, dict(FIXTURE), added)
+    if code != 1:
+        failures.append(f"bypass rename-out-of-money-path (git diff) passed: exit {code} — {msg}")
+
+    # 1b. Same rename via the REST files API (previous_filename used to be ignored), and
+    # 2. the files API truncated at 3000 entries must be Undetermined, not judged on a subset.
+    real_gh = _gh
+    renamed = [{"filename": "docs/V1__x.sql", "status": "renamed",
+                "previous_filename": "openbank-ledger-service/src/main/resources/db/migration/V1__x.sql"}]
+
+    def fake(listing, changed):
+        def _fake(args):
+            if args[0] == "pr":
+                return {"author": {"login": bot, "is_bot": True}, "headRefName": "agent/x"}
+            if "/files" in args[1]:
+                return [listing]
+            return {"changed_files": changed}
+        return _fake
+
+    saved_event = os.environ.pop("GITHUB_EVENT_PATH", None)
+    try:
+        _gh = fake(renamed, 1)
+        a, b, br, files, added = fetch_pr(1)
+        code, msg = verdict(a, b, br, files, dict(FIXTURE), added)
+        if code != 1:
+            failures.append(f"bypass rename-out-of-money-path (files API) passed: exit {code} — {msg}")
+        _gh = fake([{"filename": f"docs/f{i}.md", "status": "modified"} for i in range(3000)], 3001)
+        try:
+            fetch_pr(1)
+            failures.append("bypass files-API truncation (3000 of 3001) was judged on the visible subset")
+        except Undetermined:
+            pass
+    finally:
+        _gh = real_gh
+        if saved_event is not None:
+            os.environ["GITHUB_EVENT_PATH"] = saved_event
+
+    # 3. rules.yaml edited in the PR (agent moved to automation_accounts): policy must come
+    #    from the BASE commit, so the agent is still in scope and still blocked.
+    tmp = tempfile.mkdtemp()
+    repo = os.path.join(tmp, "repo")
+    os.makedirs(os.path.join(repo, os.path.dirname(RULES)))
+    base_rules = (
+        "money_path_services: [openbank-ledger-service]\n"
+        "autonomous_agent_prs:\n  agent_accounts: ['openbank-agent-bot[bot]']\n"
+        "  automation_accounts: []\n  agent_branch_prefixes: ['agent/']\n"
+        "  governance_path_globs: [openbank-libs/governance/*]\n"
+    )
+    Path(repo, RULES).write_text(base_rules)
+    cwd = os.getcwd()
+    # run-gates.py hands every gate a PRIVATE copy of the real repo's index via
+    # GIT_INDEX_FILE (concurrent gates would race .git/index.lock); a git subprocess that
+    # inherits it builds trees from THAT index, referencing blobs that do not exist in this
+    # scratch repo ("invalid object ... Error building trees" — measured on the runner).
+    # Same for GIT_DIR/GIT_WORK_TREE/GIT_OBJECT_DIRECTORY: they point the fixture at the
+    # real repository regardless of cwd (see probe.sh and check-pdp-flag-rollout.sh, which
+    # unset the same set). Strip them for the whole block, restore after.
+    git_env_vars = ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE",
+                    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")
+    saved_git_env = {v: os.environ.pop(v) for v in git_env_vars if v in os.environ}
+    try:
+        os.chdir(repo)
+        git = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        subprocess.run(["git", "init", "-q"], check=True)
+        subprocess.run(["git", "add", RULES], check=True)
+        subprocess.run(git + ["commit", "-qm", "base"], check=True)
+        base = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        Path(repo, RULES).write_text(base_rules.replace(
+            "agent_accounts: ['openbank-agent-bot[bot]']", "agent_accounts: []").replace(
+            "automation_accounts: []", "automation_accounts: ['openbank-agent-bot[bot]']").replace(
+            "agent_branch_prefixes: ['agent/']", "agent_branch_prefixes: []"))
+        subprocess.run(git + ["commit", "-qam", "head"], check=True)
+        saved_base = os.environ.get("PR_DIFF_BASE")
+        os.environ["PR_DIFF_BASE"] = base
+        try:
+            bcfg = base_policy(base_ref_for(1))
+        finally:
+            if saved_base is None:
+                os.environ.pop("PR_DIFF_BASE", None)
+            else:
+                os.environ["PR_DIFF_BASE"] = saved_base
+        code, msg = verdict(bot, True, "agent/x", [ledger_src], bcfg)
+        if code != 1:
+            failures.append(f"bypass head-rules.yaml descoped the agent: exit {code} — {msg}")
+    except (Undetermined, subprocess.CalledProcessError) as e:
+        failures.append(f"bypass head-rules.yaml case could not run: {e}")
+    finally:
+        os.chdir(cwd)
+        os.environ.update(saved_git_env)
+        shutil.rmtree(tmp, ignore_errors=True)
+    return 4
 
 
 def self_test():
@@ -709,9 +1066,10 @@ def self_test():
         parsed_files, parsed_added = parse_name_status_z(
             "M\0plain.kt\0A\0new file.kt\0R100\0old.kt\0renamed.kt\0C090\0source.kt\0copy.kt\0"
         )
-        if parsed_files != ["plain.kt", "new file.kt", "renamed.kt", "copy.kt"]:
+        # A rename contributes BOTH sides (old path first); its destination counts as added.
+        if parsed_files != ["plain.kt", "new file.kt", "old.kt", "renamed.kt", "copy.kt"]:
             failures.append(f"name-status parser returned wrong paths: {parsed_files}")
-        if parsed_added != frozenset({"new file.kt"}):
+        if parsed_added != frozenset({"new file.kt", "renamed.kt"}):
             failures.append(f"name-status parser returned wrong added paths: {parsed_added}")
         try:
             parse_name_status_z("R100\0only-old.kt\0")
@@ -721,13 +1079,15 @@ def self_test():
     except Undetermined as e:
         failures.append(f"valid name-status fixture was rejected: {e}")
 
+    n_bypass = bypass_self_test(failures)
+
     if failures:
         print("SELF-TEST FAILED — the guard is not falsifiable as written:")
         for f in failures:
             print(f"  x {f}")
         return 1
     print(
-        f"self-test OK — {len(cases)} classifier cases + 4 undetermined cases + diff parser, "
+        f"self-test OK — {len(cases)} classifier cases + {n_bypass} bypass regressions + 4 undetermined cases + diff parser, "
         f"every block clause independently reached"
     )
     return 0
@@ -778,7 +1138,11 @@ def main():
         return 1
 
     try:
-        cfg = load_rules()
+        n = resolve_pr_number(args.pr)
+        if n is None:
+            print("agent-pr-guard: no pull request in context — nothing to judge")
+            return 0
+        cfg = base_policy(base_ref_for(n))
         # The SUBJECT corpus is the RULE SET, not the PR. A PR-scoped gate examines one PR by
         # definition, so counting PRs could never distinguish a working gate from a broken
         # one. What CAN silently collapse is the derivation: if money_path_services stops
@@ -787,14 +1151,11 @@ def main():
         # `min_subjects:` exists for, so the floor is placed on the derived rules.
         n_rules = len(protected_tokens(cfg)) + len(cfg.get("governance_path_globs") or [])
         gatelib.subjects(n_rules, "protected service tokens + governance globs")
-        n = resolve_pr_number(args.pr)
-        if n is None:
-            print("agent-pr-guard: no pull request in context — nothing to judge")
-            return 0
         author, is_bot, branch, files, added = fetch_pr(n)
         code, msg = verdict(author, is_bot, branch, files, cfg, added)
         if code == 1 and owner_approval_allows(n, files):
-            code, msg = 0, "protected changes explicitly approved by repository owner on current head"
+            code, msg = 0, ("protected changes explicitly approved by repository owner on the "
+                            "current head, or on an earlier head followed only by content-neutral base merges")
     except Undetermined as e:
         # Third state: the verdict could not be computed. The floor must not then convert an
         # unreachable API into a lost-corpus red one layer up.

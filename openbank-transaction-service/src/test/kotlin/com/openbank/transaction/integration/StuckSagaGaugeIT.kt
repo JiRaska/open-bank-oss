@@ -7,6 +7,7 @@ import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
@@ -145,5 +146,21 @@ class StuckSagaGaugeIT {
         assertThat(sagaGaugeValue())
             .describedAs("healthy traffic must not page: only non-terminal sagas past the threshold count")
             .isEqualTo(0.0)
+    }
+
+    @Test
+    fun `a refresh against the real database records the workflow heartbeat`() {
+        val recorded = registry.find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+            .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "stuck-saga-gauge-refresh")
+        assertThat(recorded.gauge())
+            .describedAs("the heartbeat must be registered at boot, or its staleness is invisible")
+            .isNotNull()
+
+        onEventLoop { gauge.refresh() }
+
+        assertThat(recorded.gauge()!!.value()).isEqualTo(1.0)
+        val age = registry.find(WorkflowLivenessMetrics.LAST_SUCCESS_AGE_SECONDS)
+            .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "stuck-saga-gauge-refresh").gauge()!!.value()
+        assertThat(age).describedAs("age of the last success just after a refresh").isLessThan(60.0)
     }
 }

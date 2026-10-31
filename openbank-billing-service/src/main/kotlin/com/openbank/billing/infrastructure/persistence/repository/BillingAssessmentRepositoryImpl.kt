@@ -14,9 +14,13 @@ import com.openbank.billing.infrastructure.outbox.AssessedFeeOutboxPayloads
 import com.openbank.billing.infrastructure.persistence.entity.AssessedFeeEntity
 import com.openbank.billing.infrastructure.persistence.entity.BillingCycleAssessmentEntity
 import com.openbank.billing.infrastructure.persistence.entity.BillingOutboxEntity
+import com.openbank.billing.infrastructure.shadow.ProductShadowWiring
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.libs.product.WaiveReason
+import com.openbank.libs.productrevision.shadow.ProductShadowRecorder
+import com.openbank.libs.productrevision.shadow.ShadowNotComparable
+import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.pgclient.PgException
@@ -41,8 +45,11 @@ import java.util.UUID
  */
 @ApplicationScoped
 @Suppress("TooManyFunctions")
-class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, private val clock: Clock) :
-    BillingAssessmentRepository {
+class BillingAssessmentRepositoryImpl(
+    private val sf: Mutiny.SessionFactory,
+    private val clock: Clock,
+    meters: MeterRegistry,
+) : BillingAssessmentRepository {
 
     override suspend fun findExisting(cycleId: String, accountId: String, currency: String): BillingAssessment? {
         val assessment = sf.withSession { s ->
@@ -91,12 +98,40 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
                 waiveReason = fee.reason.name
                 idempotencyKey = fee.idempotencyKey
                 postingStatus = if (chargeable) PostingStatus.PENDING else PostingStatus.NOT_APPLICABLE
+                productRevisionId = fee.productRevisionId?.let(UUID::fromString)
+                accountingClass = fee.accountingClass
                 createdAt = now
                 updatedAt = now
             }
         }
 
-        val outboxEntities = feeEntities.filter { it.postingStatus == PostingStatus.PENDING }.map { fee ->
+        val outboxEntities = postIntentRows(feeEntities, now)
+
+        // Individual chained s.persist() calls, not persistAll(vararg) — avoids a spread
+        // operator over a to-typed-array (detekt SpreadOperator) and mirrors this repo's own
+        // multi-entity-one-transaction convention (see ComplaintRepositoryImpl.save:
+        // s.persist(entity).flatMap { s.persist(outbox.toEntity()) }).
+        val shadowEntities = shadowRows(assessment, assessmentEntity.id, now)
+        val allEntities: List<Any> = listOf(assessmentEntity) + feeEntities + outboxEntities + shadowEntities
+        try {
+            sf.withTransaction { s, _ ->
+                allEntities.fold(Uni.createFrom().voidItem() as Uni<*>) { acc, entity ->
+                    acc.chain { _ -> s.persist(entity) }
+                }
+            }.awaitSuspending()
+        } catch (e: PersistenceException) {
+            return recoverConcurrentReplay(e, assessment)
+        } catch (e: PgException) {
+            return recoverConcurrentReplay(e, assessment)
+        }
+
+        if (shadowEntities.isNotEmpty()) shadow.inputQueued()
+        return assessmentEntity.toDomain(feeEntities)
+    }
+
+    /** One `billing.fee.post-intent.v1` outbox row per fee that will post (ADR-0143 step 2). */
+    private fun postIntentRows(feeEntities: List<AssessedFeeEntity>, now: Instant) =
+        feeEntities.filter { it.postingStatus == PostingStatus.PENDING }.map { fee ->
             BillingOutboxEntity().apply {
                 eventId = Ids.newId()
                 synthetic = false
@@ -110,25 +145,37 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
             }
         }
 
-        // Individual chained s.persist() calls, not persistAll(vararg) — avoids a spread
-        // operator over a to-typed-array (detekt SpreadOperator) and mirrors this repo's own
-        // multi-entity-one-transaction convention (see ComplaintRepositoryImpl.save:
-        // s.persist(entity).flatMap { s.persist(outbox.toEntity()) }).
-        val allEntities: List<Any> = listOf(assessmentEntity) + feeEntities + outboxEntities
-        try {
-            sf.withTransaction { s, _ ->
-                allEntities.fold(Uni.createFrom().voidItem() as Uni<*>) { acc, entity ->
-                    acc.chain { _ -> s.persist(entity) }
-                }
-            }.awaitSuspending()
-        } catch (e: PersistenceException) {
-            return recoverConcurrentReplay(e, assessment)
-        } catch (e: PgException) {
-            return recoverConcurrentReplay(e, assessment)
-        }
-
-        return assessmentEntity.toDomain(feeEntities)
+    /**
+     * ADR-0352 phase 3: the legacy decision and its frozen inputs, queued for the product-IR shadow in the
+     * assessment's own transaction, so a committed assessment is never missing its comparison and a
+     * rolled-back one never leaves an orphan. Nothing on the posting path reads the row. The caller counts
+     * it only after the commit, never on the replay path, so the "queued, none processed" alert sees the
+     * inputs that really exist.
+     */
+    /**
+     * Building the shadow row is a pure mapping that can still fail on a malformed input (a revision id that
+     * is not a UUID, an unserialisable amount). That is a shadow-only fault and must never reach the money
+     * path: the assessment commits without its shadow row, and the miss is counted as `INPUT_UNKNOWN`, so
+     * a shadow that compares nothing still reads as not-comparable rather than as quiet.
+     */
+    private fun shadowRows(assessment: BillingAssessment, assessmentId: UUID, now: Instant): List<Any> {
+        val input = assessment.shadowInput ?: return emptyList()
+        return runCatching { ProductShadowRows.entity(assessmentId, input, now) }.fold(
+            onSuccess = { listOf(it) },
+            onFailure = {
+                log.warnf(
+                    "product shadow input not recorded for assessment %s: %s",
+                    assessmentId,
+                    it.javaClass.simpleName,
+                )
+                shadow.notComparable(ShadowNotComparable.INPUT_UNKNOWN)
+                emptyList()
+            },
+        )
     }
+
+    private val shadow = ProductShadowRecorder(meters, ProductShadowWiring.CONSUMER)
+    private val log = org.jboss.logging.Logger.getLogger(BillingAssessmentRepositoryImpl::class.java)
 
     /**
      * TOCTOU recovery (fix-review finding): [BillingCycleService.assessAndPost] calls
@@ -280,43 +327,46 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
         }.awaitSuspending().map { it.toDomain() }
 
     /**
-     * ADR-0248 annual fee-summary trigger. [aggregateIdFor] is deterministic on
-     * `(accountId, year)`, so re-running the annual scheduler for an account/year that already
-     * has a row is a genuine no-op — the existence check and the insert happen in the SAME
-     * transaction, closing the same check-then-act race [persistWithPostingIntent] documents for
-     * the charge leg (two concurrent scheduler runs can only ever insert one row per account/year;
-     * the `billing_outbox` primary key has no unique constraint on `aggregate_id` to backstop this
-     * the way `uq_billing_cycle_assessment` backstops the charge leg, so the transactional
-     * read-then-write here IS the whole guarantee — acceptable because, unlike the charge leg,
-     * this table has exactly one writer: the annual scheduler, never a customer-facing request).
+     * ADR-0248 annual fee-summary trigger. The durable issuance key is separate from the outbox
+     * lifecycle: `billing_outbox` rows can be marked SENT and eventually purged, while this compact
+     * `(account_id, calendar_year)` reservation remains. PostgreSQL's unique constraint is the
+     * concurrency arbiter; inserting the key and its outbox row in this same transaction means
+     * neither can commit without the other.
      */
     override suspend fun appendAnnualFeeSummaryEvent(summary: AnnualFeeSummary, occurredAt: Instant): Boolean {
         val aggregateId = aggregateIdFor(summary.accountId, summary.year)
         val now = Instant.now(clock)
         val payload = AnnualFeeSummaryOutboxPayloads.toJson(summary, occurredAt)
+        val eventId = Ids.newId()
+        val entity = BillingOutboxEntity().apply {
+            this.eventId = eventId
+            synthetic = false
+            this.aggregateId = aggregateId
+            eventType = ANNUAL_FEE_SUMMARY_EVENT_TYPE
+            this.payload = payload
+            status = OutboxStatus.PENDING.name
+            attemptCount = 0
+            createdAt = now
+            updatedAt = now
+        }
         return sf.withTransaction { s, _ ->
-            s.createQuery(
-                "FROM BillingOutboxEntity WHERE aggregateId = :id AND eventType = :et",
-                BillingOutboxEntity::class.java,
-            ).setParameter("id", aggregateId)
-                .setParameter("et", ANNUAL_FEE_SUMMARY_EVENT_TYPE)
-                .setMaxResults(1)
-                .singleResultOrNull
-                .chain { existing ->
-                    if (existing != null) {
+            s.createNativeQuery<Int>(
+                """
+                INSERT INTO billing_annual_fee_summary_issuance
+                    (account_id, calendar_year, source_event_id, reserved_at)
+                VALUES (:accountId, :calendarYear, :eventId, :reservedAt)
+                ON CONFLICT (account_id, calendar_year) DO NOTHING
+                """.trimIndent(),
+            )
+                .setParameter("accountId", summary.accountId)
+                .setParameter("calendarYear", summary.year)
+                .setParameter("eventId", eventId)
+                .setParameter("reservedAt", now)
+                .executeUpdate()
+                .chain { inserted ->
+                    if (inserted == 0) {
                         Uni.createFrom().item(false)
                     } else {
-                        val entity = BillingOutboxEntity().apply {
-                            eventId = Ids.newId()
-                            synthetic = false
-                            this.aggregateId = aggregateId
-                            eventType = ANNUAL_FEE_SUMMARY_EVENT_TYPE
-                            this.payload = payload
-                            status = OutboxStatus.PENDING.name
-                            attemptCount = 0
-                            createdAt = now
-                            updatedAt = now
-                        }
                         s.persist(entity).replaceWith(true)
                     }
                 }
@@ -356,4 +406,6 @@ private fun AssessedFeeEntity.toDomain(): AssessedFee = AssessedFee(
     reversalJournalId = reversalJournalId,
     reversalReason = reversalReason,
     postedAt = postedAt,
+    productRevisionId = productRevisionId?.toString(),
+    accountingClass = accountingClass,
 )

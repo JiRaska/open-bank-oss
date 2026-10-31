@@ -7,6 +7,9 @@ package com.openbank.sepa.infrastructure.persistence.repository
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.OutboxTableShape
+import com.openbank.libs.persistence.outbox.PanacheOutboxRetention
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxRepository
 import com.openbank.sepa.infrastructure.persistence.entity.SepaPaymentOutboxEntity
@@ -23,6 +26,7 @@ import java.util.UUID
 @ApplicationScoped
 class SepaPaymentOutboxRepositoryImpl(private val clock: Clock) :
     SepaPaymentOutboxRepository,
+    SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("sepa_payment_outbox")),
     PanacheRepository<SepaPaymentOutboxEntity> {
 
     fun persistWithinCurrentTransaction(message: SepaPaymentOutboxMessage): Uni<SepaPaymentOutboxEntity> =

@@ -47,6 +47,14 @@ erDiagram
   }
 ```
 
+## Přechod do FAILED a outbox
+
+Při třetím po sobě jdoucím selhání provedení se `failure_count = 3` a stav `FAILED` ukládají
+ve stejné transakci jako outbox řádek `standing-order.failed.v1`. Pokud vložení do outboxu
+selže, stav i počet selhání se společně vrátí zpět; událost selhání se neuloží.
+PostgreSQL regrese načítá uložený počet, porovnává identifikátory transakcí a vynuceným
+selháním vložení do outboxu ověřuje rollback před úspěšným opakováním.
+
 ## Migrace
 
 Flyway, immutable historické skripty, forward-only (`migrate-at-start: true`):
@@ -94,3 +102,13 @@ Celá datová sada je klasifikována jako **confidential** (`governance.yaml: da
 
 - **Upstream identifikátory** (`party_id`, `debit_account_id`) jsou cizí reference **bez DB FK** — služby jsou izolované; integritu drží aplikační hranice.
 - **Downstream** (`governance.yaml: lineage.downstream`): `transaction-service` konzumuje události příkazů a zakládá vlastní platbu; tato služba má `dependentDatabases: [openbank_transactions]`.
+
+## Retence outboxu (řádky SENT)
+
+`standing_order_outbox` je doručovací buffer, ne záznam. Řádky, které už dorazily do brokeru (`status = 'SENT'`), se mažou, jakmile je jejich `sent_at` starší než `openbank.outbox.retention.sent-days` (výchozí **7**), sdíleným jobem `OutboxSentRetentionJob` z libs-runtime (ADR-0329, ADR-0327 D8). Repozitář se zapojuje delegací `SentOutboxRetention` na `PanacheOutboxRetention`.
+
+- Běží každou noc (`openbank.outbox.retention.cron`, výchozí `0 17 3 * * ?`) na každé replice; každé mazání je omezené (`batch-size` 5 000, nejvýš `max-batches` 200 za běh), takže dlouho nečištěná tabulka se vyprázdní během několika nocí.
+- Řádků PENDING, FAILED, DISPATCHING a DEAD se nikdy nedotkne — DEAD řádky jsou DLQ na straně producenta.
+- Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
+- Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
+- Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.

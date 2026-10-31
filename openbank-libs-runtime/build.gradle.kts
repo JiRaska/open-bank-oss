@@ -53,17 +53,19 @@ dependencies {
     compileOnly("jakarta.inject:jakarta.inject-api:2.0.1")
     compileOnly("org.eclipse.microprofile.config:microprofile-config-api:3.1")
     compileOnly("org.jboss.logging:jboss-logging:3.6.2.Final")
-    compileOnly("io.quarkus:quarkus-redis-client:3.33.2")
+    compileOnly("io.quarkus:quarkus-redis-client:${libs.versions.quarkus.asProvider().get()}")
     compileOnly("io.smallrye.reactive:mutiny-kotlin:3.1.1")
     compileOnly("jakarta.persistence:jakarta.persistence-api:3.2.0")
     compileOnly("org.eclipse.microprofile.rest.client:microprofile-rest-client-api:4.0")
-    compileOnly("io.quarkus:quarkus-hibernate-reactive-panache-kotlin:3.33.2")
+    compileOnly("io.quarkus:quarkus-hibernate-reactive-panache-kotlin:${libs.versions.quarkus.asProvider().get()}")
     // Test-only, and deliberately not `implementation`: the persistence exception mappers reference
     // Hibernate types, but a service without an ORM must not inherit one from libs-runtime just to
     // get the shared error handling. compileOnly keeps it off every consumer's runtime classpath;
     // this line only lets libs-runtime's OWN tests construct a DataException to assert against.
-    testImplementation("io.quarkus:quarkus-hibernate-reactive-panache-kotlin:3.33.2")
-    compileOnly("io.quarkus:quarkus-scheduler:3.33.2")
+    testImplementation(
+        "io.quarkus:quarkus-hibernate-reactive-panache-kotlin:${libs.versions.quarkus.asProvider().get()}",
+    )
+    compileOnly("io.quarkus:quarkus-scheduler:${libs.versions.quarkus.asProvider().get()}")
     compileOnly("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")
     // 1.14.5 -> 1.17.0: GHSA-g3pr-3p32-fp23 / CVE-2026-40984 (HIGH, DoS in Micrometer's HTTP
     // server instrumentations). The 1.14.x line has NO fix (advisory's first_patched_version
@@ -75,12 +77,13 @@ dependencies {
     // confirms real services already land on 1.17.0). 1.17.0 matches that resolved version
     // exactly, consistent with this block's "MUST equal what quarkus-bom ships" convention.
     // Issue #5482.
-    compileOnly("io.micrometer:micrometer-core:1.17.0")
-    compileOnly("io.quarkus:quarkus-security:3.33.2")
-    compileOnly("io.quarkus:quarkus-arc:3.33.2")
+    compileOnly("io.micrometer:micrometer-core:1.17.1")
+    compileOnly("io.quarkus:quarkus-security:${libs.versions.quarkus.asProvider().get()}")
+    compileOnly("org.eclipse.microprofile.jwt:microprofile-jwt-auth-api:2.1")
+    compileOnly("io.quarkus:quarkus-arc:${libs.versions.quarkus.asProvider().get()}")
     // Startup warm-up (HibernateReactiveWarmup): VertxContextSupport supplies the Vert.x context
     // Hibernate Reactive needs off the event loop. Every service already ships quarkus-vertx.
-    compileOnly("io.quarkus:quarkus-vertx:3.33.2")
+    compileOnly("io.quarkus:quarkus-vertx:${libs.versions.quarkus.asProvider().get()}")
     // StartupWarmup (#11890): the readiness check implements MicroProfile Health, which every
     // consuming service already ships via quarkus-smallrye-health. (The reactive Pool ping is
     // reflective on purpose: the sql-client's transitive POMs are not in verification-metadata,
@@ -96,17 +99,9 @@ dependencies {
     // registration hook. Both compileOnly for the same reason as everything above — every real
     // service already brings them via quarkus-rest-jackson.
     //
-    // quarkus-jackson is pinned to 3.33.2, matching every sibling literal in this block rather
-    // than the 3.38.0 the platform actually resolves. That is deliberate and measured, not the
-    // rot this block's header warns about: resolving quarkus-jackson:3.38.0 STANDALONE (this
-    // module applies no Quarkus BOM) drags four POMs that `gradle/verification-metadata.xml` does
-    // not carry — io.smallrye.common:smallrye-common-{classloader,expression,function}:2.17.1 and
-    // smallrye-common-os:2.15.0 — and dependency verification then fails the build of every
-    // consuming service. Only the ObjectMapperCustomizer interface is compiled against, and it is
-    // identical across both versions. Correcting the whole block to the real BOM versions is the
-    // separate change the header calls for (#5482), and needs those checksums added with it.
+    // Keep Quarkus API coordinates aligned with the service platform catalog.
     compileOnly("com.fasterxml.jackson.core:jackson-databind:2.22.3")
-    compileOnly("io.quarkus:quarkus-jackson:3.33.2")
+    compileOnly("io.quarkus:quarkus-jackson:${libs.versions.quarkus.asProvider().get()}")
 
     // S3ObjectStore (ADR-0161 D2) compiles against the real AWS SDK v2 `s3` module
     // (S3Presigner ships in the same artifact — no separate presigner dependency).
@@ -123,36 +118,37 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
-    testImplementation("io.quarkus:quarkus-security:3.33.2")
+    testImplementation("io.quarkus:quarkus-security:${libs.versions.quarkus.asProvider().get()}")
+    testImplementation("org.eclipse.microprofile.jwt:microprofile-jwt-auth-api:2.1")
     // OpaPolicyDecisionPointProducerTest reads @IfBuildProperty reflectively; an annotation whose
     // class is absent at runtime is silently dropped, so the test needs arc itself.
-    testImplementation("io.quarkus:quarkus-arc:3.33.2")
+    testImplementation("io.quarkus:quarkus-arc:${libs.versions.quarkus.asProvider().get()}")
     testImplementation("org.eclipse.microprofile.health:microprofile-health-api:4.0.1")
     testImplementation("org.eclipse.microprofile.config:microprofile-config-api:3.1")
     testImplementation("org.jboss.resteasy:resteasy-core:6.2.12.Final")
     // MultipartParser.MalformedMessageException lives in the reactive-server artifact; the
     // classification test instantiates the real class so the by-name map key can never drift
     // from the class it names. Already in gradle/verification-metadata.xml (services resolve it).
-    testImplementation("io.quarkus.resteasy.reactive:resteasy-reactive:3.38.0")
+    testImplementation("io.quarkus.resteasy.reactive:resteasy-reactive:${libs.versions.quarkus.asProvider().get()}")
     testImplementation("org.jboss.logging:jboss-logging:3.6.2.Final")
     testImplementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
     // Kept in sync with the compileOnly pin above — CVE-2026-40984, issue #5482.
-    testImplementation("io.micrometer:micrometer-core:1.17.0")
+    testImplementation("io.micrometer:micrometer-core:1.17.1")
     // RedisApprovalStoreTest drives the REAL store — the four-eyes self-approval guard is the
     // single fleet-wide enforcement point for segregation of duties (#3349), and until that test
     // existed deleting it left every suite green. Both are compileOnly above, so the test source
     // set needs them explicitly; same pattern as quarkus-security and the FT API here.
-    testImplementation("io.quarkus:quarkus-redis-client:3.33.2")
+    testImplementation("io.quarkus:quarkus-redis-client:${libs.versions.quarkus.asProvider().get()}")
     // NulByteGuardsTest drives the REAL ObjectMapper through the REAL customizer, so the module
     // registration and the deserializer are both exercised rather than asserted about.
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.3")
     testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.22.1")
-    testImplementation("io.quarkus:quarkus-jackson:3.33.2")
+    testImplementation("io.quarkus:quarkus-jackson:${libs.versions.quarkus.asProvider().get()}")
     testImplementation("io.opentelemetry:opentelemetry-api:1.62.0")
     testImplementation("io.smallrye.reactive:mutiny-kotlin:3.1.1")
     // HashLinkedOutboxAuditEventPublisherTest asserts the @IfBuildProperty opt-in gate by reflection
     // (ADR-0323), so the annotation class must be on the test classpath; compileOnly above.
-    testImplementation("io.quarkus:quarkus-arc:3.33.2")
+    testImplementation("io.quarkus:quarkus-arc:${libs.versions.quarkus.asProvider().get()}")
     testImplementation("org.eclipse.microprofile.config:microprofile-config-api:3.1")
     // ResilientCallMetrics classifies CircuitBreakerOpenException; the API is compileOnly above.
     testImplementation("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")
@@ -160,7 +156,7 @@ dependencies {
     // REAL PrometheusNamingConvention rather than trusting the hand-rolled dot -> underscore
     // rendering that the sentinel's PromQL depends on. The registry itself is never used at runtime
     // here — each service brings quarkus-micrometer-registry-prometheus itself.
-    testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.0")
+    testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.1")
     // OpenBaoTransitFieldProtectorIT drives a REAL openbao/openbao container (ADR-0320 P3 security
     // review): the stub-based AAD/rewrap tests cannot tell whether the stub matches the server.
     // 2.0.5 (the line the Quarkus BOM resolves for every service), not the catalog's 1.20.4: 1.20.x
@@ -179,12 +175,20 @@ dependencies {
     // quarkus-rest-client) against a stub HTTP server, so the keyed-only retry classification of
     // ADR-0321 D2 is proven on actual 5xx / connect-refused / timeout failures rather than mocks.
     // Test-only; already in gradle/verification-metadata.xml because every service resolves it.
-    testImplementation("io.quarkus.resteasy.reactive:resteasy-reactive-client:3.38.0")
+    testImplementation(
+        "io.quarkus.resteasy.reactive:resteasy-reactive-client:${libs.versions.quarkus.asProvider().get()}",
+    )
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks.test {
     useJUnitPlatform()
+    val governanceRules = rootProject.file("openbank-libs/governance/rules.yaml")
+    inputs.file(governanceRules)
+        .withPropertyName("governanceRulesUnderTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    // Test runs from projectDir; keep its input property independent of the checkout path.
+    systemProperty("openbank.test.governance-rules", project.relativePath(governanceRules))
     // Ephemeral Quarkus test ports - see openbank.quarkus-service.gradle.kts, which this module
     // does not apply. Enforced by the `quarkus-test-ports-ephemeral` gate.
     systemProperty("quarkus.http.test-port", "0")
@@ -245,6 +249,9 @@ kover {
 }
 
 kotlin {
+    // Track the public JVM surface; check/build reject unreviewed ABI drift.
+    @OptIn(org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation::class)
+    abiValidation()
     jvmToolchain(25)
     compilerOptions { freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property") }
 }

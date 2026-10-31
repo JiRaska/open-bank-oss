@@ -46,6 +46,10 @@ Note the **separate management port 8085** (`quarkus.management.port`), so probe
 
 > **Gotcha (from the source comments):** do **not** declare `client-secret` in `application.yaml` with a `${UPSTREAM_OIDC_CLIENT_SECRET:}` expansion — an ENV-form property name resolves unreliably and silently yields `""`, making every token fetch 401. Supply it via the env var `OPENBANK_UPSTREAM_CLIENT_SECRET` (standard ENV→dotted-property mapping).
 
+## Shared ephemeral state
+
+Nearby-payment sessions are stored in shared Redis rather than a pod's local memory, so any customer-edge replica can resolve the receiver's token. Each session expires after five minutes; keep Redis connectivity and TTL behavior consistent across replicas when changing this backend. The service's `check`/`build` lifecycle runs the cross-replica Redis test in its own JVM after the regular suite; running `:openbank-customer-edge:test` alone does not run that test.
+
 ## Health checks
 
 - **Liveness:** `/q/health/live` (port 8085) — JVM + ArC running.
@@ -92,11 +96,19 @@ Symptom: every proxied call returns `{"error":"upstream unavailable"}`.
 
 This is the IDOR guard working as designed: the `accountId` did not resolve to the JWT party. Confirm the account belongs to the calling party in account-service; a 403 is returned (not 404) deliberately, to avoid an existence oracle.
 
+## Metric naming
+
+Every custom Micrometer counter is registered with the `openbank.` prefix (the `metric-name-prefix` CI gate rejects a new unprefixed name). Prometheus scrapes dots as underscores and appends `_total` to counters: `openbank_onboarding_funnel_events_total{step,action}`, `openbank_credit_funnel_events_total{step,action}`, `openbank_feedback_submissions_total` and `openbank_feedback_emit_failures_total`. Older unprefixed names (`onboarding_funnel_events_total`, `credit_funnel_events_total`, `feedback_submissions_total`, `feedback_emit_failures_total`) are no longer emitted once this version is deployed, so dashboards and alerts must use the prefixed names; the in-repo PrometheusRules already do.
+
 ## Deploy / release
 
 - Per-service path-scoped CI builds only when `openbank-customer-edge/src/main/**` changes; version is managed by release-please (`version.txt` = `0.9.0`; do not hand-edit).
 - Image build → push to registry; ArgoCD picks up the new tag.
 - The customer ingress applies a per-IP rate limit (`limit-rps`) as the first line of abuse defence (ADR-0065 / ADR-0069); deeper bot/spam hardening on `/onboarding/start` is an ADR-0069 Phase 2 follow-up.
+
+## Consumer contract verification
+
+The delegated-payment Pact test checks the authorization request sent to account-service. It constructs the edge with an in-memory payment-session store for the contract run; this is test-only, while the running service uses Redis. Run that contract with `./gradlew :openbank-customer-edge:consumerPactTest --tests '*CustomerEdgeDelegatedPaymentPactConsumerTest*'`.
 
 ## Tech stack
 
@@ -108,3 +120,11 @@ This is the IDOR guard working as designed: the `accountId` did not resolve to t
 | HTTP client (outbound) | JDK `java.net.http.HttpClient` (HTTP/1.1) |
 
 The exact pinned versions are emitted in the `/api/v1/info` payload at runtime.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Diagnosing a failed passkey token exchange
+
+When the token exchange that completes a passkey sign-in is rejected by the identity provider, the service logs a warning with the pseudonymous identity-provider user id and the HTTP status of the response (`impersonate: token-exchange failed for kcUserId=... status=...`). The identity provider's own error event and the exception raised by the service carry no user id, so this line is what ties a failed sign-in to the customer affected. The id is the opaque user UUID, never a username, and no token or credential is logged. A rise in these warnings with a `403` or `400` status usually points to a token-exchange permission or client-configuration problem rather than customer error.

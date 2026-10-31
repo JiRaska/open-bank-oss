@@ -4,7 +4,7 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 -->
 # Threat model — account-service
 
-- **Date:** 2026-05-30
+- **Date:** 2026-10-29
 - **Status:** Lightweight STRIDE/DFD (ADR-0030 D2). Money-path bounded context.
 - **Service ADR:** see `docs/adr/` (account lifecycle); platform controls per ADR-0029/0030/0034.
 
@@ -74,6 +74,7 @@ is a deliberate follow-up flip, not bundled here (see ADR-0155).
 | **E**oP | The maker approves their own freeze request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
 | **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
 | **R**epudiation | No record of who approved a gated freeze | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
+| **R**epudiation / **S**poofing | A display name or legacy approval is presented as proof that its maker was human or an AI agent | `makerActorKind` is captured when the authenticated request creates the approval, not inferred by Admin UI from `makerId`. A service-account caller remains `SERVICE_ACCOUNT`; the delegated savings-proposal path records `CUSTOMER_PARTY` because its party id alone does not prove a human session. Existing Redis records without provenance read as `UNKNOWN`. This field is informational and never changes the maker-checker id comparison or approval decision. |
 | **I**nfo disclosure | Approval id enumeration reveals account/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random id (`RedisApprovalStore`, not sequential) |
 | **D**oS | Flooding `POST /{accountId}/freeze` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
 
@@ -99,6 +100,22 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-29** — **Party identity is separate from the per-attempt screening key (#11694).**
+  Account opening now sends `partyId` as `subjectId` while retaining
+  `account-open:<partyId>:<idempotencyKey>` only as the attempt's replay key. This lets a new
+  attempt use a valid compliance clearance without reusing a stale `CLEAR`. sanctions-service
+  still freshly screens every new key: its 90-day `WHITELISTED` clearance covers only exactly the
+  same subject attributes and reviewed match identities, so a changed subject, expired decision or
+  new uncovered hit remains blocking. Identical account idempotency keys retain the existing
+  replay contract. **Tampering/elevation:** the caller cannot borrow another party's clearance by
+  copying its screening key; the explicit party binding and sanctions-service's exact-subject
+  comparison are the control. No new endpoint, privilege or trust boundary. Rollback: revert both
+  services together; do not deploy an account writer that sends `subjectId` ahead of a sanctions
+  reader that persists it if clearance retry is being relied upon.
+- **2026-10-17** — **`TransactionServiceClient` is now GENERATED from transaction-service's `openapi.yaml` (ADR-0319).** The hand-written interface and DTOs were replaced by a sub-interface of the client built in `openbank-client-transaction`; the welcome-bonus credit keeps its request fields; the response is now the spec's `TransactionResponse` (only `id` and `status` are read elsewhere). **STRIDE-T/S (trust boundary):** the outbound call is the same route, the same NAMED oidc-client `m2m` (Keycloak client `openbank-account`) and the same `SyntheticTaintClientFilter` registration, pinned by the existing `M2mOidcClientIdentityWiringTest`-style wiring assertions and by the consumer pact (literal `/api/v1/transactions`, replayed by transaction-service's `@PactFolder` class). What changes is where the request/response types come from: the provider's own spec, so a spec change now fails this service's compile instead of production, and the request carries the spec's full optional field set serialised as `null` (transaction-service ignores them). No new credential, no new scope, no new network path. Rollback: revert the commit (the hand-written client returns).
+- **2026-10-15** — **product-catalog gets an OPA sidecar (issue #12823).** product-catalog (same `accounts` namespace) had no `PolicyDecisionPoint` bean, so its `@Authorize` points logged "no PolicyDecisionPoint bean" per request and enforcement could never be switched on. Its pod now runs an `opa` sidecar on `localhost:8181` with the generated `product-catalog-opa-bundle` (base `rest.rego` + `product_catalog_rest_ext.rego`), and the libs-runtime PDP producer is enabled. **Elevation:** none — `AUTHZ_ENFORCE` stays `false`, so a deny is logged and the request proceeds, and `@RolesAllowed` remains the enforcing gate exactly as before. The new reasons grant human `ROLE_VIEWER` reads, the named synthetic catalog-read journey with `CATALOG_SCOPE_READ`, and authoring/publishing for human staff only; `ROLE_API` alone grants no catalog read, and API callers require an existing named, scoped grant (such as the pension service with `CATALOG_SCOPE_READ`), with every `service-account-*` and `agent:` principal excluded from catalog authoring/publishing (so the edge client's `ROLE_OPERATOR` reaches no catalog write). The synthetic client gains the `profile` scope so its `principal.id` resolves on a cold-started realm. **Spoofing / tampering:** no new ingress — the app container reaches OPA over loopback; OPA decision and management APIs bind only `127.0.0.1:8181`; kubelet probes use the separate read-only diagnostic listener on `0.0.0.0:8282`, so other pods cannot reach the decision API. No NetworkPolicy edge was added. account-service's own call to product-catalog is unchanged and remains fail-open (ADR-0158). Rollback: remove the sidecar and the producer opt-in; the service returns to the no-PDP advisory branch.
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `account_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-09-30** — Screening gate turned into an ALLOW-list (#8345 follow-up). The gate blocked
   only `HIT` and `REVIEW`; sanctions-service has never returned `REVIEW` (its vocabulary is
   `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`), so a `POTENTIAL_HIT` (a 0.65+ fuzzy
@@ -110,6 +127,7 @@ not change any existing request's outcome until explicitly flipped.
   the blocked statuses, red against the old gate), `SanctionsScreeningAdapterTest` and the new
   consumer pact `AccountSanctionsScreenPactConsumerTest`, which pins `CLEAR` and `HIT` as exact
   values and is replayed by sanctions-service. No endpoint, edge or privilege changed.
+- **2026-09-30** — **Approval maker provenance (issue #11588).** The account approval response now exposes `makerActorKind` alongside `makerId`; the shared approval store keeps the original seven-field Redis value for old readers and stores provenance in a TTL-matched sidecar. A missing or unrecognized sidecar yields `UNKNOWN`, not a guessed human maker. The delegated savings-proposal path labels its verified party identifier `CUSTOMER_PARTY`, not `HUMAN`. The shared authorizer accepts `AI_AGENT` only when the authenticated JWT `sub` matches the `agent:` principal name; a display-name prefix without that claim no longer grants an agent policy type. An agent-looking name without a JWT becomes `UNKNOWN`, and a human JWT with a different subject remains `HUMAN`. This tightens the policy input but grants no new approver privilege, approval transition or money movement. The residual risk is that upstream identity systems may not attest an AI charter through the service-account token, so such requests must remain labeled as service accounts until a trusted claim is available. Rollback: old pods ignore the sidecar and continue reading the unchanged base record; sidecars expire with approvals.
 - **2026-09-28** — **pricing namespace admitted to product-catalog `:8104` (JiRaska/openbank-pricing#1).** The
   `pricing` namespace was adopted under GitOps and its NetworkPolicies are now generated from declared edges,
   which adds `pricing` to the product-catalog ingress allow-list in `accounts`. **Not a new flow:**
@@ -120,7 +138,7 @@ not change any existing request's outcome until explicitly flipped.
   `.github/asvs-l3-baseline.txt`); TLS for pricing's edges is a follow-up.
 - **2026-09-26** — **Idempotency-Key bound to a request fingerprint on `POST /api/v1/accounts` (#10945).** **Tampering / repudiation:** previously the same `Idempotency-Key` with a DIFFERENT body replayed the first request's response, so a second, different account opening was answered as the first and silently never happened. Now the resource fingerprints method + path + the canonicalised DTO (`RequestFingerprints`, libs #10922) and claims the key ATOMICALLY (`IdempotencyStore.reserve`) before the use case runs: a different request under the key answers **409 `IDEMPOTENCY_KEY_REUSED`**, the same request still in flight **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`**, and a failed open releases the claim so a retry can run. Because the Redis record expires (24 h) while the `account_idempotency` row (V14) does not, migration V30 adds nullable `account_idempotency.request_hash`, written in the same transaction as the account; `AccountService` refuses a key whose stored hash differs (409) — on the sequential replay path and on the concurrent-loser recovery path — so the check survives Redis expiry or eviction. **Residual window:** Redis records and `account_idempotency` rows written before this deploy have no fingerprint and keep replaying by key alone (Redis for one TTL; legacy rows indefinitely); onboarding-driven opens carry no fingerprint either. No new endpoint, caller, privilege or event. Rollback: revert the code, then `ALTER TABLE account_idempotency DROP COLUMN request_hash` (see V30 header).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -414,7 +432,7 @@ not change any existing request's outcome until explicitly flipped.
   (decision) + `AccountApiIT` (end-to-end header behaviour).
 - **2026-05-30** — Added `account_outbox_seq` (Hibernate sequence fix). Additive DDL only:
   no new data flow, external surface or trust boundary. Risk class = **availability** (a missing/
-  wrong sequence breaks INSERTs); mitigated by `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  wrong sequence breaks INSERTs); mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 - **2026-06-01** — IBAN generation correctness (`IbanGenerator` + new `CzechAccountNumber` in
   openbank-libs). The previous generator emitted a padded `System.nanoTime()` tail under a hard-coded
   `0000` bank code: ISO 13616 mod-97-valid but with a **BBAN that no Czech bank could issue** (no ČNB
@@ -519,7 +537,7 @@ not change any existing request's outcome until explicitly flipped.
   satisfies the threat-model requirement for the 2-approval gate (rule #8); the change itself moves
   no money and needs no additional compensating control beyond what's documented above.
 - **2026-07-08** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
-  `account.freeze`, mirroring the sepa-payment pilot (issue #413). New `ApprovalConfig`
+  `account.freeze`, mirroring the sepa-payment pilot (issue #413). New ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`)
   (`RedisApprovalStore` producer) and `PATCH /api/v1/accounts/approvals/{id}` checker-decide
   endpoint (`@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)`, `@Authorize(action =
   "account.approval.decide")`); two new exception mappers (`SelfApprovalNotAllowedMapper` → 403,
@@ -659,6 +677,18 @@ not change any existing request's outcome until explicitly flipped.
   serialisation-only and nothing persists it.
 - **2026-09-21** — **Own machine identity for the welcome-bonus credit (#10486 batch 1).** `TransactionServiceRestClient` now mints its bearer from the NAMED oidc-client `m2m`, Keycloak client `openbank-account` (realm role `ROLE_API` only). transaction-service grants that principal exactly `transaction.create` by identity (`service-account-transaction-create`). **STRIDE-S:** a new credential. Its secret is generated by Keycloak in the live realm, stored by the owner's provisioning script at Vault KV `keycloak/account-service` (`client_secret`), projected by the `account-service-m2m-oidc` ExternalSecret and never seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod loudly (CreateContainerConfigError) rather than calling with an empty credential. Compromise of this secret reaches only `transaction.create`, against the shared secret's 54 money-path writes. **Repudiation improves:** the upstream's OPA decision reason and principal now name this service instead of "some caller on the shared client". The service's other rest-clients stay on the shared `openbank-services` client until their own edges migrate (asserted by `M2mOidcClientIdentityWiringTest`). Rollback: revert the commit (the clients return to the shared token).
 - **2026-09-21** — **Account reads admitted by named machine identity (#10486 batch 5).** `account_rest_ext.rego` adds six identity rules, one per caller that listed accounts through the shared `openbank-services` principal's `ROLE_OPERATOR` (base `operator-read-any`): analytics-sink, document, lending and party get `account.list`; billing and interest get `account.list` and `account.read`. Each principal holds `ROLE_API` only, and `AccountResource`'s RBAC already admitted `ROLE_API` on these reads, so no RBAC changes. **STRIDE-I:** `account.list` cannot be narrowed by query parameter at this layer (`/accounts/active` is the whole active book), so each rule is a real PII grant; it names one principal each, and `account_rest_ext_test.rego` asserts that another `ROLE_API` service account and the shared client with `ROLE_API` only are denied both reads (negative case run: widening one rule to a `service-account-` prefix turned two tests red). **Repudiation improves:** the decision line now names the reading service. Enforcement: `AUTHZ_ENFORCE` is on for account-service. Rollback: revert the commit.
+- **2026-10-11** — **The 8443 listener no longer accepts a client certificate as a login (#12511).**
+  `client-auth: required` (2026-09-20 entries above) also registers Quarkus's mTLS authentication
+  mechanism, which turned any certificate the private CA had signed into an authenticated
+  `SecurityIdentity`: a workload holding a fleet-CA certificate and NO bearer reached `/api/*` as a
+  logged-in principal (measured: 403 from authz instead of 401). `%prod` now restricts `/api/*` to
+  `auth-mechanism: bearer` (the #12506 pattern), so the certificate is transport authentication only and
+  the OIDC bearer is the only identity a route or OPA sees, identically on 8443 and the plain port.
+  **STRIDE-S/E:** closes a spoofing / elevation path; callers are unaffected because every 8443 caller
+  already sends its own bearer. Proven by `AccountListenerAuthParityIT` (production listener shape, real
+  HTTP; 1 of 4 failing without the change, 4 of 4 with it) and gated fleet-wide by `mtls-bearer-only`.
+  Rollback: revert the commit (re-opens the path).
+
 
 ## Delegation lifecycle ordering
 
@@ -869,7 +899,7 @@ decision use first; the additive projection table may remain until its consumer 
   guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
   the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
   `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
-  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  codes and JSON field names are unchanged; ApprovalResourceMappingTest (since replaced by the shared `ApprovalEndpointConformance` suite) covers the mapping.
   **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
@@ -961,3 +991,92 @@ than ten connections and compete with other account clients for that shared limi
 on nginx until the listener policy and 401/429 behavior have been checked on the Gateway
 address. Rollback is the coordinated DNS switch back to nginx; its Ingress and network
 allowance remain until Phase 5.
+
+
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Account ownership verification.** This integration adds the `pension` namespace to `account-service-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/accounts/ownership-verifications`.
+
+**Threat and required controls.** The response is an ownership decision for the requested party and account, not permission to move funds. A caller must not obtain unrestricted account enumeration through this edge.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.
+## 2026-10-09 — Ownership-verification projection for pension-service (ADR-0335 D2)
+
+New endpoint `POST /api/v1/accounts/ownership-verifications`, under a new action
+`account.verifyOwnership`. It is granted to one machine identity,
+`service-account-openbank-pension` (ROLE_API), by `service-pension-account-verify-ownership`.
+Staff keep the action through `operator-account-write`. Pension is **not** granted
+`account.read`, `account.list` or any write.
+
+- **Information disclosure:** the answer is exactly `{owned, active}`. An unknown IBAN and
+  another party's IBAN both answer `owned=false, active=false`, and another party's account
+  status is never revealed. No balance, product, holder name or account id is returned. The IBAN
+  travels in the request body, so it stays out of access and ingress logs. A stolen pension
+  credential yields a membership oracle for (IBAN, party) pairs the attacker already holds. It
+  cannot enumerate accounts, and per-call audit makes a sweep visible.
+- **Elevation of privilege:** the shared `service-account-openbank-services` and
+  `service-account-openbank-edge` identities, every other service account, and an `AI_AGENT`
+  presenting the pension id are all denied. `account_rest_ext_test.rego` pins this.
+- **Repudiation:** each verification emits an `AuditEvent` with the calling principal as actor
+  and the claimed party as subject. The verdict goes in the payload; the IBAN never does.
+- **Tampering:** none. The endpoint is read-only.
+
+Tests: `OwnershipVerdictTest`, `AccountOwnershipResourceTest`, `AccountOwnershipVerificationIT`
+(real HTTP: route served, exact body, indistinguishable negatives, 400 not 500, 401 anonymous).
+
+
+Update the same day (ADR-0335 D2a): when `owned` is true, the answer also carries `accountId`, for
+the caller that binds a mandate to the account (#12387). It is never present for an unknown or
+foreign IBAN, so the no-oracle property holds. A second declared caller,
+`service-account-openbank-sdd`, verifies the debtor party of a scoped mandate initiator (D6).
+Every other identity is still denied (`account_rest_ext_test.rego`).
+
+
+### Pension client identity prerequisite (ADR-0335)
+
+The scoped pension ownership projection requires a token issuer that can mint the
+`openbank-pension` service-account identity. Both committed realm definitions now
+carry the same client and service-account user as the active pension integration
+(#12435), with only `ROLE_API` and the existing `catalog:read` client scope.
+Interactive login flows remain disabled. This establishes a reviewable issuer
+configuration prerequisite; it does not prove the live realm was imported, that
+credential material was supplied, or that a deployed token matches the policy.
+The account ownership projection still returns an account identifier only for an
+active account owned by the supplied party. A compromised pension credential can
+invoke its scoped projection; it does not acquire shared operator or compliance
+roles. Realm import and credential delivery must be verified before deployment.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+- **2026-10-25** — **Account opening pins the published product revision, fail-closed (ADR-0341 D1, ADR-0352 phase 3, #668).** Opening now calls product-catalog twice (v1 product lookup and v2 `GET /api/v2/legacy-products/{productId}/published-revision?effectiveAt=<openedAt>`) under the shared `read` resilience profile (ADR-0321; idempotent GETs, 4xx returned not retried, circuit breaker), with the existing `openbank-services` bearer. **Boundary change:** the catalog moved from fail-open reference data to a hard dependency of opening — an unreachable catalog now refuses with 503 `PRODUCT_CATALOG_UNAVAILABLE`, a product with no published revision with 422 `PRODUCT_REVISION_NOT_PUBLISHED`, both before any write. **STRIDE:** *Tampering* — a forged or wrong revision cannot be pinned by a caller: the revision is resolved server-side from the catalog, never from the request; the adapter re-checks `state == PUBLISHED`; the pin is immutable in the database (`trg_accounts_product_revision_pin_immutable` refuses any change, any writer). *Spoofing* — a catalog response is trusted on the strength of the service-to-service TLS + bearer as before; the signed IR hash is recorded (`product_revision_ir_hash`) so a later consumer can verify the revision it loads against the signature (ADR-0352 §4), but account-service does not verify signatures itself. *Denial of service* — a catalog outage now blocks openings (not postings, not existing accounts); bounded by the circuit breaker and visible as `openbank_account_product_revision_pin_total{outcome="catalog_unavailable"}`; onboarding openings from Kafka retry then dead-letter for replay. *Repudiation* — the pin and `pinnedAt` (injected clock, equals `openedAt`) are on the row and on `AccountCreated`, which now commits through the account outbox in the opening transaction (it was a post-commit direct send, which could lose the event). *Information disclosure* — the pin carries no personal data; `AccountCreated` payload is otherwise unchanged. **Residual risk:** accounts opened before V33 have no pin and are not backfilled by this change (`openbank_account_product_revision_unpinned`; backfill plan in the service docs, 04-data). Rollback: revert the commit; V33 columns are additive and ignored by earlier binaries.
+
+
+### Account-owned published catalog reads
+
+Product and published-revision GET clients select the named account m2m client. The issuer
+configuration adds only the existing `catalog:read` scope to that client; no staff role or
+publish scope is added. Catalog maps the verified scope to its read role. The OPA grant
+requires the current PEP's verified service-account marker and matching `openbank-account`
+client identity, plus the read role, and grants only `catalog.read`. Missing or contradictory
+identity markers, other clients and catalog write actions remain denied. Catalog unavailability
+or authorization refusal still fails account opening closed. Source configuration does not
+establish that the live issuer was reconciled. Rollback removes this read grant and scope and
+reverts the client selection; no account pin or migration is changed.
+
+## Listener authentication follow-up (#12511)
+
+The production API permission requires an OIDC bearer on HTTP and client-certificate TLS, including
+a future route without a security annotation. Exact GET-only service info/config remain public and
+management health remains on its separate interface. Production-profile real HTTP/TLS tests cover
+these exceptions as well as annotated and unannotated API bearer parity. This candidate is not a
+deployed enforcement claim; money-path review and staged runtime verification remain required.
+Rollback restores the previous API permission and its certificate-only identity risk.

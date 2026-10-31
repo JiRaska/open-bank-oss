@@ -15,44 +15,6 @@ const NOTIFICATION_SERVICE = '/api/svc/notification-service'
 // which same-origin API operation the browser calls.
 const pathSegment = (value: string): string => encodeURIComponent(value)
 
-export const SERVICES: { name: string; port: number }[] = [
-  { name: 'account-service',        port: 8100 },
-  { name: 'ledger-service',         port: 8101 },
-  { name: 'transaction-service',    port: 8102 },
-  { name: 'balance-service',        port: 8103 },
-  { name: 'product-catalog',        port: 8104 },
-  { name: 'pid-service',            port: 8105 },
-  { name: 'consent-service',        port: 8106 },
-  { name: 'psd2-service',           port: 8107 },
-  { name: 'tpp-registry-service',   port: 8108 },
-  { name: 'sca-service',            port: 8110 },
-  { name: 'party-service',          port: 8111 },
-  { name: 'notification-service',   port: 8112 },
-  { name: 'audit-service',          port: 8113 },
-  { name: 'kyc-service',            port: 8114 },
-  { name: 'sepa-payment',           port: 8115 },
-  { name: 'domestic-payment',       port: 8116 },
-  { name: 'aml-service',            port: 8117 },
-  { name: 'card-issuance-service',  port: 8118 },
-  { name: 'fx-service',             port: 8119 },
-  { name: 'security-scanner',       port: 8120 },
-  { name: 'standing-order-service', port: 8121 },
-  { name: 'swift-service',          port: 8122 },
-  { name: 'sanctions-service',      port: 8123 },
-  { name: 'clearing-service',       port: 8124 },
-  { name: 'interest-service',       port: 8125 },
-  { name: 'dispute-service',        port: 8135 },
-  { name: 'sepa-instant',           port: 8127 },
-  { name: 'vop-service',            port: 8149 },
-  { name: 'agent-service',          port: 8109 },
-  // Extended / reporting — were missing from the probe list before ADR-0071.
-  { name: 'lending-service',        port: 8128 },
-  { name: 'statement-service',      port: 8136 },
-  { name: 'onboarding-service',     port: 8130 },
-  { name: 'anacredit-service',      port: 8137 },
-  { name: 'sdd-service',            port: 8132 },
-]
-
 export async function fetchAllServiceConfigSnapshots(): Promise<ServiceConfigSnapshot[]> {
   const res = await fetch('/api/services/config', { cache: 'no-store' })
   if (!res.ok) throw new Error(`config fetch failed: ${res.status}`)
@@ -198,7 +160,7 @@ export const transactionApi = {
   get: (id: string) => apiFetchSimple<Transaction>(`${TRANSACTION_SERVICE}/api/v1/transactions/${pathSegment(id)}`),
 }
 
-import type { ServiceHealthEntry } from '@/app/api/services/health/route'
+import type { ServiceHealthEntry } from '@/lib/services/healthContract'
 
 export type { ServiceHealthEntry }
 
@@ -238,13 +200,6 @@ export async function fetchServiceSnapshot(name: string, port: number): Promise<
   }
 }
 
-export async function fetchAllServiceSnapshots(): Promise<ServiceSnapshot[]> {
-  const evidence = await fetchAllServiceSnapshotsEvidence()
-  return evidence.ok
-    ? evidence.snapshots
-    : SERVICES.map(s => ({ name: s.name, port: s.port, info: null, health: null, rateLimitMax: null, rateLimitRemaining: null, apiVersion: null, latencyMs: null, reachable: false }))
-}
-
 export type ServiceSnapshotsEvidence =
   | { ok: true; snapshots: ServiceSnapshot[] }
   | { ok: false; failure: BffFailure }
@@ -271,13 +226,19 @@ function isHealthEntry(value: unknown): value is ServiceHealthEntry {
     (entry.latencyMs === null || (typeof entry.latencyMs === 'number' && Number.isFinite(entry.latencyMs))) &&
     (entry.version == null || typeof entry.version === 'string') &&
     (entry.gitCommit == null || typeof entry.gitCommit === 'string') &&
+    (entry.namespace === undefined || (typeof entry.namespace === 'string' && entry.namespace.length > 0)) &&
     isStack(entry.stack)
+}
+
+function healthEntryIdentity(entry: ServiceHealthEntry): string {
+  return entry.namespace ? `${entry.namespace}/${entry.name}` : `${entry.name}:${entry.port}`
 }
 
 function snapshotFromHealthEntry(entry: ServiceHealthEntry): ServiceSnapshot {
   const hasInfoSignal = Boolean(entry.version || entry.gitCommit || entry.stack)
   return {
     name: entry.name,
+    ...(entry.namespace ? { namespace: entry.namespace } : {}),
     port: entry.port,
     info: hasInfoSignal ? {
       service: entry.name,
@@ -309,9 +270,23 @@ export async function fetchAllServiceSnapshotsEvidence(): Promise<ServiceSnapsho
     if (typeof data !== 'object' || data === null || !Array.isArray((data as { services?: unknown }).services)) {
       return { ok: false, failure: 'error' }
     }
-    const services = (data as { services: unknown[] }).services
+    const healthEvidence = data as { services: unknown[]; source?: unknown; discoveryStatus?: unknown }
+    if (healthEvidence.source === 'kubernetes') {
+      if (healthEvidence.discoveryStatus !== 'complete') {
+        // Partial, unavailable, and malformed inventory can contain useful
+        // positive observations, but cannot establish the absence of services.
+        return { ok: false, failure: 'discovery_unavailable' }
+      }
+    } else if (healthEvidence.source === 'static') {
+      if (healthEvidence.discoveryStatus !== 'static') {
+        return { ok: false, failure: 'discovery_unavailable' }
+      }
+    } else {
+      return { ok: false, failure: 'discovery_unavailable' }
+    }
+    const services = healthEvidence.services
     if (!services.every(isHealthEntry)) return { ok: false, failure: 'error' }
-    if (new Set(services.map(entry => `${entry.name}:${entry.port}`)).size !== services.length) {
+    if (new Set(services.map(healthEntryIdentity)).size !== services.length) {
       return { ok: false, failure: 'error' }
     }
     return { ok: true, snapshots: services.map(snapshotFromHealthEntry) }

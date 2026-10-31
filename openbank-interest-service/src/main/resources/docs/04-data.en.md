@@ -148,3 +148,23 @@ Data classification: `internal` (`governance.yaml: dataClassification`). The wit
 - **Upstream (declared):** `accounts_schema` (account → party context; the `balance` used in accrual is supplied in the request, not read from a DB FK).
 - **Downstream (declared):** `account-service` (relation `api`, "accrues").
 - **Event lineage:** outbox → Kafka → tax/reporting consumer, ledger-service, audit-service.
+
+## Outbox retention (SENT rows)
+
+`interest_outbox` is a delivery buffer, not a record. Rows that reached the broker (`status = 'SENT'`) are deleted once their `sent_at` is older than `openbank.outbox.retention.sent-days` (default **7**), by libs-runtime's shared `OutboxSentRetentionJob` (ADR-0329, ADR-0327 D8). The repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`.
+
+- Runs nightly (`openbank.outbox.retention.cron`, default `0 17 3 * * ?`) on every replica; each delete is bounded (`batch-size` 5 000, at most `max-batches` 200 per run), so a long-unpurged table drains over several nights.
+- PENDING, FAILED, DISPATCHING and DEAD rows are never touched — DEAD rows are the producer-side DLQ.
+- Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
+- Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
+- Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.
+
+## Capitalization ledger receipt
+
+A nonzero capitalization records the actual confirmed ledger journal UUID in the existing `ledgerEntryId` field, in the same local transaction as the capitalization, withholding record, outbox event and accrual transition. The REST adapter accepts a receipt only when its status is `POSTED` and its transaction identity matches the deterministic capitalization request. It reuses the existing business idempotency key; obtaining the receipt does not post a second journal. A zero-amount capitalization has no journal and keeps a null reference. Adapters without a receipt also leave it explicitly unknown.
+
+This link proves a confirmed posting response, not complete account history or an authenticated economic classification of arbitrary ledger origins. Historical null references are not backfilled from descriptions or guessed IDs. Existing source retention and erasure rules apply; the reference creates no new retention period.
+
+## Product-IR shadow (ADR-0352 phase 3)
+
+Migration V21 adds two tables. Nothing on the posting path reads or writes either of them. `interest_product_shadow_input` is the shadow queue. It has one row per committed `interest_accruals` or `interest_capitalizations` row (`source_kind`, `source_id`, unique together). The comparator enqueues rows only after the legacy transaction has committed, so `InterestService` itself writes nothing new. A row ends `DONE` with an outcome: `AGREED`, `DIVERGED`, `RULE_UNMAPPED`, `NO_PIN`, `NO_IR`, `VERIFICATION_DISABLED`, `VERIFICATION_FAILED`, `IR_EVALUATION_FAILED`, `SOURCE_MISSING`, or a retry reason ending `_EXHAUSTED`. When a comparison was made, the row also keeps the IR `rule_id` and both amounts (`legacy_amount`, `ir_amount`, scale 6), so a divergence can be read without re-running it. `interest_product_revision_ir` is the service's immutable local copy of a pinned revision's product IR and its publish-path signature. It is written once per revision and a trigger protects it; a revision without IR is recorded as well. Rollback drops both tables and the trigger function. The previous release neither writes nor reads them.

@@ -6,7 +6,14 @@ info:
   # 1.10.0 -> 1.11.0 (#11604): additive — holds/credit/debit/initialize/overdraft-limit document
   # 400 AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED / VALIDATION_ERROR (amount + currency are built
   # into a kernel Money at the boundary, never rounded).
-  version: 1.11.0
+  # 1.11.0 -> 1.12.0 (#11588): additive verified makerActorKind on approval responses.
+  # 1.13.0 -> 1.14.0 (#12165): additive low-balance alert setting API.
+  # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
+  # payloadRef — all optional) on ApprovalResponse; no breaking change.
+  # 1.14.0 -> 1.15.0: additive GET /{accountId}/holds — lists ACTIVE holds (released/expired
+  # omitted). The endpoint agent-service's get_balance_holds MCP tool has called against a
+  # POST-only path; endpoint and consumer pact ship together (#13071).
+  version: 1.15.0
   description: >-
     Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
     read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
@@ -120,7 +127,82 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/balances/{accountId}/{currency}/low-balance-alert:
+    parameters:
+      - $ref: '#/components/parameters/accountId'
+      - name: currency
+        in: path
+        required: true
+        schema: {type: string, minLength: 3, maxLength: 3}
+      - name: X-Customer-Party-Id
+        in: header
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [Balances]
+      summary: Read the owner's optional low-balance alert setting
+      operationId: getLowBalanceAlert
+      responses:
+        '200':
+          description: Current setting
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LowBalanceAlert'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      tags: [Balances]
+      summary: Set an account owner's low-balance alert threshold
+      operationId: setLowBalanceAlert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LowBalanceAlertRequest'}
+      responses:
+        '200':
+          description: Updated setting
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LowBalanceAlert'}
+        '400': {$ref: '#/components/responses/InvalidMoney'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
   /api/v1/balances/{accountId}/holds:
+    get:
+      tags: [Balances]
+      summary: List active holds for an account
+      description: >-
+        Active (not yet released, not expired) holds against the account. Released and expired
+        holds are omitted — history is the ledger projection's job, not the reservation table's.
+        The read behind agent-service's get_balance_holds MCP tool.
+      operationId: listHolds
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: X-Customer-Party-Id
+          in: header
+          required: false
+          description: Trusted customer-edge party context; a missing or mismatched account returns 404.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Active holds (empty array when none)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  holds:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ActiveHoldResponse'
+        '401':
+          description: An authenticated identity is required.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     post:
       tags: [Balances]
       summary: Place a hold on funds
@@ -410,6 +492,22 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    LowBalanceAlertRequest:
+      type: object
+      required: [enabled, threshold, rearmMargin]
+      properties:
+        enabled: {type: boolean}
+        threshold: {type: number, minimum: 0}
+        rearmMargin: {type: number, exclusiveMinimum: 0}
+    LowBalanceAlert:
+      type: object
+      required: [accountId, currency, enabled, threshold, rearmMargin]
+      properties:
+        accountId: {type: string, format: uuid}
+        currency: {type: string}
+        enabled: {type: boolean}
+        threshold: {type: number}
+        rearmMargin: {type: number}
     ApprovalResponse:
       type: object
       description: >-
@@ -430,6 +528,10 @@ components:
         makerId:
           type: string
           nullable: true
+        makerActorKind:
+          type: string
+          enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]
+          description: Origin captured at creation; UNKNOWN for legacy records.
         createdAt:
           type: string
           format: date-time
@@ -437,7 +539,46 @@ components:
         decidedBy:
           type: string
           nullable: true
-
+        summary:
+          type: string
+          nullable: true
+          description: >-
+            Bounded human-readable description of the paused request, persisted with the
+            approval (ADR-0227 D1). Null when the approval was created by application code
+            rather than by the intercepting pause.
+        domain:
+          type: string
+          nullable: true
+          description: >-
+            The service's domain in the unified approval inbox (ADR-0227 D1), derived from
+            quarkus.application.name. Informational; the inbox keys items off its own source
+            list.
+        amount:
+          type: string
+          nullable: true
+          description: >-
+            The maker's original request amount, when a future phase persists one (ADR-0227
+            D1). Always null today - the request body is not persisted, only its SHA-256
+            fingerprint. Absent never means zero.
+        currency:
+          type: string
+          nullable: true
+          description: ISO 4217 currency of `amount`, when an amount is present. Null today.
+        riskClass:
+          type: string
+          nullable: true
+          enum: [MONEY_PATH, DESTRUCTIVE, OPERATIONAL, UNKNOWN]
+          description: >-
+            Coarse action-class risk (ADR-0227 D1/D3). UNKNOWN from the service side - the
+            authoritative classification lives in rules.yaml four_eyes metadata the store
+            cannot see; the admin-UI BFF re-derives it per action.
+        payloadRef:
+          type: string
+          nullable: true
+          description: >-
+            Retrievable pointer to the maker's original request payload, when a future phase
+            persists one. Null today - the persisted fingerprint is an integrity digest, not
+            a payload pointer.
     BalanceResponse:
       type: object
       properties:
@@ -509,6 +650,34 @@ components:
         ttlSeconds:
           type: integer
           format: int64
+
+    ActiveHoldResponse:
+      type: object
+      required: [id, accountId, amount, currency, reason, referenceId, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+        currency:
+          type: string
+        reason:
+          type: string
+        referenceId:
+          type: string
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        releasedAt:
+          type: [string, "null"]
+          format: date-time
 
     HoldResponse:
       type: object

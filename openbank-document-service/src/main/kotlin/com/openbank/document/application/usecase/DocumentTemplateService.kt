@@ -54,6 +54,9 @@ class DocumentTemplateService(
     // "current" versions — the exact defect found live in the seed data before this policy existed.
     override suspend fun publishTemplate(id: UUID): DocumentTemplate {
         val template = repo.findById(id) ?: error("Template not found: $id")
+        check(!template.bodyHtml.contains("LEGAL-REVIEW-REQUIRED")) {
+            "Template ${template.code} v${template.version} requires legal review before publication"
+        }
         val toPublish = template.publish()
         val predecessor = repo.findLatestPublished(template.code)?.takeIf { it.id != template.id }
         return try {

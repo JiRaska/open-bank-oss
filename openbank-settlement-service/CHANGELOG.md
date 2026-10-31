@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.12.2...settlement-service-v0.13.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.12.1...settlement-service-v0.12.2) (2026-10-16)
+
+
+### Security
+
+* **opa:** authorize machines by the verified service_account flag (phase 2 of 2, gated on [#12538](https://github.com/JiRaska/open-bank-oss/issues/12538) rollout) ([#12537](https://github.com/JiRaska/open-bank-oss/issues/12537)) ([abf3aff](https://github.com/JiRaska/open-bank-oss/commit/abf3aff4f24fd170a6e1641b3008f9e4648a9572))
+
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.12.0...settlement-service-v0.12.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.11.1...settlement-service-v0.12.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.11.0...settlement-service-v0.11.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.10.1...settlement-service-v0.11.0) (2026-10-03)
 
 

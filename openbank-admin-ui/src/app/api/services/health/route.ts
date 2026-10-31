@@ -3,68 +3,24 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextResponse } from 'next/server'
-import { discoverServices, prettyLabel } from '@/lib/discovery'
+import { discoverServicesSnapshot, prettyLabel } from '@/lib/discovery'
+import { getRegistry } from '@/lib/services/fleet'
+import type { ServiceHealthEntry, ServiceStackEntry } from '@/lib/services/healthContract'
 
-export interface ServiceHealthEntry {
-  name: string
-  port: number
-  label: string
-  group: 'core' | 'payments' | 'compliance' | 'identity' | 'open-banking' | 'platform'
-  container: string
-  healthPath: string
-  status: 'UP' | 'DOWN' | 'UNKNOWN'
-  reachable: boolean
-  latencyMs: number | null
-  version?: string | null
-  gitCommit?: string | null
-  /** Tech-stack snapshot, fetched separately from /api/v1/info. Null if probe failed. */
-  stack?: ServiceStackEntry | null
+export type { ServiceHealthEntry, ServiceStackEntry } from '@/lib/services/healthContract'
+
+// Off-cluster static probe list: DERIVED from the code-generated catalog (see
+// @/lib/services/fleet), never typed here. In-cluster the inventory comes from Kubernetes discovery.
+function staticServices(): Omit<ServiceHealthEntry, 'status' | 'reachable' | 'latencyMs'>[] {
+  return getRegistry().map(s => ({
+    name: s.container.replace(/^openbank-/, ''),
+    port: s.port,
+    label: s.label,
+    group: s.group,
+    container: s.container,
+    healthPath: HEALTH_PATH,
+  }))
 }
-
-export interface ServiceStackEntry {
-  kotlin?:  { version: string }
-  quarkus?: { version: string; lts?: boolean; supportUntil?: string }
-  java?:    { version: string; vendor?: string; arch?: string; cpu?: number; maxHeapMib?: number }
-  gradle?:  { version: string }
-  libs?:    { version: string; buildTime?: string; gitCommit?: string }
-}
-
-const SERVICES: Omit<ServiceHealthEntry, 'status' | 'reachable' | 'latencyMs'>[] = [
-  { name: 'account-service',        port: 8100, label: 'Accounts',        group: 'core',         container: 'openbank-account-service',        healthPath: '/api/v1/accounts?partyId=00000000-0000-0000-0000-000000000001' },
-  { name: 'ledger-service',         port: 8101, label: 'Ledger',          group: 'core',         container: 'openbank-ledger-service',          healthPath: '/api/v1/journals' },
-  { name: 'transaction-service',    port: 8102, label: 'Transactions',    group: 'core',         container: 'openbank-transaction-service',     healthPath: '/api/v1/transactions?accountId=00000000-0000-0000-0000-000000000001' },
-  { name: 'balance-service',        port: 8103, label: 'Balance',         group: 'core',         container: 'openbank-balance-service',         healthPath: '/api/v1/balances/00000000-0000-0000-0000-000000000001' },
-  { name: 'product-catalog',        port: 8104, label: 'Product Catalog', group: 'core',         container: 'openbank-product-catalog',         healthPath: '/api/v1/products' },
-  { name: 'pid-service',            port: 8105, label: 'PID',             group: 'identity',     container: 'openbank-pid-service',             healthPath: '/api/v1/parties' },
-  { name: 'consent-service',        port: 8106, label: 'Consent',         group: 'open-banking', container: 'openbank-consent-service',         healthPath: '/api/v1/consents' },
-  { name: 'psd2-service',           port: 8107, label: 'PSD2',            group: 'open-banking', container: 'openbank-psd2-service',            healthPath: '/open-banking/v2/accounts' },
-  { name: 'tpp-registry-service',   port: 8108, label: 'TPP Registry',    group: 'open-banking', container: 'openbank-tpp-registry-service',    healthPath: '/api/v1/tpp-registry/check?tppId=probe&role=AISP' },
-  { name: 'agent-service',          port: 8109, label: 'Agent (MCP)',     group: 'platform',     container: 'openbank-agent-service',           healthPath: '/api/v1/tools' },
-  { name: 'sca-service',            port: 8110, label: 'SCA',             group: 'identity',     container: 'openbank-sca-service',             healthPath: '/api/v1/sca/challenges' },
-  { name: 'party-service',          port: 8111, label: 'Parties',         group: 'identity',     container: 'openbank-party-service',           healthPath: '/api/v1/parties' },
-  { name: 'notification-service',   port: 8112, label: 'Notifications',   group: 'platform',     container: 'openbank-notification-service',    healthPath: '/api/v1/notifications' },
-  { name: 'audit-service',          port: 8113, label: 'Audit',           group: 'compliance',   container: 'openbank-audit-service',           healthPath: '/api/v1/audit/entries/00000000-0000-0000-0000-000000000001' },
-  { name: 'kyc-service',            port: 8114, label: 'KYC',             group: 'compliance',   container: 'openbank-kyc-service',             healthPath: '/api/v1/kyc/cases' },
-  { name: 'sepa-payment',           port: 8115, label: 'SEPA',            group: 'payments',     container: 'openbank-sepa-payment',            healthPath: '/api/v1/sepa-payments' },
-  { name: 'domestic-payment',       port: 8116, label: 'Domestic',        group: 'payments',     container: 'openbank-domestic-payment',        healthPath: '/api/v1/domestic-payments' },
-  { name: 'aml-service',            port: 8117, label: 'AML',             group: 'compliance',   container: 'openbank-aml-service',             healthPath: '/api/v1/aml/cases' },
-  { name: 'card-issuance-service',  port: 8118, label: 'Cards',           group: 'payments',     container: 'openbank-card-issuance-service',   healthPath: '/api/v1/cards' },
-  { name: 'fx-service',             port: 8119, label: 'FX',              group: 'payments',     container: 'openbank-fx-service',              healthPath: '/api/v1/fx/rates' },
-  { name: 'security-scanner',       port: 8120, label: 'Security',        group: 'platform',     container: 'openbank-security-scanner',        healthPath: '/api/v1/security/report' },
-  { name: 'standing-order-service', port: 8121, label: 'Standing Orders', group: 'payments',     container: 'openbank-standing-order-service',  healthPath: '/api/v1/standing-orders' },
-  { name: 'swift-service',          port: 8122, label: 'SWIFT',           group: 'payments',     container: 'openbank-swift-service',           healthPath: '/api/v1/swift/messages' },
-  { name: 'sanctions-service',      port: 8123, label: 'Sanctions',       group: 'compliance',   container: 'openbank-sanctions-service',       healthPath: '/api/v1/sanctions' },
-  { name: 'clearing-service',       port: 8124, label: 'Clearing',        group: 'payments',     container: 'openbank-clearing-service',        healthPath: '/api/v1/clearing/batches' },
-  { name: 'interest-service',       port: 8125, label: 'Interest',        group: 'payments',     container: 'openbank-interest-service',        healthPath: '/api/v1/interest/accruals' },
-  { name: 'dispute-service',        port: 8135, label: 'Disputes',        group: 'compliance',   container: 'openbank-dispute-service',         healthPath: '/api/v1/disputes' },
-  { name: 'sepa-instant',           port: 8127, label: 'SEPA Instant',    group: 'payments',     container: 'openbank-sepa-instant',            healthPath: '/api/v1/sepa-instant' },
-  // Extended / reporting — were missing from the probe list before ADR-0071.
-  { name: 'lending-service',        port: 8128, label: 'Lending',         group: 'core',         container: 'openbank-lending-service',         healthPath: '/api/v1/loans' },
-  { name: 'statement-service',      port: 8136, label: 'Statements',      group: 'core',         container: 'openbank-statement-service',       healthPath: '/api/v1/statements' },
-  { name: 'onboarding-service',     port: 8130, label: 'Onboarding',      group: 'identity',     container: 'openbank-onboarding-service',      healthPath: '/api/v1/onboarding' },
-  { name: 'anacredit-service',      port: 8137, label: 'AnaCredit',       group: 'compliance',   container: 'openbank-anacredit-service',       healthPath: '/api/v1/anacredit' },
-  { name: 'sdd-service',            port: 8132, label: 'SEPA DD',         group: 'payments',     container: 'openbank-sdd-service',             healthPath: '/api/v1/sdd/mandates' },
-]
 
 // Liveness/readiness is probed via the Quarkus SmallRye health endpoint that
 // every service exposes through openbank-libs — auth-free, state-free, and
@@ -89,16 +45,76 @@ async function probeInfo(base: string): Promise<{ version?: string; gitCommit?: 
   // cutoff manifested as "N/A everywhere" in the Tech Stack chips. The call
   // itself is cheap (BuildInfo singleton cached at JVM startup); the wall-
   // clock cost is dominated by JVM scheduling under contention.
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 8000)
-    const res = await fetch(`${base}/api/v1/info`, { signal: ctrl.signal, cache: 'no-store' })
-    clearTimeout(timer)
-    if (!res.ok) return null
-    const body = await res.json() as { version?: string; gitCommit?: string; stack?: ServiceStackEntry }
-    return { version: body.version, gitCommit: body.gitCommit, stack: body.stack }
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        ctrl.abort()
+        resolve(null)
+      }, 8000)
+    })
+    const request = (async () => {
+      const res = await fetch(`${base}/api/v1/info`, { signal: ctrl.signal, cache: 'no-store' })
+      if (!res.ok) return null
+      const body = await res.json() as { version?: string; gitCommit?: string; stack?: ServiceStackEntry }
+      return { version: body.version, gitCommit: body.gitCommit, stack: body.stack }
+    })()
+    return await Promise.race([request, timeout])
   } catch {
     return null
+  } finally {
+    // The deadline covers both the response and body parsing, and is released on
+    // every completion path so background enrichment does not retain timers.
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+type ServiceInfo = NonNullable<Awaited<ReturnType<typeof probeInfo>>>
+const INFO_CACHE_TTL_MS = 60_000
+const MAX_INFO_ENTRIES = 512
+const infoCache = new Map<string, { value: ServiceInfo; expiresAt: number }>()
+const infoInFlight = new Map<string, Promise<ServiceInfo | null>>()
+let activeInfoKeys = new Set<string>()
+
+function infoKey(base: string, desiredImage: string | undefined): string {
+  return `${base}\n${desiredImage ?? ''}`
+}
+
+function cacheInfo(key: string, value: ServiceInfo): void {
+  if (!activeInfoKeys.has(key)) return
+  infoCache.delete(key)
+  while (infoCache.size >= MAX_INFO_ENTRIES) {
+    const oldest = infoCache.keys().next().value
+    if (oldest === undefined) break
+    infoCache.delete(oldest)
+  }
+  infoCache.set(key, { value, expiresAt: Date.now() + INFO_CACHE_TTL_MS })
+}
+
+function scheduleInfoProbe(key: string, base: string): void {
+  if (infoInFlight.has(key) || infoInFlight.size >= MAX_INFO_ENTRIES) return
+  const pending = probeInfo(base)
+  infoInFlight.set(key, pending)
+  void pending
+    .then((value) => {
+      if (value) cacheInfo(key, value)
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      if (infoInFlight.get(key) === pending) infoInFlight.delete(key)
+    })
+}
+
+function trimInfoState(currentKeys: Set<string>): void {
+  activeInfoKeys = currentKeys
+  for (const [key, entry] of infoCache) {
+    if (!currentKeys.has(key) || entry.expiresAt <= Date.now()) infoCache.delete(key)
+  }
+  while (infoCache.size > MAX_INFO_ENTRIES) {
+    const oldest = infoCache.keys().next().value
+    if (oldest === undefined) break
+    infoCache.delete(oldest)
   }
 }
 
@@ -115,11 +131,22 @@ async function probeService(
     (async () => {
       try {
         const ctrl = new AbortController()
-        const timer = setTimeout(() => ctrl.abort(), 8000)
-        const res = await fetch(`${base}${HEALTH_PATH}`, { signal: ctrl.signal, cache: 'no-store' })
-        clearTimeout(timer)
-        // Reachable = we got an HTTP response at all (200 UP, 503 DOWN-but-alive).
-        return { ok: true, status: res.status }
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          const res = await Promise.race([
+            fetch(`${base}${HEALTH_PATH}`, { signal: ctrl.signal, cache: 'no-store' }),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => {
+                ctrl.abort()
+                reject(new Error('health probe timed out'))
+              }, 8000)
+            }),
+          ])
+          // Reachable = we got an HTTP response at all (200 UP, 503 DOWN-but-alive).
+          return { ok: true, status: res.status }
+        } finally {
+          if (timer !== undefined) clearTimeout(timer)
+        }
       } catch {
         // Connection refused / DNS failure / timeout — the service is not reachable.
         return { ok: false, status: 0 }
@@ -150,19 +177,39 @@ async function probeService(
 // one's readiness — the kubelet's own /q/health/ready verdict on the management
 // port, which a sibling pod cannot reach directly. Version/stack chips are still
 // enriched best-effort from /api/v1/info on the Service DNS. Off-cluster (local
-// dev) discoverServices() returns null and we fall back to static probing.
-async function fromDiscovery(): Promise<ServiceHealthEntry[] | null> {
-  const discovered = await discoverServices()
-  if (!discovered) return null
+// dev) discovery marks the source static and we fall back to static probing. An
+// incomplete in-cluster inventory remains explicitly partial/unavailable.
+async function fromDiscovery(): Promise<{ services: ServiceHealthEntry[] | null; status: 'complete' | 'partial' | 'unavailable' | 'static' }> {
+  const snapshot = await discoverServicesSnapshot()
+  if (snapshot.status === 'static') {
+    trimInfoState(new Set())
+    return { services: null, status: 'static' }
+  }
+  if (snapshot.status === 'unavailable') {
+    trimInfoState(new Set())
+    return { services: [], status: 'unavailable' }
+  }
 
-  return Promise.all(
-    discovered.map(async (d): Promise<ServiceHealthEntry> => {
-      const base = `http://${d.name}.${d.namespace}.svc:${d.port}`
+  const keyed = snapshot.services.map((d) => {
+    const base = `http://${d.name}.${d.namespace}.svc:${d.port}`
+    return { d, base, key: infoKey(base, d.image) }
+  })
+  const currentKeys = new Set(keyed.map(({ key }) => key))
+  trimInfoState(currentKeys)
+
+  const services = await Promise.all(
+    keyed.map(({ d, base, key }): ServiceHealthEntry => {
       const reachable = d.readyReplicas > 0
-      // Only enrich running services; a probe against a down service just times out.
-      const info = reachable ? await probeInfo(base) : null
+      // Kubernetes readiness is authoritative and returned immediately. Info is
+      // best-effort enrichment: use only fresh metadata, and refresh it in the
+      // background so a slow service cannot delay the health response.
+      const cached = infoCache.get(key)
+      const info = cached && cached.expiresAt > Date.now() ? cached.value : null
+      if (cached && !info) infoCache.delete(key)
+      if (reachable && !info) scheduleInfoProbe(key, base)
       return {
         name: d.name,
+        namespace: d.namespace,
         port: d.port,
         label: prettyLabel(d.name),
         group: d.group,
@@ -177,18 +224,33 @@ async function fromDiscovery(): Promise<ServiceHealthEntry[] | null> {
       }
     }),
   )
+  return { services, status: snapshot.status }
 }
 
 export async function GET() {
-  const discovered = await fromDiscovery()
-  const services = discovered ?? (await Promise.all(SERVICES.map(probeService)))
-  const source = discovered ? 'kubernetes' : 'static'
+  const discovery = await fromDiscovery()
+  const services = discovery.services ?? (await Promise.all(staticServices().map(probeService)))
+  const source = discovery.status === 'static' ? 'static' : 'kubernetes'
 
   const byContainer: Record<string, ServiceHealthEntry> = {}
-  for (const s of services) byContainer[s.container] = s
+  const byWorkload: Record<string, ServiceHealthEntry> = {}
+  const ambiguousContainers = new Set<string>()
+  for (const s of services) {
+    // A bare container key cannot identify two workloads in different namespaces.
+    // Omit that ambiguous alias; services[] and byWorkload retain both records.
+    if (!ambiguousContainers.has(s.container)) {
+      if (byContainer[s.container] === undefined) byContainer[s.container] = s
+      else {
+        delete byContainer[s.container]
+        ambiguousContainers.add(s.container)
+      }
+    }
+    const identity = s.namespace ? `${s.namespace}/${s.container}` : `${s.container}:${s.port}`
+    byWorkload[identity] = s
+  }
 
   return NextResponse.json(
-    { services, byContainer, source },
+    { services, byContainer, byWorkload, source, discoveryStatus: discovery.status },
     { headers: { 'Cache-Control': 'no-store' } },
   )
 }

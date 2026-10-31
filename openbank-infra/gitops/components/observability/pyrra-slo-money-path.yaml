@@ -1303,3 +1303,102 @@ spec:
         metric: traces_spanmetrics_latency_bucket{service="openbank-treasury-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
         metric: traces_spanmetrics_calls_total{service="openbank-treasury-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-pension-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-pension-service
+spec:
+  target: "99.9"
+  window: 30d
+  alerting:
+    absent: false
+  # Money-path (ADR-0334): pension contracts; contributions and payouts land here in later slices.
+  description: "openbank-pension-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-pension-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-pension-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-pension-fund-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-pension-fund-service
+spec:
+  target: "99.9"
+  window: 30d
+  alerting:
+    absent: false
+  description: "openbank-pension-fund-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-pension-fund-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-pension-fund-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-pension-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-pension-service
+spec:
+  target: "99"
+  window: 30d
+  alerting:
+    absent: false
+  # Fleet 1s threshold from rules.yaml.
+  description: "openbank-pension-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-pension-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-pension-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
+
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-pension-fund-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-pension-fund-service
+spec:
+  target: "99"
+  window: 30d
+  alerting:
+    absent: false
+  description: "openbank-pension-fund-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-pension-fund-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-pension-fund-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}

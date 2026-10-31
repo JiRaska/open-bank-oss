@@ -64,7 +64,6 @@ CONFIG = Path("release-please-config.json")
 # Each entry names the overlay it strands, and a stale declaration fails in either direction.
 NO_RELEASE_COMPONENT: dict[str, str] = {
     "openbank-campaign-service": "campaign-service",
-    "openbank-tax-reporting-service": "tax-reporting-service",
 }
 
 # component -> issue that tracks writing its overlay. Reason required; stale either direction.
@@ -74,6 +73,13 @@ NO_OVERLAY_YET: dict[str, str] = {
     # gate reported it in the direction that matters -- a declaration outliving its subject --
     # which turned main red for every PR until this landed. That is the check working, not a
     # defect in it: the failure was leaving the baseline out of the PR that made it obsolete.
+    "pension-service": "#12350 - new service (ADR-0334 S1), deployed nowhere yet and moving no money "
+    "in S1; dispositions are written against its own resolved runtime classpath once it is built, "
+    "not copied from a sibling.",
+    "pension-fund-service": "#12350 - new service (ADR-0334 S4), released by #12355 and not yet "
+    "deployed, so nothing is exposed. No VEX overlay is written yet: dispositions must come from "
+    "this service's own resolved runtime classpath, not be copied from a sibling. Delete this "
+    "entry in the PR that writes the overlay.",
     "wealth-service": "#9811 - released in #9771 (ADR-0301 D1) and deployed nowhere, moves no "
     "money and has no ingress, so nothing is exposed while the dispositions are verified "
     "against this service's own resolved runtime classpath rather than copied from a sibling.",
@@ -82,9 +88,6 @@ NO_OVERLAY_YET: dict[str, str] = {
                        "largely shared with services that already have overlays, but nobody has "
                        "diffed it yet. Writing dispositions from that assumption rather than from "
                        "the resolved artifacts is the fabrication this gate's own header refuses.",
-    "admin-ui": "#6719 - released component, no triage overlay written yet. Node/Next.js, so none "
-                "of the JVM dependency evidence used for the other three reaches it and there is "
-                "no npm triage material in the repository to write a disposition from.",
     "card-processing-service": "#9849 - new service (ADR-0283 phase 1), no VEX overlay written yet. "
                                "Its dependency set is the ordinary reactive Quarkus stack largely "
                                "shared with services that already carry overlays, but 'largely "
@@ -97,6 +100,12 @@ NO_OVERLAY_YET: dict[str, str] = {
                               "services that already have overlays, but writing dispositions from "
                               "that assumption rather than the resolved runtimeClasspath artifacts "
                               "is exactly the fabrication this gate's own header refuses.",
+    "products": "#668 - openbank-products (ADR-0352 phase 2) is a released content module: a "
+                "build-time Kotlin DSL, reference product IR JSON, golden scenarios and the obp CLI. "
+                "It is deployed nowhere and serves nothing; its only consumers are developers and CI. "
+                "No VEX overlay is written yet: dispositions must come from this module's own resolved "
+                "runtime classpath (it depends on openbank-libs-testing for the golden runner), not be "
+                "copied from a service. Delete this entry in the PR that writes the overlay.",
 }
 
 

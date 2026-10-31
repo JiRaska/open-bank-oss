@@ -9,11 +9,13 @@ import com.openbank.libs.contact.ContactCounterPort
 import com.openbank.libs.contact.ContactPolicy
 import com.openbank.libs.contact.ContactPolicyGate
 import com.openbank.libs.contact.ContactSuppressionPort
+import com.openbank.notification.application.NotificationConsumer
 import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationOutcomeEvent
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
+import io.agroal.api.AgroalDataSource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.MockMailbox
 import io.quarkus.test.common.QuarkusTestResource
@@ -59,6 +61,12 @@ class MarketingGateIT {
 
     @Inject
     lateinit var repository: NotificationRepository
+
+    @Inject
+    lateinit var dataSource: AgroalDataSource
+
+    @Inject
+    lateinit var notificationConsumer: NotificationConsumer
 
     @Inject
     lateinit var objectMapper: ObjectMapper
@@ -134,6 +142,18 @@ class MarketingGateIT {
         // ...and because the mailer is the mock, nothing left the process, so the record says so.
         assertThat(statusFor(request.partyId)).isEqualTo("SUPPRESSED")
         assertThat(reasonFor(request.partyId)).isEqualTo(NotificationOutcomeEvent.REASON_MAILER_MOCKED)
+        val reservations = dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT count(*) FROM marketing_contact_reservations WHERE party_id = ?",
+            ).use { statement ->
+                statement.setObject(1, request.partyId)
+                statement.executeQuery().use { rows ->
+                    rows.next()
+                    rows.getLong(1)
+                }
+            }
+        }
+        assertThat(reservations).isEqualTo(1L)
     }
 
     @Test
@@ -169,6 +189,28 @@ class MarketingGateIT {
         assertThat(mailbox.getMailMessagesSentTo("marketing-cap@example.com")).isEmpty()
     }
 
+    @Test
+    fun `unavailable contact gate keeps the row pending and never contacts the provider`() {
+        StubContactGateProducer.suppressionUnavailable = true
+        mailbox.clear()
+        val request = marketingRequest("marketing-gate-unavailable@example.com")
+            .copy(deduplicationKey = UUID.randomUUID())
+        try {
+            val failure = runCatching {
+                VertxContextSupport.subscribeAndAwait {
+                    notificationConsumer.consume(objectMapper.writeValueAsString(request))
+                }
+            }.exceptionOrNull()
+
+            assertThat(failure).isNotNull()
+            assertThat(statusFor(request.partyId)).isEqualTo("PENDING")
+            assertThat(reasonFor(request.partyId)).isNull()
+            assertThat(mailbox.getMailMessagesSentTo("marketing-gate-unavailable@example.com")).isEmpty()
+        } finally {
+            StubContactGateProducer.suppressionUnavailable = false
+        }
+    }
+
     /**
      * The falsification for the three above: every case in this class is SUPPRESSED, so status
      * alone can no longer tell them apart. Pinned as an explicit assertion so that anyone who
@@ -202,7 +244,10 @@ class StubContactGateProducer {
             override suspend fun sendsInWindow(partyId: UUID, windowStart: Instant): Int = sendsInWindow
             override suspend fun impressionsInWindow(partyId: UUID, windowStart: Instant): Int = 0
         },
-        suppression = ContactSuppressionPort { emptyList() },
+        suppression = ContactSuppressionPort {
+            if (suppressionUnavailable) error("consent unavailable")
+            emptyList()
+        },
         policy = ContactPolicy(),
         // A FIXED clock, at 12:00 UTC. ContactPolicy's defaults are quietHoursStart = 21 and
         // quietHoursEnd = 8, and ContactPolicyGate reads them against `clock()`, which defaults to
@@ -216,6 +261,7 @@ class StubContactGateProducer {
     companion object {
         var consented: Boolean = true
         var sendsInWindow: Int = 0
+        var suppressionUnavailable: Boolean = false
 
         /** 2026-01-15T12:00:00Z — midday, so outside the 21→8 quiet window in any platform zone. */
         val FIXED_NOW: Instant = Instant.parse("2026-01-15T12:00:00Z")

@@ -70,6 +70,8 @@ export interface AgentInsightsPanelProps {
   /** HITL handlers (ADR-0031 D4). When provided, Approve/Reject buttons render per finding. */
   onApprove?: (id: string) => void
   onReject?: (id: string) => void
+  /** Optional per-row guard for callers whose findings have lifecycle-specific decision rules. */
+  canDecideFinding?: (finding: AgentFinding) => boolean
   /** Already-translated button labels; defaults to Approve / Reject in English. */
   decideLabels?: { approve: string; reject: string }
   /** Id currently being decided (disables that row's buttons). */
@@ -103,7 +105,7 @@ const TAG_CFG: Record<NonNullable<AgentFindingTag['tone']>, { color: string; bg:
 
 export function AgentInsightsPanel({
   title, subtitle, findings, emptyMessage, icon, accentColor = 'var(--warning)',
-  sourceLabel, notice, onApprove, onReject, decideLabels, decidingId,
+  sourceLabel, notice, onApprove, onReject, canDecideFinding, decideLabels, decidingId,
 }: AgentInsightsPanelProps) {
   const { language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -148,6 +150,7 @@ export function AgentInsightsPanel({
           {findings.map(f => {
             const sev = f.severity ? SEVERITY_CFG[f.severity] : null
             const sc = f.status ? (STATUS_CFG[f.status.toUpperCase()] ?? STATUS_CFG['UNKNOWN']) : null
+            const canDecide = showHitl && (canDecideFinding?.(f) ?? true)
             return (
               <div key={f.id} style={{ padding: '12px 14px', borderRadius: '10px',
                 border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
@@ -190,7 +193,7 @@ export function AgentInsightsPanel({
                   </p>
                 )}
 
-                {(f.proposalUrl || f.detectedAt || showHitl) && (
+                {(f.proposalUrl || f.detectedAt || canDecide) && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     {f.proposalUrl && (
                       <a href={f.proposalUrl} target="_blank" rel="noopener noreferrer"
@@ -203,7 +206,7 @@ export function AgentInsightsPanel({
                         {new Date(f.detectedAt).toLocaleString(dateLocale)}
                       </span>
                     )}
-                    {showHitl && (
+                    {canDecide && (
                       <>
                         {onApprove && (
                           <button

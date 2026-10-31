@@ -29,10 +29,16 @@ data class EventAddress(
     val topic: String? = null,
     /** `ce-type` header — the outbox event type (`OutboxKafkaHeaders.HEADER_EVENT_TYPE`). */
     val ceType: String? = null,
+    /** Durable outbox identity, unchanged when Kafka retries at a new offset. */
+    val ceId: String? = null,
     val partition: Int? = null,
     val offset: Long? = null,
 ) {
-    fun entryId(producerId: String?): UUID = producerId?.let(UUID::fromString) ?: recordId() ?: Ids.newId()
+    fun entryId(producerId: String?): UUID =
+        producerId?.let(UUID::fromString) ?: ceIdAsUuid() ?: recordId() ?: Ids.newId()
+
+    /** A malformed ce-id falls back to the record address instead of failing the consumer. */
+    private fun ceIdAsUuid(): UUID? = ceId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
 
     /** Stable within the original Kafka address; body-only replays need a producer event ID. */
     fun recordId(): UUID? {

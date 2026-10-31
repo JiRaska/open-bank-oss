@@ -13,12 +13,16 @@ import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.sca.application.port.out.ScaChallengeRepository
+import com.openbank.sca.domain.model.DynamicLinkingData
 import com.openbank.sca.domain.model.ScaChallenge
 import com.openbank.sca.domain.model.ScaMethod
 import com.openbank.sca.domain.model.ScaPurpose
 import com.openbank.sca.domain.model.ScaStatus
+import io.quarkus.security.runtime.QuarkusPrincipal
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.vertx.core.Vertx
@@ -88,6 +92,15 @@ import java.util.concurrent.TimeUnit
 class ScaPactFolderProviderVerificationTest {
 
     companion object {
+        const val PENSION_OPERATION_STATE = "a COMPLETED APPROVAL SCA challenge bound to a pension operation exists"
+        val PENSION_CHALLENGE_ID: UUID = UUID.fromString("7e5a0001-0000-4000-8000-000000000335")
+        val PENSION_PARTY_ID: UUID = UUID.fromString("7e5a0002-0000-4000-8000-000000000335")
+        const val PENSION_PAYLOAD_SHA256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        const val PENSION_APPROVAL_REQUEST_ID = "pension-exit:$PENSION_PAYLOAD_SHA256"
+        val PENSION_IDENTITY: QuarkusSecurityIdentity = QuarkusSecurityIdentity.builder()
+            .setPrincipal(QuarkusPrincipal("service-account-openbank-pension"))
+            .addRole("ROLE_API")
+            .build()
         private val CHALLENGE_ID = UUID.fromString("99999999-9999-9999-9999-999999999999")
         private val PARTY_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         private val DELEGATION_CHALLENGE_ID = UUID.fromString("d1e2f3a4-b5c6-4d7e-8f90-1a2b3c4d5e6f")
@@ -96,6 +109,15 @@ class ScaPactFolderProviderVerificationTest {
         // Must match SavingsWithdrawScaPactConsumerTest (openbank-account-service).
         private val SAVINGS_CHALLENGE_ID = UUID.fromString("5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a")
         private val SAVINGS_PARTY_ID = UUID.fromString("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+
+        // Must match DocumentScaConsumePactConsumerTest (openbank-document-service).
+        const val DOCUMENT_SIGNING_STATE =
+            "a COMPLETED DOCUMENT_SIGNING SCA challenge bound to a document ceremony exists"
+        private val DOCUMENT_CHALLENGE_ID = UUID.fromString("d0c0c0c0-0000-4000-8000-000000000001")
+        private val DOCUMENT_PARTY_ID = UUID.fromString("d0c0c0c0-0000-4000-8000-000000000002")
+        const val DOCUMENT_SHA256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        const val DOCUMENT_CEREMONY_ID = "ceremony-doc-0001"
+        const val NO_SUCH_CHALLENGE_STATE = "no SCA challenge exists with the requested id"
     }
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -106,6 +128,9 @@ class ScaPactFolderProviderVerificationTest {
 
     @Inject
     lateinit var vertx: Vertx
+
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
@@ -143,6 +168,11 @@ class ScaPactFolderProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // A pension interaction replays as the pension principal: the consumer scope (ADR-0335)
+        // is resolved from the authenticated identity, so `pact-verifier` would be refused.
+        if (context != null && context.interaction.providerStates.any { it.name == PENSION_OPERATION_STATE }) {
+            testIdentityAssociation.setTestIdentity(PENSION_IDENTITY)
+        }
         context?.verifyInteraction()
     }
 
@@ -218,5 +248,89 @@ class ScaPactFolderProviderVerificationTest {
             ),
         )
         Unit
+    }
+
+    /**
+     * ADR-0335 / #12385 item 3: pension-service's positive consume. Seeded COMPLETED, unconsumed,
+     * APPROVAL, with a device-signed `pension-exit:` id, so the consume succeeds ONLY for the
+     * pension principal — [verifyPacts] switches the replay identity to it for this state, exactly
+     * as production would present it. Constants must match the pension consumer pact.
+     */
+    @State(PENSION_OPERATION_STATE)
+    fun stateCompletedPensionApprovalExists() = runOnVertxContext {
+        challengeRepo.save(
+            ScaChallenge(
+                id = PENSION_CHALLENGE_ID,
+                version = challengeRepo.findById(PENSION_CHALLENGE_ID)?.version ?: 0,
+                partyId = PENSION_PARTY_ID,
+                purpose = ScaPurpose.APPROVAL,
+                method = ScaMethod.PUSH_NOTIFICATION,
+                status = ScaStatus.COMPLETED,
+                expiresAt = OffsetDateTime.now().plusMinutes(5),
+                completedAt = OffsetDateTime.now(),
+                consumedAt = null,
+                dynamicLinkingData = DynamicLinkingData(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    approvalRequestId = PENSION_APPROVAL_REQUEST_ID,
+                    payloadSha256 = PENSION_PAYLOAD_SHA256,
+                ),
+                createdAt = OffsetDateTime.now(),
+            ),
+        )
+        Unit
+    }
+
+    /**
+     * ADR-0169 D2: document-service's document-signing consume. Seeded COMPLETED, unconsumed,
+     * DOCUMENT_SIGNING, with the device-signed `documentSha256` + `ceremonyId` pair, so a consume
+     * restating the same pair succeeds while any other document hash 409s on the dynamic-linking
+     * check without burning the challenge (the state handler re-reads the version, so the second
+     * interaction finds it spendable again). A general consumer (`pact-verifier` is not a reserved
+     * principal) may spend it: the challenge carries no reserved-namespace approvalRequestId.
+     * Constants must match DocumentScaConsumePactConsumerTest (openbank-document-service) — and,
+     * per this class's upkeep note, the broker twin below.
+     */
+    @State(DOCUMENT_SIGNING_STATE)
+    fun stateCompletedDocumentSigningChallengeExists() = runOnVertxContext {
+        challengeRepo.save(
+            ScaChallenge(
+                id = DOCUMENT_CHALLENGE_ID,
+                version = challengeRepo.findById(DOCUMENT_CHALLENGE_ID)?.version ?: 0,
+                partyId = DOCUMENT_PARTY_ID,
+                purpose = ScaPurpose.DOCUMENT_SIGNING,
+                method = ScaMethod.PUSH_NOTIFICATION,
+                status = ScaStatus.COMPLETED,
+                expiresAt = OffsetDateTime.now().plusMinutes(5),
+                completedAt = OffsetDateTime.now(),
+                consumedAt = null,
+                dynamicLinkingData = DynamicLinkingData(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    documentSha256 = DOCUMENT_SHA256,
+                    ceremonyId = DOCUMENT_CEREMONY_ID,
+                ),
+                createdAt = OffsetDateTime.now(),
+            ),
+        )
+        Unit
+    }
+
+    /**
+     * document-service's unknown-challenge consume leg. Deliberately no seed: the pact addresses
+     * an id this test never creates, and the handler must EXIST (with this exact name, matching
+     * DocumentScaConsumePactConsumerTest) because the class-level [PactFilter] drops stateless
+     * interactions from the git replay — an interaction that declares no providerState never runs
+     * here at all.
+     */
+    @State(NO_SUCH_CHALLENGE_STATE)
+    fun stateNoSuchChallengeExists() {
+        // No seed: the requested id is one this provider test never creates.
     }
 }

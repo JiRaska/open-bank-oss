@@ -59,6 +59,7 @@ data class SepaPayment(
     val transactionId: UUID? = null,
     /** Request fingerprint the payment was created under (#10916); `null` for legacy rows. */
     val requestHash: String? = null,
+    val returnIntent: SepaReturnIntent? = null,
 ) {
     /** ISO 4217 code of [amount], the spelling every outbound contract carries. */
     val currency: String get() = amount.currency.code
@@ -70,6 +71,12 @@ data class SepaPayment(
         clock: Clock,
     ): SepaPayment {
         val now = Instant.now(clock)
+        require(
+            targetStatus != SepaPaymentStatus.RETURNED ||
+                (returnIntent?.resolvedAt != null && returnIntent.reversalTransactionId != null),
+        ) {
+            "RETURNED requires a proven reversal intent"
+        }
         require(canTransitionTo(targetStatus)) { "Invalid SEPA payment status transition: $status -> $targetStatus" }
         require(targetStatus != SepaPaymentStatus.REJECTED || reason != null) {
             "Reject reason is required for REJECTED status"
@@ -101,29 +108,48 @@ data class SepaPayment(
         )
     }
 
-    fun canTransitionTo(targetStatus: SepaPaymentStatus): Boolean = when (status) {
-        SepaPaymentStatus.RECEIVED -> targetStatus in setOf(
-            SepaPaymentStatus.VALIDATED,
-            SepaPaymentStatus.REJECTED,
-            SepaPaymentStatus.CANCELLED,
-        )
+    /** Pending returns retain recovery states; only a known original identity permits completion. */
+    private fun unresolvedReturnAllows(targetStatus: SepaPaymentStatus): Boolean {
+        val intent = returnIntent ?: return true
+        if (intent.resolvedAt != null) return true
+        if (targetStatus !in setOf(SepaPaymentStatus.PROCESSING, SepaPaymentStatus.COMPLETED)) return false
+        return targetStatus != SepaPaymentStatus.COMPLETED ||
+            (transactionId != null && intent.originalTransactionId == transactionId)
+    }
 
-        SepaPaymentStatus.VALIDATED -> targetStatus in setOf(
-            SepaPaymentStatus.PROCESSING,
-            SepaPaymentStatus.REJECTED,
-            SepaPaymentStatus.CANCELLED,
-        )
+    fun canTransitionTo(targetStatus: SepaPaymentStatus): Boolean {
+        if (!unresolvedReturnAllows(targetStatus)) return false
+        if (targetStatus == SepaPaymentStatus.RETURNED &&
+            (returnIntent?.resolvedAt == null || returnIntent.reversalTransactionId == null)
+        ) {
+            return false
+        }
+        return when (status) {
+            SepaPaymentStatus.RECEIVED -> targetStatus in setOf(
+                SepaPaymentStatus.VALIDATED,
+                SepaPaymentStatus.REJECTED,
+                SepaPaymentStatus.CANCELLED,
+            )
 
-        SepaPaymentStatus.PROCESSING -> targetStatus in setOf(
-            SepaPaymentStatus.COMPLETED,
+            SepaPaymentStatus.VALIDATED -> targetStatus in setOf(
+                SepaPaymentStatus.PROCESSING,
+                SepaPaymentStatus.REJECTED,
+                SepaPaymentStatus.CANCELLED,
+            )
+
+            SepaPaymentStatus.PROCESSING -> targetStatus in setOf(
+                SepaPaymentStatus.COMPLETED,
+                SepaPaymentStatus.RETURNED,
+                SepaPaymentStatus.REJECTED,
+            )
+
+            // ADR-0111: a settled SCT may return, but only with the proven intent checked above.
+            SepaPaymentStatus.COMPLETED -> targetStatus == SepaPaymentStatus.RETURNED
+
+            SepaPaymentStatus.REJECTED,
             SepaPaymentStatus.RETURNED,
-            SepaPaymentStatus.REJECTED,
-        )
-
-        SepaPaymentStatus.COMPLETED,
-        SepaPaymentStatus.REJECTED,
-        SepaPaymentStatus.RETURNED,
-        SepaPaymentStatus.CANCELLED,
-        -> false
+            SepaPaymentStatus.CANCELLED,
+            -> false
+        }
     }
 }

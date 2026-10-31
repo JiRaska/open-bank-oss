@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/JiRaska/open-bank-oss/compare/ap2-service-v0.4.1...ap2-service-v0.4.2) (2026-10-13)
+
+
+### Security
+
+* **ap2:** authenticate /ap2 by bearer only on the mTLS listener ([#12535](https://github.com/JiRaska/open-bank-oss/issues/12535)) ([a941340](https://github.com/JiRaska/open-bank-oss/commit/a94134035ce83c2d5ad6c841fda95f66e934af62))
+
 ## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/ap2-service-v0.4.0...ap2-service-v0.4.1) (2026-10-04)
 
 

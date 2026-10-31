@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.17.7](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.6...finrep-service-v0.17.7) (2026-10-30)
+
+
+### Bug Fixes
+
+* **finrep:** classify ADR-0344 instrument accounts ([#14290](https://github.com/JiRaska/open-bank-oss/issues/14290)) ([8d34a27](https://github.com/JiRaska/open-bank-oss/commit/8d34a274aaa97da3e28381d06f113f056e6ff12d)), closes [#14284](https://github.com/JiRaska/open-bank-oss/issues/14284)
+
+## [0.17.6](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.5...finrep-service-v0.17.6) (2026-10-29)
+
+
+### Bug Fixes
+
+* **finrep:** verify balance sheet datapoint ids ([#14147](https://github.com/JiRaska/open-bank-oss/issues/14147)) ([287d69f](https://github.com/JiRaska/open-bank-oss/commit/287d69f1473bf196bedd39d53a4383b92c98fd24))
+
+## [0.17.5](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.4...finrep-service-v0.17.5) (2026-10-23)
+
+
+### Bug Fixes
+
+* **finrep:** map ČNB, lombard and nostro overdraft to FINREP sub-lines ([#13602](https://github.com/JiRaska/open-bank-oss/issues/13602)) ([d1546bb](https://github.com/JiRaska/open-bank-oss/commit/d1546bb27e1c3b79ef38beec4bda4a285f9eaddb))
+
+## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.3...finrep-service-v0.17.4) (2026-10-18)
+
+
+### Bug Fixes
+
+* **finrep:** classify treasury GL codes in the FINREP allowlist and F01/F02 mappers ([#13146](https://github.com/JiRaska/open-bank-oss/issues/13146)) ([1a4308d](https://github.com/JiRaska/open-bank-oss/commit/1a4308d5d140f7fe024276ef5635155f36b19028))
+
+## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.2...finrep-service-v0.17.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.1...finrep-service-v0.17.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* **finrep:** report balances, not one month's movements ([#12505](https://github.com/JiRaska/open-bank-oss/issues/12505)) ([272ea30](https://github.com/JiRaska/open-bank-oss/commit/272ea303dade99fc0f3a743ebf0aee9aedfdffe5))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.0...finrep-service-v0.17.1) (2026-10-04)
 
 

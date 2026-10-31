@@ -9,6 +9,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
@@ -97,6 +99,13 @@ class SddOutboxAtomicityIT {
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
     fun `both mandate write paths commit the mandate row and its outbox row in one transaction`() {
         val mandateId = registerCoreMandate()
 

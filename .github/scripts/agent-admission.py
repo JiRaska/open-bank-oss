@@ -12,6 +12,36 @@ import yaml
 RULES = Path("openbank-libs/governance/rules.yaml")
 
 
+def load_exceptions(path=RULES):
+    """Only reviewed trusted-base policy can grant an expiring, PR-bound exemption."""
+    doc = yaml.safe_load(Path(path).read_text())
+    entries = doc['autonomous_agent_prs'].get('one_time_wip_exceptions', [])
+    if not isinstance(entries, list):
+        raise ValueError('one_time_wip_exceptions must be a list')
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {'pr', 'repository', 'branch', 'expires_at', 'reason'}:
+            raise ValueError('invalid one-time WIP exception fields')
+        if type(entry['pr']) is not int or entry['pr'] < 1 or entry['pr'] in seen:
+            raise ValueError('invalid or duplicate exception PR')
+        seen.add(entry['pr'])
+        for key in ('repository', 'branch', 'reason'):
+            if not isinstance(entry[key], str) or not entry[key].strip():
+                raise ValueError(f'exception {key} must be non-empty')
+        parse_utc(entry['expires_at'], 'exception expires_at')
+    return entries
+
+
+def matching_exception(current, exceptions, now):
+    for entry in exceptions:
+        if (entry['pr'] == current['number']
+                and entry['branch'] == current['head']['ref']
+                and entry['repository'] == (current['head'].get('repo') or {}).get('full_name')
+                and now < parse_utc(entry['expires_at'], 'exception expires_at')):
+            return entry
+    return None
+
+
 def parse_utc(value, name):
     try:
         parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
@@ -31,8 +61,11 @@ def load_policy(path=RULES):
     if not isinstance(config, dict):
         raise ValueError("autonomous_agent_prs must be a mapping")
     prefixes = config.get("agent_branch_prefixes")
-    if not isinstance(prefixes, list) or not prefixes or any(not isinstance(p, str) or not p for p in prefixes):
-        raise ValueError("autonomous_agent_prs.agent_branch_prefixes must be a non-empty string list")
+    # 2026-10-14 (owner decision): an emptied prefix scope is valid policy — no branch then
+    # counts against the WIP ceiling, so agent PRs no longer queue behind it. The value must
+    # still be a string list; the ceiling itself stays rules-driven via max_open_prs.
+    if not isinstance(prefixes, list) or any(not isinstance(p, str) or not p for p in prefixes):
+        raise ValueError("autonomous_agent_prs.agent_branch_prefixes must be a string list")
     limit = config.get("max_open_prs")
     if type(limit) is not int or limit < 1:
         raise ValueError("autonomous_agent_prs.max_open_prs must be a positive integer")
@@ -66,7 +99,7 @@ def admit(pages, prefixes, limit):
     return count < limit, count
 
 
-def admit_current_pr(pages, prefixes, limit, number, grandfather_before):
+def admit_current_pr(pages, prefixes, limit, number, grandfather_before, exceptions=(), now=None):
     """Order concurrent openings by immutable PR number; existing work may drain."""
     prs = validate_snapshot(pages)
     current = next((pr for pr in prs if pr['number'] == number), None)
@@ -80,7 +113,8 @@ def admit_current_pr(pages, prefixes, limit, number, grandfather_before):
         pr['number'] <= number and pr['head']['ref'].startswith(prefixes)
         for pr in prs
     )
-    return created < cutoff or rank <= limit, rank
+    exception = matching_exception(current, exceptions, now or datetime.now(timezone.utc))
+    return created < cutoff or rank <= limit or exception is not None, rank
 
 
 def main():
@@ -89,6 +123,7 @@ def main():
         if not args:
             raise ValueError("snapshot path is required")
         prefixes, limit, cutoff = load_policy()
+        exceptions = load_exceptions()
         pages = json.loads(Path(args[0]).read_text())
         if len(args) == 1:
             proceed, count = admit(pages, prefixes, limit)
@@ -97,7 +132,7 @@ def main():
             number = int(args[2])
             if number < 1:
                 raise ValueError("current PR number must be positive")
-            proceed, count = admit_current_pr(pages, prefixes, limit, number, cutoff)
+            proceed, count = admit_current_pr(pages, prefixes, limit, number, cutoff, exceptions)
             current_mode = True
         else:
             raise ValueError("usage: agent-admission.py SNAPSHOT [--current-pr NUMBER]")
@@ -105,7 +140,15 @@ def main():
         print(f'::error::Agent admission could not verify the queue: {error}', file=sys.stderr)
         return 1
     print(f'proceed={str(proceed).lower()}')
-    if current_mode and proceed and count > limit:
+    exception = None
+    if current_mode:
+        current = next(pr for pr in validate_snapshot(pages) if pr['number'] == number)
+        exception = matching_exception(current, exceptions, datetime.now(timezone.utc))
+        if exception:
+            print(f"WIP exception PR #{number}: {exception['reason']}; expires {exception['expires_at']}", file=sys.stderr)
+    if exception:
+        reason = f'approved one-time WIP exception for PR #{number}'
+    elif current_mode and proceed and count > limit:
         reason = 'grandfathered existing PR may finish'
     else:
         reason = 'capacity available' if proceed else 'finish existing work before opening another PR'

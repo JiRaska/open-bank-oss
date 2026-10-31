@@ -180,3 +180,10 @@ Stav je append-only, verzovaný log žádaného stavu (`dispatch_control_log`); 
 3. **Egress ve výchozím stavu vypnutý** — push adaptéry a oversight webhook jsou vypnuté, dokud nejsou explicitně zapnuté; vypnutý adaptér je úspěšný no-op.
 4. **Soukromí z principu** — oversight egress se staví z pozitivního allow-list schématu plus scrubberu.
 5. **Žádná peněžní cesta** — doručení at-least-once, redelivery ukládá znovu; žádná vstupní idempotenční vrstva.
+
+## Katalog textů šablon
+
+`NotificationCopyCatalog` mapuje každou `NotificationTemplate` na její cs/en text v jednom úplném
+`when` bez `else`, takže šablona bez textu neprojde kompilací. Šest šablon `PENSION_*` se vykresluje
+přes `PensionCopy`: předměty jsou konstantní pro šablonu a jazyk, hodnoty jsou HTML-escapované a
+`PENSION_PAYOUT_ACCOUNT_CHANGED` je bezpečnostní oznámení, které nelze ztlumit.

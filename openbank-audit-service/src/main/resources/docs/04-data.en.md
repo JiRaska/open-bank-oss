@@ -48,6 +48,11 @@
 
 **Immutability:** PostgreSQL `DO INSTEAD NOTHING` rules silently discard any `UPDATE`/`DELETE`. The trail is physically append-only; correction is by appending a new compensating entry, never by editing.
 
+For SEPA Instant outbox events, the audit entry uses the Kafka `ce-id` header as its stable
+identity when the payload has no event ID. A retry at another Kafka offset therefore reuses
+the same `entry_id`. The consumer accepts an identical redelivery, ignoring only the new
+ingest timestamp, and rejects the same ID with different persisted evidence.
+
 ## PII & data classification
 
 The audit trail stores the **verbatim payload** of every upstream event, so it transitively contains whatever PII the producers emit (account ids, IBANs, party ids, possibly transaction detail). Additional directly-personal fields captured at this layer:
@@ -65,3 +70,8 @@ See [06 — Compliance](./06-compliance.md) for the lawful-basis and erasure ana
 
 - **10 years**, enforced two ways: a per-row `retention_until = occurred_at + INTERVAL '10 years'` set by the `trg_audit_retention` trigger, and the service property `openbank.gdpr.audit-retention-days: 3650`.
 - Deletion before `retention_until` is not just policy — the DB-level delete rule blocks it entirely. Purge after expiry is an operational concern (a separate, audited maintenance job), not an ad-hoc `DELETE`.
+
+
+## Bank-own transfer rail status (ADR-0344 phase 1b)
+
+audit-service also reads `openbank.swift.institution-transfers`, swift-service's status of each bank-own transfer. It is money-path: each status is a transfer the rail executed. Rows are attributed to `swift-service` through the shared `TopicProducers` table, and the audit KafkaUser holds Read on the topic (`kafka-audit-mtls.yaml`).

@@ -70,7 +70,8 @@ KNOWN_UNWIRED = {
     # (#8346) uses the NESTED form in application.yaml instead, which resolves in every config
     # source, so local dev and tests get the same wiring as the pod. The gate reads both sources
     # and sees all three.
-    ("openbank-tax-reporting-service", "withholding-remitted-in"): "no KafkaUser in gitops — a Write ACL cannot be granted, so a DLQ would wedge on the send (#5745)",
+    # openbank-tax-reporting-service is OFF this list as of #5760: deploying it brought the
+    # KafkaUser, so `withholding-remitted-in` now names its DLQ (nested form) with a Write grant.
     # The channels that had a DLQ BEFORE #5745, on SmallRye's implicit `dead-letter-topic-<channel>`
     # name. Naming one explicitly is a RENAME of a live topic: it strands whatever is already parked
     # in the old one and moves what the AccountPartyEventDeadLettered alert must read. That is an

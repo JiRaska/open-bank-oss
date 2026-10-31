@@ -19,18 +19,18 @@ package openbank.rest
 
 import rego.v1
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-viewer := {"type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
+viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}
 
 # The shared backend identity: classified HUMAN and carrying ROLE_OPERATOR in the realm. This is
 # the principal the whole file is shaped around — a role-only write rule would hand it the power
 # to register, amend or cancel a direct-debit mandate on any account.
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- staff: back-office mandate lifecycle ---
 
@@ -98,7 +98,7 @@ test_edge_may_not_authorise_collection if {
 
 # --- read-only oversight personas (the AUTHZ_ENFORCE precondition, #3679) ---
 
-compliance := {"type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]}
+compliance := {"service_account": false, "type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]}
 
 test_viewer_may_read_and_list if {
 	"sdd-oversight-read" in allowed_reasons with input as {"principal": viewer, "action": "sdd.read"}
@@ -126,4 +126,42 @@ test_oversight_read_grants_no_write if {
 test_no_reason_for_unknown_action if {
 	count(allowed_reasons) == 0 with input as {"principal": viewer, "action": "zzz.frobnicate"}
 	count(allowed_reasons) == 0 with input as {"principal": operator, "action": "zzz.frobnicate"}
+}
+
+# --- ADR-0335 D6: pension-service is a scoped mandate initiator (create/cancel only) ---
+
+pension_initiators := [{
+	"principal": "service-account-openbank-pension",
+	"service": "openbank-sdd-service",
+	"actions": ["sdd.create", "sdd.delete"],
+}]
+
+pension_sa := {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
+
+test_pension_may_create_and_cancel_mandates if {
+	every action in {"sdd.create", "sdd.delete"} {
+		"service-scoped-payment-initiator" in allowed_reasons with input as {"principal": pension_sa, "action": action}
+			with data.rules.scoped_payment_initiators as pension_initiators
+	}
+}
+
+test_pension_may_do_no_other_sdd_action if {
+	every action in {"sdd.read", "sdd.list", "sdd.update", "sdd.approve", "sdd.authorise"} {
+		count(allowed_reasons) == 0 with input as {"principal": pension_sa, "action": action}
+			with data.rules.scoped_payment_initiators as pension_initiators
+	}
+}
+
+test_scoped_grant_is_data_driven if {
+	count(allowed_reasons) == 0 with input as {"principal": pension_sa, "action": "sdd.create"}
+		with data.rules.scoped_payment_initiators as []
+}
+
+test_a_domestic_payment_declaration_grants_nothing_here if {
+	count(allowed_reasons) == 0 with input as {"principal": pension_sa, "action": "sdd.create"}
+		with data.rules.scoped_payment_initiators as [{
+			"principal": "service-account-openbank-pension",
+			"service": "openbank-domestic-payment",
+			"actions": ["sdd.create"],
+		}]
 }

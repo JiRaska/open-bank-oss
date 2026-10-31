@@ -44,10 +44,13 @@ class NotificationResource {
         @QueryParam("size") @DefaultValue("20") size: Int,
         @QueryParam("partyId") partyId: UUID?,
     ): Response {
-        val (items, total) = if (partyId != null) {
-            repo.pageByParty(partyId, page, size.coerceIn(1, 100))
+        val boundedPage = page.coerceAtLeast(0)
+        val boundedSize = size.coerceIn(1, 100)
+        val (items, total, unreadCount) = if (partyId != null) {
+            repo.pageByParty(partyId, boundedPage, boundedSize)
         } else {
-            repo.pageAll(page, size.coerceIn(1, 100))
+            val (allItems, allTotal) = repo.pageAll(boundedPage, boundedSize)
+            Triple(allItems, allTotal, null)
         }
         return Response.ok(
             mapOf(
@@ -57,17 +60,20 @@ class NotificationResource {
                         "partyId" to n.partyId,
                         "channel" to n.channel,
                         "template" to n.template,
+                        "templateRevision" to n.templateRevision,
                         "recipient" to n.recipient,
                         "subject" to n.subject,
                         "status" to n.status,
                         "sentAt" to n.sentAt,
+                        "visibleAt" to n.visibleAt,
                         "readAt" to n.readAt,
                         "createdAt" to n.createdAt,
                     )
                 },
                 "total" to total,
-                "page" to page,
-                "size" to size,
+                "page" to boundedPage,
+                "size" to boundedSize,
+                "unreadCount" to unreadCount,
             ),
         ).build()
     }
@@ -109,11 +115,13 @@ class NotificationResource {
         "partyId" to n.partyId,
         "channel" to n.channel,
         "template" to n.template,
+        "templateRevision" to n.templateRevision,
         "recipient" to n.recipient,
         "subject" to n.subject,
         "body" to bodyForRead(n.template, n.body),
         "status" to n.status,
         "sentAt" to n.sentAt,
+        "visibleAt" to n.visibleAt,
         "readAt" to n.readAt,
         "createdAt" to n.createdAt,
     )

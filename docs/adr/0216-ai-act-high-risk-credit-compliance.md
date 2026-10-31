@@ -92,6 +92,13 @@ for any third-party model via the gateway, and guardrail evidence (ADR-0031 D6).
 boundary "LLMs assist, deterministic + ML systems decide" is the load-bearing wall
 between a high-risk system we *conform* and one we cannot.
 
+## Amendment 2026-10-21: typed-decision models (ADR-0348)
+
+[ADR-0348](0348-typed-decision-models-a-third-inference-class-for-calibrated-schema-bound-triage-decisions.md) D4 forbids a typed-decision model from producing a credit outcome or
+standing in for any credit control. This ADR's high-risk scope is therefore unchanged: typed-decision
+triage (complaints, review-queue ordering, categorisation) is not an Annex III 5(b) system, and a
+proposal to use the class anywhere in the credit lifecycle is a change to this ADR, not to ADR-0348.
+
 ## Alternatives considered
 
 - **Treat the AI Act as documentation-only legal work.** Cheapest quarter, most
