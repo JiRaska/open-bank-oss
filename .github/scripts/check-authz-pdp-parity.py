@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Guard both OPA sidecar and application PDP wiring (issues #1797 and #9105).
 
 WHY THIS EXISTS: eight live services enforced `@Authorize` (`authz.enforce` defaults true) while
@@ -99,6 +100,19 @@ NON_MODULE_IMAGES = {
                                 "code-review follow-up in docs/threat-models/openbank-pricing-service.md",
     "openbank-pricing-console": "Next.js console in JiRaska/openbank-pricing; it authorises nothing "
                                 "itself, pricing-service's OPA sidecar decides every write",
+}
+
+# Services that DECLARE an `opa` sidecar but deliberately do not yet enable a PolicyDecisionPoint
+# bean (#9105). Enabling the producer flips live behaviour: with AUTHZ_ENFORCE effectively true,
+# AuthorizeInterceptor.onMissingPdp fails closed (503) today, whereas a resolvable PDP returns
+# real OPA decisions (403 for any action lacking a rule). That needs would-deny evidence from an
+# advisory window first. Stale in BOTH directions, like NON_MODULE_IMAGES: an entry whose service
+# now wires a bean (or no longer has a sidecar) is an error, so this cannot become a permanent list.
+PDP_BEAN_PENDING = {
+    "engagement-service": "AUTHZ_ENFORCE defaults true; enabling the producer turns the 503 "
+                          "fail-closed into real OPA decisions — needs would-deny evidence first (#9105)",
+    "tax-reporting-service": "AUTHZ_ENFORCE=true in gitops; enabling the producer turns the 503 "
+                             "fail-closed into real OPA decisions — needs would-deny evidence first (#9105)",
 }
 WORKLOAD_KINDS = {"Deployment", "Rollout"}
 
@@ -367,6 +381,7 @@ def main() -> int:
 
     violations: list[tuple[str, str, str]] = []
     unwired: list[tuple[str, str]] = []
+    pending_seen: set[str] = set()
     checked = 0
     unannotated: list[str] = []
     unresolved: list[tuple[str, str]] = []
@@ -418,7 +433,10 @@ def main() -> int:
             rel = path.relative_to(root)
             violations.append((svc_full, str(rel), "env" if env_enforce is not None else "app-default"))
         if has_pdp and not has_pdp_bean(root, service_dir):
-            unwired.append((svc_full, str(path.relative_to(root))))
+            if f"{svc_full}" in PDP_BEAN_PENDING or service_dir.removeprefix("openbank-") in PDP_BEAN_PENDING:
+                pending_seen.add(service_dir.removeprefix("openbank-"))
+            else:
+                unwired.append((svc_full, str(path.relative_to(root))))
 
     for svc, rel, source in sorted(violations):
         level = "error" if args.enforce else "warning"
@@ -448,6 +466,15 @@ def main() -> int:
     # `openbank-libs` is the marker: no fixture builds one.
     real_tree = (root / "openbank-libs").is_dir()
     stale_declared = sorted(set(NON_MODULE_IMAGES) - seen_non_module) if real_tree else []
+    stale_pending = sorted(set(PDP_BEAN_PENDING) - pending_seen) if real_tree else []
+    for svc in stale_pending:
+        print(
+            f"::{'error' if args.enforce else 'warning'}::authz-pdp-parity: PDP_BEAN_PENDING "
+            f"declares `{svc}` but it no longer has an `opa` sidecar without a PDP bean — "
+            f"remove the entry (#9105)."
+        )
+    for svc in sorted(pending_seen):
+        print(f"authz-pdp-parity: {svc} sidecar-without-bean tolerated: {PDP_BEAN_PENDING[svc]}")
     for image in stale_declared:
         print(
             f"::{'error' if args.enforce else 'warning'}::authz-pdp-parity: NON_MODULE_IMAGES "
@@ -471,7 +498,7 @@ def main() -> int:
         f"{len(violations)} enforce-without-sidecar violation(s); "
         f"{len(set(unwired))} sidecar-without-bean violation(s)."
     )
-    return 1 if ((violations or unwired or unresolved or stale_declared) and args.enforce) else 0
+    return 1 if ((violations or unwired or unresolved or stale_declared or stale_pending) and args.enforce) else 0
 
 
 if __name__ == "__main__":

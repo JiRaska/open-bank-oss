@@ -150,10 +150,6 @@ authz:
   enforce: "${AUTHZ_ENFORCE:true}"
 
 openbank:
-  authz:
-    # @Authorize consults the deployed OPA sidecar through the shared libs-runtime producer.
-    opa-pdp-producer:
-      enabled: true
   api:
     version: "1"
   # ADR-0336: catalogue-defined statutory returns. Until the reporting start and fund roster are
@@ -192,11 +188,6 @@ openbank:
       enabled: false
   authz:
     enforce: "false"
-  openbank:
-    authz:
-      # Tests run without an OPA sidecar; skip the producer's per-call timeout.
-      opa-pdp-producer:
-        enabled: false
 
 "%prod":
   quarkus:

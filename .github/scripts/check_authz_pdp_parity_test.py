@@ -158,6 +158,13 @@ class TestParity(unittest.TestCase):
             self.assertIn("1 sidecar-without-bean violation", out)
             self.assertEqual(1, code, out)
 
+    def test_declared_pending_service_is_tolerated_but_reported(self):
+        with Fixture("engagement-service", sidecar=True, enforce="true", kotlin=ANNOTATED) as f:
+            code, out = f.run("--enforce")
+            self.assertIn("0 sidecar-without-bean violation", out)
+            self.assertIn("sidecar-without-bean tolerated", out)
+            self.assertEqual(0, code, out)
+
     def test_accepts_an_explicit_cdi_producer(self):
         with Fixture("local-service", sidecar=True, enforce="true", kotlin=ANNOTATED) as f:
             source = f.root / "openbank-local-service/src/main/kotlin/AuthzProducer.kt"
