@@ -258,6 +258,10 @@ equivalent() {
     || differs "could not diff ${pact_sha} against ${dispatch_sha}"
   while IFS= read -r p; do
     [ -n "$p" ] || continue
+    # The admin UI is an explicitly independent Node application, not a JVM build
+    # input. Its dynamic-route brackets must not invalidate a JVM tree proof.
+    # Keep the strict path handling below for JVM source and unknown directories.
+    case "$p" in openbank-admin-ui/*) continue ;; esac
     # `own_scope` and the scope comparison below use shell words. A changed path containing
     # whitespace or Git's C-quoted characters could be split into nonexistent paths, then fall
     # through the Gradle-module classifier as irrelevant. Refuse unhandled names until the whole
@@ -467,6 +471,17 @@ selftest() {
   local o7; o7="$(_commit 'svc-a/Prod Config.txt' changed)"
   _expect "overlay: production file with a spaced name is refused" DIFFERENT --own-test-overlay svc-a "$o6" "$o7"
 
+  local ui1 ui2
+  ui1="$(_commit 'openbank-admin-ui/src/app/communication/edit/[personaKey]/page.tsx' first)"
+  ui2="$(_commit 'openbank-admin-ui/src/app/communication/edit/[personaKey]/page.tsx' second)"
+  _expect "unrelated admin-ui dynamic route is irrelevant" EQUIVALENT svc-a "$ui1" "$ui2"
+
+  local unsafe1 unsafe2
+  unsafe1="$(_commit 'new-build-system/[input].txt' first)"
+  _expect "unknown bracketed path remains refused" DIFFERENT svc-a "$ui2" "$unsafe1"
+  unsafe2="$(_commit 'svc-a/src/main/[input].kt' changed)"
+  _expect "production bracketed path remains refused" DIFFERENT --own-test-overlay svc-a "$unsafe1" "$unsafe2"
+
   # Keep the fail-closed workflow-input negatives last: each commit intentionally makes the
   # required inputs missing or ambiguous, so later known-positive cases must not inherit it.
   local s6d s6e s6f s6g
@@ -487,7 +502,7 @@ selftest() {
       && git rev-parse HEAD)"
   _expect "first augmentation-time build input fails closed when duplicated" DIFFERENT svc-a "$s6c" "$s6g"
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: 31 cases (23 + 8 --own-test-overlay) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, augmentation-time auto-deploy inputs (including missing/duplicate refusal for both inputs), unrelated workflow edits, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
+  [ "$fail" -eq 0 ] && echo "selftest OK: 34 cases (31 main + 3 admin/path regressions) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, augmentation-time auto-deploy inputs (including missing/duplicate refusal for both inputs), unrelated workflow edits, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
   return "$fail"
 }
 

@@ -54,7 +54,7 @@ def caller_block(modules):
 
 
 def needs_block(modules):
-    ids = ['changes', 'publication-ready', 'verification-metadata', 'renderer-tests']
+    ids = ['changes', 'publication-ready', 'verification-metadata', 'renderer-tests', 'deploy-source-freshness']
     ids += [job_id(module, lane) for lane in LANES for module in modules]
     return '    needs:\n' + '\n'.join('      - ' + name for name in ids)
 
@@ -127,6 +127,9 @@ def self_test():
             (root / name / 'build.gradle.kts').touch()
         modules = inventory(root)
         first = generated(template, modules)
+        # The exact-head deploy verifier must remain in the aggregate DAG after
+        # regeneration; an explicit step cannot read a job omitted from needs.
+        assert '      - deploy-source-freshness' in needs_block(modules)
         assert first != template and generated(first, modules) == first
         (root / 'openbank-c').mkdir()
         (root / 'openbank-c/build.gradle.kts').touch()

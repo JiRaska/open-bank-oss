@@ -91,14 +91,14 @@ classify_failure() {
     printf 'UNKNOWN\n'
     return 0
   fi
-  if printf '%s' "$err" | grep -qE 'NAME_UNKNOWN|MANIFEST_UNKNOWN|does not exist|not found|404'; then
+  if grep -qE 'NAME_UNKNOWN|MANIFEST_UNKNOWN|does not exist|not found|404' <<< "$err"; then
     printf 'ABSENT\n'
     return 0
   fi
   # cosign's own attestation verdicts. `no matching attestations` covers both "none at all"
   # and "none this key/type accepts"; the signature/certificate wordings cover a payload that
   # exists but does not verify. All of these mean the artifact WAS fetched.
-  if printf '%s' "$err" | grep -qE 'no matching attestations|no attestations|no matching signatures|none of the attestations matched|signature not found|invalid signature|failed to verify signature|unable to verify signature|no signatures found|error validating.*signature|crypto/rsa: verification error'; then
+  if grep -qE 'no matching attestations|no attestations|no matching signatures|none of the attestations matched|signature not found|invalid signature|failed to verify signature|unable to verify signature|no signatures found|error validating.*signature|crypto/rsa: verification error' <<< "$err"; then
     printf 'UNATTESTED\n'
     return 0
   fi
@@ -150,6 +150,13 @@ selftest() {
     'Error: no matching attestations:
 main.go:74: error during command execution: no matching attestations:'
   check_case "invalid signature" UNATTESTED 'Error: invalid signature when validating ASN.1 encoded signature'
+
+  # A long diagnostic used to make grep exit early and SIGPIPE printf under pipefail,
+  # misclassifying a real absence/verdict as UNKNOWN on faster runners.
+  local large_stderr
+  large_stderr="$(python3 -c 'print("synthetic filler\n" * 40000)')"
+  check_case "large absent stderr" ABSENT "NAME_UNKNOWN"$'\n'"$large_stderr"
+  check_case "large unattested stderr" UNATTESTED "no matching attestations"$'\n'"$large_stderr"
 
   check_case "cosign wraps a connection reset in its verdict prefix" UNKNOWN \
     'Error: no matching attestations: read tcp: read: connection reset by peer'

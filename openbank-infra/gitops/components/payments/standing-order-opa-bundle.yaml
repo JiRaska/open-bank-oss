@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: standing-order-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "4fd58e94b730b952"
+    openbank.tech/policy-checksum: "37dc4bb41b782358"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1313,6 +1313,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*
