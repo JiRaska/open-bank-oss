@@ -656,7 +656,10 @@ layers:
         reason: Customer journey.
   trace:
     derive: cross-service
-  simulation: {}
+  simulation:
+    exclude:
+      - component: openbank-money-service
+        reason: No time-driven process.
 `)
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
@@ -668,7 +671,12 @@ layers:
     expect(status('trace', 'openbank-chatty-service')).toBe('missing')
     expect(status('trace', 'openbank-lonely-service')).toBe('not-applicable')
     expect(status('e2e', 'openbank-lonely-service')).toBe('missing')
-    expect(status('e2e', 'openbank-money-service')).toBe('not-applicable')
+    // Money-path is applicable on every layer unless excluded with a reason.
+    expect(status('e2e', 'openbank-money-service')).toBe('missing')
+    expect(status('e2e', 'openbank-chatty-service')).toBe('not-applicable')
+    expect(status('simulation', 'openbank-money-service')).toBe('not-applicable')
+    expect(report.layerCoverage?.find(layer => layer.kind === 'simulation')?.components
+      .find(row => row.component === 'openbank-money-service')?.reason).toBe('No time-driven process.')
     expect(report.layerCoverage?.find(layer => layer.kind === 'simulation')?.applicable).toBe(0)
   })
 

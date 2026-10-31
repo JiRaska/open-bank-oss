@@ -231,12 +231,13 @@ function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceRepor
       if (gaps === 0) return []
       const missingNames = coverage.components.filter(row => row.status === 'missing')
         .sort((left, right) => Number(right.moneyPath) - Number(left.moneyPath)).map(row => row.component)
+      const shown = missingNames.slice(0, 8).join(', ') + (missingNames.length > 8 ? ` +${missingNames.length - 8}` : '')
       const state: EvidenceState = observations.some(item => item.state === 'failed') ? 'failed' : 'not-run'
       return [{
         id: `layer-${layer.kind}`, tab: layer.tab, state, title: layer.title,
         detail: t(
-          `${coverage.present}/${coverage.applicable} komponent, pro které vrstva platí, má platný ${layer.kind} důkaz; chybí ${coverage.missing}, neprokázáno ${coverage.unproven}, nevztahuje se na ${coverage.notApplicable}. Chybí: ${missingNames.join(', ') || '—'}.`,
-          `${coverage.present}/${coverage.applicable} applicable components have passing ${layer.kind} evidence; ${coverage.missing} missing, ${coverage.unproven} unproven, ${coverage.notApplicable} not applicable. Missing: ${missingNames.join(', ') || '—'}.`,
+          `${coverage.present}/${coverage.applicable} komponent, pro které vrstva platí, má platný ${layer.kind} důkaz; chybí ${coverage.missing}, neprokázáno ${coverage.unproven}, nevztahuje se na ${coverage.notApplicable}. Chybí: ${shown || '—'}.`,
+          `${coverage.present}/${coverage.applicable} applicable components have passing ${layer.kind} evidence; ${coverage.missing} missing, ${coverage.unproven} unproven, ${coverage.notApplicable} not applicable. Missing: ${shown || '—'}.`,
         ),
       }]
     }

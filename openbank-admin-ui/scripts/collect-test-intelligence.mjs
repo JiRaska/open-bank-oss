@@ -672,17 +672,24 @@ function layerApplicability(components) {
       return true
     })
     const include = entries(layer.include)
-    const exclude = new Set(entries(layer.exclude).map(item => item.component))
+    // An exclusion is the only way out of a layer, and it needs a reason. Money-path components
+    // are applicable on every layer unless excluded, so an unlisted one reads as missing, never
+    // as not applicable (check-test-layer-applicability.py enforces the register's shape).
+    const exclusions = new Map(entries(layer.exclude).map(item => [item.component, item.reason]))
     const reasons = new Map(include.map(item => [item.component, item.reason]))
     const rows = components.map(component => {
       const evidence = component.evidence.filter(item => item.kind === kind)
       let reason = reasons.get(component.component) ?? null
       if (!reason && evidence.length) reason = 'Publishes evidence for this layer.'
-      if (!reason && kind === 'trace' && layer.derive === 'cross-service' && !exclude.has(component.component)) {
+      const excluded = !reason && exclusions.has(component.component)
+      if (!reason && !excluded) {
         if (component.moneyPath) reason = 'Money-path component.'
-        else if (component.released && crossServiceComponent(component.component)) reason = 'Declares a Kafka channel or outbound REST client.'
+        else if (layer.derive === 'cross-service' && component.released && crossServiceComponent(component.component)) {
+          reason = 'Declares a Kafka channel or outbound REST client.'
+        }
       }
-      const applicable = reason !== null
+      if (excluded) reason = exclusions.get(component.component)
+      const applicable = !excluded && reason !== null
       const passed = evidence.some(item => item.state === 'passed')
       return {
         component: component.component, moneyPath: component.moneyPath, applicable,
