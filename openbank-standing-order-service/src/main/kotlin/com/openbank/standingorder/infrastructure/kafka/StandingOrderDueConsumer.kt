@@ -269,12 +269,13 @@ class StandingOrderDueConsumer(
             return null
         }
         val targetAccountId = account.id
-        val creditorPartyId = account.partyId?.toString()
+        val creditorPartyId = account.partyId
         if (targetAccountId == null || creditorPartyId == null) {
             log.warnf("[standing-order-exec] order %s: could not parse account lookup response", orderId)
             return null
         }
-        val orderPartyId = node.path("partyId").asText(null)
+        // Compared as UUIDs, not strings: the event may spell the same id in upper case.
+        val orderPartyId = runCatching { UUID.fromString(node.path("partyId").asText(null)) }.getOrNull()
         if (orderPartyId == null || creditorPartyId != orderPartyId) {
             log.infof(
                 "[standing-order-exec] order %s pays a different party's account — that needs " +

@@ -50,7 +50,7 @@ class StandingOrderDueConsumerTest {
         debtorName: String? = "Debtor",
         amountMinorUnits: Long = 220000L,
         currency: String = "CZK",
-        orderPartyId: UUID? = partyId,
+        orderPartyId: Any? = partyId,
     ): String {
         val payload = mutableMapOf<String, Any?>(
             "orderId" to orderId,
@@ -220,6 +220,59 @@ class StandingOrderDueConsumerTest {
             coVerify(exactly = 1) { useCase.recordFailure(orderId) }
             coVerify(exactly = 0) { transactionClient.initiateTransaction(any()) }
         }
+
+    @Test
+    fun `an upper-case partyId on the event still matches the same party's account`(): Unit = runBlocking {
+        val lookupBody = mapper.writeValueAsString(
+            mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to partyId),
+        )
+        every { accountClient.getAccountByIban("DE89370400440532013000") } returns
+            Uni.createFrom().item(accountOk(lookupBody))
+        every { transactionClient.initiateTransaction(any()) } returns Uni.createFrom().item(
+            ok(TransactionResponse::class.java, TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED")),
+        )
+        coEvery { useCase.confirmExecution(orderId) } returns mockk(relaxed = true)
+
+        consumer.consume(dueEvent(paymentType = "INTERNAL", orderPartyId = partyId.toString().uppercase()))
+
+        coVerify(exactly = 1) { useCase.confirmExecution(orderId) }
+        coVerify(exactly = 0) { useCase.recordFailure(any()) }
+    }
+
+    @Test
+    fun `a cancellation during the creditor lookup is rethrown and records no failure`(): Unit = runBlocking {
+        every { accountClient.getAccountByIban(any()) } returns
+            Uni.createFrom().failure(kotlin.coroutines.cancellation.CancellationException("cancelled"))
+        coEvery { useCase.recordFailure(any()) } returns mockk(relaxed = true)
+
+        assertThatThrownBy { runBlocking { consumer.consume(dueEvent(paymentType = "INTERNAL")) } }
+            .isInstanceOf(kotlin.coroutines.cancellation.CancellationException::class.java)
+
+        coVerify(exactly = 0) { useCase.recordFailure(any()) }
+    }
+
+    @Test
+    fun `a thrown creditor lookup records a failure`(): Unit = runBlocking {
+        every { accountClient.getAccountByIban(any()) } returns
+            Uni.createFrom().failure(IllegalStateException("connection reset"))
+        coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
+
+        consumer.consume(dueEvent(paymentType = "INTERNAL"))
+
+        coVerify(exactly = 1) { useCase.recordFailure(orderId) }
+        coVerify(exactly = 0) { transactionClient.initiateTransaction(any()) }
+    }
+
+    @Test
+    fun `a non-404 error status on the creditor lookup records a failure`(): Unit = runBlocking {
+        every { accountClient.getAccountByIban(any()) } returns Uni.createFrom().item(Response.status(503).build())
+        coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
+
+        consumer.consume(dueEvent(paymentType = "INTERNAL"))
+
+        coVerify(exactly = 1) { useCase.recordFailure(orderId) }
+        coVerify(exactly = 0) { transactionClient.initiateTransaction(any()) }
+    }
 
     @Test
     fun `an order with no partyId on the event never auto-routes, even to a resolvable account`(): Unit = runBlocking {
