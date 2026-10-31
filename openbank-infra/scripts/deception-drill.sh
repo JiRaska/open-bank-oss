@@ -83,15 +83,18 @@ fi
 matched() {  # EventBridge rule matched events since the drill started
   aws cloudwatch get-metric-statistics --region "$REGION" --namespace AWS/Events \
     --metric-name MatchedEvents --dimensions Name=RuleName,Value=openbank-honeytoken-canary-key-used \
-    --start-time "$(iso $(( FIRED_canary - 60 )))" --end-time "$(iso $(( $(now) + 300 )))" \
+    --start-time "$(iso $(( FIRED_canary / 60 * 60 )))" --end-time "$(iso $(( $(now) + 300 )))" \
     --period 60 --statistics Sum --query 'sum(Datapoints[].Sum)' --output text 2>/dev/null
 }
 delivered() {  # notifications the honeytoken topic delivered to its subscribers since the drill
   aws cloudwatch get-metric-statistics --region "$REGION" --namespace AWS/SNS \
     --metric-name NumberOfNotificationsDelivered --dimensions Name=TopicName,Value=openbank-honeytoken-alerts \
-    --start-time "$(iso $(( FIRED_delivery - 60 )))" --end-time "$(iso $(( $(now) + 300 )))" \
+    --start-time "$(iso $(( FIRED_delivery / 60 * 60 )))" --end-time "$(iso $(( $(now) + 300 )))" \
     --period 60 --statistics Sum --query 'sum(Datapoints[].Sum)' --output text 2>/dev/null
 }
+# Windows start at the MINUTE the drill fired, never earlier: a 60 s lead once reached into the
+# previous one-minute bucket and counted a notification sent before the drill (a subscription
+# confirmation), so delivery read PASS while every subscription was still pending (2026-10-31).
 ge1() { [[ -n "$1" && "$1" != "None" ]] && python3 -c 'import sys;sys.exit(0 if float(sys.argv[1])>=1 else 1)' "$1" 2>/dev/null; }
 alarm() {
   aws cloudwatch describe-alarms --region "$REGION" --alarm-names openbank-honeytoken-sa-used \
