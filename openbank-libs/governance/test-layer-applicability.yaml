@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: Apache-2.0
+# Which components SHOULD own e2e, trace and simulation evidence (ADR-0273).
+#
+# Without this register the Test Intelligence matrix divides by every component, so "7/74 e2e"
+# cannot tell a missing suite from a component the layer does not apply to. The collector reads
+# this file and reports, per layer: applicable, not applicable, with evidence and missing.
+#
+# Rules, applied by collect-test-intelligence.mjs:
+# - A component that already publishes evidence for a layer always counts as applicable.
+# - trace: `derive: cross-service` makes every money-path component applicable, plus every
+#   released component whose src/main declares a Kafka channel or a @RegisterRestClient.
+#   `include` and `exclude` override the derivation and each one needs a reason.
+# - e2e and simulation: only the components listed under `include` are applicable.
+# A component not made applicable is shown as not applicable. It is not counted as a gap.
+version: 1
+layers:
+  e2e:
+    rule: The component has a UI or owns a customer- or TPP-facing journey across services.
+    include:
+      - component: openbank-admin-ui
+        reason: Operator UI; the Playwright journeys are its evidence.
+      - component: openbank-customer-edge
+        reason: Customer channel BFF; every app journey enters through it.
+      - component: openbank-onboarding-service
+        reason: Customer onboarding journey (KYC, party, account opening) end to end.
+      - component: openbank-psd2-service
+        reason: TPP-facing AIS/PIS journey under consent and SCA.
+      - component: openbank-sepa-payment
+        reason: Customer SEPA credit transfer journey (initiation to settlement).
+      - component: openbank-sepa-instant
+        reason: Customer instant-payment journey with its 10-second scheme deadline.
+      - component: openbank-card-processing-service
+        reason: Card authorisation journey from scheme message to ledger hold.
+  trace:
+    rule: The component takes part in a cross-service flow (Kafka or outbound REST), or is money-path.
+    derive: cross-service
+    include: []
+    exclude:
+      - component: openbank-clearing-simulator
+        reason: Stand-in for an external clearing scheme in tests; it is not a fleet participant.
+  simulation:
+    rule: The component runs a business process with time, sequencing or money effects that openbank-simulation can sweep.
+    include:
+      - component: openbank-ledger-service
+        reason: Double-entry posting invariants.
+      - component: openbank-transaction-service
+        reason: Payment saga sequencing.
+      - component: openbank-sepa-payment
+        reason: SEPA credit transfer lifecycle.
+      - component: openbank-settlement-service
+        reason: Settlement cycles.
+      - component: openbank-billing-service
+        reason: Fee charging cycles.
+      - component: openbank-interest-service
+        reason: Interest accrual and capitalisation over time.
+      - component: openbank-statement-service
+        reason: Statement period close.
+      - component: openbank-lending-service
+        reason: Loan lifecycle and ECL calibration.
+      - component: openbank-standing-order-service
+        reason: Scheduled execution sweep.
+      - component: openbank-sdd-service
+        reason: Direct-debit collection cycles.
+      - component: openbank-delegation-service
+        reason: Spend ceilings and reservations.
+      - component: openbank-swift-service
+        reason: Cross-border MT103 lifecycle.
+      - component: openbank-sepa-instant
+        reason: Instant payment under the scheme timeout.
+      - component: openbank-domestic-payment
+        reason: Domestic clearing-cycle payments.
+      - component: openbank-clearing-service
+        reason: Clearing batch cut-offs.
+      - component: openbank-fx-service
+        reason: Rate validity windows and conversions.
+      - component: openbank-card-processing-service
+        reason: Authorisation holds, clearing and reversals.
+      - component: openbank-treasury-service
+        reason: Nostro positions and deal settlement.
+      - component: openbank-pension-service
+        reason: Contribution and payout cycles.
