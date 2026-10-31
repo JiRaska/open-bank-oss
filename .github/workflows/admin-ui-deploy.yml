@@ -120,9 +120,8 @@ jobs:
     # rebuilt the image again. Resolve the exact producer SHA before allocating the
     # arm64/OIDC build job and expose one closed boolean to the downstream job.
     if: >-
-      (github.event_name == 'schedule') ||
-      (github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy') ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # Readiness runs are serialized so overlapping CI/Pact/Services-CI completions
@@ -149,8 +148,22 @@ jobs:
         with:
           ref: refs/heads/main
           fetch-depth: 1
+      # ADR-0358: a manifest push to main and a repin/rollback dispatch are the `repin` job's
+      # lane; they build nothing, so this job admits no source for them.
+      - id: lane
+        name: Select the build lane
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          if [ "$EVENT_NAME" = push ] || { [ "$EVENT_NAME" = workflow_dispatch ] && [ "${MODE:-deploy}" != deploy ]; }; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
       - id: source
         name: Reject stale or self-generated deploy source
+        if: steps.lane.outputs.build == 'true'
         env:
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ github.token }}

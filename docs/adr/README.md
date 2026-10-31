@@ -361,7 +361,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0354](0354-financial-crime-as-code-governed-packs-and-learning.md) | Financial Crime as Code: governed packs, pure evaluation and reviewed learning | Accepted | Planned | fraud,aml-sanctions,ai-agents,libs | — |
 | [0355](0355-payment-worker-deployment-versioning-and-immutable-replay-corpora.md) | Payment worker deployment versioning and immutable replay corpora | Accepted | Partial | payments,testing,architecture | — |
 | [0357](0357-edge-deception-layer-decoy-paths-on-the-shared-gateway.md) | Edge deception layer: decoy paths on the shared gateway, alerted from the access log | Proposed | Partial | security-ops,networking,observability,gitops | — |
-| [0358](0358-image-pins-live-on-a-bot-owned-deploy-branch-not-in-main.md) | Image pins live on a bot-owned deploy branch, not in main | Proposed | Planned | gitops,ci,supply-chain | — |
+| [0358](0358-image-pins-live-on-a-bot-owned-deploy-branch-not-in-main.md) | Image pins live on a bot-owned deploy branch, not in main | Proposed | Partial | gitops,ci,supply-chain | — |
 
 ## By tag
 

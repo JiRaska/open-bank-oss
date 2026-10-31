@@ -74,6 +74,10 @@ on:
       # Pushes to main unconditionally since it went event-driven (#13400). Its red means the
       # merge train is not settling or building: armed green PRs stop landing, silently.
       - "Merge train"
+      # ADR-0358: pushes to main touching components/admin-ui re-pin the manifests on
+      # deploy/sandbox. Its red means a reviewed manifest change (or a build) never reached the
+      # pin, so the cluster silently keeps running the previous manifests or image.
+      - "Admin-UI deploy"
       # R2: post-merge guards. Path-filtered, so they do NOT run on every commit —
       # but each is a governance verdict that only ever renders on main, which
       # makes them the LEAST likely reds to be seen and the most likely to rot.

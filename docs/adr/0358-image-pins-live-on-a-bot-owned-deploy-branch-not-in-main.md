@@ -1,13 +1,14 @@
 ---
 date: 2026-10-31
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [gitops, ci, supply-chain]
 summary: "Image pins move to a bot-owned deploy/sandbox branch as a verified copy of main's manifests plus a kustomize image override; a deploy no longer merges a PR, never moves main and never waits on the merge train."
+followup: "#14360 — owner bootstrap of deploy/sandbox, readers of pins on main, and every Application after admin-ui"
 ---
 
 # ADR-0358 — Image pins live on a bot-owned deploy branch, not in main

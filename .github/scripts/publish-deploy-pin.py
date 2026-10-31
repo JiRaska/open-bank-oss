@@ -100,7 +100,7 @@ def main():
         return 1
 
     for attempt in range(1, 4):
-        git("fetch", "--no-tags", "origin", f"+refs/heads/main:refs/remotes/origin/main",
+        git("fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main",
             f"+refs/heads/{BRANCH}:refs/remotes/origin/{BRANCH}")
         main_sha = git("rev-parse", "origin/main").strip()
         parent = git("rev-parse", f"origin/{BRANCH}").strip()
