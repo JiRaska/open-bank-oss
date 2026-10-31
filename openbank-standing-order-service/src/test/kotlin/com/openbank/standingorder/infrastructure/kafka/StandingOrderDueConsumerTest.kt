@@ -71,6 +71,14 @@ class StandingOrderDueConsumerTest {
         return mapper.writeValueAsString(payload)
     }
 
+    /** A 200 account-service answer whose body the generated client reads as a stream, as on the wire. */
+    private fun accountOk(body: String): Response = mockk<Response>(relaxed = true).also {
+        every { it.status } returns 200
+        every { it.hasEntity() } returns true
+        every { it.readEntity(java.io.InputStream::class.java) } answers
+            { java.io.ByteArrayInputStream(body.toByteArray()) }
+    }
+
     private fun <T : Any> ok(type: Class<T>, body: T): Response = mockk<Response>(relaxed = true).also {
         every { it.status } returns 200
         every { it.hasEntity() } returns true
@@ -81,7 +89,7 @@ class StandingOrderDueConsumerTest {
     fun `uncertain completion retries the same key without confirming`(): Unit = runBlocking {
         val targetAccountId = UUID.fromString("00000000-0000-0000-0000-0000000000d3")
         val lookupBody = mapper.writeValueAsString(mapOf("id" to targetAccountId, "partyId" to partyId))
-        every { accountClient.getByIban(any()) } answers { Uni.createFrom().item(Response.ok(lookupBody).build()) }
+        every { accountClient.getAccountByIban(any()) } answers { Uni.createFrom().item(accountOk(lookupBody)) }
         val sent = mutableListOf<InitiateTransactionRequest>()
         every { transactionClient.initiateTransaction(capture(sent)) } returns Uni.createFrom().item(
             ok(TransactionResponse::class.java, TransactionResponse(id = targetAccountId, status = "FAILED")),
@@ -150,8 +158,8 @@ class StandingOrderDueConsumerTest {
             // way (see the two tests below) — a bare transaction-service TRANSFER carries no screening
             // of its own.
             val lookupBody = mapper.writeValueAsString(mapOf("id" to targetAccountId, "partyId" to partyId))
-            every { accountClient.getByIban("DE89370400440532013000") } returns
-                Uni.createFrom().item(Response.ok(lookupBody).build())
+            every { accountClient.getAccountByIban("DE89370400440532013000") } returns
+                Uni.createFrom().item(accountOk(lookupBody))
             val req = slot<InitiateTransactionRequest>()
             every { transactionClient.initiateTransaction(capture(req)) } returns
                 Uni.createFrom().item(
@@ -178,7 +186,7 @@ class StandingOrderDueConsumerTest {
     @Test
     fun `INTERNAL order whose creditor does NOT resolve to an internal account records a failure`(): Unit =
         runBlocking {
-            every { accountClient.getByIban("DE89370400440532013000") } returns
+            every { accountClient.getAccountByIban("DE89370400440532013000") } returns
                 Uni.createFrom().item(Response.status(404).build())
             coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
 
@@ -203,8 +211,8 @@ class StandingOrderDueConsumerTest {
                     "partyId" to UUID.fromString("00000000-0000-0000-0000-0000000000dd"),
                 ),
             )
-            every { accountClient.getByIban("DE89370400440532013000") } returns
-                Uni.createFrom().item(Response.ok(lookupBody).build())
+            every { accountClient.getAccountByIban("DE89370400440532013000") } returns
+                Uni.createFrom().item(accountOk(lookupBody))
             coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
 
             consumer.consume(dueEvent(paymentType = "INTERNAL"))
@@ -218,8 +226,8 @@ class StandingOrderDueConsumerTest {
         val lookupBody = mapper.writeValueAsString(
             mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to partyId),
         )
-        every { accountClient.getByIban("DE89370400440532013000") } returns
-            Uni.createFrom().item(Response.ok(lookupBody).build())
+        every { accountClient.getAccountByIban("DE89370400440532013000") } returns
+            Uni.createFrom().item(accountOk(lookupBody))
         coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
 
         consumer.consume(dueEvent(paymentType = "INTERNAL", orderPartyId = null))
@@ -237,7 +245,7 @@ class StandingOrderDueConsumerTest {
             val lookupBody = mapper.writeValueAsString(
                 mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to partyId),
             )
-            every { accountClient.getByIban(any()) } returns Uni.createFrom().item(Response.ok(lookupBody).build())
+            every { accountClient.getAccountByIban(any()) } returns Uni.createFrom().item(accountOk(lookupBody))
             every { transactionClient.initiateTransaction(any()) } returns
                 Uni.createFrom().failure(WebApplicationException(422))
             coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
@@ -257,7 +265,7 @@ class StandingOrderDueConsumerTest {
             val lookupBody = mapper.writeValueAsString(
                 mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to partyId),
             )
-            every { accountClient.getByIban(any()) } returns Uni.createFrom().item(Response.ok(lookupBody).build())
+            every { accountClient.getAccountByIban(any()) } returns Uni.createFrom().item(accountOk(lookupBody))
             every { transactionClient.initiateTransaction(any()) } returns
                 Uni.createFrom().failure(WebApplicationException(503))
 
@@ -289,7 +297,7 @@ class StandingOrderDueConsumerTest {
         consumer.consume(payload)
 
         coVerify(exactly = 1) { useCase.recordFailure(orderId) }
-        coVerify(exactly = 0) { accountClient.getByIban(any()) }
+        coVerify(exactly = 0) { accountClient.getAccountByIban(any()) }
     }
 
     @Test

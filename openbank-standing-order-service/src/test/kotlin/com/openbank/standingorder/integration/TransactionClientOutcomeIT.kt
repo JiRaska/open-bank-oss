@@ -92,7 +92,13 @@ class TransactionClientOutcomeIT {
         Clock.fixed(Instant.parse("2026-07-13T10:00:00Z"), ZoneOffset.UTC),
     ).also {
         val lookup = objectMapper.writeValueAsString(mapOf("id" to targetAccountId, "partyId" to partyId))
-        every { accountClient.getByIban(any()) } returns Uni.createFrom().item(Response.ok(lookup).build())
+        val lookupResponse = mockk<Response>(relaxed = true)
+        every { lookupResponse.status } returns 200
+        every { lookupResponse.hasEntity() } returns true
+        every { lookupResponse.readEntity(java.io.InputStream::class.java) } answers {
+            java.io.ByteArrayInputStream(lookup.toByteArray())
+        }
+        every { accountClient.getAccountByIban(any()) } returns Uni.createFrom().item(lookupResponse)
         coEvery { useCase.confirmExecution(orderId) } returns mockk(relaxed = true)
         coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
     }
