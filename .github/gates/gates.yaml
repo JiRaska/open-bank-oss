@@ -5017,7 +5017,12 @@ gates:
     mode: enforced
     rationale: "Individual platform job results avoid both rate-limited REST rosters and stale artifact successes across partial reruns; generated callers must cover every canonical module and preserve bounded lanes."
     review_after: "2027-04-23"
-    budget_seconds: 10
+    # Re-derived 2026-10-31 per derive-gate-observability-budgets.py: ceil(max(p95*3, max*1.5, 5)).
+    # 24 CI runs (gates (gitops-api)): min 5.0 / p50 ~8.4 / p95 ~9.8 / max 10.0s, plus two
+    # budget-only failures at 10.1s (#14183) and 10.0s (#14345). The time is
+    # test-check-service-build-results.py (59 tests, 72 subprocesses, ~19s on a laptop);
+    # the generator self-test and --check take ~0.05s each, so there is no cheap speedup.
+    budget_seconds: 30
     min_subjects: 83
     selftest: |
       python3 .github/scripts/generate-service-ci-jobs.py --self-test
