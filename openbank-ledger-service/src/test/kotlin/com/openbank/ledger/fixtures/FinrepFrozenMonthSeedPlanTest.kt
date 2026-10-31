@@ -48,4 +48,28 @@ class FinrepFrozenMonthSeedPlanTest {
             )
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @Test
+    fun `published pact without state parameters remains supported`() {
+        FinrepFrozenMonthPactSeed.validateStateParameters(LocalDate.parse("2026-06-30") to false, emptyMap())
+    }
+
+    @Test
+    fun `explicit state parameters must match the request month and evidence window`() {
+        val plan = LocalDate.parse("2000-06-30") to true
+        FinrepFrozenMonthPactSeed.validateStateParameters(
+            plan,
+            mapOf("reportingMonth" to "2000-06-30", "yearToDate" to true),
+        )
+        listOf(
+            mapOf("reportingMonth" to "2026-06-30", "yearToDate" to true),
+            mapOf("reportingMonth" to "2000-06-30", "yearToDate" to false),
+            mapOf("reportingMonth" to "invalid", "yearToDate" to true),
+            mapOf("reportingMonth" to "2000-06-30"),
+            mapOf("reportingMonth" to "2000-06-30", "yearToDate" to "true"),
+        ).forEach { parameters ->
+            assertThatThrownBy { FinrepFrozenMonthPactSeed.validateStateParameters(plan, parameters) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+    }
 }
