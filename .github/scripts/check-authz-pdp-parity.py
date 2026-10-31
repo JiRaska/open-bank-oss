@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""authz-enforce ⇒ OPA PDP sidecar parity guard (issue #1797).
+"""Guard both OPA sidecar and application PDP wiring (issues #1797 and #9105).
 
 WHY THIS EXISTS: eight live services enforced `@Authorize` (`authz.enforce` defaults true) while
 their gitops manifest declared no `opa` sidecar. AuthorizeInterceptor fails closed when the PDP at
@@ -17,10 +17,15 @@ openbank-infra/gitops/components/** whose app container runs an `openbank-<svc>-
   enforces = (app container's AUTHZ_ENFORCE env, if set) else (the service's application.yaml
              `authz.enforce` default: `${AUTHZ_ENFORCE:true}` or an absent `authz:` block ⇒ true;
              `${AUTHZ_ENFORCE:false}` ⇒ false — the libs default is true)
-  has_pdp  = that SAME pod spec has a container named `opa`
-  violation iff annotated AND enforces AND NOT has_pdp
+  has_sidecar = that SAME pod spec has a container named `opa`
+  has_bean = the module enables libs-runtime's shared producer or declares a local CDI producer
+  violations iff annotated AND enforces AND NOT has_sidecar, or
+                 annotated AND has_sidecar AND NOT has_bean
 The opa check is per-workload, not per-file, so a shared manifest (payments-services.yaml holds
 several Rollouts, each with its own opa sidecar) is handled correctly.
+The converse matters too: a running OPA container does not make decisions unless CDI supplies
+the interceptor with a PolicyDecisionPoint. On current main the old one-way guard reported zero
+while campaign-service and engagement-service both declared sidecars without an enabled bean.
 
 WHY `annotated` IS PART OF THE PREDICATE (issue #2228). Without it the guard reasons purely from
 the manifest and the `AUTHZ_ENFORCE` default, and flags a service that has nothing to fail closed:
@@ -66,9 +71,8 @@ import pathlib
 import re
 import sys
 
-import yaml
-
 import gatelib
+import yaml
 
 # The app container's module, taken from its image. This used to require a literal `-service`
 # suffix (`openbank-([a-z0-9-]+-service)`), which is a NAMING CONVENTION standing in for the set
@@ -96,6 +100,19 @@ NON_MODULE_IMAGES = {
                                 "code-review follow-up in docs/threat-models/openbank-pricing-service.md",
     "openbank-pricing-console": "Next.js console in JiRaska/openbank-pricing; it authorises nothing "
                                 "itself, pricing-service's OPA sidecar decides every write",
+}
+
+# Services that DECLARE an `opa` sidecar but deliberately do not yet enable a PolicyDecisionPoint
+# bean (#9105). Enabling the producer flips live behaviour: with AUTHZ_ENFORCE effectively true,
+# AuthorizeInterceptor.onMissingPdp fails closed (503) today, whereas a resolvable PDP returns
+# real OPA decisions (403 for any action lacking a rule). That needs would-deny evidence from an
+# advisory window first. Stale in BOTH directions, like NON_MODULE_IMAGES: an entry whose service
+# now wires a bean (or no longer has a sidecar) is an error, so this cannot become a permanent list.
+PDP_BEAN_PENDING = {
+    "engagement-service": "AUTHZ_ENFORCE defaults true; enabling the producer turns the 503 "
+                          "fail-closed into real OPA decisions — needs would-deny evidence first (#9105)",
+    "tax-reporting-service": "AUTHZ_ENFORCE=true in gitops; enabling the producer turns the 503 "
+                             "fail-closed into real OPA decisions — needs would-deny evidence first (#9105)",
 }
 WORKLOAD_KINDS = {"Deployment", "Rollout"}
 
@@ -192,6 +209,41 @@ def app_enforce_default(root: pathlib.Path, service_dir_name: str) -> bool | Non
     if m:
         return m.group(1) == "true"
     return text.strip().lower() != "false"
+
+
+def has_pdp_bean(root: pathlib.Path, service_dir_name: str) -> bool:
+    """Whether the built service enables the shared producer or declares its own CDI PDP."""
+    # @IfBuildProperty is decided during Quarkus augmentation. A deployment env var cannot
+    # add or remove the bean from an already-built image, so inspect source build config.
+    app_yaml = root / service_dir_name / "src" / "main" / "resources" / "application.yaml"
+    data = gatelib.load_yaml(app_yaml) if app_yaml.exists() else {}
+    openbank = data.get("openbank", {}) if isinstance(data, dict) else {}
+    authz = openbank.get("authz", {}) if isinstance(openbank, dict) else {}
+    producer = authz.get("opa-pdp-producer", {}) if isinstance(authz, dict) else {}
+    enabled = producer.get("enabled") if isinstance(producer, dict) else None
+    shared_enabled = enabled is True or str(enabled).strip().lower() == "true"
+    if shared_enabled:
+        return True
+
+    src_main = root / service_dir_name / "src" / "main" / "kotlin"
+    if not src_main.exists():
+        return False
+    produced = re.compile(
+        r"@Produces\b(?:(?:\s|@[\w.]+(?:\([^)]*\))?)*)"
+        r"fun\s+\w+\s*\([^)]*\)\s*:\s*PolicyDecisionPoint\b"
+    )
+    scoped_bean = re.compile(
+        r"@(?:ApplicationScoped|Singleton)\b[\s\S]*?"
+        r"class\s+\w+[^{]*?:\s*PolicyDecisionPoint\b"
+    )
+    for kt in gatelib.rglob(src_main, "*.kt"):
+        source = gatelib.read_text(kt)
+        if "PolicyDecisionPoint" not in source:
+            continue
+        code = strip_kotlin_comments(source)
+        if produced.search(code) or scoped_bean.search(code):
+            return True
+    return False
 
 
 def env_value(container: dict, name: str) -> str | None:
@@ -328,6 +380,8 @@ def main() -> int:
         return 0
 
     violations: list[tuple[str, str, str]] = []
+    unwired: list[tuple[str, str]] = []
+    pending_seen: set[str] = set()
     checked = 0
     unannotated: list[str] = []
     unresolved: list[tuple[str, str]] = []
@@ -378,6 +432,11 @@ def main() -> int:
         if enforces and not has_pdp:
             rel = path.relative_to(root)
             violations.append((svc_full, str(rel), "env" if env_enforce is not None else "app-default"))
+        if has_pdp and not has_pdp_bean(root, service_dir):
+            if f"{svc_full}" in PDP_BEAN_PENDING or service_dir.removeprefix("openbank-") in PDP_BEAN_PENDING:
+                pending_seen.add(service_dir.removeprefix("openbank-"))
+            else:
+                unwired.append((svc_full, str(path.relative_to(root))))
 
     for svc, rel, source in sorted(violations):
         level = "error" if args.enforce else "warning"
@@ -386,6 +445,14 @@ def main() -> int:
             f"declares no `opa` PDP sidecar — every @Authorize endpoint fails closed (HTTP 503/422, "
             f"issue #1797). Deploy the sidecar (see components/party/party-service.yaml) or set "
             f"AUTHZ_ENFORCE=false until it is wired."
+        )
+
+    for svc, rel in sorted(set(unwired)):
+        level = "error" if args.enforce else "warning"
+        print(
+            f"::{level} file={rel}::authz-pdp-parity: {svc} declares an `opa` sidecar but "
+            "no PolicyDecisionPoint bean is enabled — @Authorize cannot consult this policy "
+            "(issue #9105). Enable the shared producer or wire an explicit CDI PDP."
         )
 
     # Print the skipped set, so "0 violations" is never mistaken for "everything was examined" —
@@ -399,6 +466,15 @@ def main() -> int:
     # `openbank-libs` is the marker: no fixture builds one.
     real_tree = (root / "openbank-libs").is_dir()
     stale_declared = sorted(set(NON_MODULE_IMAGES) - seen_non_module) if real_tree else []
+    stale_pending = sorted(set(PDP_BEAN_PENDING) - pending_seen) if real_tree else []
+    for svc in stale_pending:
+        print(
+            f"::{'error' if args.enforce else 'warning'}::authz-pdp-parity: PDP_BEAN_PENDING "
+            f"declares `{svc}` but it no longer has an `opa` sidecar without a PDP bean — "
+            f"remove the entry (#9105)."
+        )
+    for svc in sorted(pending_seen):
+        print(f"authz-pdp-parity: {svc} sidecar-without-bean tolerated: {PDP_BEAN_PENDING[svc]}")
     for image in stale_declared:
         print(
             f"::{'error' if args.enforce else 'warning'}::authz-pdp-parity: NON_MODULE_IMAGES "
@@ -419,9 +495,10 @@ def main() -> int:
         f"{', '.join(sorted(set(unannotated))) or 'none'}); "
         f"{len(set(unresolved))} unresolved image(s); "
         f"{len(stale_declared)} stale NON_MODULE_IMAGES entr(ies); "
-        f"{len(violations)} enforce-without-PDP violation(s)."
+        f"{len(violations)} enforce-without-sidecar violation(s); "
+        f"{len(set(unwired))} sidecar-without-bean violation(s)."
     )
-    return 1 if ((violations or unresolved or stale_declared) and args.enforce) else 0
+    return 1 if ((violations or unwired or unresolved or stale_declared or stale_pending) and args.enforce) else 0
 
 
 if __name__ == "__main__":
