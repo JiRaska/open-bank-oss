@@ -442,7 +442,7 @@ class SourceValidationTest(unittest.TestCase):
         admission = build.index("Recheck source at serialized build entry")
         self.assertLess(admission, build.index("Configure AWS credentials (GitHub OIDC)"))
         self.assertLess(admission, build.index("Build, collect, push"))
-        self.assertLess(admission, build.index("Open GitOps PR (auto-merge)"))
+        self.assertLess(admission, build.index("Pin the image on deploy/sandbox"))
         steps = build.split("    steps:", 1)[1]
         step_blocks = steps.split("\n      - ")[1:]
         gated = False

@@ -10,7 +10,7 @@
 # collectors, builds the Next.js image, pushes to ECR, then pins the image on the bot-owned
 # deploy/sandbox branch (ADR-0358) as a signed GitHub App commit; ArgoCD's admin-ui
 # Application renders from that pin. No PR into main, so a deploy never moves main and never
-# waits on the merge train. A push to main touching components/admin-ui re-pins the manifests.
+# waits on the merge train. admin-ui-repin.yml re-pins the manifests after a manifest change.
 #
 # This eliminates the manual rebuild step that previously caused release notes
 # and governance data (ADR list, threat models, service catalog) to go stale
@@ -52,31 +52,12 @@ on:
     - cron: '17 3 * * *'
   # CI and Services CI already start on every main push. Their completion events
   # provide the source-change liveness path without holding a runner during validation.
-  # ADR-0358: a reviewed manifest change re-pins the manifest copy on deploy/sandbox.
-  push:
-    branches: [main]
-    paths: ["openbank-infra/gitops/components/admin-ui/**"]
   workflow_dispatch:
     inputs:
       reason:
         description: "Reason for manual trigger (informational)"
         required: false
         default: "manual"
-      mode:
-        description: "deploy = build and pin main; repin = move manifests to main, keep image; rollback = pin an earlier image"
-        required: false
-        default: deploy
-        type: choice
-        options: [deploy, repin, rollback]
-      rollback_image_source_sha:
-        description: "rollback only: image_source_sha from the earlier pins/admin-ui/pin.json"
-        required: false
-      rollback_tag:
-        description: "rollback only: tag from that pin.json"
-        required: false
-      rollback_digest:
-        description: "rollback only: digest from that pin.json"
-        required: false
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the build-push job below declares its own override for the access it needs.
@@ -148,22 +129,8 @@ jobs:
         with:
           ref: refs/heads/main
           fetch-depth: 1
-      # ADR-0358: a manifest push to main and a repin/rollback dispatch are the `repin` job's
-      # lane; they build nothing, so this job admits no source for them.
-      - id: lane
-        name: Select the build lane
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          MODE: ${{ inputs.mode }}
-        run: |
-          if [ "$EVENT_NAME" = push ] || { [ "$EVENT_NAME" = workflow_dispatch ] && [ "${MODE:-deploy}" != deploy ]; }; then
-            echo "build=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          fi
       - id: source
         name: Reject stale or self-generated deploy source
-        if: steps.lane.outputs.build == 'true'
         env:
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ github.token }}
@@ -1230,52 +1197,3 @@ jobs:
             --tag "${{ steps.build.outputs.tag }}" \
             --digest "${{ steps.build.outputs.digest }}" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-  # ADR-0358: a reviewed manifest change on main reaches the cluster without waiting for a
-  # person or for the next image build. The pinned image stays; the manifest copy on
-  # deploy/sandbox moves to the main commit that changed it. Also the recovery path
-  # (workflow_dispatch mode=repin) and the rollback path (mode=rollback).
-  repin:
-    name: Re-pin manifests / rollback on deploy/sandbox
-    if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' && inputs.mode != 'deploy')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    concurrency:
-      group: admin-ui-build-push
-      cancel-in-progress: false
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: refs/heads/main
-          fetch-depth: 0
-      - name: Mint a GitHub App installation token
-        id: app_token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          app-id: ${{ secrets.GITOPS_APP_ID }}
-          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
-      - name: Install pin checker dependencies
-        run: |
-          python3 -m venv "${RUNNER_TEMP}/deploy-pin-venv"
-          "${RUNNER_TEMP}/deploy-pin-venv/bin/python" -m pip install --quiet --require-hashes \
-            -r .github/scripts/pyyaml-requirements.txt
-      - name: Write the pin
-        env:
-          DEPLOY_PIN_TOKEN: ${{ steps.app_token.outputs.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          MODE: ${{ github.event_name == 'push' && 'repin' || inputs.mode }}
-          ROLLBACK_SOURCE_SHA: ${{ inputs.rollback_image_source_sha }}
-          ROLLBACK_TAG: ${{ inputs.rollback_tag }}
-          ROLLBACK_DIGEST: ${{ inputs.rollback_digest }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          args=(--component admin-ui --run-url "$RUN_URL")
-          if [ "$MODE" = rollback ]; then
-            args+=(--image-source-sha "$ROLLBACK_SOURCE_SHA" --tag "$ROLLBACK_TAG" --digest "$ROLLBACK_DIGEST")
-          fi
-          "${RUNNER_TEMP}/deploy-pin-venv/bin/python" .github/scripts/publish-deploy-pin.py "$MODE" "${args[@]}"
