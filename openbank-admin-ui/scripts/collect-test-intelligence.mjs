@@ -637,6 +637,75 @@ function platformCapabilities() {
   }
 }
 
+// ADR-0273 applicability register: which components SHOULD own e2e, trace and simulation
+// evidence. Without it the matrix divides by every component and cannot tell "not applicable"
+// from "missing". Evidence always implies applicability, so the register can never hide a row.
+function crossServiceComponent(component) {
+  const main = path.join(repo, component, 'src', 'main')
+  if (!exists(main)) return false
+  const config = allFiles(path.join(main, 'resources'), file => /application[^/]*\.ya?ml$/.test(file))
+  if (config.some(file => /mp\.messaging|^\s*messaging:/m.test(readText(file)))) return true
+  return allFiles(main, file => /\.(kt|java)$/.test(file)).some(file => readText(file).includes('@RegisterRestClient'))
+}
+
+function layerApplicability(components) {
+  const file = path.join(repo, 'openbank-libs', 'governance', 'test-layer-applicability.yaml')
+  let layers
+  try {
+    const document = parseDocument(fs.readFileSync(file, 'utf8'), { uniqueKeys: true })
+    if (document.errors.length) throw new Error(document.errors.map(error => error.message).join('; '))
+    layers = document.toJS()?.layers
+    if (!layers || typeof layers !== 'object') throw new Error('expected a layers mapping')
+  } catch (error) {
+    warnings.push(`test-layer applicability register unavailable: ${error.message}`)
+    return []
+  }
+  const known = new Set(components.map(item => item.component))
+  return ['e2e', 'trace', 'simulation'].map(kind => {
+    const layer = layers[kind] ?? {}
+    const entries = list => (Array.isArray(list) ? list : []).filter(item => {
+      if (typeof item?.component !== 'string' || typeof item?.reason !== 'string' || !item.reason.trim()) {
+        warnings.push(`test-layer applicability ${kind}: entry without component or reason`)
+        return false
+      }
+      if (!known.has(item.component)) warnings.push(`test-layer applicability ${kind}: unknown component ${item.component}`)
+      return true
+    })
+    const include = entries(layer.include)
+    // An exclusion is the only way out of a layer, and it needs a reason. Money-path components
+    // are applicable on every layer unless excluded, so an unlisted one reads as missing, never
+    // as not applicable (check-test-layer-applicability.py enforces the register's shape).
+    const exclusions = new Map(entries(layer.exclude).map(item => [item.component, item.reason]))
+    const reasons = new Map(include.map(item => [item.component, item.reason]))
+    const rows = components.map(component => {
+      const evidence = component.evidence.filter(item => item.kind === kind)
+      let reason = reasons.get(component.component) ?? null
+      if (!reason && evidence.length) reason = 'Publishes evidence for this layer.'
+      const excluded = !reason && exclusions.has(component.component)
+      if (!reason && !excluded) {
+        if (component.moneyPath) reason = 'Money-path component.'
+        else if (layer.derive === 'cross-service' && component.released && crossServiceComponent(component.component)) {
+          reason = 'Declares a Kafka channel or outbound REST client.'
+        }
+      }
+      if (excluded) reason = exclusions.get(component.component)
+      const applicable = !excluded && reason !== null
+      const passed = evidence.some(item => item.state === 'passed')
+      return {
+        component: component.component, moneyPath: component.moneyPath, applicable,
+        status: !applicable ? 'not-applicable' : evidence.length === 0 ? 'missing' : passed ? 'present' : 'unproven',
+        reason,
+      }
+    })
+    const count = status => rows.filter(row => row.status === status).length
+    return {
+      kind, rule: typeof layer.rule === 'string' ? layer.rule : null, components: rows,
+      applicable: rows.filter(row => row.applicable).length, notApplicable: count('not-applicable'),
+      present: count('present'), unproven: count('unproven'), missing: count('missing'),
+    }
+  })
+}
+
 function requiredControls(components, contracts, mutations, performance, synthetics, runVersionByComponent = new Map()) {
   const pactParticipants = new Set(contracts.flatMap(item => [item.consumer, item.provider]))
   const mutationParticipants = mutationComponents()
@@ -1112,6 +1181,7 @@ async function main() {
   const synthetic = syntheticJourneys()
   const controls = requiredControls(components, contractEvidence, mutationEvidence, performanceEvidence, synthetic, runVersionByComponent)
   const capabilities = platformCapabilities()
+  const layerCoverage = layerApplicability(components)
   const syntheticCoverage = journeyCoverage(synthetic)
   const clientExperience = await clientExperiences()
   const testCases = testCaseHistory(currentEnvelopes)
@@ -1209,7 +1279,7 @@ async function main() {
     schemaVersion: 1, collectedAt: collectedAt.toISOString(), components,
     contracts: contractEvidence, mutations: mutationEvidence, performance: performanceEvidence, performanceHistory,
     syntheticJourneys: synthetic, journeyCoverage: syntheticCoverage, history, runHistory, testCases, testImpact: impact,
-    clientExperiences: clientExperience, requiredControls: controls, platformCapabilities: capabilities,
+    clientExperiences: clientExperience, requiredControls: controls, platformCapabilities: capabilities, layerCoverage,
     totals: {
       components: components.length,
       componentsWithExecutionEvidence,
