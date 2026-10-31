@@ -224,8 +224,18 @@ jobs:
 
       # Restore dependency and auxiliary-task caches. The init policy forces every
       # Kotlin/Java compiler, including included builds, out of date and non-cacheable.
+      #
+      # READ-ONLY because of that policy. Every other Linux-X64 setup-gradle job (all
+      # Services CI build legs) has no home entry of its own and falls back to the
+      # NEWEST `gradle-home-v2|Linux-X64|*` entry on main. This job finishes after
+      # fleet-lint on every push, so its entry won that race — and it holds a ~13 MB
+      # build cache with zero compiler outputs, so build-logic and openbank-libs-*
+      # recompiled in every service job (runs 41225001521, 41220495768: restore-key
+      # `codeql[...]`; fleet-lint's own entry gives build-logic/libs FROM-CACHE).
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         if: matrix.language == 'java-kotlin'
+        with:
+          cache-read-only: true
 
       # A cached build can compile only one changed module and upload an apparently
       # successful partial analysis. On main that marked 11 log-injection alerts fixed
