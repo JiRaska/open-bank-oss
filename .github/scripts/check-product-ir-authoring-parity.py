@@ -425,7 +425,8 @@ def self_test() -> int:
                 failures += 1
                 print(f"SELF-TEST FAIL: a {verdict} byte-parity case must be a finding", file=sys.stderr)
     # REAL Gradle reports (fixtures/product-ir-parity, produced by `:openbank-products:test` and
-    # `:openbank-product-catalog:test`, hostname scrubbed): the reader must find every committed product
+    # `:openbank-product-catalog:test`, copied unchanged except the `hostname` attribute, redacted because
+    # this repository is public): the reader must find every committed product
     # and both Studio cases PASSED in them, by the exact names Gradle actually writes, and nothing by a
     # prefix. Synthetic XML above can only agree with this function's own idea of a report.
     real = pathlib.Path(__file__).resolve().parent / "fixtures" / "product-ir-parity"
