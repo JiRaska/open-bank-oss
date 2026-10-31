@@ -593,6 +593,26 @@ gates:
     selftest_inputs: [".github/scripts/check-deploy-holds.py", ".github/scripts/merge-deploy-holds.py", ".github/scripts/test-conjunctive-holds.py", "openbank-libs/governance/rules.yaml"]
     run: python3 .github/scripts/check-deploy-holds.py --root . --enforce-live-strict
 
+  # ADR-0358: image pins live on the bot-owned deploy/sandbox branch. The branch carries no
+  # workflows, so a push there runs nothing; the contract is checked by the writer
+  # (publish-deploy-pin.py) before every write, and here against the live tip on every CI run.
+  # Contract: only pins/** changes, digest present, manifests are a verbatim copy of main at
+  # manifest_sha, every pinned sha is an ancestor of main, no sha moves backwards (rollback
+  # may move only the image), and a service under deploy_holds keeps its image. Before the
+  # owner bootstraps the branch the corpus is UNRESOLVED, which is not a pass.
+  - id: deploy-pin-branch-contract
+    name: "deploy/sandbox pins obey the ADR-0358 contract"
+    group: gitops
+    mode: enforced
+    min_subjects: 1  # the tip commit; UNRESOLVED until deploy/sandbox exists
+    budget_seconds: 60  # self-test builds a throwaway repo; live mode may unshallow main (blobless)
+    rationale: "Pins bypass PR review by design (ADR-0358); this contract is what keeps a direct write to deploy/sandbox from deploying a manifest or image main never had."
+    review_after: "2027-04-30"
+    selftest: python3 .github/scripts/check-deploy-pin-branch.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-deploy-pin-branch.py", ".github/scripts/check-deploy-holds.py", "openbank-libs/governance/rules.yaml"]
+    run: bash .github/scripts/check-deploy-pin-branch-live.sh
+
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
   # mechanism-3 liveness gauge. ENFORCED as of #3931, ahead of the 2026-09-30
   # target — a baseline ratchet, not a sweep gate: the 16 files still without a

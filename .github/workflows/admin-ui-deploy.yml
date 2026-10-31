@@ -7,8 +7,10 @@
 # after a one-shot exact-source readiness check; manual and scheduled runs remain
 # available for recovery. This
 # mirrors openbank-infra/scripts/build-push-admin-ui.sh: runs all repo-derived
-# collectors, builds the Next.js image, pushes to ECR, then opens a GitOps PR
-# (auto-merged once CI is green) so ArgoCD syncs the new tag automatically.
+# collectors, builds the Next.js image, pushes to ECR, then pins the image on the bot-owned
+# deploy/sandbox branch (ADR-0358) as a signed GitHub App commit; ArgoCD's admin-ui
+# Application renders from that pin. No PR into main, so a deploy never moves main and never
+# waits on the merge train. A push to main touching components/admin-ui re-pins the manifests.
 #
 # This eliminates the manual rebuild step that previously caused release notes
 # and governance data (ADR list, threat models, service catalog) to go stale
@@ -21,17 +23,16 @@
 #     per-service-sboms artifact from the latest security.yml run is downloaded
 #     and staged at openbank-*/build/reports/bom.json before the Docker build,
 #     so the sbom-collector stage in the Dockerfile bundles them automatically.
-#   - GitOps manifest bump is done by peter-evans/create-pull-request, not sed+git.
+#   - The pin is written by .github/scripts/publish-deploy-pin.py, not sed+git.
 #
 # Security:
 #   - OIDC → arn:aws:iam::265175468565:role/openbank-arc-build-runner (same as
 #     auto-deploy.yml, has ECR push + KMS cosign alias/openbank-cosign-signing).
-#   - GitOps change lands via a PR (never direct push to main) — normal review gate.
-#   - A GitHub App installation token (GITOPS_APP_ID + GITOPS_APP_PRIVATE_KEY) opens the
-#     PR: it both triggers the required checks and gets its commit signed by GitHub, which
-#     required_signatures demands. Falls back only to GITHUB_TOKEN (manual-merge only — its
-#     PRs do not trigger workflows); the GITOPS_PR_TOKEN user-PAT rung was retired in #1305
-#     (its commits were unsigned and stranded the PR anyway). See issue #1269.
+#   - The pin lands on deploy/sandbox, whose ruleset admits only the deploy App, requires
+#     signed commits and forbids force-push and deletion. The commit is checked against the
+#     deploy-pin-branch-contract before it is written (check-deploy-pin-branch.py).
+#   - A GitHub App installation token (GITOPS_APP_ID + GITOPS_APP_PRIVATE_KEY) writes it:
+#     GitHub signs createCommitOnBranch only for an App token. There is no fallback.
 
 name: Admin-UI deploy
 
@@ -51,12 +52,31 @@ on:
     - cron: '17 3 * * *'
   # CI and Services CI already start on every main push. Their completion events
   # provide the source-change liveness path without holding a runner during validation.
+  # ADR-0358: a reviewed manifest change re-pins the manifest copy on deploy/sandbox.
+  push:
+    branches: [main]
+    paths: ["openbank-infra/gitops/components/admin-ui/**"]
   workflow_dispatch:
     inputs:
       reason:
         description: "Reason for manual trigger (informational)"
         required: false
         default: "manual"
+      mode:
+        description: "deploy = build and pin main; repin = move manifests to main, keep image; rollback = pin an earlier image"
+        required: false
+        default: deploy
+        type: choice
+        options: [deploy, repin, rollback]
+      rollback_image_source_sha:
+        description: "rollback only: image_source_sha from the earlier pins/admin-ui/pin.json"
+        required: false
+      rollback_tag:
+        description: "rollback only: tag from that pin.json"
+        required: false
+      rollback_digest:
+        description: "rollback only: digest from that pin.json"
+        required: false
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the build-push job below declares its own override for the access it needs.
@@ -100,8 +120,9 @@ jobs:
     # rebuilt the image again. Resolve the exact producer SHA before allocating the
     # arm64/OIDC build job and expose one closed boolean to the downstream job.
     if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+      (github.event_name == 'schedule') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # Readiness runs are serialized so overlapping CI/Pact/Services-CI completions
@@ -187,8 +208,8 @@ jobs:
     # is linux/arm64. ECR push + cosign use the same GitHub-OIDC role as before.
     runs-on: ubuntu-24.04-arm
     permissions:
-      contents: write
-      pull-requests: write
+      # The pin is written with the GitHub App token, never with GITHUB_TOKEN (ADR-0358).
+      contents: read
       id-token: write  # GitHub OIDC → openbank-arc-build-runner
       actions: read    # gh run list / gh run download for SBOM staging; also read by
                        # collect-gate-health.mjs (ADR-0255) for the same reason — no new grant
@@ -198,10 +219,6 @@ jobs:
       ECR_REPO: openbank-admin-ui
       AWS_REGION: eu-north-1
       AWS_DEFAULT_REGION: eu-north-1
-      MANIFEST: openbank-infra/gitops/components/admin-ui/admin-ui.yaml
-      # Mirrored into env because the `secrets` context is NOT available in a step-level `if:`
-      # — only job-level env can read it. Used solely to decide whether to mint an App token.
-      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
       # Read-only token for the separate private customer-app repository. It is optional:
       # missing scope/evidence renders an explicit blocked client row; it never blocks deploy.
       APP_RO_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
@@ -1165,191 +1182,87 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Rewrite GitOps image tag
-        if: steps.build_admission.outputs.proceed == 'true'
-        id: rewrite
-        run: |
-          set -euo pipefail
-          # Recompute the bump against LIVE main, not against github.sha (#3194). The checkout
-          # above has no `ref:`, so on a push it holds the commit that triggered the build. The
-          # build takes minutes, admin-ui deploys are frequent, and if another one merges in that
-          # window create-pull-request branches from a main that no longer exists — both sides
-          # having rewritten the same `image:` line. The PR is then born CONFLICTED, which means
-          # no refs/pull/<n>/merge, which means NO workflow run at all: not skipped, absent. It
-          # reads as "waiting", never as broken, and the image is simply never deployed (four in
-          # one day, three closed undeployed).
-          #
-          # Safe because the rewrite is deterministic — set `image:` to the tag just built — so
-          # recomputing it against a newer main is always correct. It is what a human does when
-          # resolving this by hand.
-          git fetch origin main
-          git reset --hard origin/main
-          TAG="${{ steps.build.outputs.tag }}"
-          IMAGE="${ECR_REGISTRY}/${ECR_REPO}"
-
-          old_tag="$(grep -oE "${IMAGE}:sandbox-[A-Za-z0-9._-]+" "${MANIFEST}" | head -1 | cut -d: -f2 || true)"
-          if [ "${old_tag}" = "${TAG}" ]; then
-            echo "Manifest already at ${TAG} — no change needed."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            sed -i.bak -E "s#(image: ${IMAGE}:)[^[:space:]]+#\1${TAG}#" "${MANIFEST}"
-            rm -f "${MANIFEST}.bak"
-            echo "Updated ${MANIFEST}: ${old_tag:-?} → ${TAG}"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      # GitHub signs API-created commits for GitHub *App* tokens (and the web UI's web-flow
-      # key) — never for a user PAT. The old GITOPS_PR_TOKEN was a user PAT, so `sign-commits:
-      # true` below faithfully routed the commit through the API and GitHub declined to sign it:
-      # every bot deploy commit that fell to the PAT came out `verified=false; reason=unsigned`,
-      # and required_signatures stranded the PR until a human re-signed it by hand (issue #1269).
-      # That is exactly why the PAT was retired (#1305): an App installation token is the only
-      # option that satisfies both constraints at once — it triggers the required checks
-      # (GITHUB_TOKEN does not) AND its commits get signed (a PAT's do not).
+      # ADR-0358: the image pin lives on the bot-owned deploy/sandbox branch, not in main.
+      # No PR, no deploy window, no supersede: publish-deploy-pin.py builds the candidate
+      # pin, runs the deploy-pin-branch-contract check on it (digest present, deploy_holds,
+      # every sha an ancestor of main, never older than the pin already there) and only then
+      # writes it as a signed GitHub App commit with expectedHeadOid = the parent it checked.
+      # An App installation token is the only credential the deploy/sandbox ruleset admits
+      # and the only one GitHub signs createCommitOnBranch for; there is no fallback.
       - name: Mint a GitHub App installation token
         id: app_token
-        if: ${{ steps.build_admission.outputs.proceed == 'true' && steps.rewrite.outputs.changed == 'true' && env.GITOPS_APP_ID != '' }}
+        if: ${{ steps.build_admission.outputs.proceed == 'true' }}
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
 
-      - name: Open GitOps PR (auto-merge)
-        id: gitops_pr
-        if: ${{ steps.build_admission.outputs.proceed == 'true' && steps.rewrite.outputs.changed == 'true' }}
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
-        with:
-          # The source-validation job checks out the admitted immutable SHA, which leaves
-          # the worktree detached. Explicitly set the PR base so the action can create the
-          # GitOps branch against the current main branch.
-          base: main
-          # Preference order, and why each rung exists:
-          #   1. App installation token — triggers required checks AND gets its commit signed.
-          #      The only rung that actually works end-to-end (issue #1269). Proven on both
-          #      axes, so it is now the sole real path (the GITOPS_PR_TOKEN user PAT was retired
-          #      here, issue #1305 — its commits were unsigned and stranded the PR anyway).
-          #   2. GITHUB_TOKEN — last-resort only; a PR opened with it does NOT trigger workflows
-          #      (anti-recursion), so the required checks never run and there is nothing to
-          #      auto-merge against (an admin merges it by hand). Degraded fallback, not a
-          #      working path — it exists so a broken App-token mint still opens a rescuable PR.
-          token: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
-          # Route the commit through the GitHub API so GitHub can sign it. Necessary but NOT
-          # sufficient on its own — the token above decides whether the signing actually
-          # happens. The "Verify the deploy commit is signed" step below is what proves it did.
-          sign-commits: true
-          # Commit ONLY the manifest the rewrite step edited. Without this, create-pull-request
-          # sweeps the whole dirty tree — and build-push-admin-ui.sh has just regenerated six
-          # derived dossiers into it (catalog, service-graph, security-graph, governance,
-          # infra-lifecycle, cluster-topology). Committing those was never a decision; it was a
-          # side effect, and it cost three separate defects:
-          #   1. Two concurrent deploy PRs conflict BY CONSTRUCTION. cluster-topology.json and
-          #      infra-lifecycle.json carry a wall-clock `generatedAt`, so every deploy PR
-          #      rewrites that line with a different value. #2618 went DIRTY on exactly that —
-          #      not on the image tag, which is what everyone assumes (issue #2621).
-          #   2. A deploy loop, worked around by the `if:` on this job (line ~83): the PR touches
-          #      openbank-admin-ui/**, which is this workflow's own path filter.
-          #   3. agent-review (retired #2161) flagged the derived churn as an infra decision, piling up
-          #      #596/#608/#609 unmerged on 2026-07-08 — worked around by path exclusions in
-          #      agent-review.yml, i.e. at the symptom.
-          # The dossiers are still generated on every build and still baked by the Dockerfile;
-          # the committed copies remain as the build-context fallback. Nothing needs them to be
-          # rewritten by a deploy. Scoping the commit removes all three at the cause.
-          add-paths: ${{ env.MANIFEST }}
-          branch: chore/admin-ui-deploy-${{ github.sha }}
-          delete-branch: true
-          commit-message: "chore(admin-ui): deploy ${{ steps.build.outputs.tag }}"
-          title: "chore(admin-ui): deploy ${{ steps.build.outputs.tag }}"
-          body: |
-            Auto-deploy from [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
-
-            Triggered by commit ${{ github.sha }} on `main`.
-
-            Browser-tested image digest: `${{ steps.build.outputs.digest }}`.
-            Image identity and browser proof are retained on the linked workflow run.
-
-            ## Linked issues
-
-            N/A — automated admin-ui GitOps update (ADR-0029 Layer B).
-          labels: |
-            chore
-            gitops
-
-      # Close every OLDER open deploy PR now that this one exists. A deploy PR rewrites an image tag
-      # to the newest build, so two are never additive and both edit the same manifest line — left
-      # open, whichever merges first leaves the rest conflicting while still reading as healthy
-      # (green checks, auto-merge armed). branch-cleanup.yml already assumed this close happened
-      # ("a superseded deploy PR is CLOSED-unmerged"); nothing ever performed it, and the backlog
-      # reached 7 of the repo's 23 open PRs. Runs BEFORE the signature guard so a run that later
-      # fails the guard still leaves exactly one current deploy PR behind, not a growing pile.
-      # `add-paths` scopes the commit — which introduces a failure mode the workflow could not
-      # previously have: if that path ever resolves to nothing (a renamed manifest, an empty
-      # env.MANIFEST), create-pull-request commits nothing, opens no PR, and every later step is
-      # gated on `pull-request-number != ''` and skips. The run then goes GREEN having built and
-      # pushed an image that nothing will ever pin — a silent non-deploy, which is strictly worse
-      # than a red run. The rewrite step already told us a change was needed; if no PR carries it,
-      # that is a hard failure.
-      - name: Fail if a needed deploy produced no PR
-        if: ${{ steps.build_admission.outputs.proceed == 'true' && steps.rewrite.outputs.changed == 'true' && steps.gitops_pr.outputs.pull-request-number == '' }}
+      - name: Install pin checker dependencies
+        if: ${{ steps.build_admission.outputs.proceed == 'true' }}
         run: |
-          echo "::error::Rewrite step updated ${MANIFEST} to ${{ steps.build.outputs.tag }}, but no" \
-               "GitOps PR was opened — so the pushed image will never be pinned. Most likely the" \
-               "create-pull-request 'add-paths' pathspec matched nothing (check MANIFEST=${MANIFEST})."
-          exit 1
-
-      - name: Install deploy-hold parser
-        if: ${{ steps.build_admission.outputs.proceed == 'true' && steps.gitops_pr.outputs.pull-request-number != '' }}
-        run: |
-          python3 -m venv "${RUNNER_TEMP}/deploy-hold-venv"
-          "${RUNNER_TEMP}/deploy-hold-venv/bin/python" -m pip install --quiet --require-hashes \
+          python3 -m venv "${RUNNER_TEMP}/deploy-pin-venv"
+          "${RUNNER_TEMP}/deploy-pin-venv/bin/python" -m pip install --quiet --require-hashes \
             -r .github/scripts/pyyaml-requirements.txt
 
-      - name: Close superseded deploy PRs
-        if: ${{ steps.build_admission.outputs.proceed == 'true' && steps.gitops_pr.outputs.pull-request-number != '' }}
+      - name: Pin the image on deploy/sandbox
+        id: pin
+        if: ${{ steps.build_admission.outputs.proceed == 'true' }}
         env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          DEPLOY_PIN_TOKEN: ${{ steps.app_token.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          DEPLOY_HOLD_PYTHON: ${{ runner.temp }}/deploy-hold-venv/bin/python
         run: |
-          bash .github/scripts/supersede-deploy-prs.sh \
-            'chore/admin-ui-deploy-' '${{ steps.gitops_pr.outputs.pull-request-number }}'
-      # deploy-window-flush.yml is the sole auto-merge writer. Its workflow_run trigger
-      # admits this PR after this workflow completes; its schedule retries missed triggers.
+          "${RUNNER_TEMP}/deploy-pin-venv/bin/python" .github/scripts/publish-deploy-pin.py deploy \
+            --component admin-ui \
+            --image-source-sha "${{ needs.deploy-source.outputs.source_sha }}" \
+            --tag "${{ steps.build.outputs.tag }}" \
+            --digest "${{ steps.build.outputs.digest }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-      # The failure this guards against is silent by construction: create-pull-request logs
-      # "Commit verified: false; reason: unsigned" and exits 0, the PR opens with every check
-      # green and auto-merge armed, and it simply never merges. That reads as healthy from
-      # every angle except the one nobody checks — which is how #806 shipped a fix that
-      # no-opped for five days and stranded seven deploy PRs at once (issue #1269).
-      # Fail loudly instead: an unsigned commit means required_signatures WILL strand this PR.
-      #
-      # Keep this LAST in the job, and `always()`: core.setFailed() skips every subsequent
-      # step that is not always(), so any step appended after this one would be silently
-      # starved on exactly the runs where it matters most.
-      - name: Verify the deploy commit is signed
-        if: ${{ steps.build_admission.outputs.proceed == 'true' && always() && steps.gitops_pr.outputs.pull-request-number != '' }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+  # ADR-0358: a reviewed manifest change on main reaches the cluster without waiting for a
+  # person or for the next image build. The pinned image stays; the manifest copy on
+  # deploy/sandbox moves to the main commit that changed it. Also the recovery path
+  # (workflow_dispatch mode=repin) and the rollback path (mode=rollback).
+  repin:
+    name: Re-pin manifests / rollback on deploy/sandbox
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode != 'deploy')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: admin-ui-build-push
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          github-token: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
-          script: |
-            const pull_number = Number('${{ steps.gitops_pr.outputs.pull-request-number }}');
-            const { data: commits } = await github.rest.pulls.listCommits({
-              owner: context.repo.owner, repo: context.repo.repo, pull_number,
-            });
-            const unsigned = commits.filter(c => !c.commit.verification?.verified);
-            if (unsigned.length === 0) {
-              core.info(`all ${commits.length} commit(s) on PR #${pull_number} are signed and verified`);
-              return;
-            }
-            for (const c of unsigned) {
-              core.error(`${c.sha}: verified=false reason=${c.commit.verification?.reason ?? 'unknown'} committer=${c.commit.committer?.name}`);
-            }
-            core.setFailed(
-              `PR #${pull_number} carries ${unsigned.length} unsigned commit(s); the main ruleset's ` +
-              `required_signatures will block it and this deploy will never land. ` +
-              `Most likely cause: no GitHub App token — GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY unset, so the ` +
-              `run fell back to GITHUB_TOKEN, whose PR does not trigger the required checks (anti-recursion), ` +
-              `so auto-merge can never fire (the GITOPS_PR_TOKEN user-PAT fallback was retired in #1305). ` +
-              `To rescue this PR by hand: amend the commit locally with a GPG signature and force-push, then ` +
-              `re-run the required checks — auto-merge fires on its own once they pass and the signature is valid. ` +
-              `The durable fix is to restore the App token (GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY).`
-            );
+          ref: refs/heads/main
+          fetch-depth: 0
+      - name: Mint a GitHub App installation token
+        id: app_token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+      - name: Install pin checker dependencies
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/deploy-pin-venv"
+          "${RUNNER_TEMP}/deploy-pin-venv/bin/python" -m pip install --quiet --require-hashes \
+            -r .github/scripts/pyyaml-requirements.txt
+      - name: Write the pin
+        env:
+          DEPLOY_PIN_TOKEN: ${{ steps.app_token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          MODE: ${{ github.event_name == 'push' && 'repin' || inputs.mode }}
+          ROLLBACK_SOURCE_SHA: ${{ inputs.rollback_image_source_sha }}
+          ROLLBACK_TAG: ${{ inputs.rollback_tag }}
+          ROLLBACK_DIGEST: ${{ inputs.rollback_digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          args=(--component admin-ui --run-url "$RUN_URL")
+          if [ "$MODE" = rollback ]; then
+            args+=(--image-source-sha "$ROLLBACK_SOURCE_SHA" --tag "$ROLLBACK_TAG" --digest "$ROLLBACK_DIGEST")
+          fi
+          "${RUNNER_TEMP}/deploy-pin-venv/bin/python" .github/scripts/publish-deploy-pin.py "$MODE" "${args[@]}"
