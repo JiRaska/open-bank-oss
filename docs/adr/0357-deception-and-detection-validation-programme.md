@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [security-ops, observability, infrastructure, gitops]
-followup: "#14163 — layers 0-1 and the drill ship; regional EventBridge coverage, OpenBao/S3/Keycloak/DB lures, Stratus Red Team cadence, GoAlert wiring and the fate of HoneytokenFilter are open"
+followup: "#14163 — layers 0-1, the drill and an armed HoneytokenFilter ship; regional EventBridge coverage, OpenBao/S3/Keycloak/DB lures, a scheduled drill identity and paging are open (owner decisions)"
 summary: "Deception is a layered programme on existing telemetry: edge decoys, then cloud and cluster honeytokens whose any use is an alert, each mapped to ATT&CK, gated as wired and powerless, and proven by a timed drill. Under 1 USD/month."
 ---
 
@@ -116,8 +116,8 @@ Nothing new runs: no pod, no load balancer, no instance, no added log ingestion.
 ## Alternatives considered
 
 - **Per-service honey paths (the ADR-0279 shape as built).** These sit inside the JAX-RS chain, so
-  they see only paths routed to a service that opted in, and no service ever did. Kept only as a
-  possible second layer behind authentication.
+  they see only paths routed to a service that opted in, and no service ever did. Kept as a
+  second layer, and armed in slice 2 (below), because it sees what Envoy cannot.
 - **Commercial canary platform.** The category leader is the
   benchmark for the "any interaction is a true positive" design this ADR copies. Hardware or
   virtual canaries are a recurring licence and a third-party data processor. The same tripwires
@@ -161,6 +161,43 @@ Nothing new runs: no pod, no load balancer, no instance, no added log ingestion.
 - Applying layer 1 is an owner step (`tofu apply` in `aws/envs/sandbox-substrate`, targeted to
   `deception.tf`'s resources; the plan is 16 to add, 0 to change, 0 to destroy) plus confirming
   the two SNS email subscriptions.
+
+### Slice 2 (2026-10-31): HoneytokenFilter armed, paging and cadence measured
+
+**HoneytokenFilter could never fire, in any service.** It was a post-matching
+`ContainerRequestFilter`, and JAX-RS calls those only after a resource method has matched; a
+honey path has none, so RESTEasy answered its own routing 404 and the filter was skipped. Shown
+by `HoneyEndpointIT` in customer-edge: with the paths configured and the filter post-matching,
+the hit counter stayed at 0.0. It is now `@PreMatching`, and it no longer answers the request
+itself: it counts, logs and lets the platform's own `NOT_FOUND` 404 answer. The old empty-bodied
+404 differed from every real 404, which told a prober the path was special. customer-edge sets
+two honey paths under its public `/customer/v1` prefix. That is a signal the edge decoys cannot
+give: the request is seen inside the service's namespace whether it came through Envoy or from an
+in-cluster caller that skipped it. `honeytoken-wiring` now fails if `HoneyEndpointHit` exists
+while no workload sets `OPENBANK_SECURITY_HONEY_PATHS`, or if the filter loses `@PreMatching`.
+
+**Paging (GoAlert) is not wireable without new surface, so it is an owner decision.** Every
+critical alert reaches GoAlert one way: Alertmanager `webhook_configs` to a cluster-internal URL
+(kube-prometheus-stack.yaml, ADR-0088). GoAlert has no ingress (ADR-0056), and an SNS HTTPS
+subscription needs a public endpoint, so the honeytoken topic cannot reach it as it stands. The
+options all add something: a public, authenticated GoAlert integration endpoint (new attack
+surface on the detection path); a CloudWatch exporter pod so the two AWS signals become
+Prometheus series (new long-running workload); or an SNS-to-chat delivery through a function
+holding the chat webhook. Email stays the delivery today, and it reaches a human outside the
+cluster, which is the property that matters when the cluster is what was compromised.
+`EdgeDecoyTargetedHit` and `HoneyEndpointHit` stay `warning` (Slack). Their promotion criterion
+(a drill hit seen in Slack end to end) has not been met, and promoting them first would break the
+estate's rule that nothing pages before a known-positive has reached a human.
+
+**A scheduled drill needs an identity that can read the lures.** The drill reads the canary key
+from SSM and the honey token from its Secret. A scheduled run therefore needs a CI or in-cluster
+identity holding `ssm:GetParameter` with decrypt on the lure and `get` on the honey Secret, which
+makes that identity a credential for every lure. It is cheap (a weekly job is free on hosted or
+ARC runners), but it is a design choice, not plumbing. The safe shape is a dedicated OIDC role
+scoped to those two reads plus `cloudwatch:GetMetricStatistics`/`DescribeAlarms`, used by one
+workflow on `schedule` only, never on `pull_request`. Stratus Red Team needs the same identity
+plus permission to detonate, and stays planned until that role exists. Until then the cadence is
+the monthly manual run above, and a missing run is visible as the 35-day rule.
 
 ### Delivery check
 

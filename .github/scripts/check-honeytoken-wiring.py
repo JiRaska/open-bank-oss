@@ -23,7 +23,11 @@ Checks:
   - the canary IAM user has exactly one inline policy, it is an explicit Deny "*" on "*",
     and no policy attachment or group membership references it;
   - the canary EventBridge rules opt in to read-only management events (without that, the
-    attacker's first call, sts:GetCallerIdentity, never reaches the rule).
+    attacker's first call, sts:GetCallerIdentity, never reaches the rule);
+  - while a Loki rule named HoneyEndpointHit exists, at least one workload sets a non-empty
+    OPENBANK_SECURITY_HONEY_PATHS (else the rule has no subject — the ADR-0279 shape), and
+    HoneytokenFilter stays @PreMatching (a post-matching filter is never called for a path
+    with no resource method, i.e. for every honey path; measured 2026-10-31).
 
 Usage:
     check-honeytoken-wiring.py             # scan
@@ -41,6 +45,8 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
 TOFU = REPO / "openbank-infra" / "aws" / "envs" / "sandbox-substrate"
+FILTER = REPO / "openbank-libs-runtime" / "src" / "main" / "kotlin" / "com" / "openbank" / "libs" / "security" / "HoneytokenFilter.kt"
+HONEY_ENV = "OPENBANK_SECURITY_HONEY_PATHS"
 LABEL = "openbank.io/deception"
 
 FILTER_SA_RE = re.compile(r'system:serviceaccount:(?P<ns>[a-z0-9-]+):(?P<name>[a-z0-9-]+)')
@@ -110,7 +116,30 @@ def bound_subjects(gitops: Path) -> set[tuple[str, str]]:
     return found
 
 
-def scan(gitops: Path, tofu: Path) -> tuple[list[str], int]:
+def honey_path_workloads(gitops: Path) -> list[str]:
+    """Workload containers that set a non-empty honey-path env."""
+    found = []
+    for path in _candidates(gitops, HONEY_ENV):
+        try:
+            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+        except yaml.YAMLError:
+            continue
+        for d in docs:
+            if not isinstance(d, dict):
+                continue
+            spec = ((d.get("spec") or {}).get("template") or {}).get("spec") or {}
+            for c in spec.get("containers") or []:
+                for e in c.get("env") or []:
+                    if e.get("name") == HONEY_ENV and str(e.get("value") or "").strip(","):
+                        found.append(f"{(d.get('metadata') or {}).get('name')}/{c.get('name')}")
+    return found
+
+
+def honey_rule_present(gitops: Path) -> bool:
+    return any(True for _ in _candidates(gitops, "alert: HoneyEndpointHit"))
+
+
+def scan(gitops: Path, tofu: Path, filter_src: Path = FILTER) -> tuple[list[str], int]:
     findings: list[str] = []
     text = "\n".join(p.read_text(encoding="utf-8") for p in sorted(tofu.glob("*.tf")))
     blocks = _blocks(text)
@@ -148,7 +177,14 @@ def scan(gitops: Path, tofu: Path) -> tuple[list[str], int]:
         for b in rules:
             if "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS" not in b:
                 findings.append("a canary EventBridge rule does not opt in to read-only management events — sts:GetCallerIdentity would never alert")
-    return findings, len(sas) + len(users)
+    workloads = honey_path_workloads(gitops)
+    if honey_rule_present(gitops) and not workloads:
+        findings.append(f"HoneyEndpointHit exists but no workload sets {HONEY_ENV} — an alert with no subject")
+    if workloads:
+        src = filter_src.read_text(encoding="utf-8") if filter_src.exists() else ""
+        if not re.search(r"^@PreMatching\s*$", src, re.M):
+            findings.append("HoneytokenFilter is not @PreMatching — it is never called for an unrouted honey path")
+    return findings, len(sas) + len(users) + len(workloads)
 
 
 def selftest() -> int:
@@ -185,15 +221,26 @@ def selftest() -> int:
             "tofu", "deception.tf",
             lambda s: s.replace('state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"', 'state         = "ENABLED"', 1),
             "read-only management events"),
+        "honey paths unset": (
+            "gitops", "components/customer-edge/customer-edge.yaml",
+            lambda s: s.replace(f"name: {HONEY_ENV}", "name: OPENBANK_SECURITY_HONEY_PATHS_DISABLED", 1),
+            "an alert with no subject"),
+        "filter post-matching": (
+            "filter", "HoneytokenFilter.kt",
+            lambda s: s.replace("\n@PreMatching\n", "\n", 1),
+            "not @PreMatching"),
     }
     for label, (tree, rel, mutate, expect) in cases.items():
         with tempfile.TemporaryDirectory() as tmp:
             g, t = Path(tmp) / "gitops", Path(tmp) / "tofu"
-            shutil.copytree(GITOPS / "components" / "platform", g / "components" / "platform")
+            for comp in ("platform", "customer-edge", "observability"):
+                shutil.copytree(GITOPS / "components" / comp, g / "components" / comp)
             shutil.copytree(TOFU, t, ignore=shutil.ignore_patterns(".terraform", "lambda"))
-            target = (g if tree == "gitops" else t) / rel
+            k = Path(tmp) / "HoneytokenFilter.kt"
+            shutil.copy(FILTER, k)
+            target = {"gitops": g, "tofu": t, "filter": Path(tmp)}[tree] / rel
             target.write_text(mutate(target.read_text(encoding="utf-8")), encoding="utf-8")
-            bad, _ = scan(g, t)
+            bad, _ = scan(g, t, k)
             if not any(expect in f for f in bad):
                 print(f"SELFTEST FAIL: case '{label}' was not reported (got {bad})")
                 return 1
@@ -207,7 +254,7 @@ def main() -> int:
     if ap.parse_args().selftest:
         return selftest()
     findings, subjects = scan(GITOPS, TOFU)
-    print(f"SUBJECTS={subjects}  # honey ServiceAccounts + IAM users in the substrate root")
+    print(f"SUBJECTS={subjects}  # honey ServiceAccounts + IAM users + honey-path workloads")
     for f in findings:
         print(f"::error::{f}")
     if findings:
