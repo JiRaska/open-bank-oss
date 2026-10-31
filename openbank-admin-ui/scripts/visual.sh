@@ -29,11 +29,18 @@ args+=("$@")
 prepare='true'
 volume=()
 if [ -z "${CI:-}" ]; then
-  volume=(-v openbank-admin-ui-visual-node-modules:/work/openbank-admin-ui/node_modules)
+  volume=(-v "openbank-admin-ui-visual-node-modules:${ui_dir}/node_modules")
   prepare='npm ci --no-audit --no-fund && NEXT_TELEMETRY_DISABLED=1 npm run build'
 fi
 
+# The build reads git (next build stamps the commit). Mount the repo, and the git common dir
+# a worktree's .git file points at, at their REAL paths so that pointer resolves in-container.
+git_common="$(cd "${repo_root}" && cd "$(git rev-parse --git-common-dir)" && pwd)"
+mounts=(-v "${repo_root}:${repo_root}")
+case "${git_common}" in "${repo_root}"/*) ;; *) mounts+=(-v "${git_common}:${git_common}") ;; esac
+
 exec docker run --rm --platform linux/amd64 --ipc=host --network host \
-  -v "${repo_root}:/work" "${volume[@]}" -w /work/openbank-admin-ui \
+  "${mounts[@]}" ${volume[@]+"${volume[@]}"} -w "${ui_dir}" \
   -e CI -e OPENBANK_E2E_PREBUILT=true \
-  "${IMAGE}" bash -c "${prepare} && npx playwright test -c playwright.visual.config.ts \"\$@\"" visual "${args[@]}"
+  -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
+  "${IMAGE}" bash -c "${prepare} && npx playwright test -c playwright.visual.config.ts \"\$@\"" visual ${args[@]+"${args[@]}"}
