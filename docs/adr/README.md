@@ -360,7 +360,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0353](0353-financial-crime-vocabulary-one-customer-risk-rating-one-aml-case-severity-shared-rail-screening-types.md) | Financial-crime vocabulary: one customer risk rating, one AML case severity, shared rail screening types | Accepted | Planned | aml-sanctions,kyc,fraud,libs | — |
 | [0354](0354-financial-crime-as-code-governed-packs-and-learning.md) | Financial Crime as Code: governed packs, pure evaluation and reviewed learning | Accepted | Planned | fraud,aml-sanctions,ai-agents,libs | — |
 | [0355](0355-payment-worker-deployment-versioning-and-immutable-replay-corpora.md) | Payment worker deployment versioning and immutable replay corpora | Accepted | Partial | payments,testing,architecture | — |
-| [0357](0357-edge-deception-layer-decoy-paths-on-the-shared-gateway.md) | Edge deception layer: decoy paths on the shared gateway, alerted from the access log | Proposed | Partial | security-ops,networking,observability,gitops | — |
+| [0357](0357-deception-and-detection-validation-programme.md) | Deception and detection-validation programme: edge decoys, honeytokens, timed drills | Proposed | Partial | security-ops,observability,infrastructure,gitops | — |
 
 ## By tag
 
@@ -395,7 +395,7 @@ anything else, so this map cannot sprawl into synonyms._
 - **gitops** — 0010 0027 0060 0098 0236 0277 0324 0357
 - **governance** — 0001 0002 0005 0006 0012 0014 0020 0029 0030 0031 0042 0044 0047 0048 0052 0067 0071 0074 0082 0091 0092 0123 0124 0134 0136 0141 0144 0145 0147 0148 0152 0154 0155 0160 0163 0164 0166 0167 0174 0176 0196 0197 0202 0203 0208 0209 0221 0223 0227 0229 0231 0235 0237 0241 0242 0244 0246 0251 0253 0254 0255 0259 0260 0264 0266 0271 0272 0273 0280 0285 0288 0330 0343 0345 0347
 - **i18n-a11y** — 0149 0150
-- **infrastructure** — 0007 0010 0027 0054 0058 0060 0079 0161 0174 0175
+- **infrastructure** — 0007 0010 0027 0054 0058 0060 0079 0161 0174 0175 0357
 - **interest** — 0033 0038 0318 0342 0352
 - **kafka** — 0003 0006 0013 0050 0084 0137 0140 0202 0239 0245 0247 0256 0260 0267 0281 0310 0323 0327
 - **kubernetes** — 0010 0027 0041 0051 0057 0077 0081 0083 0098 0151 0159 0173 0177 0324 0325
@@ -406,7 +406,7 @@ anything else, so this map cannot sprawl into synonyms._
 - **licensing** — 0012 0123 0136 0197
 - **ml** — 0102 0139 0140 0141 0142 0201 0209 0216 0348 0349 0350 0351
 - **mobile-app** — 0064 0065 0066 0070 0073 0074 0075 0088 0089 0095 0109 0110 0125 0135 0153 0170 0191 0192 0200 0220 0261 0266 0269 0282 0284 0310
-- **networking** — 0051 0058 0081 0093 0234 0324 0357
+- **networking** — 0051 0058 0081 0093 0234 0324
 - **notifications** — 0059 0135 0176 0198 0200 0219 0221 0239 0240 0252 0263 0285 0333
 - **observability** — 0008 0059 0061 0070 0075 0077 0087 0088 0091 0112 0119 0160 0163 0218 0234 0236 0237 0241 0243 0246 0252 0253 0255 0265 0273 0274 0279 0288 0309 0316 0326 0328 0357
 - **onboarding** — 0066 0068 0069 0072 0094 0162 0170 0267 0268 0270 0284 0305 0334 0338
