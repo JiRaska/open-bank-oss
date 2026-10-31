@@ -124,6 +124,35 @@ class DeployWindowMutateTest(unittest.TestCase):
         self.assertFalse(any(args[:2] == ("api", "graphql") for args in calls))
         return str(error)
 
+    def test_reselect_uses_the_same_per_kind_window_as_the_flush(self):
+        # A recent GitOps deploy and an armed GitOps PR close only the GitOps lane. The flush
+        # (per-kind) selects the admin-ui PR; a reselect that read ONE global window would see
+        # "last deploy 100 s ago", defer, and refuse every admin-ui arm while GitOps is busy.
+        branch = "chore/admin-ui-deploy-example"
+        prs = [{"number": 6, "head": "chore/gitops-auto-deploy-other", "head_sha": "c" * 40,
+                "created_at": "2025-12-31", "armed": True, "state": "open", "repair_priority": False},
+               {"number": 7, "head": branch, "head_sha": HEAD, "created_at": "2026-01-01",
+                "armed": False, "state": "open", "repair_priority": False}]
+        commits = [{"message": "chore(gitops): auto-deploy x", "epoch": 4900}]
+        error, calls, _ = self.execute(prs=prs, commits=commits, branch=branch)
+        self.assertIsNone(error)
+        self.assertTrue(any(args[:2] == ("api", "graphql") for args in calls))
+
+    def test_a_later_kind_is_armable_when_the_first_kind_was_refused(self):
+        # Both lanes open: the flush offers gitops first, the workflow refuses it (stale pin or
+        # hold) and falls through to admin-ui. The reselect must accept that second candidate,
+        # and still refuse a PR that is not offered at all.
+        branch = "chore/admin-ui-deploy-example"
+        prs = [{"number": 6, "head": "chore/gitops-auto-deploy-other", "head_sha": "c" * 40,
+                "created_at": "2025-12-30", "armed": False, "state": "open", "repair_priority": False},
+               {"number": 7, "head": branch, "head_sha": HEAD, "created_at": "2026-01-01",
+                "armed": False, "state": "open", "repair_priority": False}]
+        error, calls, _ = self.execute(prs=prs, branch=branch)
+        self.assertIsNone(error)
+        self.assertTrue(any(args[:2] == ("api", "graphql") for args in calls))
+        foreign = [dict(prs[0]), dict(prs[1], number=9)]
+        self.assertIn("deferred or changed", self.assert_refused(prs=foreign, branch=branch))
+
     def test_actual_workflow_arm_block_uses_current_policy_and_only_queues(self):
         workflow = Path(__file__).parents[1] / "workflows/deploy-window-flush.yml"
         # The arming step is the final workflow step; execute its actual Bash block.
