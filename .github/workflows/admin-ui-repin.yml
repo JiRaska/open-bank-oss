@@ -48,11 +48,30 @@ jobs:
     name: Re-pin admin-ui on deploy/sandbox
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write  # GitHub OIDC -> ECR read + KMS verify, rollback mode only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/heads/main
           fetch-depth: 0
+      # A rollback tag and digest are typed by an operator. Prove the pair exists in ECR and
+      # carries the signature and SBOM attestation Kyverno admits, before it can become a pin.
+      - name: Configure AWS credentials (GitHub OIDC)
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'rollback'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
+          aws-region: eu-north-1
+      - name: Verify the rollback image in ECR (signature + SBOM attestation)
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'rollback'
+        env:
+          ROLLBACK_TAG: ${{ inputs.rollback_tag }}
+          ROLLBACK_DIGEST: ${{ inputs.rollback_digest }}
+        run: |
+          bash .github/scripts/verify-pinned-image.sh \
+            265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui "$ROLLBACK_TAG" "$ROLLBACK_DIGEST"
       - name: Mint a GitHub App installation token
         id: app_token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0

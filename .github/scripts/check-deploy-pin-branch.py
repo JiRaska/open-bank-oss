@@ -40,6 +40,7 @@ import argparse
 import base64
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -436,10 +437,56 @@ def self_test():
             if not isinstance(error, PinError) or "outside pins/" not in str(error):
                 failures.append(f"check_range: wrong reason {error!r}")
 
+    failures.extend(render_real_component())
     for failure in failures:
         print(f"SELF-TEST FAIL: {failure}")
     print(f"self-test: {'FAILED' if failures else 'ok'} ({len(failures)} failure(s))")
     return 1 if failures else 0
+
+
+def render_real_component():
+    """Build a pin from the REAL components/admin-ui at HEAD and run kustomize over it: the
+    output must name the image by the pinned digest, and the image name in PINNABLE must be
+    exactly the string the manifest uses (kustomize matches `images.name` verbatim; a mismatch
+    renders silently with the old tag)."""
+    failures = []
+    real = Path(__file__).resolve().parents[2]
+    for component, image in PINNABLE.items():
+        manifests = (real / COMPONENTS_DIR / component).glob("*.yaml")
+        refs = {m.group(1) for f in manifests
+                for m in re.finditer(r"image:\s*(\S+?)(?::[^\s@]+)?(?:@\S+)?\s*$", f.read_text(), re.M)
+                if m.group(1).endswith("/openbank-" + component)}
+        if refs != {image}:
+            failures.append(f"render {component}: manifest image name(s) {sorted(refs)} != PINNABLE {image!r}")
+            continue
+        tool = next((t for t in (["kustomize", "build"], ["kubectl", "kustomize"])
+                     if subprocess.run(["sh", "-c", f"command -v {t[0]}"], capture_output=True).returncode == 0),
+                    None)
+        if tool is None:
+            if os.environ.get("CI"):
+                failures.append(f"render {component}: no kustomize or kubectl on the CI runner")
+            else:
+                print(f"self-test: render {component} skipped locally (no kustomize/kubectl)")
+            continue
+        digest = "sha256:" + "d" * 64
+        files = render(real, component, git(real, "rev-parse", "HEAD").strip(),
+                       git(real, "rev-parse", "HEAD").strip(), "selftest-tag", digest)
+        with tempfile.TemporaryDirectory() as out:
+            for path, data in files.items():
+                (Path(out) / path).parent.mkdir(parents=True, exist_ok=True)
+                (Path(out) / path).write_bytes(data)
+            built = subprocess.run([*tool, out], capture_output=True, text=True)
+        if built.returncode:
+            failures.append(f"render {component}: {' '.join(tool)} failed: {built.stderr.strip()[:300]}")
+            continue
+        rendered = {m.group(1) for m in re.finditer(r"image:\s*(\S+)", built.stdout)
+                    if m.group(1).startswith(image)}
+        want = f"{image}:selftest-tag@{digest}"
+        if rendered != {want}:
+            failures.append(f"render {component}: rendered {sorted(rendered)}, want exactly {want}")
+        else:
+            print(f"self-test: render {component} -> {want}")
+    return failures
 
 
 # ---------------------------------------------------------------- CLI
