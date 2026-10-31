@@ -2220,7 +2220,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-37ccc183@sha256:0b3ec634eef555fab18334994a329a25ca32bc3dee9b19221a192eb50420de7b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-35c3c4d5@sha256:6b01e0124c566bce0b789d4e2aa74ceacf3b333d26709417ae6815032c812228
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
