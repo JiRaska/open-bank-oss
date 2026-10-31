@@ -4626,6 +4626,18 @@ gates:
       - ".github/scripts/test-release-evidence-upload.py"
       - ".github/scripts/prepare-release-evidence.py"
       - ".github/scripts/test-release-evidence-source.py"
+      - ".github/scripts/release_evidence_repair.py"
+      - ".github/scripts/release_repair_attestation.py"
+      - ".github/scripts/release_repair_crypto.py"
+      - ".github/scripts/release_repair_api.py"
+      - ".github/scripts/prepare-release-repair.py"
+      - ".github/scripts/apply-release-repair.py"
+      - ".github/scripts/verify-release-repair.py"
+      - ".github/scripts/test-release-evidence-repair.py"
+      - ".github/scripts/test-release-repair-attestation.py"
+      - ".github/scripts/test-release-repair-crypto.py"
+      - ".github/scripts/test-release-repair-workflow.py"
+      - ".github/workflows/backfill-release-evidence.yml"
       - ".github/scripts/build-release-evidence.sh"
       - ".github/scripts/verify-release-evidence-manifest.py"
       - ".github/scripts/test-verify-release-evidence-manifest.py"
@@ -4635,6 +4647,10 @@ gates:
       python3 .github/scripts/check-release-evidence-coverage.py --self-test
       python3 .github/scripts/test-release-evidence-upload.py
       python3 .github/scripts/test-release-evidence-source.py
+      python3 .github/scripts/test-release-evidence-repair.py
+      python3 .github/scripts/test-release-repair-attestation.py
+      python3 .github/scripts/test-release-repair-crypto.py
+      python3 .github/scripts/test-release-repair-workflow.py
       python3 .github/scripts/test-verify-release-evidence-manifest.py
     run: |
       python3 .github/scripts/check-release-evidence-coverage.py --enforce
