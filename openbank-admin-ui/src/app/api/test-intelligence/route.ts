@@ -4,7 +4,7 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 import { NextResponse } from 'next/server'
-import type { EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
+import type { EvidenceObservation, EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
 import { enforceRuntimeFreshness } from '@/lib/test-intelligence-freshness'
 import { createSnapshotCache, type SnapshotCache } from '@/lib/evidence/snapshotCache'
 import { createCommitEvidenceReader } from '@/lib/evidence/commitEvidence'
@@ -289,8 +289,35 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
       observedAt: journey.live?.observedAt ?? journey.ci?.observedAt ?? control.observedAt,
     }
   })
+  // Project every ACTIVE journey's live verdict onto the components it `covers`, so the
+  // matrix's synthetic column reads the same state the Synthetics tab does. Without this the
+  // column was structurally empty: journeys lived only in their own table (2026-10-31,
+  // "synthetic 0/74" with nine journeys running). A planned journey proves nothing and adds
+  // no row; a journey whose run never happened projects `not-run`, never a pass.
+  const syntheticByComponent = new Map<string, EvidenceObservation[]>()
+  for (const journey of syntheticJourneys) {
+    if (journey.status !== 'active') continue
+    for (const component of journey.covers ?? []) {
+      const rows = syntheticByComponent.get(component) ?? []
+      rows.push({
+        kind: 'synthetic',
+        state: journey.state,
+        observedAt: journey.live?.observedAt ?? journey.ci?.observedAt ?? null,
+        source: `journey:${journey.id}`,
+        environment: journey.environment ?? 'sandbox',
+        detail: `${journey.title} — ${journey.executor === 'github-actions' ? 'browser synthetic (GitHub Actions)' : 'k6 CronJob in the sandbox cluster'}.`,
+      })
+      syntheticByComponent.set(component, rows)
+    }
+  }
+  const components = report.components.map(component => {
+    const projected = syntheticByComponent.get(component.component)
+    if (!projected) return component
+    const kept = component.evidence.filter(item => !(item.kind === 'synthetic' && item.source.startsWith('journey:')))
+    return { ...component, evidence: [...kept, ...projected] }
+  })
   return {
-    ...report, syntheticJourneys, performance: [...report.performance, ...runtimePerformance],
+    ...report, components, syntheticJourneys, performance: [...report.performance, ...runtimePerformance],
     ...(requiredControls ? {
       requiredControls,
       totals: {

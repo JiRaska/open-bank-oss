@@ -389,6 +389,45 @@ describe('GET /api/test-intelligence', () => {
     }
   })
 
+  it('projects each active journey verdict onto the components it covers, and never a planned one', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-matrix-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    const component = (name: string) => ({ component: name, released: true, moneyPath: false, evidence: [],
+      coverage: { state: 'unknown', observedAt: null, source: 'none', environment: 'ci' }, testInfrastructure: { declared: [], observed: [] } })
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-10-31T00:00:00.000Z', contracts: [], mutations: [], performance: [], history: [], runHistory: [], testCases: [], clientExperiences: [],
+      components: [component('openbank-fx-service'), component('openbank-admin-ui'), component('openbank-account-service')],
+      syntheticJourneys: [
+        { id: 'fx-rates-read', title: 'FX', status: 'active', state: 'unknown', severity: 'page', schedule: '*/10 * * * *', environment: 'sandbox', covers: ['openbank-fx-service'], falsifies: 'x', blocker: null },
+        { id: 'admin-operator-access', title: 'Operator', status: 'active', state: 'unknown', severity: 'page', executor: 'github-actions', schedule: '13 */2 * * *', environment: 'sandbox', covers: ['openbank-admin-ui'], falsifies: 'x', blocker: null,
+          ci: { state: 'passed', observedAt: '2026-10-31T06:23:08.282Z' } },
+        { id: 'sepa-credit-transfer', title: 'SEPA', status: 'planned', state: 'blocked', severity: 'page', schedule: null, environment: 'sandbox', covers: ['openbank-account-service'], falsifies: 'x', blocker: '#4348' },
+      ],
+      totals: { components: 3, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.PROMETHEUS_URL = 'http://prometheus.test'
+    const now = Date.now() / 1000
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      // fx: a Job failed inside the window and none ever succeeded.
+      const payload = query.includes('kube_job_status_failed')
+        ? { status: 'success', data: { result: [{ value: [now, '1'] }] } }
+        : query.includes('kube_cronjob_status_last_schedule_time')
+          ? { status: 'success', data: { result: [{ value: [now, String(now)] }] } }
+          : { status: 'success', data: { result: [] } }
+      return new Response(JSON.stringify(payload), { status: 200 })
+    }))
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
+    const synthetic = (name: string) => body.components.find((c: { component: string }) => c.component === name)
+      .evidence.filter((e: { kind: string }) => e.kind === 'synthetic')
+    expect(synthetic('openbank-fx-service')).toEqual([expect.objectContaining({ state: 'failed', source: 'journey:fx-rates-read' })])
+    expect(synthetic('openbank-admin-ui')).toEqual([expect.objectContaining({ state: 'passed', source: 'journey:admin-operator-access', observedAt: '2026-10-31T06:23:08.282Z' })])
+    expect(synthetic('openbank-account-service')).toEqual([])
+  })
+
   it('does not treat a retained historical failed Job as a current synthetic failure', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-route-'))
     dirs.push(dir)
