@@ -46,6 +46,8 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
     implementation("org.jetbrains.kotlin.plugin.allopen:org.jetbrains.kotlin.plugin.allopen.gradle.plugin:$kotlinVersion")
     implementation("io.quarkus:io.quarkus.gradle.plugin:$quarkusVersion")
+    // Public model-task descriptor types are supplied at runtime by the Quarkus plugin.
+    compileOnly("io.quarkus:quarkus-gradle-model:$quarkusVersion")
     implementation("org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:$cyclonedxVersion")
     // Public model-builder API; the existing Quarkus/CycloneDX runtime selects 3.9.16.
     compileOnly("org.apache.maven:maven-model-builder:3.9.16")
