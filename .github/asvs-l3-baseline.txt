@@ -45,6 +45,7 @@ V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2942: plai
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2988: plaintext http:// env value http://party-service.party.svc:8111
 V9.1 openbank-infra/gitops/components/ledger/ledger-service.yaml:114: plaintext http:// env value http://fx-service.fx.svc:8119
 V9.1 openbank-infra/gitops/components/ledger/ledger-service.yaml:122: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/ledger-pension-co/ledger-service.yaml:134: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/ap2/ap2-service.yaml:66: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/devops-agent/devops-agent.yaml:54: plaintext http:// env value http://prometheus-operated.observability.svc:9090
 V9.1 openbank-infra/gitops/components/devops-agent/devops-agent.yaml:56: plaintext http:// env value http://alertmanager-operated.observability.svc:9093
@@ -293,6 +294,10 @@ V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:181: plai
 # agent exposes only HTTP :8146 and there is no HTTPS listener to target instead. Retires with
 # the fleet-wide mesh-mTLS work (Layer 1; see #10486).
 V9.1 openbank-infra/gitops/components/case-coordinator/pilot-case-injector.yaml:173: plaintext http:// env value http://case-coordinator-agent.platform.svc:8146
+# kyc -> case-coordinator rest client (ADR-0256 trigger loop): the same genuinely NEW plaintext
+# edge as pilot-case-injector above — the agent exposes only HTTP :8146 and there is no HTTPS
+# listener to target instead. Retires with the fleet-wide mesh-mTLS work (Layer 1; see #10486).
+V9.1 openbank-infra/gitops/components/kyc/kyc-service.yaml:138: plaintext http:// env value http://case-coordinator-agent.platform.svc:8146
 V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:117: plaintext http:// env value http://party-service.party.svc:8111
 V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:126: plaintext http:// env value http://document-service.documents.svc:8143
 # Tempo OTLP endpoint for the Deployments that had none and exported to localhost:4317.
@@ -326,3 +331,12 @@ V9.1 openbank-infra/gitops/components/pricing/workloads.yaml:285: plaintext http
 V9.1 openbank-infra/gitops/components/pricing/workloads.yaml:287: plaintext http:// env value http://product-catalog.accounts.svc:8104
 V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:85: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:97: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/pension/pension-service.yaml:62: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/pension-fund/pension-fund-service.yaml:62: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/tax-reporting/tax-reporting-service.yaml:63: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/observability/cronjob-journey-product-catalog-read.yaml:175: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
+V9.1 openbank-infra/gitops/components/observability/cronjob-journey-customer-authentication.yaml:219: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
+V9.1 openbank-infra/gitops/components/observability/cronjob-journey-account-overview.yaml:293: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
+V9.1 openbank-infra/gitops/components/observability/cronjob-journey-fx-read.yaml:174: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
+V9.1 openbank-infra/gitops/components/observability/cronjob-journey-wealth-declared-holding.yaml:247: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
+V9.1 openbank-infra/gitops/components/ai-platform/langfuse-exporter.yaml:276: plaintext http:// env value http://langfuse-web.ai-platform.svc:3000

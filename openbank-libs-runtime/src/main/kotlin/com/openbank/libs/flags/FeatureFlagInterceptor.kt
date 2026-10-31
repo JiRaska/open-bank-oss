@@ -4,6 +4,7 @@
 
 package com.openbank.libs.flags
 
+import com.openbank.libs.interceptor.GuardedInvocation
 import jakarta.annotation.Priority
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
@@ -67,11 +68,13 @@ class FeatureFlagInterceptor {
             ?.let { EvalContext(targetingKey = it) }
             ?: EvalContext.EMPTY
 
-        if (flags.get().enabled(annotation.flag, evalContext)) {
-            return ctx.proceed()
+        val client = flags.get()
+        return GuardedInvocation.proceed(ctx) {
+            if (!client.enabledSuspending(annotation.flag, evalContext)) {
+                log.debugf("feature off: flag=%s key=%s — short-circuiting", annotation.flag, evalContext.targetingKey)
+                throw FeatureDisabledException(annotation.flag)
+            }
         }
-        log.debugf("feature off: flag=%s key=%s — short-circuiting", annotation.flag, evalContext.targetingKey)
-        throw FeatureDisabledException(annotation.flag)
     }
 
     private fun extractTargetingKey(ctx: InvocationContext, expr: String): String? {

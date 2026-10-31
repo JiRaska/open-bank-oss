@@ -8,6 +8,8 @@ import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.ProductOffering
 import com.openbank.productcatalog.domain.catalog.ProductRevision
 import com.openbank.productcatalog.domain.catalog.ProductSpecification
+import com.openbank.productcatalog.domain.catalog.RevisionApproval
+import com.openbank.productcatalog.domain.catalog.RevisionIrSignature
 import com.openbank.productcatalog.domain.catalog.SchemaRef
 import java.time.Instant
 import java.util.UUID
@@ -27,6 +29,16 @@ interface GenericCatalogRepository {
     suspend fun listRevisions(offeringId: UUID): List<ProductRevision>
     suspend fun findRevision(id: UUID): ProductRevision?
     suspend fun updateDraft(revision: ProductRevision, actorId: String): ProductRevision
+    suspend fun approveRevision(
+        revisionId: UUID,
+        expectedRevision: Long,
+        role: String,
+        issuer: String,
+        subject: String,
+        actorName: String,
+        reason: String,
+    ): RevisionApproval
+    suspend fun revisionApprovals(revisionId: UUID): List<RevisionApproval>
     suspend fun publishDraft(
         revisionId: UUID,
         expectedRevision: Long,
@@ -34,6 +46,11 @@ interface GenericCatalogRepository {
         reason: String,
         contentHash: String,
         at: Instant,
+        /** ADR-0352 §4: present only for an IR-bearing revision published through `publish-ir`; stored as evidence. */
+        irSignature: RevisionIrSignature? = null,
     ): ProductRevision
     suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision?
+
+    /** The published revision of the offering the v1 banking product [productId] is mapped to (ADR-0341). */
+    suspend fun findPublishedForLegacyProduct(productId: UUID, effectiveAt: Instant): ProductRevision?
 }

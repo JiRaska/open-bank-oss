@@ -1,5 +1,99 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.19.1...treasury-service-v0.20.0) (2026-10-30)
+
+
+### Features
+
+* **treasury:** posting matrix, credit exposure and day completion for every product ([#14182](https://github.com/JiRaska/open-bank-oss/issues/14182)) ([cd115b6](https://github.com/JiRaska/open-bank-oss/commit/cd115b635d8ac6d16c7fb33dd3bd4b276432ebd9))
+
+
+### Bug Fixes
+
+* **treasury:** record a posting intent before the ledger call ([#14220](https://github.com/JiRaska/open-bank-oss/issues/14220)) ([059840b](https://github.com/JiRaska/open-bank-oss/commit/059840b74eb1f495df083e12296842ad4dbd4d80))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.19.0...treasury-service-v0.19.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **treasury:** compare nostro balances by value date ([#14218](https://github.com/JiRaska/open-bank-oss/issues/14218)) ([e46468b](https://github.com/JiRaska/open-bank-oss/commit/e46468bf92ef3ae2dcd98705bf9fe08708a78a42))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.18.0...treasury-service-v0.19.0) (2026-10-29)
+
+
+### Features
+
+* **treasury:** day-close participant - report the hourly accrual and the day's deal journals (ADR-0342) ([#13882](https://github.com/JiRaska/open-bank-oss/issues/13882)) ([8408b38](https://github.com/JiRaska/open-bank-oss/commit/8408b38cd8954afb0a55c623b18d933bc836eae8))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.17.1...treasury-service-v0.18.0) (2026-10-28)
+
+
+### Features
+
+* **treasury:** custodian portfolio statements and the period-end portfolio for tax reporting ([#13992](https://github.com/JiRaska/open-bank-oss/issues/13992)) ([c82147c](https://github.com/JiRaska/open-bank-oss/commit/c82147c20901a6fe7c6f5d6639f0f8cb54e82c4e))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.17.0...treasury-service-v0.17.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **treasury:** versioned deal saves, override eligibility and a reference-only editor role ([#13756](https://github.com/JiRaska/open-bank-oss/issues/13756)) ([e710754](https://github.com/JiRaska/open-bank-oss/commit/e71075488dcfb88c5deb10d426c00d27e5dfa051))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.16.0...treasury-service-v0.17.0) (2026-10-26)
+
+
+### Features
+
+* **treasury:** fixings, the market-data quality gate, IRS and FRA cash flows (ADR-0344 phase 1a) ([#13643](https://github.com/JiRaska/open-bank-oss/issues/13643)) ([f083272](https://github.com/JiRaska/open-bank-oss/commit/f083272cf895df63fa4093255be9cad5fd9b61e5))
+
+
+### Bug Fixes
+
+* **treasury:** re-check deal state under the lock before applying a fixing ([#13846](https://github.com/JiRaska/open-bank-oss/issues/13846)) ([631e0f6](https://github.com/JiRaska/open-bank-oss/commit/631e0f615de566129ebad1e28718f0206706daa6))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.15.1...treasury-service-v0.16.0) (2026-10-24)
+
+
+### Features
+
+* **treasury:** reference data and the cash-flow ledger for the five existing products (ADR-0344 phase 0) ([#13614](https://github.com/JiRaska/open-bank-oss/issues/13614)) ([42eec93](https://github.com/JiRaska/open-bank-oss/commit/42eec93ad9ee5c85728242d9b559515037391274))
+
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.15.0...treasury-service-v0.15.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **treasury:** reverse per GL account what was posted there, fail closed ([#13412](https://github.com/JiRaska/open-bank-oss/issues/13412)) ([84e3f7c](https://github.com/JiRaska/open-bank-oss/commit/84e3f7c773eb1a4021dafd08015bf56f3dd37902)), closes [#13411](https://github.com/JiRaska/open-bank-oss/issues/13411)
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.14.0...treasury-service-v0.15.0) (2026-10-19)
+
+
+### Features
+
+* **billing:** price fees from the pinned catalog revision, post by accounting class (ADR-0341) ([#13209](https://github.com/JiRaska/open-bank-oss/issues/13209)) ([dcd911c](https://github.com/JiRaska/open-bank-oss/commit/dcd911cea88eaa7b38cb7192ab89de830400b5a9))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.13.1...treasury-service-v0.14.0) (2026-10-19)
+
+
+### Features
+
+* **ledger:** own the accountingClass to GL map; treasury posts by class (ADR-0341) ([#13205](https://github.com/JiRaska/open-bank-oss/issues/13205)) ([b936611](https://github.com/JiRaska/open-bank-oss/commit/b936611a8c9f622a076b30377e0757485c29a6f6))
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.13.0...treasury-service-v0.13.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.12.0...treasury-service-v0.13.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.11.1...treasury-service-v0.12.0) (2026-10-04)
 
 

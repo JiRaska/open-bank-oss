@@ -9,6 +9,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
@@ -50,6 +52,13 @@ class PartyApiIT {
     @Test
     @Order(3)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET parties returns paginated list`() {
         Given {
             queryParam("page", 0)
@@ -66,6 +75,13 @@ class PartyApiIT {
     @Test
     @Order(3)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET parties with an unparseable status filter is a 400, not the unfiltered list`() {
         // #9038: runCatching{}.getOrNull() used to drop the condition, answering every party
         // with a 200 to a typo.
@@ -81,6 +97,13 @@ class PartyApiIT {
     @Test
     @Order(3)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET parties with a valid status filter still answers 200`() {
         Given {
             queryParam("status", "ACTIVE")
@@ -95,6 +118,13 @@ class PartyApiIT {
     @Test
     @Order(4)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `POST parties creates individual party and returns 201`() {
         val payload = """
             {
@@ -129,6 +159,13 @@ class PartyApiIT {
     @Test
     @Order(5)
     @TestSecurity(user = "risk-officer", roles = ["ROLE_RISK"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "risk-officer"),
+            Claim(key = "preferred_username", value = "risk-officer"),
+        ],
+    )
     fun `ROLE_RISK reads the party detail but not the search or the list`() {
         val id = createdPartyId ?: error("order 4 must have created a party")
         Given { this } When { get("/api/v1/parties/$id") } Then {
@@ -142,6 +179,13 @@ class PartyApiIT {
     @Test
     @Order(5)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET party by id returns created party`() {
         val id = createdPartyId ?: return
         Given { this } When {
@@ -156,6 +200,13 @@ class PartyApiIT {
     @Test
     @Order(6)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `PATCH party updates contact details`() {
         val id = createdPartyId ?: return
         Given {
@@ -172,6 +223,13 @@ class PartyApiIT {
     @Test
     @Order(7)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR", "ROLE_KYC"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `POST party document adds document`() {
         val id = createdPartyId ?: return
         val payload = """
@@ -195,6 +253,13 @@ class PartyApiIT {
     @Test
     @Order(8)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET party documents returns added document`() {
         val id = createdPartyId ?: return
         val body = (
@@ -210,6 +275,13 @@ class PartyApiIT {
     @Test
     @Order(9)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_ADMIN", "ROLE_KYC"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `PUT kyc-status updates KYC to APPROVED`() {
         val id = createdPartyId ?: return
         Given {
@@ -226,6 +298,13 @@ class PartyApiIT {
     @Test
     @Order(10)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET party by unknown id returns 404`() {
         Given { this } When {
             get("/api/v1/parties/${UUID.randomUUID()}")
@@ -237,6 +316,13 @@ class PartyApiIT {
     @Test
     @Order(11)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `POST duplicate email returns 409`() {
         val payload = """
             {
@@ -260,6 +346,13 @@ class PartyApiIT {
     @Test
     @Order(12)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `POST party without email returns a diagnosable 400, not a silent empty body`() {
         // Contract guard: openapi.yaml marks email required. A request that omits it must
         // fail with a structured VALIDATION_ERROR body — never the body-less 400 a missing
@@ -293,6 +386,13 @@ class PartyApiIT {
     @Test
     @Order(13)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_ADMIN"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET gdpr-export returns the subject PII and document metadata`() {
         val id = createdPartyId ?: return
         Given { this } When {
@@ -310,6 +410,13 @@ class PartyApiIT {
     @Test
     @Order(14)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_ADMIN"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET gdpr-export for an unknown party returns 404`() {
         Given { this } When {
             get("/api/v1/parties/${UUID.randomUUID()}/gdpr-export")
@@ -321,6 +428,13 @@ class PartyApiIT {
     @Test
     @Order(15)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET gdpr-export with a non-ADMIN role returns 403`() {
         // Subject-access export is ADMIN-only (GDPR Art. 15 is privileged). A read role
         // must not be able to pull the full PII set.
@@ -364,6 +478,13 @@ class PartyApiIT {
     @Test
     @Order(20)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET search by name returns matching party, data-minimised`() {
         val marker = "Zphinx${UUID.randomUUID().toString().take(6)}"
         Given {
@@ -391,6 +512,13 @@ class PartyApiIT {
     @Test
     @Order(21)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET search with sub-2-char term returns an empty page, never a scan`() {
         Given { queryParam("q", "a") } When {
             get("/api/v1/parties/search")
@@ -404,6 +532,13 @@ class PartyApiIT {
     @Test
     @Order(22)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET search finds a party by email, phone and registration-number fragments (ADR-0228)`() {
         val marker = UUID.randomUUID().toString().take(8)
         val email = "ops.$marker@openbank.test"
@@ -453,6 +588,13 @@ class PartyApiIT {
     @Test
     @Order(23)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "00000000-0000-0000-0000-000000000099"),
+            Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
+        ],
+    )
     fun `GET search with a role outside the permitted set returns 403`() {
         Given { queryParam("q", "novak") } When {
             get("/api/v1/parties/search")
@@ -478,6 +620,13 @@ class PartyApiIT {
     @Test
     @Order(24)
     @TestSecurity(user = "directory-lookup-it", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "directory-lookup-it"),
+            Claim(key = "preferred_username", value = "directory-lookup-it"),
+        ],
+    )
     fun `POST directory lookup answers 400 for an absent body and for a null hash`() {
         Given {
             contentType("application/json")

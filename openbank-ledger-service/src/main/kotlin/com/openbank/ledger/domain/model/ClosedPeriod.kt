@@ -260,3 +260,12 @@ data class ClosedPeriodVerification(
     val balanced: Boolean,
     val recomputedAt: Instant,
 )
+
+/** Calendar-year movements and the monthly hashes that substantiate a frozen flow. */
+data class YearToDateTrialBalance(
+    val balance: PeriodTrialBalance,
+    val from: LocalDate,
+    val to: LocalDate,
+    val sourcePeriods: List<String> = emptyList(),
+    val sourceContentHashes: List<String> = emptyList(),
+)

@@ -317,6 +317,8 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 ## Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `settlement_outbox` would have kept every SENT row, payload included, indefinitely. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; the repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched, and nothing in this service reads SENT rows. Information disclosure: shrinks the window in which a database read exposes past settlement-event payloads. No new endpoint, caller or privilege. Since slice 10 (#10041) this outbox also carries `SETTLEMENT_OPERATOR_APPROVAL_CHANGED`, the maker-checker evidence that outlives a purged approval row; its retained copy is audit-service's tamper-evident chain, which consumes `openbank.settlement.events` and keeps each entry 10 years (`retention_until`), so purging the delivered outbox row after 7 days removes a buffer, not the evidence.
+
 - **2026-10-03** — **Read-only settlement status query (#10041).** `GET /api/v1/settlements/{id}`
   returns the persisted settlement (stable v1 status vocabulary, `recoveryRequired` for an
   uncertain balance movement, amount as exact decimal text) with `Cache-Control: no-store`. It
@@ -356,7 +358,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
   `AUTHZ_FOUR_EYES_ENFORCE=false`; keep the table and its outbox evidence.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set

@@ -77,7 +77,7 @@ com.openbank.domestic/
 │   ├── model/                 DomesticPayment, status / priority / scope / reject enums,
 │   │                          transitionTo() + canTransitionTo() (the state machine)
 │   ├── event/                 DomesticPaymentCreatedEvent, DomesticPaymentStatusChangedEvent
-│   └── screening/             ScreeningPolicy (pure decision), ScreeningResult, ScreeningDecision
+│   └── screening/             (moved to openbank-libs-fincrime, ADR-0353)
 │
 ├── application/               ◄── use-case orchestration
 │   ├── port/in/               DomesticPaymentUseCase + commands / queries
@@ -90,7 +90,6 @@ com.openbank.domestic/
     ├── persistence/           repository impls, JPA entities, mappers
     ├── outbox/                DomesticPaymentOutboxDispatcher (scheduled, fault-tolerant)
     ├── kafka/                 KafkaDomesticPaymentEventPublisher
-    ├── approval/              ApprovalConfig (Redis-backed four-eyes workflow only)
     ├── client/               SanctionsServiceClient + adapter, AmlServiceClient + adapter
     └── authz/                AuthzProducer (OPA, ADR-0034)
 ```
@@ -181,3 +180,11 @@ sequenceDiagram
 3. **Fail closed** — a sanctions-service outage holds the payment in `RECEIVED`; it is never auto-released.
 4. **No remote call inside the persistence transaction** — screening and AML-case calls happen between transactions.
 5. **Durable, actor-bound idempotency** — `Idempotency-Key` is mandatory; Postgres stores its normalized request fingerprint atomically with the payment/outbox, exact replays return that row, and mismatches fail with 409.
+
+## Scoped payment initiators (ADR-0335 D5)
+
+`rules.yaml: scoped_payment_initiators` declares pension-service for `domestic-payment.create`.
+The domain resolves an `InitiatorScope` from the principal: pension may pay only from its one
+configured debtor account (`OPENBANK_DOMESTIC_PAYMENT_SCOPED_INITIATORS_PENSION_DEBTOR_ACCOUNT_ID`),
+an unset value permits nothing, and any other ROLE_API-only machine is `Undeclared` and may pay from
+no account. The scope is checked before the `Idempotency-Key` is claimed.

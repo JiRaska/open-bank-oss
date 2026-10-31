@@ -1,0 +1,27 @@
+{
+  "periodStart" : "2009-01-01",
+  "periodEnd" : "2009-03-31",
+  "currency" : "CZK",
+  "participants" : {
+    "inForce" : 3,
+    "newInPeriod" : 1,
+    "exitedInPeriod" : 2,
+    "contributing" : 2,
+    "pensioners" : 1,
+    "byProductLine" : { "DPS" : 3 },
+    "byAgeBand" : { "0-17" : 0, "18-34" : 1, "35-49" : 0, "50-59" : 0, "60-64" : 1, "65+" : 1 },
+    "byStatusAtPeriodEnd" : { "ACTIVE" : 2, "CHANGED_AFTER_PERIOD_END" : 1 }
+  },
+  "contributions" : { "participant" : 2300.00, "employer" : 500.00, "state" : 230.00, "transferIn" : 50000.00, "total" : 3030.00 },
+  "contributionsYtd" : { "participant" : 2300.00, "employer" : 500.00, "state" : 230.00, "transferIn" : 50000.00, "total" : 3030.00 },
+  "stateContributions" : { "claimed" : 230.00, "received" : 230.00, "returned" : 0.00 },
+  "payouts" : {
+    "total" : 125000.00, "cases" : 2, "taxWithheld" : 18000.00,
+    "byForm" : { "LUMP_SUM" : { "amount" : 120000.00, "count" : 1 }, "PHASED_WITHDRAWAL" : { "amount" : 5000.00, "count" : 1 } }
+  },
+  "payoutsYtd" : {
+    "total" : 125000.00, "cases" : 2, "taxWithheld" : 18000.00,
+    "byForm" : { "LUMP_SUM" : { "amount" : 120000.00, "count" : 1 }, "PHASED_WITHDRAWAL" : { "amount" : 5000.00, "count" : 1 } }
+  },
+  "transfers" : { "inCount" : 1, "inAmount" : 50000.00, "outCount" : 1, "outAmount" : 80000.00 }
+}

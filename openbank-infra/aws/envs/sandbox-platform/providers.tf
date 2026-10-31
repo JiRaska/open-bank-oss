@@ -76,6 +76,16 @@ provider "helm" {
       args        = ["eks", "get-token", "--cluster-name", local.cluster_name, "--region", local.region]
     }
   }
+
+  # Authenticated OCI login for helm_release.karpenter's chart (anonymous ECR Public pulls
+  # 429 on shared runners, 2026-09-28). Provider-level on purpose: helm_release's
+  # repository_password is a stored attribute and this token rotates every run, which
+  # made the release a perpetual diff; helm provider 3.3 has no write-only variant of it.
+  registries = [{
+    url      = "oci://public.ecr.aws"
+    username = data.aws_ecrpublic_authorization_token.karpenter_chart.user_name
+    password = data.aws_ecrpublic_authorization_token.karpenter_chart.password
+  }]
 }
 
 provider "kubectl" {

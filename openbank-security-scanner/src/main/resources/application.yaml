@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,OPTIONS
       headers: Content-Type,Authorization
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
   log:
     level: INFO
     console:
@@ -36,11 +21,6 @@ quarkus:
     path: /api/docs
   scheduler:
     enabled: true
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
   # quarkus-flyway was a build dependency and `db/migration/` held V2/V3, but nothing ever
@@ -65,6 +45,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_security
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_security
   flyway:
@@ -120,6 +103,24 @@ quarkus:
 
 mp:
   messaging:
+    # mTLS to Strimzi (ADR-0137). Defaults keep local dev/test PLAINTEXT; the gitops manifest sets
+    # KAFKA_* env in prod. The broker address comes from the global kafka.bootstrap.servers
+    # (KAFKA_BOOTSTRAP_SERVERS) -- a channel-level bootstrap.servers would override it (#4942).
+    connector:
+      smallrye-kafka:
+        # Nested, not dotted: SmallRye's YAML source quotes a dotted leaf key, which the Kafka
+        # connector's plain lookup never finds (see root CLAUDE.md, Kafka group.id note).
+        security:
+          protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl:
+          keystore:
+            location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+            type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+            password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+          truststore:
+            location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+            type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+            password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     outgoing:
       # `security-events-out` -> openbank.security.scan.event was removed in #4709. The channel,
       # its outbox and its topic existed for the whole life of this service with nothing ever
@@ -127,7 +128,6 @@ mp:
       # results are served from GET /api/v1/security/report, not published.
       ict-incident-outbox-out:
         connector: smallrye-kafka
-        bootstrap.servers: kafka:9092
         client.id: security-scanner-ict-${quarkus.uuid}
         topic: openbank.security.ict.incident
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -135,8 +135,8 @@ mp:
 
 openbank:
   outbox:
-    # Outbox delivery is part of the service contract. Production may override this to false only
-    # during the documented schema/broker activation gate; the GitOps rollout currently does so.
+    # Outbox delivery is part of the service contract. The GitOps manifest also sets it true
+    # (#4942); IctIncidentRelayDeployedConfigTest pins both.
     dispatch-enabled: true
     poll-interval: 5s
     initial-delay: 5s

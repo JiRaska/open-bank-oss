@@ -77,7 +77,7 @@ jobs:
       # the dependency graph and hashing what it finds, so what is already on disk is exactly what
       # it must not take for granted. The cost is a slower resolve on a job nobody waits on.
       - if: steps.tok.outputs.have == 'true'
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           java-version: "25"
           distribution: temurin
@@ -90,9 +90,10 @@ jobs:
           # its platform BOMs (quarkusProdRuntimeClasspathConfigurationPlatform) are never
           # touched by it, so artifacts that exist only there were never hashed — measured
           # as 38 missing for one service (#3028). quarkusDependenciesBuild resolves the
-          # Quarkus application model without running a full quarkusBuild.
+          # Quarkus application model without running a full quarkusBuild. cyclonedxBom
+          # resolves each component's .pom, which auto-deploy's SBOM step then verifies.
           ./gradlew --write-verification-metadata sha256 \
-            testClasses quarkusDependenciesBuild --no-daemon -q
+            testClasses quarkusDependenciesBuild cyclonedxBom --no-daemon -q
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false"
 

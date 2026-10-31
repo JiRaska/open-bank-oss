@@ -71,7 +71,7 @@ Tajemství (`POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`) přicházejí z prostřed
 Nárůst `PENDING` znamená, že sankční brána platby drží — buď skutečné REVIEW výstupy, nebo pravděpodobněji **sanctions-service je nedostupná** (fail-closed, ADR-0032 §C). Zkontroluj health sanctions-service a stav circuit-breakeru. Každá podržená platba má otevřený AML případ (`AML_HOLD` nebo `SCREENING_UNAVAILABLE`); řeš přes aml-service / compliance ops. Platby jsou uloženy, nikdy ztraceny.
 
 ### Zpoždění publikace událostí
-Události se publikují přímo a synchronně ze `SctInstPaymentService` přes `KafkaSctInstEventPublisher` — na této cestě není žádný outbox ani dispatcher (dřívější outbox pipeline byla odstraněna jako mrtvý kód, issue #1034). Zaostává-li `openbank.sepa.instant.events`, zkontroluj health Kafka emitteru / brokeru a logy na straně producenta u samotného volání publikace; signálem je zaseknutý přechod stavu platby, ne zaseknutá backlog tabulka.
+Ve zdrojovém kandidátu #12181 se platba a řádek události commitují společně; `SctInstOutboxDispatcher` opakuje doručení do `openbank.sepa.instant.events`. Před použitím postupu pro outbox nejdřív ověř nasazenou revizi a migraci Flyway V5: samotná větev není důkaz nasazení. Zkontroluj backlog `PENDING`/`FAILED` v `sct_inst_outbox`, stav relaye a dostupnost brokeru. Řádek `DEAD` je terminální a vyžaduje rozhodnutí vlastníka podle [runbooku obnovy outboxu](../../../../docs/runbooks/sepa-instant-outbox-recovery.md); nulový zpracovatelný backlog nedokazuje doručení. Opakování je at-least-once: potvrzení brokerem před `markSent` může zdvojit Kafka zprávu se stejným `ce-id`. Před zapnutím relaye nejdřív nasaď a ověř deduplikaci `ce-id` v auditním konzumentovi; samotná změna zdroje nedokazuje pořadí nasazení ani neopravuje historické mezery.
 
 ### Flyway checksum mismatch při startu
 Způsobeno přepsanou aplikovanou migrací. Dočasná oprava: nastav `QUARKUS_FLYWAY_REPAIR_AT_START=true` v GitOps env, pak odeber, jakmile se DB ustálí. Nikdy nepřepisuj aplikovanou migraci.
@@ -82,3 +82,24 @@ Platby v `PROCESSING` po `execution_timeout_at` jsou vyzvednuty `findTimedOut` (
 ## Produkční mTLS volání AML služby
 
 Produkční REST klient AML používá pojmenovanou konfiguraci TLS `aml-authority` a listener AML služby na portu 8443, který vyžaduje klientský certifikát. Nasazení dodává klientský certifikát a svazek důvěryhodné privátní CA; vyžaduje se TLS 1.3. Pokud volání AML po nasazení selhává, zkontrolujte společně klientský certifikát a CA, produkční URL REST klienta a síťovou politiku k listeneru. Lokální vývoj a testy nadále používají HTTP fixture; úspěšný lokální HTTP test sám neprokazuje navázání TLS v nasazení.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Volání vypořádání do transaction-service
+
+Vypořádání se vyžaduje přes sdílenou fasádu `TransactionClient` z generovaného modulu `openbank-client-transaction` (ADR-0319), která je nově jediným místem interpretujícím HTTP odpověď transaction-service. Stav 2xx se prokazuje ze stavového řádku dříve, než se čte tělo; přijme se jen HTTP 201 s čitelným tělem odpovídajícím požadavku (typ, zdrojový účet, částka, měna, platební schéma, typ instrukce), přičemž `COMPLETED` znamená vypořádáno a `PENDING`/`PROCESSING` fasáda vyhodí jako nejisté a platba se zopakuje. Vše ostatní - 409, 400/422, jiné kódy 2xx, nečitelné nebo neodpovídající tělo i jakékoli 3xx/401/403/404/5xx nebo selhání spojení - končí jako `SettlementUnavailableException`, takže se platba zopakuje se stejným idempotentním klíčem (`sct-inst-settlement-<paymentId>`) a opakování přehraje stejné zaúčtování místo vytvoření druhého. Konfigurace se nezměnila.
+
+## Typ platby v pacs.008 (#13663)
+
+Tato větev sestavuje zprávy SCT Inst s `PmtTpInf/SvcLvl/Cd=SEPA` a
+`PmtTpInf/LclInstrm/Cd=INST`. Sdílený builder vkládá blok za `PmtId`; stávající kontrola proti
+XML schématu ověří výslednou zprávu před voláním brány.
+Mění se odchozí zpráva schématu, nikoli platební API, účetní klíče či pravidla opakování.
+Použijte běžný revidovaný release a znovu sestavte konzumenty sdílené knihovny; zdrojový kód
+a lokální testy simulátoru nedokládají přijetí zprávy nasazenou externí bránou schématu.

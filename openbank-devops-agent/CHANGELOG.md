@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.8.3...devops-agent-v0.8.4) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.8.2...devops-agent-v0.8.3) (2026-10-12)
+
+
+### Bug Fixes
+
+* **egress:** allow-list third-party hosts and bound in-cluster HTTP responses ([#11740](https://github.com/JiRaska/open-bank-oss/issues/11740)) ([d81d1d8](https://github.com/JiRaska/open-bank-oss/commit/d81d1d8e362f49be4883bfca884f967c742de5d0))
+
 ## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.8.1...devops-agent-v0.8.2) (2026-10-04)
 
 

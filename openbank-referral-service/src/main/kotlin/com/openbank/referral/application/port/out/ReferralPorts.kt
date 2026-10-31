@@ -15,6 +15,9 @@ interface ReferralProgramRepository {
     suspend fun create(program: ReferralProgram): ReferralProgram
     suspend fun find(id: UUID): ReferralProgram?
     suspend fun listPublished(): List<ReferralProgram>
+
+    /** Draft (unpublished) programs, newest first — the marketing maker's work queue. */
+    suspend fun listDrafts(): List<ReferralProgram>
     suspend fun publish(id: UUID, maker: String, checker: String, at: java.time.Instant): ReferralProgram
 }
 

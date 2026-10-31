@@ -55,6 +55,7 @@ class OutboxDeadLetterAlertNamingTest {
         // ADR-0283 phase 1: the card money path binds the same gauge, and its DEAD rows are
         // money that moved with nobody told. Same file as card-issuance — both are payments.
         "card-processing" to File("../openbank-infra/gitops/components/payments/prometheus-rules.yaml"),
+        "sepa-instant" to File("../openbank-infra/gitops/components/payments/prometheus-rules.yaml"),
         "referral" to File("../openbank-infra/gitops/components/referral/prometheus-rules-referral.yaml"),
     )
 
@@ -125,7 +126,10 @@ class OutboxDeadLetterAlertNamingTest {
             )
             .isNotEmpty()
 
-        val covered = alertRules.keys.map { "openbank-$it-service" }.toSortedSet()
+        val covered = alertRules.keys.map { tag ->
+            // The SEPA Instant module predates the fleet's `-service` naming convention.
+            if (tag == "sepa-instant") "openbank-sepa-instant" else "openbank-$tag-service"
+        }.toSortedSet()
         assertThat(bindings)
             .describedAs(
                 "every service binding AbstractOutboxDeadLetterGauge needs a row in `alertRules` " +

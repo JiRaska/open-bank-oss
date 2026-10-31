@@ -8,6 +8,10 @@ output "distribution_id" {
   value       = aws_cloudfront_distribution.cdn.id
 }
 
+output "distribution_arn" {
+  value = aws_cloudfront_distribution.cdn.arn
+}
+
 output "distribution_domain" {
   description = "CloudFront default domain (debug / health check)."
   value       = aws_cloudfront_distribution.cdn.domain_name

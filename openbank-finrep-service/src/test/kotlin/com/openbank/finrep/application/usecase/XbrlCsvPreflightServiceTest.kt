@@ -5,6 +5,9 @@ package com.openbank.finrep.application.usecase
 
 import com.openbank.finrep.application.port.inbound.FinrepUseCase
 import com.openbank.finrep.application.port.inbound.GetXbrlCsvPreflightQuery
+import com.openbank.finrep.application.port.out.TrialBalanceLineDto
+import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
+import com.openbank.finrep.domain.mapper.F0101Mapper
 import com.openbank.finrep.domain.model.BalanceVerdict
 import com.openbank.finrep.domain.model.FinrepDataGap
 import com.openbank.finrep.domain.model.FinrepTemplate
@@ -14,6 +17,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
 import java.time.LocalDate
 
 class XbrlCsvPreflightServiceTest {
@@ -61,6 +65,29 @@ class XbrlCsvPreflightServiceTest {
             isBalanced = true,
             balanceVerdict = BalanceVerdict.AGREED_BALANCED,
         )
+
+        val result = XbrlCsvPreflightService(finrepUseCase)
+            .getPreflight(GetXbrlCsvPreflightQuery("F01.01", asOf))
+
+        assertThat(result.state).isEqualTo(XbrlCsvPreflightState.READY_FOR_RENDERING)
+        assertThat(result.blockers).isEmpty()
+    }
+
+    @Test
+    fun `allows a return whose emitted datapoint ids are verified`(): Unit = runBlocking {
+        val mapped = F0101Mapper.map(
+            TrialBalanceSnapshot(
+                lines = listOf(
+                    TrialBalanceLineDto("1510", "ASSET", BigDecimal("100"), "CZK"),
+                    TrialBalanceLineDto("4100", "INCOME", BigDecimal("-100"), "CZK"),
+                ),
+                ledgerReportsBalanced = true,
+            ),
+            asOf,
+        )
+        assertThat(mapped.hasDataGaps).isFalse()
+        assertThat(mapped.isBalanced).isTrue()
+        coEvery { finrepUseCase.getTemplate(any()) } returns mapped
 
         val result = XbrlCsvPreflightService(finrepUseCase)
             .getPreflight(GetXbrlCsvPreflightQuery("F01.01", asOf))

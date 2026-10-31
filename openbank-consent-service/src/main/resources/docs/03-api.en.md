@@ -1,8 +1,17 @@
 # API
 
-All endpoints are under `/api/v1/consents`. The API contract major version (`1`) maps to the URL prefix `/api/v1` (`openbank.api.version=1`, ADR 0048). Content type is `application/json`.
+Consent and suppression endpoints are under `/api/v1/consents` and `/api/v1/suppressions`. The API contract major version (`1`) maps to the URL prefix `/api/v1` (`openbank.api.version=1`, ADR 0048). Content type is `application/json`.
 
 > **Contract status:** an `openapi.yaml` ships with the service but is currently **partially stale** relative to the implemented resource (it predates the SCA-gated lifecycle — e.g. it shows `expiresAt`/`accountIds` and a `PENDING` status, whereas the code uses `validTo`/`accountIbans` and `PENDING_SCA`, and exposes `/activate` and `/reject`). The descriptions below are **derived from the actual `ConsentResource.kt`** and are authoritative; reconciling `openapi.yaml` to this is a tracked follow-up.
+
+## Production listener authentication
+
+`/api/*` requires an OIDC bearer token on both the plain HTTP listener and the
+mTLS listener. A trusted client certificate authenticates only the TLS
+connection; callers using mTLS must also send their bearer token. A trusted
+certificate without a bearer token receives 401. A missing trusted certificate
+fails the TLS handshake before HTTP. Endpoint roles, OPA decisions and the SCA
+requirements for consent activation still apply.
 
 ## Endpoints
 
@@ -16,6 +25,10 @@ All endpoints are under `/api/v1/consents`. The API contract major version (`1`)
 | `POST` | `/api/v1/consents/{id}/reject?reason={text}` | Reject → emits `ConsentRejected` | `200` |
 | `DELETE` | `/api/v1/consents/{id}?partyId={uuid}` | Revoke → emits `ConsentRevoked` | `200` |
 | `POST` | `/api/v1/consents/{id}/validate` | Validate access (scope/account/grantee) | `200` |
+
+## Suppression authorization
+
+The suppression endpoints require a bearer token even when the OPA interceptor runs in advisory mode. `GET /api/v1/suppressions/party/{partyId}` accepts `ROLE_API`, `ROLE_OPERATOR`, or `ROLE_ADMIN`. `POST /api/v1/suppressions` and `POST /api/v1/suppressions/{id}/revoke` accept only `ROLE_OPERATOR` or `ROLE_ADMIN`. OPA evaluates `suppression.read` and `suppression.manage`; its denials are enforced when `AUTHZ_ENFORCE=true` and advisory otherwise. A request without authentication returns `401`; an authenticated caller without the required role receives `403`.
 
 ## Create consent
 

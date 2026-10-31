@@ -11,6 +11,7 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.domestic.domain.model.InitiatorScope
 import com.openbank.libs.domain.money.Money
 import java.time.Instant
 import java.util.UUID
@@ -44,6 +45,8 @@ data class CreateDomesticPaymentCommand(
     val reservationId: UUID? = null,
     /** Trusted inbound synthetic taint, copied into the durable outbox boundary. */
     val synthetic: Boolean = false,
+    /** Which debtor accounts the caller may pay from (ADR-0335 D5); resolved from the principal at the REST edge. */
+    val initiatorScope: InitiatorScope = InitiatorScope.General,
 ) {
     init {
         require((delegationId == null) == (reservationId == null)) {

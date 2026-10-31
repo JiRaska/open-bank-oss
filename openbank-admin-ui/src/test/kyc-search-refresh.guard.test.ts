@@ -10,7 +10,7 @@ describe('KYC search and refresh contract', () => {
     expect(source).toContain('disabled={loading}')
     expect(source).toContain('aria-busy={loading}')
     expect(source).toContain("aria-label={t('Obnovit KYC případy', 'Refresh KYC cases')}")
-    expect(source).toContain("aria-label={t('Vyhledat KYC případy', 'Search KYC cases')}")
+    expect(source).not.toContain('kyc-party-id')
     expect(source).toContain("${KYC_SERVICE}/api/v1/kyc/cases")
   })
 })

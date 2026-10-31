@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA server certificate for audit-service's east-west mTLS listener (8443, #11900). The
+# HTTP/8113 listener remains for existing callers; new consumers (lending-service's evidence-bundle
+# read) use 8443. Same shape as consent-service-internal-tls.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: audit-service-internal-tls
+  namespace: audit
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: audit-service-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - audit-service.audit.svc
+    - audit-service.audit.svc.cluster.local
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

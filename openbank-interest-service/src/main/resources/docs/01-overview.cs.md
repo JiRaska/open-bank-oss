@@ -15,7 +15,7 @@
 - ❌ Nedrží ani nepočítá zůstatky účtů — autoritativní zůstatek je `balance-service`; úročení používá zůstatek předaný v accrual požadavku.
 - ❌ Neúčtuje podvojné zápisy — to dělá `ledger-service`; `capitalized.ledgerEntryId` je referenční odkaz (ve v1 nullable).
 - ❌ Nepřesouvá hotovost zákazníkovi ani finančnímu úřadu — kapitalizace zaznamenává připsání; peněžní část daně (odvod) je delegována dále přes událost `interest.withholding.remitted.v1` (ADR-0030 off-gate).
-- ❌ Zatím neřeší daňové atributy strany (party) příjemce — v1 dodává fail-safe výchozího providera (CZ rezident fyzická osoba); resoluce účet→party je dokumentovaný fast-follow.
+- ✅ Řeší daňové atributy strany (party) příjemce v okamžiku vzniku příjmu (ADR-0339 B) — účet→party→AML profil, pouze země rezidence (TINy zůstávají v party-service); každé selhání padne bezpečně na výchozí profil CZ rezidenta fyzické osoby (ADR-0033 §C).
 - ❌ Neprovádí KYC/AML ani sanction screening.
 
 ## Pozice v doméně
@@ -62,7 +62,7 @@
 - **Redis (Valkey)** — zapojený jako závislost; resources ve v1 nepoužívají idempotency-key tok.
 - **Keycloak** — OIDC autentizace.
 - **openbank-libs** — sdílená runtime infrastruktura (BuildInfo, ServiceInfoResource, DocsResource, security).
-- **TaxProfilePort** — resolvuje daňový profil příjemce; výchozí provider v1 vrací fail-safe profil CZ rezidenta fyzické osoby.
+- **TaxProfilePort** — resolvuje daňový profil příjemce z faktů vlastněných stranou (`PartyTaxProfileProvider`, ADR-0339 B: účet→typ party→země rezidence z AML profilu); každé selhání resoluce padne bezpečně na profil CZ rezidenta fyzické osoby.
 
 ## Byznysová hodnota
 

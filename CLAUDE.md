@@ -66,9 +66,11 @@ security holes (→ private Security Advisories). Every PR links its issue (`Clo
 Labels are code (`.github/labels.yml`, applied by the Label-sync workflow) — don't create them by hand.
 
 Autonomous work is WIP-limited across every prefix in
-`rules.yaml: autonomous_agent_prs.agent_branch_prefixes` (currently `agent/` and `codex/`). Before
-opening one of those PRs, count all open PRs under those prefixes. At the limit of three, tend or
-reuse existing work instead of opening another PR unless the user explicitly directs the new PR.
+`rules.yaml: autonomous_agent_prs.agent_branch_prefixes`, up to `max_open_prs` open PRs. Read both
+values from `rules.yaml` rather than from here: since 2026-10-14 the prefix list is deliberately
+empty (owner decision), so no branch counts against the ceiling. When the list is non-empty, count
+all open PRs under those prefixes before opening another, and at the limit tend or reuse existing
+work unless the user explicitly directs the new PR.
 
 ## Build
 
@@ -272,6 +274,12 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   profile: a `QuarkusTestProfile` loads in a **different classloader** from the test class, so a
   companion object initializes twice — a randomized id in `getConfigOverrides()` hands the scheduler
   one value and the assertion another. Use literals.
+- **Reference data is not an `enum class` — no numbers in value names, no second copy in another
+  module.** `UP_TO_30K`/`DAYS_7` turn a business threshold into a compiled identifier (party-service
+  derives `HIGH_TURNOVER` from `OVER_500K`), and a vocabulary copied per service drifts: the AML risk
+  scale exists as seven enums on three scales. Model it as data or reuse the owning type.
+  `check-enum-reference-data.py` (gate `enum-reference-data-ratchet`) ratchets both shapes; today's
+  estate is baselined against #13434–#13441.
 - **A Kafka `group.id` / `auto.offset.reset` written as a YAML key never reaches the connector.**
   SmallRye Config's YAML source quotes any leaf map key containing a literal dot, so
   `group.id: foo` under `mp.messaging.incoming.<channel>:` registers as the property

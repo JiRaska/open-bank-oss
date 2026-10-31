@@ -100,7 +100,10 @@ drift-guarded by `check-eu-ai-act.sh`.
 In addition, the AI-governance substrate an auditor can verify directly: agents-as-code +
 AI-attributed audit (ADR-0031), policy-gated MCP tool-calls via the shared OPA sidecar (ADR-0034),
 agent charters as Markdown (ADR-0156), and the versioned prompt registry with its integrity guard
-(`openbank-libs/governance/prompts/` + `check-prompt-registry.py`, ADR-0148).
+(`openbank-libs/governance/prompts/` + `check-prompt-registry.py`, ADR-0148). ADR-0031 phase 3 adds
+the recorded-human-merge evidence — `agent_merge_record` plus the `agent.pr.merged` audit event
+under the merging human, least-privilege `ROLE_MERGE_RECORDER` ingest, and the attestation
+procedure in [`runbook 0018`](../runbooks/0018-agent-merge-record-first-attestation.md).
 
 ---
 

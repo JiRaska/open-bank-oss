@@ -5,7 +5,9 @@ info:
   title: Consent Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.0 -> 1.1): additive
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.13.0
+  # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
+  # payloadRef — all optional) on ApprovalResponse; no breaking change.
+  version: 1.15.0
   description: >-
     Data sharing consent lifecycle — create, activate, reject, revoke, validate. GET /approvals
     lists pending four-eyes work for checkers; PATCH /approvals/{id} decides an approval paused by
@@ -336,6 +338,8 @@ paths:
     post:
       tags: [Suppressions]
       summary: Create a do-not-contact suppression (ADR-0219 D3)
+      security:
+        - bearerAuth: []
       description: >-
         Idempotent on the natural key (partyId, scope, value) over ACTIVE rows: a retried create
         replays the original suppression — no duplicate row, no second event (ADR-0293). A revoked
@@ -356,6 +360,8 @@ paths:
                 $ref: '#/components/schemas/SuppressionResponse'
         '400':
           description: Invalid entry (ALL takes no value; SCOPE/TOPIC require one)
+        '401':
+          description: Missing or invalid authentication
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -363,6 +369,8 @@ paths:
     get:
       tags: [Suppressions]
       summary: List a party's active suppressions — the contact-policy gate's read
+      security:
+        - bearerAuth: []
       operationId: listActiveSuppressions
       parameters:
         - name: partyId
@@ -380,6 +388,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SuppressionResponse'
+        '401':
+          description: Missing or invalid authentication
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -387,6 +397,8 @@ paths:
     post:
       tags: [Suppressions]
       summary: Revoke a suppression entry
+      security:
+        - bearerAuth: []
       operationId: revokeSuppression
       parameters:
         - name: id
@@ -406,6 +418,8 @@ paths:
           description: No suppression with that id
         '409':
           description: Already revoked
+        '401':
+          description: Missing or invalid authentication
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -427,7 +441,7 @@ components:
 
   responses:
     Forbidden:
-      description: Authenticated but denied by the OPA authorization policy (ADR-0034)
+      description: Authenticated but denied by a role gate or the OPA authorization policy (ADR-0034)
       content:
         application/json:
           schema:
@@ -463,7 +477,46 @@ components:
           format: date-time
           description: Request time; pending approvals expire after 24 hours.
         decidedBy: { type: string, nullable: true }
-
+        summary:
+          type: string
+          nullable: true
+          description: >-
+            Bounded human-readable description of the paused request, persisted with the
+            approval (ADR-0227 D1). Null when the approval was created by application code
+            rather than by the intercepting pause.
+        domain:
+          type: string
+          nullable: true
+          description: >-
+            The service's domain in the unified approval inbox (ADR-0227 D1), derived from
+            quarkus.application.name. Informational; the inbox keys items off its own source
+            list.
+        amount:
+          type: string
+          nullable: true
+          description: >-
+            The maker's original request amount, when a future phase persists one (ADR-0227
+            D1). Always null today - the request body is not persisted, only its SHA-256
+            fingerprint. Absent never means zero.
+        currency:
+          type: string
+          nullable: true
+          description: ISO 4217 currency of `amount`, when an amount is present. Null today.
+        riskClass:
+          type: string
+          nullable: true
+          enum: [MONEY_PATH, DESTRUCTIVE, OPERATIONAL, UNKNOWN]
+          description: >-
+            Coarse action-class risk (ADR-0227 D1/D3). UNKNOWN from the service side - the
+            authoritative classification lives in rules.yaml four_eyes metadata the store
+            cannot see; the admin-UI BFF re-derives it per action.
+        payloadRef:
+          type: string
+          nullable: true
+          description: >-
+            Retrievable pointer to the maker's original request payload, when a future phase
+            persists one. Null today - the persisted fingerprint is an integrity digest, not
+            a payload pointer.
     CreateConsentRequest:
       type: object
       required: [partyId, granteeId, scopes]

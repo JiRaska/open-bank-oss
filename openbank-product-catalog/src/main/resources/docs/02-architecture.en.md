@@ -126,3 +126,25 @@ latest catalog document during accrual would make historical interest non-reprod
 Specification, offering, draft, update and publication changes persist the domain row, append-only
 audit evidence and a `CatalogChangeEvent` v1 envelope atomically. A failed outbox insert rolls the
 whole transaction back. The outbox is intentionally transport-neutral until a delivery adapter ships.
+
+## Pack manifests and revision approval policy (ADR-0345)
+
+Each pack ships `catalog-packs/<pack>/pack.json`. The manifest lists the pack's schemas in registration
+order and, per schema version, an optional `approvalPolicy`. A policy has three parts:
+
+- role codes, each bound to an internal authority;
+- an optional `requireEffectiveFrom`;
+- required top-level attribute values.
+
+The seeder discovers enabled packs from their manifests, so the kernel names no pack, schema, role or
+authority. Registered policies are append-only per schema version.
+
+A schema with a policy publishes only when every declared role has approved the exact content digest.
+Each role must be approved by a different principal, and never by the maker. Approvals go through
+`/api/v2/offerings/{o}/revisions/{r}/approvals/{role}`. `/pension-approvals` is a deprecated alias.
+
+Deployment config binds each authority to the scope and realm role a token must carry together:
+`openbank.catalog.approval.authorities.<AUTHORITY>`.
+
+Gate `catalog-kernel-industry-neutral` keeps industry vocabulary out of the kernel. It also pins the
+frozen `/api/v1` enum values.

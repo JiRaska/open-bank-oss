@@ -9,16 +9,18 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.devops.application.port.out.RemediationProposalPort
 import com.openbank.devops.domain.model.DevOpsFinding
 import com.openbank.devops.infrastructure.config.DevOpsConfig
+import com.openbank.libs.security.EgressPolicy
+import com.openbank.libs.security.EgressRequest
+import com.openbank.libs.security.EgressResolver
+import com.openbank.libs.security.EgressResponse
+import com.openbank.libs.security.SafeHttpClient
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.ConfigProvider
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.Base64
 
@@ -45,8 +47,23 @@ class RemediationProposalAdapter(private val config: DevOpsConfig) : Remediation
         get() = ConfigProvider.getConfig()
             .getOptionalValue("devops.github.token", String::class.java).orElse("")
 
-    private val http: HttpClient by lazy {
-        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_S)).build()
+    /**
+     * ADR-0320 P1: the GitHub API URL is configurable, so egress is allow-listed. Default
+     * `api.github.com`; a GitHub Enterprise host must be added to `openbank.egress.allowed-hosts`.
+     */
+    @ConfigProperty(name = "openbank.egress.allowed-hosts", defaultValue = "api.github.com")
+    lateinit var allowedHosts: List<String>
+
+    /** Visible for testing: lets a unit test pin a stub host to loopback. */
+    internal var resolver: EgressResolver = EgressResolver.SYSTEM
+
+    private val http: SafeHttpClient by lazy {
+        SafeHttpClient(
+            EgressPolicy.fromConfig(allowedHosts),
+            resolver = resolver,
+            connectTimeout = Duration.ofSeconds(CONNECT_TIMEOUT_S),
+            callTimeout = Duration.ofSeconds(REQUEST_TIMEOUT_S),
+        )
     }
 
     @Suppress("TooGenericExceptionCaught", "ReturnCount")
@@ -74,47 +91,53 @@ class RemediationProposalAdapter(private val config: DevOpsConfig) : Remediation
 
     private fun getMainSha(): String? {
         val resp = send("GET", "/git/ref/heads/main", null)
-        if (resp == null || resp.statusCode() !in OK_RANGE) return null
-        return objectMapper.readValue(resp.body(), GitRefResponse::class.java).obj.sha.takeIf { it.isNotBlank() }
+        if (resp == null || resp.status !in OK_RANGE) return null
+        return objectMapper.readValue(resp.bodyAsString(), GitRefResponse::class.java).obj.sha.takeIf {
+            it.isNotBlank()
+        }
     }
 
     private fun createBranch(branch: String, sha: String): Boolean {
         val body = objectMapper.writeValueAsString(CreateRefRequest("refs/heads/$branch", sha))
         val resp = send("POST", "/git/refs", body)
         // 201 created; 422 = branch already exists (a re-run for the same finding) — both are fine.
-        return resp != null && (resp.statusCode() in OK_RANGE || resp.statusCode() == UNPROCESSABLE)
+        return resp != null && (resp.status in OK_RANGE || resp.status == UNPROCESSABLE)
     }
 
     private fun commitFile(path: String, branch: String, message: String, content: String): Boolean {
         val encoded = Base64.getEncoder().encodeToString(content.toByteArray())
         val body = objectMapper.writeValueAsString(PutContentRequest(message, encoded, branch))
         val resp = send("PUT", "/contents/$path", body)
-        return resp != null && resp.statusCode() in OK_RANGE
+        return resp != null && resp.status in OK_RANGE
     }
 
     private fun openPr(branch: String, title: String, body: String): String? {
         val payload = objectMapper.writeValueAsString(CreatePrRequest(title, branch, "main", body))
         val resp = send("POST", "/pulls", payload)
-        if (resp == null || resp.statusCode() !in OK_RANGE) {
-            log.warnf("GitHub create-PR returned HTTP %s", resp?.statusCode())
+        if (resp == null || resp.status !in OK_RANGE) {
+            log.warnf("GitHub create-PR returned HTTP %s", resp?.status)
             return null
         }
-        return objectMapper.readValue(resp.body(), CreatePrResponse::class.java).htmlUrl.takeIf { it.isNotBlank() }
+        return objectMapper.readValue(resp.bodyAsString(), CreatePrResponse::class.java).htmlUrl.takeIf {
+            it.isNotBlank()
+        }
     }
 
-    private fun send(method: String, path: String, body: String?): HttpResponse<String>? {
+    /** Visible for testing (egress allow-list). */
+    internal fun send(method: String, path: String, body: String?): EgressResponse? {
         val url = "${config.githubApiUrl().trimEnd('/')}/repos/${config.githubOwner()}/${config.githubRepo()}$path"
-        val publisher =
-            if (body == null) HttpRequest.BodyPublishers.noBody() else HttpRequest.BodyPublishers.ofString(body)
-        val request = HttpRequest.newBuilder(URI.create(url))
-            .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_S))
-            .header("Authorization", "Bearer $token")
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("Content-Type", "application/json")
-            .method(method, publisher)
-            .build()
-        return http.send(request, HttpResponse.BodyHandlers.ofString())
+        val request = EgressRequest(
+            method = method,
+            url = url,
+            headers = mapOf(
+                "Authorization" to "Bearer $token",
+                "Accept" to "application/vnd.github+json",
+                "X-GitHub-Api-Version" to "2022-11-28",
+                "Content-Type" to "application/json",
+            ),
+            body = body?.toByteArray(Charsets.UTF_8),
+        )
+        return http.send(request)
     }
 
     private fun markdown(f: DevOpsFinding, remediation: String): String = """

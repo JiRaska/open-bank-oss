@@ -28,6 +28,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_risk
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     # A LITERAL jdbc url, not only an env expression: Flyway migrates the DEFAULT (Agroal/JDBC)
     # datasource, and a service that boots only because the environment supplied one cannot start
     # from this repo alone (check-flyway-default-datasource.py, #3080).
@@ -62,10 +65,14 @@ quarkus:
       # gitops Deployment env, where gen-network-policies.py can see the edge; a cluster URL
       # baked in here would be an edge that generator cannot see (network-policy-code-edges).
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+      connect-timeout: 2000
+      read-timeout: 5000
     # ADR-0314 D4: lending's loan-book read. Local default only, as for ledger above; the gitops
     # Deployment points it at lending's private-CA mTLS listener (8443, #10732).
     lending-service:
       url: ${LENDING_SERVICE_URL:http://localhost:8126}
+      connect-timeout: 2000
+      read-timeout: 5000
 
   smallrye-reactive-messaging:
     kafka:
@@ -88,12 +95,6 @@ quarkus:
     resource:
       attributes:
         service.name: openbank-risk-engine
-
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
 
   dev-ui:
     enabled: false
@@ -198,6 +199,11 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
 
 openbank:
+  authz:
+    # libs-runtime OpaPolicyDecisionPointProducer (replaced this service's own AuthzProducer;
+    # same opa.url / opa.path / opa.timeout-ms keys and defaults). BUILD-time switch.
+    opa-pdp-producer:
+      enabled: true
   outbox:
     # Defaults to FALSE fleet-wide. Without this line no risk.limit.* event ever leaves risk_outbox:
     # no error, attempt_count stays 0, and a breach reaches nobody.
@@ -744,12 +750,27 @@ openbank:
     # Not declared: an open FX position per currency — the snapshot carries no FX derivative legs and
     # the ledger's FX revaluation accounts (1990-1997) are not modelled, so no net open position is
     # computable from the data.
+    # ADR-0344 D8: historical-simulation VaR over the stored curve-set and FX-fixing history. Fewer
+    # complete scenarios than minimum-scenarios in the window answers an explicit data gap, never a
+    # number (the ADR-0097 rule). 250 scenarios is the customary one-year minimum; the window is in
+    # calendar days and must hold that many recorded curve-set days.
+    var:
+      minimum-scenarios: 250
+      window-days: 400
+      # Wall-clock budget per VaR request (full revaluation per scenario); past it the work stops
+      # and the call answers 503 COMPUTATION_TIMEOUT. Same for the two budgets below.
+      timeout: 30S
+    pricing:
+      timeout: 5S
+    valuation:
+      timeout: 10S
     limits:
       parameter-set-id: openbank-risk-appetite
       parameter-sets:
         openbank-risk-appetite:
-          version: "1"
-          source: "Regulatory minima (CRR, Delegated Regulations (EU) 2015/61 and 2024/856) as limits; every early-warning threshold is a risk-appetite POLICY choice awaiting ALCO sign-off"
+          # v2 (ADR-0344 D8): adds the own-book PV01 and VaR limits.
+          version: "2"
+          source: "Regulatory minima (CRR, Delegated Regulations (EU) 2015/61 and 2024/856) as limits; every early-warning threshold, and the PV01 and VaR limits themselves, are risk-appetite POLICY choices awaiting ALCO sign-off"
           limits:
             lcr-min:
               metric: lcr
@@ -776,6 +797,18 @@ openbank:
               limit: 0.25
               early-warning: 0.20
               citation: "CRR Art. 395(1): exposure to one client or group at most 25 % of Tier 1; the EUR 150m alternative for institutions is NOT applied (conservative); early warning 20 % POLICY"
+            # ADR-0344 D8: market-risk appetite of the own treasury book, in CZK. No regulatory minimum
+            # exists for either figure; both levels are POLICY placeholders sized for the sandbox book.
+            own-book-pv01-max:
+              metric: pv01
+              limit: 500000
+              early-warning: 400000
+              citation: "Risk appetite POLICY: absolute PV01 of the own treasury book at most CZK 500k per bp; early warning CZK 400k"
+            own-book-var-max:
+              metric: var-99-1d
+              limit: 25000000
+              early-warning: 20000000
+              citation: "Risk appetite POLICY: 99 % one-day historical-simulation VaR of the own treasury book at most CZK 25m; early warning CZK 20m"
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -789,7 +822,7 @@ openbank:
 opa:
   url: "${OPA_URL:http://localhost:8181}"
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
-  timeout: "${OPA_TIMEOUT:PT0.5S}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
 
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"
@@ -807,6 +840,19 @@ authz:
       # Keep plain HTTP/8159: with client-auth REQUIRED Quarkus otherwise drops the HTTP listener
       # and every existing caller and probe gets connection refused (#10505).
       insecure-requests: enabled
+      # Listener parity (#12511, the #12506 pattern): with client-auth on, Quarkus ALSO registers its
+      # mTLS authentication mechanism, which turns any trusted client certificate into an authenticated
+      # SecurityIdentity of its own — on 8443 only. The API must be authenticated identically on both
+      # listeners, by the OIDC bearer OPA decides on, so /api/* accepts the bearer mechanism ONLY; the
+      # certificate stays transport authentication. Measured before this: a fleet-CA certificate with no
+      # bearer reached the API as an authenticated principal (403 from authz, not 401).
+      # RiskListenerAuthParityIT holds both listeners to it with the production listener shape.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
     # ledger-service terminates a private-CA mTLS listener on 8443 with client auth REQUIRED, so
     # the ledger rest-client names its own TLS bucket. Local/test fixtures speak plain HTTP, so
     # this stays under %prod: the client certificate only exists in the cluster.

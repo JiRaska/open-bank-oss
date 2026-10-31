@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -106,6 +108,223 @@ def valid_capability_evidence(root: Path, evidence: str) -> bool:
         normalized_heading(heading) == target
         for heading in re.findall(r"(?m)^#{1,6}\s+(.+?)\s*#*\s*$", text(candidate))
     )
+
+
+def admin_ui_deploy_liveness_errors(root: Path) -> list[str]:
+    """Prove every main push reaches the Admin UI snapshot through completed CI evidence.
+
+    Keep this semantic: workflow layout and admission implementation may move, but the
+    producer push triggers, completion subscription and all privileged-boundary calls
+    must remain connected.
+    """
+    errors: list[str] = []
+
+    def workflow(relative: str) -> dict:
+        path = root / relative
+        try:
+            loaded = yaml.load(path.read_text(encoding="utf-8"), Loader=CapabilityLoader)
+        except (OSError, yaml.YAMLError) as exc:
+            errors.append(f"cannot parse {relative} for deploy liveness: {exc}")
+            return {}
+        if not isinstance(loaded, dict):
+            errors.append(f"{relative} has no workflow mapping for deploy liveness")
+            return {}
+        return loaded
+
+    def triggers(document: dict) -> dict:
+        value = document.get("on", document.get(True, {}))
+        return value if isinstance(value, dict) else {}
+
+    def has_unfiltered_main_push(relative: str, expected_name: str) -> bool:
+        document = workflow(relative)
+        if document.get("name") != expected_name:
+            errors.append(f"{relative} is not the {expected_name!r} evidence producer")
+        on = triggers(document)
+        if "push" not in on:
+            errors.append(f"{relative} no longer runs on main pushes needed for Admin UI evidence")
+            return False
+        push = on.get("push")
+        if isinstance(push, list):
+            branches = push
+            paths = paths_ignore = branches_ignore = None
+        elif isinstance(push, dict):
+            branches = push.get("branches")
+            paths, paths_ignore = push.get("paths"), push.get("paths-ignore")
+            branches_ignore = push.get("branches-ignore")
+        elif push is None:
+            branches = None
+            paths = paths_ignore = branches_ignore = None
+        else:
+            errors.append(f"{relative} has unsupported push trigger syntax for Admin UI liveness")
+            return False
+        if branches is not None:
+            branches = [branches] if isinstance(branches, str) else branches
+            if (not isinstance(branches, list)
+                    or any(not isinstance(branch, str) or branch.startswith("!") for branch in branches)
+                    or not any(branch in {"main", "*", "**"} for branch in branches)):
+                errors.append(f"{relative} does not run on main pushes needed for Admin UI evidence")
+                return False
+        if branches_ignore:
+            errors.append(f"{relative} excludes branches from the main-push evidence trigger")
+            return False
+        if paths or paths_ignore:
+            errors.append(f"{relative} path-filters main pushes and can miss Admin UI snapshot inputs")
+            return False
+        return True
+
+    has_unfiltered_main_push(".github/workflows/ci.yml", "CI")
+    has_unfiltered_main_push(".github/workflows/services-ci.yml", "Services CI")
+
+    deploy = workflow(".github/workflows/admin-ui-deploy.yml")
+    workflow_run = triggers(deploy).get("workflow_run")
+    workflow_run = workflow_run if isinstance(workflow_run, dict) else {}
+    branches = workflow_run.get("branches", [])
+    branches = [branches] if isinstance(branches, str) else branches
+    workflows = workflow_run.get("workflows", [])
+    workflow_names = set(workflows) if isinstance(workflows, list) else set()
+    if (not isinstance(branches, list)
+            or "main" not in branches
+            or any(not isinstance(branch, str) or branch.startswith("!") for branch in branches)):
+        errors.append("Admin UI deploy workflow_run is not restricted to main evidence")
+    if not {"CI", "Services CI"}.issubset(workflow_names):
+        errors.append("admin deployment is not subscribed to CI and Services CI main-push completions")
+    event_types = workflow_run.get("types", [])
+    if not isinstance(event_types, list) or "completed" not in event_types:
+        errors.append("Admin UI deploy does not retry readiness when CI evidence completes")
+
+    def normalize_condition(value: object) -> str:
+        condition = str(value or "").strip()
+        if condition.startswith("${{") and condition.endswith("}}"):
+            condition = condition[3:-2]
+        return "".join(condition.split())
+
+    workflow_jobs = deploy.get("jobs", {})
+    workflow_jobs = workflow_jobs if isinstance(workflow_jobs, dict) else {}
+    deploy_source_job = workflow_jobs.get("deploy-source", {})
+    deploy_source_job = deploy_source_job if isinstance(deploy_source_job, dict) else {}
+    expected_source_if = (
+        "github.event_name!='workflow_run'||"
+        "(github.event.workflow_run.conclusion=='success'&&"
+        "github.event.workflow_run.head_branch=='main')"
+    )
+    if normalize_condition(deploy_source_job.get("if")) != expected_source_if:
+        errors.append("deploy-source job does not require successful main workflow_run evidence")
+    expected_group = (
+        "admin-ui-deploy-${{github.event.workflow_run.head_sha||github.sha}}-"
+        "${{github.event_name=='workflow_run'&&"
+        "github.event.workflow_run.conclusion!='success'&&'nonverdict'||'eligible'}}"
+    )
+    concurrency = deploy.get("concurrency", {})
+    if not isinstance(concurrency, dict) or "".join(str(concurrency.get("group", "")).split()) != expected_group:
+        errors.append("Admin UI deploy lacks the source-SHA and nonverdict concurrency boundary")
+
+    jobs = workflow_jobs
+    deploy_source = jobs.get("deploy-source", {})
+    build_push = jobs.get("build-push", {})
+    deploy_source = deploy_source if isinstance(deploy_source, dict) else {}
+    build_push = build_push if isinstance(build_push, dict) else {}
+
+    def executable_lines(source: str) -> str:
+        # This is deliberately a line-comment filter, not a shell parser. It prevents
+        # comments from satisfying wiring checks while keeping the gate small and clear.
+        return "\n".join(
+            line for line in source.splitlines() if not line.lstrip().startswith("#")
+        )
+
+    def step_run(job: dict, step_id: str) -> str:
+        steps = job.get("steps", [])
+        if not isinstance(steps, list):
+            return ""
+        return executable_lines("\n".join(
+            str(step.get("run", "")) for step in steps
+            if isinstance(step, dict) and step.get("id") == step_id
+        ))
+
+    def find_step(job: dict, step_id: str) -> dict:
+        steps = job.get("steps", [])
+        if not isinstance(steps, list):
+            return {}
+        return next((step for step in steps
+                     if isinstance(step, dict) and step.get("id") == step_id), {})
+
+    admission = ".github/scripts/check-admin-ui-deploy-admission.sh"
+    boundary_steps = (
+        (deploy_source, "source", "initial deploy-source admission"),
+        (deploy_source, "post_validation", "post-validation deploy-source admission"),
+        (build_push, "build_admission", "serialized build-entry admission"),
+    )
+    for job, step_id, label in boundary_steps:
+        if admission not in step_run(job, step_id):
+            errors.append(f"admin deployment bypasses its admission helper at {label}")
+    if normalize_condition(find_step(deploy_source, "validation").get("if")) != "steps.source.outputs.proceed=='true'":
+        errors.append("Admin UI validation is not gated by initial deploy-source admission")
+    if normalize_condition(find_step(deploy_source, "post_validation").get("if")) != "steps.validation.outputs.proceed=='true'":
+        errors.append("post-validation admission is not gated by successful evidence readiness")
+    expected_build_job_if = "needs.deploy-source.outputs.proceed=='true'"
+    if normalize_condition(build_push.get("if")) != expected_build_job_if:
+        errors.append("privileged Admin UI build bypasses deploy-source admission")
+    build_steps = build_push.get("steps", [])
+    admission_index = -1
+    if isinstance(build_steps, list):
+        admission_index = next((index for index, step in enumerate(build_steps)
+                                if isinstance(step, dict) and step.get("id") == "build_admission"), -1)
+    allowed_admission_index = 0
+    if (isinstance(build_steps, list) and build_steps
+            and isinstance(build_steps[0], dict)
+            and isinstance(build_steps[0].get("uses"), str)
+            and build_steps[0]["uses"].startswith("actions/checkout@")
+            and "run" not in build_steps[0]):
+        # This pinned checkout only materializes the already-authorized source SHA;
+        # no repository code executes until the admission step allows later steps.
+        allowed_admission_index = 1
+    if admission_index != allowed_admission_index:
+        errors.append("serialized build-entry admission does not precede all build-push work")
+    elif isinstance(build_steps, list):
+        admission_guard = "steps.build_admission.outputs.proceed=='true'"
+        allowed_extra_clauses = {
+            "always()",
+            "env.APP_RO_TOKEN!=''",
+            "runner.os=='macOS'",
+            "steps.build.outputs.digest!=''",
+            "vars.ADMIN_UI_EVIDENCE_WRITER_ROLE_ARN==''",
+            "steps.rewrite.outputs.changed=='true'",
+            "env.GITOPS_APP_ID!=''",
+            "steps.gitops_pr.outputs.pull-request-number==''",
+            "steps.gitops_pr.outputs.pull-request-number!=''",
+        }
+        for step in build_steps[admission_index + 1:]:
+            if not isinstance(step, dict):
+                errors.append("a privileged build step is malformed")
+                break
+            # Accept only the current direct guard, optionally followed by known simple
+            # conjuncts. The guard cannot be wrapped, negated, or nested under `||`.
+            condition = normalize_condition(step.get("if"))
+            clauses = condition.split("&&")
+            if (not clauses[0] == admission_guard
+                    or "||" in condition
+                    or any(clause not in allowed_extra_clauses for clause in clauses[1:])):
+                errors.append("a privileged build step can run without serialized build-entry admission")
+                break
+
+    admission_helper_path = root / ".github/scripts/check-admin-ui-deploy-admission.sh"
+    admission_helper = text(admission_helper_path)
+    # Ignore full-line shell comments while checking that required operations are present
+    # in executable lines. This intentionally is not a shell parser; command behavior is
+    # covered by the helper's own tests and this guard is for wiring regressions.
+    executable_helper = executable_lines(admission_helper)
+    for needle, message in (
+        ("git ls-remote origin refs/heads/main", "admission helper does not recheck current main"),
+        ('git fetch --no-tags --depth=64 origin "$main_sha"', "admission helper cannot prove bounded image-pin-only main advances"),
+        ('deploy_branch="chore/admin-ui-deploy-${SOURCE_SHA}"', "admission helper cannot identify the source deploy branch"),
+        ('git ls-remote --exit-code --heads origin "refs/heads/${deploy_branch}"', "admission helper does not check the source deploy branch"),
+        ('gh pr list --repo "${GITHUB_REPOSITORY:?}" --state open', "admission helper cannot distinguish open deploy PRs from stale branches"),
+        (".github/scripts/authorize-admin-ui-deploy-source.sh", "admission helper bypasses source ancestry authorization"),
+        ('"$SOURCE_SHA" "$main_sha" "$EVENT_NAME" "$open_deploy_pr_exists"', "admission helper omits freshness or duplicate-source evidence"),
+    ):
+        if needle not in executable_helper:
+            errors.append(message)
+
+    return errors
 
 
 def capability_register_errors(root: Path) -> list[str]:
@@ -569,6 +788,197 @@ def performance_selector_self_test_error(selector_path: Path) -> str | None:
     return None
 
 
+def service_ci_observer_source(root: Path, workflow: str) -> str:
+    """Read only the active build observer, inline or via the one trusted staged helper."""
+    try:
+        document = yaml.load(workflow, Loader=CapabilityLoader)
+        steps = document['jobs']['build']['steps']
+        builds = [(i, step) for i, step in enumerate(steps)
+                  if step.get('name') == 'Build + test (:${{ inputs.service }})']
+        if len(builds) != 1:
+            return ''
+        build_index, build = builds[0]
+        if 'if' in build or build.get('continue-on-error') or build.get('shell') is not None:
+            return ''
+        source = build.get('run', '')
+        if source == 'bash -e "$SERVICE_CI_HELPERS/build-test.sh"':
+            if build.get('env', {}).get('SERVICE') != '${{ inputs.service }}':
+                return ''
+            stages = [(i, step) for i, step in enumerate(steps)
+                      if step.get('name') == 'Stage trusted service CI step helpers']
+            if len(stages) != 1:
+                return ''
+            stage_index, stage = stages[0]
+            if (stage_index >= build_index or 'if' in stage or stage.get('continue-on-error')
+                    or stage.get('shell') is not None):
+                return ''
+            # A closed staging recipe, not an arbitrary glob or helper resolver. Only this
+            # fixed source directory can supply the regular build-test.sh checked below.
+            recipe = '''set -euo pipefail
+helper_dir="$(mktemp -d "${RUNNER_TEMP}/service-ci-helpers.XXXXXX")"
+cp .github/scripts/service-ci-steps/*.sh "$helper_dir/"
+cp .github/scripts/heal-gradle-verification-failure.sh "$helper_dir/"
+chmod 600 "$helper_dir/"*.sh
+echo "SERVICE_CI_HELPERS=$helper_dir" >> "$GITHUB_ENV"'''
+            def recipe_lines(body: str) -> list[str]:
+                return [line.strip() for line in body.splitlines() if line.strip()]
+            with_diagnostics = recipe.replace(
+                'echo "SERVICE_CI_HELPERS=',
+                'bash "$helper_dir/diagnostic-actions.sh" stage "$helper_dir"\necho "SERVICE_CI_HELPERS=')
+            if recipe_lines(stage.get('run', '')) not in (recipe_lines(recipe), recipe_lines(with_diagnostics)):
+                return ''
+            checkouts = [(i, step) for i, step in enumerate(steps[:stage_index])
+                         if step.get('uses', '').startswith('actions/checkout@')]
+            if len(checkouts) != 1:
+                return ''
+            checkout = checkouts[0][1]
+            if ('if' in checkout or checkout.get('continue-on-error')
+                    or checkout.get('with', {}).get('ref') != "${{ inputs.ref != '' && github.sha || '' }}"):
+                return ''
+            if any('git checkout' in step.get('run', '') for step in steps[:stage_index]):
+                return ''
+            helper = root / '.github/scripts/service-ci-steps/build-test.sh'
+            relative = helper.relative_to(root)
+            components = [root.joinpath(*relative.parts[:i]) for i in range(1, len(relative.parts) + 1)]
+            if not helper.is_file() or any(path.is_symlink() for path in components):
+                return ''
+            source = helper.read_text()
+        elif 'SERVICE_CI_HELPERS' in source:
+            return ''
+        # Keep quoted strings and comments out of command identity. Joining shell
+        # continuations is enough for the existing fixed observer command, not a shell evaluator.
+        lexer = shlex.shlex(source.replace('\\\n', ' '), posix=True, punctuation_chars=';&|()\n')
+        lexer.whitespace = ' \t\r'
+        lexer.whitespace_split = True
+        command: list[str] = []
+        observers = []
+        for token in [*lexer, '\n']:
+            if token and all(c in ';&|()\n' for c in token):
+                if command[:2] == ['docker', 'events']:
+                    filters = [command[i + 1] for i, value in enumerate(command[:-1]) if value == '--filter']
+                    required_filters = {'type=container', 'event=start', 'event=die'}
+                    if required_filters <= set(filters):
+                        observers.append('docker events ' + ' '.join(
+                            '--filter ' + value for value in sorted(required_filters)))
+                command = []
+            else:
+                command.append(token)
+        return '\n'.join(observers)
+    except (KeyError, TypeError, AttributeError, ValueError, OSError, yaml.YAMLError):
+        return ''
+
+
+def bounded_kover_report(workflow: str, root: Path | None = None) -> bool:
+    # Configuration scoping changes Gradle startup, never the timeout contract.
+    if re.search(
+        r"timeout --kill-after=10s 600s ./gradlew --no-daemon "
+        r"(?:--configure-on-demand )?:\$\{\{ inputs\.service \}\}:koverXmlReport(?:\s|$)",
+        workflow,
+    ) is not None:
+        return True
+    if root is None:
+        return False
+    try:
+        document = yaml.load(workflow, Loader=CapabilityLoader)
+        steps = document['jobs']['build']['steps']
+        reports = [step for step in steps if step.get('name') == 'Generate Kover XML report']
+        if len(reports) != 1:
+            return False
+        report = reports[0]
+        expected = 'timeout --kill-after=10s 600s bash -e "$SERVICE_CI_HELPERS/render-coverage-report.sh"'
+        if (report.get('run', '').strip() != expected or report.get('shell') is not None
+                or 'if' in report or report.get('continue-on-error') is not True
+                or report.get('env', {}).get('SERVICE') != '${{ inputs.service }}'):
+            return False
+        # The observer resolver already proves the closed staging recipe and trusted checkout.
+        build = next(step for step in steps if step.get('name') == 'Build + test (:${{ inputs.service }})')
+        if (build.get('run') != 'bash -e "$SERVICE_CI_HELPERS/build-test.sh"'
+                or steps.index(report) <= steps.index(build)
+                or not service_ci_observer_source(root, workflow)):
+            return False
+        helper = root / '.github/scripts/service-ci-steps/render-coverage-report.sh'
+        relative = helper.relative_to(root)
+        if (not helper.is_file() or any(root.joinpath(*relative.parts[:i]).is_symlink()
+                                       for i in range(1, len(relative.parts) + 1))):
+            return False
+        # Closed helper bodies: shell text inside heredocs or after an exit cannot attest
+        # execution. The sibling is staged with the report, never loaded from historical code.
+        # Intentional helper changes require renewed body review.
+        shared = helper.with_name('coverage-evidence.sh')
+        if not shared.is_file() or shared.is_symlink():
+            return False
+        return (hashlib.sha256(helper.read_bytes()).hexdigest() ==
+                '15a5349221070810f671a4558bdac2c083dd474898ce9cd972644d75774b5b73'
+                and hashlib.sha256(shared.read_bytes()).hexdigest() ==
+                '64062707a69e5f92bb18eae0eaaa8492935cd21cb8fa056b0de35587dbfc9f89')
+    except (KeyError, TypeError, AttributeError, ValueError, OSError, StopIteration, yaml.YAMLError):
+        return False
+
+
+def service_ci_evidence_source(root: Path, workflow: str) -> str:
+    """Resolve only the reviewed, active coverage composite and its trusted snapshot."""
+    try:
+        document = yaml.load(workflow, Loader=CapabilityLoader)
+        build = document['jobs']['build']
+        steps = build['steps']
+        calls = [step for step in steps if step.get('uses') == './.github/actions/service-ci-coverage-evidence']
+        if not calls:
+            return workflow  # The original inline producer remains supported.
+        if (len(calls) != 1 or document.get('defaults') or build.get('defaults')
+                or not service_ci_observer_source(root, workflow)):
+            return ''
+        call = calls[0]
+        if (call.get('if') != 'always()' or call.get('continue-on-error') is not True
+                or call.get('env') != {'SERVICE': '${{ inputs.service }}',
+                                      'SERVICE_CI_JOB_STATUS': '${{ job.status }}',
+                                      'SERVICE_CI_REPORT_OUTCOME': '${{ steps.coverage_report.outcome }}'}):
+            return ''
+        stage = next(step for step in steps if step.get('name') == 'Stage trusted service CI step helpers')
+        if set(stage) != {'name', 'run'}:
+            return ''
+        historical = [step for step in steps if step.get('name') == 'Check out historical service source with trusted helpers']
+        report = next(step for step in steps if step.get('id') == 'coverage_report')
+        if (len(historical) != 1 or historical[0].get('if') != "inputs.ref != ''"
+                or set(historical[0]) != {'name', 'if', 'env', 'run'}
+                or historical[0].get('env') != {'REF': '${{ inputs.ref }}'}
+                or not steps.index(stage) < steps.index(historical[0]) < steps.index(report) < steps.index(call)):
+            return ''
+        stage_line = 'bash "$helper_dir/diagnostic-actions.sh" stage "$helper_dir"'
+        restore_line = 'bash "$SERVICE_CI_HELPERS/diagnostic-actions.sh" restore "$SERVICE_CI_HELPERS"'
+        historical_body = historical[0].get('run', '')
+        # Presence alone would accept exit/heredoc branches that never restore the snapshot.
+        # Bind the entire reviewed fetch, ancestry, checkout and restore recipe.
+        if hashlib.sha256(historical_body.encode()).hexdigest() != '0477626f8f1f88fb9453379e6fd7d189f72a6f003bca91a840d47c04c1f54831':
+            return ''
+        historical_lines = [line.strip() for line in historical_body.splitlines() if line.strip()]
+        if (stage_line not in stage.get('run', '').splitlines()
+                or not historical_lines or historical_lines[-1] != restore_line
+                or 'git checkout --detach --quiet "$resolved_ref"' not in historical_lines):
+            return ''
+        paths = {
+            '.github/actions/service-ci-coverage-evidence/action.yml': '10e8de61f2a7e3541926b4857d2f1a10f4c2dee53c5eb933cb9090d439f3b313',
+            '.github/scripts/service-ci-steps/diagnostic-actions.sh': '860f5df9ff1cc9f7a3d829e437d0dfb903189d4a9cb5984c8d834444e2048a79',
+        }
+        for relative, expected_hash in paths.items():
+            path = root / relative
+            if (not path.is_file() or any(root.joinpath(*Path(relative).parts[:i]).is_symlink()
+                                           for i in range(1, len(Path(relative).parts) + 1))
+                    or hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash):
+                return ''
+        return text(root / '.github/actions/service-ci-coverage-evidence/action.yml')
+    except (KeyError, TypeError, AttributeError, ValueError, OSError, StopIteration, yaml.YAMLError):
+        return ''
+
+
+def admin_collector_source(root: Path) -> str:
+    """The collector plus the run-envelope projection it shares with the per-commit evidence
+    publisher (#13201): together they are the admin projection this gate reads."""
+    return "\n".join(text(root / relative) for relative in (
+        "openbank-admin-ui/scripts/collect-test-intelligence.mjs",
+        "openbank-admin-ui/src/lib/test-intelligence-run-projection.mjs",
+    ))
+
+
 def check(root: Path) -> list[str]:
     errors: list[str] = []
     schema_file = root / "openbank-libs/governance/test-intelligence-run.schema.json"
@@ -633,20 +1043,21 @@ def check(root: Path) -> list[str]:
         errors.append(f"run schema unavailable: {exc}")
 
     workflow = text(root / ".github/workflows/_service-ci.yml")
+    evidence_source = service_ci_evidence_source(root, workflow)
     for needle in (
         "collect-test-run-evidence.py",
         "build/test-intelligence/run.json",
         "if: always()",
-        "docker events",
-        "--filter type=container",
-        "--filter event=start",
-        "--filter event=die",
     ):
-        if needle not in workflow:
+        if needle not in evidence_source:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
-    if "timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport" not in workflow:
+    observer = service_ci_observer_source(root, workflow)
+    for needle in ('docker events', '--filter type=container', '--filter event=start', '--filter event=die'):
+        if needle not in observer:
+            errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
+    if not bounded_kover_report(workflow, root):
         errors.append("Kover evidence is not bounded with the money-path-safe timeout")
-    immutable_envelope_artifact = workflow.partition("Retain immutable Test Intelligence run envelope")[2].partition(
+    immutable_envelope_artifact = evidence_source.partition("Retain immutable Test Intelligence run envelope")[2].partition(
         "Upload coverage to Codecov"
     )[0]
     if "build/test-intelligence/run.json" not in immutable_envelope_artifact or "runtime/" in immutable_envelope_artifact:
@@ -715,12 +1126,6 @@ def check(root: Path) -> list[str]:
     for needle, message in (
         ("build/test-intelligence/run.json", "admin deployment does not stage the versioned run envelope"),
         ("-name 'run.json'", "admin deployment does not accept the root run-envelope artifact layout"),
-        ("workflow_run:", "admin deployment does not refresh Test Intelligence after successful Services CI"),
-        ("workflows: [\"Services CI\", \"CI\"]", "admin deployment is not subscribed to both fleet and Admin UI CI evidence workflows"),
-        ("workflow_run.conclusion == 'success'", "admin deployment accepts unsuccessful Services CI evidence"),
-        ("workflow_run.head_branch == 'main'", "admin deployment accepts non-main Services CI evidence"),
-        ("github.event.workflow_run.head_sha", "admin deployment cannot inspect the exact workflow-run source commit"),
-        ("authorize-admin-ui-deploy-source.sh", "admin deployment bypasses its source-ancestry guard"),
         ("needs.deploy-source.outputs.proceed == 'true'", "privileged admin image build bypasses the deploy-source guard"),
         ("find-latest-main-artifacts.py", "admin deployment cannot select main-only service evidence"),
         ("if ! python3 .github/scripts/find-latest-main-artifacts.py",
@@ -730,20 +1135,10 @@ def check(root: Path) -> list[str]:
         ("github.event_name }}\" = \"schedule\"", "scheduled snapshot refresh does not use a unique immutable image tag"),
         ("github.event_name }}\" = \"workflow_run\"", "event-driven snapshot refresh does not use a unique immutable image tag"),
         ("github.event.workflow_run.head_sha || github.sha", "automatic Admin UI deploy sources for one SHA do not share a serialization boundary"),
-        ('deploy_branch="chore/admin-ui-deploy-${source_sha}"', "admin deployment cannot identify an existing deploy branch for the source SHA"),
-        ('git ls-remote --exit-code --heads origin "refs/heads/${deploy_branch}"', "admin deployment does not reject an already-open automatic deploy source"),
-        ('gh pr list --repo "$GITHUB_REPOSITORY" --state open', "admin deployment confuses a stale deploy branch with an open deploy PR"),
-        ('"$source_sha" "$main_sha" "$EVENT_NAME" "$open_deploy_pr_exists"', "admin deployment does not pass duplicate-source evidence to its authorization guard"),
-        ("git ls-remote origin refs/heads/main", "admin deployment does not reject a source commit that is stale before privileged build"),
-        ('git fetch --no-tags --depth=64 origin "$main_sha"',
-         "admin deployment cannot inspect current main after checking out a waiting source"),
-        ('"openbank-libs/governance/journeys.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when the journey catalog changes"),
-        ('"perf/scenarios.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when the performance catalog changes"),
-        ('"perf/k6/**"', "admin deployment does not rebuild the Test Intelligence snapshot when a performance definition changes"),
-        ('"openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when a synthetic runtime manifest changes"),
     ):
         if needle not in deploy:
             errors.append(message)
+    errors.extend(admin_ui_deploy_liveness_errors(root))
     for needle, message in (
         ('workflow_run.get("head_branch") == "main"', "artifact lookup accepts non-main evidence"),
         ("len(artifacts) < PER_PAGE", "artifact lookup blindly scans exhausted result pages"),
@@ -782,6 +1177,12 @@ def check(root: Path) -> list[str]:
          "immutable run history cannot find browser evidence beyond the repository-wide artifact window"),
         ("actions/runs/${browser_run_id}/artifacts?per_page=100",
          "immutable run history does not inspect the latest browser producer's artifacts"),
+        ("synthetic-journeys.yml/runs?branch=main&status=completed&per_page=1",
+         "immutable run history cannot find scheduled synthetic evidence beyond the repository-wide artifact window"),
+        ("actions/runs/${synthetic_run_id}/artifacts?per_page=100",
+         "immutable run history does not inspect the latest scheduled synthetic producer's artifacts"),
+        ("test-intelligence-run-openbank-platform-",
+         "immutable run history does not select the scheduled synthetic envelope"),
         ("head -\"${MAX_ENVELOPES}\"", "immutable run history is not bounded before artifact download"),
         ("extract-test-intelligence-envelope.py --self-test", "immutable run envelope selector is not regression-tested"),
         ("--prune-cache openbank-admin-ui/test-run-history",
@@ -816,7 +1217,7 @@ def check(root: Path) -> list[str]:
             errors.append(f"admin deployment cannot project Pact Broker verification evidence: {needle}")
     if "[ ! -d openbank-simulation ] || printf '%s\\n' openbank-simulation" not in deploy:
         errors.append("admin deployment omits the unreleased deterministic-simulation envelope")
-    collector = text(root / "openbank-admin-ui/scripts/collect-test-intelligence.mjs")
+    collector = admin_collector_source(root)
     for needle in ("const tooling = exists(path.join(repo, simulation)) ? [simulation] : []",
                    "const envelope = runEnvelope(simulation)"):
         if needle not in collector:
@@ -851,7 +1252,7 @@ def check(root: Path) -> list[str]:
     for workflow_name, required in {
         "perf-gate.yml": ("--performance-summary", "Build performance Test Intelligence envelope"),
         "perf-baseline.yml": ("--performance-summary", "test-intelligence-run-openbank-money-path"),
-        "pitest.yml": ("--mutation-report", "--mutation-threshold 70", "Build mutation Test Intelligence envelope"),
+        "pitest.yml": ("--mutation-report", '--mutation-threshold "$PITEST_MUTATION_THRESHOLD"', "Build mutation Test Intelligence envelope"),
     }.items():
         workflow = text(root / ".github/workflows" / workflow_name)
         for needle in required:
@@ -873,6 +1274,12 @@ def check(root: Path) -> list[str]:
     )
     if staging_test.returncode != 0:
         errors.append(f"PIT artifact staging regression tests failed: {staging_test.stderr.strip()}")
+    pool_test = subprocess.run(
+        [sys.executable, str(root / ".github/scripts/test-admin-ui-ti-staging-pool.py")],
+        capture_output=True, text=True, check=False,
+    )
+    if pool_test.returncode != 0:
+        errors.append(f"Test Intelligence staging pool regression tests failed: {pool_test.stderr.strip()}")
     performance_stage = deploy.partition("Stage performance evidence from latest complete k6 run")[2].partition(
         "Collect production-readiness scorecard"
     )[0]
@@ -994,7 +1401,7 @@ def check(root: Path) -> list[str]:
     ):
         if needle not in synthetic_workflow:
             errors.append(message)
-    collector = text(root / "openbank-admin-ui/scripts/collect-test-intelligence.mjs")
+    collector = admin_collector_source(root)
     for needle, message in (
         ("evidence.kind !== 'synthetic'", "Admin projection ignores retained synthetic run evidence"),
         ("latestCi.set", "Admin projection cannot select the latest synthetic CI verdict"),
@@ -1008,6 +1415,193 @@ def check(root: Path) -> list[str]:
 
 
 def self_test() -> int:
+    command = "timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport"
+    for candidate in (command, command.replace("--no-daemon ", "--no-daemon --configure-on-demand ")):
+        if not bounded_kover_report(candidate):
+            print("self-test failed: bounded Kover report rejected")
+            return 1
+    for candidate in (
+        command.replace("600s", "900s"),
+        command.replace("--kill-after=10s ", ""),
+        command.replace("--no-daemon ", ""),
+        command.replace("koverXmlReport", "koverXmlReportOther"),
+        command.replace("timeout --kill-after=10s 600s ", ""),
+    ):
+        if bounded_kover_report(candidate):
+            print("self-test failed: unbounded or incorrect Kover report accepted")
+            return 1
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        workflows_dir = root / ".github/workflows"
+        scripts_dir = root / ".github/scripts"
+        workflows_dir.mkdir(parents=True)
+        scripts_dir.mkdir(parents=True)
+        (workflows_dir / "ci.yml").write_text(
+            "name: CI\non:\n  push:\n    branches: [main]\n")
+        (workflows_dir / "services-ci.yml").write_text(
+            "name: Services CI\non:\n  push:\n    branches: [main]\n")
+        deploy_workflow = workflows_dir / "admin-ui-deploy.yml"
+        deploy_workflow.write_text(
+            "name: Admin-UI deploy\n"
+            "on:\n"
+            "  workflow_run:\n"
+            "    branches: [main]\n"
+            "    workflows: [Services CI, CI, Pact drift check]\n"
+            "    types: [completed]\n"
+            "  schedule: [{cron: '17 3 * * *'}]\n"
+            "concurrency:\n"
+            "  group: >-\n"
+            "    admin-ui-deploy-${{ github.event.workflow_run.head_sha || github.sha }}-\n"
+            "    ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success' && 'nonverdict' || 'eligible' }}\n"
+            "jobs:\n"
+            "  deploy-source:\n"
+            "    if: >-\n"
+            "      github.event_name != 'workflow_run' ||\n"
+            "      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')\n"
+            "    steps:\n"
+            "      - id: source\n"
+            "        run: bash .github/scripts/check-admin-ui-deploy-admission.sh source event\n"
+            "      - id: validation\n"
+            "        if: steps.source.outputs.proceed == 'true'\n"
+            "        run: python3 .github/scripts/await-admin-ui-source-validation.py --check\n"
+            "      - id: post_validation\n"
+            "        if: steps.validation.outputs.proceed == 'true'\n"
+            "        run: bash .github/scripts/check-admin-ui-deploy-admission.sh source event\n"
+            "  build-push:\n"
+            "    if: needs.deploy-source.outputs.proceed == 'true'\n"
+            "    steps:\n"
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
+            "      - id: build_admission\n"
+            "        run: bash .github/scripts/check-admin-ui-deploy-admission.sh source event\n"
+            "      - id: build\n"
+            "        if: steps.build_admission.outputs.proceed == 'true'\n"
+            "        run: ./build.sh\n"
+        )
+        (scripts_dir / "check-admin-ui-deploy-admission.sh").write_text(
+            'git ls-remote origin refs/heads/main\n'
+            'git fetch --no-tags --depth=64 origin "$main_sha"\n'
+            'deploy_branch="chore/admin-ui-deploy-${SOURCE_SHA}"\n'
+            'git ls-remote --exit-code --heads origin "refs/heads/${deploy_branch}"\n'
+            'gh pr list --repo "${GITHUB_REPOSITORY:?}" --state open\n'
+            'bash .github/scripts/authorize-admin-ui-deploy-source.sh\n'
+            '"$SOURCE_SHA" "$main_sha" "$EVENT_NAME" "$open_deploy_pr_exists"\n'
+        )
+        fixture_errors = admin_ui_deploy_liveness_errors(root)
+        if fixture_errors:
+            print("self-test failed: valid main-push evidence and admission wiring was rejected: "
+                  + "; ".join(fixture_errors))
+            return 1
+
+        original_deploy = deploy_workflow.read_text()
+        deploy_workflow.write_text(original_deploy.replace(
+            "branches: [main]\n    workflows:", "branches: [main, '!main']\n    workflows:"))
+        if not any("workflow_run is not restricted to main evidence" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: workflow_run main exclusion was accepted")
+            return 1
+        deploy_workflow.write_text(original_deploy)
+
+        deploy_workflow.write_text(original_deploy.replace(
+            "(github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')",
+            "always() || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')"))
+        if not any("does not require successful main workflow_run evidence" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: permissive deploy-source job condition was accepted")
+            return 1
+        deploy_workflow.write_text(original_deploy)
+
+        deploy_workflow.write_text(original_deploy.replace(
+            "if: steps.source.outputs.proceed == 'true'",
+            "if: always() || steps.source.outputs.proceed == 'true'"))
+        if not any("validation is not gated by initial" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: permissive validation condition was accepted")
+            return 1
+        deploy_workflow.write_text(original_deploy)
+
+        deploy_workflow.write_text(original_deploy.replace(
+            "if: steps.build_admission.outputs.proceed == 'true'\n        run: ./build.sh",
+            "if: always() || steps.build_admission.outputs.proceed == 'true'\n        run: ./build.sh"))
+        if not any("build step can run without serialized" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: permissive privileged build-step condition was accepted")
+            return 1
+        deploy_workflow.write_text(original_deploy)
+
+        deploy_workflow.write_text(original_deploy.replace(
+            "if: steps.build_admission.outputs.proceed == 'true'\n        run: ./build.sh",
+            "if: always() || (steps.rewrite.outputs.changed == 'true' && steps.build_admission.outputs.proceed == 'true')\n        run: ./build.sh"))
+        if not any("build step can run without serialized" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: nested-OR build admission guard was accepted")
+            return 1
+        deploy_workflow.write_text(original_deploy)
+
+        deploy_workflow.write_text(original_deploy.replace(
+            "run: bash .github/scripts/check-admin-ui-deploy-admission.sh source event",
+            "run: |\n          # bash .github/scripts/check-admin-ui-deploy-admission.sh source event\n          echo proceed=true", 1))
+        if not any("initial deploy-source admission" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: commented-out workflow admission call was accepted")
+            return 1
+        deploy_workflow.write_text(original_deploy)
+
+        helper_path = scripts_dir / "check-admin-ui-deploy-admission.sh"
+        original_helper = helper_path.read_text()
+        helper_path.write_text("\n".join("# " + line for line in original_helper.splitlines()) + "\n")
+        if not any("admission helper does not recheck current main" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: commented-out admission commands were accepted")
+            return 1
+        helper_path.write_text(original_helper)
+
+        deploy_workflow.write_text(deploy_workflow.read_text().replace(
+            "workflows: [Services CI, CI, Pact drift check]",
+            "workflows: [Services CI, Pact drift check]"))
+        if not any("CI and Services CI main-push completions" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: losing the CI completion trigger was accepted")
+            return 1
+
+        deploy_workflow.write_text(deploy_workflow.read_text().replace(
+            "workflows: [Services CI, Pact drift check]",
+            "workflows: [Services CI, CI, Pact drift check]"))
+        deploy_workflow.write_text(deploy_workflow.read_text().replace(
+            "id: post_validation\n        if: steps.validation.outputs.proceed == 'true'\n"
+            "        run: bash .github/scripts/check-admin-ui-deploy-admission.sh source event",
+            "id: post_validation\n        if: steps.validation.outputs.proceed == 'true'\n"
+            "        run: echo proceed=true"))
+        if not any("post-validation deploy-source admission" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: removing the post-validation admission call was accepted")
+            return 1
+
+        deploy_workflow.write_text(deploy_workflow.read_text().replace(
+            "id: post_validation\n        if: steps.validation.outputs.proceed == 'true'\n"
+            "        run: echo proceed=true",
+            "id: post_validation\n        if: steps.validation.outputs.proceed == 'true'\n"
+            "        run: bash .github/scripts/check-admin-ui-deploy-admission.sh source event"))
+        (workflows_dir / "services-ci.yml").write_text(
+            "name: Services CI\non:\n  push:\n    branches: [main]\n    paths: ['openbank-*/**']\n")
+        if not any("path-filters main pushes" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: path-filtered Services CI was accepted as a complete liveness source")
+            return 1
+
+        (workflows_dir / "services-ci.yml").write_text(
+            "name: Services CI\non:\n  push:\n    branches: ['**', '!main']\n")
+        if not any("does not run on main pushes" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: main excluded by ordered branch filters was accepted")
+            return 1
+
+        (workflows_dir / "services-ci.yml").write_text(
+            "name: Services CI\non:\n  push:\n    branches: [main]\n    branches-ignore: [main]\n")
+        if not any("excludes branches" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: branches-ignore exclusion was accepted")
+            return 1
+
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         for path in [
@@ -1398,6 +1992,13 @@ function collectContracts() {}
     )
     if selector_error:
         print(f"self-test failed: {selector_error}")
+        return 1
+    observer_test = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("test-service-ci-observer-source.py"))],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if observer_test.returncode != 0:
+        print(f"self-test failed: active observer wiring: {observer_test.stdout}{observer_test.stderr}")
         return 1
     print("test-intelligence ecosystem self-test: red path proven")
     return 0

@@ -1,0 +1,459 @@
+{
+  "id": "cz-dps-questionnaire",
+  "version": 1,
+  "jurisdiction": "CZ",
+  "productLine": "DPS",
+  "regime": "RISK_PROFILE_ONLY",
+  "legalReview": {
+    "status": "REQUIRES_LEGAL_REVIEW",
+    "note": "Reference wording for the investment-strategy questionnaire of supplementary pension savings (Act 427/2011 Coll. s. 136(1)(a)-(d), warning s. 136(3)); question wording, scores and class ceilings must be confirmed by legal and compliance review."
+  },
+  "steps": [
+    {
+      "code": "GOAL",
+      "title": {
+        "cs": "Váš cíl",
+        "en": "Your goal"
+      }
+    },
+    {
+      "code": "RISK",
+      "title": {
+        "cs": "Postoj k riziku",
+        "en": "Attitude to risk"
+      }
+    },
+    {
+      "code": "CAPACITY",
+      "title": {
+        "cs": "Co unesete",
+        "en": "What you can bear"
+      }
+    },
+    {
+      "code": "SUSTAINABILITY",
+      "title": {
+        "cs": "Udržitelnost",
+        "en": "Sustainability"
+      },
+      "optional": true
+    }
+  ],
+  "questions": [
+    {
+      "id": "dps.objective",
+      "step": "GOAL",
+      "dimension": "OBJECTIVE",
+      "text": {
+        "cs": "Co je pro vás u těchto peněz nejdůležitější?",
+        "en": "What matters most to you about this money?"
+      },
+      "options": [
+        {
+          "code": "PRESERVE",
+          "text": {
+            "cs": "Nepřijít o nic, i za cenu nízkého zhodnocení",
+            "en": "Not losing anything, even if growth is low"
+          },
+          "score": 0,
+          "maxRiskClass": 2
+        },
+        {
+          "code": "STEADY",
+          "text": {
+            "cs": "Mírný a stabilní růst",
+            "en": "Modest, steady growth"
+          },
+          "score": 1,
+          "maxRiskClass": 4
+        },
+        {
+          "code": "GROWTH",
+          "text": {
+            "cs": "Vyšší růst v dlouhém období, kolísání beru",
+            "en": "Higher long-term growth; I accept ups and downs"
+          },
+          "score": 2,
+          "maxRiskClass": 6
+        },
+        {
+          "code": "MAX_GROWTH",
+          "text": {
+            "cs": "Co nejvyšší růst, i s velkými výkyvy",
+            "en": "Maximum growth, even with large swings"
+          },
+          "score": 3,
+          "maxRiskClass": 7
+        }
+      ]
+    },
+    {
+      "id": "dps.risk_reaction",
+      "step": "RISK",
+      "dimension": "RISK_WILLINGNESS",
+      "text": {
+        "cs": "Představte si, že hodnota vašeho spoření za rok klesne o 20 %. Co uděláte?",
+        "en": "Imagine your savings fall 20% in value within a year. What do you do?"
+      },
+      "help": {
+        "cs": "Takový pokles se u akciových fondů v historii několikrát stal a obvykle se časem vyrovnal.",
+        "en": "Equity funds have fallen this much several times in the past and usually recovered over time."
+      },
+      "options": [
+        {
+          "code": "SELL_ALL",
+          "text": {
+            "cs": "Převedu vše do nejbezpečnější varianty",
+            "en": "Move everything to the safest option"
+          },
+          "score": 0,
+          "maxRiskClass": 1
+        },
+        {
+          "code": "SWITCH_SAFER",
+          "text": {
+            "cs": "Převedu část do bezpečnější varianty",
+            "en": "Move part of it to a safer option"
+          },
+          "score": 1,
+          "maxRiskClass": 3
+        },
+        {
+          "code": "HOLD",
+          "text": {
+            "cs": "Nechám to být a počkám",
+            "en": "Leave it and wait"
+          },
+          "score": 2,
+          "maxRiskClass": 5
+        },
+        {
+          "code": "BUY_MORE",
+          "text": {
+            "cs": "Využiji příležitosti a přispěji víc",
+            "en": "Take the chance and contribute more"
+          },
+          "score": 3,
+          "maxRiskClass": 7
+        }
+      ]
+    },
+    {
+      "id": "dps.knowledge",
+      "step": "RISK",
+      "dimension": "KNOWLEDGE",
+      "instrumentClass": "PENSION_FUNDS",
+      "text": {
+        "cs": "Co platí o účastnických fondech s vyšším podílem akcií?",
+        "en": "What is true of participant funds with a higher share of equities?"
+      },
+      "options": [
+        {
+          "code": "CORRECT",
+          "text": {
+            "cs": "V krátkém období mohou i klesat, v dlouhém obvykle vynášejí víc",
+            "en": "They can fall in the short term but usually earn more over the long term"
+          },
+          "score": 3
+        },
+        {
+          "code": "WRONG",
+          "text": {
+            "cs": "Jejich hodnota nemůže klesnout",
+            "en": "Their value cannot fall"
+          },
+          "score": 0
+        },
+        {
+          "code": "DONT_KNOW",
+          "text": {
+            "cs": "Nevím",
+            "en": "I don't know"
+          },
+          "score": 0
+        }
+      ]
+    },
+    {
+      "id": "dps.experience",
+      "step": "RISK",
+      "dimension": "EXPERIENCE",
+      "instrumentClass": "PENSION_FUNDS",
+      "text": {
+        "cs": "Jak často jste za poslední 3 roky investoval/a do fondů nebo penzijního spoření se strategií?",
+        "en": "How often in the last 3 years have you invested in funds or pension savings with a chosen strategy?"
+      },
+      "options": [
+        {
+          "code": "NEVER",
+          "text": {
+            "cs": "Nikdy",
+            "en": "Never"
+          },
+          "score": 0
+        },
+        {
+          "code": "OCCASIONALLY",
+          "text": {
+            "cs": "Jednou až několikrát za poslední 3 roky",
+            "en": "Once to a few times in the last 3 years"
+          },
+          "score": 1
+        },
+        {
+          "code": "REGULARLY",
+          "text": {
+            "cs": "Pravidelně (alespoň jednou ročně) poslední 3 roky",
+            "en": "Regularly (at least yearly) for the last 3 years"
+          },
+          "score": 2
+        },
+        {
+          "code": "PROFESSIONALLY",
+          "text": {
+            "cs": "Pracuji nebo jsem pracoval/a ve financích",
+            "en": "I work or have worked in finance"
+          },
+          "score": 3
+        }
+      ]
+    },
+    {
+      "id": "dps.savings",
+      "step": "CAPACITY",
+      "dimension": "SAVINGS",
+      "required": false,
+      "text": {
+        "cs": "Kolik máte zhruba naspořeno a investováno (bez bydlení a rezervy)?",
+        "en": "Roughly how much do you have saved and invested (excluding your home and emergency reserve)?"
+      },
+      "help": {
+        "cs": "Pomůže nám ukázat možné výkyvy v korunách. Odpověď je nepovinná.",
+        "en": "It lets us show possible swings in crowns. Optional."
+      },
+      "options": [
+        {
+          "code": "UNDER_50K",
+          "text": {
+            "cs": "Do 50 000 Kč",
+            "en": "Up to CZK 50,000"
+          },
+          "amountCzk": 25000
+        },
+        {
+          "code": "50K_250K",
+          "text": {
+            "cs": "50 000 – 250 000 Kč",
+            "en": "CZK 50,000 – 250,000"
+          },
+          "amountCzk": 150000
+        },
+        {
+          "code": "250K_1M",
+          "text": {
+            "cs": "250 000 Kč – 1 mil. Kč",
+            "en": "CZK 250,000 – 1 million"
+          },
+          "amountCzk": 600000
+        },
+        {
+          "code": "OVER_1M",
+          "text": {
+            "cs": "Více než 1 mil. Kč",
+            "en": "Over CZK 1 million"
+          },
+          "amountCzk": 1500000
+        }
+      ]
+    },
+    {
+      "id": "dps.loss_capacity",
+      "step": "CAPACITY",
+      "dimension": "LOSS_CAPACITY",
+      "text": {
+        "cs": "Jak velký dočasný pokles byste unesli, aniž byste museli měnit své plány?",
+        "en": "How large a temporary fall could you absorb without having to change your plans?"
+      },
+      "help": {
+        "cs": "U každé možnosti ukážeme, kolik by to bylo v korunách z vašich úspor.",
+        "en": "For each option we show what it would mean in crowns of your savings."
+      },
+      "options": [
+        {
+          "code": "NONE",
+          "text": {
+            "cs": "Žádný",
+            "en": "None"
+          },
+          "score": 0,
+          "maxRiskClass": 1,
+          "lossSharePercent": 0
+        },
+        {
+          "code": "UP_TO_10",
+          "text": {
+            "cs": "Do 10 %",
+            "en": "Up to 10%"
+          },
+          "score": 1,
+          "maxRiskClass": 3,
+          "lossSharePercent": 10
+        },
+        {
+          "code": "UP_TO_25",
+          "text": {
+            "cs": "Do 25 %",
+            "en": "Up to 25%"
+          },
+          "score": 2,
+          "maxRiskClass": 5,
+          "lossSharePercent": 25
+        },
+        {
+          "code": "OVER_25",
+          "text": {
+            "cs": "Více než 25 %",
+            "en": "More than 25%"
+          },
+          "score": 3,
+          "maxRiskClass": 7,
+          "lossSharePercent": 40
+        }
+      ]
+    },
+    {
+      "id": "dps.sustainability",
+      "step": "SUSTAINABILITY",
+      "dimension": "SUSTAINABILITY",
+      "required": false,
+      "text": {
+        "cs": "Záleží vám na tom, do čeho jsou peníze investovány?",
+        "en": "Does it matter to you what the money is invested in?"
+      },
+      "help": {
+        "cs": "Nepovinné. Udržitelná volba může zúžit nabídku strategií.",
+        "en": "Optional. A sustainable choice may narrow the strategies on offer."
+      },
+      "options": [
+        {
+          "code": "NO_PREFERENCE",
+          "text": {
+            "cs": "Nemám preferenci",
+            "en": "No preference"
+          },
+          "sustainability": {
+            "categories": []
+          }
+        },
+        {
+          "code": "AVOID_HARM",
+          "text": {
+            "cs": "Ať se vyhýbají firmám, které výrazně škodí lidem nebo přírodě",
+            "en": "Avoid companies that seriously harm people or nature"
+          },
+          "sustainability": {
+            "categories": [
+              "PAI_CONSIDERED"
+            ]
+          }
+        },
+        {
+          "code": "PART_SUSTAINABLE",
+          "text": {
+            "cs": "Ať je alespoň desetina v udržitelných investicích",
+            "en": "At least a tenth in sustainable investments"
+          },
+          "sustainability": {
+            "categories": [
+              "SFDR_SUSTAINABLE"
+            ],
+            "minSharePercent": 10
+          }
+        },
+        {
+          "code": "GREEN_TAXONOMY",
+          "text": {
+            "cs": "Ať je alespoň desetina v ekologicky udržitelných činnostech podle EU taxonomie",
+            "en": "At least a tenth in environmentally sustainable activities under the EU taxonomy"
+          },
+          "sustainability": {
+            "categories": [
+              "TAXONOMY_ALIGNED"
+            ],
+            "minSharePercent": 10
+          }
+        },
+        {
+          "code": "MOSTLY_SUSTAINABLE",
+          "text": {
+            "cs": "Ať je většina v udržitelných investicích a dopady se zohledňují",
+            "en": "Most in sustainable investments, with harmful impacts considered"
+          },
+          "sustainability": {
+            "categories": [
+              "SFDR_SUSTAINABLE",
+              "PAI_CONSIDERED"
+            ],
+            "minSharePercent": 50
+          }
+        }
+      ]
+    }
+  ],
+  "consistencyRules": [
+    {
+      "code": "OBJECTIVE_VS_REACTION",
+      "question": "dps.objective",
+      "options": [
+        "PRESERVE"
+      ],
+      "conflictsWith": "dps.risk_reaction",
+      "conflictingOptions": [
+        "BUY_MORE"
+      ],
+      "message": {
+        "cs": "Chcete nepřijít o nic, ale při poklesu byste přikoupili. Zkontrolujte prosím obě odpovědi.",
+        "en": "You want to lose nothing, yet would buy more after a fall. Please check both answers."
+      }
+    },
+    {
+      "code": "REACTION_VS_CAPACITY",
+      "question": "dps.risk_reaction",
+      "options": [
+        "BUY_MORE",
+        "HOLD"
+      ],
+      "conflictsWith": "dps.loss_capacity",
+      "conflictingOptions": [
+        "NONE"
+      ],
+      "message": {
+        "cs": "Pokles byste vydrželi, ale žádnou ztrátu neunesete. Zkontrolujte prosím obě odpovědi.",
+        "en": "You would sit out a fall, yet cannot bear any loss. Please check both answers."
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "code": "STRATEGY_ABOVE_PROFILE",
+      "text": {
+        "cs": "Zvolená strategie je rizikovější, než odpovídá vašim odpovědím. Doporučujeme strategii uvedenou výše. Pokud budete pokračovat, berete na vědomí, že hodnota spoření může kolísat víc, než jste uvedli, že unesete.",
+        "en": "The chosen strategy is riskier than your answers support. We recommend the strategy shown above. If you continue, you acknowledge that your savings may swing more than you said you could bear."
+      }
+    },
+    {
+      "code": "PRODUCT_NOT_APPROPRIATE",
+      "text": {
+        "cs": "Podle vašich znalostí a zkušeností pro vás tento produkt nemusí být vhodný. Můžete pokračovat, ale nemusíte plně rozumět jeho rizikům.",
+        "en": "Based on your knowledge and experience this product may not be appropriate for you. You may continue, but you may not fully understand its risks."
+      }
+    },
+    {
+      "code": "SUSTAINABILITY_PREFERENCE_NOT_MET",
+      "text": {
+        "cs": "Žádná vhodná strategie nesplňuje vaši preferenci udržitelnosti. Doporučení ji proto nezohledňuje; pokračováním svou preferenci pro tuto smlouvu upravujete.",
+        "en": "No suitable strategy meets your sustainability preference, so the recommendation does not reflect it; by continuing you adapt your preference for this contract."
+      }
+    }
+  ]
+}

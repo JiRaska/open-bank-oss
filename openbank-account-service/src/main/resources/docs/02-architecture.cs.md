@@ -136,3 +136,10 @@ sequenceDiagram
 3. **No remote calls in TX** — vše synchronní v rámci request-response, async přes outbox + Kafka.
 4. **Idempotence at edge** — povinný `Idempotency-Key` na všech POST/PUT, deduplikace v Redis.
 5. **PII minimalizace** — IBAN je PII (GDPR), v lozích maskován (`libs.security.PiiMask.maskIban`).
+
+## Projekce ověření vlastnictví (ADR-0335 D2)
+
+`POST /api/v1/accounts/ownership-verifications` (akce `account.verifyOwnership`) přijímá v těle
+`{iban, partyId}` a odpovídá jen `{owned, active}`, plus `accountId`, když je `owned` pravda.
+Neznámý IBAN i IBAN jiné strany odpovídají `owned=false`, takže endpoint neprozrazuje existenci účtu.
+Deklarovanými volajícími jsou pension-service a sdd-service; ani jeden nemá `account.read`.

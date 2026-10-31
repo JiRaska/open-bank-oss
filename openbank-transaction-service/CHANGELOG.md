@@ -1,5 +1,72 @@
 # Changelog
 
+## [2.0.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.0.0...transaction-service-v2.0.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **transaction:** dial Temporal lazily so reads boot without a frontend ([#14076](https://github.com/JiRaska/open-bank-oss/issues/14076)) ([98e0a1c](https://github.com/JiRaska/open-bank-oss/commit/98e0a1ca988b97e1a566657092b295575adbd69b))
+
+## [2.0.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.30.2...transaction-service-v2.0.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **transaction:** SDK 1.40 payment workers require versioning and immutable build identity. Prepare retained workers and disable workers on API replicas before rollout; the independent deployment hold preserves this ordering. SDK downgrade is not routing rollback.
+
+### Features
+
+* **transaction:** pin payment workflows to retained workers ([#13890](https://github.com/JiRaska/open-bank-oss/issues/13890)) ([15165dc](https://github.com/JiRaska/open-bank-oss/commit/15165dc8435139b5800be51d0ee6ecef069d4bc4))
+
+## [1.30.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.30.1...transaction-service-v1.30.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **card-processing:** persist the ledger posting state per clearing and re-drive it ([#13229](https://github.com/JiRaska/open-bank-oss/issues/13229)) ([a3c8c98](https://github.com/JiRaska/open-bank-oss/commit/a3c8c98272b098bb48170e2535ae6e67a6c673c9))
+
+## [1.30.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.30.0...transaction-service-v1.30.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **transaction:** remove the dead payment.scheme-accepted path (ADR-0108) ([#13158](https://github.com/JiRaska/open-bank-oss/issues/13158)) ([0140013](https://github.com/JiRaska/open-bank-oss/commit/014001337a587b8895e88c589212340fa9fbbf3e))
+
+## [1.30.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.29.0...transaction-service-v1.30.0) (2026-10-18)
+
+
+### Features
+
+* **sanctions:** workflow-liveness heartbeats for five scheduled jobs ([#13153](https://github.com/JiRaska/open-bank-oss/issues/13153)) ([c352a0e](https://github.com/JiRaska/open-bank-oss/commit/c352a0ec0d75d439a85132070a1e77aa4e8052b4))
+
+## [1.29.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.28.0...transaction-service-v1.29.0) (2026-10-18)
+
+
+### Features
+
+* **client-transaction:** generate the ADR-0319 transaction-service client ([#13211](https://github.com/JiRaska/open-bank-oss/issues/13211)) ([024dd79](https://github.com/JiRaska/open-bank-oss/commit/024dd79bd5d464bf7b0550f67bec4e81260c5062))
+
+## [1.28.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.27.1...transaction-service-v1.28.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
+## [1.27.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.27.0...transaction-service-v1.27.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [1.27.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.26.1...transaction-service-v1.27.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
 ## [1.26.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.26.0...transaction-service-v1.26.1) (2026-10-07)
 
 

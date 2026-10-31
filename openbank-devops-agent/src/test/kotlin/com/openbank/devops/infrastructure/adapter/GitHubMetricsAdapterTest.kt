@@ -7,6 +7,7 @@ package com.openbank.devops.infrastructure.adapter
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.devops.infrastructure.config.DevOpsConfig
+import com.openbank.libs.security.EgressResolver
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import io.mockk.every
@@ -21,6 +22,7 @@ import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.Optional
 
@@ -55,15 +57,19 @@ class GitHubMetricsAdapterTest {
         every { ConfigProvider.getConfig() } returns cfg
     }
 
-    private fun adapter() = GitHubMetricsAdapter(config).also { it.objectMapper = ObjectMapper() }
+    private fun adapter() = GitHubMetricsAdapter(config).also {
+        it.objectMapper = ObjectMapper()
+        it.allowedHosts = listOf("stub.test:${server.address.port};http;private")
+        it.resolver = EgressResolver { listOf(InetAddress.getLoopbackAddress()) }
+    }
 
     @BeforeEach
     fun setUp() {
-        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
         server.createContext("/") { respond(it) }
         server.start()
         config = mockk()
-        every { config.githubApiUrl() } returns "http://127.0.0.1:${server.address.port}/"
+        every { config.githubApiUrl() } returns "http://stub.test:${server.address.port}/"
         every { config.githubOwner() } returns "JiRaska"
         every { config.githubRepo() } returns "open-bank"
         mockkStatic(ConfigProvider::class)

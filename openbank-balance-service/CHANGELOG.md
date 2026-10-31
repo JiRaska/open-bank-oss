@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.23.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.22.0...balance-service-v1.23.0) (2026-10-19)
+
+
+### Features
+
+* **balance:** expose active holds via GET /{accountId}/holds, the read get_balance_holds has called all along ([#13071](https://github.com/JiRaska/open-bank-oss/issues/13071)) ([df80cbb](https://github.com/JiRaska/open-bank-oss/commit/df80cbb61daebd591f0977f481d3e866eed48f0b))
+
+## [1.22.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.21.0...balance-service-v1.22.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
+## [1.21.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.20.1...balance-service-v1.21.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
+## [1.20.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.20.0...balance-service-v1.20.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [1.20.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.19.1...balance-service-v1.20.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
 ## [1.19.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.19.0...balance-service-v1.19.1) (2026-10-07)
 
 

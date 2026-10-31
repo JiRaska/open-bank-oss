@@ -1,0 +1,128 @@
+{
+  "consumer": {
+    "name": "openbank-pension-service"
+  },
+  "interactions": [
+    {
+      "description": "POST a pension ownership verification for another party's IBAN",
+      "providerStates": [
+        {
+          "name": "an account owned by a known party exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "iban": "CZ6508000000192000145399",
+          "partyId": "77777777-8888-4999-8aaa-bbbbbbbbbbbb"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/accounts/ownership-verifications"
+      },
+      "response": {
+        "body": {
+          "active": false,
+          "owned": false
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST a pension ownership verification for the owner's active account",
+      "providerStates": [
+        {
+          "name": "an account owned by a known party exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "iban": "CZ6508000000192000145399",
+          "partyId": "66666666-7777-4888-8999-aaaaaaaaaaaa"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/accounts/ownership-verifications"
+      },
+      "response": {
+        "body": {
+          "accountId": "11111111-2222-4333-8444-555555555555",
+          "active": true,
+          "owned": true
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST a pension ownership verification for an IBAN the bank does not hold",
+      "providerStates": [
+        {
+          "name": "no account exists for the unknown IBAN"
+        }
+      ],
+      "request": {
+        "body": {
+          "iban": "CZ0708000000000000000099",
+          "partyId": "66666666-7777-4888-8999-aaaaaaaaaaaa"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/accounts/ownership-verifications"
+      },
+      "response": {
+        "body": {
+          "active": false,
+          "owned": false
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST a pension ownership verification with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "iban": "CZ6508000000192000145399",
+          "partyId": "66666666-7777-4888-8999-aaaaaaaaaaaa"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/accounts/ownership-verifications"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-account-service"
+  }
+}

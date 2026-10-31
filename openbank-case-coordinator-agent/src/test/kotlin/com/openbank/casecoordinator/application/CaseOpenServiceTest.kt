@@ -5,9 +5,11 @@
 
 package com.openbank.casecoordinator.application
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.casecoordinator.application.port.out.CaseKillSwitchStatePort
 import com.openbank.casecoordinator.domain.model.CaseClass
 import com.openbank.casecoordinator.domain.model.CaseDeliveryMode
+import com.openbank.casecoordinator.domain.model.CaseStart
 import com.openbank.casecoordinator.infrastructure.config.CaseCoordinatorConfig
 import com.openbank.libs.temporal.TemporalConfig
 import io.mockk.every
@@ -20,6 +22,7 @@ import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowClientOptions
 import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
+import io.temporal.client.WorkflowServiceException
 import io.temporal.client.WorkflowStub
 import io.temporal.serviceclient.WorkflowServiceStubs
 import org.assertj.core.api.Assertions.assertThat
@@ -215,6 +218,104 @@ class CaseOpenServiceTest {
             .contains("case opened")
         assertThat(all).describedAs("CR/LF from request input must not reach the log verbatim")
             .doesNotContain("\r").doesNotContain("evil\nFATAL")
+    }
+
+    @Test
+    fun `logged caller fields round trip without rewriting the workflow payload`() {
+        val records = mutableListOf<LogRecord>()
+        val logger = JulLogger.getLogger(CaseOpenService::class.java.name)
+        val previousLevel = logger.level
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                records += record
+            }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        val claimed = "agent\r\ncaller=forged \"quote\" \\ route"
+        val principal = "operator\u0085verified\u2028name\u001b[31m"
+        every { gate.canOpenCase(claimed) } returns true
+        logger.addHandler(handler)
+        logger.level = Level.ALL
+        try {
+            assertThat(open(agent = claimed, subject = "subject-633", principal = principal))
+                .isEqualTo(CaseOpenResult.Opened(service.workflowIdFor(CaseClass.INCIDENT_RESPONSE, "subject-633")))
+        } finally {
+            logger.removeHandler(handler)
+            logger.level = previousLevel
+        }
+        verify(exactly = 1) {
+            untyped.start(match<CaseStart> { it.openedBy == claimed && it.subjectRef == "subject-633" })
+        }
+        val record = records.single { it.message.startsWith("case opened:") }
+        val output = record.parameters?.let { String.format(record.message, *it) } ?: record.message
+        assertThat(output.none { it.isISOControl() || it == '\u2028' || it == '\u2029' }).isTrue()
+        assertThat(output).doesNotContain("subject-633")
+        val fields = Regex(
+            """case opened: [a-f0-9]{64} claimed-by ("(?:[^"\\]|\\.)*") principal ("(?:[^"\\]|\\.)*") \(class INCIDENT_RESPONSE\)""",
+        ).matchEntire(output)
+        assertThat(fields).describedAs("one emitted line must contain exactly two quoted caller fields").isNotNull()
+        val parsed = requireNotNull(fields)
+        val mapper = ObjectMapper()
+        assertThat(mapper.readValue(parsed.groupValues[1], String::class.java)).isEqualTo(claimed)
+        assertThat(mapper.readValue(parsed.groupValues[2], String::class.java)).isEqualTo(principal)
+    }
+
+    @Test
+    fun `opened case logs correlation without subject and retains caller attribution`() {
+        val workflowId = service.workflowIdFor(CaseClass.INCIDENT_RESPONSE, "private-subject-460")
+        assertPrivateOutcome(CaseOpenResult.Opened(workflowId))
+    }
+
+    @Test
+    fun `duplicate case logs neither subject nor throwable payload`() {
+        every { untyped.start(any()) } throws WorkflowExecutionAlreadyStarted(
+            WorkflowExecution.newBuilder().setWorkflowId("private-subject-460").build(),
+            "CaseWorkflow",
+            IllegalStateException("private-provider-detail-460"),
+        )
+        assertPrivateOutcome(CaseOpenResult.Duplicate)
+    }
+
+    @Test
+    fun `failed case logs neither subject nor throwable payload`() {
+        every { untyped.start(any()) } throws WorkflowServiceException(
+            WorkflowExecution.newBuilder().setWorkflowId("private-subject-460").build(),
+            "CaseWorkflow",
+            IllegalStateException("private-provider-detail-460"),
+        )
+        assertPrivateOutcome(CaseOpenResult.Unavailable)
+    }
+
+    private fun assertPrivateOutcome(expected: CaseOpenResult) {
+        val records = mutableListOf<LogRecord>()
+        val logger = JulLogger.getLogger(CaseOpenService::class.java.name)
+        val previousLevel = logger.level
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                records += record
+            }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        logger.addHandler(handler)
+        logger.level = Level.ALL
+        try {
+            assertThat(open(subject = "private-subject-460")).isEqualTo(expected)
+        } finally {
+            logger.removeHandler(handler)
+            logger.level = previousLevel
+        }
+        assertThat(records).isNotEmpty
+        assertThat(records.map { it.thrown }).containsOnlyNulls()
+        val output = records.joinToString("\n") { it.message + (it.parameters?.joinToString(" ") ?: "") }
+        assertThat(output).doesNotContain("private-subject-460", "private-provider-detail-460")
+        val workflowId = service.workflowIdFor(CaseClass.INCIDENT_RESPONSE, "private-subject-460")
+        val correlation = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(workflowId.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        assertThat(output).contains(correlation)
+        if (expected is CaseOpenResult.Opened) assertThat(output).contains(PRINCIPAL, COORDINATOR)
+        if (expected == CaseOpenResult.Unavailable) assertThat(output).contains("WorkflowServiceException")
     }
 
     @Test

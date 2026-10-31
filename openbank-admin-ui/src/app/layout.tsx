@@ -6,12 +6,14 @@ import type { Metadata } from 'next'
 import './globals.css'
 import { cookies, headers } from 'next/headers'
 import { AppProviders } from '@/components/layout/AppProviders'
+import { auth } from '@/auth'
 import { LANG_COOKIE, parseLanguage } from '@/lib/i18n/language'
 import { THEME_COOKIE_KEY, parseTheme } from '@/lib/theme/theme'
 
 export const metadata: Metadata = {
-  title: 'OpenBank Admin',
-  description: 'OpenBank Operations Portal',
+  title: 'OpenBank Admin · Secure operations portal',
+  description: 'Sign in to the OpenBank operator workspace with your assigned access.',
+  robots: { index: false, follow: false },
 }
 
 // The operator console uses the platform font stack. The remote font loader fetches at build time,
@@ -29,11 +31,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const persistedLanguage = parseLanguage(requestCookies.get(LANG_COOKIE)?.value)
   const initialLanguage = persistedLanguage ?? 'en'
   const initialTheme = parseTheme(requestCookies.get(THEME_COOKIE_KEY)?.value) ?? 'light'
+  // Server-side session read (local JWT decode — no network round-trip): seeds the
+  // permission-filtered shell so its first paint already carries the operator's roles.
+  // Without this the client useSession() resolves a moment later and the whole console
+  // nav re-painted on top of the user (measured 0.12+ workspace CLS, see Sidebar).
+  const initialRoles: string[] | null = (await auth())?.user?.roles ?? null
 
   return (
     <html lang={initialLanguage} className={initialTheme === 'dark' ? 'dark' : undefined} suppressHydrationWarning>
       <body>
-        <AppProviders initialLanguage={persistedLanguage} initialTheme={initialTheme}>{children}</AppProviders>
+        <AppProviders initialLanguage={persistedLanguage} initialTheme={initialTheme} initialRoles={initialRoles}>{children}</AppProviders>
       </body>
     </html>
   )

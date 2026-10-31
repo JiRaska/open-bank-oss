@@ -18,7 +18,7 @@
 # Stage 1a: Collect docs trees into a single bundle/ directory.
 # Lightweight alpine, no node, just shell + cp.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS docs-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS docs-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -42,7 +42,7 @@ RUN set -e; \
 # Re-uses the root .dockerignore exception added for SBOM coverage:
 #   !openbank-*/build/reports/bom.json
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS sbom-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS sbom-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -69,7 +69,7 @@ RUN set -e; \
 # catalog work for ALL services regardless of deploy state, with no external
 # GitHub dependency. Mirrors the docs/sbom collectors above.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS openapi-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS openapi-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -98,7 +98,7 @@ RUN set -e; \
 # Communication Studio: openbank-libs/ is .dockerignore'd out of the runtime fs, so without this
 # copy /communication renders "registry not available" in the image while looking correct in local
 # dev, where the repo tree is one level up.
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS governance-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS governance-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -120,7 +120,7 @@ RUN set -e; \
 # (read-only) at /docs/flags (ADR-0067). Mirrors the collectors above; the loader
 # (src/lib/governance/flags.ts) parses the ConfigMap YAML + embedded flags.json.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS flags-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS flags-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -144,7 +144,7 @@ RUN set -e; \
 # Release notes are derived from these same files. Re-uses the root .dockerignore
 # exception (!openbank-*/CHANGELOG.md). Mirrors the docs/sbom/openapi collectors.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS changelog-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS changelog-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -180,7 +180,7 @@ RUN set -e; \
 # Staged as its own collector rather than widening the build COPY: the image context stays the
 # admin-ui directory plus explicitly named bundles, which is what every other input here does.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS origination-collector
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS origination-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -195,7 +195,22 @@ RUN set -e; \
     fi; \
     ls /origination-src/openbank-libs-lending/src/main/kotlin/com/openbank/libs/lending/origination
 
-FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:725aeba2364a9b16beae49e180d83bd597dbd0b15c47f1f28875c290bfd255b9 AS deps
+# ──────────────────────────────────────────────────────────────────────
+# Stage: platform-versions-collector - the infra files scripts/generate-platform-versions.mjs PARSES
+# (substrate tofu, finops EKS lifecycle table, and the GitOps YAML for image/chart pins), staged at
+# their repo-relative paths. Only these are copied; the rest of openbank-infra stays out of the image.
+# ──────────────────────────────────────────────────────────────────────
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS platform-versions-collector
+COPY . /repo
+RUN set -e; \
+    mkdir -p /pv-src/openbank-infra/aws/envs/sandbox-substrate /pv-src/openbank-infra/aws/finops; \
+    cp /repo/openbank-infra/aws/envs/sandbox-substrate/variables.tf /repo/openbank-infra/aws/envs/sandbox-substrate/main.tf /pv-src/openbank-infra/aws/envs/sandbox-substrate/; \
+    cp /repo/openbank-infra/aws/finops/eks-version-lifecycle.json /pv-src/openbank-infra/aws/finops/; \
+    cd /repo && find openbank-infra/aws -name '*.tf' -not -path '*/.terraform/*' | while read -r f; do mkdir -p "/pv-src/$(dirname "$f")"; cp "$f" "/pv-src/$f"; done; \
+    find openbank-infra/gitops -name '*.yaml' | while read -r f; do mkdir -p "/pv-src/$(dirname "$f")"; cp "$f" "/pv-src/$f"; done; \
+    test -s /pv-src/openbank-infra/gitops/components/kafka/kafka.yaml
+
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS deps
 WORKDIR /app
 COPY openbank-admin-ui/package.json openbank-admin-ui/package-lock.json* ./
 # Resilient install: the registry/network can flake (ECONNRESET mid-download) and a bare
@@ -220,7 +235,7 @@ RUN npm config set fetch-retries 5 \
 # copy into the arm64 runtime stage. Running on the native arch avoids
 # QEMU overhead (~10× slower) and SIGILL crashes on x86 hosts.
 # ──────────────────────────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:725aeba2364a9b16beae49e180d83bd597dbd0b15c47f1f28875c290bfd255b9 AS build
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS build
 WORKDIR /app
 
 # BuildInfo — passed in via docker-compose build args, stamped into the bundle.
@@ -237,6 +252,9 @@ ENV NEXT_PUBLIC_BUILD_VERSION=$BUILD_VERSION \
 COPY --from=deps /app/node_modules ./node_modules
 COPY openbank-admin-ui/ ./
 COPY .github/gates/gates.yaml /.github/gates/gates.yaml
+# platform-versions.json is PARSED by `npm run build` (prebuild) from the infra sources of truth, staged
+# at their repo-relative paths, so the UI can never show a hand-typed Kubernetes/EKS/Loki/Postgres version.
+COPY --from=platform-versions-collector /pv-src/ /
 # The origination Kotlin, at the repo-relative path the generator expects (#3283). It resolves
 # against --repo, which defaults to the parent of the admin-ui directory — here, /.
 COPY --from=origination-collector /origination-src/openbank-libs-lending /openbank-libs-lending
@@ -255,9 +273,17 @@ ENV NEXT_STANDALONE=true
 #
 # Absent secret = no upload and a normal build, so local and PR builds are unaffected and this can
 # never become the reason a build fails.
+#
+# `prebuild:image`, not `prebuild`: the production-readiness collector scores every runnable
+# backend module, and this stage deliberately stages none of them (repo root is `/`). Since the
+# collector refuses an inventory missing declared money-path modules, running it here failed
+# every image build. Its output was never used from this stage anyway: the workflow generates
+# openbank-admin-ui/prod-readiness.json over the full checkout and the runtime stage COPYs that.
+# `--ignore-scripts` keeps npm from re-running the full `prebuild` hook before `build`.
 RUN --mount=type=secret,id=glitchtip_token \
+    npm run prebuild:image && \
     SENTRY_AUTH_TOKEN="$(cat /run/secrets/glitchtip_token 2>/dev/null || true)" \
-    npm run build
+    npm run build --ignore-scripts
 
 # Client source maps NEVER enter the runtime image. The upload happens inside `npm run build`
 # above, so by this line the maps have already served their only purpose.
@@ -277,7 +303,7 @@ RUN echo "maps before prune: $(find .next/static -name '*.map' | wc -l)" \
 # ──────────────────────────────────────────────────────────────────────
 # Stage 4: Runtime image — minimal surface, non-root.
 # ──────────────────────────────────────────────────────────────────────
-FROM node:26-alpine@sha256:725aeba2364a9b16beae49e180d83bd597dbd0b15c47f1f28875c290bfd255b9 AS runtime
+FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -381,6 +407,10 @@ COPY --chmod=0644 openbank-admin-ui/service-graph.json ./service-graph.json
 # build so this file always exists (parse failure → an honest available:false
 # snapshot). --chmod=0644 for the same UID-100 readability reason.
 COPY --chmod=0644 openbank-admin-ui/security-graph.json ./security-graph.json
+# Canonical BCP classification and recovery targets (read-only parser source for
+# /api/bcp/policy; the source Markdown is copied as-is, never re-authored here).
+COPY --chmod=0644 docs/bcp/bcp-policy.md ./bcp-policy.md
+ENV OPENBANK_BCP_POLICY_FILE=/app/bcp-policy.md
 # Infrastructure lifecycle snapshot (ADR-0077): endoflife.date cycles + GitOps image
 # tags, baked by scripts/generate-infra-lifecycle.mjs. Read-only consumer:
 # src/app/api/infra/lifecycle/route.ts. build-push-admin-ui.sh runs the generator before
@@ -390,11 +420,10 @@ COPY --chmod=0644 openbank-admin-ui/infra-lifecycle.json ./infra-lifecycle.json
 # build ran with --scan-infra; otherwise an honest "not scanned" placeholder. The BFF
 # degrades gracefully when it is absent.
 COPY --chmod=0644 openbank-admin-ui/infra-vulns.json ./infra-vulns.json
-# Repo-derived production-readiness scorecard (C1–C9 maturity; read-only consumer,
-# src/app/api/prod-readiness/route.ts). build-push-admin-ui.sh runs
-# scripts/prod-readiness-collector.py before the build so this file always exists
-# (collector failure → an honest empty scorecard). --chmod=0644 for the same
-# UID-100 readability reason as test-results.json.
+# Repo-derived production-readiness scorecard (C1–C9 maturity). The API prefers the
+# validated runtime evidence-store snapshot; this image copy is a dated fallback and
+# is labeled as not live. --chmod=0644 for the same UID-100 readability reason as
+# test-results.json.
 COPY --chmod=0644 openbank-admin-ui/prod-readiness.json ./prod-readiness.json
 
 USER openbank

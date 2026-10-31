@@ -110,4 +110,14 @@ Mandate faults are mapped by `MandateNotFoundMapper` (404) and `IllegalMandateTr
 
 - **AuthN:** Keycloak OIDC, RS256 JWT bearer token (`auth-server-url .../realms/openbank`, client `openbank-services`).
 - **AuthZ:** Quarkus `@RolesAllowed`. Mutations require one of `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_API`; read endpoints (`GET` list/fetch, `GET refund-assessment`) additionally allow `ROLE_VIEWER`.
+- For mandate registration and cancellation, the initiator-scope check follows the endpoint role and OPA checks (ADR-0335 D6). The pension client service account is recognized only from a verified JWT with a non-empty subject, `azp` matching that client, and `preferred_username` matching `service-account-<azp>`; its creditor identifier is confined to the configured value. The edge client service account has general scope. Staff receive general scope only with `ROLE_OPERATOR` or `ROLE_ADMIN` and verified interactive-user claims. A role or service-account-looking username alone does not grant a machine or human general scope.
 - CORS is restricted to `http://localhost:3000` in the shipped config; security headers (CSP, HSTS, X-Frame-Options DENY, nosniff) are set on every response.
+
+### Mandate initiator identity (#12448)
+
+The pension service-account receives only its configured creditor scope; the edge service-account
+retains its general mandate scope. Both positive machine matches require a Quarkus-verified JWT
+with a subject, `azp` equal to the expected client (`openbank-pension` or `openbank-edge`), and
+the corresponding `service-account-<azp>` preferred username. A matching principal name alone
+is insufficient. An unrecognised `service-account-` principal is denied, including one carrying
+staff roles. The existing operator/admin path is evaluated separately.

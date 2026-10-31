@@ -43,7 +43,7 @@ import rego.v1
 # session token (not a service account), so this rule is the one that carries the console.
 allowed_reasons contains "operator-sdd-write" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	startswith(input.action, "sdd.")
@@ -66,7 +66,7 @@ allowed_reasons contains "operator-sdd-write" if {
 #     reachable on a customer-facing principal.
 allowed_reasons contains "edge-service-sdd" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"sdd.create",
 		"sdd.read",
@@ -115,3 +115,17 @@ allowed_reasons contains "sdd-oversight-read" if {
 	role in input.principal.roles
 	input.action in {"sdd.read", "sdd.list"}
 }
+
+# ADR-0335 D6 — scoped payment initiators are DATA (rules.yaml: scoped_payment_initiators). The
+# declared identity is admitted to the declared sdd actions only; WHICH mandates (creditor = its
+# configured SEPA creditor identifier, debtor account owned+active by the stated subject party as
+# verified with account-service) is decided in sdd-service's domain (ScopedMandateService), because
+# both the creditor identifier and the account ownership are facts OPA's input does not carry.
+allowed_reasons contains "service-scoped-payment-initiator" if {
+	input.principal.type == "HUMAN"
+	some initiator in data.rules.scoped_payment_initiators
+	initiator.service == "openbank-sdd-service"
+	input.principal.id == initiator.principal
+	input.action in initiator.actions
+}
+

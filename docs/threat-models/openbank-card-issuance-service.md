@@ -41,9 +41,22 @@ no external network connection in sandbox. Sandbox `maskedPan` is synthetic (no 
 | `GET /api/v1/cards`, `GET /{id}`, `GET /account/{id}`, `GET /party/{id}` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN` |
 | `POST /{id}/activate`, `/{id}/suspend`, `/{id}/resume` | `ROLE_OPERATOR`, `ROLE_ADMIN` |
 | `POST /{id}/block` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_COMPLIANCE` |
+| `GET /{id}/secure-details` (synthetic PAN/CVV) | `ROLE_OPERATOR`, and only the verified `service-account-openbank-edge` principal (named-caller check + OPA rule) |
 
 All mutations require `Idempotency-Key` or `X-Operator-Id` header; resource-level
 `@Authorize` enforces OPA policy (ADR-0034, advisory→enforce).
+
+### Customer-facing masked card reads
+
+The verified customer-edge machine identity may list cards by party and read a card by ID.
+The edge derives the party from the authenticated customer and checks card ownership or a
+valid delegation before disclosing a card. A caller-supplied party is not accepted by the
+customer list route. The resource guard and OPA policy both bind the allow-list entry to
+the verified client; an unrelated client using the edge's display name remains denied.
+These grants do not add write permissions or change the separate holder-only, SCA-bound
+secure-details path. Tests cover allowed reads, a spoofed client, unrelated service
+accounts, and denial of writes. Rollback restores the previous named-caller sets and
+regenerates the policy bundle; no stored data changes.
 
 ## 4. STRIDE
 
@@ -184,8 +197,10 @@ retiring the corresponding KEK version in Transit, not after.
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `card_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -236,6 +251,7 @@ retiring the corresponding KEK version in Transit, not after.
   revoke propagation per ADR-0232; customer-edge adoption of the check endpoint is its own slice.
   Rollback: revert; the projection tables are droppable without touching `cards`.
 - **2026-09-21** — **Two card reads admit named machine identities (#10486 batch 6).** `GET /api/v1/cards/{id}` (`card.read`) and `GET /api/v1/cards/party/{partyId}` (`card.list`) add `ROLE_API` to `@RolesAllowed`, so delegation-service (ownership check) and party-service (GDPR Art. 15) keep reading once the shared `openbank-services` client loses `ROLE_OPERATOR`. **STRIDE-E/I:** `ROLE_API` is held by every service account and this is cardholder data, so it is narrowed twice: identity rules in `card_issuance_rest_ext.rego` (`service-delegation-card-read`, `service-party-card-list`) and, because card-issuance runs `AUTHZ_ENFORCE=false`, a Kotlin named-caller check (`requireNamedCardReader`) with one list per endpoint. `CardReadCallerGuardTest` pins the Kotlin lists to the rego and asserts only these two endpoints admit `ROLE_API`; `card_issuance_rest_ext_test.rego` denies another service account and the shared client (negative case run: widening a rule to a `service-account-` prefix turned two tests red). The secure-details endpoint (PAN/CVV) is unchanged. Rollback: revert the commit.
+- **2026-10-15** — **secure-details is machine-only.** `GET /api/v1/cards/{id}/secure-details` (`card.details.read`) is admitted for customer-edge's own principal only — the caller that reaches it after its holder-only check and a card-bound SCA challenge. **STRIDE-I/E:** no staff role is admitted (no back-office screen renders a PAN), so `@RolesAllowed` is `ROLE_OPERATOR` and, because card-issuance runs `AUTHZ_ENFORCE=false`, a Kotlin named-caller check (`requireCardDetailsReader`, no staff exemption) enforces it; in policy, `card.details.read` is listed in `rules.yaml: authz.operator_read_any_excluded_actions` so no generic read grant reaches it, and `service-edge-card-details-read` names the one principal. `CardReadCallerGuardTest` pins the Kotlin list to the rego; `card_issuance_rest_ext_test.rego` denies every staff role and other service accounts (negative case run: emptying the exclusion or deleting the rule turns the tests red). The rego rule uses `machine_named`: a current PEP must supply the verified service-account marker and matching `client_id`; explicit person markers and mismatched or missing current-client claims are denied. The shared helper retains its existing compatibility branch for legacy PEPs whose marker is absent. Rollback: revert the commit.
 ## Delegation lifecycle ordering
 
 The card enforcement projection uses a durable monotonic cursor before changing access or blocking
@@ -263,3 +279,9 @@ revisioned delegation producer.
   `openbank-libs-domain`, identical in behavior to the copy it replaces. **Risk class:** none — the
   admin resource's authorization checks and outbox-replay logic are unchanged; only the log-sanitizer
   helper's defining class moves. Rollback: restore the service-local `sanitizeForLog` copy.
+
+## Machine-caller identity binding (#12448)
+
+The ROLE_API card reads (`card.read` for delegation, `card.list` for party) name their machine callers. `requireNamedCardReader` recognises each one through `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT whose `azp` is the caller's client and whose `preferred_username` is `service-account-<azp>`. It never uses the principal name, which Quarkus takes from a username claim, so a token whose username matches a listed service account but was issued to another client is refused.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.6](https://github.com/JiRaska/open-bank-oss/compare/governance-auditor-v0.6.5...governance-auditor-v0.6.6) (2026-10-17)
+
+
+### Bug Fixes
+
+* **governance-auditor:** preserve rule fallback and validation checks ([#12814](https://github.com/JiRaska/open-bank-oss/issues/12814)) ([3371364](https://github.com/JiRaska/open-bank-oss/commit/3371364f0a7e7e345a9e301b5b02b2ca440c10a3))
+
+## [0.6.5](https://github.com/JiRaska/open-bank-oss/compare/governance-auditor-v0.6.4...governance-auditor-v0.6.5) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
 ## [0.6.4](https://github.com/JiRaska/open-bank-oss/compare/governance-auditor-v0.6.3...governance-auditor-v0.6.4) (2026-10-04)
 
 

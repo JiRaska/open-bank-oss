@@ -20,7 +20,15 @@ Práh pokrytí (kover): LINE ≥ 40 (money-path baseline; ratchet-only, cíl 70)
 | Port | Účel |
 |---|---|
 | 8110 | aplikační HTTP (`/api/v1/sca/**`) |
+| 8443 | produkční HTTPS s povinným klientským certifikátem |
 | 8085 | management — health, metriky, docs (`root-path /q`) |
+
+Produkční HTTPS vyžaduje důvěryhodný klientský certifikát pro navázání TLS spojení. Na
+`/api/*` však certifikát neprokazuje identitu volajícího API: oprávnění `bearer-only` vyžaduje
+platný OIDC bearer token na HTTPS i HTTP. Certifikát bez tokenu musí po navázání TLS dostat HTTP
+401; klient bez certifikátu nedokončí HTTPS handshake. Kontrola rolí příslušné operace platí dál;
+rozhodnutí OPA se vynucují pouze při `AUTHZ_ENFORCE=true`. Test `ScaListenerAuthParityIT` tyto
+případy ověřuje na obou portech s produkčním nastavením listeneru a autentizace.
 
 ## Health probes
 
@@ -86,3 +94,16 @@ Selže OTP store, idempotence a store rozhodnutí. Výzvy nelze spolehlivě vytv
 
 ### Flyway checksum mismatch při startu
 Nastav `QUARKUS_FLYWAY_REPAIR_AT_START=true` v gitops env, nech pod nastartovat, pak odeber. Nikdy needituj aplikovanou migraci.
+
+
+## Integrační testy a příznak service-account (fail closed)
+
+OPA považuje každého volajícího, jehož token neprokazuje osobu, za service account (`input.principal.service_account`, fail closed). Prostá identita `@TestSecurity` nenese JWT, takže se počítá jako stroj a přichází o oprávnění vyhrazená lidem. Integrační testy, které vystupují jako skuteční zaměstnanci, proto přidávají lidské claimy přes `@OidcSecurity`. Proto modul testuje s `quarkus-test-security-oidc`.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

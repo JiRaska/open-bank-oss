@@ -27,10 +27,10 @@
 # as the source rather than release-please's package list — that list disagrees
 # BOTH ways. It omits the six deployed images that are not released components
 # (analytics-sink, developer-portal, document-renderer, keycloak, pyroscope-agent,
-# ci-runner) and includes openbank-tax-reporting-service, a released component
-# with no gitops workload, no auto-deploy entry and — correctly — no repository.
-# Deriving from it would have created a seventh unused repository and left six
-# real ones undeclared.
+# ci-runner), and when this was written it included openbank-tax-reporting-service,
+# then a released component with no gitops workload and — correctly — no
+# repository (it gained one with its workload, #5760). Deriving from it would
+# have created an unused repository and left six real ones undeclared.
 #
 # A new service therefore gets its repository from the same PR that gives it a
 # gitops manifest, which is necessarily before its first image is pushed.

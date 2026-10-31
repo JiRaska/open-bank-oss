@@ -43,8 +43,11 @@ Image skládá `.github/workflows/Dockerfile.deploy` z fast-jaru sestaveného na
 | `AUTHZ_ENFORCE` | `false` | `@Authorize` enforce vs advisory |
 | `BUILD_TIME` / `GIT_COMMIT` | `unknown` | build metadata pro `/api/v1/info` |
 | `QUARKUS_LOG_LEVEL` | `INFO` | úroveň logu |
+| `openbank.pid.eudi.trusted-list.allowed-hosts` | nenastaveno (prázdný seznam) | HTTPS hosty povolené pro stažení podepsaného seznamu důvěry |
 
 Bezpečnostní hlavičky (CSP, HSTS, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy) jsou nastaveny globálně v `application.yaml`.
+
+Při nastavení `openbank.pid.eudi.trusted-list.url` uveďte jeho externí host v `openbank.pid.eudi.trusted-list.allowed-hosts`; samotná URL stahování nepovolí. `SafeHttpClient` kontroluje veřejné DNS adresy, připojuje se k prověřené adrese, ověřuje TLS certifikát vůči původnímu jménu, odmítá přesměrování a omezuje velikost odpovědi. Selhání stažení nebo ověření podpisu ponechá aktuální úložiště důvěry beze změny. Zdroj podepsaného seznamu vložený přímo do konfigurace síťové spojení nepoužívá.
 
 ## Health checky
 
@@ -117,3 +120,11 @@ Verze jsou pinovány centrálně v `libs.versions.toml` (Quarkus BOM) a vystaven
 - **Verzování:** `version.txt` (aktuálně `0.3.0`) vlastní release-please; conventional commits řídí bump. Release osa je nezávislá na `openapi.yaml:info.version` (ADR-0048).
 - **CI:** path-scoped per-service pipeline (build jen při změnách pod `openbank-pid-service/src/main/**`); `detekt`, `ktlintCheck`, `koverVerify`, testy, SBOM, image build.
 - **CD:** ArgoCD vyzvedne nový image tag z GitOps manifestu.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

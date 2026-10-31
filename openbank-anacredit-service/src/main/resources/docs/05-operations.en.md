@@ -109,3 +109,23 @@ Exact pinned versions are auto-generated from `libs.versions.toml` at build and 
 - `version.txt` is owned by **release-please** (per-service component); feature/fix PRs do not hand-edit it.
 - The OpenAPI contract version (`openapi.yaml:info.version`) is the separate API-contract axis (ADR-0048) and is verified by `AnaCreditContractTest`.
 - CD: ArgoCD picks up the new image tag from the gitops manifest bump.
+
+## Observability
+
+The service includes the `quarkus-opentelemetry` runtime extension to instrument HTTP
+requests and reactive Postgres operations. `AnaCreditTraceContractIT` uses a test-only
+span recorder and verifies that `POST /api/v1/anacredit/exposures` and its
+`INSERT credit_exposures` operation share a trace id.
+
+The deployment must configure the intended OTLP exporter endpoint and collector route.
+This local trace contract proves HTTP/SQL correlation; it does not prove export to a
+collector, delivery to Tempo, or retention in a deployed environment. Verify those
+separately before relying on exported traces for operational investigation.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

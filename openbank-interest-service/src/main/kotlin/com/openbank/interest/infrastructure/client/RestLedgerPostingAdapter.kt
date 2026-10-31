@@ -34,9 +34,15 @@ class RestLedgerPostingAdapter(private val guard: LedgerCallGuard, private val c
     /** Overridable only so a test can pin "today"; production reads the system clock. */
     internal var clock: Clock = Clock.systemUTC()
 
-    override fun post(posting: CapitalizationPosting): Uni<Unit> {
+    override fun post(posting: CapitalizationPosting): Uni<Unit> = postWithReceipt(posting).replaceWith(Unit)
+
+    override fun postWithReceipt(posting: CapitalizationPosting): Uni<java.util.UUID?> {
         val bookingDate = LocalDate.now(clock.withZone(CapitalizationJournalFactory.LEDGER_ZONE))
-        return guard.postJournal(CapitalizationJournalFactory.buildRequest(posting, config, bookingDate))
-            .replaceWith(Unit)
+        val request = CapitalizationJournalFactory.buildRequest(posting, config, bookingDate)
+        return guard.postJournal(request).map { receipt ->
+            check(receipt.transactionId == request.transactionId) { "ledger capitalization receipt identity mismatch" }
+            check(receipt.status == "POSTED") { "ledger did not confirm a posted capitalization" }
+            receipt.id
+        }
     }
 }

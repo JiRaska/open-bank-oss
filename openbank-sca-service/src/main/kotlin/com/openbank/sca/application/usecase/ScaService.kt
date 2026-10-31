@@ -75,6 +75,9 @@ class ScaMethodNotDeliverableException(method: ScaMethod) :
  */
 private val UNDELIVERABLE_METHODS = setOf(ScaMethod.TOTP)
 
+/** Column width of `sca_challenges.dynamic_approval_request_id` (V17). */
+const val MAX_APPROVAL_REQUEST_ID = 160
+
 class ScaChallengeNotFoundException(id: UUID) : RuntimeException("SCA challenge not found: $id")
 class ScaChallengeExpiredException(id: UUID) : RuntimeException("SCA challenge expired: $id")
 class ScaChallengeMaxAttemptsException(id: UUID) : RuntimeException("Max attempts exceeded for challenge: $id")
@@ -83,6 +86,8 @@ class ScaChallengeNotAwaitingException(id: UUID) : RuntimeException("SCA challen
 class ScaChallengeNotApprovedException(id: UUID) : RuntimeException("SCA challenge is not approved: $id")
 class ScaChallengeAlreadyConsumedException(id: UUID) : RuntimeException("SCA challenge already consumed: $id")
 class ScaChallengePartyMismatchException(id: UUID) : RuntimeException("SCA challenge belongs to another party: $id")
+class ScaConsumerScopeViolationException(id: UUID) :
+    RuntimeException("SCA challenge is outside this consumer's scope: $id")
 class ScaDynamicLinkingMismatchException(id: UUID) :
     RuntimeException("Operation does not match what the device signed for challenge: $id")
 class DeviceNotEnrolledException(credentialId: String) :
@@ -432,6 +437,10 @@ class ScaService(
         if (challenge.partyId != command.expectedPartyId) {
             throw ScaChallengePartyMismatchException(command.challengeId)
         }
+        // ADR-0335 D1: a scoped consumer spends only its own reserved namespace, and nobody else
+        // spends that namespace. Checked on the STORED (device-signed) linking data, before anything
+        // that could burn the challenge.
+        if (!command.scope.permits(challenge)) throw ScaConsumerScopeViolationException(command.challengeId)
         if (challenge.consumedAt != null) throw ScaChallengeAlreadyConsumedException(command.challengeId)
         if (challenge.isExpired(now)) throw ScaChallengeExpiredException(command.challengeId)
         // A decoupled challenge may hold a signature-verified device decision that nobody has
@@ -505,6 +514,9 @@ class ScaService(
             "APPROVAL challenge requires dynamicLinkingData.approvalRequestId and payloadSha256"
         }
         require(SHA256_HEX.matches(payloadSha256)) { "payloadSha256 must be 64 hex characters" }
+        require(approvalRequestId.length <= MAX_APPROVAL_REQUEST_ID) {
+            "approvalRequestId must be at most $MAX_APPROVAL_REQUEST_ID characters"
+        }
         // A payment approval signs amount, currency and creditor in canonical form (see
         // approvalLinkingPayload): all three or none, and an amount that has a canonical form.
         val dl = requireNotNull(command.dynamicLinkingData)

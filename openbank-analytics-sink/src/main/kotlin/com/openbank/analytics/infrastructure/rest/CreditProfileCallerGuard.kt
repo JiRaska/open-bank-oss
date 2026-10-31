@@ -4,10 +4,11 @@
 
 package com.openbank.analytics.infrastructure.rest
 
+import com.openbank.libs.authz.ServiceAccountIdentity
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.ws.rs.ForbiddenException
 
-/** Staff roles the credit profile admitted before #10486; a caller holding one needs no identity check. */
+/** Staff roles the credit profile admitted before #10486, for verified human sessions only. */
 private val CREDIT_PROFILE_STAFF_ROLES = setOf("ROLE_OPERATOR", "ROLE_AUDITOR", "ROLE_ADMIN")
 
 /**
@@ -30,8 +31,8 @@ internal val CREDIT_PROFILE_CALLERS = setOf(
  * of them read any party's income and outflow figures.
  */
 internal fun requireNamedCreditProfileCaller(identity: SecurityIdentity) {
-    if (CREDIT_PROFILE_STAFF_ROLES.any(identity::hasRole)) return
-    if (identity.principal?.name !in CREDIT_PROFILE_CALLERS) {
+    if (CREDIT_PROFILE_STAFF_ROLES.any(identity::hasRole) && ServiceAccountIdentity.isHumanStaff(identity)) return
+    if (!ServiceAccountIdentity.isOneOf(identity, CREDIT_PROFILE_CALLERS)) {
         throw ForbiddenException("caller is not a named credit-profile reader")
     }
 }

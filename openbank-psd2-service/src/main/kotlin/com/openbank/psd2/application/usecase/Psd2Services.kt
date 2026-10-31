@@ -201,6 +201,12 @@ class PaymentInitiationService(
 ) : PaymentInitiationUseCase {
 
     override suspend fun initiatePayment(command: InitiatePaymentCommand): PaymentInitiationResponse {
+        // Non-HTTP callers must meet the same scheme rule before consent-dependent work.
+        val payment = if (command.product == PaymentProduct.DOMESTIC_CZ) {
+            DomesticCzCurrency.normalize(command.payment as DomesticCzPayment)
+        } else {
+            command.payment
+        }
         val valid = consentClient.validateConsent(
             command.consentId,
             command.tppId,
@@ -211,7 +217,7 @@ class PaymentInitiationService(
             } else {
                 "PAYMENTS_INITIATE"
             },
-            debtorIban(command.payment),
+            debtorIban(payment),
         )
         if (!valid) throw ConsentUnauthorizedException("Consent does not allow payment initiation")
 
@@ -219,7 +225,7 @@ class PaymentInitiationService(
             PaymentProduct.SEPA_CREDIT_TRANSFERS,
             PaymentProduct.INSTANT_SEPA_CREDIT_TRANSFERS,
             -> {
-                val p = command.payment as PaymentInitiation
+                val p = payment as PaymentInitiation
                 transactionClient.initiatePayment(
                     debtorIban = p.debtorAccount.iban ?: throw InvalidPaymentProductException("Debtor IBAN required"),
                     creditorIban = p.creditorAccount.iban
@@ -233,7 +239,7 @@ class PaymentInitiationService(
                 )
             }
             PaymentProduct.DOMESTIC_CZ -> {
-                val p = command.payment as DomesticCzPayment
+                val p = payment as DomesticCzPayment
                 transactionClient.initiatePayment(
                     debtorIban = p.debtorAccount.iban ?: throw InvalidPaymentProductException("Debtor IBAN required"),
                     creditorIban = p.creditorAccount.iban
@@ -251,7 +257,7 @@ class PaymentInitiationService(
                 )
             }
             PaymentProduct.SIPO -> {
-                val p = command.payment as SipoPayment
+                val p = payment as SipoPayment
                 transactionClient.initiatePayment(
                     debtorIban = p.debtorAccount.iban ?: throw InvalidPaymentProductException("Debtor IBAN required"),
                     creditorIban = "CZ0000000000000000000000",

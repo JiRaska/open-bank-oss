@@ -19,6 +19,7 @@ import jakarta.ws.rs.container.ContainerResponseContext
 import jakarta.ws.rs.core.MultivaluedHashMap
 import jakarta.ws.rs.core.SecurityContext
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.jboss.logging.MDC
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -46,10 +47,33 @@ class SyntheticTaintFilterTest {
         testContextScope.close()
     }
 
-    private fun request(header: String?, principal: String?): ContainerRequestContext {
+    private fun request(
+        header: String?,
+        principal: String?,
+        clientId: String? = principal?.removePrefix("service-account-"),
+        username: String? = principal,
+        subjectClaim: String? = "service-account-subject",
+        plainPrincipal: Boolean = false,
+        unreadableClaim: String? = null,
+    ): ContainerRequestContext {
         val security = mockk<SecurityContext>(relaxed = true) {
             every { userPrincipal } returns principal?.let { name ->
-                mockk<Principal> { every { getName() } returns name }
+                if (plainPrincipal) {
+                    Principal { name }
+                } else {
+                    mockk<JsonWebToken> {
+                        every { getName() } returns name
+                        every { subject } returns subjectClaim
+                        every { getClaim<String>("azp") } returns clientId
+                        every { getClaim<String>("preferred_username") } returns username
+                        when (unreadableClaim) {
+                            "sub" -> every { subject } throws IllegalStateException("unreadable subject")
+                            "azp" -> every { getClaim<String>("azp") } throws IllegalStateException("unreadable azp")
+                            "preferred_username" -> every { getClaim<String>("preferred_username") } throws
+                                IllegalStateException("unreadable username")
+                        }
+                    }
+                }
             }
         }
         return mockk(relaxed = true) {
@@ -60,15 +84,24 @@ class SyntheticTaintFilterTest {
 
     private fun filterWith(trusted: String?) = SyntheticTaintRequestFilter().apply {
         trustedPrincipals = Optional.ofNullable(trusted)
+        taintContext = SyntheticTaintContext()
     }
 
     @Test
     fun `a trusted principal asserting the header taints the request`() {
         val req = request(header = "true", principal = "service-account-openbank-canary")
+        val holder = SyntheticTaintContext()
+        val filter = SyntheticTaintRequestFilter().apply {
+            trustedPrincipals = Optional.of("service-account-openbank-canary")
+            taintContext = holder
+        }
 
-        filterWith("service-account-openbank-canary").filter(req)
+        filter.filter(req)
 
         verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, true) }
+        // This unit fixture checks the manually constructed holder. HTTP tests separately exercise
+        // suspended resource reads under controlled request-property loss.
+        assertThat(holder.tainted).isTrue()
         assertThat(MDC.get(MDC_SYNTHETIC)).isEqualTo("true")
     }
 
@@ -92,12 +125,48 @@ class SyntheticTaintFilterTest {
         // of AML scoring and the regulatory returns, using the mechanism built to make the
         // platform more honest.
         val req = request(header = "true", principal = "some-real-customer")
+        val holder = SyntheticTaintContext()
+        val filter = SyntheticTaintRequestFilter().apply {
+            trustedPrincipals = Optional.of("service-account-openbank-canary")
+            taintContext = holder
+        }
 
-        filterWith("service-account-openbank-canary").filter(req)
+        filter.filter(req)
 
         verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, false) }
         verify(exactly = 0) { req.setProperty("openbank.synthetic.baggage-scope", any()) }
+        assertThat(holder.tainted).isFalse()
         assertThat(MDC.get(MDC_SYNTHETIC)).isNull()
+    }
+
+    @Test
+    fun `a matching name without a verified client JWT cannot taint`() {
+        val name = "service-account-openbank-canary"
+        val attempts = listOf(
+            request("true", name, plainPrincipal = true),
+            request("true", name, clientId = null),
+            request("true", name, clientId = "attacker"),
+            request("true", name, username = "another-user"),
+            request("true", name, subjectClaim = null),
+        )
+        attempts.forEach { req ->
+            filterWith(name).filter(req)
+            verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, false) }
+        }
+    }
+
+    @Test
+    fun `unreadable service account claims fail to real without rejecting the request`() {
+        val canary = "service-account-openbank-canary"
+        listOf("sub", "azp", "preferred_username").forEach { claim ->
+            val req = request(header = "true", principal = canary, unreadableClaim = claim)
+
+            filterWith(canary).filter(req)
+
+            verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, false) }
+            verify(exactly = 0) { req.setProperty("openbank.synthetic.baggage-scope", any()) }
+            assertThat(Baggage.current().getEntryValue(SyntheticTaint.BAGGAGE_KEY)).isNull()
+        }
     }
 
     @Test
@@ -116,7 +185,10 @@ class SyntheticTaintFilterTest {
         // fleet-wide hole the moment it merged, on every service that depends on libs-runtime.
         val req = request(header = "true", principal = "service-account-openbank-canary")
 
-        SyntheticTaintRequestFilter().filter(req)
+        SyntheticTaintRequestFilter().apply {
+            trustedPrincipals = Optional.empty()
+            taintContext = SyntheticTaintContext()
+        }.filter(req)
 
         verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, false) }
     }
@@ -132,9 +204,9 @@ class SyntheticTaintFilterTest {
 
     @Test
     fun `the trusted list is a list, and whitespace around a name does not break it`() {
-        val req = request(header = "true", principal = "canary-b")
+        val req = request(header = "true", principal = "service-account-canary-b")
 
-        filterWith("canary-a, canary-b , canary-c").filter(req)
+        filterWith("service-account-canary-a, service-account-canary-b , service-account-canary-c").filter(req)
 
         verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, true) }
     }
@@ -152,8 +224,8 @@ class SyntheticTaintFilterTest {
     @Test
     fun `a value that is not an exact true is real even from a trusted principal`() {
         for (value in listOf("1", "yes", "TRUE!", "false", "")) {
-            val req = request(header = value, principal = "canary")
-            filterWith("canary").filter(req)
+            val req = request(header = value, principal = "service-account-canary")
+            filterWith("service-account-canary").filter(req)
             verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, false) }
         }
     }

@@ -19,6 +19,7 @@ import java.util.UUID
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_catalog_boundaries")],
+    restrictToAnnotatedClass = true,
 )
 @TestSecurity(user = "boundary-author", roles = ["ROLE_OPERATOR"])
 class CatalogBoundaryValidationTest {
