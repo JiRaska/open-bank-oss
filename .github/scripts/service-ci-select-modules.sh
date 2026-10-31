@@ -58,6 +58,10 @@ select_modules() {
     RELEVANT=""
     while IFS= read -r f; do
       [ -z "$f" ] && continue
+      if gitops_image_pin_only_change "$f" "$DIFF_BASE"; then
+        echo "Decision: $f changes only image pins -> inert."
+        continue
+      fi
       if ! is_inert_service_path "$f"; then RELEVANT="${RELEVANT}${RELEVANT:+$'\n'}${f}"; fi
     done <<< "$FILES"
     RELEVANT_COUNT=$(grep -c . <<< "$RELEVANT" || true)
@@ -319,6 +323,10 @@ select_modules() {
     while IFS= read -r f; do
       [ -z "$f" ] && continue
       is_inert_service_path "$f" && continue
+      if gitops_image_pin_only_change "$f" "$DIFF_BASE"; then
+        echo "Decision: $f changes only image pins -> inert."
+        continue
+      fi
       case "$f" in
         openbank-libs/governance/*|pacts/*.json|.github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-select-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) continue ;;
         openbank-*/*)
