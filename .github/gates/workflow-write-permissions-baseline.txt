@@ -2,6 +2,8 @@
 _service-ci.yml|job:contract|id-token
 _service-ci.yml|job:publish-evidence|id-token
 admin-ui-deploy.yml|job:build-push|id-token
+# ADR-0358 rollback guard: OIDC for ECR read + KMS cosign verify of an operator-typed digest; no write.
+admin-ui-repin.yml|job:repin|id-token
 # Dataset-only OIDC publisher; IAM limits writes to Gate Health snapshots and its CAS selector.
 admin-ui-evidence.yml|job:publish|id-token
 agent-review.yml|job:review|pull-requests
