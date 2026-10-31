@@ -264,7 +264,7 @@ def last_deploy_by_kind(commits: list[dict]) -> dict[str, int | None]:
     """{deploy-branch prefix: epoch of that kind's newest deploy commit}, per-lane windows."""
     out: dict[str, int | None] = {p: None for p in DEPLOY_PREFIXES}
     for c in commits:
-        for prefix, subject in zip(DEPLOY_PREFIXES, DEPLOY_SUBJECTS):
+        for prefix, subject in zip(DEPLOY_PREFIXES, DEPLOY_SUBJECTS, strict=True):
             if out[prefix] is None and c["message"].startswith(subject):
                 out[prefix] = int(c["epoch"])
     return out
