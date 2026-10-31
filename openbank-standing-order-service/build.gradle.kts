@@ -33,6 +33,8 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
     // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
     implementation(project(":openbank-client-transaction"))
+    // #13169: the account-service operations and DTOs are generated from its openapi.yaml (ADR-0319).
+    implementation(project(":openbank-client-account"))
     implementation(libs.quarkus.scheduler)
     testImplementation(libs.mockk)
     // @TestSecurity: StandingOrderOutboxAtomicityIT (#8353) drives the @RolesAllowed lifecycle
