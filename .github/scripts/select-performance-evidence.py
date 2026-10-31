@@ -19,10 +19,38 @@ from pathlib import Path
 
 NARROWED = 3
 UNKNOWN = 4
-EXPECTED_GATE = (
-    ("perf-reports-openbank-product-catalog", "k6 smoke (openbank-product-catalog)"),
-    ("perf-reports-openbank-flaky-test-hunter", "k6 smoke (openbank-flaky-test-hunter)"),
-)
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DECLARED_SCOPE = re.compile(r"DECLARED = \[(?P<body>[^\]]*)\]")
+
+
+def declared_gate_lanes(repo_root: Path = REPO_ROOT) -> tuple[tuple[str, str, str], ...]:
+    """(artifact, job, scenario id) for every module in perf-gate.yml's declared scope.
+
+    Derived, not listed: a hand-kept pair of names here outlived the gate growing from two
+    jobs to five (#14069, #14077), after which every full run read as `unknown` scope and
+    no perf-gate row could be attributed at all. The lane script is resolved exactly as
+    the gate's `prepare` job resolves it — `<stem>-smoke.js` first, else
+    `<stem>-read-baseline.js` — so the scenario id names the definition that actually ran.
+    """
+    workflow = (repo_root / ".github/workflows/perf-gate.yml").read_text()
+    match = DECLARED_SCOPE.search(workflow)
+    if not match:
+        raise SystemExit("perf-gate.yml declares no DECLARED scope")
+    lanes = []
+    for service in re.findall(r'"(openbank-[a-z0-9-]+)"', match.group("body")):
+        stem = service.replace("openbank-", "").replace("-service", "")
+        k6 = repo_root / service / "src/test/k6"
+        script = next((name for name in (f"{stem}-smoke", f"{stem}-read-baseline")
+                       if (k6 / f"{name}.js").is_file()), None)
+        if script is None:
+            continue  # The gate excludes it too, loudly, in its own summary.
+        lanes.append((f"perf-reports-{service}", f"k6 smoke ({service})", f"{service}-{script}"))
+    return tuple(lanes)
+
+
+GATE_LANES = declared_gate_lanes()
+EXPECTED_GATE = tuple((artifact, job) for artifact, job, _ in GATE_LANES)
+GATE_SCENARIO = {artifact: scenario for artifact, _, scenario in GATE_LANES}
 BASELINE_ARTIFACT = "k6-money-path-summary"
 OVERRIDE_SCOPE = re.compile(
     r"scope OVERRIDDEN by dispatch input\s*\((\d+) of (\d+) requested service\(s\)\)"
@@ -74,12 +102,13 @@ def ordered_runs(payloads: object) -> list[dict]:
     return selected
 
 
-def explicit_narrow_override(event: str, scope_log: str) -> bool:
+def explicit_narrow_override(event: str, scope_log: str, expected=None) -> bool:
     """Trust narrowing only when the dispatch log proves a smaller requested denominator."""
+    expected = EXPECTED_GATE if expected is None else expected
     if event != "workflow_dispatch":
         return False
     return any(
-        int(requested) < len(EXPECTED_GATE)
+        int(requested) < len(expected)
         for _measured, requested in OVERRIDE_SCOPE.findall(scope_log)
     )
 
@@ -89,22 +118,24 @@ def gate_policies(
     attempt_started_at: str,
     event: str = "unknown",
     scope_log: str = "",
+    expected=None,
 ) -> tuple[str, dict[str, ArtifactWindow]]:
     """Classify scope and return the artifact window attributable to each latest-view job."""
+    expected = EXPECTED_GATE if expected is None else expected
     if not isinstance(jobs_payload, dict):
         return "unknown", {}
     attempt_start = instant(attempt_started_at)
     jobs = [job for job in jobs_payload.get("jobs", []) if isinstance(job, dict)]
     perf_jobs = [job for job in jobs if str(job.get("name", "")).startswith("k6 smoke (")]
-    expected_names = {job_name for _, job_name in EXPECTED_GATE}
+    expected_names = {job_name for _, job_name in expected}
     observed_names = {str(job.get("name", "")) for job in perf_jobs}
     if observed_names != expected_names:
-        if observed_names <= expected_names and explicit_narrow_override(event, scope_log):
+        if observed_names <= expected_names and explicit_narrow_override(event, scope_log, expected):
             return "narrowed", {}
         return "unknown", {}
 
     policies: dict[str, ArtifactWindow] = {}
-    for artifact_name, job_name in EXPECTED_GATE:
+    for artifact_name, job_name in expected:
         matches = [job for job in perf_jobs if job.get("name") == job_name]
         if len(matches) != 1:
             return "unknown", {}
@@ -163,7 +194,7 @@ def newest_artifacts(
     return selected
 
 
-def select_gate_candidate(candidates: list[dict]) -> tuple[str, int | None, list[dict]]:
+def select_gate_candidate(candidates: list[dict], expected=None) -> tuple[str, int | None, list[dict]]:
     """Pure model of the workflow loop: skip proven narrow runs, stop at every other scope."""
     for candidate in ordered_runs({"workflow_runs": candidates}):
         scope, policies = gate_policies(
@@ -171,6 +202,7 @@ def select_gate_candidate(candidates: list[dict]) -> tuple[str, int | None, list
             str(candidate["run_started_at"]),
             str(candidate.get("event", "unknown")),
             str(candidate.get("scope_log", "")),
+            expected,
         )
         run_id = identifier(candidate["id"])
         if scope == "narrowed":
@@ -238,6 +270,17 @@ def self_test() -> int:
     ])] == [101, 99, 100]
     assert run_page_size({"workflow_runs": [{}] * 100}) == 100
 
+    # The windowing cases below use the v1 two-lane fixture; the derived scope is checked
+    # separately so these cases stay stable as the declared scope grows.
+    v1 = (
+        ("perf-reports-openbank-product-catalog", "k6 smoke (openbank-product-catalog)"),
+        ("perf-reports-openbank-flaky-test-hunter", "k6 smoke (openbank-flaky-test-hunter)"),
+    )
+    assert set(v1) <= set(EXPECTED_GATE), "the v1 lanes must stay in the derived scope"
+    assert GATE_SCENARIO["perf-reports-openbank-product-catalog"] == "openbank-product-catalog-product-catalog-smoke"
+    assert GATE_SCENARIO["perf-reports-openbank-ledger-service"] == "openbank-ledger-service-ledger-read-baseline"
+    assert len(EXPECTED_GATE) == len(set(EXPECTED_GATE)), "a declared lane appears twice"
+
     attempt_start = "2026-09-01T12:00:00Z"
     jobs = {
         "jobs": [
@@ -253,7 +296,7 @@ def self_test() -> int:
             },
         ]
     }
-    scope, policies = gate_policies(jobs, attempt_start)
+    scope, policies = gate_policies(jobs, attempt_start, expected=v1)
     assert scope == "full"
     assert policies == {
         "perf-reports-openbank-product-catalog": ArtifactWindow(
@@ -323,7 +366,7 @@ def self_test() -> int:
     cancelled_jobs = json.loads(json.dumps(jobs))
     cancelled_jobs["jobs"][1]["started_at"] = None
     cancelled_jobs["jobs"][1]["conclusion"] = "cancelled"
-    scope, cancelled = gate_policies(cancelled_jobs, attempt_start)
+    scope, cancelled = gate_policies(cancelled_jobs, attempt_start, expected=v1)
     assert scope == "full"
     assert [row["name"] for row in newest_artifacts(artifacts, cancelled)] == [
         "perf-reports-openbank-product-catalog"
@@ -334,12 +377,12 @@ def self_test() -> int:
         "perf-gate: scope OVERRIDDEN by dispatch input "
         "(1 of 1 requested service(s))"
     )
-    assert gate_policies(narrowed, attempt_start, "schedule", override_log)[0] == "unknown"
-    assert gate_policies(narrowed, attempt_start, "workflow_dispatch", "")[0] == "unknown"
-    assert gate_policies(narrowed, attempt_start, "workflow_dispatch", override_log)[0] == "narrowed"
-    assert gate_policies({"jobs": []}, attempt_start, "schedule", "")[0] == "unknown"
+    assert gate_policies(narrowed, attempt_start, "schedule", override_log, expected=v1)[0] == "unknown"
+    assert gate_policies(narrowed, attempt_start, "workflow_dispatch", "", expected=v1)[0] == "unknown"
+    assert gate_policies(narrowed, attempt_start, "workflow_dispatch", override_log, expected=v1)[0] == "narrowed"
+    assert gate_policies({"jobs": []}, attempt_start, "schedule", "", expected=v1)[0] == "unknown"
     extra = {"jobs": jobs["jobs"] + [{"name": "k6 smoke (openbank-extra)"}]}
-    assert gate_policies(extra, attempt_start)[0] == "unknown"
+    assert gate_policies(extra, attempt_start, expected=v1)[0] == "unknown"
 
     baseline = {
         "artifacts": [
@@ -371,7 +414,7 @@ def self_test() -> int:
         "run_started_at": attempt_start,
         "jobs": cancelled_jobs,
     }
-    state, run_id, rows = select_gate_candidate([old_full, new_full_incomplete])
+    state, run_id, rows = select_gate_candidate([old_full, new_full_incomplete], v1)
     assert (state, run_id) == ("full", 201)
     assert [row["name"] for row in rows] == ["perf-reports-openbank-product-catalog"]
 
@@ -383,7 +426,7 @@ def self_test() -> int:
         "jobs": narrowed,
         "scope_log": override_log,
     }
-    assert select_gate_candidate([old_full, new_explicit_narrow])[1] == 200
+    assert select_gate_candidate([old_full, new_explicit_narrow], v1)[1] == 200
 
     new_default_incomplete = {
         **new_explicit_narrow,
@@ -391,7 +434,7 @@ def self_test() -> int:
         "event": "schedule",
         "scope_log": "",
     }
-    assert select_gate_candidate([old_full, new_default_incomplete])[:2] == ("barrier", 203)
+    assert select_gate_candidate([old_full, new_default_incomplete], v1)[:2] == ("barrier", 203)
     print(
         "performance evidence selector self-test: ordering, positive narrowing, "
         "rerun carry windows, pagination and fail-closed candidate barriers proven"
