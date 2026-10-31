@@ -123,10 +123,10 @@ describe('committed derived artifacts are a pure function of their inputs (#2621
     ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })).not.toThrow()
   })
 
-  it('retains lifecycle and scan provenance only while the baked facts remain identical', () => {
+  it('retains source-date provenance only while the baked facts remain identical', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'derived-provenance-'))
     try {
-      for (const field of ['generatedAt', 'scannedAt']) {
+      for (const field of ['generatedAt']) {
         const output = path.join(dir, `${field}.json`)
         const old = { schema: 'example/v1', [field]: '2024-01-01T00:00:00.000Z', facts: [{ id: 'a', value: 1 }] }
         writeFileSync(output, JSON.stringify(old))
@@ -134,10 +134,18 @@ describe('committed derived artifacts are a pure function of their inputs (#2621
         expect(preserveDerivedTimestamp(output, sameFacts, field)).toEqual(old)
         const changedFacts = { ...sameFacts, facts: [{ id: 'a', value: 2 }] }
         expect(preserveDerivedTimestamp(output, changedFacts, field)).toEqual(changedFacts)
+        // monotonic: changed facts with an OLDER source date never move the stamp backwards
+        const olderChanged = { ...changedFacts, [field]: '2023-01-01T00:00:00.000Z' }
+        expect(preserveDerivedTimestamp(output, olderChanged, field)[field]).toBe(old[field])
       }
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('scan-infra-vulns does not reuse a previous scannedAt (scan time, not source date)', () => {
+    const src = readFileSync(path.join(ADMIN_UI, 'scripts', 'scan-infra-vulns.mjs'), 'utf8')
+    expect(src).not.toContain('preserveDerivedTimestamp')
   })
 
   it(
