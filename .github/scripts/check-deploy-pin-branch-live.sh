@@ -32,5 +32,5 @@ else
   git fetch --quiet --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
 fi
 git fetch --quiet --no-tags origin "+refs/heads/${branch}:refs/remotes/origin/${branch}"
-exec python3 .github/scripts/check-deploy-pin-branch.py check --tip-only \
+exec python3 .github/scripts/check-deploy-pin-branch.py check --tip-only --state \
   --head "refs/remotes/origin/${branch}" --main refs/remotes/origin/main

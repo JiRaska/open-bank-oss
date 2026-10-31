@@ -172,6 +172,8 @@ def check_commit(root, commit, parent, main_rev):
         changed = git(root, "ls-tree", "-r", "--name-only", commit).splitlines()
         # The bootstrap root commit carries only a README; everything after it is pins.
         changed = [p for p in changed if p != "README.md"]
+    if parent and not changed:
+        raise PinError(f"{commit[:12]} changes nothing; the bot never writes an empty pin commit")
     outside = [p for p in changed if not p.startswith(f"{PINS_DIR}/")]
     if outside:
         raise PinError(f"commit touches paths outside {PINS_DIR}/: {', '.join(outside)}")
@@ -208,6 +210,9 @@ def check_commit(root, commit, parent, main_rev):
             if not is_ancestor(root, old["manifest_sha"], pin["manifest_sha"]):
                 raise PinError(f"{component}: manifest_sha moves backwards "
                                f"({old['manifest_sha'][:12]} is not an ancestor of {pin['manifest_sha'][:12]})")
+            if pin["rollback"] and not was_pinned_before(root, parent, component, pin):
+                raise PinError(f"{component}: rollback target {pin['tag']} ({pin['digest']}) was never pinned "
+                               f"on this branch; a rollback may only restore an earlier pin")
             if not pin["rollback"] and not is_ancestor(root, old["image_source_sha"], pin["image_source_sha"]):
                 raise PinError(f"{component}: image_source_sha moves backwards "
                                f"({old['image_source_sha'][:12]} -> {pin['image_source_sha'][:12]}); "
@@ -218,6 +223,47 @@ def check_commit(root, commit, parent, main_rev):
             raise PinError(f"{component}: {service} is under a deploy hold in rules.yaml; its image pin "
                            f"cannot change")
     return components
+
+
+def was_pinned_before(root, rev, component, pin):
+    """True when some earlier deploy-branch commit up to `rev` pinned exactly this image."""
+    want = (pin["image_source_sha"], pin["tag"], pin["digest"])
+    path = f"{PINS_DIR}/{component}/pin.json"
+    for old_rev in git(root, "rev-list", "--first-parent", rev, "--", path).split():
+        old = read_pin(root, old_rev, component)
+        if old and (old.get("image_source_sha"), old.get("tag"), old.get("digest")) == want:
+            return True
+    return False
+
+
+def check_state(root, rev, main_rev):
+    """Verify every pin present at `rev`, whether or not `rev` touched it: a delta check of the
+    tip alone would pass a branch whose earlier, unverified commit planted a bad pin."""
+    names = git(root, "ls-tree", "--name-only", f"{rev}:{PINS_DIR}").split() if subprocess.run(
+        ["git", "-C", str(root), "cat-file", "-e", f"{rev}:{PINS_DIR}"], capture_output=True).returncode == 0 else []
+    top = [p for p in git(root, "ls-tree", "--name-only", rev).split() if p not in (PINS_DIR, "README.md")]
+    if top:
+        raise PinError(f"{rev[:12]} carries paths outside {PINS_DIR}/: {', '.join(top)}")
+    for component in names:
+        if component not in PINNABLE:
+            raise PinError(f"{PINS_DIR}/{component} is not a pinnable component")
+        pin = read_pin(root, rev, component)
+        if pin is None:
+            raise PinError(f"{component}: pin.json missing at {rev[:12]}")
+        validate_pin(pin, component)
+        expected = render(root, component, pin["manifest_sha"], pin["image_source_sha"],
+                          pin["tag"], pin["digest"], pin["rollback"])
+        prefix = f"{PINS_DIR}/{component}/"
+        actual = {line.split("\t", 1)[1][len(prefix):]: git(root, "show", f"{rev}:{line.split(chr(9), 1)[1]}", text=False)
+                  for line in git(root, "ls-tree", "-r", rev, prefix).splitlines()}
+        if actual != expected:
+            raise PinError(f"{component}: tip state differs from what main@{pin['manifest_sha'][:12]} and "
+                           f"pin.json produce")
+        for key in ("manifest_sha", "image_source_sha"):
+            if not is_ancestor(root, pin[key], main_rev):
+                raise PinError(f"{component}: {key} {pin[key][:12]} is not an ancestor of main")
+        print(f"OK state {component} {pin['tag']} manifests@{pin['manifest_sha'][:12]}")
+    return len(names)
 
 
 def check_range(root, base, head, main_rev):
@@ -322,6 +368,9 @@ def self_test():
         expect("manifest-only re-pin keeps image", p1, pin_files(m2, m1, "t1", d1), ok=True)
         expect("rollback to older image", deploy_commit(p1, pin_files(m2, m2, "t2", d2)),
                pin_files(m2, m1, "t1", d1, rollback=True), ok=True)
+        expect("rollback to an image never pinned", deploy_commit(p1, pin_files(m2, m2, "t2", d2)),
+               pin_files(m2, m1, "t9", "sha256:" + "9" * 64, rollback=True), ok=False,
+               fragment="never pinned")
         expect("older build overwrites newer pin",
                deploy_commit(p1, pin_files(m2, m2, "t2", d2)), pin_files(m2, m1, "t1", d1),
                ok=False, fragment="image_source_sha moves backwards")
@@ -359,6 +408,23 @@ def self_test():
         m3 = git(root, "rev-parse", "HEAD").strip()
         expect("held service image change", p1, pin_files(m2, m2, "t2", d2), ok=False, fragment="deploy hold")
         expect("held service manifest-only re-pin", p1, pin_files(m3, m1, "t1", d1), ok=True)
+
+        # State mode: a bad pin planted earlier and left untouched by the tip.
+        planted = pin_files(m2, m2, "t2", d2)
+        planted[f"{PINS_DIR}/admin-ui/manifests/admin-ui.yaml"] += b"privileged: true\n"
+        bad_pin = deploy_commit(p1, planted)
+        tip = deploy_commit(bad_pin, {"README.md": b"touch\n"})
+        try:
+            check_state(root, tip, "main")
+            failures.append("check_state: planted bad pin PASSED")
+        except Exception as error:
+            if not isinstance(error, PinError) or "tip state differs" not in str(error):
+                failures.append(f"check_state: wrong reason {error!r}")
+        try:
+            check_state(root, p1, "main")
+        except Exception as error:
+            failures.append(f"check_state: good tip failed {error!r}")
+        expect("empty commit", p1, {}, ok=False, fragment="changes nothing")
 
         # check_range must walk every commit, not only the tip: a bad commit buried under a
         # good one is still a violation of the branch history.
@@ -401,6 +467,8 @@ def main(argv=None):
     c.add_argument("--tip-only", action="store_true",
                    help="verify only HEAD against its parent (the per-PR gate; a bad commit buried "
                         "under later good ones is the writer's pre-check's job, not every PR's)")
+    c.add_argument("--state", action="store_true",
+                   help="also verify every pin present at HEAD, not only what HEAD changed")
     c.add_argument("--allow-absent", action="store_true",
                    help="treat a head ref that does not resolve as zero subjects (pre-bootstrap)")
     args = parser.parse_args(argv)
@@ -433,6 +501,8 @@ def main(argv=None):
                 parents = git(args.root, "rev-list", "--parents", "-n", "1", args.head).split()[1:]
                 base = parents[0] if parents else None
             n = check_range(args.root, base, args.head, args.main)
+            if args.state:
+                check_state(args.root, args.head, args.main)
             print(f"SUBJECTS={n}  # deploy-branch commits verified")
             return 0
     except PinError as error:
