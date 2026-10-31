@@ -58,10 +58,6 @@ select_modules() {
     RELEVANT=""
     while IFS= read -r f; do
       [ -z "$f" ] && continue
-      if gitops_image_pin_only_change "$f" "$DIFF_BASE"; then
-        echo "Decision: $f changes only image pins -> inert."
-        continue
-      fi
       if ! is_inert_service_path "$f"; then RELEVANT="${RELEVANT}${RELEVANT:+$'\n'}${f}"; fi
     done <<< "$FILES"
     RELEVANT_COUNT=$(grep -c . <<< "$RELEVANT" || true)
@@ -323,8 +319,10 @@ select_modules() {
     while IFS= read -r f; do
       [ -z "$f" ] && continue
       is_inert_service_path "$f" && continue
+      # pull_request only: the main push keeps its full-fleet run so every deployed SHA has
+      # a green Services CI of its own.
       if gitops_image_pin_only_change "$f" "$DIFF_BASE"; then
-        echo "Decision: $f changes only image pins -> inert."
+        echo "Decision: $f changes only container image pins -> inert."
         continue
       fi
       case "$f" in

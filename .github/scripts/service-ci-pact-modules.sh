@@ -71,33 +71,31 @@ admin_ui_pact_changed() {
   grep -qE '^pacts/openbank-admin-ui-openbank-[a-z0-9-]+\.json$' <<< "$1"
 }
 
-# Deploy-pin diffs (the chore/admin-ui-deploy and chore/gitops-auto-deploy bot PRs, ~130 a
-# week) rewrite only `image:` values in GitOps manifests. GitOps stays a conservative input
-# because JVM tests read ConfigMaps and policies from it; none reads an image pin. So a
-# manifest diff is inert only when EVERY changed line is an `image:` value AND no JVM test
-# that opens openbank-infra mentions `image` (fail closed the day one starts to).
-# Reads a `git diff --unified=0` body on stdin.
-image_pin_only_diff() {
-  local changed other
-  changed=$(grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' || true)
-  [ -n "$changed" ] || return 1
-  other=$(grep -cvE '^[+-][[:space:]]*(- )?image:[[:space:]]*[^[:space:]]+[[:space:]]*$' <<< "$changed" || true)
-  [ "${other:-1}" -eq 0 ]
-}
-
+# Deploy-pin diffs (the chore/admin-ui-deploy and chore/gitops-auto-deploy bot PRs) rewrite
+# only container `image:` values in GitOps manifests. GitOps stays a conservative input because
+# JVM tests read ConfigMaps and policies from it. gitops-image-pin-only.py decides structurally
+# (parsed trees equal once container images are masked); everything else is relevant.
+# Scope of the reader guard = what Services CI builds: Gradle modules' tests and build scripts
+# plus build-logic. admin-ui tests DO read image pins, but they run in admin-ui CI, whose own
+# path filter this selector does not touch. Any grep error counts as "reader present".
 gitops_image_reader_present() {
-  local readers
-  readers=$(git grep -lE 'openbank-infra' -- 'openbank-*/src/test/**' ':!openbank-admin-ui/**' 2>/dev/null || true)
+  local readers rc
+  readers=$(git grep -z -lE 'openbank-infra' -- 'openbank-*/src/test/**' 'openbank-*/build.gradle.kts' 'build-logic/**' ':!openbank-admin-ui/**' | tr '\0' '\n'); rc=$?
+  [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ] || return 0
   [ -n "$readers" ] || return 1
-  # shellcheck disable=SC2086  # one path per word; module paths carry no spaces
-  grep -lE '"image"|image:|\.image\b' $readers >/dev/null 2>&1
+  rc=0
+  while IFS= read -r f; do
+    grep -qE '"image"|image:|\.image\b|"image\b' -- "$f"; rc=$?
+    [ "$rc" -eq 1 ] || return 0   # 0 = a reader mentions image, >1 = error: both fail closed
+  done <<< "$readers"
+  return 1
 }
 
-# $1 path, $2 diff base. True only for a GitOps manifest whose diff is image pins only.
+# $1 path, $2 diff base. True only for a GitOps manifest whose change is container image pins only.
 gitops_image_pin_only_change() {
   case "$1" in openbank-infra/gitops/*.yaml|openbank-infra/gitops/*.yml) ;; *) return 1 ;; esac
   gitops_image_reader_present && return 1
-  git diff --unified=0 --no-color "$2" HEAD -- "$1" 2>/dev/null | image_pin_only_diff
+  python3 .github/scripts/gitops-image-pin-only.py "$2" "$1"
 }
 
 pact_build_modules_self_test() {
@@ -203,14 +201,6 @@ pact_build_modules_self_test() {
     || { echo "selector self-test: changed admin UI pact needs publication" >&2; return 1; }
   ! admin_ui_pact_changed 'openbank-admin-ui/src/app/page.tsx' \
     || { echo "selector self-test: UI source alone needs no publication wait" >&2; return 1; }
-  image_pin_only_diff <<< $'--- a/x.yaml\n+++ b/x.yaml\n@@ -9 +9 @@\n-          image: registry.invalid/openbank-x:sandbox-aaa@sha256:00\n+          image: registry.invalid/openbank-x:sandbox-bbb@sha256:11' \
-    || { echo "selector self-test: an image-pin-only manifest diff must be inert" >&2; return 1; }
-  ! image_pin_only_diff <<< $'--- a/x.yaml\n+++ b/x.yaml\n@@ -9 +9,2 @@\n-          image: r/x:a\n+          image: r/x:b\n+          env: [{name: KAFKA_GROUP, value: y}]' \
-    || { echo "selector self-test: an image pin plus any other line must stay relevant" >&2; return 1; }
-  ! image_pin_only_diff <<< $'--- a/x.yaml\n+++ b/x.yaml\n@@ -3 +3 @@\n-  group.id: a\n+  group.id: b' \
-    || { echo "selector self-test: a GitOps config change must stay relevant" >&2; return 1; }
-  ! image_pin_only_diff <<< '' \
-    || { echo "selector self-test: an empty diff is not evidence of an image-only change" >&2; return 1; }
   ! gitops_image_pin_only_change "openbank-ledger-service/src/main/resources/application.yaml" HEAD \
     || { echo "selector self-test: only GitOps manifests can be image-pin inert" >&2; return 1; }
 }

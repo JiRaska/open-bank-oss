@@ -5036,6 +5036,22 @@ gates:
     run: |
       bash .github/scripts/service-ci-select-modules.sh --self-test
 
+  - id: gitops-image-pin-only
+    name: "Services CI: image-pin-only GitOps diffs are inert, everything else relevant (enforced)"
+    group: gitops
+    mode: enforced
+    selftest_exempt: "is-a-test-suite"
+    rationale: "Deploy-pin PRs ran the full Services CI fleet (#14413). The comparator decides inertness structurally; this runs its end-to-end git cases and proves a comparator forced to 'equal' fails them."
+    review_after: "2027-04-30"
+    budget_seconds: 30
+    min_subjects: 15
+    run: |
+      python3 .github/scripts/gitops-image-pin-only.py --self-test
+      if python3 .github/scripts/gitops-image-pin-only.py --self-test --sabotage >/dev/null; then
+        echo "sabotaged comparator passed its own suite: the suite cannot see a broken comparator" >&2
+        exit 1
+      fi
+
   # analytics-sink owns no OLTP DB and runs no migration runner (ADR-0022): its ClickHouse DDL lives
   # once as `clickhouse/V*.sql` resources an operator applies, and once in the `clickhouse-init`
   # ConfigMap a FRESH cluster boots from. Nothing reconciles the two, and a migration that reaches
