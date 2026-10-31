@@ -60,6 +60,8 @@
 #     #14316 -> #14328 -> #14334, each closed armed). It is left open; the window arms the survivor
 #     only after the armed one has merged (one armed PR per kind), and the main push from that merge
 #     rebuilds against the new pin, so the survivor's now-conflicting line is superseded in turn.
+#     The cost: an armed PR whose pin later proves wrong is no longer closed by its successor;
+#     disarm it by hand (disable its auto-merge) or record a deploy hold on main.
 #   * A comment is left on every PR it closes. A silent close of someone's PR is not acceptable even
 #     when the PR is bot-generated: the next person to look must find out why from the PR itself.
 #
