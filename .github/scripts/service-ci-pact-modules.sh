@@ -79,16 +79,45 @@ admin_ui_pact_changed() {
 # plus build-logic. admin-ui tests DO read image pins, but they run in admin-ui CI, whose own
 # path filter this selector does not touch. Any grep error counts as "reader present".
 gitops_image_reader_present() {
-  local readers rc
-  readers=$(git grep -z -lE 'openbank-infra' -- 'openbank-*/src/test/**' 'openbank-*/build.gradle.kts' 'build-logic/**' ':!openbank-admin-ui/**' | tr '\0' '\n'); rc=$?
-  [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ] || return 0
-  [ -n "$readers" ] || return 1
-  rc=0
-  while IFS= read -r f; do
-    grep -qE '"image"|image:|\.image\b|"image\b' -- "$f"; rc=$?
-    [ "$rc" -eq 1 ] || return 0   # 0 = a reader mentions image, >1 = error: both fail closed
-  done <<< "$readers"
-  return 1
+  # Optional args replace the pathspecs (self-test only). Returns 0 = reader present OR error.
+  local tmp rc f
+  local -a specs=("$@")
+  [ "${#specs[@]}" -gt 0 ] || specs=('openbank-*/src/test/**' 'openbank-*/build.gradle.kts' 'build-logic/**' ':!openbank-admin-ui/**')
+  tmp=$(mktemp) || return 0
+  git grep -z -lE 'openbank-infra' -- "${specs[@]}" > "$tmp" 2>/dev/null
+  rc=$?   # git grep's own status: 0 match, 1 none, anything else = could not look
+  if [ "$rc" -eq 1 ]; then rm -f "$tmp"; return 1; fi
+  if [ "$rc" -ne 0 ]; then rm -f "$tmp"; return 0; fi
+  local found=1
+  while IFS= read -r -d '' f; do
+    grep -qE '"image"|image:|\.image\b|"image\b' -- "$f"
+    rc=$?
+    if [ "$rc" -ne 1 ]; then found=0; break; fi   # 0 = mentions image, >1 = error
+  done < "$tmp"
+  rm -f "$tmp"
+  return "$found"
+}
+
+gitops_image_reader_guard_self_test() {
+  local d rc
+  d=$(mktemp -d) || return 1
+  (
+    cd "$d" || exit 1
+    g() { env -u GIT_INDEX_FILE -u GIT_DIR -u GIT_WORK_TREE GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git "$@"; }
+    g init -q -b main . && g config user.email t@example.invalid && g config user.name t || exit 1
+    mkdir -p openbank-a/src/test && echo 'val p = File("../openbank-infra/gitops/a.yaml")' > openbank-a/src/test/A.kt
+    g add -A && g -c commit.gpgsign=false commit -q -m a || exit 1
+    export GIT_DIR="$d/.git" GIT_WORK_TREE="$d"
+    unset GIT_INDEX_FILE
+    ! gitops_image_reader_present || { echo "reader guard: a reader without image must read as absent" >&2; exit 1; }
+    echo 'val i = m["image"]' >> openbank-a/src/test/A.kt
+    g add -A && g -c commit.gpgsign=false commit -q -m b || exit 1
+    gitops_image_reader_present || { echo "reader guard: an image reader must read as present" >&2; exit 1; }
+    gitops_image_reader_present ':(nosuchmagic)x' || { echo "reader guard: a git grep error must read as present" >&2; exit 1; }
+  )
+  rc=$?
+  rm -rf "$d"
+  return "$rc"
 }
 
 # $1 path, $2 diff base. True only for a GitOps manifest whose change is container image pins only.
@@ -201,6 +230,8 @@ pact_build_modules_self_test() {
     || { echo "selector self-test: changed admin UI pact needs publication" >&2; return 1; }
   ! admin_ui_pact_changed 'openbank-admin-ui/src/app/page.tsx' \
     || { echo "selector self-test: UI source alone needs no publication wait" >&2; return 1; }
+  gitops_image_reader_guard_self_test \
+    || { echo "selector self-test: GitOps image reader guard failed" >&2; return 1; }
   ! gitops_image_pin_only_change "openbank-ledger-service/src/main/resources/application.yaml" HEAD \
     || { echo "selector self-test: only GitOps manifests can be image-pin inert" >&2; return 1; }
 }
