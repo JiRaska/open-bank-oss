@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [gitops, ci, supply-chain]
-summary: "Image pins move out of main into a bot-owned deploy/sandbox branch read by multi-source ArgoCD Applications; manifests stay on main, so a deploy no longer merges a PR, never moves main and never waits on the merge train."
+summary: "Image pins move to a bot-owned deploy/sandbox branch as a verified copy of main's manifests plus a kustomize image override; a deploy no longer merges a PR, never moves main and never waits on the merge train."
 ---
 
 # ADR-0358 — Image pins live on a bot-owned deploy branch, not in main
@@ -40,11 +40,17 @@ already built from a `main` commit that passed that contract.
 
 We will separate WHAT runs (manifests) from WHICH IMAGE runs (pins):
 
-1. **Pins move to a bot-owned branch `deploy/sandbox`.** It holds one small kustomize image
-   overlay per component (`pins/<component>/kustomization.yaml` with an `images:` entry carrying
-   the tag and sha256 digest) and nothing else.
-2. **Applications become multi-source.** Manifests keep coming from `main`; the image overlay
-   comes from `deploy/sandbox`. A manifest change still goes through a reviewed PR into `main`.
+1. **Pins move to a bot-owned branch `deploy/sandbox`.** It holds one directory per component,
+   `pins/<component>/`, and nothing else: `manifests/` is a verbatim copy of
+   `openbank-infra/gitops/components/<component>/` at a `main` commit, `kustomization.yaml`
+   lists those files and overrides the image (`images:` with tag and sha256 digest), and
+   `pin.json` records `manifest_sha`, `image_source_sha`, image, tag, digest and a rollback flag.
+2. **Applications read the pin as a single kustomize source.** `targetRevision: deploy/sandbox`,
+   `path: pins/<component>`, same `repoURL` (so the existing repository credential is reused).
+   Manifests are still authored and reviewed as PRs into `main`; the pin only ever carries a
+   copy of a `main` commit, which the contract below proves byte for byte. A push to `main`
+   that touches `components/<component>/` re-pins the manifests automatically (image kept),
+   so a manifest change never waits for a person or for the next image build.
 3. **The build bot commits the pin directly** to `deploy/sandbox` after the same checks it runs
    today (can-i-deploy, digest present, `deploy_holds` honoured, source is an ancestor of
    `main`). Signed commit, GitHub App identity. No PR, no deploy window, no supersede: a newer
@@ -59,6 +65,16 @@ Migration is per Application, admin-ui first, so a regression is bounded to one 
 
 ## Alternatives considered
 
+- **Multi-source Application: manifests from `main`, an `images:` overlay from
+  `deploy/sandbox`** (this ADR's first draft) — does not render. Argo CD (v3.5 here) builds each
+  source on its own, and a kustomize `images:` transformer rewrites only resources inside its own
+  kustomization; `ref:` sources feed only Helm `valueFiles`. The overlay would emit nothing and
+  the image would stay whatever `main` says.
+- **Kustomize remote base pinned to a `main` sha** (`github.com/...//components/<c>?ref=<sha>`
+  plus `images:`) — renders, but the repo-server clones the monorepo for every render (a local
+  fetch hit kustomize's 27 s timeout), outside Argo's repository credential; a floating `?ref=main`
+  would additionally be cached by the overlay's revision, so manifest changes would not sync.
+  The verbatim copy has the same semantics (manifests pinned to a `main` sha) without either cost.
 - **ArgoCD Image Updater with git write-back** — same topology (pins on a branch), but the
   pinning decision moves into a third-party controller that knows nothing of can-i-deploy,
   `deploy_holds` or our signing; we would re-implement those as its plugins. Rejected: it moves a
@@ -96,9 +112,14 @@ Migration is per Application, admin-ui first, so a regression is bounded to one 
 - Admission controls are unaffected: Kyverno `verifyImages` and cosign attestations verify the
   image itself, wherever its tag was written.
 
-**Enforcement.** A new enforced gate `deploy-pin-branch-contract` runs on every push to
-`deploy/sandbox` and fails unless the commit touches only `pins/**`, every pin carries a digest,
-no held service changes, and each pinned source sha is an ancestor of `main`. The ruleset in
+**Enforcement.** The contract (`check-deploy-pin-branch.py`): a commit touches only `pins/**`;
+every pin carries a digest and its kustomization agrees with `pin.json`; `manifests/` equals the
+component directory at `manifest_sha` file for file; `manifest_sha` and `image_source_sha` are
+ancestors of `main`; neither moves backwards against the previous pin (a rollback may move only
+the image); and a service under `deploy_holds` keeps its image. A push to `deploy/sandbox` runs
+no workflow (the branch holds none), so the contract is checked by the writer on the candidate
+before every write, and by the enforced gate `deploy-pin-branch-contract` against the live tip on
+every CI run. The ruleset in
 Decision 4 is checked by the existing ruleset-parity tooling (ADR-0254).
 
 ### Delivery check
@@ -106,10 +127,10 @@ Decision 4 is checked by the existing ruleset-parity tooling (ADR-0254).
 ```
 git grep -h 'targetRevision:' origin/main -- openbank-infra/gitops/apps | sort | uniq -c
 ```
-Expected after delivery: every Application that pins an image lists a `deploy/sandbox` source;
-`main` remains only for manifest sources. Live:
-`kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.sources[*].targetRevision}{"\n"}{end}'`
-shows both revisions for each migrated app, and `gh pr list --search "head:chore/gitops-auto-deploy-"`
+Expected after delivery: every Application that pins an image reads `deploy/sandbox`
+(`path: pins/<component>`); `main` remains only for Applications without a bot-pinned image. Live:
+`kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.source.targetRevision}{"\n"}{end}'`
+shows `deploy/sandbox` for each migrated app, and `gh pr list --search "head:chore/gitops-auto-deploy-"`
 returns nothing once migration is complete.
 
 ## Compliance impact
