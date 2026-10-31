@@ -536,8 +536,13 @@ def main() -> int:
             cands.append({"number": int(number), "head": head})
 
         def verify(c):
-            diff = subprocess.run(["gh", "pr", "diff", str(c["number"]), "--repo", repo],
-                                  capture_output=True, text=True, check=True).stdout
+            # An unreadable diff refuses THIS kind only; raising here would abort the
+            # fall-through and re-create the head-of-line block this command exists to remove.
+            read = subprocess.run(["gh", "pr", "diff", str(c["number"]), "--repo", repo],
+                                  capture_output=True, text=True)
+            if read.returncode != 0:
+                return [f"diff of #{c['number']} unreadable (gh rc {read.returncode})"]
+            diff = read.stdout
             return verify_pins(diff, lambda image, tag: image_source_is_current(a.root, image, tag))
 
         def supersede(c):
