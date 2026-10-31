@@ -446,6 +446,18 @@ class SyntheticStagingTests(unittest.TestCase):
         self.assertEqual(payloads, {})
         self.assertTrue(any("provenance differs" in warning for warning in warnings))
 
+    def test_one_unreadable_artifact_rejects_only_itself(self):
+        runs = [self.run(2), self.run(1)]
+        fetch_json, fetch_bytes = self.fetchers(runs, {10: self.envelope(1)})
+        def flaky_bytes(url):
+            if "/artifacts/20/" in url:
+                raise COLLECTOR.CollectionError("GitHub artifact download failed (HTTP 502)")
+            return fetch_bytes(url)
+        payloads, warnings = COLLECTOR.synthetic_payloads("org/repo", fetch_json, flaky_bytes)
+        self.assertEqual([k.rsplit("/", 1)[1] for k in payloads],
+                         ["test-intelligence-run-openbank-admin-ui-operator-chromium-1-a1.json"])
+        self.assertTrue(any("operator-chromium-2-a1 rejected" in w for w in warnings))
+
     def test_unreadable_producer_is_a_warning_not_an_empty_success(self):
         def fetch_json(url):
             raise COLLECTOR.CollectionError("GitHub API failed (HTTP 502)")

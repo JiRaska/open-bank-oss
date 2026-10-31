@@ -207,7 +207,9 @@ def synthetic_payloads(repo_slug: str, fetch_json, fetch_bytes) -> tuple[dict[st
                         if (str(claimed.get("id")) != str(run["id"]) or not isinstance(commit, str)
                                 or len(commit) < 7 or not run["head_sha"].startswith(commit)):
                             raise ValueError("envelope provenance differs from its producing run")
-                    except (ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
+                    except (CollectionError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
+                        # One unreadable artifact rejects only itself; the producer's other
+                        # runs are still read, so the snapshot keeps every verdict it can prove.
                         warnings.append(f"synthetic envelope {artifact_name} rejected: {exc}")
                         continue
                     payloads[f"{SYNTHETIC_HISTORY_DIR}/{artifact_name}.json"] = envelope
