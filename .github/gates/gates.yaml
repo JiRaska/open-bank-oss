@@ -5035,6 +5035,7 @@ gates:
     min_subjects: 4
     run: |
       bash .github/scripts/service-ci-select-modules.sh --self-test
+      python3 .github/scripts/service-ci-build-input-scripts.py --self-test
 
   # analytics-sink owns no OLTP DB and runs no migration runner (ADR-0022): its ClickHouse DDL lives
   # once as `clickhouse/V*.sql` resources an operator applies, and once in the `clickhouse-init`

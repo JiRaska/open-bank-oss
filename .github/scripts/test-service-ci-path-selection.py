@@ -8,7 +8,13 @@ root=Path(__file__).resolve().parents[2]
 script='bash .github/scripts/service-ci-select-modules.sh'
 allmods={p.name for p in root.glob('openbank-*') if (p/'build.gradle.kts').is_file()}
 sample=['.github/gates/gates.yaml','.github/scripts/check-tofu-image-pull-through.py']+['openbank-infra/aws/envs/sandbox-platform/'+x+'.tf' for x in ['arc-runner-reaper','arc-runners','main','providers']]
-cases=[('governance-reader',['openbank-libs/governance/agents.yaml'],'charter'),('measured-infra',sample,'empty'),('mixed-account',sample+['openbank-account-service/src/main/kotlin/Sample.kt'],'account'),('gitops-reader',['openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml'],'full'),('adr-reader',['docs/adr/0039-ledger-as-golden-source-balance-as-projection.md'],'full'),('unknown-helper',['.github/scripts/check-tofu-image-pull-through-test-helper.py'],'full')]
+cases=[('governance-reader',['openbank-libs/governance/agents.yaml'],'charter'),('measured-infra',sample,'empty'),('mixed-account',sample+['openbank-account-service/src/main/kotlin/Sample.kt'],'account'),('gitops-reader',['openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml'],'full'),('adr-reader',['docs/adr/0039-ledger-as-golden-source-balance-as-projection.md'],'full'),('unreferenced-helper',['.github/scripts/check-tofu-image-pull-through-test-helper.py'],'empty'),
+('merge-train-only',['.github/scripts/merge-train.py','.github/scripts/test-merge-train-owner-approval.py'],'empty'),
+('recipe-workflow',['.github/workflows/_service-ci.yml'],'canary'),
+('recipe-selector-script',['.github/scripts/service-ci-select-modules.sh'],'canary'),
+('recipe-referenced-script',['.github/scripts/derive-verification-modules.py'],'full'),
+('mixed-train-and-account',['.github/scripts/merge-train.py','openbank-account-service/src/main/kotlin/Sample.kt'],'account'),
+('mixed-train-recipe-account',['.github/scripts/merge-train.py','openbank-account-service/src/main/kotlin/Sample.kt','.github/scripts/derive-verification-modules.py'],'full')]
 cases += [('canonical-runtime-image', ['.github/workflows/Dockerfile.deploy'], 'full'), ('shared-benchmark-build', ['openbank-libs-benchmarks/build.gradle.kts'], 'full'), ('shared-detekt-source', ['openbank-libs-detekt-rules/src/main/kotlin/Sample.kt'], 'full')]
 results=[]
 with tempfile.TemporaryDirectory(prefix='ob-selector-') as tmp:
@@ -22,6 +28,7 @@ with tempfile.TemporaryDirectory(prefix='ob-selector-') as tmp:
    assert r.returncode==0,(event,name,r.stderr[-2000:])
    selected=set((Path(env['SELECT_OUT'])/'changed.txt').read_text().split())
    if expected=='empty':assert not selected,(event,name,selected)
+   elif expected=='canary':assert selected=={'openbank-libs'},(event,name,selected)
    elif expected=='full':assert selected==allmods,(event,name,selected)
    elif expected=='charter':assert {'openbank-agent-service','openbank-mcp-service'} <= selected and selected!=allmods,(event,name,selected)
    else:assert 'openbank-account-service' in selected and 'openbank-libs-runtime' in selected and selected!=allmods,(event,name,selected)

@@ -4,6 +4,9 @@
 # Admin UI is a consumer but not a Gradle module; its trusted Pact workflow
 # publishes the contract, and the provider remains in the service matrix.
 
+# Per-run memo of the build-recipe corpus (see service-ci-build-input-scripts.py); empty = recompute.
+SCI_CORPUS_FILE=$(mktemp 2>/dev/null || true); export SCI_CORPUS_FILE
+
 is_inert_service_path() {
   # Shared umbrella docs are consumed by the Admin UI image bundle, not by any
   # Gradle module. Keep this exact root-level Markdown set out of JVM builds;
@@ -26,6 +29,15 @@ is_inert_service_path() {
     .github/scripts/test-service-ci-job-roster.py|.github/scripts/test-service-ci-path-selection.py)
       # The changes job exercises this test; its source is not a Gradle/Pact input.
       return 0 ;;
+    .github/scripts/*)
+      # Derived, not enumerated: a script is a service-build input only if the build recipe
+      # (service CI workflows, Dockerfile.deploy, composite actions, Gradle/build-logic) names
+      # it, directly or through a non-gate helper. Merge-train, gates and their tests are not.
+      # FAIL CLOSED: if the helper is absent or errors, the path stays build-relevant.
+      local verdict
+      [ -f .github/scripts/service-ci-build-input-scripts.py ] || return 1
+      verdict=$(printf '%s\n' "$1" | python3 .github/scripts/service-ci-build-input-scripts.py) || return 1
+      [ -z "$verdict" ] ;;
     openbank-document-renderer/requirements.txt)
       # Main's Python sidecar lock remains outside the JVM lane.
       return 0 ;;
@@ -126,18 +138,22 @@ pact_build_modules_self_test() {
     || { echo "selector self-test: packaged service docs are module-scoped, not global" >&2; return 1; }
   ! is_inert_service_path "openbank-ledger-service/src/main/resources/docs/03-api.en.md" \
     || { echo "selector self-test: packaged service docs must remain module-relevant" >&2; return 1; }
-  ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
-    || { echo "selector self-test: unknown automation must retain safe fallback" >&2; return 1; }
+  is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
+    || { echo "selector self-test: unreferenced automation script must be service-inert" >&2; return 1; }
+  is_inert_service_path ".github/scripts/merge-train.py" \
+    || { echo "selector self-test: merge-train must not select services" >&2; return 1; }
+  ! is_inert_service_path ".github/scripts/service-ci-new-step.sh" \
+    || { echo "selector self-test: service-ci scripts must remain build inputs" >&2; return 1; }
   is_inert_service_path ".github/scripts/check-tofu-image-pull-through.py" \
     || { echo "selector self-test: Terraform image gate must be service-inert" >&2; return 1; }
-  ! is_inert_service_path ".github/scripts/check-tofu-image-pull-through-test-helper.py" \
-    || { echo "selector self-test: unowned Terraform helper must retain safe fallback" >&2; return 1; }
-  ! is_inert_service_path ".github/scripts/test-unknown-admin-ui-helper.py" \
-    || { echo "selector self-test: unknown UI helper must retain safe fallback" >&2; return 1; }
-  ! is_inert_service_path ".github/scripts/check-service-build-inputs.py" \
-    || { echo "selector self-test: unknown build policy must retain safe fallback" >&2; return 1; }
-  ! is_inert_service_path ".github/scripts/unknown-evidence-reconcile-helper.py" \
-    || { echo "selector self-test: unknown evidence helper must retain safe fallback" >&2; return 1; }
+  is_inert_service_path ".github/scripts/check-tofu-image-pull-through-test-helper.py" \
+    || { echo "selector self-test: unreferenced Terraform helper must be service-inert" >&2; return 1; }
+  is_inert_service_path ".github/scripts/test-unknown-admin-ui-helper.py" \
+    || { echo "selector self-test: unreferenced UI helper must be service-inert" >&2; return 1; }
+  is_inert_service_path ".github/scripts/check-service-build-inputs.py" \
+    || { echo "selector self-test: unreferenced policy script must be service-inert" >&2; return 1; }
+  is_inert_service_path ".github/scripts/unknown-evidence-reconcile-helper.py" \
+    || { echo "selector self-test: unreferenced evidence helper must be service-inert" >&2; return 1; }
   is_inert_service_path ".github/scripts/check-flyway-version-commit-order.py" \
     || { echo "selector self-test: Flyway order gate must be service-inert" >&2; return 1; }
   is_inert_service_path ".github/scripts/verify-dependabot-auto-merge.py" \
