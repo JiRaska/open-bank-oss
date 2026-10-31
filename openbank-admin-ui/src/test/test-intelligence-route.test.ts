@@ -426,6 +426,29 @@ describe('GET /api/test-intelligence', () => {
     expect(synthetic('openbank-fx-service')).toEqual([expect.objectContaining({ state: 'failed', source: 'journey:fx-rates-read' })])
     expect(synthetic('openbank-admin-ui')).toEqual([expect.objectContaining({ state: 'passed', source: 'journey:admin-operator-access', observedAt: '2026-10-31T06:23:08.282Z' })])
     expect(synthetic('openbank-account-service')).toEqual([])
+    // The headline totals must count a projected failure, and a k6 row is dated by its run,
+    // never by the Prometheus query time (no completed run in this fixture => null).
+    expect(body.totals.failingEvidence).toBe(1)
+    expect(synthetic('openbank-fx-service')[0].observedAt).toBeNull()
+  })
+
+  it('never projects a carried snapshot verdict for a k6 journey with no live observation', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-carried-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-10-31T00:00:00.000Z', contracts: [], mutations: [], performance: [], history: [], runHistory: [], testCases: [], clientExperiences: [],
+      components: [{ component: 'openbank-fx-service', released: true, moneyPath: false, evidence: [],
+        coverage: { state: 'unknown', observedAt: null, source: 'none', environment: 'ci' }, testInfrastructure: { declared: [], observed: [] } }],
+      syntheticJourneys: [{ id: 'fx-rates-read', title: 'FX', status: 'active', state: 'passed', severity: 'page', schedule: '*/10 * * * *', environment: 'sandbox', covers: ['openbank-fx-service'], falsifies: 'x', blocker: null }],
+      totals: { components: 1, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    delete process.env.PROMETHEUS_URL
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
+    const rows = body.components[0].evidence.filter((e: { kind: string }) => e.kind === 'synthetic')
+    expect(rows).toEqual([expect.objectContaining({ state: 'unknown', observedAt: null, source: 'journey:fx-rates-read' })])
   })
 
   it('does not treat a retained historical failed Job as a current synthetic failure', async () => {

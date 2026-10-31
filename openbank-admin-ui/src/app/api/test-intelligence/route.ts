@@ -5,7 +5,8 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { NextResponse } from 'next/server'
 import type { EvidenceObservation, EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
-import { enforceRuntimeFreshness } from '@/lib/test-intelligence-freshness'
+import { enforceRuntimeFreshness, runtimeFreshnessState } from '@/lib/test-intelligence-freshness'
+import { executionEvidenceTotals } from '@/lib/test-intelligence-execution-evidence.mjs'
 import { createSnapshotCache, type SnapshotCache } from '@/lib/evidence/snapshotCache'
 import { createCommitEvidenceReader } from '@/lib/evidence/commitEvidence'
 import { loadRunningCommits } from '@/lib/evidence/runningCommits'
@@ -188,6 +189,21 @@ async function queryPrometheus(base: string, query: string): Promise<number | nu
   } catch { return null }
 }
 
+/** The verdict a journey projects onto a covered component, dated by the RUN it describes.
+ *  A k6 journey with no live observation (no Prometheus, or no CronJob selector) carries only
+ *  the published snapshot's state, which is not a current observation: it projects `unknown`,
+ *  never a carried green. The date is the last successful run for a pass and the newest
+ *  completed run otherwise — never the query time, which would make every row look fresh. */
+function projectedVerdict(journey: TestIntelligenceReport['syntheticJourneys'][number]): Pick<EvidenceObservation, 'state' | 'observedAt'> {
+  if (journey.executor === 'github-actions') {
+    return { state: runtimeFreshnessState(journey.state, journey.ci?.observedAt), observedAt: journey.ci?.observedAt ?? null }
+  }
+  if (!journey.live) return { state: 'unknown', observedAt: null }
+  const newestRun = [...(journey.live.recentRuns ?? [])].map(run => run.observedAt).sort().at(-1) ?? null
+  const observedAt = journey.state === 'passed' ? journey.live.lastSuccessfulAt : newestRun
+  return { state: runtimeFreshnessState(journey.state, observedAt), observedAt }
+}
+
 async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestIntelligenceReport> {
   const base = prometheusBase()
   const nowSeconds = Date.now() / 1000
@@ -301,8 +317,7 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
       const rows = syntheticByComponent.get(component) ?? []
       rows.push({
         kind: 'synthetic',
-        state: journey.state,
-        observedAt: journey.live?.observedAt ?? journey.ci?.observedAt ?? null,
+        ...projectedVerdict(journey),
         source: `journey:${journey.id}`,
         environment: journey.environment ?? 'sandbox',
         detail: `${journey.title} — ${journey.executor === 'github-actions' ? 'browser synthetic (GitHub Actions)' : 'k6 CronJob in the sandbox cluster'}.`,
@@ -316,15 +331,25 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
     const kept = component.evidence.filter(item => !(item.kind === 'synthetic' && item.source.startsWith('journey:')))
     return { ...component, evidence: [...kept, ...projected] }
   })
+  // The freshness pass ran before this projection, so the headline totals must be recomputed
+  // over the projected rows too — otherwise a red journey shows in the matrix but not in them.
+  const evidence = components.flatMap(component => component.evidence)
+  const { componentsWithExecutionEvidence, missingEvidence } = executionEvidenceTotals(components)
   return {
     ...report, components, syntheticJourneys, performance: [...report.performance, ...runtimePerformance],
-    ...(requiredControls ? {
-      requiredControls,
-      totals: {
-        ...report.totals,
+    ...(requiredControls ? { requiredControls } : {}),
+    totals: {
+      ...report.totals,
+      componentsWithExecutionEvidence,
+      failingEvidence: evidence.filter(item => item.state === 'failed').length,
+      missingEvidence,
+      staleEvidence: evidence.filter(item => item.state === 'stale').length,
+      unknownEvidence: evidence.filter(item => item.state === 'unknown').length,
+      unresolvedEvidence: evidence.filter(item => ['unknown', 'not-run', 'blocked'].includes(item.state)).length,
+      ...(requiredControls ? {
         requiredControlGaps: requiredControls.filter(control => control.state !== 'passed').length,
-      },
-    } : {}),
+      } : {}),
+    },
   }
 }
 
