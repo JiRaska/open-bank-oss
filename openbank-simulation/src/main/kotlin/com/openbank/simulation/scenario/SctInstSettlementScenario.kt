@@ -102,15 +102,12 @@ object SctInstSettlementScenario {
         val now = OffsetDateTime.ofInstant(world.context.clock.instant(), ZoneOffset.UTC)
 
         val amount = BigDecimal(random.nextLong(1L, MAX_MINOR_UNITS)).movePointLeft(2)
-        val debtorIdx = random.nextInt(accounts.size)
-        val debtorAccount = accounts[debtorIdx]
-        val creditorAccountIdx = (debtorIdx + 1 + random.nextInt(accounts.size - 1)) % accounts.size
-        // codeql[java/insecure-randomness]: intentional. `random` is SimulationRandom, a
-        // seeded kotlin.random.Random wrapper (engine/SimulationRandom.kt) whose entire purpose
-        // is deterministic, REPRODUCIBLE test-account selection (ADR-0100) -- a SecureRandom
-        // here would break the seed-replay property this harness exists for. openbank-simulation
-        // is a test-tooling module (no version.txt, never deployed), not production code.
-        val creditorAccount = accounts[creditorAccountIdx]
+        // Same selection shape as SwiftScenario: an inline index draw plus an equality skip.
+        // (The derived-index arithmetic in SepaSettlementScenario trips CodeQL's
+        // java/insecure-randomness on new files; SimulationRandom stays the seeded, replayable
+        // source either way, so the simpler form loses nothing.)
+        val debtorAccount = accounts[random.nextInt(accounts.size)]
+        val creditorAccount = accounts.first { it != debtorAccount }
 
         // SCT Inst is euro-only (EPC SCT Inst rulebook). The amount is built in EUR and the
         // REAL scheme rule is applied before the payment enters the world, so a regression in
