@@ -63,6 +63,10 @@ paths = [
   # (A scoped regexTarget="line" allowlist does not apply under [extend] useDefault in gitleaks 8.x.)
   '''(^|/)openbank-infra/gitops/components/[a-z0-9-]+/[a-z0-9._-]+\.yaml$''',
   '''(^|/)openbank-admin-ui/(cluster-topology|infra-lifecycle)\.json$''',
+  # GENERATED JMH allocation baseline (check-bench-alloc-baseline.py --write-baseline): bytes/op
+  # figures only. A 10-digit B/op such as 5423543997.3 trips the rod-cislo heuristic exactly as
+  # numeric image tags do above; the file holds no free text, so a whole-file allowlist is safe.
+  '''(^|/)openbank-libs-benchmarks/alloc-baseline\.json$''',
   # Build/cache directories — these are gitignored, but `--no-git` scans the FS directly.
   # Skipping them prevents thousands of false positives from minified JS / compiled artifacts.
   '''(^|/)node_modules/''',
