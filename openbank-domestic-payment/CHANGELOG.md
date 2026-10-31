@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.3...domestic-payment-v1.3.0) (2026-10-30)
+
+
+### Features
+
+* **domestic-payment:** hold or reject fraud-flagged payments behind a default-off flag ([#14294](https://github.com/JiRaska/open-bank-oss/issues/14294)) ([fb6c2fd](https://github.com/JiRaska/open-bank-oss/commit/fb6c2fdfae852b3fdd030b49732942369e61c7d8))
+
 ## [1.2.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.2...domestic-payment-v1.2.3) (2026-10-23)
 
 

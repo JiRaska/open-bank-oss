@@ -208,7 +208,7 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
     // journey look healthy again while its last successful run was still nominally fresh.
     const failureWindowSeconds = freshnessLimitSeconds(journey.schedule)
     const journeyTag = cronjob.slice('journey-'.length)
-    const [scheduled, successful, failures, activeJobs, recentRunsResult, worstP95Ms, worstChecksRate] = await Promise.all([
+    const [scheduled, successful, failures, activeJobs, recentRunsResult, worstP95Seconds, worstChecksRate] = await Promise.all([
       queryPrometheus(base, `max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="${cronjob}"})`),
       queryPrometheus(base, `max(kube_cronjob_status_last_successful_time{namespace="observability",cronjob="${cronjob}"})`),
       // kube-state-metrics continues exporting terminal Job status until the Job is garbage
@@ -248,7 +248,9 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
         performance: {
           source: 'prometheus' as const,
           windowSeconds: failureWindowSeconds,
-          worstP95Ms,
+          // k6's Prometheus remote-write exports durations in SECONDS (public-edge reads ~0.05,
+          // i.e. 52 ms). Rendered unconverted, every journey showed "0 ms" or "1 ms".
+          worstP95Ms: worstP95Seconds === null ? null : Math.round(worstP95Seconds * 1_000_000) / 1000,
           worstCheckPassRatePercent: worstChecksRate === null ? null : Math.round(worstChecksRate * 10_000) / 100,
         },
       },

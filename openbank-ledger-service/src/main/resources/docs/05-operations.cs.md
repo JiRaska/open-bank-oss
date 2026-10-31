@@ -134,12 +134,18 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 
 `PUT /api/v1/ledger/accounting-days/{date}/participants/{participant}` se autorizuje vlastní akcí
 `ledger.close.participate`, nikdy `ledger.create`. `ledger_rest_ext.rego: close_participant_accounts`
-přiřazuje každému strojovému účtu JEDINÉHO účastníka, za kterého smí hlásit (interest, lending, billing); use
+přiřazuje každému strojovému účtu JEDINÉHO účastníka, za kterého smí hlásit (interest, lending, billing, treasury); use
 case pak ověří volajícího proti `openbank.ledger.close.participants.<name>.principal`. Přidání
 účastníka jsou tedy tři úpravy: `rules.yaml: close_participants`, mapa v `application.yaml` ledgeru a
-položka v rego mapě (pak přegenerovat bundly). Deklarovaní účastníci: interest, lending, billing. Režim: `shadow`.
+položka v rego mapě (pak přegenerovat bundly). Deklarovaní účastníci: interest, lending, billing, treasury. Režim: `shadow`.
 
 Billing se připojuje jako účastník uzávěrky pro svůj měsíční cyklus. Hlásí na vlastní identitě,
 klientovi Keycloak `openbank-billing` (`service-account-openbank-billing`), nikoli pod sdíleným
 principalem `openbank-services`, kterým účtuje své žurnály. Vymezený grant `ledger.close.participate`
 pro `participants/billing` je jediným ledger grantem tohoto účtu; vlastní `ledger.create` nemá.
+
+Treasury se připojuje jako účastník uzávěrky pro hodinové časové rozlišení úroků z obchodů a pro
+žurnály obchodů daného dne. Hlásí na identitě, kterou už účtuje žurnály, klientovi Keycloak
+`openbank-treasury` (`service-account-openbank-treasury`). Jeho položka v mapě přidává
+`ledger.close.participate` jen pro `participants/treasury`; stávající granty `ledger.create` a čtení pro
+nostro se nemění a za jiného účastníka hlásit nemůže.

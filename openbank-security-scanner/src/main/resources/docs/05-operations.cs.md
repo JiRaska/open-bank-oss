@@ -103,7 +103,7 @@ Pravděpodobně problém s network policy nebo DNS.
 ### Event ICT incidentu chybí downstream
 
 Přechody incidentu zůstávají v `ict_incident_outbox`, dokud je relay neoznačí jako odeslané.
-Produkční dispatch zůstává během migrační zkoušky vypnutý a zapne se až po ověření schématu a ACL.
+Relay je v nasazené konfiguraci zapnutý (`OPENBANK_OUTBOX_DISPATCH_ENABLED=true`, #4942); nastavení na `false` pozastaví doručování bez ztráty incidentů, které zůstávají v outboxu.
 
 1. Zkontroluj chyby relaye a `openbank_outbox_backlog{service="security-scanner"}`.
 2. Zkontroluj broker: `kcat -L -b kafka:9092`
