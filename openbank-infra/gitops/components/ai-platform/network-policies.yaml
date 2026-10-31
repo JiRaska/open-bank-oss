@@ -59,6 +59,38 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  name: langfuse-exporter-ingress-allow-list
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/part-of: ai-platform
+    openbank.io/derived: gen-network-policies
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: langfuse-exporter
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - protocol: TCP
+          port: 8085
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: security-scanner
+      ports:
+        - protocol: TCP
+          port: 8085
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: langfuse-valkey-ingress-allow-list
   namespace: ai-platform
   labels:

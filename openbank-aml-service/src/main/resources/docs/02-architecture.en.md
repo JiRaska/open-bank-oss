@@ -137,6 +137,8 @@ sequenceDiagram
 
 **Why outbox:** transactional consistency between the DB write and the Kafka publish. The dispatcher is the **single writer** — `concurrentExecution = SKIP` prevents in-JVM overlap and the Deployment is pinned to `replicas: 1`; entries are processed sequentially to preserve per-aggregate ordering. Per-row publish failures are isolated (recover → `markFailed`) so one bad row never aborts the batch; repeated failures are bounded by a DEAD transition (ADR-0050 N5). The publisher wraps the send in MicroProfile Fault Tolerance (`@Bulkhead`, `@CircuitBreaker`, `@Retry`, `@Timeout`).
 
+For `aml.case.created.v1` with `HIGH` or `CRITICAL` risk, the same durable outbox row also fans out to `openbank.oversight-triggers` (ADR-0031 D9). The wake-up body contains only `sourceService` and `occurredAt`; the original `ce-id`/`ce-type` headers preserve correlation. Customer references, party IDs, names and alert details are not copied to the oversight topic. LOW/MEDIUM cases and later status changes remain on `openbank.aml.events` only.
+
 ## Inbound event flow
 
 `PartyEventConsumer` (`@Incoming("party-events-in")`) reads `openbank.party.events`, filters `eventType == PARTY_CREATED` and `partyType == INDIVIDUAL`, and opens a `CUSTOMER_ONBOARDING` case with idempotency key `"<partyId>:CUSTOMER_ONBOARDING"` (redelivery-safe). In the **sandbox only** (`openbank.aml.auto-clear=true`, default `false`) it then auto-clears the case so the party clears the AML key of the activation gate without an analyst. Production keeps the four-eyes decision endpoint as the only path to a terminal state. The consumer is poison-pill safe: failures are logged and acked.
@@ -172,3 +174,7 @@ sequenceDiagram
 ## Shared case severity (ADR-0353)
 
 `AmlRiskLevel` is a typealias of `AmlCaseSeverity` from `openbank-libs-fincrime`, the one declaration the payment rails also use when they open a case. The values (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) and the `aml_cases.risk_level` column are unchanged. The scale rates the alert, not the customer: the customer risk rating is kyc-service's and is never derived from it.
+
+## Account-service read (ADR-0319)
+
+The party-resolution sweep reads `GET /api/v1/accounts/{accountId}` through the client generated from account-service's own `openapi.yaml` (`openbank-client-account`), via its `AccountClient` facade. A 404 resolves to no owner silently; any other failure is logged and also resolves to no owner, so the row is retried on the next sweep.

@@ -106,6 +106,10 @@ Every custom Micrometer counter is registered with the `openbank.` prefix (the `
 - Image build → push to registry; ArgoCD picks up the new tag.
 - The customer ingress applies a per-IP rate limit (`limit-rps`) as the first line of abuse defence (ADR-0065 / ADR-0069); deeper bot/spam hardening on `/onboarding/start` is an ADR-0069 Phase 2 follow-up.
 
+## Consumer contract verification
+
+The delegated-payment Pact test checks the authorization request sent to account-service. It constructs the edge with an in-memory payment-session store for the contract run; this is test-only, while the running service uses Redis. Run that contract with `./gradlew :openbank-customer-edge:consumerPactTest --tests '*CustomerEdgeDelegatedPaymentPactConsumerTest*'`.
+
 ## Tech stack
 
 | Component | Version |
@@ -120,3 +124,7 @@ The exact pinned versions are emitted in the `/api/v1/info` payload at runtime.
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Diagnosing a failed passkey token exchange
+
+When the token exchange that completes a passkey sign-in is rejected by the identity provider, the service logs a warning with the pseudonymous identity-provider user id and the HTTP status of the response (`impersonate: token-exchange failed for kcUserId=... status=...`). The identity provider's own error event and the exception raised by the service carry no user id, so this line is what ties a failed sign-in to the customer affected. The id is the opaque user UUID, never a username, and no token or credential is logged. A rise in these warnings with a `403` or `400` status usually points to a token-exchange permission or client-configuration problem rather than customer error.

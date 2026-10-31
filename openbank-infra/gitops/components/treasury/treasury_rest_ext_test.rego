@@ -47,6 +47,7 @@ approver_writes := {
 	"treasury.deal.settle",
 	"treasury.deal.mature",
 	"treasury.deal.reverse",
+	"treasury.posting-intent.close",
 }
 
 all_writes := (dealer_writes | approver_writes) | {"treasury.deal.cancel"}
@@ -406,4 +407,12 @@ test_tax_reporting_explicit_null_marker_is_not_legacy if {
 		p := object.union(tax_reporting, claims)
 		not portfolio_allowed(p, "treasury.portfolio.inspect")
 	}
+}
+
+# ADR-0344 catalogue: a close-of-day position snapshot is a back-office record; nobody else writes one.
+test_position_close_is_a_back_office_write if {
+	every p in [dealer, approver, editor, agent, shared_sa, renamed_sa, nobody] {
+		not allowed(p, "treasury.position.close")
+	}
+	allowed(back_office, "treasury.position.close")
 }

@@ -47,11 +47,6 @@ deploy_holds:
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-balance-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-billing-service:
       all_of:
       - issue: '#11503'
@@ -62,26 +57,11 @@ deploy_holds:
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-consent-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-    openbank-delegation-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-domestic-payment:
       all_of:
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-fraud-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 1 is healthy for 24h.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-fx-service:
       all_of:
       - issue: '#11503'
@@ -108,26 +88,6 @@ deploy_holds:
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-pension-fund-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-    openbank-psd2-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-    openbank-sanctions-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 1 is healthy for 24h.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-    openbank-sca-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-sdd-service:
       all_of:
       - issue: '#11503'
@@ -143,11 +103,6 @@ deploy_holds:
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-settlement-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
     openbank-standing-order-service:
       issue: '#11503'
       reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
@@ -162,11 +117,6 @@ deploy_holds:
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-vop-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
 # ---------------------------------------------------------------------------------------
@@ -785,8 +735,6 @@ change_requirements:
     # tracking issue (#NNN); a stale entry (the topic now has a producer, or is no longer consumed)
     # is reported, and fails under --enforce only in the first case.
     consumer_allowlist:
-      - topic: "openbank.oversight-triggers"
-        reason: "agent-service's OversightEventConsumer (ADR-0031 D9 phase 2, channel disabled by default via AGENT_OVERSIGHT_KAFKA_ENABLED) is built; its producers (aml-service, sanctions-service, per the KafkaTopic comment) are not. The 30-minute scheduler sweep covers the gap meanwhile. TRACKING (2026-10-17, #13168): #13179."
       - topic: "openbank.treasury.payments"
         reason: "ADR-0344 split of #13413: swift-service's TreasuryPaymentReleasedConsumer and audit-service's subscription land first (bank-own transfer rail slice); the treasury-service producer arrives with the market-and-payments slice, which MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-10-23, #13698): #13698."
   lineage_code_audit:
@@ -2172,13 +2120,13 @@ dependencies:
     # existing version no longer resolves. Lockfiles/Dependabot pin VERSIONS; this pins BYTES.
     # LENIENT (warn-only) while the metadata soaks across all CI lanes and developer
     # platforms; flip = org.gradle.dependency.verification=strict in gradle.properties.
-    # Dependabot PRs auto-refresh the metadata (dependabot-verification-metadata.yml).
+    # Validate actual Dependabot metadata regeneration and push before strict rollout
+    # (dependabot-verification-metadata.yml); a skipped run is not proof.
     mechanism: gradle-verification-metadata-sha256
     enforced: advisory
-    # Moved 2026-09-30 -> 2026-10-15 (#11686): criteria now measured as met (6/6 clean daily
-    # drift sweeps 09-25..09-30); the strict flip ships as its own revertible PR, not bundled here.
-    # Moved 2026-10-15 -> 2026-11-15: the strict-flip PR still has not shipped; the date
-    # lapsed at midnight and gate-graduation-guard (ADR-0144) started failing EVERY PR.
+    # Review date moved to 2026-11-15 in #12980; strict activation remains separate (#11686).
+    # Daily drift does not prove strict CodeQL/SBOM resolution or an executed Dependabot
+    # refresh. Verify those lane proofs before the independently reviewed strict flip.
     target_enforce_date: "2026-11-15"   # ADR-0144
     ci_producer: "gradle.properties org.gradle.dependency.verification=lenient + .github/workflows/dependabot-verification-metadata.yml"
 
@@ -4042,6 +3990,50 @@ product_ir_authoring_parity:
   target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the MCP/Studio authoring paths (phases 5-6) are in scope
   ci_producer: ".github/scripts/check-product-ir-authoring-parity.py"
 
+product_bearing_services:
+  # ADR-0341 D1 / ADR-0352 phase 3: a service that opens product-bearing contracts pins the PUBLISHED
+  # catalog revision each contract was opened under, and no service keeps its own copy of the terms.
+  # The list is DERIVED from the code and held to it both ways by the checker: every service whose
+  # migrations give a table a catalog product reference column (product_id, product_code,
+  # catalog_offering_id, offering_id) must appear under `services` or `not_product_bearing` (with a
+  # reason), and an entry whose service no longer has one is stale. Measured 2026-10-25 on origin/main
+  # b292eba341: six services carry such a column. ADR-0341 also names pension, pension-fund and treasury
+  # as product-bearing; none of them references the catalog by a column today (free-text product_line /
+  # product), so they enter this list in the change that gives them a catalog reference (D5 order).
+  # `adoption: pinned` arms the three structural checks (migration column, entity @Column, creation path
+  # binds the pin); `pending` is reported, never failed, until that service's adoption PR flips it.
+  services:
+    openbank-account-service:
+      adoption: pinned
+      contract_table: accounts
+      pin_column: product_revision_id
+      entity: openbank-account-service/src/main/kotlin/com/openbank/account/infrastructure/persistence/entity/AccountEntities.kt
+      creation:
+        file: openbank-account-service/src/main/kotlin/com/openbank/account/application/usecase/AccountService.kt
+        function: openAccount
+        aggregate: Account
+        pin_argument: productRevisionPin
+    openbank-lending-service:
+      adoption: pending
+      reason: "loan_application.catalog_revision_id exists (ADR-0264) but is set only when a caller sends catalogOfferingId, which none does; ADR-0352 §9 defers lending's pin to IR v2 (#668)"
+    openbank-card-issuance-service:
+      adoption: pending
+      reason: "cards.product_code names a catalog card product (CardProductCatalogPort) with no revision pinned; not yet in ADR-0341's D5 adoption order"
+  not_product_bearing:
+    openbank-interest-service: "consumer of the pin, not a contract opener: account_rate_revision_pins caches the revision per account (V19), accruals and capitalisations copy product_id as evidence"
+    openbank-product-catalog: "the publication authority itself: bank_v1_product_mapping and catalog_revisions are the catalog, not a contract"
+    openbank-tax-reporting-service: "observed_income_credit copies product_id from the interest event as report evidence; it opens no contract"
+  detect: ["openbank-*/src/main/resources/db/migration/*.sql", "openbank-*/src/main/kotlin/**/*.kt"]
+  require:
+    - "every listed service with adoption: pinned has a migration adding pin_column to contract_table"
+    - "its contract-table entity maps the pin column with an explicit @Column(name = ...)"
+    - "its creation function constructs the aggregate with pin_argument bound to a non-null pin"
+    - "every service whose migrations declare a catalog product reference column is listed under services or not_product_bearing"
+  gate: product-revision-pinned
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144; enforce once lending and card-issuance have each decided pinned or out of scope
+  ci_producer: ".github/scripts/check-product-revision-pinned.py"
+
 realm_devci_artifact_parity:
   detect: [
     "openbank-infra/gitops/components/keycloak/*realm-template*.json",
@@ -4791,6 +4783,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsCheck.kt"
       - "src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsEntry.kt"
       - "src/main/kotlin/com/openbank/sanctions/infrastructure/importer/EuFsfSaxParser.kt"
+      - "src/main/kotlin/com/openbank/sanctions/infrastructure/importer/CzAntiTerrorismCsvParser.kt"
       - "src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/entity/SanctionsCheckEntity.kt"
       - "src/main/resources/db/migration/V1__create_sanctions.sql"
       - "src/main/resources/db/migration/V5__create_sanctions_entries.sql"

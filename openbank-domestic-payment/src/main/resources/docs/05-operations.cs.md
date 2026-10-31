@@ -165,3 +165,9 @@ nedělá SEPA platbu. Výchozí XML bez bloku se nemění.
 `DomesticPaymentPriority.INSTANT` stále nemá odpovídající kód v této zprávě: volba úrovně služby
 a lokálního instrumentu domácího schématu zůstává nevyřešená. Toto zachování kompatibility
 nedokládá, že se okamžitá priorita předává schématu.
+
+## Příznak vynucování fraud rozhodnutí (#4403, ADR-0084 §4.2)
+
+`openbank.domestic.fraud.enforcement-enabled` (env `OPENBANK_DOMESTIC_FRAUD_ENFORCEMENT_ENABLED`) je ve výchozím stavu **vypnutý**. Dokud je vypnutý, každá platba pokračuje beze změny a případné rozhodnutí se pouze započítá do `openbank_fraud_enforcement_decisions_total{decision,mode="shadow"}`. Před zapnutím kalibrujte podle této metriky.
+
+Po zapnutí workflow aktivita `fraudGate` selhává uzavřeně: pokračuje jen skutečné ALLOW, DECLINE platbu zamítne jako `FRAUD_SUSPECTED` a každý jiný verdikt (CHALLENGE, REVIEW, UNKNOWN, jakýkoli syntetický) platbu před odesláním do schématu pozdrží a otevře případ `FRAUD_REVIEW`. Pozdržení uvolní jen signál workflow `resolveFraudHold(RELEASE)`; signál REJECT nebo žádný signál do 48 h platbu zamítne. Signál se při uzavření případu zatím neodesílá, proto příznak nezapínejte, dokud toto napojení neexistuje. Cesta zamítnutí neposílá zákazníkovi žádné oznámení (tipping-off). Rollback: nastavte příznak na `false`; již čekající platby dál čekají na signál nebo timeout.
