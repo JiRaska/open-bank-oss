@@ -23,7 +23,17 @@ import java.security.MessageDigest
  */
 @Startup
 @ApplicationScoped
-class ClasspathApprovalPortfolios : ApprovalPortfolioSource {
+class ClasspathApprovalPortfolios internal constructor(
+    /** Reads `approval-portfolios/<name>`; the classpath in production, a map in the loader's own test. */
+    private val resource: (String) -> ByteArray,
+) : ApprovalPortfolioSource {
+
+    constructor() : this({ name ->
+        checkNotNull(ClasspathApprovalPortfolios::class.java.getResourceAsStream("/$DIR/$name")) {
+            "$DIR/$name is missing"
+        }
+            .use { it.readBytes() }
+    })
 
     private val manifest: Map<String, Any?> = tree(read(MANIFEST)) as? Map<String, Any?>
         ?: error("$DIR/$MANIFEST is not a JSON object")
@@ -48,8 +58,7 @@ class ClasspathApprovalPortfolios : ApprovalPortfolioSource {
 
     private fun read(name: String): ByteArray {
         require(NAME.matches(name)) { "approval portfolio name '$name' is not a plain file name" }
-        return checkNotNull(javaClass.getResourceAsStream("/$DIR/$name")) { "$DIR/$name is missing" }
-            .use { it.readBytes() }
+        return resource(name)
     }
 
     private fun tree(bytes: ByteArray): Any? = IrJson.parse(bytes.toString(Charsets.UTF_8))

@@ -371,6 +371,9 @@ class GenericCatalogService(
                 .digest(evidence.canonicalDiff.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) },
             recordedAt = Instant.now(clock),
         ),
+        // The digest above and the IR the replay ran both come from THIS read of the row; the write is
+        // refused unless the row is still at its version, under a lock (no edit can land in between).
+        expectedRowVersion = revision.revision,
     )
 
     /**

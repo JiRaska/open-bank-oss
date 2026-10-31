@@ -713,7 +713,9 @@ paths:
           description: >-
             The revision's IR does not belong to the offering (productCode or currency), or the
             offering has no server-defined golden portfolio of its own (there is no fallback; pass a
-            portfolio to explore). A 403 means the caller is not a verified interactive human.
+            portfolio to explore), or its currency is not the golden portfolio's. A 403 means the
+            caller is not a verified interactive human.
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
         '429':
           description: Too many backtests are running; retry after the Retry-After interval
   /api/v2/offerings/{offeringId}/revisions/{revisionId}/approvals:

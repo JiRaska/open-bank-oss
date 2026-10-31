@@ -6,18 +6,27 @@ package com.openbank.productcatalog.contract
 
 import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.productcatalog.GoldenOfferings
+import com.openbank.productcatalog.application.ApproverIdentity
+import com.openbank.productcatalog.application.BacktestEvidence
+import com.openbank.productcatalog.application.CatalogPreconditionFailedException
+import com.openbank.productcatalog.application.GenericCatalogService
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
+import io.quarkus.vertx.VertxContextSupport
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import io.smallrye.mutiny.coroutines.uni
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
@@ -43,6 +52,9 @@ class IrOfferingBindingIT {
 
     @Inject
     lateinit var dataSource: DataSource
+
+    @Inject
+    lateinit var catalog: GenericCatalogService
 
     @Test
     fun `an IR naming another product is refused on write, so it never becomes a draft`() {
@@ -186,6 +198,38 @@ class IrOfferingBindingIT {
         val offeringId = offering("SAVINGS_FIXED")
         val revisionId = create(offeringId, revisionBody(SAVINGS_FIXED_IR, "EUR"), 201)!!
         backtest(offeringId, revisionId, 403)
+        assertThat(evidenceRows(revisionId)).isZero()
+    }
+
+    @Test
+    fun `evidence of a row the backtest read is refused once the draft has been edited under it`() {
+        val offeringId = offering("SAVINGS_FIXED")
+        val revisionId = create(offeringId, revisionBody(SAVINGS_FIXED_IR, "EUR"), 201)!!
+        // The backtest's read: the row as it was when the replay started.
+        val read = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) { catalog.findRevision(revisionId) }
+        }
+        // An edit lands while the replay runs.
+        Given {
+            contentType("application/json")
+            header("If-Match", "\"0\"")
+            body(revisionBody(SAVINGS_FIXED_IR.replace("0.0250000000", "0.0350000000"), "EUR"))
+        } When { put("/api/v2/offerings/$offeringId/revisions/$revisionId") } Then { statusCode(200) }
+        val evidence = BacktestEvidence(
+            approver = ApproverIdentity("test-operator", ISSUER, "u-op"),
+            portfolioName = "approval-savings-fixed.json",
+            portfolioSha256 = "0".repeat(64),
+            identical = true,
+            changedAccounts = 0,
+            baseRevisionHash = "0".repeat(64),
+            candidateRevisionHash = "0".repeat(64),
+            canonicalDiff = "{}",
+        )
+        assertThatThrownBy {
+            VertxContextSupport.subscribeAndAwait {
+                uni(CoroutineScope(Dispatchers.Unconfined)) { catalog.recordBacktest(read, evidence) }
+            }
+        }.isInstanceOf(CatalogPreconditionFailedException::class.java)
         assertThat(evidenceRows(revisionId)).isZero()
     }
 

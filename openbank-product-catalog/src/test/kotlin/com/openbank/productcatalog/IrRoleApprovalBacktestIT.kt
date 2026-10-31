@@ -17,6 +17,7 @@ import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import jakarta.inject.Inject
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.nio.file.Files
 import java.nio.file.Path
+import javax.sql.DataSource
 
 /**
  * ADR-0352 §7 (phase 5b) on the ROLE approval path (`POST .../approvals/{role}`): a revision that
@@ -41,19 +43,16 @@ import java.nio.file.Path
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class IrRoleApprovalBacktestIT {
 
+    @Inject
+    lateinit var dataSource: DataSource
+
     @Test
     @Order(1)
     @TestSecurity(user = "widget-maker", roles = ["ROLE_OPERATOR"])
     fun `maker drafts a ready widget that carries product IR`() {
-        val specificationId = create(
-            "/api/v2/specifications",
-            """{"code":"WIDGET_IR_BACKTEST","schemaRef":{"id":"$SCHEMA_ID","version":1}}""",
-        )
         // The golden portfolio is keyed by the OFFERING (ADR-0352 §7), and the IR must name it.
-        offeringId = create(
-            "/api/v2/offerings",
-            """{"specificationId":"$specificationId","code":"SAVINGS_FIXED","market":{"countries":["CZ"]}}""",
-        )
+        offeringId =
+            GoldenOfferings.offering(dataSource, "SAVINGS_FIXED", SCHEMA_ID, 1, """{"countries":["CZ"]}""").toString()
         revisionId = create("/api/v2/offerings/$offeringId/revisions", revisionJson("READY"))
     }
 

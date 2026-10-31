@@ -219,7 +219,11 @@ accounts of its currency, and `ApprovalPortfoliosTest` holds every reference pro
 product-catalog packages that directory at build time and looks the portfolio up by the OFFERING's
 code, never by the author-editable IR. The IR must agree with its offering — `productCode` with `-`
 read as `_` equal to the offering code, `currency` equal to the revision's `currency` attribute — or
-the write, `publish-ir`, the backtest and a lint given the `offeringId` answer 409; an offering
+the write, `publish-ir`, the backtest and a lint given the `offeringId` answer 409. Where the schema
+has no `currency` attribute, the backtest compares the IR currency with the golden portfolio's accounts
+instead (409). The evidence row's digest and the IR the replay ran come from one read of the revision,
+and the row is written only while the revision is still at that version, under a row lock (412
+otherwise), so an edit landing during the replay cannot leave evidence for content nobody saw; an offering
 without its own golden portfolio cannot be backtested, so it cannot be approved (fail closed). A backtest request WITHOUT a portfolio runs over that golden portfolio, and only such
 a run — valid, by a verified JWT principal — is recorded as evidence (`catalog_revision_backtests`,
 immutable: no UPDATE, DELETE or TRUNCATE). The row binds the principal's JWT issuer + subject and the

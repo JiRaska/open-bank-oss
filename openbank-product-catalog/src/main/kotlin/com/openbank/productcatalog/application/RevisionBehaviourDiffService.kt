@@ -84,6 +84,14 @@ class RevisionBehaviourDiffService(
             null
         }
         val parsed = ReplayPortfolioJson.parse(golden?.tree ?: request.portfolio, request.defaultZone)
+        // A schema without a `currency` attribute gave the write nothing to check the IR currency with;
+        // the golden portfolio's accounts are the offering's currency, so an IR in another one is refused.
+        if (golden != null && parsed.portfolio.accounts.any { it.initialState.currency != candidate.currency }) {
+            throw CatalogConflictException(
+                "product IR currency ${candidate.currency} is not the currency of offering ${offering.code}'s " +
+                    "golden portfolio ${golden.name}",
+            )
+        }
         val range = BehaviourDiffInputs.range(parsed, request.from, request.to)
         val options = BehaviourDiffInputs.options(request.threshold)
         require(parsed.portfolio.accounts.size.toLong() * range.days <= MAX_ACCOUNT_DAYS) {

@@ -1,6 +1,6 @@
 {
   "schema": "openbank.approval-portfolios.v1",
-  "description": "ADR-0352 \u00a77 (phase 5b): the server-defined golden portfolio an approver's behavioural-diff backtest must run over to count as having seen a change. Looked up ONLY by the offering's product code (no currency fallback: a product without its own entry has no approval backtest and cannot be approved). Each portfolio is the product's golden scenario account plus the shared sample accounts of its currency; ReferenceProductsTest holds every reference product to an entry. product-catalog packages this directory; obp diff takes the same files.",
+  "description": "ADR-0352 \u00a77 (phase 5b): the server-defined golden portfolio an approver's behavioural-diff backtest must run over to count as having seen a change. Looked up ONLY by the offering's product code (no currency fallback: a product without its own entry has no approval backtest and cannot be approved). Each portfolio is the product's golden scenario account plus the shared sample accounts of its currency; ApprovalPortfoliosTest holds every reference product to an entry. product-catalog packages this directory; obp diff takes the same files.",
   "byProductCode": {
     "CURRENT-ACCOUNT": "approval-current-account.json",
     "SAVINGS-CZK": "approval-savings-czk.json",
