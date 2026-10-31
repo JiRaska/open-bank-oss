@@ -72,6 +72,11 @@ if [ "${BUILD_VERSION}" != "${PKG_VERSION}" ]; then
   exit 1
 fi
 GIT_SHA="$(git rev-parse --short HEAD)"
+# The image tag keeps the short sha, but the sha baked into the image as BUILD_GIT_SHA
+# (served by /.well-known/openbank-build-attestation) must be the FULL 40-hex commit:
+# the commit-addressed evidence store keys objects by full sha and the journey
+# evidence publisher resolves the deployed commit from this attestation.
+GIT_SHA_FULL="$(git rev-parse HEAD)"
 if ! git diff --quiet HEAD -- openbank-admin-ui 2>/dev/null; then
   GIT_SHA="${GIT_SHA}-dirty"
 fi
@@ -413,7 +418,7 @@ buildx_args=(
   --sbom=false \
   --file openbank-admin-ui/Dockerfile \
   --build-arg "BUILD_VERSION=${BUILD_VERSION}" \
-  --build-arg "BUILD_GIT_SHA=${GIT_SHA}" \
+  --build-arg "BUILD_GIT_SHA=${GIT_SHA_FULL}" \
   --build-arg "BUILD_DATE=${BUILD_DATE}" \
   --tag "${IMAGE}" \
   --push \

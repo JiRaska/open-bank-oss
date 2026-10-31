@@ -24,4 +24,18 @@ describe('Admin UI deploy image-tag guard', () => {
     expect(workflow).toContain('if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_run" ]; then')
     expect(workflow).toContain('ADMIN_UI_IMAGE_TAG_SUFFIX="run${GITHUB_RUN_ID}"')
   })
+
+  it('bakes the full 40-hex commit into the image attestation, not the short tag sha', () => {
+    const script = readFileSync(
+      join(repoRoot, 'openbank-infra/scripts/build-push-admin-ui.sh'),
+      'utf8',
+    )
+
+    // The commit-addressed evidence store is keyed by full sha and the journey
+    // evidence publisher resolves the deployed commit from the build attestation,
+    // so the attested sha must be the full commit even though the ECR tag stays
+    // short (DEPLOY_TAG_SHA_LENGTH in test-intelligence-run-projection.mjs).
+    expect(script).toContain('GIT_SHA_FULL="$(git rev-parse HEAD)"')
+    expect(script).toContain('--build-arg "BUILD_GIT_SHA=${GIT_SHA_FULL}"')
+  })
 })

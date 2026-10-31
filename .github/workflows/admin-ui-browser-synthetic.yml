@@ -163,3 +163,83 @@ jobs:
           path: openbank-admin-ui/build/test-intelligence/run-security-excellence-${{ matrix.browser }}.json
           retention-days: 30
           if-no-files-found: error
+
+  # Merge every journey envelope from this run into ONE and publish it to the
+  # commit-addressed evidence store (#13201) under the commit the DEPLOYED image
+  # attests — the same key the Test Intelligence matrix overlays for the running
+  # build. Without this job the journeys only ever existed as workflow artifacts,
+  # so the matrix showed "no synthetic evidence" for a fully green fleet. Write-once:
+  # the first publication for a commit stands (412 = kept). Runs even when a journey
+  # failed — a red observation is evidence too, and hiding it would launder the gap.
+  publish-journey-evidence:
+    name: Publish journey evidence to the evidence store
+    needs: [sso-boundary, admin-operator-access, security-excellence-probe]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          sparse-checkout: |
+            .github/scripts/publish-test-evidence.sh
+            openbank-admin-ui/scripts/publish-test-evidence.mjs
+            openbank-admin-ui/scripts/merge-synthetic-run-envelopes.mjs
+            openbank-admin-ui/src/lib/test-intelligence-run-projection.mjs
+            openbank-admin-ui/version.txt
+            openbank-libs/governance/rules.yaml
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+
+      - name: Download journey envelopes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: test-intelligence-run-openbank-admin-ui-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/journey-envelopes
+
+      - name: Resolve the deployed commit from the build attestation
+        id: deployed
+        run: |
+          set -euo pipefail
+          attested="$(curl -fsS --retry 3 https://admin.open-bank.tech/.well-known/openbank-build-attestation | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).gitSha))')"
+          case "${attested}" in
+            ''|unknown) echo "::error::build attestation unavailable or unknown"; exit 1 ;;
+          esac
+          # Images built before the full-sha attestation change report the short
+          # prefix; expand it against main. An ambiguous prefix fails rev-parse,
+          # which is correct — never guess a commit for evidence.
+          if [ "${#attested}" -ne 40 ]; then
+            attested="$(git rev-parse --verify --quiet "${attested}^{commit}")" || {
+              echo "::error::attested sha ${attested} does not resolve to a unique commit on main"; exit 1; }
+          fi
+          echo "commit=${attested}" >> "$GITHUB_OUTPUT"
+          echo "Deployed commit: ${attested}"
+
+      - name: Merge journey envelopes
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          envelopes=( "${{ runner.temp }}"/journey-envelopes/*.json )
+          [ "${#envelopes[@]}" -ge 1 ] || { echo "::error::no journey envelopes downloaded"; exit 1; }
+          node openbank-admin-ui/scripts/merge-synthetic-run-envelopes.mjs \
+            --commit "${{ steps.deployed.outputs.commit }}" \
+            --out "${{ runner.temp }}/merged-run.json" "${envelopes[@]}"
+
+      - name: Assume the evidence-writer role (GitHub OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-sandbox-test-evidence-writer
+          aws-region: eu-north-1
+
+      - name: Publish write-once to the evidence store
+        run: |
+          bash .github/scripts/publish-test-evidence.sh openbank-admin-ui \
+            "${{ steps.deployed.outputs.commit }}" "${{ steps.deployed.outputs.commit }}" \
+            identical "${{ runner.temp }}/merged-run.json"
