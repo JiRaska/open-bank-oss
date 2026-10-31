@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0358: keep admin-ui's pin on deploy/sandbox in step with reviewed manifests on main.
+#
+# A push to main that touches components/admin-ui moves the manifest copy in pins/admin-ui to
+# that commit and keeps the pinned image, so a manifest change never waits for a person or for
+# the next image build. workflow_dispatch is the recovery path (repin) and the rollback path
+# (rollback: restore an image an earlier pin on the branch already carried). Image deploys stay
+# in admin-ui-deploy.yml. Every write goes through publish-deploy-pin.py, which runs the
+# deploy-pin-branch-contract on the candidate before committing it as a signed App commit.
+
+name: Admin-UI re-pin
+
+on:
+  push:
+    branches: [main]
+    paths: ["openbank-infra/gitops/components/admin-ui/**"]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "repin = move manifests to main, keep image; rollback = pin an earlier image"
+        required: true
+        default: repin
+        type: choice
+        options: [repin, rollback]
+      rollback_image_source_sha:
+        description: "rollback only: image_source_sha from the earlier pins/admin-ui/pin.json"
+        required: false
+      rollback_tag:
+        description: "rollback only: tag from that pin.json"
+        required: false
+      rollback_digest:
+        description: "rollback only: digest from that pin.json"
+        required: false
+
+permissions:
+  contents: read
+
+# Shares admin-ui-deploy.yml's build-push group: a re-pin and an image pin never race on
+# deploy/sandbox (publish-deploy-pin.py also retries on a moved head, this just avoids it).
+concurrency:
+  group: admin-ui-build-push
+  cancel-in-progress: false
+
+jobs:
+  repin:
+    name: Re-pin admin-ui on deploy/sandbox
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write  # GitHub OIDC -> ECR read + KMS verify, rollback mode only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+      # A rollback tag and digest are typed by an operator. Prove the pair exists in ECR and
+      # carries the signature and SBOM attestation Kyverno admits, before it can become a pin.
+      - name: Configure AWS credentials (GitHub OIDC)
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'rollback'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
+          aws-region: eu-north-1
+      - name: Verify the rollback image in ECR (signature + SBOM attestation)
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'rollback'
+        env:
+          ROLLBACK_TAG: ${{ inputs.rollback_tag }}
+          ROLLBACK_DIGEST: ${{ inputs.rollback_digest }}
+        run: |
+          bash .github/scripts/verify-pinned-image.sh \
+            265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui "$ROLLBACK_TAG" "$ROLLBACK_DIGEST"
+      - name: Mint a GitHub App installation token
+        id: app_token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+      - name: Install pin checker dependencies
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/deploy-pin-venv"
+          "${RUNNER_TEMP}/deploy-pin-venv/bin/python" -m pip install --quiet --require-hashes \
+            -r .github/scripts/pyyaml-requirements.txt
+      - name: Write the pin
+        env:
+          DEPLOY_PIN_TOKEN: ${{ steps.app_token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          MODE: ${{ github.event_name == 'push' && 'repin' || inputs.mode }}
+          ROLLBACK_SOURCE_SHA: ${{ inputs.rollback_image_source_sha }}
+          ROLLBACK_TAG: ${{ inputs.rollback_tag }}
+          ROLLBACK_DIGEST: ${{ inputs.rollback_digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          args=(--component admin-ui --run-url "$RUN_URL")
+          if [ "$MODE" = rollback ]; then
+            args+=(--image-source-sha "$ROLLBACK_SOURCE_SHA" --tag "$ROLLBACK_TAG" --digest "$ROLLBACK_DIGEST")
+          fi
+          "${RUNNER_TEMP}/deploy-pin-venv/bin/python" .github/scripts/publish-deploy-pin.py "$MODE" "${args[@]}"

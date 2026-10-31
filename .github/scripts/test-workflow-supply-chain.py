@@ -90,7 +90,7 @@ class SupplyChainTest(unittest.TestCase):
             self.assertFalse(guard.findings(name, {'permissions': {}, 'on': {'workflow_run': {'branches': ['main']}},
                                                    'jobs': {}}))
 
-    def test_admin_ui_deploy_gitops_pr_declares_base_for_exact_sha_checkout(self):
+    def test_admin_ui_deploy_pin_uses_the_app_token(self):
         path = guard.ROOT / '.github/workflows/admin-ui-deploy.yml'
         original = yaml.safe_load(path.read_text())
         self.assertFalse(guard.findings(path.name, original))
@@ -98,11 +98,11 @@ class SupplyChainTest(unittest.TestCase):
         mutated = copy.deepcopy(original)
         step = next(
             step for job in mutated['jobs'].values() for step in job.get('steps', [])
-            if step.get('id') == 'gitops_pr'
+            if step.get('id') == 'pin'
         )
-        step['with'].pop('base', None)
+        step['env']['DEPLOY_PIN_TOKEN'] = '${{ secrets.GITHUB_TOKEN }}'
         self.assertIn(
-            'GitOps pull request must declare base: main for exact-SHA checkout',
+            'deploy pin must be written by publish-deploy-pin.py with the GitHub App token',
             guard.findings(path.name, mutated),
         )
 
