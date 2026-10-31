@@ -113,6 +113,12 @@ STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
 # trickling forever; it is measured from the head's committer time, which update-branch sets.
 RESERVATION_STALL_S = 15 * 60
 RESERVATION_CEILING_S = 4 * 3600
+# Queued CI is CI (#14302): required contexts produced by nested reusable-workflow jobs (`gates (*)`,
+# `Validate manifests`) register no check run until their caller job starts, so a head whose CI only
+# waits for runners has no check-run stamp to show. A workflow run for the head in one of these states
+# counts as activity now; the ceiling still bounds it. `waiting` (an environment approval) is excluded:
+# that is a human gate, not CI making progress.
+LIVE_RUN_STATUSES = frozenset({"queued", "in_progress", "requested", "pending"})
 # Lane fairness (ADR-0343): after a strict-lane merge the train gets the next turn — no strict-lane
 # update-branch while train candidates wait — for at most this long after that merge, so a train that
 # cannot be built never freezes the strict lane. Two ticks of the */10 cron at its measured p90 gap.
@@ -169,6 +175,7 @@ STRICT_CONFLICT_COMMENT = ("merge-train: conflict — this strict-lane PR confli
                            "up on its own. It stays armed.")
 NOTICE_PATH_CAP = 20
 RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's inconclusive jobs were re-run once
+RELEASED_CONTEXT = "merge-train/strict-released"  # App marker: this head's reservation timed out once (#14302)
 DEFER_CONTEXT = "merge-train/strict-deferral"   # App marker: this running strict head yielded once to a carrier
 # Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
 # whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
@@ -1481,12 +1488,13 @@ class GitHub:
         return out
 
     def ci_activity(self, sha: str) -> float | None:
-        """Newest started_at/completed_at of any check run on `sha` (epoch), None when none started.
-        GitHub stamps these, so unlike the committer time they cannot be author-dated."""
-        stamps = [c.get(k) for c in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs")
-                  for k in ("started_at", "completed_at")]
-        epochs = [datetime.datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp() for t in stamps if t]
-        return max(epochs) if epochs else None
+        """Newest CI activity on `sha` (epoch) or None: see latest_ci_activity. The workflow-runs read is
+        made only when the check-run stamps are already stale, so a live head costs no extra call."""
+        return latest_ci_activity(
+            paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"),
+            lambda: [r for r in paginate(f"/repos/{self.repo}/actions/runs?head_sha={sha}", "workflow_runs")
+                     if r.get("head_sha", sha) == sha],
+            time.time())
 
     def extra_checks(self, sha: str, gates: dict[str, str]) -> dict[str, str | None]:
         """Pinned extra-gate verdicts on `sha`: only check runs by the `github-actions` app whose workflow
@@ -2298,8 +2306,16 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
                            any(is_carrier(p, repo) and carrier_holds_strict(p) for p in gh.open_prs()))
     if timed_out:
         summary["timed_out"] = timed_out
-        # Released: never reserving again on that head, and served after every other strict-lane PR.
+        # Released: never reserving again on that head (RELEASED_CONTEXT, read back by
+        # strict_reservation on later ticks), and served after every other strict-lane PR.
         strict.sort(key=lambda sv: sv[1]["number"] in timed_out)
+        for _st, view in strict:
+            if (not shadow and view["number"] in timed_out
+                    and RELEASED_CONTEXT not in (view.get("app") or {})):
+                gh.post_status(view["head_sha"], "success",
+                               "strict lane: reservation timed out on this head; it does not reserve main again",
+                               context=RELEASED_CONTEXT)
+                view.setdefault("app", {})[RELEASED_CONTEXT] = ("success", "")
     # Strict lane first: an update-branch it issues starts a reservation THIS tick, so the fast lane
     # below must already see it.
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
@@ -2474,6 +2490,22 @@ def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now:
     return f"train's turn after a strict-lane merge ({len(train_waiting)} train candidate(s) waiting)"
 
 
+def latest_ci_activity(check_runs: list, load_runs, now: float) -> float | None:
+    """Newest started_at/completed_at of any check run (epoch; GitHub stamps these, so unlike the
+    committer time they cannot be author-dated). When that is older than RESERVATION_STALL_S (or there
+    is none), `load_runs()` — the head's workflow runs — is read: any run still queued or in progress
+    (LIVE_RUN_STATUSES) is activity NOW (#14302), since nested reusable-workflow jobs register no check
+    run until their caller starts. Nothing live: the check-run stamp stands (None when none started)."""
+    stamps = [c.get(k) for c in check_runs for k in ("started_at", "completed_at")]
+    epochs = [datetime.datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp() for t in stamps if t]
+    last = max(epochs) if epochs else None
+    if last is not None and now - last <= RESERVATION_STALL_S:
+        return last
+    if any(r.get("status") in LIVE_RUN_STATUSES for r in load_runs()):
+        return now
+    return last
+
+
 def reservation_expired(git, head: str, now: float, activity=None, green: bool = False) -> str | None:
     """Why the reservation on `head` is over, or None while its CI is live (ADR-0343, #13400).
     Expired when the head is future-dated (the committer time is author-supplied, #13485), older
@@ -2577,6 +2609,13 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
             continue
         if state == "green" and shadow:
             continue  # shadow never merges it, so it must not hold anything
+        if state == "pending" and RELEASED_CONTEXT in (view.get("app") or {}):
+            # Cooldown (#14302): this head already timed out once. Its CI may resume, but re-reserving
+            # it on the next tick starved every other strict PR and the fast lane. It may still merge
+            # once GREEN; a new head (update-branch) reserves afresh.
+            log(f"#{n:>6} strict    reservation released earlier on this head: not reserved again")
+            timed_out.append(n)
+            continue
         why = reservation_expired(git, head, now, activity, green=state == "green")
         if why:
             log(f"#{n:>6} strict    reservation timed out ({why}): released, back of the queue")
@@ -5393,6 +5432,45 @@ def self_test() -> int:
             check("reservation: a RED holder takes the failure path, not the stall path",
                   not s.get("timed_out") and 35 not in gh.merged and 34 in s["fast"], f"{s} merged={gh.merged}")
             reset()
+            # #14302 COOLDOWN: a head whose reservation timed out does not reserve main again when its CI
+            # resumes. #14187 timed out at 13:33Z and was re-reserved as soon as a job started, so the
+            # next strict PR and the fast lane stayed held. Tick 1 stalls; tick 2 shows fresh activity.
+            s1 = reservation_at(RESERVATION_STALL_S + 5 * 60)
+            marked = RELEASED_CONTEXT in gh.app_statuses(gh.prs[35]["head"]["sha"])
+            s2 = reservation_at(30 * 60, 60)
+            check("reservation cooldown: a timed-out head is marked and NOT re-reserved when its CI resumes",
+                  s1.get("timed_out") == [35] and marked and not s2["in_flight"] and 34 in s2["fast"]
+                  and s2.get("timed_out") == [35], f"marked={marked} s1={s1} s2={s2}")
+            reset()
+
+            # #14302 QUEUED CI IS CI: nested reusable-workflow contexts register no check run until their
+            # caller starts. latest_ci_activity feeds reservation_expired's stall clock.
+            t0 = 1_800_000_000.0
+            stale = [{"started_at": datetime.datetime.fromtimestamp(t0 - RESERVATION_STALL_S - 300, datetime.timezone.utc)
+                      .strftime("%Y-%m-%dT%H:%M:%SZ")}]
+            act = latest_ci_activity([], lambda: [{"status": "queued"}], t0)
+            check("stall clock: a head whose only CI is a QUEUED workflow run is active (no timeout)",
+                  act is not None and t0 - act <= RESERVATION_STALL_S, f"activity={act}")
+            act = latest_ci_activity(stale, lambda: [{"status": "in_progress"}], t0)
+            check("stall clock: stale check runs + an IN-PROGRESS workflow run is active (no timeout)",
+                  act is not None and t0 - act <= RESERVATION_STALL_S, f"activity={act}")
+            act = latest_ci_activity(stale, lambda: [{"status": "completed"}, {"status": "waiting"}], t0)
+            check("stall clock: stale check runs and nothing queued or running still times out",
+                  act is not None and t0 - act > RESERVATION_STALL_S, f"activity={act}")
+            check("stall clock: no check run and no live workflow run is no activity at all",
+                  latest_ci_activity([], lambda: [], t0) is None)
+            fresh = [{"started_at": datetime.datetime.fromtimestamp(t0 - 60, datetime.timezone.utc)
+                      .strftime("%Y-%m-%dT%H:%M:%SZ")}]
+
+            def no_read():
+                raise AssertionError("workflow runs read although a check run is fresh")
+            try:
+                act, ok = latest_ci_activity(fresh, no_read, t0), True
+            except AssertionError:
+                act, ok = None, False
+            check("stall clock: a fresh check run costs no workflow-runs read (API budget)",
+                  ok and act == t0 - 60, f"activity={act}")
+
             # #13485: what #13500 left open; both cases fail on the code before it.
             # (a) right after update-branch nothing has REPORTED yet; that head must still hold main.
             open_only("pW", "pF")
