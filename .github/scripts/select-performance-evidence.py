@@ -43,7 +43,9 @@ def declared_gate_lanes(repo_root: Path = REPO_ROOT) -> tuple[tuple[str, str, st
         script = next((name for name in (f"{stem}-smoke", f"{stem}-read-baseline")
                        if (k6 / f"{name}.js").is_file()), None)
         if script is None:
-            continue  # The gate excludes it too, loudly, in its own summary.
+            # Fail closed: a declared module silently missing from the expected set would make
+            # its lane unattributable while every other lane still reads as complete.
+            raise SystemExit(f"perf-gate.yml declares {service} but it has no k6 lane script")
         lanes.append((f"perf-reports-{service}", f"k6 smoke ({service})", f"{service}-{script}"))
     return tuple(lanes)
 
@@ -280,6 +282,16 @@ def self_test() -> int:
     assert GATE_SCENARIO["perf-reports-openbank-product-catalog"] == "openbank-product-catalog-product-catalog-smoke"
     assert GATE_SCENARIO["perf-reports-openbank-ledger-service"] == "openbank-ledger-service-ledger-read-baseline"
     assert len(EXPECTED_GATE) == len(set(EXPECTED_GATE)), "a declared lane appears twice"
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / ".github/workflows").mkdir(parents=True)
+        (root / ".github/workflows/perf-gate.yml").write_text('DECLARED = [\n  "openbank-ghost-service",\n]\n')
+        try:
+            declared_gate_lanes(root)
+            raise AssertionError("a declared module with no k6 script must fail closed")
+        except SystemExit:
+            pass
 
     attempt_start = "2026-09-01T12:00:00Z"
     jobs = {

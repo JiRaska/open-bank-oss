@@ -412,10 +412,19 @@ class PerformanceStageTests(unittest.TestCase):
         self.assertIn("openbank-account-service-account-read-baseline", claimed)
 
     def test_real_gate_scope_is_derived_from_perf_gate_declared(self):
-        lanes = STAGE_SELECTOR_REAL.GATE_LANES
-        self.assertIn(("perf-reports-openbank-product-catalog", "k6 smoke (openbank-product-catalog)",
-                       "openbank-product-catalog-product-catalog-smoke"), lanes)
-        self.assertIn("openbank-ledger-service-ledger-read-baseline", {sc for _, _, sc in lanes})
+        self.assertEqual({sc for _, _, sc in STAGE_SELECTOR_REAL.GATE_LANES}, {
+            "openbank-product-catalog-product-catalog-smoke",
+            "openbank-flaky-test-hunter-flaky-test-hunter-smoke",
+            "openbank-ledger-service-ledger-read-baseline",
+            "openbank-balance-service-balance-read-baseline",
+            "openbank-transaction-service-transaction-read-baseline",
+            "openbank-consent-service-consent-read-baseline",
+            "openbank-domestic-payment-domestic-payment-read-baseline",
+            "openbank-fx-service-fx-read-baseline",
+            "openbank-sca-service-sca-read-baseline",
+            "openbank-sepa-instant-sepa-instant-read-baseline",
+            "openbank-sepa-payment-sepa-payment-read-baseline",
+        })
 
     def test_ambiguous_baseline_definition_is_never_attributed(self):
         self.module()

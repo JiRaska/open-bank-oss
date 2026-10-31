@@ -188,6 +188,8 @@ jobs:
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
       # mutable; the digest is the executable supply-chain identity.
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
+      # The same image the Quarkus Kafka dev-service would pull, pinned by its index digest.
+      KAFKA_IMAGE: docker.io/apache/kafka-native:4.2.0@sha256:777f2dddec6970003f1f27922a8c317d87140567b0537e801d35669ad9a81faf
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -215,6 +217,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p perf-reports
+
+          # Teardown runs on every exit, including the `exit 1` paths below: under `set -e` a
+          # trailing cleanup block is skipped exactly when a lane fails.
+          DEV_PID=""
+          teardown() {
+            if [ -n "$DEV_PID" ]; then kill "$DEV_PID" 2>/dev/null || true; fi
+            pkill -f "quarkusDev" 2>/dev/null || true
+            docker rm -f perf-pg perf-redis perf-kafka >/dev/null 2>&1 || true
+          }
+          trap teardown EXIT
 
           echo "==> [${SERVICE}] starting postgres db=${DB}"
           docker rm -f perf-pg >/dev/null 2>&1 || true
@@ -249,7 +261,7 @@ jobs:
           # image minutes later. A plain container the gate owns has no such race.
           echo "==> [${SERVICE}] starting throwaway kafka"
           docker rm -f perf-kafka >/dev/null 2>&1 || true
-          docker run -d --name perf-kafka -p 9092:9092 apache/kafka-native:4.2.0 >/dev/null
+          docker run -d --name perf-kafka -p 9092:9092 "${KAFKA_IMAGE}" >/dev/null
 
           echo "==> [${SERVICE}] starting quarkusDev on port ${PORT}"
           # No Temporal frontend exists in the throwaway stack, so every worker registrar must
@@ -333,9 +345,6 @@ jobs:
               --summary-export "perf-reports/${SERVICE}-summary.json" \
               "$SCRIPT" | tee "perf-reports/${SERVICE}-k6.log"
 
-          kill "$DEV_PID" 2>/dev/null || true
-          pkill -f "quarkusDev" 2>/dev/null || true
-          docker rm -f perf-pg perf-redis perf-kafka >/dev/null 2>&1 || true
 
       - name: Build performance Test Intelligence envelope
         if: always()
