@@ -49,9 +49,10 @@ class IrRoleApprovalBacktestIT {
             "/api/v2/specifications",
             """{"code":"WIDGET_IR_BACKTEST","schemaRef":{"id":"$SCHEMA_ID","version":1}}""",
         )
+        // The golden portfolio is keyed by the OFFERING (ADR-0352 §7), and the IR must name it.
         offeringId = create(
             "/api/v2/offerings",
-            """{"specificationId":"$specificationId","code":"WIDGET_IR_ONE","market":{"countries":["CZ"]}}""",
+            """{"specificationId":"$specificationId","code":"SAVINGS_FIXED","market":{"countries":["CZ"]}}""",
         )
         revisionId = create("/api/v2/offerings/$offeringId/revisions", revisionJson("READY"))
     }
@@ -72,6 +73,7 @@ class IrRoleApprovalBacktestIT {
                 key = "azp",
                 value = "openbank-admin-ui",
             ), Claim(key = "iss", value = ISSUER), Claim(key = "sub", value = "safety-officer"),
+            Claim(key = "preferred_username", value = "safety-officer"),
         ],
     )
     fun `no backtest - the role approval is a 409`() {
@@ -87,6 +89,7 @@ class IrRoleApprovalBacktestIT {
                 key = "azp",
                 value = "openbank-admin-ui",
             ), Claim(key = "iss", value = ISSUER), Claim(key = "sub", value = "someone-else"),
+            Claim(key = "preferred_username", value = "someone-else"),
         ],
     )
     fun `another principal runs the golden backtest`() {
@@ -109,6 +112,7 @@ class IrRoleApprovalBacktestIT {
                 key = "azp",
                 value = "openbank-admin-ui",
             ), Claim(key = "iss", value = ISSUER), Claim(key = "sub", value = "safety-officer"),
+            Claim(key = "preferred_username", value = "safety-officer"),
         ],
     )
     fun `another principal's backtest and the approver's own CUSTOM portfolio do not unlock it`() {
@@ -133,6 +137,7 @@ class IrRoleApprovalBacktestIT {
                 key = "azp",
                 value = "openbank-admin-ui",
             ), Claim(key = "iss", value = ISSUER), Claim(key = "sub", value = "safety-officer"),
+            Claim(key = "preferred_username", value = "safety-officer"),
         ],
     )
     fun `the approver's golden backtest is recorded`() {
@@ -166,6 +171,7 @@ class IrRoleApprovalBacktestIT {
                 key = "azp",
                 value = "openbank-admin-ui",
             ), Claim(key = "iss", value = ISSUER), Claim(key = "sub", value = "safety-officer"),
+            Claim(key = "preferred_username", value = "safety-officer"),
         ],
     )
     fun `a backtest of the content before the edit does not unlock it, a fresh golden one does`() {

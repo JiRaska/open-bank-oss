@@ -20,6 +20,7 @@ import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
 import com.openbank.productcatalog.domain.catalog.CatalogValue
 import com.openbank.productcatalog.domain.catalog.MarketContext
+import com.openbank.productcatalog.domain.catalog.ProductCodes
 import com.openbank.productcatalog.domain.catalog.ProductOffering
 import com.openbank.productcatalog.domain.catalog.ProductRevision
 import com.openbank.productcatalog.domain.catalog.ProductSpecification
@@ -122,7 +123,7 @@ class GenericCatalogService(
         }
         findSchema(schemaRef)
         validateOrThrow(schemaRef, content.attributes)
-        parseBehaviour(content)
+        requireIrBelongsTo(offering, content)
         validateRelationshipReferences(offeringId, content)
         val now = Instant.now(clock)
         return repository.createDraft(
@@ -163,7 +164,7 @@ class GenericCatalogService(
             throw CatalogConflictException("published revisions are immutable")
         }
         validateOrThrow(existing.schemaRef, content.attributes)
-        parseBehaviour(content)
+        requireIrBelongsTo(findOffering(existing.offeringId), content)
         validateRelationshipReferences(existing.offeringId, content)
         return repository.updateDraft(
             existing.copy(
@@ -204,7 +205,7 @@ class GenericCatalogService(
         checker: ApproverIdentity?,
     ): ProductRevision {
         val draft = findRevision(revisionId)
-        val ir = parseBehaviour(draft.content)
+        val ir = requireIrBelongsTo(findOffering(draft.offeringId), draft.content)
             ?: throw CatalogConflictException("revision carries no product IR; publish it through publish")
         // Matched by JWT issuer + subject, as a role approval is; a display name proves nothing.
         requireBacktest(draft) { checker != null && it.issuer == checker.issuer && it.subject == checker.subject }
@@ -271,12 +272,42 @@ class GenericCatalogService(
     fun parseBehaviour(content: RevisionContent): ProductRevisionIr? = content.behaviour?.let(::parseIr)
 
     /**
-     * ADR-0352 phase 5b: the Studio IR editor's dry run. The same [parseIr] a revision write runs, so
-     * the editor cannot accept an IR the write would refuse, nor refuse one it would accept. Stores,
-     * signs and publishes nothing.
+     * ADR-0352 §7 (phase 5b): the IR must describe the offering it is filed under. Its `productCode` must
+     * name the offering ([ProductCodes.offeringCode]) and its `currency` must equal the revision's
+     * `currency` attribute where the schema has one — otherwise the author, who writes the IR, would
+     * choose which product's golden portfolio unlocks the change. Checked on every write, at publish-ir
+     * and again at the backtest, so a row from before the check cannot slip through. A 409.
      */
-    fun lintIr(behaviour: CatalogValue): IrLintResult = try {
+    fun requireIrBelongsTo(offering: ProductOffering, content: RevisionContent): ProductRevisionIr? {
+        val ir = parseBehaviour(content) ?: return null
+        requireProductCodeOf(offering, ir)
+        val currency = (content.attributes.values["currency"] as? CatalogValue.TextValue)?.value
+        if (currency != null && currency != ir.currency) {
+            throw CatalogConflictException(
+                "product IR currency ${ir.currency} contradicts the revision's currency $currency",
+            )
+        }
+        return ir
+    }
+
+    private fun requireProductCodeOf(offering: ProductOffering, ir: ProductRevisionIr) {
+        if (ProductCodes.offeringCode(ir.productCode) != offering.code) {
+            throw CatalogConflictException(
+                "product IR productCode ${ir.productCode} does not belong to offering ${offering.code}",
+            )
+        }
+    }
+
+    /**
+     * ADR-0352 phase 5b: the Studio IR editor's dry run. The same [parseIr] a revision write runs, so
+     * the editor cannot accept an IR the write would refuse, nor refuse one it would accept. Given the
+     * [offeringId] it is being written for, it also runs the write's productCode binding
+     * ([requireIrBelongsTo]); the currency half needs the revision's attributes, so the write checks it.
+     * Stores, signs and publishes nothing.
+     */
+    suspend fun lintIr(behaviour: CatalogValue, offeringId: UUID?): IrLintResult = try {
         val ir = parseIr(behaviour)
+        if (offeringId != null) requireProductCodeOf(findOffering(offeringId), ir)
         IrLintResult(ir, ProductIrCanonical.canonicalJson(ir), emptyList())
     } catch (e: ProductIrValidationException) {
         IrLintResult(null, null, e.problems)

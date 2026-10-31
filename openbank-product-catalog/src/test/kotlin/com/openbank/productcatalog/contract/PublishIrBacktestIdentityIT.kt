@@ -5,6 +5,7 @@
 package com.openbank.productcatalog.contract
 
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.productcatalog.GoldenOfferings
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -52,14 +53,8 @@ class PublishIrBacktestIdentityIT {
         ],
     )
     fun `a different subject with the same name runs the golden backtest`() {
-        val suffix = UUID.randomUUID().toString().replace("-", "").take(8).uppercase()
-        val spec =
-            create(
-                "/api/v2/specifications",
-                """{"code":"SAV_ID_$suffix","schemaRef":{"id":"org.openbank.banking.deposit","version":2}}""",
-            )
-        offeringId =
-            create("/api/v2/offerings", """{"specificationId":"$spec","code":"SAV_ID_${suffix}_CZ","market":$MARKET}""")
+        offeringId = GoldenOfferings.offering(dataSource, "SAVINGS_FIXED", "org.openbank.banking.deposit", 2, MARKET)
+            .toString()
         revisionId = create(
             "/api/v2/offerings/$offeringId/revisions",
             """{"schemaRef":{"id":"org.openbank.banking.deposit","version":2},"name":{"en":"Savings"},""" +
@@ -107,7 +102,7 @@ class PublishIrBacktestIdentityIT {
         const val ISSUER = "https://example.invalid/catalog-issuer"
         const val MARKET = """{"countries":["CZ"],"channels":["WEB"],"locales":["cs-CZ"]}"""
         const val DEPOSIT_ATTRIBUTES =
-            """{"currency":"CZK","productType":"SAVINGS","interest":{"rateType":"FIXED","dayCount":"ACT_365","payoutFrequency":"MONTHLY","annualRate":"0.0425"}}"""
+            """{"currency":"EUR","productType":"SAVINGS","interest":{"rateType":"FIXED","dayCount":"ACT_365","payoutFrequency":"MONTHLY","annualRate":"0.0425"}}"""
         val IR: String = Files.readString(Path.of("..", "openbank-products", "ir", "savings-fixed.json")).trimEnd()
         private var offeringId: String? = null
         private var revisionId: String? = null

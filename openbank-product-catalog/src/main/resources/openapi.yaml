@@ -368,7 +368,9 @@ paths:
         (trusted-profile bound, then the shared ProductIrParser) and returns what `obp lint` prints:
         productCode, irVersion and the canonical revisionHash, plus the canonical IR bytes. Stores
         nothing, signs nothing, publishes nothing. Invalid IR is a 200 with valid=false and the
-        parser's problems, so an editor can show every problem at once.
+        parser's problems, so an editor can show every problem at once. With `offeringId` it also
+        runs the write's binding: an IR whose productCode (`-` read as `_`) is not that offering's
+        code is a 409, exactly as the write would refuse it.
       operationId: lintProductIrV2
       requestBody:
         required: true
@@ -384,6 +386,8 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
   /api/v2/specifications:
     get:
       tags: [Catalog V2]
@@ -706,7 +710,10 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/CatalogNotFound' }
         '409':
-          description: No server-defined golden portfolio for the product (pass a portfolio to explore)
+          description: >-
+            The revision's IR does not belong to the offering (productCode or currency), or the
+            offering has no server-defined golden portfolio of its own (there is no fallback; pass a
+            portfolio to explore). A 403 means the caller is not a verified interactive human.
         '429':
           description: Too many backtests are running; retry after the Retry-After interval
   /api/v2/offerings/{offeringId}/revisions/{revisionId}/approvals:
@@ -1107,6 +1114,12 @@ components:
       type: object
       additionalProperties: false
       properties:
+        offeringId:
+          type: string
+          format: uuid
+          description: >-
+            The offering the IR is being written for. When given, an IR whose productCode does not
+            name this offering is a 409 (ADR-0352 §7: the offering, not the IR, decides the product).
         ir:
           type: object
           additionalProperties: true

@@ -122,7 +122,7 @@ class GenericCatalogResource(
     override suspend fun lintProductIrV2(request: LintProductIrRequest): Response {
         val node = mapper.valueToTree<JsonNode>(request.ir)
         schemaProfile.requireValidInstance(node)
-        val result = service.lintIr(catalogJson.toObject(node))
+        val result = service.lintIr(catalogJson.toObject(node), request.offeringId)
         return Response.ok(
             GeneratedLintProductIrResponse(
                 valid = result.ir != null,
@@ -146,6 +146,11 @@ class GenericCatalogResource(
         revisionId: UUID,
         request: BehaviourDiffRequest,
     ): Response {
+        // Enforced HERE as publish-ir is: a backtest records approval evidence, and @Authorize is advisory
+        // while AUTHZ_ENFORCE=false. Only a verified interactive human may run one; a machine records nothing.
+        if (!ServiceAccountIdentity.isHumanStaff(identity)) {
+            throw CatalogForbiddenException("a behavioural-diff backtest requires a verified human approver")
+        }
         val custom = request.portfolio?.let {
             val node = mapper.valueToTree<JsonNode>(it)
             schemaProfile.requireValidInstance(node)

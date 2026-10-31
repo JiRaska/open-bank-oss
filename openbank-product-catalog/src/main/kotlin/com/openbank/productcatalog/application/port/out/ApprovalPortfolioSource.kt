@@ -10,8 +10,12 @@ package com.openbank.productcatalog.application.port.out
  * supplies may still be run, but it is the approver's choice of what to look at and unlocks nothing.
  */
 interface ApprovalPortfolioSource {
-    /** The portfolio for [productCode], else for [currency]; null when the server defines none. */
-    fun find(productCode: String, currency: String): ApprovalPortfolio?
+    /**
+     * The portfolio for the OFFERING [offeringCode] — the catalog's record of which product this is, never
+     * the author-editable IR — or null when the server defines none. There is deliberately no fallback
+     * (e.g. by currency): a product without its own golden portfolio fails closed and cannot be approved.
+     */
+    fun find(offeringCode: String): ApprovalPortfolio?
 }
 
 /** [name] is the file it came from; [sha256] covers its exact bytes so the evidence can be re-checked. */

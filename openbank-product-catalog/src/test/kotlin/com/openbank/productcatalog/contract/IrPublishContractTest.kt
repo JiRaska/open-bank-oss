@@ -15,6 +15,7 @@ import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.libs.productrevision.RevisionLoadOutcome
 import com.openbank.libs.productrevision.SignedRevisionCopy
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.productcatalog.GoldenOfferings
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -63,6 +64,8 @@ class IrPublishContractTest {
 
     private val irJson: String = checkNotNull(javaClass.getResourceAsStream("/product-ir/savings-fixed.json"))
         .readBytes().toString(Charsets.UTF_8)
+        // The offering decides the product (ADR-0352 §7): the IR must name the offering it is filed under.
+        .replace("\"SAV-FIXED\"", "\"$PRODUCT_CODE\"")
 
     private val testVerifier = HmacIrSigner(TEST_SECRET.toByteArray(), "product-ir-publish")
 
@@ -82,6 +85,7 @@ class IrPublishContractTest {
         setMaker(revisionId, "independent-ir-author")
         backtest(offeringId, revisionId)
         val expectedHash = ProductIrParser.parse(irJson).revisionHash
+        val number = mapper.readTree(getRevision(revisionId)).get("number").asLong()
 
         Given {
             contentType("application/json")
@@ -101,11 +105,11 @@ class IrPublishContractTest {
 
         // A consumer sees nothing but this response: the IR as served and the detached signature.
         val copy = signedCopyFromResponse(getRevision(revisionId))
-        val pin = RevisionIdentity("SAV-FIXED", revisionId, 1, 1, expectedHash)
+        val pin = RevisionIdentity(PRODUCT_CODE, revisionId, number, 1, expectedHash)
         assertThat(copy.identity).isEqualTo(pin)
         val loader = PinnedRevisionLoader({ p -> copy.takeIf { p == pin } }, testVerifier)
         val loaded = loader.load(pin)
-        assertThat(loaded.productCode).isEqualTo("SAV-FIXED")
+        assertThat(loaded.productCode).isEqualTo(PRODUCT_CODE)
         assertThat(ProductIrCanonical.revisionHash(loaded)).isEqualTo(expectedHash)
 
         // A copy edited after signing does not load, whatever its signature says.
@@ -323,7 +327,7 @@ class IrPublishContractTest {
      */
     private fun assertBacktestEvidence(revisionId: UUID) {
         val golden = java.security.MessageDigest.getInstance("SHA-256")
-            .digest(Files.readAllBytes(Path.of("..", "openbank-products", "portfolios", "savings-sample.json")))
+            .digest(Files.readAllBytes(Path.of("..", "openbank-products", "portfolios", "approval-savings-fixed.json")))
             .joinToString("") { "%02x".format(it) }
         dataSource.connection.use { c ->
             c.createStatement().use { st ->
@@ -332,7 +336,7 @@ class IrPublishContractTest {
                         "FROM catalog_revision_backtests WHERE revision_id = '$revisionId'",
                 ).use { rs ->
                     assertThat(rs.next()).isTrue()
-                    assertThat(rs.getString(1)).isEqualTo("savings-sample.json")
+                    assertThat(rs.getString(1)).isEqualTo("approval-savings-fixed.json")
                     assertThat(rs.getString(2)).isEqualTo(golden)
                     assertThat(rs.getBoolean(3)).isTrue() // the base is the candidate itself here
                     assertThat(rs.getInt(4)).isZero()
@@ -404,10 +408,14 @@ class IrPublishContractTest {
         )
     }
 
+    /** An IR-bearing draft goes on the one SAVINGS_FIXED offering its golden portfolio is keyed by. */
     private fun draft(behaviour: String?): Pair<UUID, UUID> {
-        val suffix = UUID.randomUUID().toString().replace("-", "").take(8).uppercase()
-        val specificationId = createDepositSpecification("SAV_IR_$suffix")
-        val offeringId = createOffering(specificationId, "SAV_IR_${suffix}_CZ")
+        val offeringId = if (behaviour != null) {
+            GoldenOfferings.offering(dataSource, OFFERING_CODE, "org.openbank.banking.deposit", 2, MARKET)
+        } else {
+            val suffix = UUID.randomUUID().toString().replace("-", "").take(8).uppercase()
+            createOffering(createDepositSpecification("SAV_IR_$suffix"), "SAV_IR_${suffix}_CZ")
+        }
         val revisionId = UUID.fromString(
             Given {
                 contentType("application/json")
@@ -462,8 +470,10 @@ class IrPublishContractTest {
     private companion object {
         /** Matches application.yaml `%test` openbank.catalog.ir-signing.hmac-secret. */
         const val TEST_SECRET = "test-only-ir-signing-secret-not-for-production"
+        const val PRODUCT_CODE = "SAVINGS-FIXED"
+        const val OFFERING_CODE = "SAVINGS_FIXED"
         const val MARKET = """{"countries":["CZ"],"channels":["WEB"],"locales":["cs-CZ"]}"""
         const val DEPOSIT_ATTRIBUTES =
-            """{"currency":"CZK","productType":"SAVINGS","interest":{"rateType":"FIXED","dayCount":"ACT_365","payoutFrequency":"MONTHLY","annualRate":"0.0425"}}"""
+            """{"currency":"EUR","productType":"SAVINGS","interest":{"rateType":"FIXED","dayCount":"ACT_365","payoutFrequency":"MONTHLY","annualRate":"0.0425"}}"""
     }
 }

@@ -11,6 +11,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
@@ -38,6 +40,13 @@ class BehaviourDiffRateLimitTest {
     }
 
     @Test
+    @OidcSecurity(
+        claims = [
+            Claim(key = "iss", value = "https://example.invalid/catalog-issuer"),
+            Claim(key = "azp", value = "openbank-admin-ui"), Claim(key = "sub", value = "u-op"),
+            Claim(key = "preferred_username", value = "test-operator"),
+        ],
+    )
     fun `a backtest with no free slot is a 429 with Retry-After`() {
         Given {
             contentType("application/json")

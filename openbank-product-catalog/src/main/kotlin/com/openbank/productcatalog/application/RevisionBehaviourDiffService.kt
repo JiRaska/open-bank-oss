@@ -33,8 +33,9 @@ import java.util.concurrent.Semaphore
  * schema-v1 document `obp diff --behavioural` prints, read by the same [ReplayPortfolioJson] and
  * resolved by the same [BehaviourDiffInputs].
  *
- * Without a portfolio it runs over the product's SERVER-DEFINED golden portfolio
- * ([ApprovalPortfolioSource]), and only that run — valid, and by a verified JWT principal — is recorded
+ * Without a portfolio it runs over the SERVER-DEFINED golden portfolio of the OFFERING
+ * ([ApprovalPortfolioSource], keyed by the offering's code, never by the author-editable IR, and with no
+ * fallback), and only that run — valid, and by a verified JWT principal — is recorded
  * as approval evidence (ADR-0352 §7). A portfolio the caller supplies may still be run to explore, but
  * the caller chose what to look at, so it unlocks nothing.
  *
@@ -63,7 +64,11 @@ class RevisionBehaviourDiffService(
         requester: ApproverIdentity?,
     ): BacktestOutcome = slots.run {
         val candidateRevision = catalog.findRevision(revisionId).also { requireOffering(it.offeringId, offeringId) }
-        val candidate = irOf(candidateRevision)
+        // The offering, not the author's IR, decides which product this is (ADR-0352 §7): re-checked here
+        // so even a stored row that predates the write-time check cannot pick another product's portfolio.
+        val offering = catalog.findOffering(offeringId)
+        val candidate = catalog.requireIrBelongsTo(offering, candidateRevision.content)
+            ?: throw IllegalArgumentException("revision ${candidateRevision.id} carries no product IR (behaviour)")
         val base = irOf(
             if (baseRevisionId != null) {
                 catalog.findRevision(baseRevisionId).also { requireOffering(it.offeringId, offeringId) }
@@ -72,8 +77,8 @@ class RevisionBehaviourDiffService(
             },
         )
         val golden = if (request.portfolio == null) {
-            portfolios.find(candidate.productCode, candidate.currency) ?: throw CatalogConflictException(
-                "no server-defined approval portfolio for product ${candidate.productCode} (${candidate.currency})",
+            portfolios.find(offering.code) ?: throw CatalogConflictException(
+                "no server-defined approval portfolio for offering ${offering.code}; it cannot be approved",
             )
         } else {
             null

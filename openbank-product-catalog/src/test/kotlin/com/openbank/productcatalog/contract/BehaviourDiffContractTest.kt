@@ -20,6 +20,7 @@ import com.openbank.libs.product.replay.ReplayPortfolioJson
 import com.openbank.libs.product.replay.ReplayPosting
 import com.openbank.libs.product.replay.ReplayRange
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.productcatalog.GoldenOfferings
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -164,6 +165,13 @@ class BehaviourDiffContractTest {
     }
 
     @Test
+    @OidcSecurity(
+        claims = [
+            Claim(key = "iss", value = "https://example.invalid/catalog-issuer"),
+            Claim(key = "azp", value = "openbank-admin-ui"), Claim(key = "sub", value = "u-op"),
+            Claim(key = "preferred_username", value = "test-operator"),
+        ],
+    )
     fun `an oversized, malformed or out-of-range backtest is a 400 before any replay`() {
         val (offeringId, revisionId) = draftOffering(baseIr)
         val path = "/api/v2/offerings/$offeringId/revisions/$revisionId/behaviour-diff"
@@ -204,6 +212,13 @@ class BehaviourDiffContractTest {
     }
 
     @Test
+    @OidcSecurity(
+        claims = [
+            Claim(key = "iss", value = "https://example.invalid/catalog-issuer"),
+            Claim(key = "azp", value = "openbank-admin-ui"), Claim(key = "sub", value = "u-op"),
+            Claim(key = "preferred_username", value = "test-operator"),
+        ],
+    )
     fun `a revision of another offering, or an offering with nothing published, is a 404`() {
         val (offeringA, revisionA) = draftOffering(baseIr)
         val (offeringB, _) = draftOffering(baseIr)
@@ -268,8 +283,16 @@ class BehaviourDiffContractTest {
         (base?.let { ""","baseRevisionId":"$it"""" } ?: "") +
         (threshold?.let { ""","materialityThreshold":"$it"""" } ?: "") + "}"
 
+    /** Published through publish-ir, so on the SAVINGS_FIXED offering its golden portfolio is keyed by. */
     private fun publishedRevision(ir: String): Pair<UUID, UUID> {
-        val (offeringId, revisionId) = draftOffering(ir)
+        val offeringId = GoldenOfferings.offering(
+            dataSource,
+            "SAVINGS_FIXED",
+            "org.openbank.banking.deposit",
+            2,
+            MARKET,
+        )
+        val revisionId = draft(offeringId, ir)
         dataSource.connection.use { c ->
             c.prepareStatement("UPDATE catalog_revisions SET maker_id = ? WHERE id = ?").use { st ->
                 st.setString(1, "independent-ir-author")
@@ -300,6 +323,7 @@ class BehaviourDiffContractTest {
         return offeringId to revisionId
     }
 
+    /** A fresh offering of its own; the IR is renamed to it, since the offering decides the product (ADR-0352 §7). */
     private fun draftOffering(ir: String): Pair<UUID, UUID> {
         val suffix = UUID.randomUUID().toString().replace("-", "").take(8).uppercase()
         val specificationId = id(
@@ -311,7 +335,7 @@ class BehaviourDiffContractTest {
                 "/api/v2/offerings",
                 """{"specificationId":"$specificationId","code":"SAV_BD_${suffix}_CZ","market":$MARKET}""",
             )
-        return offeringId to draft(offeringId, ir)
+        return offeringId to draft(offeringId, ir.replace("\"SAVINGS-FIXED\"", "\"SAV-BD-$suffix-CZ\""))
     }
 
     private fun draft(offeringId: UUID, ir: String): UUID = id(
@@ -334,7 +358,7 @@ class BehaviourDiffContractTest {
     private companion object {
         const val MARKET = """{"countries":["CZ"],"channels":["WEB"],"locales":["cs-CZ"]}"""
         const val DEPOSIT_ATTRIBUTES =
-            """{"currency":"CZK","productType":"SAVINGS","interest":{"rateType":"FIXED","dayCount":"ACT_365","payoutFrequency":"MONTHLY","annualRate":"0.0425"}}"""
+            """{"currency":"EUR","productType":"SAVINGS","interest":{"rateType":"FIXED","dayCount":"ACT_365","payoutFrequency":"MONTHLY","annualRate":"0.0425"}}"""
         val PORTFOLIO = """{"accounts":[""" +
             account("low", "") + "," +
             account(
