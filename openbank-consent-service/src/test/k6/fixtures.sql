@@ -16,3 +16,8 @@ VALUES (
     NOW() - INTERVAL '1 day',
     NOW() + INTERVAL '89 days'
 );
+
+-- The domain refuses a consent with no scope (Consent.init), so a scopeless row makes every
+-- read that maps it answer 400; one read scope keeps the fixture a valid aggregate.
+INSERT INTO consent_scopes (consent_id, scope)
+VALUES ('00000000-0000-0000-0000-0000000000d1', 'ACCOUNTS_READ');
