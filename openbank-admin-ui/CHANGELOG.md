@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.15.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.1...admin-ui-v3.15.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **admin-ui:** accept bilingual topology copy in the content snapshot validator ([#14323](https://github.com/JiRaska/open-bank-oss/issues/14323)) ([f27d366](https://github.com/JiRaska/open-bank-oss/commit/f27d366b1f6aab19a9bd88e1a583ac3425c42193))
+* **admin-ui:** seed sidebar roles from the session cookie to paint operator nav in one pass ([#14319](https://github.com/JiRaska/open-bank-oss/issues/14319)) ([0a52218](https://github.com/JiRaska/open-bank-oss/commit/0a52218b038e25eb4d42aa8f29b6caaba88420a5)), closes [#14295](https://github.com/JiRaska/open-bank-oss/issues/14295)
+
 ## [3.15.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.0...admin-ui-v3.15.1) (2026-10-30)
 
 
