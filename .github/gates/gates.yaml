@@ -258,6 +258,23 @@ gates:
 
   # The shell probes this repo keeps getting wrong, each held to a known-positive AND a
   # known-negative. The run: IS the self-test; the whole file is the falsification harness.
+  - id: ecr-live-tags-selftest
+    name: "deployed ECR images keep their live- lifecycle shield (enforced)"
+    group: lint
+    mode: enforced
+    rationale: >-
+      The service ECR lifecycle policy keeps the newest N builds and expires the rest, so a deployed
+      image ranked beyond N would be deleted under running pods and fail only at the next pull.
+      ecr-live-tags.py derives the deployed set from gitops and shields it with a live- tag; this
+      gate keeps its reference parser and its tag/untag planner falsified against a known positive
+      (an unprotected tag is removed, a protected digest is tagged) and a known negative (#14189).
+    review_after: '2027-04-30'
+    min_subjects: 4
+    budget_seconds: 10
+    selftest_exempt: "is-a-test-suite - the run: IS the script's own --selftest"
+    run: |
+      python3 .github/scripts/ecr-live-tags.py --selftest
+
   - id: probe-lib-known-positive
     name: "shell probes are falsified against a known-positive (enforced)"
     group: lint
