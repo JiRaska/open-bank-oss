@@ -90,7 +90,8 @@ describe('ProductIrEditor', () => {
 
     const lint = calls.filter(c => c.url.includes('/product-ir/lint'))
     expect(lint).toHaveLength(2)
-    expect(lint[1].body).toEqual({ ir: { ...IR, currency: 'CZK' } })
+    // Linted against the offering it is written for, so a foreign productCode is refused before the save.
+    expect(lint[1].body).toEqual({ ir: { ...IR, currency: 'CZK' }, offeringId: revision().offeringId })
     const write = calls.find(c => c.method === 'PUT')!
     expect(write.url).toContain(`/offerings/${revision().offeringId}/revisions/${revision().id}`)
     expect(write.headers.get('If-Match')).toBe('"7"')

@@ -39,7 +39,7 @@ export function ProductIrEditor({ revision, t, onSaved }: {
     if (!parsed.ok) { setVerdict(null); setMessage(t('IR není validní JSON', 'IR is not valid JSON') + `: ${parsed.error}`); return }
     setBusy(true); setMessage('')
     try {
-      const result = await catalogV2Operation('lintProductIrV2', { body: { ir: parsed.ir } })
+      const result = await catalogV2Operation('lintProductIrV2', { body: { ir: parsed.ir, offeringId: revision?.offeringId } })
       setVerdict({ text, result })
     } catch (error) {
       setVerdict(null)
