@@ -424,6 +424,28 @@ def self_test() -> int:
             if not any("canonical bytes" in f for f in studio_junit_findings(junit)):
                 failures += 1
                 print(f"SELF-TEST FAIL: a {verdict} byte-parity case must be a finding", file=sys.stderr)
+    # REAL Gradle reports (fixtures/product-ir-parity, produced by `:openbank-products:test` and
+    # `:openbank-product-catalog:test`, hostname scrubbed): the reader must find every committed product
+    # and both Studio cases PASSED in them, by the exact names Gradle actually writes, and nothing by a
+    # prefix. Synthetic XML above can only agree with this function's own idea of a report.
+    real = pathlib.Path(__file__).resolve().parent / "fixtures" / "product-ir-parity"
+    repo = pathlib.Path(__file__).resolve().parents[2]
+    products = sorted(p.stem for p in (repo / IR_DIR).glob("*.json"))
+    verdicts = junit_verdicts(real, TEST_CLASS) or {}
+    checks = [
+        (bool(products) and junit_findings(real, products) == [],
+         f"every committed product {products} must read PASSED from the real {TEST_CLASS} report"),
+        (all(verdict_of(verdicts, n) == "passed" for n in products), "verdict_of must resolve each dynamic case"),
+        (verdict_of(verdicts, "savings") is None, "a prefix of a real case name must not resolve"),
+        (verdict_of(verdicts, "the library carries the ADR-0352 reference deposit products with distinct hashes")
+         == "passed", "a method case must resolve by its display name plus ()"),
+        (studio_junit_findings(real) == [], f"both Studio cases must read PASSED from the real {STUDIO_CLASS} report"),
+    ]
+    for ok, label in checks:
+        ran += 1
+        if not ok:
+            failures += 1
+            print(f"SELF-TEST FAIL: {label}", file=sys.stderr)
     if failures:
         print(f"self-test: {failures} failure(s)")
         return 1

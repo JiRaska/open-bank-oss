@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.openbank.products.ReferenceProductsTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-10-31T00:00:00Z" hostname="localhost" time="0.013">
+  <properties/>
+  <testcase name="the library carries the ADR-0352 reference deposit products with distinct hashes()" classname="com.openbank.products.ReferenceProductsTest" time="0.003"/>
+  <testcase name="savings-fixed" classname="com.openbank.products.ReferenceProductsTest" time="0.005"/>
+  <testcase name="current-account" classname="com.openbank.products.ReferenceProductsTest" time="0.002"/>
+  <testcase name="term-deposit" classname="com.openbank.products.ReferenceProductsTest" time="0.001"/>
+  <testcase name="savings-czk" classname="com.openbank.products.ReferenceProductsTest" time="0.001"/>
+  <testcase name="every ruleId a product declares has a recorded DSL source location()" classname="com.openbank.products.ReferenceProductsTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

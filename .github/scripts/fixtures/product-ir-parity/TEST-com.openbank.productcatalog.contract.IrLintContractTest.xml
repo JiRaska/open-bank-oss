@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.openbank.productcatalog.contract.IrLintContractTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-10-31T00:00:00Z" hostname="localhost" time="0.274">
+  <properties/>
+  <testcase name="every committed reference IR lints to its own bytes and hash()" classname="com.openbank.productcatalog.contract.IrLintContractTest" time="0.136"/>
+  <testcase name="a reordered, pretty-printed IR lints to the committed canonical bytes()" classname="com.openbank.productcatalog.contract.IrLintContractTest" time="0.073"/>
+  <testcase name="an invalid IR is valid=false with the parser's problems, shared with the write path()" classname="com.openbank.productcatalog.contract.IrLintContractTest" time="0.026"/>
+  <testcase name="a read-only caller is refused with 403()" classname="com.openbank.productcatalog.contract.IrLintContractTest" time="0.009"/>
+  <testcase name="a request without an ir object is a 400, never a vacuous valid=true()" classname="com.openbank.productcatalog.contract.IrLintContractTest" time="0.021"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
