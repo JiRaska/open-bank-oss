@@ -822,7 +822,10 @@ chmod 600 "$helper_dir/"*.sh
 echo "SERVICE_CI_HELPERS=$helper_dir" >> "$GITHUB_ENV"'''
             def recipe_lines(body: str) -> list[str]:
                 return [line.strip() for line in body.splitlines() if line.strip()]
-            if recipe_lines(stage.get('run', '')) != recipe_lines(recipe):
+            with_diagnostics = recipe.replace(
+                'echo "SERVICE_CI_HELPERS=',
+                'bash "$helper_dir/diagnostic-actions.sh" stage "$helper_dir"\necho "SERVICE_CI_HELPERS=')
+            if recipe_lines(stage.get('run', '')) not in (recipe_lines(recipe), recipe_lines(with_diagnostics)):
                 return ''
             checkouts = [(i, step) for i, step in enumerate(steps[:stage_index])
                          if step.get('uses', '').startswith('actions/checkout@')]
@@ -898,13 +901,73 @@ def bounded_kover_report(workflow: str, root: Path | None = None) -> bool:
         if (not helper.is_file() or any(root.joinpath(*relative.parts[:i]).is_symlink()
                                        for i in range(1, len(relative.parts) + 1))):
             return False
-        # Closed, independently reviewed body: shell text inside heredocs or after an exit
-        # cannot attest execution. Intentional helper changes require renewed body review.
-        return hashlib.sha256(helper.read_bytes()).hexdigest() == (
-            '2186b9c579e58fef1eb0874d7de97598b8d6fdbf145d8b3f02eedb15e369424d'
-        )
+        # Closed helper bodies: shell text inside heredocs or after an exit cannot attest
+        # execution. The sibling is staged with the report, never loaded from historical code.
+        # Intentional helper changes require renewed body review.
+        shared = helper.with_name('coverage-evidence.sh')
+        if not shared.is_file() or shared.is_symlink():
+            return False
+        return (hashlib.sha256(helper.read_bytes()).hexdigest() ==
+                '15a5349221070810f671a4558bdac2c083dd474898ce9cd972644d75774b5b73'
+                and hashlib.sha256(shared.read_bytes()).hexdigest() ==
+                '64062707a69e5f92bb18eae0eaaa8492935cd21cb8fa056b0de35587dbfc9f89')
     except (KeyError, TypeError, AttributeError, ValueError, OSError, StopIteration, yaml.YAMLError):
         return False
+
+
+def service_ci_evidence_source(root: Path, workflow: str) -> str:
+    """Resolve only the reviewed, active coverage composite and its trusted snapshot."""
+    try:
+        document = yaml.load(workflow, Loader=CapabilityLoader)
+        build = document['jobs']['build']
+        steps = build['steps']
+        calls = [step for step in steps if step.get('uses') == './.github/actions/service-ci-coverage-evidence']
+        if not calls:
+            return workflow  # The original inline producer remains supported.
+        if (len(calls) != 1 or document.get('defaults') or build.get('defaults')
+                or not service_ci_observer_source(root, workflow)):
+            return ''
+        call = calls[0]
+        if (call.get('if') != 'always()' or call.get('continue-on-error') is not True
+                or call.get('env') != {'SERVICE': '${{ inputs.service }}',
+                                      'SERVICE_CI_JOB_STATUS': '${{ job.status }}',
+                                      'SERVICE_CI_REPORT_OUTCOME': '${{ steps.coverage_report.outcome }}'}):
+            return ''
+        stage = next(step for step in steps if step.get('name') == 'Stage trusted service CI step helpers')
+        if set(stage) != {'name', 'run'}:
+            return ''
+        historical = [step for step in steps if step.get('name') == 'Check out historical service source with trusted helpers']
+        report = next(step for step in steps if step.get('id') == 'coverage_report')
+        if (len(historical) != 1 or historical[0].get('if') != "inputs.ref != ''"
+                or set(historical[0]) != {'name', 'if', 'env', 'run'}
+                or historical[0].get('env') != {'REF': '${{ inputs.ref }}'}
+                or not steps.index(stage) < steps.index(historical[0]) < steps.index(report) < steps.index(call)):
+            return ''
+        stage_line = 'bash "$helper_dir/diagnostic-actions.sh" stage "$helper_dir"'
+        restore_line = 'bash "$SERVICE_CI_HELPERS/diagnostic-actions.sh" restore "$SERVICE_CI_HELPERS"'
+        historical_body = historical[0].get('run', '')
+        # Presence alone would accept exit/heredoc branches that never restore the snapshot.
+        # Bind the entire reviewed fetch, ancestry, checkout and restore recipe.
+        if hashlib.sha256(historical_body.encode()).hexdigest() != '0477626f8f1f88fb9453379e6fd7d189f72a6f003bca91a840d47c04c1f54831':
+            return ''
+        historical_lines = [line.strip() for line in historical_body.splitlines() if line.strip()]
+        if (stage_line not in stage.get('run', '').splitlines()
+                or not historical_lines or historical_lines[-1] != restore_line
+                or 'git checkout --detach --quiet "$resolved_ref"' not in historical_lines):
+            return ''
+        paths = {
+            '.github/actions/service-ci-coverage-evidence/action.yml': '10e8de61f2a7e3541926b4857d2f1a10f4c2dee53c5eb933cb9090d439f3b313',
+            '.github/scripts/service-ci-steps/diagnostic-actions.sh': '860f5df9ff1cc9f7a3d829e437d0dfb903189d4a9cb5984c8d834444e2048a79',
+        }
+        for relative, expected_hash in paths.items():
+            path = root / relative
+            if (not path.is_file() or any(root.joinpath(*Path(relative).parts[:i]).is_symlink()
+                                           for i in range(1, len(Path(relative).parts) + 1))
+                    or hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash):
+                return ''
+        return text(root / '.github/actions/service-ci-coverage-evidence/action.yml')
+    except (KeyError, TypeError, AttributeError, ValueError, OSError, StopIteration, yaml.YAMLError):
+        return ''
 
 
 def admin_collector_source(root: Path) -> str:
@@ -980,12 +1043,13 @@ def check(root: Path) -> list[str]:
         errors.append(f"run schema unavailable: {exc}")
 
     workflow = text(root / ".github/workflows/_service-ci.yml")
+    evidence_source = service_ci_evidence_source(root, workflow)
     for needle in (
         "collect-test-run-evidence.py",
         "build/test-intelligence/run.json",
         "if: always()",
     ):
-        if needle not in workflow:
+        if needle not in evidence_source:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
     observer = service_ci_observer_source(root, workflow)
     for needle in ('docker events', '--filter type=container', '--filter event=start', '--filter event=die'):
@@ -993,7 +1057,7 @@ def check(root: Path) -> list[str]:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
     if not bounded_kover_report(workflow, root):
         errors.append("Kover evidence is not bounded with the money-path-safe timeout")
-    immutable_envelope_artifact = workflow.partition("Retain immutable Test Intelligence run envelope")[2].partition(
+    immutable_envelope_artifact = evidence_source.partition("Retain immutable Test Intelligence run envelope")[2].partition(
         "Upload coverage to Codecov"
     )[0]
     if "build/test-intelligence/run.json" not in immutable_envelope_artifact or "runtime/" in immutable_envelope_artifact:

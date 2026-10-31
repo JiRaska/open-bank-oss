@@ -319,6 +319,30 @@ tasks.withType<Test>().configureEach {
     ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
+// Consumer contracts compile independently of the full service test suite.
+// Helpers stay in their existing test paths and are explicitly included by their owners.
+val consumerPactTestSourceSet =
+    sourceSets.create("consumerPactTest") {
+        kotlin.srcDir("src/test/kotlin")
+        kotlin.include("**/*PactConsumerTest.kt")
+        resources.srcDir("src/test/resources")
+        compileClasspath = sourceSets.main.get().output + configurations.testCompileClasspath.get()
+        runtimeClasspath = output + sourceSets.main.get().output + configurations.testRuntimeClasspath.get()
+    }
+kotlin.target.compilations.getByName("consumerPactTest")
+    .associateWith(kotlin.target.compilations.getByName("main"))
+
+tasks.register<Test>("consumerPactTest") {
+    description = "Regenerates consumer Pact contracts without compiling unrelated service tests."
+    group = org.gradle.language.base.plugins.LifecycleBasePlugin.VERIFICATION_GROUP
+    testClassesDirs = consumerPactTestSourceSet.output.classesDirs
+    classpath = consumerPactTestSourceSet.runtimeClasspath
+    filter.includeTestsMatching("*.contract.*PactConsumerTest")
+    // Pact files live outside this task's declared outputs: every invocation must regenerate.
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+}
+
 // ADR-0250 Phase 2 (issue #4414): a Pact provider-verification test needs `-Dpactbroker.url` set
 // to run against the broker, and that `-D` is a tracked INPUT of whatever Test task runs it — so
 // invoking the ordinary `test` task with a broker URL set (the main-push "contract" build) is
@@ -396,17 +420,19 @@ tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
 kover {
     currentProject {
         sources {
-            // This separate compilation contains only provider-verification tests from
-            // src/test/kotlin; it must not enter the service production coverage denominator.
+            // These separate contract compilations contain only tests from src/test/kotlin;
+            // neither belongs in the service production coverage denominator.
             excludedSourceSets.add("providerPactTest")
+            excludedSourceSets.add("consumerPactTest")
         }
         instrumentation {
             excludedClasses.add("org.testcontainers.*")
             // Kover otherwise wires every Test task into koverVerify. The ordinary `test`
-            // task already executes these provider classes, so letting coverage pull in
-            // providerPactTest repeats verification and can publish to the broker during
-            // every build. Keep that task explicit for the contract lane only.
+            // task already includes consumer and provider classes. Keep contract tasks
+            // explicit: coverage must not repeat consumer regeneration or publish provider
+            // verification to the broker during every build.
             disabledForTestTasks.add("providerPactTest")
+            disabledForTestTasks.add("consumerPactTest")
         }
     }
 }

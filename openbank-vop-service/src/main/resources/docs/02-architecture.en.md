@@ -19,7 +19,7 @@ infrastructure/
   rest/VopResource.kt             POST /api/v1/vop/verify
   rest/dto/VopDtos.kt             wire mapping + explicit validation
   ratelimit/                      VopRateLimiter, VopRateLimitFilter
-  client/                         AccountServiceClient, PartyServiceClient (local mirrors)
+  client/                         AccountServiceClient (generated, openbank-client-account), PartyServiceClient (local mirror)
   adapter/                        AccountHolderNameLookupAdapter, NoSchemeRoutingAdapter
   persistence/                    VopVerificationEntity, VopVerificationRecordAdapter
   authz/AuthzProducer.kt          OPA sidecar PDP

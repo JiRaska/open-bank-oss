@@ -13,7 +13,9 @@ import com.openbank.sanctions.application.port.out.SanctionsPublicationPermit
 import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.SanctionsEntry
 import com.openbank.sanctions.domain.model.SanctionsListType
+import com.openbank.sanctions.infrastructure.importer.CzAntiTerrorismCsvParser
 import com.openbank.sanctions.infrastructure.importer.EuFsfSaxParser
+import com.openbank.sanctions.infrastructure.importer.StreamingCsv
 import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -58,6 +60,8 @@ private suspend fun SanctionsEntryRepository.deactivateMissingForRefresh(
  *  - EU_CONSOLIDATED → official EU FSF XML (first-party) by default; OpenSanctions CSV selectable
  *  - PEP_GLOBAL / UN / HM / CNB_DOMESTIC → OpenSanctions targets.simple.csv — BufferedReader streaming,
  *    batch upsert (CNB_DOMESTIC is the Czech national list kept by MZV, mirrored as cz_national_sanctions)
+ *  - CZ_TERRORISTS → official e-Sbírka SPARQL CSV for Regulation 210/2008 Coll.; the small legal
+ *    snapshot is fully validated before the first upsert and stays separate from CNB_DOMESTIC
  *  - FATF         → country-risk, not entity-based — skipped
  *
  * Every import attempt returns a [ListImportResult] whose outcome is one of the
@@ -168,6 +172,8 @@ class SanctionsImportService(
             SanctionsListType.CNB_DOMESTIC -> importedOrEmpty(
                 importOpenSanctionsCsv(sourceUrl, listType, CZ_NATIONAL_PROGRAMS, permit),
             )
+            // Separate legal regime: Regulation 210/2008 Coll., sourced only from e-Sbírka (#10760).
+            SanctionsListType.CZ_TERRORISTS -> importedOrEmpty(importCzAntiTerrorism(sourceUrl, permit))
         }
     } catch (ex: Exception) {
         // Deliberately broad: any fetch/parse/store failure means the SAME thing to the
@@ -375,11 +381,11 @@ class SanctionsImportService(
         val inputStream = withContext(Dispatchers.IO) { httpGetStream(url) }
         val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8))
 
-        val headerLine = withContext(Dispatchers.IO) { OpenSanctionsCsv.readRecord(reader) } ?: run {
+        val headerLine = withContext(Dispatchers.IO) { StreamingCsv.readRecord(reader) } ?: run {
             reader.close()
             return 0
         }
-        val headers = OpenSanctionsCsv.parseRecord(headerLine)
+        val headers = StreamingCsv.parseRecord(headerLine)
 
         // Resolve column indexes from actual header (format-safe)
         val idxId = headers.indexOf("id")
@@ -411,10 +417,10 @@ class SanctionsImportService(
 
         try {
             while (true) {
-                val rawLine = withContext(Dispatchers.IO) { OpenSanctionsCsv.readRecord(reader) } ?: break
+                val rawLine = withContext(Dispatchers.IO) { StreamingCsv.readRecord(reader) } ?: break
                 if (rawLine.isBlank()) continue
 
-                val cols = OpenSanctionsCsv.parseRecord(rawLine)
+                val cols = StreamingCsv.parseRecord(rawLine)
                 val id = col(cols, idxId)
                 val schema = col(cols, idxSchema)
                 val name = col(cols, idxName)
@@ -488,6 +494,32 @@ class SanctionsImportService(
         return parsed
     }
 
+    /** Parse the complete, small legal snapshot before making the first database write. */
+    private suspend fun importCzAntiTerrorism(url: String, permit: SanctionsPublicationPermit?): Int {
+        val designations = withContext(Dispatchers.IO) {
+            httpGetStream(url).use { CzAntiTerrorismCsvParser.parse(it) }
+        }
+        if (designations.isEmpty()) return 0
+        val presentExternalIds = designations.map { "cz-210-2008-${it.fragmentId}" }.toSet()
+        val entries = designations.map { designation ->
+            buildEntry(
+                listType = SanctionsListType.CZ_TERRORISTS,
+                externalId = "cz-210-2008-${designation.fragmentId}",
+                entityType = designation.entityType,
+                primaryName = designation.primaryName,
+                aliases = designation.aliases,
+                dateOfBirth = designation.dateOfBirth,
+                programs = CZ_TERRORISM_PROGRAMS,
+            )
+        }
+        for (chunk in entries.chunked(IMPORT_BATCH_SIZE)) {
+            entryRepo.upsertForRefresh(chunk, permit)
+        }
+        entryRepo.deactivateMissingForRefresh(SanctionsListType.CZ_TERRORISTS, presentExternalIds, permit)
+        Log.infof("Imported %d official Czech anti-terrorism designations", entries.size)
+        return entries.size
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
@@ -548,53 +580,6 @@ class SanctionsImportService(
 
         private val EU_PROGRAMS = listOf("EU-SANCTIONS")
         private val CZ_NATIONAL_PROGRAMS = listOf("CZ-NATIONAL-SANCTIONS")
-    }
-}
-
-/** Minimal RFC 4180 reader for the OpenSanctions `targets.simple.csv` feeds. */
-private object OpenSanctionsCsv {
-    /**
-     * Read one CSV RECORD, which is not the same as one line: a quoted field may contain line
-     * breaks (gb_fcdo_sanctions puts them in its `sanctions` column), and reading such a record
-     * line by line splits it — the fragments become bogus entries and the real one loses every
-     * column after the break. Keeps appending physical lines while a quote is still open; `""`
-     * inside a quoted field adds two quotes, so an odd running count means "still inside quotes".
-     */
-    fun readRecord(reader: BufferedReader): String? {
-        val first = reader.readLine() ?: return null
-        var record = first
-        var quotes = first.count { it == '"' }
-        while (quotes % 2 != 0) {
-            val next = reader.readLine() ?: break
-            record += "\n" + next
-            quotes += next.count { it == '"' }
-        }
-        return record
-    }
-
-    fun parseRecord(line: String): List<String> {
-        val result = mutableListOf<String>()
-        val current = StringBuilder()
-        var inQuote = false
-        var i = 0
-        while (i < line.length) {
-            val ch = line[i]
-            when {
-                ch == '"' && !inQuote -> inQuote = true
-                ch == '"' && inQuote && i + 1 < line.length && line[i + 1] == '"' -> {
-                    current.append('"')
-                    i++
-                }
-                ch == '"' && inQuote -> inQuote = false
-                ch == ',' && !inQuote -> {
-                    result += current.toString()
-                    current.clear()
-                }
-                else -> current.append(ch)
-            }
-            i++
-        }
-        result += current.toString()
-        return result
+        private val CZ_TERRORISM_PROGRAMS = listOf("CZ-TERR")
     }
 }

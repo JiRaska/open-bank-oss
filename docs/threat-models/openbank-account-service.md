@@ -1071,3 +1071,12 @@ identity markers, other clients and catalog write actions remain denied. Catalog
 or authorization refusal still fails account opening closed. Source configuration does not
 establish that the live issuer was reconciled. Rollback removes this read grant and scope and
 reverts the client selection; no account pin or migration is changed.
+
+## Listener authentication follow-up (#12511)
+
+The production API permission requires an OIDC bearer on HTTP and client-certificate TLS, including
+a future route without a security annotation. Exact GET-only service info/config remain public and
+management health remains on its separate interface. Production-profile real HTTP/TLS tests cover
+these exceptions as well as annotated and unannotated API bearer parity. This candidate is not a
+deployed enforcement claim; money-path review and staged runtime verification remain required.
+Rollback restores the previous API permission and its certificate-only identity risk.
