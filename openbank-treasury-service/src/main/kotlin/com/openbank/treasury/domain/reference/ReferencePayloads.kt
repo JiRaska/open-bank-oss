@@ -190,10 +190,10 @@ data class CounterpartyPayload(
 }
 
 /**
- * How a counterparty's standing settlement instruction (SSI) says it is paid. The payment phase of
- * ADR-0344 moves this vocabulary to `openbank-libs-iso20022`, beside the bank-own rails it maps to.
+ * How a counterparty's standing settlement instruction (SSI) says it is paid. The vocabulary lives in
+ * `openbank-libs-iso20022` (ADR-0344), beside the bank-own rails it maps to; treasury aliases it.
  */
-enum class SettlementRail { CERTIS, SEPA, TARGET2, SWIFT }
+typealias SettlementRail = com.openbank.libs.iso20022.SettlementRail
 
 data class SsiPayload(
     val counterpartyId: String,
