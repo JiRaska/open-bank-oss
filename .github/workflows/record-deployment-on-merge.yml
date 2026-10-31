@@ -80,10 +80,9 @@ jobs:
       # goes stale with no error. Pass the repo explicitly so it works API-only.
       GH_REPO: ${{ github.repository }}
     steps:
-      # SHALLOW on purpose. The only things needed from the repo are two files —
-      # .github/scripts/resolve-record-deployment-version.sh and release-please-config.json —
-      # and the equivalence proof is made through the compare API, not through git history
-      # (#3223). A full-history checkout on every gitops merge would buy nothing here.
+      # SHALLOW on purpose. The resolver, its complete-manifest proof helper, and
+      # release-please-config.json are sufficient; the bounded Git Trees/Blobs API proof does
+      # not depend on local history. A full-history checkout on every gitops merge buys nothing.
       - name: Check out the resolver and the exclude-paths it reads
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
         with:

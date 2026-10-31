@@ -13,15 +13,23 @@ is_inert_service_path() {
   fi
 
   case "$1" in
-    openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
+    docs/adr/0039-ledger-as-golden-source-balance-as-projection.md)
+      # AdrTextScannerTest reads this exact repository fixture.
+      return 1 ;;
+    openbank-infra/aws/envs/sandbox-platform/*.tf)
+      # This Terraform environment has its own Platform OpenTofu workflow.
+      # GitOps manifests remain relevant: JVM tests read some ConfigMaps and policies.
+      return 0 ;;
+    .github/scripts/check-authz-enforce-money-path.py|.github/scripts/check-flyway-version-commit-order.py|.github/scripts/check-public-workload-ha.py|.github/scripts/check-tofu-image-pull-through.py|.github/scripts/auto-update-armed-prs.py|.github/scripts/deploy-window-inputs.sh|.github/scripts/supersede-deploy-prs.sh|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/gates/gates.yaml|.github/gates/workflow-write-permissions-baseline.txt|.github/canary-rollout-realisable-baseline.txt|.github/public-workload-ha-baseline.txt|.github/scripts/collect-admin-ui-test-evidence.py|.github/scripts/test-collect-admin-ui-test-evidence.py|.github/scripts/select_admin_ui_evidence_datasets.py|.github/scripts/select_admin_ui_evidence_datasets_test.py|.github/scripts/await-admin-ui-source-validation.py|.github/scripts/test-await-admin-ui-source-validation.py|.github/scripts/reconcile-test-evidence.py|.github/scripts/reconcile_test_evidence_test.py|.github/scripts/check-readiness-collectors-agree.py)
+      # Exact governance, Pact and evidence paths are inert; unknown helpers stay relevant.
+      return 0 ;;
+    .github/scripts/test-service-ci-job-roster.py|.github/scripts/test-service-ci-path-selection.py)
+      # The changes job exercises this test; its source is not a Gradle/Pact input.
       return 0 ;;
     openbank-document-renderer/requirements.txt)
-      # Python sidecar dependencies are built/scanned by auto-deploy's SELF_BUILT lane,
-      # not by Gradle. Keep all other renderer and unknown module paths conservative.
+      # Main's Python sidecar lock remains outside the JVM lane.
       return 0 ;;
-    .github/scripts/check-flyway-version-commit-order.py|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/scripts/collect-admin-ui-test-evidence.py|.github/scripts/test-collect-admin-ui-test-evidence.py|.github/scripts/select_admin_ui_evidence_datasets.py|.github/scripts/select_admin_ui_evidence_datasets_test.py|.github/scripts/await-admin-ui-source-validation.py|.github/scripts/test-await-admin-ui-source-validation.py|.github/scripts/reconcile-test-evidence.py|.github/scripts/reconcile_test_evidence_test.py|.github/scripts/check-readiness-collectors-agree.py|.github/gates/workflow-write-permissions-baseline.txt)
-      # Exact governance, Pact, and evidence publisher/reconcile paths do not build services.
-      # Keep unknown helpers relevant so new CI/build behavior still gets validated.
+    openbank-admin-ui/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
       return 0 ;;
     .github/workflows/*)
       # The copied runtime Dockerfile is a build input for every Gradle image.
@@ -45,7 +53,7 @@ global_service_build_input_changed() {
     if [[ "$path" =~ ^openbank-libs/docs/[^/]+\.md$ ]]; then continue; fi
     build_inputs="${build_inputs}${build_inputs:+$'\n'}${path}"
   done <<< "$changed"
-  grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$build_inputs" \
+  grep -qE '^(openbank-libs[^/]*/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$build_inputs" \
     || grep -Fxq '.github/workflows/Dockerfile.deploy' <<< "$changed"
 }
 
@@ -64,6 +72,14 @@ admin_ui_pact_changed() {
 }
 
 pact_build_modules_self_test() {
+  ! is_inert_service_path "docs/adr/0039-ledger-as-golden-source-balance-as-projection.md" \
+    || { echo "selector self-test: real ADR test fixture must remain relevant" >&2; return 1; }
+  is_inert_service_path "openbank-infra/aws/envs/sandbox-platform/providers.tf" \
+    || { echo "selector self-test: platform Terraform must be service-inert" >&2; return 1; }
+  ! is_inert_service_path "openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml" \
+    || { echo "selector self-test: GitOps test input must remain relevant" >&2; return 1; }
+  ! is_inert_service_path "openbank-infra/aws/envs/unknown/main.tf" \
+    || { echo "selector self-test: unowned infrastructure must retain safe fallback" >&2; return 1; }
   is_inert_service_path "openbank-document-renderer/requirements.txt" \
     || { echo "selector self-test: Python renderer lock is not a JVM build input" >&2; return 1; }
   ! is_inert_service_path "openbank-document-renderer/requirements.txt.backup" \
@@ -112,6 +128,10 @@ pact_build_modules_self_test() {
     || { echo "selector self-test: packaged service docs must remain module-relevant" >&2; return 1; }
   ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
     || { echo "selector self-test: unknown automation must retain safe fallback" >&2; return 1; }
+  is_inert_service_path ".github/scripts/check-tofu-image-pull-through.py" \
+    || { echo "selector self-test: Terraform image gate must be service-inert" >&2; return 1; }
+  ! is_inert_service_path ".github/scripts/check-tofu-image-pull-through-test-helper.py" \
+    || { echo "selector self-test: unowned Terraform helper must retain safe fallback" >&2; return 1; }
   ! is_inert_service_path ".github/scripts/test-unknown-admin-ui-helper.py" \
     || { echo "selector self-test: unknown UI helper must retain safe fallback" >&2; return 1; }
   ! is_inert_service_path ".github/scripts/check-service-build-inputs.py" \
