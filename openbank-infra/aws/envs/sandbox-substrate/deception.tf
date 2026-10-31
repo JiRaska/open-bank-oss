@@ -166,7 +166,7 @@ locals {
   # AWS Chatbot's custom-notification shape (deception-delivery.tf): Slack renders title and
   # description, email subscribers receive the same JSON, still readable.
   canary_input_template = <<-EOT
-    {"version":"1.0","source":"custom","content":{"textType":"client-markdown","title":"HONEYTOKEN USED (ADR-0357): canary AWS key","description":"The canary key <key> (user ${local.canary_user_name}) called <source>:<event> in <region> from <ip> (<ua>) at <time>. No legitimate process holds this key: treat as credential compromise. Find where it leaked from the placement list in #14163, rotate anything stored alongside it, and open an incident. A user agent starting openbank-deception-drill is the scheduled drill."}}
+    {"version":"1.0","source":"custom","content":{"textType":"client-markdown","title":"HONEYTOKEN USED (ADR-0357): canary AWS key","description":"The canary key <key> (user ${local.canary_user_name}) called <source>:<event> in <region> from <ip> (<ua>) at <time>. No legitimate process holds this key: treat as credential compromise. Find where it leaked from the placement list in #14163, rotate anything stored alongside it, and open an incident. The user agent and source address are attacker-controlled: never use them to call this a drill. It is the scheduled drill only if a deception-drill workflow run on main started minutes before; check the Actions run list."}}
   EOT
   canary_input_paths = {
     key    = "$.detail.userIdentity.accessKeyId"
