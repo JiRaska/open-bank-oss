@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [security-ops, observability, infrastructure, gitops]
-followup: "#14163 — layers 0-1, the drill and an armed HoneytokenFilter ship; regional EventBridge coverage, OpenBao/S3/Keycloak/DB lures, a scheduled drill identity and paging are open (owner decisions)"
+followup: "#14163 — layers 0-1, the drill, an armed HoneytokenFilter, Slack delivery and the weekly drill ship; regional EventBridge coverage, OpenBao/S3/Keycloak/DB lures, GoAlert paging and Stratus are open"
 summary: "Deception is a layered programme on existing telemetry: edge decoys, then cloud and cluster honeytokens whose any use is an alert, each mapped to ATT&CK, gated as wired and powerless, and proven by a timed drill. Under 1 USD/month."
 ---
 
@@ -176,28 +176,33 @@ give: the request is seen inside the service's namespace whether it came through
 in-cluster caller that skipped it. `honeytoken-wiring` now fails if `HoneyEndpointHit` exists
 while no workload sets `OPENBANK_SECURITY_HONEY_PATHS`, or if the filter loses `@PreMatching`.
 
-**Paging (GoAlert) is not wireable without new surface, so it is an owner decision.** Every
-critical alert reaches GoAlert one way: Alertmanager `webhook_configs` to a cluster-internal URL
-(kube-prometheus-stack.yaml, ADR-0088). GoAlert has no ingress (ADR-0056), and an SNS HTTPS
-subscription needs a public endpoint, so the honeytoken topic cannot reach it as it stands. The
-options all add something: a public, authenticated GoAlert integration endpoint (new attack
-surface on the detection path); a CloudWatch exporter pod so the two AWS signals become
-Prometheus series (new long-running workload); or an SNS-to-chat delivery through a function
-holding the chat webhook. Email stays the delivery today, and it reaches a human outside the
-cluster, which is the property that matters when the cluster is what was compromised.
-`EdgeDecoyTargetedHit` and `HoneyEndpointHit` stay `warning` (Slack). Their promotion criterion
-(a drill hit seen in Slack end to end) has not been met, and promoting them first would break the
-estate's rule that nothing pages before a known-positive has reached a human.
+**Paging: Slack through AWS Chatbot (owner decision 2026-10-31).** GoAlert is cluster-internal
+(ADR-0056) and an SNS HTTPS subscription needs a public endpoint, so the honeytoken topics could
+reach a human only by email. AWS Chatbot subscribes to the same two topics from AWS's side and
+posts into Slack: no Lambda, no webhook secret, nothing listening on the internet
+(`deception-delivery.tf`). Its channel role carries no policy and its guardrail is read-only
+CloudWatch, because the service applies AdministratorAccess when no guardrail is given. Chatbot
+renders CloudWatch alarms natively and other messages only in its custom-notification JSON, so
+the canary rule's input template now emits that shape (email receives the same JSON). Slack
+workspace and channel ids are tofu variables with no default and never enter git; the workspace
+is authorised once in the Chatbot console before the first apply. GoAlert paging stays out of
+reach without new surface. `EdgeDecoyTargetedHit` and `HoneyEndpointHit` stay `warning` (Slack)
+until a drill hit has been seen there end to end.
 
-**A scheduled drill needs an identity that can read the lures.** The drill reads the canary key
-from SSM and the honey token from its Secret. A scheduled run therefore needs a CI or in-cluster
-identity holding `ssm:GetParameter` with decrypt on the lure and `get` on the honey Secret, which
-makes that identity a credential for every lure. It is cheap (a weekly job is free on hosted or
-ARC runners), but it is a design choice, not plumbing. The safe shape is a dedicated OIDC role
-scoped to those two reads plus `cloudwatch:GetMetricStatistics`/`DescribeAlarms`, used by one
-workflow on `schedule` only, never on `pull_request`. Stratus Red Team needs the same identity
-plus permission to detonate, and stays planned until that role exists. Until then the cadence is
-the monthly manual run above, and a missing run is visible as the 35-day rule.
+**Scheduled drill (owner decision 2026-10-31).** `.github/workflows/deception-drill.yml` runs
+weekly and on dispatch, never on a pull request, on a GitHub-hosted runner. It assumes
+`openbank-deception-drill`, trusted only for that file on main (`sub` and `job_workflow_ref`,
+both `StringEquals`; hosted runners always carry the claim, so no `IfExists`). The role can read
+the one SSM lure (decrypt only via SSM) and `GetMetricStatistics` in `AWS/Events` and
+`AWS/SNS`, nothing else. The drill fires the canary key and fails, posting on #14163, unless
+EventBridge matched it and the topic delivered it within ten minutes. The honey ServiceAccount
+and the Loki half of the decoy need cluster access this role deliberately lacks; they print
+`SKIPPED`, never `PASS`, and stay in the monthly manual drill. `deception-drill-selftest.sh`
+proves on the runner itself that silence exits 1 and a signal exits 0. Stratus Red Team is not
+run: every technique that adds coverage beyond our own lures needs rights to create or change
+AWS resources, which a lure-reading role must not hold. `honeytoken-wiring` fails if the trust
+loses either pin, gains `IfExists` or a wider `sub`, if the workflow gains any other trigger, or
+if the Chatbot guardrail is missing or AdministratorAccess.
 
 ### Delivery check
 

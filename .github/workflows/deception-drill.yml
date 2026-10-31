@@ -1,0 +1,107 @@
+# -----------------------------------------------------------------------------
+# Scheduled deception drill (ADR-0357 slice 2, #14163).
+#
+# WHY. A tripwire nobody fires is indistinguishable from a broken one: "no alert" is also what
+# a quiet week looks like. This fires the canary AWS key on purpose every week and FAILS when
+# EventBridge did not match it or the honeytoken SNS topic did not deliver it within the window.
+# A red scheduled run is addressed to nobody, so a failure also posts on #14163.
+#
+# IDENTITY. Role openbank-deception-drill (aws/envs/sandbox-substrate/deception-delivery.tf),
+# assumable only from this file on main (sub + job_workflow_ref, both StringEquals) and only on
+# a GitHub-hosted runner, which always carries job_workflow_ref. It reads one SSM parameter and
+# two CloudWatch namespaces, nothing else. Its ARN is the repository variable
+# DECEPTION_DRILL_ROLE_ARN, so no account id enters git.
+#
+# SCOPE. --scope aws: decoy (its 401), canary key, SNS delivery. The honey ServiceAccount and
+# the Loki half of the decoy need cluster access this identity deliberately lacks; they print
+# SKIPPED and stay in the monthly manual drill. Stratus Red Team is NOT run: every technique
+# that would add coverage needs rights to create or change AWS resources, which this identity
+# must not hold.
+#
+# TRIGGERS. schedule and workflow_dispatch only, never pull_request: a PR must not be able to
+# reach a role that can read a lure.
+# -----------------------------------------------------------------------------
+name: Deception drill
+
+on:
+  schedule:
+    # Mondays 07:20 UTC: inside working hours, so the Slack and email it produces are seen
+    # and recognised as the drill (user agent openbank-deception-drill/<run-id>).
+    - cron: "20 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deception-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    name: deception-drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The drill exists to fail when an alert does not arrive. This proves that branch runs on
+      # this runner's bash and userland before its verdict below is believed.
+      - name: Self-test the drill
+        run: bash openbank-infra/scripts/deception-drill-selftest.sh
+
+      - name: Require the drill role
+        env:
+          ROLE: ${{ vars.DECEPTION_DRILL_ROLE_ARN }}
+        run: |
+          if [ -z "$ROLE" ]; then
+            echo "::error::DECEPTION_DRILL_ROLE_ARN is not set: the drill cannot run, so the tripwires are UNVERIFIED (not passing). Apply deception-delivery.tf and set the variable (ADR-0357 slice 2)."
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.DECEPTION_DRILL_ROLE_ARN }}
+          aws-region: eu-north-1
+          role-session-name: deception-drill-${{ github.run_id }}
+
+      - name: Fire the tripwires and wait for the signals
+        run: bash openbank-infra/scripts/deception-drill.sh --scope aws | tee "$RUNNER_TEMP/drill.txt"
+
+      - name: Escalate a failed drill on #14163
+        if: ${{ failure() }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs')
+            const p = `${process.env.RUNNER_TEMP}/drill.txt`
+            const report = fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : '(the drill did not get far enough to report)'
+            const MARKER = '<!-- deception-drill -->'
+            const issue_number = 14163
+            const body = [
+              MARKER,
+              '## Scheduled deception drill FAILED',
+              '',
+              'The weekly drill fired the canary key and an expected signal did not arrive in its',
+              'window (or the drill could not run at all). Until a run passes, treat the canary',
+              'tripwire as broken, not quiet.',
+              '',
+              '```',
+              report,
+              '```',
+              '',
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join('\n')
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number, per_page: 100,
+            })
+            const prior = comments.find(c => c.body && c.body.includes(MARKER))
+            if (prior) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: prior.id, body })
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number, body })
+            }

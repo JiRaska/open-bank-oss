@@ -121,7 +121,7 @@ resource "aws_sns_topic" "honeytoken" {
 
 resource "aws_sns_topic_policy" "honeytoken" {
   arn    = aws_sns_topic.honeytoken.arn
-  policy = data.aws_iam_policy_document.honeytoken_topic["eu-north-1"].json
+  policy = data.aws_iam_policy_document.honeytoken_topic_chatbot["eu-north-1"].json
 }
 
 resource "aws_sns_topic_subscription" "honeytoken_email" {
@@ -139,7 +139,7 @@ resource "aws_sns_topic" "honeytoken_us_east_1" {
 resource "aws_sns_topic_policy" "honeytoken_us_east_1" {
   provider = aws.us_east_1
   arn      = aws_sns_topic.honeytoken_us_east_1.arn
-  policy   = data.aws_iam_policy_document.honeytoken_topic["us-east-1"].json
+  policy   = data.aws_iam_policy_document.honeytoken_topic_chatbot["us-east-1"].json
 }
 
 resource "aws_sns_topic_subscription" "honeytoken_email_us_east_1" {
@@ -163,8 +163,10 @@ locals {
       }
     }
   })
+  # AWS Chatbot's custom-notification shape (deception-delivery.tf): Slack renders title and
+  # description, email subscribers receive the same JSON, still readable.
   canary_input_template = <<-EOT
-    "HONEYTOKEN USED (ADR-0357): the canary AWS key <key> (user ${local.canary_user_name}) called <source>:<event> in <region> from <ip> (<ua>) at <time>. No legitimate process holds this key: treat as credential compromise. Find where it leaked from the placement list in #14163, rotate anything stored alongside it, and open an incident."
+    {"version":"1.0","source":"custom","content":{"textType":"client-markdown","title":"HONEYTOKEN USED (ADR-0357): canary AWS key","description":"The canary key <key> (user ${local.canary_user_name}) called <source>:<event> in <region> from <ip> (<ua>) at <time>. No legitimate process holds this key: treat as credential compromise. Find where it leaked from the placement list in #14163, rotate anything stored alongside it, and open an incident. A user agent starting openbank-deception-drill is the scheduled drill."}}
   EOT
   canary_input_paths = {
     key    = "$.detail.userIdentity.accessKeyId"

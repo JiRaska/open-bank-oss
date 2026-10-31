@@ -1430,16 +1430,23 @@ gates:
       Since 2026-10-31 it also holds HoneyEndpointHit to a subject: some workload must set
       OPENBANK_SECURITY_HONEY_PATHS, and HoneytokenFilter must stay @PreMatching — without it
       the filter was never called for an unrouted path, which is why it had never counted a hit.
+      It also pins the scheduled-drill role to deception-drill.yml on main (no IfExists, no PR
+      trigger) and requires the Chatbot channel to carry a non-admin guardrail.
     review_after: "2027-04-29"
-    min_subjects: 3   # deploy-prod SA + canary IAM user + customer-edge honey paths (2026-10-31)
+    min_subjects: 4   # deploy-prod SA + canary IAM user + customer-edge honey paths + drill role (2026-10-31)
     selftest_inputs:
       - ".github/scripts/check-honeytoken-wiring.py"
       - "openbank-infra/gitops/components/platform/honey-serviceaccount.yaml"
       - "openbank-infra/aws/envs/sandbox-substrate/deception.tf"
       - "openbank-infra/gitops/components/customer-edge/customer-edge.yaml"
       - "openbank-libs-runtime/src/main/kotlin/com/openbank/libs/security/HoneytokenFilter.kt"
+      - "openbank-infra/aws/envs/sandbox-substrate/deception-delivery.tf"
+      - ".github/workflows/deception-drill.yml"
+      - "openbank-infra/scripts/deception-drill.sh"
+      - "openbank-infra/scripts/deception-drill-selftest.sh"
     selftest: |
       python3 .github/scripts/check-honeytoken-wiring.py --selftest
+      bash openbank-infra/scripts/deception-drill-selftest.sh
     run: |
       python3 .github/scripts/check-honeytoken-wiring.py
 
