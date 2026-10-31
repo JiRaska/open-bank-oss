@@ -558,7 +558,7 @@ describe('GET /api/test-intelligence', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
       const query = new URL(String(input)).searchParams.get('query') ?? ''
       queries.push(query)
-      const value = query.includes('k6_http_req_duration_p95') ? '1834.8'
+      const value = query.includes('k6_http_req_duration_p95') ? '1.8348'
         : query.includes('k6_checks_rate') ? '0.997'
           : query.includes('kube_job_status_completion_time') ? undefined : String(now)
       return new Response(JSON.stringify({ status: 'success', data: { result: value === undefined ? [] : [{ value: [now, value] }] } }), { status: 200 })
