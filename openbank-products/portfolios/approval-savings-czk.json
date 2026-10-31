@@ -1,0 +1,220 @@
+{
+  "zone": "UTC",
+  "accounts": [
+    {
+      "id": "savings-czk-golden",
+      "state": {
+        "currency": "CZK",
+        "balance": "250000.00",
+        "accruedInterest": "0.000000",
+        "openedOn": "2028-02-01"
+      },
+      "steps": [
+        {
+          "at": "2028-02-01T00:00:00Z",
+          "hook": "onOpen",
+          "expected": [
+            {
+              "type": "SCHEDULE",
+              "ruleId": "open.schedule-accrual",
+              "irVersion": 1,
+              "hook": "scheduled",
+              "tag": "ACCRUAL",
+              "cadence": "DAILY",
+              "at": null
+            },
+            {
+              "type": "SCHEDULE",
+              "ruleId": "open.schedule-capitalisation",
+              "irVersion": 1,
+              "hook": "scheduled",
+              "tag": "CAPITALISATION",
+              "cadence": "MONTHLY",
+              "at": null
+            }
+          ]
+        },
+        {
+          "at": "2028-02-28T23:00:00Z",
+          "hook": "scheduled",
+          "tag": "ACCRUAL",
+          "expected": [
+            {
+              "type": "POST",
+              "ruleId": "interest.base",
+              "irVersion": 1,
+              "narrative": "interest accrual",
+              "lines": [
+                {
+                  "accountingClass": "INTEREST_EXPENSE",
+                  "direction": "DEBIT",
+                  "amount": "20.547950",
+                  "currency": "CZK"
+                },
+                {
+                  "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+                  "direction": "CREDIT",
+                  "amount": "20.547950",
+                  "currency": "CZK"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "at": "2028-02-29T23:00:00Z",
+          "hook": "scheduled",
+          "tag": "ACCRUAL",
+          "expected": [
+            {
+              "type": "POST",
+              "ruleId": "interest.base",
+              "irVersion": 1,
+              "narrative": "interest accrual",
+              "lines": [
+                {
+                  "accountingClass": "INTEREST_EXPENSE",
+                  "direction": "DEBIT",
+                  "amount": "20.547950",
+                  "currency": "CZK"
+                },
+                {
+                  "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+                  "direction": "CREDIT",
+                  "amount": "20.547950",
+                  "currency": "CZK"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "at": "2028-02-29T23:30:00Z",
+          "hook": "scheduled",
+          "tag": "CAPITALISATION",
+          "expected": [
+            {
+              "type": "POST",
+              "ruleId": "scheduled.capitalise",
+              "irVersion": 1,
+              "narrative": "interest capitalisation",
+              "lines": [
+                {
+                  "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+                  "direction": "DEBIT",
+                  "amount": "41.10",
+                  "currency": "CZK"
+                },
+                {
+                  "accountingClass": "CUSTOMER_DEPOSIT",
+                  "direction": "CREDIT",
+                  "amount": "41.10",
+                  "currency": "CZK"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "at": "2028-03-01T23:00:00Z",
+          "hook": "scheduled",
+          "tag": "ACCRUAL",
+          "expected": [
+            {
+              "type": "POST",
+              "ruleId": "interest.base",
+              "irVersion": 1,
+              "narrative": "interest accrual",
+              "lines": [
+                {
+                  "accountingClass": "INTEREST_EXPENSE",
+                  "direction": "DEBIT",
+                  "amount": "20.551328",
+                  "currency": "CZK"
+                },
+                {
+                  "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+                  "direction": "CREDIT",
+                  "amount": "20.551328",
+                  "currency": "CZK"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "acc-low-balance-czk",
+      "state": {
+        "currency": "CZK",
+        "balance": "500.00",
+        "accruedInterest": "0.000000",
+        "openedOn": "2026-01-01"
+      },
+      "steps": [
+        {
+          "at": "2026-01-05T23:00:00Z",
+          "hook": "scheduled",
+          "tag": "ACCRUAL"
+        },
+        {
+          "at": "2026-01-31T23:00:00Z",
+          "hook": "scheduled",
+          "tag": "FEE_MAINT"
+        },
+        {
+          "at": "2026-01-31T23:30:00Z",
+          "hook": "scheduled",
+          "tag": "CAPITALISATION"
+        }
+      ]
+    },
+    {
+      "id": "acc-high-balance-czk",
+      "state": {
+        "currency": "CZK",
+        "balance": "20000.00",
+        "accruedInterest": "0.000000",
+        "openedOn": "2026-01-01"
+      },
+      "steps": [
+        {
+          "at": "2026-01-05T23:00:00Z",
+          "hook": "scheduled",
+          "tag": "ACCRUAL"
+        },
+        {
+          "at": "2026-01-31T23:00:00Z",
+          "hook": "scheduled",
+          "tag": "FEE_MAINT"
+        },
+        {
+          "at": "2026-01-31T23:30:00Z",
+          "hook": "scheduled",
+          "tag": "CAPITALISATION"
+        }
+      ]
+    },
+    {
+      "id": "acc-overdraft-attempt-czk",
+      "state": {
+        "currency": "CZK",
+        "balance": "100.00",
+        "accruedInterest": "0.000000",
+        "openedOn": "2026-01-01"
+      },
+      "steps": [
+        {
+          "at": "2026-01-10T10:00:00Z",
+          "hook": "prePosting",
+          "posting": {
+            "kind": "WITHDRAWAL",
+            "direction": "DEBIT",
+            "amount": "150.00"
+          }
+        }
+      ]
+    }
+  ]
+}

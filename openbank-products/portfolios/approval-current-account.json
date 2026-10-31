@@ -1,0 +1,181 @@
+{
+  "zone": "UTC",
+  "accounts": [
+    {
+      "id": "current-account-golden",
+      "state": {
+        "currency": "EUR",
+        "balance": "100.00",
+        "accruedInterest": "0.000000",
+        "openedOn": "2026-03-01"
+      },
+      "steps": [
+        {
+          "at": "2026-03-01T08:00:00Z",
+          "hook": "onOpen",
+          "expected": [
+            {
+              "type": "SCHEDULE",
+              "ruleId": "open.schedule-fee",
+              "irVersion": 1,
+              "hook": "scheduled",
+              "tag": "FEE_MAINT",
+              "cadence": "MONTHLY",
+              "at": null
+            },
+            {
+              "type": "NOTIFY",
+              "ruleId": "open.welcome",
+              "irVersion": 1,
+              "templateId": "current-account-welcome",
+              "variables": {
+                "productCode": "CURRENT-ACCOUNT"
+              }
+            }
+          ]
+        },
+        {
+          "at": "2026-03-02T12:00:00Z",
+          "hook": "prePosting",
+          "posting": {
+            "kind": "CARD_PAYMENT",
+            "direction": "DEBIT",
+            "amount": "700.00"
+          },
+          "expected": [
+            {
+              "type": "REJECT",
+              "ruleId": "posting.overdraft-limit",
+              "irVersion": 1,
+              "reasonCode": "OVERDRAFT_LIMIT_EXCEEDED"
+            }
+          ]
+        },
+        {
+          "at": "2026-03-02T12:05:00Z",
+          "hook": "prePosting",
+          "posting": {
+            "kind": "CARD_PAYMENT",
+            "direction": "DEBIT",
+            "amount": "300.00"
+          },
+          "expected": []
+        },
+        {
+          "at": "2026-03-31T23:00:00Z",
+          "hook": "scheduled",
+          "tag": "FEE_MAINT",
+          "expected": [
+            {
+              "type": "POST",
+              "ruleId": "scheduled.fee",
+              "irVersion": 1,
+              "narrative": "fee MAINT",
+              "lines": [
+                {
+                  "accountingClass": "CUSTOMER_DEPOSIT",
+                  "direction": "DEBIT",
+                  "amount": "4.90",
+                  "currency": "EUR"
+                },
+                {
+                  "accountingClass": "FEE_INCOME",
+                  "direction": "CREDIT",
+                  "amount": "4.90",
+                  "currency": "EUR"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "at": "2026-04-15T09:00:00Z",
+          "hook": "onClose",
+          "expected": [
+            {
+              "type": "NOTIFY",
+              "ruleId": "close.notify",
+              "irVersion": 1,
+              "templateId": "account-closed",
+              "variables": {
+                "productCode": "CURRENT-ACCOUNT"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "acc-low-balance",
+      "state": {
+        "currency": "EUR",
+        "balance": "500.00",
+        "accruedInterest": "0.000000",
+        "openedOn": "2026-01-01"
+      },
+      "steps": [
+        {
+          "at": "2026-01-05T23:00:00Z",
+          "hook": "scheduled",
+          "tag": "ACCRUAL"
+        },
+        {
+          "at": "2026-01-31T23:00:00Z",
+          "hook": "scheduled",
+          "tag": "FEE_MAINT"
+        },
+        {
+          "at": "2026-01-31T23:30:00Z",
+          "hook": "scheduled",
+          "tag": "CAPITALISATION"
+        }
+      ]
+    },
+    {
+      "id": "acc-high-balance",
+      "state": {
+        "currency": "EUR",
+        "balance": "20000.00",
+        "accruedInterest": "0.000000",
+        "openedOn": "2026-01-01"
+      },
+      "steps": [
+        {
+          "at": "2026-01-05T23:00:00Z",
+          "hook": "scheduled",
+          "tag": "ACCRUAL"
+        },
+        {
+          "at": "2026-01-31T23:00:00Z",
+          "hook": "scheduled",
+          "tag": "FEE_MAINT"
+        },
+        {
+          "at": "2026-01-31T23:30:00Z",
+          "hook": "scheduled",
+          "tag": "CAPITALISATION"
+        }
+      ]
+    },
+    {
+      "id": "acc-overdraft-attempt",
+      "state": {
+        "currency": "EUR",
+        "balance": "100.00",
+        "accruedInterest": "0.000000",
+        "openedOn": "2026-01-01"
+      },
+      "steps": [
+        {
+          "at": "2026-01-10T10:00:00Z",
+          "hook": "prePosting",
+          "posting": {
+            "kind": "WITHDRAWAL",
+            "direction": "DEBIT",
+            "amount": "150.00"
+          }
+        }
+      ]
+    }
+  ]
+}
