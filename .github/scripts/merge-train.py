@@ -2232,13 +2232,23 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
         if not problem and chain[0] != live_main:
             problem = "main moved since publish — the next tick rebuilds"
         if not problem and not failing and holder is not None:
+            hview = next((v for _st, v in strict if v["number"] == holder), None)
+            hgreen = hview is not None and any(st == "green" and v["number"] == holder for st, v in strict)
+            if hgreen:
+                # Green holder first: the reservation holder is green on a head that already contains live
+                # main, so it merges in THIS tick's strict_lane. A carrier merging first would move main and
+                # push it behind, restarting ~1.5 h of full CI (#14191 behind after deploy #14338; #14183
+                # after release #14327). The carrier waits one tick: it is left open and NOT in flight, so
+                # strict_lane merges the holder; next tick its base check rebuilds it over the new main.
+                log(f"carrier #{carrier}: green, but strict-lane #{holder} is green and up to date — it merges "
+                    f"first, the carrier waits one tick")
+                continue
             # Green carrier first (#13400): VERIFIED green on its exact head over live main, extra gates
-            # satisfied, so it merges now, before strict_lane runs below — never held for the holder and
-            # voided by its merge (#13853 / #13806). The holder waits one tick and is update-branched,
+            # satisfied, so it merges now, before strict_lane runs below — never held for a RUNNING holder
+            # and voided by its merge (#13853 / #13806). The holder waits one tick and is update-branched,
             # inheriting its deferral record through the first parent, so no further carrier is built
             # under it. Before merging, withdraw any `merge-train` success the App left on the holder's
             # head (a refused merge earlier): auto-merge must not act on it while main moves under it.
-            hview = next((v for _st, v in strict if v["number"] == holder), None)
             if hview is not None and not shadow:
                 hstate = gh.app_statuses(hview["head_sha"]).get(STATUS_CONTEXT, ("", ""))[0]
                 if hstate == "success":
@@ -5091,35 +5101,22 @@ def self_test() -> int:
             gh.head_checks.clear()
             reset()
 
-            # (3) GREEN CARRIER FIRST (#13400), rebuilt from #13853/#13806 on 2026-10-25: the strict
-            # head and the carrier built under its CI are BOTH green in one tick. The carrier merges
-            # first; no `merge-train` success is ever posted on the strict head in that tick (GitHub
-            # auto-merge would act on it); the strict PR is update-branched on the next tick and
-            # merges after its CI — no second carrier, since its update inherits the deferral record.
+            # (3) GREEN HOLDER FIRST (#14191/#14338, #14183/#14327): the strict head and the carrier
+            # built under its CI are BOTH green in one tick. The holder is up to date, so it merges
+            # first; the carrier merging first would push it behind main and restart its full CI.
+            # The carrier merges nothing this tick (it is rebuilt over the new main later). This is
+            # the must-FAIL case: on code where the green carrier goes first, gh.merged == [1].
             gh.updates.clear()
             running_reservation_and_green_candidate()
             tick()
             pw_head = gh.prs[35]["head"]["sha"]
-            gh.post_status(pw_head, "success", "strict lane: left by a refused merge")   # a stale success
             gh.head_checks.clear()                     # pW goes green; the carrier is green as well
             s = settle_now()
-            check("green carrier first: green carrier + green strict holder -> the carrier merges, the strict PR waits",
-                  gh.merged == [1] and 35 not in gh.merged and not s["rejected"], f"{s} merged={gh.merged}")
-            check("green carrier first: no merge-train success stands on the strict head while the carrier merges",
-                  gh.app_statuses(pw_head).get(STATUS_CONTEXT, ("", ""))[0] != "success",
-                  f"{gh.app_statuses(pw_head).get(STATUS_CONTEXT)}")
-            b_head = gh.prs[35]["head"]["sha"]        # updated right after the carrier merged (same tick or next)
-            if b_head == pw_head:
-                settle_now()
-                b_head = gh.prs[35]["head"]["sha"]
-            gh.head_checks[b_head] = {"gates (data)": None}
-            open_only("p2")
-            _s2, st2 = tick()                          # its CI runs: no second carrier (deferral inherited)
-            gh.head_checks.clear()
-            s3 = settle_now()
-            check("green carrier first: strict PR is served next - updated once, merges after one more CI cycle",
-                  gh.updates == [35] and st2 == "in-flight" and 35 in s3["merged"] and 2 not in gh.merged,
-                  f"st2={st2} s3={s3} merged={gh.merged} updates={gh.updates}")
+            check("green holder first: green strict holder + green carrier -> the holder merges, the carrier does not",
+                  gh.merged == [35] and 1 not in gh.merged and gh.updates == [],
+                  f"{s} merged={gh.merged} updates={gh.updates}")
+            check("green holder first: the holder was merged on its own, un-updated head",
+                  gh.prs[35]["head"]["sha"] == pw_head, "head moved")
             gh.updates.clear()
             reset()
 
