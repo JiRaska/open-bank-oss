@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.audit.integration
 
-import com.openbank.audit.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.mtls.ListenerAuthParityConformance
 import com.openbank.libs.testing.mtls.ProductionListenerProfile
 import io.quarkus.test.common.QuarkusTestResource
