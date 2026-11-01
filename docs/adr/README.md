@@ -360,6 +360,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0353](0353-financial-crime-vocabulary-one-customer-risk-rating-one-aml-case-severity-shared-rail-screening-types.md) | Financial-crime vocabulary: one customer risk rating, one AML case severity, shared rail screening types | Accepted | Planned | aml-sanctions,kyc,fraud,libs | — |
 | [0354](0354-financial-crime-as-code-governed-packs-and-learning.md) | Financial Crime as Code: governed packs, pure evaluation and reviewed learning | Accepted | Planned | fraud,aml-sanctions,ai-agents,libs | — |
 | [0355](0355-payment-worker-deployment-versioning-and-immutable-replay-corpora.md) | Payment worker deployment versioning and immutable replay corpora | Accepted | Partial | payments,testing,architecture | — |
+| [0356](0356-five-million-client-capacity-qualification.md) | Five-million-client capacity qualification for Czech current accounts | Proposed | Partial | capacity,payments,resilience,testing | — |
 | [0357](0357-edge-deception-layer-decoy-paths-on-the-shared-gateway.md) | Edge deception layer: decoy paths on the shared gateway, alerted from the access log | Proposed | Partial | security-ops,networking,observability,gitops | — |
 | [0358](0358-image-pins-live-on-a-bot-owned-deploy-branch-not-in-main.md) | Image pins live on a bot-owned deploy branch, not in main | Proposed | Planned | gitops,ci,supply-chain | — |
 | [0359](0359-deception-and-detection-validation-programme.md) | Deception and detection-validation programme: edge decoys, honeytokens, timed drills | Proposed | Partial | security-ops,observability,infrastructure,gitops | — |
@@ -380,7 +381,7 @@ anything else, so this map cannot sprawl into synonyms._
 - **audit** — 0023 0031 0047 0068 0086 0117 0118 0133 0164 0214 0223 0226 0306 0308 0322 0323 0347
 - **authn** — 0065 0066 0069 0073 0080 0094 0177 0224 0234 0320 0331
 - **authz** — 0018 0031 0034 0089 0155 0167 0169 0181 0195 0202 0206 0223 0224 0225 0226 0227 0229 0232 0233 0249 0280 0284 0292 0295 0296 0303 0304 0305 0307 0308 0312 0322 0335
-- **capacity** — 0040 0083 0173 0250 0325 0333
+- **capacity** — 0040 0083 0173 0250 0325 0333 0356
 - **cards** — 0113 0194 0249 0262 0283
 - **ci** — 0011 0020 0029 0040 0042 0043 0044 0049 0053 0054 0060 0061 0063 0076 0082 0092 0115 0119 0121 0122 0144 0154 0160 0165 0168 0196 0236 0237 0242 0243 0250 0251 0254 0255 0272 0277 0278 0288 0317 0330 0343 0358
 - **compliance** — 0017 0021 0023 0032 0033 0037 0047 0050 0072 0078 0085 0090 0094 0096 0097 0111 0116 0117 0118 0126 0133 0134 0142 0146 0148 0149 0171 0172 0174 0175 0180 0187 0193 0196 0198 0200 0201 0203 0204 0212 0213 0215 0216 0217 0219 0222 0232 0235 0251 0252 0259 0261 0262 0263 0268 0270 0278 0279 0293 0307 0321 0322 0323 0333 0334 0336 0339 0340 0349 0350
@@ -412,13 +413,13 @@ anything else, so this map cannot sprawl into synonyms._
 - **notifications** — 0059 0135 0176 0198 0200 0219 0221 0239 0240 0252 0263 0285 0333
 - **observability** — 0008 0059 0061 0070 0075 0077 0087 0088 0091 0112 0119 0160 0163 0218 0234 0236 0237 0241 0243 0246 0252 0253 0255 0265 0273 0274 0279 0288 0309 0316 0326 0328 0357 0359
 - **onboarding** — 0066 0068 0069 0072 0094 0162 0170 0267 0268 0270 0284 0305 0334 0338
-- **payments** — 0004 0021 0032 0036 0084 0086 0090 0095 0101 0103 0104 0108 0111 0114 0120 0137 0171 0182 0184 0190 0193 0233 0249 0283 0287 0289 0291 0294 0297 0298 0299 0300 0306 0312 0332 0344 0355
+- **payments** — 0004 0021 0032 0036 0084 0086 0090 0095 0101 0103 0104 0108 0111 0114 0120 0137 0171 0182 0184 0190 0193 0233 0249 0283 0287 0289 0291 0294 0297 0298 0299 0300 0306 0312 0332 0344 0355 0356
 - **privacy-gdpr** — 0059 0118 0126 0175 0189 0192 0198 0199 0200 0204 0205 0210 0214 0219 0220 0222 0228 0238 0239 0240 0245 0247 0261 0269 0274 0301 0302 0309 0320 0328 0329 0340 0348
 - **product-catalog** — 0105 0138 0158 0194 0201 0212 0257 0258 0259 0264 0282 0334 0339 0341 0345 0352
 - **psd2-api** — 0005 0090 0093 0126 0145 0181 0195 0204 0248
 - **regulatory-reporting** — 0022 0023 0037 0038 0085 0096 0097 0180 0286 0313 0314 0332 0336 0337 0340 0341
 - **release-versioning** — 0029 0044 0048 0165 0272 0343
-- **resilience** — 0004 0045 0050 0088 0098 0100 0101 0120 0132 0134 0146 0151 0159 0186 0211 0218 0241 0242 0244 0271 0277 0287 0289 0291 0292 0293 0294 0295 0296 0297 0298 0299 0300 0309 0321 0325 0327 0338 0346
+- **resilience** — 0004 0045 0050 0088 0098 0100 0101 0120 0132 0134 0146 0151 0159 0186 0211 0218 0241 0242 0244 0271 0277 0287 0289 0291 0292 0293 0294 0295 0296 0297 0298 0299 0300 0309 0321 0325 0327 0338 0346 0356
 - **sca** — 0021 0066 0086 0169 0170 0182 0193 0194 0195 0205 0232 0233 0249 0280 0312 0335
 - **secrets** — 0007 0017 0073 0099 0172 0177 0262
 - **security** — 0258 0265 0271 0278 0279 0280 0308 0320 0324 0328 0331 0335
@@ -427,12 +428,12 @@ anything else, so this map cannot sprawl into synonyms._
 - **statements** — 0035 0078 0207 0248
 - **supply-chain** — 0029 0030 0053 0079 0081 0121 0141 0278 0358
 - **tax** — 0033 0038 0180 0336 0339 0340
-- **testing** — 0011 0020 0030 0043 0063 0076 0092 0100 0104 0115 0151 0168 0243 0250 0252 0253 0263 0273 0274 0279 0319 0321 0331 0346 0355
+- **testing** — 0011 0020 0030 0043 0063 0076 0092 0100 0104 0115 0151 0168 0243 0250 0252 0253 0263 0273 0274 0279 0319 0321 0331 0346 0355 0356
 - **transactions** — 0039 0103 0108 0111 0120 0178 0351
 
 ---
 
-**Numbering gaps:** 0015 0127 0128 0129 0130 0131 0157 0275 0276 0290 0311 0356
+**Numbering gaps:** 0015 0127 0128 0129 0130 0131 0157 0275 0276 0290 0311
 
 These numbers correspond to no file in this repo's history — confirmed by
 `git log --diff-filter=A` across all branches, not just an absent current file.

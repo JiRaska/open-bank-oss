@@ -37,7 +37,7 @@ _Also tagged `accounts`: 0035 0036 0039 0105 0107 0110 0178 0179 0205 0232 0267 
 - **[0312](0312-business-payment-signing-multi-signature-approval-and-trusted-payees.md)** · Business payment signing: multi-signature approval and trusted payees _(proposed)_ · `planned` · delegation-service owns the business signing policy, signer groups, trusted payees and N-of-M approval requests; customer-edge holds a business payment until APPROVED and releases it to the rail once, by a single-use claim.
 - **[0355](0355-payment-worker-deployment-versioning-and-immutable-replay-corpora.md)** · Payment worker deployment versioning and immutable replay corpora · `partial` · Pin payment workflows to immutable Temporal worker deployments, retain workers independently of HTTP rollouts, and gate changes with original SDK history replay. SDK rollback is not worker-routing rollback.
 
-_Also tagged `payments`: 0004 0021 0032 0084 0086 0090 0103 0137 0233 0249 0283 0287 0289 0291 0294 0297 0298 0299 0300 0306 0332 0344_
+_Also tagged `payments`: 0004 0021 0032 0084 0086 0090 0103 0137 0233 0249 0283 0287 0289 0291 0294 0297 0298 0299 0300 0306 0332 0344 0356_
 
 ## cards
 
@@ -455,11 +455,12 @@ _Also tagged `observability`: 0059 0070 0075 0091 0112 0119 0160 0163 0218 0234 
 - **[0309](0309-incident-business-impact-graph.md)** · Incident business impact graph · `partial` · Incident response uses a privacy-minimized impact lens on the shared context graph to map affected services, workflows and bounded business cases from observed telemetry and event evidence.
 - **[0321](0321-shared-resilience-policy-profiles-for-inter-service-calls.md)** · Shared resilience policy profiles for inter-service calls _(proposed)_ · `partial` · Inter-service calls use one of four named resilience profiles from openbank-libs; money-sync retries only keyed calls (keyed-only retryOn exception); fault hook needs ADR-0252 trusted-principal taint (empty by default).
 
-_Also tagged `resilience`: 0004 0050 0088 0098 0100 0101 0120 0132 0146 0159 0211 0218 0241 0244 0271 0277 0325 0327 0338 0346_
+_Also tagged `resilience`: 0004 0050 0088 0098 0100 0101 0120 0132 0146 0159 0211 0218 0241 0244 0271 0277 0325 0327 0338 0346 0356_
 
 ## capacity
 
 - **[0173](0173-capacity-management-and-headroom.md)** · Capacity management and headroom · `partial` · Karpenter NodePool limits (cpu 48, memory 128Gi) are declared the deliberate fleet capacity ceiling, resource requests are treated as a correctness input, and an alert is added so a binding cap stops failing silently as Pending pods.
+- **[0356](0356-five-million-client-capacity-qualification.md)** · Five-million-client capacity qualification for Czech current accounts _(proposed)_ · `partial` · Qualify five million Czech current-account clients against a versioned full-path workload and financial invariants; retain one logical ledger write authority until measured limits justify a separate topology decision.
 
 _Also tagged `capacity`: 0040 0083 0250 0325 0333_
 
@@ -516,7 +517,7 @@ _Also tagged `release-versioning`: 0044 0048 0165 0343_
 - **[0273](0273-unified-test-intelligence-evidence-and-admin-ui.md)** · Unified test intelligence evidence and admin UI · `partial` · OpenBank publishes one provenance-aware test-intelligence snapshot and one consolidated admin UI, separating execution, code coverage, scenario coverage and freshness so missing evidence cannot look healthy.
 - **[0274](0274-authenticated-admin-ui-browser-rum.md)** · Authenticated Admin UI browser RUM · `partial` · OpenBank emits privacy-bounded browser RUM only from authenticated Admin UI routes through a same-origin relay, so web E2E, RUM and backend traces can be correlated without exposing collector access or operator identifiers.
 
-_Also tagged `testing`: 0030 0043 0076 0104 0151 0168 0243 0250 0253 0263 0279 0319 0321 0331 0346 0355_
+_Also tagged `testing`: 0030 0043 0076 0104 0151 0168 0243 0250 0253 0263 0279 0319 0321 0331 0346 0355 0356_
 
 ## governance
 
