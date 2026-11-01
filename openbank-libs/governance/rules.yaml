@@ -3990,6 +3990,36 @@ product_ir_authoring_parity:
   target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the MCP/Studio authoring paths (phases 5-6) are in scope
   ci_producer: ".github/scripts/check-product-ir-authoring-parity.py"
 
+product_ir_formal_properties:
+  # ADR-0352 §9 phase 6: formal properties of the pure interpreter, as property-based tests in CI
+  # over every reference product and over generated revisions (ProductArb). The gate checks the
+  # assertions are PRESENT; the module CI lane runs them.
+  detect: ["openbank-products/src/test/kotlin/com/openbank/products/ProductFormalPropertiesTest.kt"]
+  require:
+    - "termination: every evaluation emits at most maxInstructionsPerEvaluation (64) instructions, and one past it is refused with ProductEvaluationException"
+    - "balance conservation: every Post instruction balances per currency"
+    - "monotone tiers, reference products: on the interpreter's accrual Post, the marginal rate never falls from one tier to the next, sampled at every tier edge"
+    - "monotone accrual: for every revision ProductMonotonicity passes (all reference products; generated ones it passes), a higher balance never accrues less and no tier's marginal rate is lower than the one below; the check must flag some generated revisions and a known bonus-below-x revision. IR v1 itself does not guarantee monotone accrual (product-ir.md, #14210)"
+    - "determinism: the same input gives byte-identical canonical instructions"
+    - "purity: the compiled com.openbank.libs.product and com.openbank.libs.finance.deposit packages reference no ambient clock, I/O, randomness, logging or metrics"
+    - "v1 rounding is HALF_UP, pinned by golden accrual and capitalisation values that sit exactly on a half"
+  gate: product-ir-formal-properties
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144
+  ci_producer: ".github/scripts/check-product-ir-formal-properties.py"
+
+product_ir_version_lifecycle:
+  # ADR-0352 §1/§9 phase 6: a published revision is pinned to its irVersion and each schema is immutable.
+  detect: ["openbank-libs-domain/src/main/kotlin/com/openbank/libs/product/ir/ProductIr.kt"]
+  require:
+    - "IrVersion.SUPPORTED holds at most two versions"
+    - "every supported version has product-ir/v<N>.schema.json"
+    - "removing a supported version carries a breaking-change marker (`!:` title or BREAKING CHANGE body)"
+  gate: product-ir-version-lifecycle
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144
+  ci_producer: ".github/scripts/check-product-ir-version-lifecycle.py"
+
 product_bearing_services:
   # ADR-0341 D1 / ADR-0352 phase 3: a service that opens product-bearing contracts pins the PUBLISHED
   # catalog revision each contract was opened under, and no service keeps its own copy of the terms.
