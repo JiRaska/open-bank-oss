@@ -639,6 +639,47 @@ journeys:
     )
   }, 15_000)
 
+  it('separates not-applicable components from missing evidence per layer', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-layer-applicability-'))
+    dirs.push(repo)
+    write(repo, 'openbank-money-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-chatty-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-chatty-service/src/main/resources/application.yaml', 'mp:\n  messaging:\n    incoming: {}\n')
+    write(repo, 'openbank-lonely-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services:\n  - openbank-money-service\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-libs/governance/test-layer-applicability.yaml', `version: 1
+layers:
+  e2e:
+    include:
+      - component: openbank-lonely-service
+        reason: Customer journey.
+  trace:
+    derive: cross-service
+  simulation:
+    exclude:
+      - component: openbank-money-service
+        reason: No time-driven process.
+`)
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const status = (kind: string, component: string) => report.layerCoverage
+      ?.find(layer => layer.kind === kind)?.components.find(row => row.component === component)?.status
+
+    expect(status('trace', 'openbank-money-service')).toBe('missing')
+    expect(status('trace', 'openbank-chatty-service')).toBe('missing')
+    expect(status('trace', 'openbank-lonely-service')).toBe('not-applicable')
+    expect(status('e2e', 'openbank-lonely-service')).toBe('missing')
+    // Money-path is applicable on every layer unless excluded with a reason.
+    expect(status('e2e', 'openbank-money-service')).toBe('missing')
+    expect(status('e2e', 'openbank-chatty-service')).toBe('not-applicable')
+    expect(status('simulation', 'openbank-money-service')).toBe('not-applicable')
+    expect(report.layerCoverage?.find(layer => layer.kind === 'simulation')?.components
+      .find(row => row.component === 'openbank-money-service')?.reason).toBe('No time-driven process.')
+    expect(report.layerCoverage?.find(layer => layer.kind === 'simulation')?.applicable).toBe(0)
+  })
+
   it('does not project a malformed capability register as a partial platform matrix', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-capability-register-'))
     dirs.push(repo)
