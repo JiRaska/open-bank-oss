@@ -74,8 +74,8 @@ CONFIG = ROOT / "release-please-config.json"
 # this list belongs next to the code that reads it, not in a file that restamps ~40 unrelated
 # artifacts when it changes.
 KNOWN_UNCOVERED: dict[str, str] = {
-    "openbank-campaign-service": "#7597 — release-please-config.json has no `component`; adding one "
-    "changes the release tag name, a repo-owner decision, not a drive-by fix",
+    # openbank-campaign-service is OFF this list as of #7597, on the same ground: it had never
+    # produced a tag, so `component: campaign-service` changed no existing release identity.
     # openbank-tax-reporting-service is OFF this list as of #5760: it gained `component:
     # tax-reporting-service` when it was first deployed (it had never produced a tag).
 }
