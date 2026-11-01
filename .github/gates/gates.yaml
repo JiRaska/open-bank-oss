@@ -593,7 +593,7 @@ gates:
 
   # ==== gitops =========================================================
   - id: deploy-hold-image-pins
-    name: "held services cannot change GitOps image pins (issue #11503)"
+    name: "held services cannot change GitOps image pins or drift from approved_image (issue #11503)"
     group: gitops
     mode: enforced
     budget_seconds: 45  # fixture creates a temporary Git repo; PR-mode gate measured 29s locally
