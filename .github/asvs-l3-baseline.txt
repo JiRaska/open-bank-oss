@@ -339,4 +339,8 @@ V9.1 openbank-infra/gitops/components/observability/cronjob-journey-customer-aut
 V9.1 openbank-infra/gitops/components/observability/cronjob-journey-account-overview.yaml:293: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
 V9.1 openbank-infra/gitops/components/observability/cronjob-journey-fx-read.yaml:174: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
 V9.1 openbank-infra/gitops/components/observability/cronjob-journey-wealth-declared-holding.yaml:247: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
+# critical-alert-digest CronJob -> Alertmanager (#6432). Same in-namespace plaintext hop as the
+# devops-agent line above: Alertmanager serves no TLS listener; retiring it is the mesh-mTLS work
+# (baseline Layer 1). The request carries no credential, it is a read of active alerts.
+V9.1 openbank-infra/gitops/components/observability/cronjob-critical-alert-digest.yaml:67: plaintext http:// env value http://kube-prometheus-stack-alertmanager.observability.svc:
 V9.1 openbank-infra/gitops/components/ai-platform/langfuse-exporter.yaml:276: plaintext http:// env value http://langfuse-web.ai-platform.svc:3000

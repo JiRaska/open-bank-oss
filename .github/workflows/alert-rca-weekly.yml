@@ -13,10 +13,17 @@
 # to emit a P90 whose granularity is coarser than half the target. See #5869.
 name: Weekly critical-alert RCA review
 
+# SCHEDULE DISABLED (#6432). Its only input was the artifact of standing-critical-digest.yml,
+# which never once succeeded and is now replaced by the in-cluster CronJob
+# critical-alert-digest (components/observability/cronjob-critical-alert-digest.yaml). That job
+# logs each observation envelope to Loki as `event=standing-critical-observation`, and a
+# GitHub-hosted runner cannot read it: no HTTPRoute exposes Loki, and Grafana sits behind the
+# cookie-only tools gate, the same wall that broke the daily digest. Left on a schedule this
+# workflow could only fail "measured nothing" every Monday, an alarm nobody can act on. The
+# ledger fold (alert-rca-ledger.py, self-tested by its gate on every PR) is unchanged; it
+# returns to a schedule when it runs where the observations are (in-cluster), not before.
+# Dispatching it by hand still fails closed for the same reason.
 on:
-  schedule:
-    # ADR-0241 D3: Mondays at 10:00 UTC.
-    - cron: "0 10 * * 1"
   workflow_dispatch:
 
 permissions:

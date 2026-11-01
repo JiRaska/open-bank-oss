@@ -346,6 +346,20 @@ gates:
     run: |
       python3 .github/scripts/standing-critical-digest.py --self-test
 
+  - id: critical-alert-digest-configmap-drift
+    name: "critical-alert digest ConfigMap matches its source script (#6432)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 30
+    rationale: "The in-cluster digest CronJob runs a generated copy of standing-critical-digest.py; if the copy drifts, production runs logic the self-test never saw. Regenerates and fails on any difference."
+    review_after: "2027-10-30"
+    min_subjects: 1
+    selftest_inputs: ["openbank-infra/scripts/gen-critical-alert-digest-configmap.py"]
+    selftest: python3 openbank-infra/scripts/gen-critical-alert-digest-configmap.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 openbank-infra/scripts/gen-critical-alert-digest-configmap.py --check
+
   - id: yamllint
     selftest_exempt: "third-party — yamllint's own test suite is not ours to run"
     name: "yamllint"
