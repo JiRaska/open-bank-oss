@@ -115,9 +115,10 @@ data class FlakyTestReport(
 )
 
 /**
- * What started a run. There is no scheduled value: the weekly sweep was removed on 2026-10-17
- * (the deployed pod has no repository checkout), and the deprecated SCHEDULED value was deleted
- * once the 168 h Temporal history retention had passed.
+ * The weekly sweep was removed because the deployed pod carries no repository checkout or test
+ * results. Its replay-only SCHEDULED value was removed after the 168-hour Temporal history
+ * retention window. The scan remains reachable through a webhook or operator trigger; production
+ * input is the Admin UI Test Intelligence snapshot posted to `POST /evidence/analyze`.
  */
 enum class RunTrigger {
     CI_TEST_SUITE_FAILURE_WEBHOOK,

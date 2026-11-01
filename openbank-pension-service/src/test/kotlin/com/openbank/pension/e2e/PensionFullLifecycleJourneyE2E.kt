@@ -483,13 +483,12 @@ class PensionFullLifecycleJourneyE2E {
             eventually("transfer $key accepted") {
                 ok(operatorGet("/api/v2/pension/operator/transfers/$transfer")).getString("status") == "ACCEPTED"
             }
+            val incentiveYear = LocalDate.now(appClock).year - 1
             ok(
                 operatorPost(
                     "/api/v2/pension/operator/transfers/$transfer/funds-received",
                     """{"amount":250000,"currency":"CZK","originalStartDate":"$ORIGINAL_START",
-                        "incentiveHistory":[{"incentiveId":"state-contribution","year":${LocalDate.now(
-                        appClock,
-                    ).year - 1},"amount":4080}]}""",
+                        "incentiveHistory":[{"incentiveId":"state-contribution","year":$incentiveYear,"amount":4080}]}""",
                 ),
             )
         }

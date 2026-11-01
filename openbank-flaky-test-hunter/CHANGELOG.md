@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.2...flaky-test-hunter-v0.15.3) (2026-11-01)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** clear CI cliffs and recognize recorder policy sources ([#14373](https://github.com/JiRaska/open-bank-oss/issues/14373)) ([9e0192e](https://github.com/JiRaska/open-bank-oss/commit/9e0192e0c3e4a36fcb5dbe97bad54c0eb0ba019b))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.1...flaky-test-hunter-v0.15.2) (2026-10-19)
 
 
