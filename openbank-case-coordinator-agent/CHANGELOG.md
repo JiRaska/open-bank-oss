@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.4](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.12.3...case-coordinator-agent-v0.12.4) (2026-11-01)
+
+
+### Bug Fixes
+
+* **case-coordinator-agent:** document validation 400s as ProblemDetail ([#14485](https://github.com/JiRaska/open-bank-oss/issues/14485)) ([140e2e5](https://github.com/JiRaska/open-bank-oss/commit/140e2e5c27d798f159e780fbd3df44a468faa22f))
+
 ## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.12.2...case-coordinator-agent-v0.12.3) (2026-10-16)
 
 
