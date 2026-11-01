@@ -542,36 +542,28 @@ class PostingIntentReconcileIT {
             cfg.getValue("quarkus.datasource.password", String::class.java),
         )
         val pool = Executors.newSingleThreadExecutor()
-        connect().use { holder ->
-            // Hold the DEAL row so the save stops right after locking its claim (it locks the claim first).
-            holder.autoCommit = false
-            holder.prepareStatement("select 1 from deals where deal_id = ? for update").use { ps ->
-                ps.setObject(1, UUID.fromString(id))
-                ps.executeQuery().close()
-            }
-            val save = pool.submit(Callable { onContext { repo.save(reversed, releaseClaim = claim) } })
-            // Wait until the save is blocked on the deal row, i.e. it holds the claim lock.
-            val deadline = System.currentTimeMillis() + 10_000
-            while (System.currentTimeMillis() < deadline && !saveWaitsOnLock()) Thread.sleep(50)
-            assertThat(saveWaitsOnLock()).describedAs("the save is waiting on the deal row").isTrue()
+        try {
+            connect().use { holder ->
+                // Hold the DEAL row so the save stops right after locking its claim (it locks the claim first).
+                holder.autoCommit = false
+                val holderPid = backendPid(holder)
+                holder.prepareStatement("select 1 from deals where deal_id = ? for update").use { ps ->
+                    ps.setObject(1, UUID.fromString(id))
+                    ps.executeQuery().close()
+                }
+                val save = pool.submit(Callable { onContext { repo.save(reversed, releaseClaim = claim) } })
+                // Wait until the save is blocked on the deal row, i.e. it holds the claim lock.
+                val deadline = System.currentTimeMillis() + 10_000
+                while (System.currentTimeMillis() < deadline && !saveWaitsOnLock(holderPid)) Thread.sleep(50)
+                assertThat(saveWaitsOnLock(holderPid)).describedAs("the save is waiting on the deal row").isTrue()
 
-            connect().use { releaser ->
-                releaser.createStatement().use { it.execute("set lock_timeout = '500ms'") }
-                assertThatThrownBy {
-                    releaser.prepareStatement(
-                        "update deal_posting_intent set status = 'REFUSED' where idempotency_key = ?",
-                    ).use { ps ->
-                        ps.setString(1, claim)
-                        ps.executeUpdate()
-                    }
-                }.describedAs(
-                    "a release must block while the save holds the claim",
-                ).hasMessageContaining("lock timeout")
+                assertReleaseBlocks(::connect, claim)
+                holder.commit()
+                save.get(30, java.util.concurrent.TimeUnit.SECONDS)
             }
-            holder.commit()
-            save.get(30, java.util.concurrent.TimeUnit.SECONDS)
+        } finally {
+            pool.shutdownNow()
         }
-        pool.shutdown()
         assertThat(state(id)).isEqualTo("REVERSED")
         assertThat(intent(claim).first).isNotEqualTo("OPEN")
     }
@@ -646,11 +638,37 @@ class PostingIntentReconcileIT {
         assertThat(intent("treasury:$replayBId:settled").first).isEqualTo("OPEN")
     }
 
-    private fun saveWaitsOnLock(): Boolean = jdbc { c ->
-        c.createStatement().use { st ->
-            st.executeQuery(
-                "select count(*) from pg_stat_activity where wait_event_type = 'Lock' and query like '%deals%'",
-            ).use { rs ->
+    private fun backendPid(c: java.sql.Connection): Int = c.createStatement().use { st ->
+        st.executeQuery("select pg_backend_pid()").use { rs ->
+            rs.next()
+            rs.getInt(1)
+        }
+    }
+
+    private fun assertReleaseBlocks(connect: () -> java.sql.Connection, claim: String) {
+        connect().use { releaser ->
+            releaser.createStatement().use { it.execute("set lock_timeout = '500ms'") }
+            assertThatThrownBy {
+                releaser.prepareStatement(
+                    "update deal_posting_intent set status = 'REFUSED' where idempotency_key = ?",
+                ).use { ps ->
+                    ps.setString(1, claim)
+                    ps.executeUpdate()
+                }
+            }.describedAs(
+                "a release must block while the save holds the claim",
+            ).hasMessageContaining("lock timeout")
+        }
+    }
+
+    // Only a backend blocked by THIS test's holder counts — a text match on the query would also
+    // see an unrelated session waiting on any deals lock.
+    private fun saveWaitsOnLock(holderPid: Int): Boolean = jdbc { c ->
+        c.prepareStatement(
+            "select count(*) from pg_stat_activity where ? = any(pg_blocking_pids(pid))",
+        ).use { ps ->
+            ps.setInt(1, holderPid)
+            ps.executeQuery().use { rs ->
                 rs.next()
                 rs.getInt(1) > 0
             }
