@@ -4,6 +4,9 @@
 
 package com.openbank.simulation.runner
 
+import com.openbank.clearing.domain.model.ClearingBatch
+import com.openbank.clearing.domain.model.ClearingItem
+import com.openbank.clearing.domain.model.SettlementPosition
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.domestic.domain.model.DomesticPayment
@@ -70,6 +73,14 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // Layer-3 invariants can assert every domestic payment reaches a terminal state. Same
     // convention as sepaPayments/settlements above.
     val domesticPayments = mutableListOf<DomesticPayment>()
+
+    // Issue #14366 (Test Intelligence simulation gap, money path): the REAL clearing-service
+    // domain aggregates driven by ClearingCycleScenario, kept here so the Layer-3 invariants
+    // can assert every batch and item reaches a terminal state and the batch totals still net.
+    // Same convention as sepaPayments/settlements above.
+    val clearingBatches = mutableListOf<ClearingBatch>()
+    val clearingItems = mutableListOf<ClearingItem>()
+    val settlementPositions = mutableListOf<SettlementPosition>()
 
     // Issue #14366 (Test Intelligence simulation gap, money path): the REAL `SctInstPayment`
     // (sepa-instant) domain aggregate driven by SctInstSettlementScenario, kept here so the

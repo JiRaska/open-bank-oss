@@ -6,6 +6,7 @@ package com.openbank.psd2.integration
 
 import com.openbank.psd2.infrastructure.client.TppAuthorizationResponse
 import com.openbank.psd2.infrastructure.client.TppRegistryRestClient
+import io.quarkus.arc.profile.UnlessBuildProfile
 import io.quarkus.test.Mock
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -15,6 +16,7 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
  * `@QuarkusTest` drive the real `EidasMtlsFilter` without a tpp-registry service (#10997).
  */
 @Mock
+@UnlessBuildProfile("psd2-real-tpp-registry")
 @ApplicationScoped
 @RestClient
 class FakeTppRegistryRestClient : TppRegistryRestClient {

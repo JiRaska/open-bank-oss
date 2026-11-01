@@ -4,8 +4,8 @@
 
 package com.openbank.sdd.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.trace.RecordingSpanExporter
-import com.openbank.sdd.it.PostgresTestResource
 import com.openbank.sdd.it.TraceContractProfile
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager

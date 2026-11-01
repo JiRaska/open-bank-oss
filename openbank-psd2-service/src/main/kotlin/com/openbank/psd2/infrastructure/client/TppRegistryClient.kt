@@ -4,21 +4,49 @@
 
 package com.openbank.psd2.infrastructure.client
 
+import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.core.JsonToken
+import com.fasterxml.jackson.databind.DeserializationContext
+import com.fasterxml.jackson.databind.JsonDeserializer
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.ProcessingException
 import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.WebApplicationException
+import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
+import java.io.InputStream
+
+/**
+ * Accepts only the JSON booleans `true` / `false` for `authorized`. Default Jackson coercion also
+ * maps the string "true" (and 0/1) onto a Kotlin Boolean, which would let a malformed 200 body
+ * grant access; here any other token is a decode failure and the guard stays fail-closed (503).
+ */
+class StrictBooleanDeserializer : JsonDeserializer<Boolean>() {
+    override fun deserialize(p: JsonParser, ctxt: DeserializationContext): Boolean = when (p.currentToken) {
+        JsonToken.VALUE_TRUE -> true
+        JsonToken.VALUE_FALSE -> false
+        else -> ctxt.handleUnexpectedToken(Boolean::class.javaObjectType, p) as Boolean
+    }
+
+    // Absent/null keeps the previous fail-closed meaning (false = deny), only coercion changes.
+    override fun getNullValue(ctxt: DeserializationContext): Boolean = false
+    override fun getAbsentValue(ctxt: DeserializationContext): Boolean = false
+}
 
 data class TppAuthorizationResponse(
     val tppId: String,
+    @param:JsonDeserialize(using = StrictBooleanDeserializer::class)
     val authorized: Boolean,
     val roles: Set<String>,
     val reason: String?,
@@ -42,6 +70,63 @@ class TppAuthorizationGuard @Inject constructor(@RestClient private val client: 
     @Timeout(2000)
     @Retry(maxRetries = 2, delay = 200, jitter = 100, retryOn = [Exception::class])
     @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000, successThreshold = 2)
-    fun requireAuthorized(tppId: String, role: String): TppAuthorizationResponse =
+    fun requireAuthorized(tppId: String, role: String): TppAuthorizationResponse = try {
         client.checkAuthorization(tppId, role)
+    } catch (e: WebApplicationException) {
+        // tpp-registry's documented business denial is HTTP 403 with a TppAuthorizationResult
+        // body (`authorized` is the JSON boolean false). Validate the raw node before DTO
+        // construction so conversion defaults cannot broaden the accepted denial shape.
+        // Translate only that exact, valid denial into the DTO the
+        // filter already maps to public 401 CERTIFICATE_INVALID. A 401, 404, malformed 403, or
+        // upstream failure remains an exception and therefore keeps the fail-closed 503 path.
+        if (e.response.status != Response.Status.FORBIDDEN.statusCode) throw e
+        val response = e.response
+        val denial = try {
+            parseDenial(response, tppId) ?: throw e
+        } catch (_: Exception) {
+            closeFailedResponse(response, e)
+            throw e
+        }
+        response.close()
+        denial
+    }
+
+    private companion object {
+        const val MAX_DENIAL_BODY_BYTES = 16 * 1024
+        val DENIAL_MAPPER = ObjectMapper()
+    }
+
+    /** Returns the denial only when the bounded body is a complete, valid `authorized:false` result for [tppId]. */
+    private fun parseDenial(response: Response, tppId: String): TppAuthorizationResponse? {
+        // Bounded read: a denial is a few hundred bytes; anything above the cap is malformed.
+        val raw = response.readEntity(InputStream::class.java).use { it.readNBytes(MAX_DENIAL_BODY_BYTES + 1) }
+        if (raw.size > MAX_DENIAL_BODY_BYTES) return null
+        val body = DENIAL_MAPPER.readTree(raw)
+        val responseTppId = body.get("tppId")
+        val authorized = body.get("authorized")
+        val roles = body.get("roles")
+        val reason = body.get("reason")
+        val validShape = body.isObject &&
+            responseTppId?.isTextual == true &&
+            authorized?.isBoolean == true &&
+            !authorized.booleanValue() &&
+            roles?.isArray == true &&
+            roles.elements().asSequence().all { it.isTextual } &&
+            (reason == null || reason.isNull || reason.isTextual)
+        if (!validShape || responseTppId.asText() != tppId) return null
+        return TppAuthorizationResponse(
+            tppId = responseTppId.asText(),
+            authorized = false,
+            roles = roles.elements().asSequence().map { it.asText() }.toSet(),
+            reason = reason?.takeUnless { it.isNull }?.asText(),
+        )
+    }
+
+    private fun closeFailedResponse(response: Response, original: WebApplicationException) {
+        try {
+            response.close()
+        } catch (closeFailure: ProcessingException) {
+            original.addSuppressed(closeFailure)
+        }
+    }
 }
