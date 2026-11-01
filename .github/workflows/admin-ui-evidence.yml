@@ -6,7 +6,7 @@ on:
   # runner while the main CI producers are still running.
   workflow_run:
     branches: [main]
-    workflows: ["CI", "Services CI", "Security KPI snapshot"]
+    workflows: ["CI", "Services CI", "Security KPI snapshot", "Performance gate", "Perf baseline"]
     types: [completed]
   schedule:
     - cron: "17,47 * * * *"
@@ -28,7 +28,9 @@ permissions:
 
 jobs:
   authorize-source:
-    if: github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || (github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository && (github.event.workflow_run.name != 'Security KPI snapshot' || github.event.workflow_run.path == '.github/workflows/security-kpis.yml')))
+    # The tested selector rejects forks, wrong workflow paths and non-terminal runs
+    # before the publisher job can obtain credentials. Failed perf attempts are evidence.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -47,37 +49,30 @@ jobs:
           WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           WORKFLOW_RUN_NAME: ${{ github.event.workflow_run.name }}
           WORKFLOW_RUN_PATH: ${{ github.event.workflow_run.path }}
+          WORKFLOW_RUN_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_RUN_STATUS: ${{ github.event.workflow_run.status }}
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           EVENT_SHA: ${{ github.sha }}
           EVENT_NAME: ${{ github.event_name }}
           ROLLBACK_SNAPSHOT: ${{ inputs.rollback_snapshot }}
           SELECTED_DATASET: ${{ inputs.dataset }}
         run: |
           set -euo pipefail
-          source_sha="$EVENT_SHA"
-          if [ "$EVENT_NAME" = workflow_run ]; then
-            if [ "$WORKFLOW_RUN_NAME" = 'Security KPI snapshot' ]; then
-              if [ "$WORKFLOW_RUN_PATH" != '.github/workflows/security-kpis.yml' ]; then
-                echo '::error::Unexpected Security KPI workflow path.'
-                exit 1
-              fi
-            else
-              source_sha="$WORKFLOW_RUN_SHA"
-            fi
-          fi
-          if ! [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo '::error::Evidence source must be a full commit SHA.'
-            exit 1
-          fi
           if [ -n "$ROLLBACK_SNAPSHOT" ] && [ "$SELECTED_DATASET" = all ]; then
             echo '::error::A rollback must select exactly one dataset.'
             exit 1
           fi
-          datasets="$(python3 .github/scripts/select_admin_ui_evidence_datasets.py \
-            --event "$EVENT_NAME" \
-            --workflow-name "$WORKFLOW_RUN_NAME" \
+          selection="$(python3 .github/scripts/select_admin_ui_evidence_datasets.py \
+            --with-source --event "$EVENT_NAME" \
+            --workflow-name "$WORKFLOW_RUN_NAME" --workflow-path "$WORKFLOW_RUN_PATH" \
+            --workflow-repository "$WORKFLOW_RUN_REPOSITORY" --repository "$GITHUB_REPOSITORY" \
+            --workflow-branch "$WORKFLOW_RUN_BRANCH" --workflow-status "$WORKFLOW_RUN_STATUS" \
+            --workflow-conclusion "$WORKFLOW_RUN_CONCLUSION" \
+            --workflow-sha "$WORKFLOW_RUN_SHA" --event-sha "$EVENT_SHA" \
             --dataset "$SELECTED_DATASET")"
-          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
-          echo "datasets=$datasets" >> "$GITHUB_OUTPUT"
+          echo "sha=$(jq -r '.sha' <<< "$selection")" >> "$GITHUB_OUTPUT"
+          echo "datasets=$(jq -c '.datasets' <<< "$selection")" >> "$GITHUB_OUTPUT"
 
   publish:
     needs: authorize-source
@@ -131,6 +126,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # Enable only after the deployed Admin UI accepts the optional topology content key.
+          OPENBANK_ADMIN_UI_CONTENT_INCLUDE_CLUSTER_TOPOLOGY: ${{ vars.ADMIN_UI_CONTENT_INCLUDE_CLUSTER_TOPOLOGY }}
         run: |
           set -euo pipefail
           case "$DATASET" in

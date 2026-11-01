@@ -20,7 +20,7 @@
 #   treasury.reference.approve                — ROLE_TREASURY_APPROVER; for kind `counterparty` (limits)
 #                                               ROLE_TREASURY_SENIOR_APPROVER only
 #   treasury.reference.reject, .verify        — ROLE_TREASURY_APPROVER
-#   treasury.cashflow.override.propose        — ROLE_TREASURY_BACK_OFFICE
+#   treasury.cashflow.override.propose, treasury.position.close — ROLE_TREASURY_BACK_OFFICE
 #   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
 #   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
 #   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
@@ -29,6 +29,15 @@
 #   treasury.marketdata.approve               — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
 #                                               balance; it is still back-office evidence, #10896)
+#   treasury.portfolio.inspect                — treasury dealers, approvers and admins, and
+#                                               tax-reporting's OWN client (ADR-0337 amendment)
+#   treasury.portfolio.upload                 — ROLE_TREASURY_APPROVER (the custodian's semt.002)
+#
+# treasury.portfolio.inspect is the one treasury read a MACHINE reaches, so it deliberately does not
+# end in `.read`: base rest.rego's operator-read-any and compliance-read-any grant every `.read` to
+# any HUMAN-classified principal holding ROLE_OPERATOR / ROLE_COMPLIANCE, which the shared
+# service-account does in at least one realm. A non-read verb is served ONLY by the identity-scoped
+# rules below (the fleet convention since pension-fund.holding.inspect, #12481).
 #
 # Four-eyes (approver != creator) is enforced in the domain (ADR-0315 D3); these rules decide only
 # WHO may attempt each step. Dealer and approver are separate roles on purpose: a dealer cannot
@@ -78,6 +87,8 @@ allowed_reasons contains "treasury-staff-read" if {
 		"treasury.counterparty.read",
 		"treasury.position.read",
 		"treasury.nostro.read",
+		# ADR-0337 amendment: the custodian's period-end statement of holdings.
+		"treasury.portfolio.inspect",
 		# ADR-0315 D9: the simulated counterparties' SYNTHETIC quotes (GET /quotes).
 		"treasury.quote.read",
 		# ADR-0344: reference data, the cash-flow ledger and the event calendar.
@@ -122,6 +133,16 @@ allowed_reasons contains "treasury-approver-write" if {
 		"treasury.deal.mature",
 		"treasury.deal.reverse",
 	}
+}
+
+# #13883: closing a deal's stuck posting intent releases its value day's close hold although the
+# ledger may hold a journal under its key. Its own action so it can be granted, audited and denied
+# apart from reversing a deal; approvers only. The domain additionally refuses a non-person, the
+# posting's own actor and the deal's approver.
+allowed_reasons contains "treasury-posting-intent-close" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action == "treasury.posting-intent.close"
 }
 
 # ADR-0315 D4: a counterparty-limit breach blocks booking unless a SENIOR approver records an
@@ -199,6 +220,7 @@ allowed_reasons contains "treasury-back-office-write" if {
 	input.action in {
 		"treasury.cashflow.override.propose",
 		"treasury.deal.send-confirmation",
+		"treasury.position.close",
 	}
 }
 
@@ -235,4 +257,26 @@ allowed_reasons contains "treasury-approver-market-data" if {
 	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
 	role in input.principal.roles
 	input.action == "treasury.marketdata.approve"
+}
+
+# ADR-0337 amendment: the custodian's semt.002 is the source of record for PSP 34-12 PS, so only a
+# back-office approver supplies it — the same rule, and the same reason, as the nostro camt.053.
+allowed_reasons contains "treasury-portfolio-upload" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action == "treasury.portfolio.upload"
+}
+
+# tax-reporting, and ONLY tax-reporting, reads the period-end portfolio for PSP 34-12 PS. Gated on
+# its own identity (Keycloak service-account-<clientId>), never on a role every machine may hold;
+# its whole grant here is this one read — never the upload, never any other treasury action.
+treasury_portfolio_reader_account := "service-account-openbank-tax-reporting"
+
+allowed_reasons contains "service-tax-reporting-portfolio-read" if {
+	input.principal.type == "HUMAN"
+	machine_named(treasury_portfolio_reader_account)
+	# Undefined is legacy; explicit null is not a verified or absent marker.
+	not input.principal.service_account == null
+	"ROLE_API" in input.principal.roles
+	input.action == "treasury.portfolio.inspect"
 }

@@ -129,6 +129,7 @@ jobs:
           cp .github/scripts/service-ci-steps/*.sh "$helper_dir/"
           cp .github/scripts/heal-gradle-verification-failure.sh "$helper_dir/"
           chmod 600 "$helper_dir/"*.sh
+          bash "$helper_dir/diagnostic-actions.sh" stage "$helper_dir"
           echo "SERVICE_CI_HELPERS=$helper_dir" >> "$GITHUB_ENV"
 
       - name: Stage trusted build retry helpers
@@ -156,6 +157,7 @@ jobs:
           for helper in retry-testcontainers-ebusy.sh retry-gradle-verification-cache.sh heal-gradle-verification-failure.sh; do
             cp "${RUNNER_TEMP}/${helper}" ".github/scripts/${helper}"
           done
+          bash "$SERVICE_CI_HELPERS/diagnostic-actions.sh" restore "$SERVICE_CI_HELPERS"
 
       # Resolve GRADLE_USER_HOME. This job is ALWAYS `runner.environment == 'github-hosted'`
       # now (never self-hosted), so it always takes the default-home branch below — restoring
@@ -196,7 +198,7 @@ jobs:
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
       # lets Gradle's toolchain resolution pick the right one with zero Foojay
       # downloads at build time (faster, fewer billed minutes).
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: |
@@ -250,6 +252,15 @@ jobs:
           SERVICE: ${{ inputs.service }}
           DEPLOY_ARTIFACT_PILOT: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' }}
         run: bash -e "$SERVICE_CI_HELPERS/build-test.sh"
+
+      # Keep advisory diagnostics in runner-loaded local actions instead of repeating
+      # their step definitions in every reusable workflow expansion.
+      - name: Retain Gradle task profile
+        if: always() && (inputs.service == 'openbank-lending-service' || inputs.service == 'openbank-pension-service')
+        continue-on-error: true
+        uses: ./.github/actions/service-ci-gradle-profile
+        env:
+          SERVICE: ${{ inputs.service }}
 
       - name: Package verified context deployment build
         id: deploy_bundle
@@ -308,6 +319,7 @@ jobs:
       # Different invocation properties can invalidate `test` and overwrite the verified
       # test.ic before this advisory report, even when both Gradle invocations succeed.
       - name: Generate Kover XML report
+        id: coverage_report
         continue-on-error: true
         # This is advisory evidence, never a second mandatory build. Keep it daemonless
         # and bounded so a Gradle/Kover process cannot retain the raw coverage file or
@@ -322,32 +334,14 @@ jobs:
       # The envelope is built even after a failing suite. A missing envelope is not a
       # passing zero: the projection renders it as absent evidence. The collector only
       # reads JUnit/Kover counts and the secret-free shared Testcontainers lifecycle log.
-      - name: Build Test Intelligence run envelope
-        if: always()
-        # Evidence collection observes the build; it must never gate it (#6614).
-        continue-on-error: true
-        run: |
-          python3 .github/scripts/collect-test-run-evidence.py \
-            --service "${{ inputs.service }}" \
-            --out "${{ inputs.service }}/build/test-intelligence/run.json"
-
-      - name: Retain immutable Test Intelligence run envelope
+      - name: Retain coverage and Test Intelligence evidence
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: test-intelligence-run-${{ inputs.service }}-${{ github.run_id }}-a${{ github.run_attempt }}
-          path: ${{ inputs.service }}/build/test-intelligence/run.json
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload coverage to Codecov
-        continue-on-error: true
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
-        with:
-          files: ${{ inputs.service }}/build/reports/kover/report.xml
-          flags: ${{ inputs.service }}
-          fail_ci_if_error: false
+        uses: ./.github/actions/service-ci-coverage-evidence
+        env:
+          SERVICE: ${{ inputs.service }}
+          SERVICE_CI_JOB_STATUS: ${{ job.status }}
+          SERVICE_CI_REPORT_OUTCOME: ${{ steps.coverage_report.outcome }}
 
       # Consumer pacts this service just (re)generated (pact.rootDir -> repo /pacts, ADR-0063)
       # are handed to the `contract` job as an artifact rather than regenerated there — the
@@ -406,7 +400,7 @@ jobs:
           name: quality-evidence-${{ inputs.service }}-a${{ github.run_attempt }}
           path: |
             ${{ inputs.service }}/build/test-results/**/*.xml
-            ${{ inputs.service }}/build/reports/kover/report.xml
+            ${{ steps.coverage_report.outcome == 'success' && format('{0}/build/reports/kover/report.xml', inputs.service) || '' }}
           if-no-files-found: ignore
           retention-days: 7
 
@@ -443,7 +437,7 @@ jobs:
           path: |
             ${{ inputs.service }}/build/test-intelligence/run.json
             ${{ inputs.service }}/build/test-results/**/*.xml
-            ${{ inputs.service }}/build/reports/kover/report.xml
+            ${{ steps.coverage_report.outcome == 'success' && format('{0}/build/reports/kover/report.xml', inputs.service) || '' }}
           if-no-files-found: ignore
           retention-days: 14
           overwrite: true
@@ -574,6 +568,11 @@ jobs:
         run: |
           set -euo pipefail
           cp .github/scripts/pact-broker-post.sh "$RUNNER_TEMP/pact-broker-post.sh"
+          cp .github/scripts/service-ci-provider-task-list.sh "$RUNNER_TEMP/service-ci-provider-task-list.sh"
+          cp .github/scripts/service-ci-discover-provider-pact-task.sh "$RUNNER_TEMP/service-ci-discover-provider-pact-task.sh"
+          chmod 700 "$RUNNER_TEMP/pact-broker-post.sh" \
+            "$RUNNER_TEMP/service-ci-provider-task-list.sh" \
+            "$RUNNER_TEMP/service-ci-discover-provider-pact-task.sh"
           bash "$RUNNER_TEMP/pact-broker-post.sh" --self-test
           cp .github/scripts/resolve-historical-service-ref.sh \
             "$RUNNER_TEMP/resolve-historical-service-ref.sh"
@@ -604,6 +603,29 @@ jobs:
           else
             echo "GRADLE_USER_HOME=${{ github.workspace }}/../../.gradle-svc/${{ inputs.service }}" >> "$GITHUB_ENV"
           fi
+
+      # Bound what each persistent per-service home keeps after a Gradle version bump. Gradle
+      # keeps `caches/<old-version>/` and `wrapper/dists/gradle-<old>-bin/` for 30 days by
+      # default, and setup-gradle's own cache-cleanup is inert here (cache-disabled: true), so
+      # every bump doubled ~40 homes for a month: measured 2026-10-29 the runner held 61 GiB in
+      # `.gradle-svc`, 21.5 GiB of it Gradle 9.8.1 left behind by the 9.8.2 bump. Deleting by
+      # hand races a concurrent job on the same home (the corruption / NoClassDefFoundError
+      # this isolation exists to prevent); Gradle's own cleanup runs under its cache locks, so
+      # it is the only safe deleter. Written atomically: a sibling job may be reading init.d.
+      - name: Configure Gradle cache retention
+        run: |
+          set -euo pipefail
+          mkdir -p "${GRADLE_USER_HOME}/init.d"
+          tmp="$(mktemp "${GRADLE_USER_HOME}/init.d/.cache-retention.XXXXXX")"
+          cat > "$tmp" <<'GRADLE_INIT'
+          beforeSettings { settings ->
+              settings.caches {
+                  releasedWrappers.removeUnusedEntriesAfterDays = 1
+                  snapshotWrappers.removeUnusedEntriesAfterDays = 1
+              }
+          }
+          GRADLE_INIT
+          mv -f "$tmp" "${GRADLE_USER_HOME}/init.d/cache-retention.gradle"
 
       - name: Normalize DOCKER_HOST for Testcontainers (#873)
         run: |
@@ -649,7 +671,7 @@ jobs:
           ECR_LOGIN_OUTCOME: ${{ steps.ecr_login.outcome }}
         run: bash -e "$SERVICE_CI_HELPERS/prewarm-images.sh"
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: |

@@ -161,3 +161,5 @@ kopie nebo neplatný podpis selže uzavřeně (žádné vyhodnocení, žádné �
 `outcome` metriky `openbank_product_revision_load_total` (`identity_mismatch` pro podvrženou
 revizi); katalog je publikační autorita, nikdy závislost na účtovací
 cestě. Verze kontraktu API je 2.9.0; změna je aditivní.
+
+Těla požadavků katalogu se dekódují přísně: tělo s opakovaným klíčem JSON objektu je odmítnuto s `400`, poslední hodnota se tiše neprosadí. Limity 1 MiB a hloubky vnoření u těla IR lintu zůstávají beze změny.

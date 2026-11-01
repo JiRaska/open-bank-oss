@@ -248,6 +248,15 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-10-28** — **Journal-approval OPA grants restored (#12906).** `ledger.approval.read` and
+  `ledger.approval.decide` now admit only HUMAN operators/admins whose principal is not a service
+  account. An explicit machine prohibition also overrides the base operator-read rule, so a
+  client-credentials identity carrying `ROLE_OPERATOR` can neither read checker queues nor decide
+  approvals. This repairs the deny-by-default outage without weakening the four-eyes boundary;
+  maker≠checker remains enforced by `ApprovalStore.decide`. Rego tests cover operator grants,
+  wrong-role denial and service-account denial for both actions. Rollback: revert the extension
+  and regenerate the bundle; approval endpoints return to deny-by-default.
+
 - **2026-10-17** — **Day-close participants (ADR-0342, #13167).** New inbound surface
   `/api/v1/ledger/accounting-days/{date}/participants`: `PUT …/{participant}` (product service
   reports RAN / SKIPPED / REFUSED for a day), `PUT …/{participant}/waiver` (operator), `GET` (read
@@ -733,6 +742,7 @@ set) apply equally to the new `ledger.approval.decide` action.
   has every non-interest declared participant report RAN, read from the live config, so its interest
   scenarios cannot turn vacuous as participants are added. Rollback: remove the entry.
 - **2026-10-23** — **`billing` declared as a day-close participant (#13167, ADR-0342 D2), with its own grant.** `openbank.ledger.close.participants.billing.principal = service-account-openbank-billing`, matching `rules.yaml: close_participants`. Billing holds no `ledger.create` on its own identity (its journals ride the shared `openbank-services` principal), and gets none: it is one more entry in `close_participant_accounts`, so its identity may perform `ledger.close.participate` for the participant `billing` and NOTHING else (review of #13709 replaced an earlier generic `ledger.create` grant). **STRIDE-E:** `opa eval` on the regenerated bundle: billing allowed `ledger.close.participate` for `billing`; denied it for `lending`; denied `ledger.create` and `ledger.read`; the shared client denied participation. Rego tests cover every journal action and turn red if billing is mapped to another participant. **STRIDE-S:** a `billing` report from any other principal, the shared one included, is 403. The mode stays `shadow`. Rollback: remove the entry and the rule, then regenerate the bundles.
+- **2026-10-25** — **`treasury` declared as a day-close participant (#13167, ADR-0342 D2).** `openbank.ledger.close.participants.treasury.principal = service-account-openbank-treasury`, matching `rules.yaml: close_participants`. Treasury reports on the identity it already posts journals with. It is one more entry in `close_participant_accounts`, so it gains `ledger.close.participate` for the participant `treasury` and nothing else; its existing `service-treasury-ledger-post` (`ledger.create`) and `service-treasury-ledger-read` rules are unchanged. **STRIDE-E:** `opa eval` on the regenerated bundle: treasury allowed for `treasury`, denied for `interest`, `lending` and `billing`; lending, billing, the shared client and another ROLE_API account denied for `treasury`; treasury still denied `ledger.reverse`. Rego tests turn red if the treasury entry or the resource binding is removed. **STRIDE-S:** a `treasury` report from any other principal is 403. **STRIDE-D:** under `enforce`, a treasury outage would hold every day in CUTOFF until it reports or an operator waives the day; the mode stays `shadow`. Rollback: remove the entry and the map key, then regenerate the bundles.
 
 ### Raw history snapshot boundary (ADR-0352 preparation)
 
@@ -742,3 +752,33 @@ set) apply equally to the new `ledger.approval.decide` action.
 - Copied facts are linked to every opening/window source. Source erasure invalidates copies; detached sources make reads unavailable and the existing partition lifecycle purges the raw copies. No independent retention extension or legal-hold override is authorized. These controls require real concurrent PostgreSQL, source-deletion and partition-lifecycle tests before delivery; no local/hosted PASS is claimed by this note.
 - Snapshot capture and its idempotent result binding commit in the same PostgreSQL transaction. The binding frames the operation and authenticated caller/key scope, stores digests rather than the request or a financial response, and expires after the existing 86,400-second lifetime without replay renewal. Replays revalidate the retained source-linked manifest. Erasure clears its foreign-key reference and subsequent replay is 410, never a new capture under the unexpired key. An explicit EMPTY result stores only its original opaque identifier, observation instant and database-view metadata, so source erasure cannot be mistaken for an empty financial history. These digests and identifiers are not claimed to be anonymous.
 - Expired replay metadata is removed on access and by minute maintenance; physical cleanup can lag during an outage. This metadata has no independent financial response body in Redis. A contending or failed transaction rolls back both copied facts and replay binding; loss of the HTTP response after commit must replay the original result. Real HTTP/PostgreSQL erasure, contention, rollback and response-loss regressions must verify these claims before delivery.
+
+### Synthetic taint request carrier (#4348, #14058, #14059)
+
+- **Classification integrity:** a false synthetic flag can include canary activity in real-only
+  ledger views; an unjustified true flag can exclude real activity. Fail-to-real rejects untrusted
+  self-exclusion but is not a universally safe accounting fallback for a trusted canary.
+- **Trust boundary:** `SyntheticTaintRequestFilter` retains the authenticated service-account
+  check and exact trusted-principals allowlist before accepting the header. It copies the decision
+  to the JAX-RS request property and `SyntheticTaintContext`; neither is caller-authoritative.
+  Ledger RBAC and OPA authorization remain unchanged. No principal, role, grant or trust-list
+  activation is introduced by the carrier change.
+- **Request lifecycle:** the CDI request holder starts false, and accepted and declined paths both
+  write it. `LedgerResource` uses OR with the legacy property, so either true value wins; an
+  inactive CDI context is not an absent-holder fallback. Isolation and propagation across
+  suspension are correctness obligations, not guarantees established by naming the scope.
+- **Evidence and residual risk:** `SyntheticLedgerDimensionIT` checks real HTTP, persisted flags,
+  untrusted taint and population views; `SyntheticTaintFilterTest` checks filter decisions with
+  manually created holders. The original four HTTP tests also passed with the CDI read removed.
+  The extended HTTP profile removes the request property only after the real trust decision and
+  checks actual journal rows. A bounded asynchronous barrier overlaps trusted and ordinary POSTs
+  before either ledger read, followed by a fresh ordinary POST. The five-test HTTP/JDBC run passed; removing only
+  the CDI read fails both the sequential and concurrent synthetic-row assertions. This establishes
+  the CDI read's role under controlled property loss, not the older image's loss mechanism or an
+  absent-holder fallback. Test claims and advisory OPA do not verify production token signatures
+  or enforced authorization. Issue #14058 still requires separate deployed acceptance.
+- **Privacy and rollback:** the new carrier contains only the existing decision Boolean; it adds
+  no identifier, credential, log field or retention store. Reverting it restores property-only
+  reads and may restore false-real classification. Existing journal flags are not rewritten.
+  Dedicated caller provisioning and trusted-principals configuration are separate work (#14060);
+  live canary seeding and deployed acceptance remain separate operational decisions.

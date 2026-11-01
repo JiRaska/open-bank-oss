@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.4](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.3...delegation-service-v0.23.4) (2026-10-30)
+
+
+### Bug Fixes
+
+* **delegation:** align owner portfolio OpenAPI path parameter ([#14235](https://github.com/JiRaska/open-bank-oss/issues/14235)) ([c33021d](https://github.com/JiRaska/open-bank-oss/commit/c33021d3a183784d89b104b006496fc7022be9a5))
+
 ## [0.23.3](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.2...delegation-service-v0.23.3) (2026-10-19)
 
 

@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -59,6 +60,7 @@ COMPONENTS = REPO / "openbank-infra" / "gitops" / "components"
 LOKI_IMAGE = "grafana/loki:3.7.8"
 PORT = 13199
 CONTAINER = "openbank-loki-rule-check"
+PARSE_REJECTION_MARKER = "confirmed LogQL parse rejection"
 
 # Minimal single-binary config whose ruler section mirrors apps/loki.yaml's: local rule storage in
 # /rules, single-tenant (auth_enabled: false, so the tenant directory is `fake`). Storage is
@@ -129,6 +131,32 @@ def _get(url: str, timeout: float = 5.0) -> str | None:
         return None
 
 
+def _confirmed_parse_error(log_text: str, filenames: set[str]) -> str | None:
+    """Return evidence only for a parse error in one of this run's mounted files.
+
+    The mounted rule tree is immutable while Loki runs. A matching ruler parse error therefore
+    cannot recover during the loaded-group poll; generic ruler errors and errors for other paths
+    remain subject to the normal timeout.
+    """
+    for line in log_text.splitlines():
+        lowered = line.lower()
+        if ("unable to list rules" not in lowered
+                or "error parsing" not in lowered
+                or "could not parse expression" not in lowered):
+            continue
+        for filename in filenames:
+            mounted_path = f"/rules/fake/{filename}.yaml"
+            parse_clause = r"error parsing\s+" + re.escape(mounted_path) + r"(?=[:\s\"'])"
+            if re.search(parse_clause, line):
+                return f"{PARSE_REJECTION_MARKER} [{mounted_path}]: {line[:600]}"
+    return None
+
+
+def _container_logs() -> str:
+    logs = subprocess.run(["docker", "logs", CONTAINER], capture_output=True, text=True, check=False)
+    return (logs.stderr or "") + (logs.stdout or "")
+
+
 def load_into_ruler(bodies: dict[str, str], quiet: bool = False) -> tuple[bool, str]:
     """-> (accepted, detail). accepted is False when the ruler lists fewer groups than we gave it."""
     tmp = Path(tempfile.mkdtemp())
@@ -160,6 +188,10 @@ def load_into_ruler(bodies: dict[str, str], quiet: bool = False) -> tuple[bool, 
             return False, "Loki never became ready within 120s"
 
         # The ruler lists lazily; poll until it reports the expected count or we run out of patience.
+        # If it has already returned a short list, a parse error for one of our immutable mounted
+        # files cannot self-heal. Check that specific signature while short, but retain the normal
+        # poll for startup, transient, unrelated, and nonspecific ruler errors.
+        filenames = set(bodies)
         deadline = time.monotonic() + 60
         loaded: list[str] = []
         while time.monotonic() < deadline:
@@ -169,11 +201,17 @@ def load_into_ruler(bodies: dict[str, str], quiet: bool = False) -> tuple[bool, 
                 loaded = [g["name"] for g in groups]
                 if len(loaded) >= expected_groups:
                     break
+                parse_error = _confirmed_parse_error(_container_logs(), filenames)
+                if parse_error:
+                    return False, (
+                        f"ruler loaded {len(loaded)} group(s), expected {expected_groups}. "
+                        f"{parse_error}"
+                    )
             time.sleep(2)
 
         if len(loaded) < expected_groups:
-            logs = subprocess.run(["docker", "logs", CONTAINER], capture_output=True, text=True)
-            err = [ln for ln in (logs.stderr + logs.stdout).splitlines()
+            logs = _container_logs()
+            err = [ln for ln in logs.splitlines()
                    if "unable to list rules" in ln or "error parsing" in ln]
             return False, (
                 f"ruler loaded {len(loaded)} group(s), expected {expected_groups}. "
@@ -276,10 +314,13 @@ def self_test(since: str | None = None) -> int:
         failures.append("valid rule rejected")
 
     print("self-test: the case the gate MUST flag")
-    ok, _ = load_into_ruler(bad, quiet=True)
-    print(f"  {'ok  ' if not ok else 'FAIL'} a file with unparseable LogQL is rejected")
-    if ok:
-        failures.append("broken rule accepted")
+    ok, detail = load_into_ruler(bad, quiet=True)
+    bad_marker = f"{PARSE_REJECTION_MARKER} [/rules/fake/bad.yaml]:"
+    rejected = not ok and bad_marker in detail
+    print(f"  {'ok  ' if rejected else 'FAIL'} a file with unparseable LogQL is rejected"
+          + ("" if rejected else f" — {detail or 'no parser rejection was proved'}"))
+    if not rejected:
+        failures.append("invalid LogQL was not specifically rejected by the ruler parser")
 
     if failures:
         print(f"\n::error::check-loki-rules --self-test: {', '.join(failures)}")

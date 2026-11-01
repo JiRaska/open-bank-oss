@@ -47,6 +47,7 @@ approver_writes := {
 	"treasury.deal.settle",
 	"treasury.deal.mature",
 	"treasury.deal.reverse",
+	"treasury.posting-intent.close",
 }
 
 all_writes := (dealer_writes | approver_writes) | {"treasury.deal.cancel"}
@@ -308,4 +309,110 @@ test_staff_read_fixings_and_market_data if {
 	allowed(dealer, "treasury.fixing.read")
 	allowed(approver, "treasury.marketdata.read")
 	not allowed(agent, "treasury.marketdata.read")
+}
+
+# --- portfolio (ADR-0337 amendment): the one treasury read a machine reaches ---
+
+tax_reporting := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+
+portfolio_allowed(p, a) if rest.allow.allow with input as {"principal": p, "action": a} with data.rules as {}
+
+test_tax_reporting_may_read_portfolio if {
+	portfolio_allowed(tax_reporting, "treasury.portfolio.inspect")
+}
+
+test_tax_reporting_reads_nothing_else if {
+	not portfolio_allowed(tax_reporting, "treasury.portfolio.upload")
+	every a in reads {
+		not portfolio_allowed(tax_reporting, a)
+	}
+}
+
+# Without ROLE_API (the role the realm grants that client) the identity alone is not enough.
+test_tax_reporting_identity_without_api_role_denied if {
+	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": []}, "treasury.portfolio.inspect")
+}
+
+test_treasury_staff_may_read_portfolio if {
+	every p in [dealer, approver, admin, senior] {
+		portfolio_allowed(p, "treasury.portfolio.inspect")
+	}
+}
+
+test_shared_m2m_other_service_account_and_agent_may_not_read_portfolio if {
+	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API", "ROLE_COMPLIANCE"]}, "treasury.portfolio.inspect")
+	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API", "ROLE_OPERATOR"]}, "treasury.portfolio.inspect")
+	not portfolio_allowed(shared_sa, "treasury.portfolio.inspect")
+	not portfolio_allowed({"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_API", "ROLE_TREASURY_DEALER"]}, "treasury.portfolio.inspect")
+	not portfolio_allowed(nobody, "treasury.portfolio.inspect")
+}
+
+# A ROLE_COMPLIANCE holder is not let in by compliance-read-any: the verb is not `.read`.
+test_compliance_role_does_not_reach_portfolio if {
+	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-aml", "roles": ["ROLE_COMPLIANCE"]}, "treasury.portfolio.inspect")
+	not portfolio_allowed({"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]}, "treasury.portfolio.inspect")
+}
+
+# The verb is what does the work: the same resource named `.read` is reopened by the base rules.
+test_a_read_verb_would_reopen_portfolio_to_the_shared_account if {
+	rest.allow.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+		"action": "treasury.portfolio.read",
+	}
+		with data.rules as {}
+}
+
+test_only_approver_may_upload_portfolio if {
+	allowed(approver, "treasury.portfolio.upload")
+	not allowed(dealer, "treasury.portfolio.upload")
+	not allowed(admin, "treasury.portfolio.upload")
+	not allowed(shared_sa, "treasury.portfolio.upload")
+	not allowed(agent, "treasury.portfolio.upload")
+}
+
+# Current PEP markers bind the fixed account name to the verified JWT client.
+# The existing absent-marker fixture remains the shared helper's compatibility control.
+test_current_tax_reporting_identity_reads_only_portfolio if {
+	p := object.union(tax_reporting, {"service_account": true, "client_id": "openbank-tax-reporting"})
+	portfolio_allowed(p, "treasury.portfolio.inspect")
+	not portfolio_allowed(p, "treasury.portfolio.upload")
+	every a in reads { not portfolio_allowed(p, a) }
+}
+
+test_tax_reporting_person_marker_cannot_borrow_machine_grant if {
+	p := object.union(tax_reporting, {"service_account": false})
+	not portfolio_allowed(p, "treasury.portfolio.inspect")
+}
+
+test_tax_reporting_current_marker_requires_matching_client if {
+	every claims in [
+		{"service_account": true, "client_id": "openbank-other"},
+		{"service_account": true},
+		{"service_account": "true", "client_id": "openbank-tax-reporting"},
+	] {
+		p := object.union(tax_reporting, claims)
+		not portfolio_allowed(p, "treasury.portfolio.inspect")
+	}
+}
+
+# Only actual key absence selects the Phase-1 compatibility path. An explicit
+# JSON null is a supplied invalid marker, irrespective of any client-id value.
+test_tax_reporting_explicit_null_marker_is_not_legacy if {
+	every claims in [
+		{"service_account": null},
+		{"service_account": null, "client_id": ""},
+		{"service_account": null, "client_id": "openbank-tax-reporting"},
+		{"service_account": null, "client_id": "openbank-other"},
+	] {
+		p := object.union(tax_reporting, claims)
+		not portfolio_allowed(p, "treasury.portfolio.inspect")
+	}
+}
+
+# ADR-0344 catalogue: a close-of-day position snapshot is a back-office record; nobody else writes one.
+test_position_close_is_a_back_office_write if {
+	every p in [dealer, approver, editor, agent, shared_sa, renamed_sa, nobody] {
+		not allowed(p, "treasury.position.close")
+	}
+	allowed(back_office, "treasury.position.close")
 }

@@ -1,0 +1,37 @@
+# Langfuse -> Prometheus bridge health (ADR-0112 P1; exporter in ai-platform/langfuse-exporter.yaml).
+#
+# admin-ui /api/finops/ai-costs gates on `langfuse_up == 1`, so a dead bridge turns the AI-cost page
+# into "unavailable" with no other signal. Two failure shapes, both caught by one expression:
+#   - langfuse_up == 0  : the pod is alive but its last poll failed (bad key, API shape change).
+#   - absent(langfuse_up): the pod is gone or never scraped (no series at all).
+#
+# Cold pod at t=0: the exporter renders `langfuse_up 0` until its first poll succeeds (seconds), and
+# a fresh Prometheus target has no series until the first scrape. `for: 30m` is far longer than
+# either, so a deploy or restart does not page; only a persistent failure does.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-langfuse-exporter-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.ai.langfuse-exporter
+      interval: 1m
+      rules:
+        - alert: LangfuseExporterDown
+          expr: |
+            langfuse_up == 0 or absent(langfuse_up)
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Langfuse metrics bridge has been down or absent for 30m"
+            description: >-
+              langfuse_up is 0 (last poll of the Langfuse metrics API failed) or the series is
+              absent (exporter pod not running or not scraped) for over 30m. The FinOps AI-cost
+              page reports unavailable while this fires. Check the langfuse-exporter pod logs in
+              ai-platform for "poll failed" lines and the langfuse-secrets key pair.
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0012-ai-stack-enablement.md"

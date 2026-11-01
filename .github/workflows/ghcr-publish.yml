@@ -104,7 +104,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: |
@@ -119,14 +119,14 @@ jobs:
 
       - name: Build fast-jar + SBOM
         run: |
-          ./gradlew ":${SERVICE_DIR}:quarkusBuild" ":${SERVICE_DIR}:cyclonedxBom" \
+          ./gradlew ":${SERVICE_DIR}:verifyPackagedLibrarySbom" \
             --build-cache --console=plain
 
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Login to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -141,6 +141,10 @@ jobs:
           [ -d "$qa" ] || { echo "::error::${svc}: quarkus-app missing (fast-jar not built?)"; exit 1; }
           version="$(tr -d '[:space:]' < "${svc}/version.txt")"
           ctx="$(mktemp -d)"
+          python3 .github/scripts/verify-packaged-library-sbom.py \
+            --sbom "${svc}/build/reports/bom.json" \
+            --receipt "${svc}/build/reports/library-artifacts/verification.json" \
+            --quarkus-app "$qa" > /dev/null
           cp -r "$qa" "${ctx}/quarkus-app"
           # Gradle writes quarkus-app/lib/ as 600; the image runs as non-root
           # (ClassNotFoundException at boot otherwise — PR #2141 pattern).

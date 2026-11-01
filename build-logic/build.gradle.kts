@@ -46,7 +46,11 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
     implementation("org.jetbrains.kotlin.plugin.allopen:org.jetbrains.kotlin.plugin.allopen.gradle.plugin:$kotlinVersion")
     implementation("io.quarkus:io.quarkus.gradle.plugin:$quarkusVersion")
+    // Public model-task descriptor types are supplied at runtime by the Quarkus plugin.
+    compileOnly("io.quarkus:quarkus-gradle-model:$quarkusVersion")
     implementation("org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:$cyclonedxVersion")
+    // Public model-builder API; the existing Quarkus/CycloneDX runtime selects 3.9.16.
+    compileOnly("org.apache.maven:maven-model-builder:3.9.16")
     implementation("org.jetbrains.kotlinx:kover-gradle-plugin:$koverVersion")
     // Static analysis (SAST gate), applied fleet-wide by the openbank.static-analysis
     // convention plugin. Only ktlint is a Gradle plugin here — detekt is invoked as a
@@ -79,30 +83,32 @@ dependencies {
 // was floored).
 configurations.all {
     resolutionStrategy {
+        // GHSA-xxph-c9ww-hj94 also affects the independently resolved plugin tooling graph.
+        force("com.google.guava:guava:33.7.2-jre")
         // Kover's coverage reporter otherwise resolves FreeMarker 2.3.32, vulnerable to template
         // path traversal (GHSA-27j2-h3m2-8237, fixed in 2.3.35). Build-time classpath only.
         force("org.freemarker:freemarker:2.3.35")
         force("org.codehaus.plexus:plexus-utils:4.1.0")
-        force("com.fasterxml.jackson.core:jackson-databind:2.22.3")
-        force("com.fasterxml.jackson.core:jackson-core:2.22.3")
+        force("com.fasterxml.jackson.core:jackson-databind:2.22.4")
+        force("com.fasterxml.jackson.core:jackson-core:2.22.4")
         // Match the platform and runtime security floor across the complete Netty family.
-        force("io.netty:netty-buffer:4.1.139.Final")
-        force("io.netty:netty-codec-dns:4.1.139.Final")
-        force("io.netty:netty-codec-socks:4.1.139.Final")
-        force("io.netty:netty-resolver:4.1.139.Final")
-        force("io.netty:netty-transport:4.1.139.Final")
-        force("io.netty:netty-transport-classes-epoll:4.1.139.Final")
-        force("io.netty:netty-transport-classes-kqueue:4.1.139.Final")
-        force("io.netty:netty-transport-native-unix-common:4.1.139.Final")
-        force("io.netty:netty-codec:4.1.139.Final")
-        force("io.netty:netty-codec-http:4.1.139.Final")
-        force("io.netty:netty-codec-http2:4.1.139.Final")
-        force("io.netty:netty-codec-haproxy:4.1.139.Final")
-        force("io.netty:netty-common:4.1.139.Final")
-        force("io.netty:netty-handler:4.1.139.Final")
-        force("io.netty:netty-handler-proxy:4.1.139.Final")
-        force("io.netty:netty-resolver-dns:4.1.139.Final")
-        force("io.netty:netty-transport-native-epoll:4.1.139.Final")
-        force("io.netty:netty-transport-native-kqueue:4.1.139.Final")
+        force("io.netty:netty-buffer:4.2.19.Final")
+        force("io.netty:netty-codec-dns:4.2.19.Final")
+        force("io.netty:netty-codec-socks:4.2.19.Final")
+        force("io.netty:netty-resolver:4.2.19.Final")
+        force("io.netty:netty-transport:4.2.19.Final")
+        force("io.netty:netty-transport-classes-epoll:4.2.19.Final")
+        force("io.netty:netty-transport-classes-kqueue:4.2.19.Final")
+        force("io.netty:netty-transport-native-unix-common:4.2.19.Final")
+        force("io.netty:netty-codec:4.2.19.Final")
+        force("io.netty:netty-codec-http:4.2.19.Final")
+        force("io.netty:netty-codec-http2:4.2.19.Final")
+        force("io.netty:netty-codec-haproxy:4.2.19.Final")
+        force("io.netty:netty-common:4.2.19.Final")
+        force("io.netty:netty-handler:4.2.19.Final")
+        force("io.netty:netty-handler-proxy:4.2.19.Final")
+        force("io.netty:netty-resolver-dns:4.2.19.Final")
+        force("io.netty:netty-transport-native-epoll:4.2.19.Final")
+        force("io.netty:netty-transport-native-kqueue:4.2.19.Final")
     }
 }

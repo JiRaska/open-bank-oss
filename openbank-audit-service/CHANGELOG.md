@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.29.2...audit-service-v0.30.0) (2026-10-30)
+
+
+### Features
+
+* **audit:** enable agent-audit consumer with DLQ NACK handling ([#14200](https://github.com/JiRaska/open-bank-oss/issues/14200)) ([e3e81ac](https://github.com/JiRaska/open-bank-oss/commit/e3e81ac214db829186c0969991670f1d1b839bb7))
+
+## [0.29.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.29.1...audit-service-v0.29.2) (2026-10-29)
+
+
+### Bug Fixes
+
+* **aml:** publish high-risk oversight triggers ([#14151](https://github.com/JiRaska/open-bank-oss/issues/14151)) ([f7d1363](https://github.com/JiRaska/open-bank-oss/commit/f7d1363da164ac94e18dcc044be210b3d50a7ff5))
+
+## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.29.0...audit-service-v0.29.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **swift:** preserve institution transfer safeguards on current main ([#13838](https://github.com/JiRaska/open-bank-oss/issues/13838)) ([a9d9549](https://github.com/JiRaska/open-bank-oss/commit/a9d954930bf32a32340faece398777838ded4992))
+
 ## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.28.0...audit-service-v0.29.0) (2026-10-26)
 
 

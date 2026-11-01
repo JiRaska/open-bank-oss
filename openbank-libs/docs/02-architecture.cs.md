@@ -43,6 +43,8 @@ Sdílené knihovny a služby používají Quarkus **3.40.1.1 LTS** ze stejného 
 
 `openbank-libs-domain` mapuje `openbank.fx.cnb-policy-rate.published` na `fx-service` v `TopicProducers`. Tím zaznamenává producenta pro sdílenou analytiku a kontroly správy; knihovna událost sama nepublikuje ani neodebírá. Producentem je cesta příjmu sazeb ve FX, zatímco risk engine a audit-service odebírají fakta a auditní stopu. Při přejmenování topicu nebo změně vlastníka aktualizujte i mapování.
 
+`TopicProducers` mapuje sdílený topik `openbank.oversight-triggers` na `multiple-producers`, protože do něj aml-service i sanctions-service publikují nezávislé požadavky na kontrolu. Audit-service odebírá stejný topik, aby se tyto požadavky staly součástí auditní stopy. Sdílené mapování eviduje vlastnictví; samo události nepublikuje ani neodebírá.
+
 ## Producenti zapínaní při buildu
 
 `RedisApprovalStoreProducer` (`ApprovalStore` pro čtyři oči, zapíná `openbank.approval.store: redis`) a `OpaPolicyDecisionPointProducer` (PDP pro OPA sidecar, zapíná `openbank.authz.opa-pdp-producer.enabled: true`) jsou podmíněné `@IfBuildProperty` a bez vlastnosti vypnuté. Ani jeden není `@DefaultBean`: služba, která je zapne a zároveň si ponechá vlastního producenta, neprojde `quarkusBuild` kvůli nejednoznačné závislosti. Na přítomnosti beanu záleží, protože `AuthorizeInterceptor` zapíná čtyři oči, jakmile `ApprovalStore` existuje.
@@ -50,3 +52,12 @@ Sdílené knihovny a služby používají Quarkus **3.40.1.1 LTS** ze stejného 
 ## Trace kontext outboxu
 
 `PanacheOutboxEntityTraced` (libs-runtime) rozšiřuje entitu outboxu v2 o nullable sloupec `trace_context` s W3C `traceparent`, který při zápisu řádku zachytí `TraceparentCapture`. `OutboxEntry.traceparent` ho přenese do dispatcheru a `OutboxKafkaHeaders` ho vydá jako Kafka hlavičku `traceparent`. Služba ho přebírá dobrovolně spolu s migrací `ALTER TABLE ... ADD COLUMN trace_context TEXT`; základy v1 a v2 se nemění, protože namapovaný sloupec, který tabulka nemá, shodí každý SELECT.
+
+## Slovník kanálu vlastních převodů banky (ADR-0344, fáze 1b)
+
+`openbank-libs-iso20022` drží slovník kanálu vlastních převodů banky, aby jej swift-service i treasury pojmenovávaly stejně:
+- `InstitutionTransferRail` je CERTIS, TARGET2 nebo SWIFT, každý se svou měnou a kódem clearingového systému pro pacs.009.
+- `InstitutionTransferStatus` je životní cyklus převodu. Publikují se jen ACCEPTED, SENT, SETTLED a REJECTED (kontrakt 9.2).
+- Builder a reader pro pacs.009 validují proti přiloženému XSD `pacs.009.001.08`.
+
+Sdílená tabulka `TopicProducers` v `openbank-libs-domain` přiřazuje topik `openbank.swift.institution-transfers` službě swift-service. Podle ní audit-service označuje záznamy, které z tohoto topiku čte.

@@ -161,10 +161,25 @@ class BoundedCoverageTest(unittest.TestCase):
         self.report_helper = self.helper.with_name('render-coverage-report.sh')
         self.report_body = (ROOT / '.github/scripts/service-ci-steps/render-coverage-report.sh').read_text()
         self.report_helper.write_text(self.report_body)
+        self.shared_helper = self.helper.with_name("coverage-evidence.sh")
+        self.shared_body = (ROOT / ".github/scripts/service-ci-steps/coverage-evidence.sh").read_text()
+        self.shared_helper.write_text(self.shared_body)
 
     def test_real_staged_helper_is_bounded(self):
         self.prepare_report()
         self.assertTrue(self.bounded())
+
+    def test_missing_changed_or_symlinked_shared_validator_is_rejected(self):
+        self.prepare_report()
+        self.shared_helper.unlink()
+        self.assertFalse(self.bounded())
+        self.shared_helper.write_text('coverage_run() { "$@"; }')
+        self.assertFalse(self.bounded())
+        self.shared_helper.unlink()
+        outside = self.root / 'outside-validator.sh'
+        outside.write_text(self.shared_body)
+        self.shared_helper.symlink_to(outside)
+        self.assertFalse(self.bounded())
 
     def test_missing_or_changed_timeout_and_inexact_call_are_rejected(self):
         self.prepare_report()
@@ -227,6 +242,117 @@ class BoundedCoverageTest(unittest.TestCase):
             with self.subTest(body=body):
                 self.report_helper.write_text(body)
                 self.assertFalse(self.bounded())
+
+
+class DiagnosticCompositeTest(unittest.TestCase):
+    def setUp(self):
+        import shutil
+        ActiveObserverTest.setUp(self)
+        for relative in ('.github/actions/service-ci-coverage-evidence/action.yml',
+                         '.github/scripts/service-ci-steps/diagnostic-actions.sh'):
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / relative, target)
+        self.call = next(step for step in self.steps
+                         if step.get('uses') == './.github/actions/service-ci-coverage-evidence')
+        self.history = next(step for step in self.steps
+                            if step.get('name') == 'Check out historical service source with trusted helpers')
+
+    def observed(self):
+        source = ecosystem.service_ci_evidence_source(self.root, yaml.safe_dump(self.document))
+        return 'collect-test-run-evidence.py' in source and 'build/test-intelligence/run.json' in source
+
+    def test_actual_active_composite_is_resolved(self):
+        self.assertTrue(self.observed())
+
+    def test_unused_disabled_or_wrongly_bound_composite_is_rejected(self):
+        for change in [{'uses': './.github/actions/unused'}, {'if': 'false'},
+                       {'continue-on-error': False}, {'env': {}},
+                       {'env': {**self.call['env'], 'SERVICE_CI_REPORT_OUTCOME': 'success'}}]:
+            with self.subTest(change=change):
+                original = copy.deepcopy(self.call)
+                self.call.update(change)
+                self.assertFalse(self.observed())
+                self.call.clear()
+                self.call.update(original)
+        self.steps.append(copy.deepcopy(self.call))
+        self.assertFalse(self.observed())
+
+    def test_missing_changed_or_symlinked_snapshot_and_action_are_rejected(self):
+        for relative in ('.github/actions/service-ci-coverage-evidence/action.yml',
+                         '.github/scripts/service-ci-steps/diagnostic-actions.sh'):
+            path = self.root / relative
+            original = path.read_bytes()
+            path.unlink()
+            self.assertFalse(self.observed())
+            path.write_bytes(original + b'\n# different reviewed source\n')
+            self.assertFalse(self.observed())
+            path.unlink()
+            outside = self.root / 'outside-file'
+            outside.write_bytes(original)
+            path.symlink_to(outside)
+            self.assertFalse(self.observed())
+            path.unlink()
+            path.write_bytes(original)
+            self.assertTrue(self.observed())
+
+    def test_historical_restore_must_be_reachable_in_exact_reviewed_recipe(self):
+        original = self.history['run']
+        restore = 'bash "$SERVICE_CI_HELPERS/diagnostic-actions.sh" restore "$SERVICE_CI_HELPERS"'
+        for replacement in ['exit 0\n' + restore, '# ' + restore,
+                            "cat <<'IGNORED'\n" + restore + '\nIGNORED\nexit 0\n' + restore]:
+            with self.subTest(replacement=replacement):
+                self.history['run'] = original.replace(restore, replacement)
+                self.assertFalse(self.observed())
+        self.history['run'] = original
+        self.assertTrue(self.observed())
+
+    def test_historical_restore_cannot_override_trusted_environment_or_workspace(self):
+        original = copy.deepcopy(self.history)
+        for change in [{'env': {'REF': '${{ inputs.ref }}', 'SERVICE_CI_HELPERS': 'untrusted'}},
+                       {'env': {'REF': 'different-ref'}}, {'env': {}},
+                       {'working-directory': 'different-workspace'}, {'shell': 'bash'},
+                       {'continue-on-error': True}]:
+            with self.subTest(change=change):
+                self.history.update(change)
+                self.assertFalse(self.observed())
+                self.history.clear()
+                self.history.update(copy.deepcopy(original))
+        self.assertTrue(self.observed())
+
+    def test_inherited_run_defaults_cannot_redirect_snapshot_execution(self):
+        for target in (self.document, self.document['jobs']['build']):
+            for value in ({'run': {'working-directory': 'different-workspace'}},
+                          {'run': {'shell': 'bash {0}'}}):
+                with self.subTest(defaults=value):
+                    target['defaults'] = value
+                    self.assertFalse(self.observed())
+                    del target['defaults']
+        self.assertTrue(self.observed())
+
+    def test_snapshot_stage_cannot_redirect_environment_or_workspace(self):
+        original = copy.deepcopy(self.stage)
+        for change in [{'env': {'GITHUB_ENV': 'different-environment-file'}},
+                       {'working-directory': 'different-workspace'}]:
+            with self.subTest(change=change):
+                self.stage.update(change)
+                self.assertFalse(self.observed())
+                self.stage.clear()
+                self.stage.update(copy.deepcopy(original))
+        self.assertTrue(self.observed())
+
+    def test_snapshot_restore_and_order_cannot_be_removed(self):
+        for target, needle in [(self.stage, 'bash "$helper_dir/diagnostic-actions.sh" stage "$helper_dir"'),
+                               (self.history, 'bash "$SERVICE_CI_HELPERS/diagnostic-actions.sh" restore "$SERVICE_CI_HELPERS"')]:
+            original = target['run']
+            for replacement in ['', '# ' + needle]:
+                target['run'] = original.replace(needle, replacement)
+                self.assertFalse(self.observed())
+            target['run'] = original
+        self.steps.remove(self.call)
+        self.steps.insert(0, self.call)
+        self.assertFalse(self.observed())
+
 
 
 if __name__ == '__main__':

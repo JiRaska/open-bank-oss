@@ -1,0 +1,97 @@
+# PromQL unit tests for the Argo Rollouts alerts (workload-availability + tier1 progressive delivery).
+#
+# The argo-rollouts controller exports rollout_* with `namespace` = the CONTROLLER's namespace
+# (argo-rollouts) and the Rollout's own namespace in `exported_namespace`. The series below copy
+# that live shape, so a rule that forgets to map the label either labels the alert argo-rollouts
+# (the must-fire expectations name the REAL namespace) or never fires.
+evaluation_interval: 1m
+rule_files:
+  - prometheus-rules-workload-availability.yaml
+  - prometheus-rules-tier1.yaml
+
+tests:
+  - interval: 1m
+    input_series:
+      # payments/sepa-payment: DOWN (desired 2, available 0) -> RolloutNoAvailableReplicas fires
+      - series: 'rollout_info_replicas_desired{namespace="argo-rollouts", exported_namespace="payments", name="sepa-payment"}'
+        values: "2x40"
+      - series: 'rollout_info_replicas_available{namespace="argo-rollouts", exported_namespace="payments", name="sepa-payment"}'
+        values: "0x40"
+      # ledger/ledger-service: healthy -> quiet
+      - series: 'rollout_info_replicas_desired{namespace="argo-rollouts", exported_namespace="ledger", name="ledger-service"}'
+        values: "2x40"
+      - series: 'rollout_info_replicas_available{namespace="argo-rollouts", exported_namespace="ledger", name="ledger-service"}'
+        values: "2x40"
+      # kyc/kyc-service: scaled to zero -> quiet
+      - series: 'rollout_info_replicas_desired{namespace="argo-rollouts", exported_namespace="kyc", name="kyc-service"}'
+        values: "0x40"
+      - series: 'rollout_info_replicas_available{namespace="argo-rollouts", exported_namespace="kyc", name="kyc-service"}'
+        values: "0x40"
+      # phase alerts: fx aborted, party degraded, sca stuck progressing; ledger healthy
+      - series: 'rollout_phase{namespace="argo-rollouts", exported_namespace="fx", name="fx-service", phase="Aborted"}'
+        values: "1x40"
+      - series: 'rollout_phase{namespace="argo-rollouts", exported_namespace="party", name="party-service", phase="Degraded"}'
+        values: "1x40"
+      - series: 'rollout_phase{namespace="argo-rollouts", exported_namespace="sca", name="sca-service", phase="Progressing"}'
+        values: "1x40"
+      - series: 'rollout_phase{namespace="argo-rollouts", exported_namespace="ledger", name="ledger-service", phase="Healthy"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: RolloutNoAvailableReplicas
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: payments
+              name: sepa-payment
+            exp_annotations:
+              summary: "Rollout sepa-payment has ZERO available replicas (payments)"
+              description: "Rollout sepa-payment in namespace payments has had no available replicas for >15m while still desiring at least one — the service is DOWN (this is not an off-hours scale-down; those set desired replicas to 0 and are excluded). Likely causes: admission denied by a Kyverno policy (see KyvernoAdmissionDenied), ImagePullBackOff, CrashLoopBackOff, OOMKilled, missing secret/configmap, or no node with capacity. Check: kubectl -n payments get pods, kubectl argo rollouts get rollout sepa-payment -n payments"
+      - eval_time: 3m
+        alertname: RolloutAnalysisAborted
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: fx
+              name: fx-service
+              exported_namespace: fx
+              phase: Aborted
+            exp_annotations:
+              summary: "Rollout fx-service aborted in fx"
+              description: "Canary analysis failed for fx-service (namespace fx). Traffic has been reverted to stable. Check AnalysisRun for failing metric (error-rate or p95-latency). Next deploy will restart the canary cycle."
+      - eval_time: 5m
+        alertname: RolloutProgressDeadlineExceeded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: party
+              name: party-service
+              exported_namespace: party
+              phase: Degraded
+            exp_annotations:
+              summary: "Rollout party-service degraded in party"
+              description: "Rollout party-service (namespace party) exceeded the 10-minute progress deadline — canary pods did not become healthy. Likely cause: OOMKilled, CrashLoopBackOff, missing secret/configmap, or image pull error. Traffic reverted to stable."
+      - eval_time: 35m
+        alertname: RolloutStuckProgressing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: sca
+              name: sca-service
+              exported_namespace: sca
+              phase: Progressing
+            exp_annotations:
+              summary: "Rollout sca-service stuck Progressing for 30m in sca"
+              description: "sca-service (namespace sca) has been Progressing for 30 minutes without completing. On this fleet's one-replica canaries the standing cause is capacity: the canary pod cannot schedule on a full nodepool, so the new revision never rolls and nothing else reports it (#3806). Check KarpenterNodePoolAtLimit and the pending canary pod first; the replica-floor decision is ADR material, tracked in #3806."
+    promql_expr_test:
+      # must-not-fire: healthy and scaled-to-zero Rollouts, under either namespace spelling
+      - expr: 'ALERTS{alertname="RolloutNoAvailableReplicas", alertstate="firing", name=~"ledger-service|kyc-service"}'
+        eval_time: 20m
+        exp_samples: []
+      - expr: 'ALERTS{alertname=~"RolloutAnalysisAborted|RolloutProgressDeadlineExceeded|RolloutStuckProgressing", alertstate="firing", name="ledger-service"}'
+        eval_time: 35m
+        exp_samples: []
+      # nothing may be labelled with the controller namespace
+      - expr: 'ALERTS{alertname=~"Rollout.*", alertstate="firing", namespace="argo-rollouts"}'
+        eval_time: 35m
+        exp_samples: []
