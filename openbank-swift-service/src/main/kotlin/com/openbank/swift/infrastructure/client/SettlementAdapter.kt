@@ -9,6 +9,7 @@ import com.openbank.clients.transaction.TransactionClient
 import com.openbank.clients.transaction.TransactionCompletionFailure
 import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.TransactionHttpException
+import com.openbank.clients.transaction.UnsettledOutcome
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.swift.application.port.out.SettlementOutcome
@@ -16,7 +17,7 @@ import com.openbank.swift.application.port.out.SettlementPort
 import com.openbank.swift.application.port.out.SettlementUnavailableException
 import com.openbank.swift.domain.model.SwiftMessage
 import com.openbank.swift.infrastructure.observability.SwiftSettlementMetrics
-import com.openbank.swift.infrastructure.observability.SwiftSettlementMetrics.Outcome
+import com.openbank.swift.infrastructure.observability.SwiftSettlementMetrics.SwiftOutcome
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.CancellationException
@@ -58,7 +59,7 @@ class SettlementAdapter(
             // SwiftMessage.validate() guarantees YYYYMMDD at creation; a stored value that no longer parses is
             // bad data, not an outage: nothing is sent and the message stays SENT. It cannot heal, so it is
             // counted as bad-data and marked permanent: the re-drive stops on it, the open clock keeps alerting.
-            metrics.unsettled(Outcome.BAD_DATA)
+            metrics.unsettled(SwiftOutcome.BAD_DATA)
             log.errorf(
                 e,
                 "SWIFT message %s has an unparseable value date '%s'; not booking",
@@ -83,12 +84,12 @@ class SettlementAdapter(
                 is TransactionCompletionUncertainException -> if (ex.completionFailure ==
                     TransactionCompletionFailure.FAILED
                 ) {
-                    Outcome.FAILED_REPLAY
+                    UnsettledOutcome.FAILED_REPLAY
                 } else {
-                    Outcome.UNEXPECTED_STATUS
+                    UnsettledOutcome.UNEXPECTED_STATUS
                 }
-                is TransactionHttpException -> Outcome.UNEXPECTED_STATUS
-                else -> Outcome.TRANSPORT_ERROR
+                is TransactionHttpException -> UnsettledOutcome.UNEXPECTED_STATUS
+                else -> UnsettledOutcome.TRANSPORT_ERROR
             }
             metrics.unsettled(reason)
             // No proven completion (5xx, dropped connection): the caller retains SENT, never decided here.
@@ -144,7 +145,7 @@ class SettlementAdapter(
     }
 
     private fun unbound(message: SwiftMessage, reason: String): SettlementOutcome {
-        metrics.unsettled(Outcome.MISMATCH)
+        metrics.unsettled(UnsettledOutcome.MISMATCH)
         log.warnf(
             "transaction-service answered with %s for SWIFT message %s settlement; message stays SENT",
             reason,
@@ -154,7 +155,15 @@ class SettlementAdapter(
     }
 
     private fun refused(message: SwiftMessage, status: Int): SettlementOutcome {
-        metrics.unsettled(if (status == HTTP_CONFLICT) Outcome.CONFLICT else Outcome.UNEXPECTED_STATUS)
+        metrics.unsettled(
+            if (status ==
+                HTTP_CONFLICT
+            ) {
+                UnsettledOutcome.CONFLICT
+            } else {
+                UnsettledOutcome.UNEXPECTED_STATUS
+            },
+        )
         log.warnf(
             "transaction-service returned HTTP %d for SWIFT message %s settlement; message stays SENT",
             status,

@@ -9,6 +9,7 @@ import com.openbank.clients.transaction.TransactionClient
 import com.openbank.clients.transaction.TransactionCompletionFailure
 import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.TransactionHttpException
+import com.openbank.clients.transaction.UnsettledOutcome
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.libs.domain.payment.PaymentRail
@@ -18,7 +19,6 @@ import com.openbank.sepa.application.port.out.SettlementUnavailableException
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentType
 import com.openbank.sepa.infrastructure.observability.SepaSettlementMetrics
-import com.openbank.sepa.infrastructure.observability.SepaSettlementMetrics.Outcome
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -91,12 +91,12 @@ class SettlementAdapter(
             SettlementResponseCheck.confirm(payment.id.toString(), request, outcome)
         } catch (ex: SettlementUnavailableException) {
             val classification = when (outcome) {
-                TransactionCallOutcome.Conflict -> Outcome.CONFLICT
-                is TransactionCallOutcome.Rejected -> Outcome.UNEXPECTED_STATUS
+                TransactionCallOutcome.Conflict -> UnsettledOutcome.CONFLICT
+                is TransactionCallOutcome.Rejected -> UnsettledOutcome.UNEXPECTED_STATUS
                 is TransactionCallOutcome.HttpSuccess -> if (outcome.status == 201) {
-                    Outcome.MISMATCH
+                    UnsettledOutcome.MISMATCH
                 } else {
-                    Outcome.UNEXPECTED_STATUS
+                    UnsettledOutcome.UNEXPECTED_STATUS
                 }
             }
             metrics.unsettled(classification)
@@ -118,16 +118,16 @@ class SettlementAdapter(
             throw ex
         }
 
-    private fun providerFailure(failure: Exception): Outcome = when (failure) {
+    private fun providerFailure(failure: Exception): UnsettledOutcome = when (failure) {
         is TransactionCompletionUncertainException -> if (failure.completionFailure ==
             TransactionCompletionFailure.FAILED
         ) {
-            Outcome.FAILED_REPLAY
+            UnsettledOutcome.FAILED_REPLAY
         } else {
-            Outcome.UNEXPECTED_STATUS
+            UnsettledOutcome.UNEXPECTED_STATUS
         }
-        is TransactionHttpException -> Outcome.UNEXPECTED_STATUS
-        else -> Outcome.TRANSPORT_ERROR
+        is TransactionHttpException -> UnsettledOutcome.UNEXPECTED_STATUS
+        else -> UnsettledOutcome.TRANSPORT_ERROR
     }
 
     private fun requestFor(payment: SepaPayment, acceptedAt: Instant) = InitiateTransactionRequest(

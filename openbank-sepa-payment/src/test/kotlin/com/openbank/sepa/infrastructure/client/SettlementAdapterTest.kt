@@ -5,6 +5,7 @@
 package com.openbank.sepa.infrastructure.client
 
 import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.UnsettledOutcome
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.libs.domain.money.Money
@@ -237,7 +238,7 @@ class SettlementAdapterTest {
             .isNotInstanceOf(SettlementUnavailableException::class.java)
     }
 
-    private fun counts(): Map<String, Double> = SepaSettlementMetrics.Outcome.entries.associate { outcome ->
+    private fun counts(): Map<String, Double> = UnsettledOutcome.entries.associate { outcome ->
         outcome.label to registry.get(SepaSettlementMetrics.METRIC)
             .tags("rail", "SEPA", "outcome", outcome.label).counter().count()
     }
@@ -259,7 +260,7 @@ class SettlementAdapterTest {
             Case(matching(), 202, "unexpected-status"),
             Case(null, 500, "unexpected-status"),
         )
-        val expected = SepaSettlementMetrics.Outcome.entries.associate { it.label to 0.0 }.toMutableMap()
+        val expected = UnsettledOutcome.entries.associate { it.label to 0.0 }.toMutableMap()
         for (case in cases) {
             answer(case.tx, case.http)
             assertThat(runCatching { adapter.settle(payment(), ACCEPTED_AT) }.exceptionOrNull())

@@ -4,6 +4,8 @@
 
 package com.openbank.swift.infrastructure.observability
 
+import com.openbank.clients.transaction.UnsettledOutcome
+import com.openbank.clients.transaction.UnsettledOutcomeLabel
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
@@ -19,7 +21,7 @@ class SwiftSettlementMetrics {
     @Inject
     lateinit var registryInstance: Instance<MeterRegistry>
 
-    private var counters: Map<Outcome, Counter> = emptyMap()
+    private var counters: Map<UnsettledOutcomeLabel, Counter> = emptyMap()
 
     @PostConstruct
     fun register() {
@@ -28,24 +30,20 @@ class SwiftSettlementMetrics {
 
     /** Zero means no observed unsettled attempts since process start, not proof of successful bookings. */
     fun bindTo(registry: MeterRegistry) {
-        counters = Outcome.entries.associateWith { outcome ->
+        counters = ALL_OUTCOMES.associateWith { outcome ->
             registry.counter(METRIC, "rail", "SWIFT", "outcome", outcome.label)
         }
     }
 
-    fun unsettled(outcome: Outcome) {
+    fun unsettled(outcome: UnsettledOutcomeLabel) {
         counters[outcome]?.increment()
     }
 
-    enum class Outcome(val label: String) {
-        MISMATCH("mismatch"),
-
-        // A FAILED response, including a replay; this label does not prove the request was replayed.
-        FAILED_REPLAY("failed-replay"),
-        CONFLICT("conflict"),
-        UNEXPECTED_STATUS("unexpected-status"),
-        TRANSPORT_ERROR("transport-error"),
-
+    /**
+     * SWIFT-only extension of the shared [UnsettledOutcome] vocabulary (#13669): outcomes of the settlement
+     * re-drive and of stored data, which no other rail produces. The shared values are not repeated here.
+     */
+    enum class SwiftOutcome(override val label: String) : UnsettledOutcomeLabel {
         // #13686: the re-drive gave up on a message; it is no longer retried and its booking clock stays open.
         REDRIVE_EXHAUSTED("redrive-exhausted"),
 
@@ -61,6 +59,9 @@ class SwiftSettlementMetrics {
     }
 
     companion object {
-        const val METRIC = "openbank.payment.unsettled"
+        const val METRIC = UnsettledOutcome.METRIC
+
+        /** Every series registered eagerly at zero: the shared values first, then the SWIFT-only ones. */
+        val ALL_OUTCOMES: List<UnsettledOutcomeLabel> = UnsettledOutcome.entries + SwiftOutcome.entries
     }
 }
