@@ -138,3 +138,7 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Test coverage floor
+
+`koverVerify` enforces a LINE coverage floor of 40%, the money-path baseline in `rules.yaml: coverage.money_path_floor` (raised from 34 in #13144). Measured coverage on 2026-10-31 was 86.1% (507/589 lines). The floor is ratchet-only.
