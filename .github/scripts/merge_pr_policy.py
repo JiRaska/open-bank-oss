@@ -32,6 +32,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     # Independently reviewed canonical first-parent source shared by #14150, #14182,
     # #14220, #14233, #14235, #14240, #14253, #14262, #14265, #14272 and #14277.
     'c5fa389c9724b4998f1c82b0281fc164194ca98b',
+    # Independently reviewed canonical first-parent source: #14381.
+    'a6909111d6622e77549e195be58e6332b64837b6',
     # Independently reviewed canonical first-parent source: #14373.
     '2af53eb7424798ae66558c81417190d2805943e7',
 })
