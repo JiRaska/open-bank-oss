@@ -21,12 +21,12 @@ import java.util.UUID
 
 /**
  * Unit coverage for [MoneyPathInvariants.standingOrderExecutionConservation], in isolation from
- * the seeded runner — building a [World] by hand and poking `StandingOrderBook` directly proves
+ * the seeded runner — building a [World] by hand and poking `StandingOrderExecutionBook` directly proves
  * the invariant's own comparison logic (per-order, not netted across orders; ONCE discipline
- * separate from the posted-amount law) independent of how [World.standingOrders] gets populated.
+ * separate from the posted-amount law) independent of how [World.standingOrderExecutions] gets populated.
  * `com.openbank.simulation.scenario.StandingOrderExecutionScenario` (wired into
  * `SimulationRunner.runSeed`) is what feeds real sweep/execution activity into
- * [World.standingOrders] during an actual seeded run — see `StandingOrderExecutionScenarioTest` /
+ * [World.standingOrderExecutions] during an actual seeded run — see `StandingOrderExecutionScenarioTest` /
  * `DstSimulationTest` for the integrated, non-vacuous proof.
  */
 class StandingOrderExecutionConservationInvariantTest {
@@ -69,15 +69,15 @@ class StandingOrderExecutionConservationInvariantTest {
         val w = world()
         val id = UUID.randomUUID()
         val order = order(id, Frequency.DAILY, amountMinorUnits = 5_000)
-        w.standingOrders.place(order)
+        w.standingOrderExecutions.place(order)
         val day1 = LocalDate.parse("2026-01-01")
         val day2 = LocalDate.parse("2026-01-02")
-        w.standingOrders.recordAttempt(id, day1)
-        w.standingOrders.recordAttempt(id, day2)
-        w.standingOrders.recordConfirmed(id, day1)
-        w.standingOrders.recordConfirmed(id, day2)
-        w.standingOrders.recordPosted(id, BigDecimal("50.00"))
-        w.standingOrders.recordPosted(id, BigDecimal("50.00"))
+        w.standingOrderExecutions.recordAttempt(id, day1)
+        w.standingOrderExecutions.recordAttempt(id, day2)
+        w.standingOrderExecutions.recordConfirmed(id, day1)
+        w.standingOrderExecutions.recordConfirmed(id, day2)
+        w.standingOrderExecutions.recordPosted(id, BigDecimal("50.00"))
+        w.standingOrderExecutions.recordPosted(id, BigDecimal("50.00"))
 
         assertThat(MoneyPathInvariants.standingOrderExecutionConservation.check(w)).isNull()
     }
@@ -86,11 +86,11 @@ class StandingOrderExecutionConservationInvariantTest {
     fun `a failure that moved money anyway is a violation — posted exceeds confirmed executions`() {
         val w = world()
         val id = UUID.randomUUID()
-        w.standingOrders.place(order(id, Frequency.DAILY, amountMinorUnits = 5_000))
+        w.standingOrderExecutions.place(order(id, Frequency.DAILY, amountMinorUnits = 5_000))
         val day1 = LocalDate.parse("2026-01-01")
-        w.standingOrders.recordAttempt(id, day1)
+        w.standingOrderExecutions.recordAttempt(id, day1)
         // No confirmation for day1, yet 50.00 posted — the replay/duplication defect class.
-        w.standingOrders.recordPosted(id, BigDecimal("50.00"))
+        w.standingOrderExecutions.recordPosted(id, BigDecimal("50.00"))
 
         val violation = MoneyPathInvariants.standingOrderExecutionConservation.check(w)
         assertThat(violation).isNotNull()
@@ -101,11 +101,11 @@ class StandingOrderExecutionConservationInvariantTest {
     fun `a confirmed execution that posted less than the order amount is a violation`() {
         val w = world()
         val id = UUID.randomUUID()
-        w.standingOrders.place(order(id, Frequency.DAILY, amountMinorUnits = 5_000))
+        w.standingOrderExecutions.place(order(id, Frequency.DAILY, amountMinorUnits = 5_000))
         val day1 = LocalDate.parse("2026-01-01")
-        w.standingOrders.recordAttempt(id, day1)
-        w.standingOrders.recordConfirmed(id, day1)
-        w.standingOrders.recordPosted(id, BigDecimal("49.99"))
+        w.standingOrderExecutions.recordAttempt(id, day1)
+        w.standingOrderExecutions.recordConfirmed(id, day1)
+        w.standingOrderExecutions.recordPosted(id, BigDecimal("49.99"))
 
         assertThat(MoneyPathInvariants.standingOrderExecutionConservation.check(w)).isNotNull()
     }
@@ -114,15 +114,15 @@ class StandingOrderExecutionConservationInvariantTest {
     fun `a ONCE order attempted on two distinct dates is a violation even when money conserves`() {
         val w = world()
         val id = UUID.randomUUID()
-        w.standingOrders.place(order(id, Frequency.ONCE, amountMinorUnits = 5_000))
+        w.standingOrderExecutions.place(order(id, Frequency.ONCE, amountMinorUnits = 5_000))
         val day1 = LocalDate.parse("2026-01-01")
         val day2 = LocalDate.parse("2026-01-02")
-        w.standingOrders.recordAttempt(id, day1)
-        w.standingOrders.recordAttempt(id, day2)
-        w.standingOrders.recordConfirmed(id, day1)
-        w.standingOrders.recordConfirmed(id, day2)
-        w.standingOrders.recordPosted(id, BigDecimal("50.00"))
-        w.standingOrders.recordPosted(id, BigDecimal("50.00"))
+        w.standingOrderExecutions.recordAttempt(id, day1)
+        w.standingOrderExecutions.recordAttempt(id, day2)
+        w.standingOrderExecutions.recordConfirmed(id, day1)
+        w.standingOrderExecutions.recordConfirmed(id, day2)
+        w.standingOrderExecutions.recordPosted(id, BigDecimal("50.00"))
+        w.standingOrderExecutions.recordPosted(id, BigDecimal("50.00"))
 
         assertThat(MoneyPathInvariants.standingOrderExecutionConservation.check(w))
             .isNotNull()
@@ -134,14 +134,14 @@ class StandingOrderExecutionConservationInvariantTest {
     fun `a confirmed ONCE order still ACTIVE is the issue-12839 violation`() {
         val w = world()
         val id = UUID.randomUUID()
-        w.standingOrders.place(order(id, Frequency.ONCE, amountMinorUnits = 5_000))
+        w.standingOrderExecutions.place(order(id, Frequency.ONCE, amountMinorUnits = 5_000))
         val day1 = LocalDate.parse("2026-01-01")
-        w.standingOrders.recordAttempt(id, day1)
-        w.standingOrders.recordConfirmed(id, day1)
-        w.standingOrders.recordPosted(id, BigDecimal("50.00"))
+        w.standingOrderExecutions.recordAttempt(id, day1)
+        w.standingOrderExecutions.recordConfirmed(id, day1)
+        w.standingOrderExecutions.recordPosted(id, BigDecimal("50.00"))
         // The defect shape from issue #12839: the payment went through (confirmed, posted) but
         // the order never completed — it stays ACTIVE and would be re-due on the next sweep.
-        w.standingOrders.replace(w.standingOrders.view(id).order!!.copy(status = StandingOrderStatus.ACTIVE))
+        w.standingOrderExecutions.replace(w.standingOrderExecutions.view(id).order!!.copy(status = StandingOrderStatus.ACTIVE))
 
         assertThat(MoneyPathInvariants.standingOrderExecutionConservation.check(w))
             .isNotNull()
@@ -153,14 +153,14 @@ class StandingOrderExecutionConservationInvariantTest {
     fun `a failed-then-retried ONCE order on the same date stays within the law`() {
         val w = world()
         val id = UUID.randomUUID()
-        w.standingOrders.place(order(id, Frequency.ONCE, amountMinorUnits = 5_000))
+        w.standingOrderExecutions.place(order(id, Frequency.ONCE, amountMinorUnits = 5_000))
         val day1 = LocalDate.parse("2026-01-01")
-        w.standingOrders.recordAttempt(id, day1)
+        w.standingOrderExecutions.recordAttempt(id, day1)
         // First attempt declined, retry replays the SAME date (idempotent), then succeeds.
-        w.standingOrders.recordConfirmed(id, day1)
-        w.standingOrders.recordPosted(id, BigDecimal("50.00"))
-        w.standingOrders.replace(
-            w.standingOrders.view(id).order!!.copy(status = StandingOrderStatus.COMPLETED),
+        w.standingOrderExecutions.recordConfirmed(id, day1)
+        w.standingOrderExecutions.recordPosted(id, BigDecimal("50.00"))
+        w.standingOrderExecutions.replace(
+            w.standingOrderExecutions.view(id).order!!.copy(status = StandingOrderStatus.COMPLETED),
         )
 
         assertThat(MoneyPathInvariants.standingOrderExecutionConservation.check(w)).isNull()

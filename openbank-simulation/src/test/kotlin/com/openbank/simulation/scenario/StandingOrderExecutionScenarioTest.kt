@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test
 
 /**
  * Exercises [StandingOrderExecutionScenario] directly, proving it actually feeds
- * [World.standingOrders] (so `MoneyPathInvariants.standingOrderExecutionConservation` is
+ * [World.standingOrderExecutions] (so `MoneyPathInvariants.standingOrderExecutionConservation` is
  * load-bearing, not vacuously true over an always-empty book), that the journals it posts are
  * real, balanced `openbank-ledger-service` `JournalEntry` postings, and that the real
  * `StandingOrder` aggregate's lifecycle rules (daily recurrence, endDate completion, ONCE
@@ -33,7 +33,7 @@ class StandingOrderExecutionScenarioTest {
         val world = newWorld()
         repeat(3) { StandingOrderExecutionScenario.step(world) }
 
-        assertThat(world.standingOrders.all()).isNotEmpty()
+        assertThat(world.standingOrderExecutions.all()).isNotEmpty()
         assertThat(world.ledger.postedCount()).isGreaterThanOrEqualTo(1)
         assertThat(MoneyPathInvariants.conservationOfMoney.check(world)).isNull()
         assertThat(MoneyPathInvariants.standingOrderExecutionConservation.check(world)).isNull()
@@ -46,8 +46,8 @@ class StandingOrderExecutionScenarioTest {
 
         assertThat(MoneyPathInvariants.standingOrderExecutionConservation.check(world)).isNull()
         // At least one execution must have confirmed, or the conservation law above proved nothing.
-        val confirmedTotal = world.standingOrders.all()
-            .sumOf { world.standingOrders.view(it.id).confirmedDates.size }
+        val confirmedTotal = world.standingOrderExecutions.all()
+            .sumOf { world.standingOrderExecutions.view(it.id).confirmedDates.size }
         assertThat(confirmedTotal).isGreaterThanOrEqualTo(1)
     }
 
@@ -60,7 +60,7 @@ class StandingOrderExecutionScenarioTest {
         val world = newWorld(seed = 11L)
         repeat(400) { StandingOrderExecutionScenario.step(world) }
 
-        val statuses = world.standingOrders.all().map { it.status }.toSet()
+        val statuses = world.standingOrderExecutions.all().map { it.status }.toSet()
         assertThat(statuses)
             .containsAnyOf(StandingOrderStatus.COMPLETED, StandingOrderStatus.FAILED)
         assertThat(MoneyPathInvariants.standingOrderExecutionConservation.check(world)).isNull()
@@ -76,14 +76,14 @@ class StandingOrderExecutionScenarioTest {
             newWorld(seed = seed).also { world -> repeat(200) { StandingOrderExecutionScenario.step(world) } }
         }
 
-        val onceOrders = worlds.flatMap { it.standingOrders.all() }.filter { it.frequency == Frequency.ONCE }
+        val onceOrders = worlds.flatMap { it.standingOrderExecutions.all() }.filter { it.frequency == Frequency.ONCE }
         assertThat(onceOrders).isNotEmpty()
         onceOrders.forEach { order ->
             assertThat(order.executionCount)
                 .describedAs("ONCE order %s must not be re-swept after completion", order.id)
                 .isLessThanOrEqualTo(1)
-            val world = worlds.first { it.standingOrders.view(order.id).order != null }
-            if (world.standingOrders.view(order.id).confirmedDates.isNotEmpty()) {
+            val world = worlds.first { it.standingOrderExecutions.view(order.id).order != null }
+            if (world.standingOrderExecutions.view(order.id).confirmedDates.isNotEmpty()) {
                 assertThat(order.status).isEqualTo(StandingOrderStatus.COMPLETED)
             }
         }
@@ -119,7 +119,7 @@ class StandingOrderExecutionScenarioTest {
         repeat(60) { StandingOrderExecutionScenario.step(second) }
 
         assertThat(first.ledger.postedCount()).isEqualTo(second.ledger.postedCount())
-        assertThat(first.standingOrders.all().map { it.id to it.status })
-            .isEqualTo(second.standingOrders.all().map { it.id to it.status })
+        assertThat(first.standingOrderExecutions.all().map { it.id to it.status })
+            .isEqualTo(second.standingOrderExecutions.all().map { it.id to it.status })
     }
 }

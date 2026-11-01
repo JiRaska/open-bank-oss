@@ -8,21 +8,12 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     // M2M client-credentials token attached to the downstream account/balance/transaction/consent
     // RestClient calls (ADR-0195 step 2) — same pattern as openbank-agent-service's ServiceClients.
     implementation(libs.quarkus.oidc.client.reactive.filter)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     // ADR-0224 D2: the agent-session store — this service's first persistence (governance.yaml's
     // ownsNoDatabase note anticipated exactly this step). The reactive pg client is what creates
@@ -39,10 +30,11 @@ dependencies {
     // (PolicyDecisionPoint / OpaSidecarPolicyDecisionPoint) lives here.
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // #13169: the account-service operations and DTOs are generated from its openapi.yaml (ADR-0319).
+    implementation(project(":openbank-client-account"))
     testImplementation(project(":openbank-libs-testing"))
-    testImplementation(libs.quarkus.junit5)
-    testImplementation(libs.assertj)
-    testImplementation(libs.rest.assured.kotlin)
+    // Stubs the generated account-service client (#13169): it returns raw JAX-RS Responses.
+    testImplementation(libs.mockk)
     // Consumer-driven contract tests (ADR-0063, issue #2255 dimension C3). mcp's read ports became
     // real HTTP clients in #2262 and are not wired as the default yet — pinning the routes now is
     // what keeps the ADR-0195 cutover from shipping a call to a path that does not exist (#2269).

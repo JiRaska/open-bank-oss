@@ -96,7 +96,15 @@ test.describe('Transaction ledger search recovery', () => {
     await expect(clear).toHaveCount(0)
 
     await page.locator('html').evaluate(element => element.classList.add('dark'))
-    const background = await page.locator('.ui-empty-state').evaluate(element => getComputedStyle(element).backgroundImage)
+    const resetState = page.getByRole('status')
+    await expect(resetState).toHaveCount(1)
+    await expect(resetState).toContainText('Find a transaction using the details you have')
+    await expect(page.getByText('No transactions have been recorded yet', { exact: true })).toHaveCount(0)
+    const resetCard = page.getByRole('main').locator('.ui-empty-state')
+      .filter({ hasText: 'Find a transaction using the details you have' })
+    await expect(resetCard).toHaveCount(1)
+    await expect(resetCard).toBeVisible()
+    const background = await resetCard.evaluate(element => getComputedStyle(element).backgroundImage)
     expect(background).not.toBe('none')
   })
 
@@ -116,7 +124,7 @@ test.describe('Transaction ledger search recovery', () => {
     await expect(page.locator('#transaction-date-range-error')).toContainText('The start date must be on or before the end date.')
     const search = page.getByRole('button', { name: 'Search transactions' })
     await expect(search).toBeDisabled()
-    await page.getByLabel('Search by account ID').press('Enter')
+    await page.getByLabel('Filter by IBAN').press('Enter')
     expect(requestedUrls).toHaveLength(0)
 
     await page.getByLabel('Date to').fill('2026-09-30')
@@ -124,7 +132,7 @@ test.describe('Transaction ledger search recovery', () => {
     await page.getByLabel('Amount to (CZK)').fill('100')
     await expect(page.locator('#transaction-amount-range-error')).toContainText('The minimum amount cannot exceed the maximum amount.')
     await expect(search).toBeDisabled()
-    await page.getByLabel('Search by account ID').press('Enter')
+    await page.getByLabel('Filter by IBAN').press('Enter')
     expect(requestedUrls).toHaveLength(0)
 
     await page.getByLabel('Amount to (CZK)').fill('300')

@@ -4,7 +4,15 @@ openapi: 3.1.0
 info:
   title: Product Catalog API
   # API-contract version is independent of version.txt (ADR-0048); newest URL major is /api/v2.
-  version: 2.4.0
+  # 2.4.0 -> 2.5.0 (ADR-0341): additive GET /api/v2/legacy-products/{productId}/published-revision, the
+  # revision a contract pins when it still knows a product only by its v1 id.
+  # 2.8.0 -> 2.9.0 (ADR-0352 phase 2): additive. RevisionRequest/RevisionContent gain an optional
+  # `behaviour` (product IR v1), ProductRevision gains an optional `irSignature`, and
+  # POST .../revisions/{revisionId}/publish-ir publishes an IR-bearing revision signed (four-eyes
+  # action catalog.publish-ir). The plain publish refuses an IR-bearing revision with 409.
+  # 2.9.0 -> 2.10.0 (ADR-0352 phase 5b): additive POST /api/v2/product-ir/lint, the Studio IR editor's
+  # dry-run of the same parser a revision write runs; stores nothing.
+  version: 2.10.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -36,8 +44,10 @@ tags:
     description: Durable pull cursor for standalone change delivery
   - name: Catalog V2
     description: Generated runtime contract for the governed generic catalog
+  - name: Revision Approvals
+    description: Independent role-qualified approval evidence for schemas whose pack declares an approval policy
   - name: Pension Approvals
-    description: Independent legal and product evidence for pension pack v2 revisions
+    description: Deprecated alias of Revision Approvals (#13429)
 security:
   - bearerAuth: []
 paths:
@@ -347,6 +357,31 @@ paths:
         '404': { $ref: '#/components/responses/CatalogNotFound' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/product-ir/lint:
+    post:
+      tags: [Catalog V2]
+      summary: Lint a product IR document without storing it
+      description: >-
+        ADR-0352 phase 5b. Runs the exact validation a revision write runs on its `behaviour`
+        (trusted-profile bound, then the shared ProductIrParser) and returns what `obp lint` prints:
+        productCode, irVersion and the canonical revisionHash, plus the canonical IR bytes. Stores
+        nothing, signs nothing, publishes nothing. Invalid IR is a 200 with valid=false and the
+        parser's problems, so an editor can show every problem at once.
+      operationId: lintProductIrV2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LintProductIrRequest' }
+      responses:
+        '200':
+          description: Lint result, deterministically ordered problems
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LintProductIrResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/specifications:
     get:
       tags: [Catalog V2]
@@ -595,11 +630,100 @@ paths:
         '428': { $ref: '#/components/responses/PreconditionRequired' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/offerings/{offeringId}/revisions/{revisionId}/publish-ir:
+    post:
+      tags: [Catalog V2]
+      summary: Publish an IR-bearing revision, signing its canonical revisionHash (ADR-0352)
+      description: >-
+        Four-eyes action `catalog.publish-ir`, distinct from `catalog.publish`. The revision's
+        `content.behaviour` is validated as product IR v1, hashed over its canonical form and signed
+        by the publish path; the detached signature is stored with the revision and returned as
+        `irSignature`. A revision without `behaviour` is refused with 409; the plain publish refuses
+        a revision WITH `behaviour` with 409, so an IR-bearing revision is never published unsigned.
+      operationId: publishOfferingRevisionIrV2
+      parameters:
+        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IfMatchRequired' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PublishRequest' }
+      responses:
+        '200':
+          description: Published, signed immutable revision
+          headers:
+            ETag: { $ref: '#/components/headers/RevisionETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductRevision' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422': { $ref: '#/components/responses/CatalogValidation' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/offerings/{offeringId}/revisions/{revisionId}/approvals:
+    get:
+      tags: [Revision Approvals]
+      operationId: listRevisionApprovalsV2
+      summary: List role approvals recorded for a revision's current content and effective interval
+      parameters:
+        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Approval metadata matching the revision's current content and effective interval
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RevisionApprovalResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
+  /api/v2/offerings/{offeringId}/revisions/{revisionId}/approvals/{role}:
+    post:
+      tags: [Revision Approvals]
+      operationId: approveRevisionV2
+      summary: Record one immutable, authenticated approval by a role the revision's pack policy declares
+      parameters:
+        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: role
+          in: path
+          required: true
+          description: A role code declared by the approval policy of the revision's schema (pack.json).
+          schema: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
+        - { $ref: '#/components/parameters/IfMatchRequired' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RevisionApprovalRequest' }
+      responses:
+        '201':
+          description: Immutable approval evidence recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RevisionApprovalResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
   /api/v2/offerings/{offeringId}/revisions/{revisionId}/pension-approvals:
     get:
       tags: [Pension Approvals]
       operationId: listPensionRevisionApprovalsV2
-      summary: List role approvals recorded for a pension catalog revision
+      deprecated: true
+      summary: Deprecated alias of listRevisionApprovalsV2 (#13429)
       parameters:
         - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -618,7 +742,8 @@ paths:
     post:
       tags: [Pension Approvals]
       operationId: approvePensionRevisionV2
-      summary: Record one immutable, authenticated, role-qualified approval of an exact draft
+      deprecated: true
+      summary: Deprecated alias of approveRevisionV2 (#13429)
       parameters:
         - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -649,6 +774,29 @@ paths:
       operationId: getPublishedProductV2
       parameters:
         - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: effectiveAt, in: query, required: false, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Published revision effective at the requested instant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductRevision' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/legacy-products/{productId}/published-revision:
+    get:
+      tags: [Catalog V2]
+      summary: Resolve the published revision of a v1 banking product by its v1 product id
+      description: >-
+        ADR-0341: a contract pins a published catalog revision. Services that still hold only the v1
+        product id (an account's `productId`) resolve the revision effective now here and pin its
+        `id`; the pin, not this lookup, is what later reads use. 404 when the product is unknown or
+        none of its revisions is published yet.
+      operationId: getPublishedRevisionForLegacyProductV2
+      parameters:
+        - { name: productId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: effectiveAt, in: query, required: false, schema: { type: string, format: date-time } }
       responses:
         '200':
@@ -755,13 +903,29 @@ components:
       description: Strong optimistic-concurrency token for this product representation.
       schema: { type: string, pattern: '^"[0-9]+"$' }
   schemas:
+    RevisionApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 4096 }
+    RevisionApprovalResponse:
+      type: object
+      additionalProperties: false
+      required: [role, digest, approvedAt]
+      properties:
+        role: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
+        digest: { type: string, pattern: '^[0-9a-f]{64}$' }
+        approvedAt: { type: string, format: date-time }
     PensionApprovalRequest:
+      deprecated: true
       type: object
       additionalProperties: false
       required: [reason]
       properties:
         reason: { type: string, minLength: 1, maxLength: 4096 }
     PensionApprovalResponse:
+      deprecated: true
       type: object
       additionalProperties: false
       required: [role, digest, approvedAt]
@@ -800,7 +964,32 @@ components:
         document: { type: object, additionalProperties: true }
         sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
         registeredAt: { type: string, format: date-time }
+        approvalPolicy:
+          $ref: '#/components/schemas/RevisionApprovalPolicy'
+          description: >-
+            Role approvals the pack requires before a revision of this exact schema version may
+            publish; absent when publication is maker-checker only. Internal authorities stay private.
       required: [id, version, document, sha256, registeredAt]
+    RevisionApprovalPolicy:
+      type: object
+      additionalProperties: false
+      required: [roles, requireEffectiveFrom, requiredAttributes]
+      properties:
+        roles:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/RevisionApprovalRole' }
+        requireEffectiveFrom: { type: boolean }
+        requiredAttributes:
+          type: object
+          description: Top-level attribute values a draft must carry before any role may approve it.
+          additionalProperties: { type: string }
+    RevisionApprovalRole:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
     SchemaViolation:
       type: object
       additionalProperties: false
@@ -816,6 +1005,39 @@ components:
       properties:
         attributes: { type: object, additionalProperties: true }
       required: [attributes]
+    LintProductIrRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        ir:
+          type: object
+          additionalProperties: true
+          description: Product IR v1 document (ADR-0352), exactly as it would be sent as a revision's `behaviour`.
+      required: [ir]
+    ProductIrProblem:
+      type: object
+      additionalProperties: false
+      properties:
+        path: { type: string, description: JSON pointer into the submitted IR }
+        message: { type: string }
+      required: [path, message]
+    LintProductIrResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        valid: { type: boolean }
+        productCode: { type: [string, 'null'] }
+        irVersion: { type: [integer, 'null'] }
+        revisionHash:
+          type: [string, 'null']
+          description: SHA-256 of the canonical IR, the hash two approvals bind to (ADR-0352 §4).
+        canonicalIr:
+          type: [string, 'null']
+          description: Canonical JSON of the IR, byte-identical to `obp compile` output for the same product.
+        problems:
+          type: array
+          items: { $ref: '#/components/schemas/ProductIrProblem' }
+      required: [valid, problems]
     ValidateCatalogResponse:
       type: object
       additionalProperties: false
@@ -899,6 +1121,13 @@ components:
         taxTreatment: { type: string, enum: [INCLUSIVE, EXCLUSIVE, EXEMPT, UNSPECIFIED] }
         effectiveFrom: { type: [string, 'null'], format: date-time }
         effectiveTo: { type: [string, 'null'], format: date-time }
+        role:
+          type: [string, 'null']
+          enum: [FEE, RATE, LIMIT, THRESHOLD, null]
+          description: >-
+            What the component is (#13230). Consumers act on a component only by its role; billing charges
+            FEE only. Null on components authored before roles existed, which keep their content hash.
+            A FEE must be an AMOUNT.
       required: [code, kind, value, unit, cadence]
     EligibilityOperator:
       type: string
@@ -959,6 +1188,12 @@ components:
           maxItems: 256
           uniqueItems: true
           items: { type: string, minLength: 1, maxLength: 128 }
+        behaviour:
+          type: [object, 'null']
+          additionalProperties: true
+          description: >-
+            Product IR v1 document (ADR-0352): the revision's executable behaviour, validated by the
+            IR parser on every write. Absent for a revision with no behaviour.
         effectiveFrom: { type: [string, 'null'], format: date-time }
         effectiveTo: { type: [string, 'null'], format: date-time }
       required: [schemaRef, name, attributes]
@@ -994,6 +1229,12 @@ components:
           maxItems: 256
           uniqueItems: true
           items: { type: string, minLength: 1, maxLength: 128 }
+        behaviour:
+          type: [object, 'null']
+          additionalProperties: true
+          description: >-
+            Product IR v1 document (ADR-0352): the revision's executable behaviour, validated by the
+            IR parser on every write. Absent for a revision with no behaviour.
       required: [name, attributes, prices, eligibility, relationships, documentCodes]
     ProductRevision:
       type: object
@@ -1011,11 +1252,35 @@ components:
         checkerId: { type: [string, 'null'] }
         reason: { type: [string, 'null'] }
         contentHash: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
-        pensionApprovalDigest: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
-        pensionApprovedEffectiveTo: { type: [string, 'null'], format: date-time }
+        approvalDigest:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{64}$'
+          description: Content digest the pack-declared role approvals covered, frozen at publication.
+        approvedEffectiveTo:
+          type: [string, 'null']
+          format: date-time
+          description: Effective-to the approvers saw; a successor may shorten effectiveTo, never this.
+        pensionApprovalDigest:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{64}$'
+          deprecated: true
+          description: Deprecated alias of approvalDigest (#13429).
+        pensionApprovedEffectiveTo:
+          type: [string, 'null']
+          format: date-time
+          deprecated: true
+          description: Deprecated alias of approvedEffectiveTo (#13429).
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         revision: { type: integer, format: int64, minimum: 0 }
+        irSignature:
+          oneOf:
+            - { $ref: '#/components/schemas/IrSignature' }
+            - { type: 'null' }
+          description: >-
+            Publish-path signature over the product IR's canonical revisionHash (ADR-0352 §4). Present
+            on every read of a revision published through publish-ir, single or list; null means the
+            revision is unsigned.
       required:
         - id
         - offeringId
@@ -1053,6 +1318,19 @@ components:
       properties:
         reason: { type: string, minLength: 1 }
       required: [reason]
+    IrSignature:
+      type: object
+      additionalProperties: false
+      description: >-
+        Detached signature over a product revision's canonical `revisionHash` (ADR-0352 §4). A
+        consumer's pinned-revision loader verifies it before the revision is evaluated.
+      properties:
+        revisionHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        keyId: { type: string, minLength: 1, maxLength: 128 }
+        algorithm: { type: string, minLength: 1, maxLength: 64, description: 'openbao-transit or hmac-sha256 (dev/test only)' }
+        signature: { type: string, minLength: 1 }
+        signedAt: { type: string, format: date-time }
+      required: [revisionHash, keyId, algorithm, signature, signedAt]
     Fee:
       type: object
       properties:

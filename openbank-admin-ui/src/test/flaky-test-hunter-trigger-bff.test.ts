@@ -218,6 +218,50 @@ describe('flaky-test-hunter trigger BFF', () => {
     expect(new Headers(init.headers).get('Idempotency-Key')).toBe('flaky-test-hunter-operator-manual-2026-08-17')
   })
 
+  it('reads only an admin-owned operator workflow status and validates the upstream contract', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'operator-token', roles: ['ROLE_ADMIN'] } } as never)
+    const workflowId = 'flaky-test-hunter-check-operator_manual-2026-08-18'
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ workflowId, status: 'RUNNING' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { GET } = await import('@/app/api/iaops/flaky-test-hunter/workflows/[workflowId]/route')
+
+    const response = await GET(new Request('http://localhost'), { params: Promise.resolve({ workflowId }) })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ workflowId, status: 'RUNNING' })
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://localhost:8148/api/v1/flaky-test-hunter/check/workflows/${workflowId}`,
+      expect.objectContaining({ headers: { Authorization: 'Bearer operator-token' }, cache: 'no-store' }),
+    )
+  })
+
+  it('rejects arbitrary or stale workflow IDs before making an upstream request', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'operator-token', roles: ['ROLE_ADMIN'] } } as never)
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const { GET } = await import('@/app/api/iaops/flaky-test-hunter/workflows/[workflowId]/route')
+
+    const response = await GET(new Request('http://localhost'), {
+      params: Promise.resolve({ workflowId: 'flaky-test-hunter-check-nightly-2026-08-18' }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not pass through malformed workflow status payloads', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'operator-token', roles: ['ROLE_ADMIN'] } } as never)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ workflowId: 'other-id', status: 'RUNNING' }), { status: 200 })))
+    const { GET } = await import('@/app/api/iaops/flaky-test-hunter/workflows/[workflowId]/route')
+
+    const response = await GET(new Request('http://localhost'), {
+      params: Promise.resolve({ workflowId: 'flaky-test-hunter-check-operator_manual-2026-08-18' }),
+    })
+
+    expect(response.status).toBe(502)
+    await expect(response.json()).resolves.toEqual({ error: 'invalid_workflow_status_response' })
+  })
+
   it('retires the legacy synchronous BFF route without contacting the agent', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)

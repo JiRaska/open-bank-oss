@@ -118,7 +118,7 @@ class DstSimulationTest {
             observation.checks++
             observation.screened = world.screening.conversions().size
             observation.authorizations = world.cardAuths.all().size
-            observation.standingOrders = world.standingOrders.all().size
+            observation.standingOrders = world.standingOrderExecutions.all().size
             observation.lastInstant = now
             return null
         }

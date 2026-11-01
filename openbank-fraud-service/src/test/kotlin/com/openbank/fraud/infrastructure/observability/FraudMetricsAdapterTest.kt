@@ -18,9 +18,23 @@ class FraudMetricsAdapterTest {
         adapter.recordVerdict(FraudVerdict.ALLOW, "SEPA")
         adapter.recordVerdict(FraudVerdict.ALLOW, "SEPA")
         adapter.recordVerdict(FraudVerdict.DECLINE, "FX")
+        adapter.recordVerdict(FraudVerdict.REVIEW, "CARD")
 
         assertThat(counter(registry, FraudVerdict.ALLOW, "SEPA")).isEqualTo(2.0)
         assertThat(counter(registry, FraudVerdict.DECLINE, "FX")).isEqualTo(1.0)
+        assertThat(counter(registry, FraudVerdict.REVIEW, "CARD")).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `maps caller-controlled rail values to one unknown bucket`() {
+        val registry = SimpleMeterRegistry()
+        val adapter = FraudMetricsAdapter(registry)
+
+        repeat(25) { adapter.recordVerdict(FraudVerdict.REVIEW, "attacker-controlled-$it") }
+        adapter.recordVerdict(FraudVerdict.REVIEW, "sepa")
+
+        assertThat(counter(registry, FraudVerdict.REVIEW, "unknown")).isEqualTo(26.0)
+        assertThat(registry.meters.map { it.id.getTag("rail") }.toSet()).containsOnly("unknown")
     }
 
     @Test

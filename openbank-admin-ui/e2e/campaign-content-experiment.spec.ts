@@ -4,6 +4,7 @@
 
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { waitForSettledShell } from './helpers/shell'
 
 const CAMPAIGN_ID = '019fb93a-0d54-7f05-aad3-9e8c7c9bc110'
 const CONTENT_CATALOGUE = [
@@ -82,6 +83,7 @@ test('authors a measured A/B content experiment and renders its conservative res
   }))
 
   await page.goto('/campaigns/new')
+  await waitForSettledShell(page)
   await page.locator('#c-name').fill('Headline comparison')
   await page.locator('#c-goal').fill('Open more accounts')
   // Mandatory in the studio since ADR-0269 (#8773): the maker states whether the campaign
@@ -99,7 +101,13 @@ test('authors a measured A/B content experiment and renders its conservative res
   await page.locator('#var-b-0-offerTitle').fill('Save more with B')
   await page.locator('#var-b-0-offerText').fill('B copy')
   await page.locator('#var-b-0-ctaText').fill('Try')
+  const createResponsePromise = page.waitForResponse(response =>
+    response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/api/campaigns'),
+  )
   await page.getByRole('button', { name: /Založit koncept|Create draft/ }).click()
+  const createResponse = await createResponsePromise
+  expect(createResponse.status()).toBe(200)
+  await expect(createResponse.json()).resolves.toMatchObject({ state: 'ok', campaign: { id: CAMPAIGN_ID } })
 
   await expect.poll(() => createBody).toMatchObject({
     conversionRule: 'ACCOUNT_OPENED',

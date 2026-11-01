@@ -1,0 +1,42 @@
+# Pension company ledger (ADR-0337): a SECOND deployment of ledger-service holding the pension
+# company's (penzijní společnost) own books — separate namespace, separate CNPG cluster
+# (ledger-pension-co-db), its own OPA bundle and chart of accounts, every bank-only scheduler and
+# the outbox → Kafka edge switched off (gate ledger-instance-switches-off). Read by
+# tax-reporting-service (frozen trial balances) and staff tooling only. No public Ingress.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ledger-pension-co
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/ledger-pension-co
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ledger-pension-co
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      # The OPA bundle ConfigMap is ~260 KB; client-side apply would store it in the
+      # last-applied-configuration annotation and be rejected past 256 KB (see apps/ledger.yaml).
+      - ServerSideApply=true
+  # Argo Rollouts sets spec.selector.rollouts-pod-template-hash on the stable/canary Services.
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jqPathExpressions:
+        - .spec.selector."rollouts-pod-template-hash"

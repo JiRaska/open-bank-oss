@@ -10,7 +10,10 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.openbank.risk.application.port.out.TreasuryDealBook
+import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.domain.Fixtures
+import com.openbank.risk.domain.valuation.DealKind
 import com.openbank.risk.integration.FakeLedgerPort
 import com.openbank.risk.integration.RiskSnapshotApiIT
 import com.openbank.risk.it.PostgresTestResource
@@ -20,11 +23,15 @@ import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
+import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hamcrest.Matchers.oneOf
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
 
 /**
  * Provider replay of finrep's snapshot-list, capital and liquidity pact (ADR-0313 D6) — the risk engine's
@@ -54,6 +61,9 @@ class RiskEnginePactProviderVerificationTest {
 
     @Inject
     lateinit var testIdentity: TestIdentityAssociation
+
+    @Inject
+    lateinit var dealBook: TreasuryDealBook
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
@@ -87,6 +97,59 @@ class RiskEnginePactProviderVerificationTest {
     /** treasury's simulated quotes (ADR-0315 D9) read the newest curve set and its pillars. */
     @State(CurveSetPactState.NAME)
     fun curveSetWithCzeonia(): Map<String, Any> = CurveSetPactState.seed()
+
+    /** treasury's revaluation (ADR-0344 D8) lists the runs and reads one TIED_OUT run's valuation. */
+    @State(ValuationPactState.NAME)
+    fun tiedOutRunValuingAnIrs(): Map<String, Any> = ValuationPactState.seed(ledger, dealBook)
+}
+
+/**
+ * treasury-service's revaluation state: the TIED_OUT run of [CapitalPactState], a curve set as of the
+ * same date carrying the two curves a CZK floating IRS needs, and one ACTUAL treasury IRS in the
+ * engine's deal book, so the valuation values exactly one deal. Run and deal ids go to the pact.
+ */
+object ValuationPactState {
+    const val NAME = "a TIED_OUT risk snapshot values a treasury IRS"
+    private val DEAL_ID: UUID = UUID.fromString("0191c0de-0000-7000-8000-00000000d1a1")
+
+    fun seed(ledger: FakeLedgerPort, book: TreasuryDealBook): Map<String, Any> {
+        val runId = CapitalPactState.seed(ledger).getValue("runId")
+        given().contentType("application/json").body(
+            """{"asOf":"2026-06-30","provenance":"synthetic","source":"pact provider state","curves":{
+                "CZEONIA":[{"tenor":"ON","rate":0.035},{"tenor":"1Y","rate":0.036},{"tenor":"5Y","rate":0.037,"instrument":"SWAP"}],
+                "PRIBOR_3M":[{"tenor":"3M","rate":0.036},{"tenor":"6x12","rate":0.0365,"instrument":"FRA"},
+                             {"tenor":"2Y","rate":0.0366,"instrument":"SWAP"},{"tenor":"5Y","rate":0.037,"instrument":"SWAP"}]}}""",
+        ).`when`().post("/api/v1/risk/curve-sets").then().statusCode(HTTP_CREATED)
+        val legs = """
+            [{"payReceive":"PAY","currency":"CZK","notional":100000000,"accrualStart":"2026-03-10","accrualEnd":"2031-03-10",
+              "accrualFrequency":"1Y","dayCount":"ACT/360","rate":{"type":"FIXED","rate":0.036},"finalNotionalExchange":false},
+             {"payReceive":"RECEIVE","currency":"CZK","notional":100000000,"accrualStart":"2026-03-10","accrualEnd":"2031-03-10",
+              "accrualFrequency":"3M","dayCount":"ACT_360","rate":{"type":"FLOATING","index":"PRIBOR-3M","spread":0,
+              "fixingLagBusinessDays":2},"finalNotionalExchange":false}]
+        """.trimIndent()
+        runBlocking {
+            book.apply(
+                TreasuryDealEvent(
+                    state = "BOOKED",
+                    dealId = DEAL_ID,
+                    product = "IRS",
+                    counterpartyId = "CP-1",
+                    currency = "CZK",
+                    principal = BigDecimal("100000000"),
+                    rate = null,
+                    valueDate = LocalDate.parse("2026-03-10"),
+                    maturityDate = LocalDate.parse("2031-03-10"),
+                    kind = DealKind.ACTUAL,
+                    bookId = "TRADING-1",
+                    legsJson = legs,
+                    scheduleHash = null,
+                ),
+            )
+        }
+        return mapOf("runId" to runId, "dealId" to DEAL_ID.toString())
+    }
+
+    private const val HTTP_CREATED = 201
 }
 
 /**

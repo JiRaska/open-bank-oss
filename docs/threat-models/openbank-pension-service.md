@@ -200,6 +200,22 @@ pre-contractual documents are not yet attached to offers (docs/compliance/pensio
 legal review pending). Withholding tax already remitted on a premium returned to the contract is
 not reversed automatically.
 
+The reference adapter closes non-success response bodies without collecting or draining them;
+HTTP status rejection retains the existing exception contract. Coroutine cancellation, including
+the quote deadline, requests cancellation of the original JDK HTTP exchange and propagates the
+cancellation to the caller. It does not retry a purchase or cancellation command. Request-local
+status handling does not convert a successful-status transport failure into a status rejection.
+`ReferenceAnnuityResponseLifecycleTest` verifies these properties against synthetic loopback
+peers, including held bodies, exchange closure and concurrent responses; it is not deployment
+proof. Existing protocol tests retain request and idempotency contracts.
+
+Successful response parsing remains compatible with the published partner protocol. This change
+does not establish a maximum successful-response size, number of offers or aggregate fan-out
+memory budget. Those bounds require an explicit partner-protocol envelope; the inbound request
+limit is not a partner-response limit. Rollback restores the previous response lifecycle while
+leaving registry authorization, credential sourcing, timeouts and financial state transitions
+unchanged.
+
 ## 4e. Reporting read model (#12425)
 
 `GET /api/v2/pension/reporting/participant-aggregates` serves the participant aggregates
@@ -316,6 +332,28 @@ foreign-client, missing-subject and non-JWT identities are rejected before trans
 Participant SCA consent remains required before funds can move. Rollback of this guard
 restores username-only authentication and must not precede an equivalent replacement.
 
+## Idempotency replay telemetry boundary — #12424
+
+The idempotency replay filter increments `openbank.pension.idempotency.replays` only after finding a
+stored response and accepting the existing request fingerprint. The metric's sole label is the HTTP
+method. The filter accepts only POST, PUT and PATCH in its existing replay scope, so the label has
+three values; principal, participant, path, key, fingerprint and request/response bodies are not
+metric labels or values.
+
+The existing scope still binds principal, customer-party header, method, path and key; a mismatching
+stored fingerprint is still rejected before a replay is counted. Counting an accepted replay does
+not repeat the business operation, alter authorization, weaken fingerprint checks, or add a new data
+destination beyond the existing metrics registry. The counter describes stored-response reuse, not
+successful new money movement. Existing concurrent-first-attempt limitations and lower-layer
+financial idempotency remain as described above.
+
+The observability adapter and service tests provide source evidence for the metric contract. This
+document does not establish deployed metric availability, scraper access control, cardinality
+measurements on running pods or successful hosted CI on a later documentation-only head. Rollback of
+this observation removes the counter call and metric wiring while retaining the replay scope and
+fingerprint checks. The separate pending staff-search assessment in #12943 is not part of this
+change; a future merge must preserve both independent threat-model additions.
+
 ## Staff contract search and participant birth-date response — #12942
 
 The staff contract-list surface accepts an optional free-text `q` covering contract and participant
@@ -342,3 +380,5 @@ exercises the injected CDI bean and prevents the default-argument proxy failure;
 deadline rule or financial operation. These are source/test claims, not proof of deployment, access-
 log redaction or runtime enforcement. Rollback: revert the search parameter/response addition and UI
 changes together; no migration or stored-data rewrite is introduced.
+
+- **2026-10-17** — **OPA PolicyDecisionPoint now comes from libs-runtime (#13136).** The per-service AuthzProducer is removed and the service opts into the shared `OpaPolicyDecisionPointProducer` with `openbank.authz.opa-pdp-producer.enabled: true` (a build-time switch). `opa.url` and `opa.path` keep their keys and defaults. The timeout key is renamed from `opa.timeout` (`PT0.5S`) to `opa.timeout-ms` (`500`); no manifest or environment sets either, so the effective OPA timeout stays 500 ms. No change to policy, actions, roles, the sidecar edge or fail-closed behaviour; the PDP object is the same `OpaSidecarPolicyDecisionPoint`. Rollback: revert the PR.

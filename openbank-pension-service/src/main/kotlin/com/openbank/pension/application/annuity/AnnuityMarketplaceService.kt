@@ -19,7 +19,9 @@ import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
+import com.openbank.pension.application.port.out.AnnuityQuoteOutcome
 import com.openbank.pension.application.port.out.FundAdministrationPort
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.domain.annuity.AnnuityCompensation
 import com.openbank.pension.domain.annuity.AnnuityOffer
 import com.openbank.pension.domain.annuity.AnnuityPackRules
@@ -87,6 +89,7 @@ class AnnuityMarketplaceService(
     private val packs: JurisdictionPackRegistry,
     private val clock: Clock,
     private val quoteTimeout: Duration,
+    private val metrics: PensionMetrics = PensionMetrics.NONE,
 ) : AnnuityPlacementPort {
 
     private val log = Logger.getLogger(AnnuityMarketplaceService::class.java)
@@ -132,6 +135,7 @@ class AnnuityMarketplaceService(
             survivorShare = preferences.survivorShare,
         )
         val (offers, failures) = quoteAll(eligible, request, rules)
+        eligible.forEach { metrics.annuityQuote(it.partnerId, quoteOutcome(it.partnerId, offers, failures)) }
         val now = clock.instant()
         val existing = stores.purchases.findById(payoutId)
         val purchase = existing?.reoffer(offers, failures, now)
@@ -185,7 +189,7 @@ class AnnuityMarketplaceService(
         ) {
             throw ExitForbiddenException("strong customer authentication failed for this offer")
         }
-        return stores.purchases.save(selected)
+        return stores.purchases.save(selected).also { metrics.annuitySelected(partnerId) }
     }
 
     /** Cancel an issued policy inside the partner's cooling-off period; SCA over [AnnuityPurchase.cancellationHash]. */
@@ -466,6 +470,21 @@ class AnnuityMarketplaceService(
 
     // ---- quoting ----
 
+    /** A partner that answered but whose offers all failed validation is not a FAILED partner. */
+    private fun quoteOutcome(
+        partnerId: String,
+        offers: List<AnnuityOffer>,
+        failures: List<PartnerQuoteFailure>,
+    ): AnnuityQuoteOutcome {
+        val answered = failures.filter { it.partnerId == partnerId }
+            .all { it.reason == NO_OFFER || it.reason.endsWith(NOT_MATCHING) }
+        return when {
+            offers.any { it.partnerId == partnerId } -> AnnuityQuoteOutcome.OFFERED
+            answered -> AnnuityQuoteOutcome.NO_VALID_OFFER
+            else -> AnnuityQuoteOutcome.FAILED
+        }
+    }
+
     private suspend fun quoteAll(
         providers: List<ApprovedPartner>,
         request: AnnuityQuoteRequest,
@@ -492,10 +511,10 @@ class AnnuityMarketplaceService(
                         failures +=
                             PartnerQuoteFailure(
                                 provider.partnerId,
-                                "${invalid.size} offer(s) did not match the request",
+                                "${invalid.size} offer(s) $NOT_MATCHING",
                             )
                     }
-                    if (received.isEmpty()) failures += PartnerQuoteFailure(provider.partnerId, "no offer")
+                    if (received.isEmpty()) failures += PartnerQuoteFailure(provider.partnerId, NO_OFFER)
                 },
                 onFailure = {
                     failures += PartnerQuoteFailure(provider.partnerId, it.message ?: it.javaClass.simpleName)
@@ -592,6 +611,8 @@ class AnnuityMarketplaceService(
 
     companion object {
         const val MAX_LIST = 200
+        private const val NO_OFFER = "no offer"
+        private const val NOT_MATCHING = "did not match the request"
 
         fun key(purchaseId: UUID, step: String) = "pension-annuity-$purchaseId-$step"
 

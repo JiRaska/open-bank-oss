@@ -9,13 +9,18 @@ import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.Invariant
 import com.openbank.simulation.invariants.MoneyPathInvariants
 import com.openbank.simulation.scenario.CardAuthorizationScenario
+import com.openbank.simulation.scenario.DelegatedSpendScenario
+import com.openbank.simulation.scenario.DomesticClearingScenario
 import com.openbank.simulation.scenario.FeeBillingScenario
 import com.openbank.simulation.scenario.FxScreeningScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
+import com.openbank.simulation.scenario.SddCollectionScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
 import com.openbank.simulation.scenario.StandingOrderExecutionScenario
+import com.openbank.simulation.scenario.StandingOrderScenario
 import com.openbank.simulation.scenario.StatementCloseScenario
+import com.openbank.simulation.scenario.SwiftScenario
 
 /**
  * The seed-driven exhaustion loop (ADR-0100 Layer 2 — runner). For each seed it builds a fresh
@@ -57,6 +62,11 @@ class SimulationRunner(
             // is checked by the same invariant sweep every step.
             SepaSettlementScenario.step(world)
             context.scheduler.drain()
+            // Issue #14366 (Test Intelligence simulation gap, money path): interleave the
+            // Czech domestic clearing domain-class binding into the same seeded run so it
+            // shares the fault profile and is checked by the same invariant sweep every step.
+            DomesticClearingScenario.step(world)
+            context.scheduler.drain()
             // ADR-0143 phase 2d/2e: interleave the billing fee-charge (+ seeded reversal) path
             // so MoneyPathInvariants.billingFeeConservation is actually exercised every step,
             // instead of vacuously passing against an always-empty World.billingFees.
@@ -72,6 +82,28 @@ class SimulationRunner(
             // only, posts nothing, so this drain is a no-op today but kept for the same
             // "settled before the invariant sweep" convention as every other scenario above.
             StatementCloseScenario.step(world)
+            context.scheduler.drain()
+            // The standing-order sweep step (issue #667 E2E money-path): drives the REAL
+            // StandingOrder status machine against real journals so its execution/failure
+            // counters stay reconciled with the ledger under the same fault profile.
+            StandingOrderScenario.step(world)
+            context.scheduler.drain()
+            // ADR-0036 (ADR-0100 full-service adoption): interleave the SDD collection path —
+            // REAL SddMandate lifecycle (confirm/expireIfIdle/recordCollection) against real
+            // journals — so sddCollectionCompleteness is swept every step under the same fault
+            // profile. Kept before the invariant sweep, after the per-scenario drain convention.
+            SddCollectionScenario.step(world)
+            context.scheduler.drain()
+            // ADR-0249 D3 / issue #667: the delegated-spend path — real DelegationGrant lifecycle,
+            // real SpendCeilings policy, real SpendReservation state machine — sharing the fault
+            // profile and checked by the delegatedSpend*/delegationCeilingIntegrity invariants.
+            DelegatedSpendScenario.step(world)
+            context.scheduler.drain()
+            // Issue #667 (E2E money-path): the outgoing SWIFT MT103 path — real SwiftMessage
+            // validate() admission gate and PENDING→…→COMPLETED/REJECTED/FAILED lifecycle —
+            // sharing the fault profile and checked by the swiftCompleteness /
+            // swiftMoneyConservation invariants.
+            SwiftScenario.step(world)
             context.scheduler.drain()
             // Issue #12839 follow-up (Refs #12830): one simulated DAY of the standing-order
             // sweep + execution path (the scenario advances the virtual clock itself), checked

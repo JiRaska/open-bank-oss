@@ -4,6 +4,8 @@
 package com.openbank.audit.infrastructure.observability
 
 import com.openbank.audit.infrastructure.persistence.AuditRepository
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.observability.standardPercentiles
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
@@ -15,6 +17,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicLong
 
@@ -65,6 +68,11 @@ class AuditChainIntegrityGauge {
     @Inject
     lateinit var auditRepository: AuditRepository
 
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
     /**
      * Off would make this bean pointless, so it defaults ON — unlike the retention scheduler next
      * door, which defaults off because it DELETES. This one only reads and recomputes hashes; the
@@ -86,6 +94,9 @@ class AuditChainIntegrityGauge {
 
     @PostConstruct
     fun register() {
+        // Generic fleet heartbeat next to the chain-specific timestamp gauge: that one is only
+        // published by this bean, the heartbeat is what the control-liveness sentinel reads.
+        liveness = domainMetrics.registerWorkflowLiveness("audit-chain-verify", Duration.ofHours(1))
         Gauge.builder("openbank.audit.chain.intact") { intact.get().toDouble() }
             .description("1 when every audit hash-chain link recomputed correctly on the last run, 0 when broken")
             .strongReference(true)
@@ -154,6 +165,7 @@ class AuditChainIntegrityGauge {
             .register(registry)
             .record(System.nanoTime() - startedAt, java.util.concurrent.TimeUnit.NANOSECONDS)
 
+        liveness?.recordSuccess()
         intact.set(if (result.intact) 1 else 0)
         checked.set(result.checked)
         unchained.set(result.unchained)

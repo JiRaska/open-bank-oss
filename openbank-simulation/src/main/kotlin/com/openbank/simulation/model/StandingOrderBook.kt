@@ -4,71 +4,71 @@
 
 package com.openbank.simulation.model
 
-import com.openbank.standingorder.domain.model.StandingOrder
 import java.math.BigDecimal
-import java.time.LocalDate
 import java.util.UUID
 
 /**
- * Simulated standing-order execution state (issue #12839 follow-up / Refs #12830): the real
- * `openbank-standing-order-service` `StandingOrder` aggregate per order, plus the two facts the
- * DST invariant needs that the aggregate itself does not carry:
+ * Simulated standing-order execution state: per order, what the **real**
+ * `com.openbank.standingorder.domain.model.StandingOrder` status machine recorded
+ * (`executionCount` / `failureCount`) versus what actually happened on the money path. The
+ * scenario writes both sides independently and `MoneyPathInvariants.standingOrderCompleteness`
+ * reconciles them — the same both-sides bookkeeping shape as [BillingFeeLedger] (ADR-0143
+ * phase 2d) and [InterestAccrualBook] (ADR-0033).
  *
- * - how much money was actually posted per order (the ledger journals this scenario posted), so
- *   `MoneyPathInvariants.standingOrderExecutionConservation` can assert *Σ posted == Σ confirmed
- *   executions × order amount* — the standing-order analogue of billing-fee-conservation
- *   (ADR-0143 phase 2d): a replayed or duplicated execution must never move money twice, and a
- *   failed execution must never move money at all;
- * - which execution dates were attempted/confirmed, keyed exactly like the production
- *   idempotency key's date dimension (`so-exec-{orderId}-{executionDate}`), so a re-delivered
- *   due event is a *replay of the same attempt*, not a new one — the property that keeps a
- *   stuck ONCE order (issue #12839) from becoming many payments.
+ * Two failure counters are kept on purpose, mirroring the production consumer exactly
+ * (StandingOrderDueConsumer): every failed attempt is an *outcome* of a claimed execution slot,
+ * but the status machine only acknowledges it when `recordFailure` actually applies — the
+ * consumer calls it through `runCatching` (`recordFailureSafely`), and a `require` rejection
+ * (e.g. an order `recordExecution` just COMPLETED) is a logged warning, not a counter move. An
+ * invariant over only one side would pass vacuously over an always-empty map — the trap
+ * [BillingFeeLedger] documented when it made `billingFeeConservation` load-bearing.
  */
 class StandingOrderBook {
 
-    /** The read-only query side: everything the invariant and the replay path need, per order. */
-    data class OrderView(
-        val order: StandingOrder?,
-        val attemptedDates: Set<LocalDate>,
-        val confirmedDates: Set<LocalDate>,
-        val postedAmount: BigDecimal,
+    private data class Totals(
+        var confirmed: Int = 0,
+        var confirmedAmount: BigDecimal = BigDecimal.ZERO,
+        var attemptedFailures: Int = 0,
+        var machineAcknowledgedFailures: Int = 0,
+        /** The live streak the status machine would carry: confirmExecution resets it to 0. */
+        var machineStreak: Int = 0,
     )
 
-    private val orders = mutableMapOf<UUID, StandingOrder>()
-    private val posted = mutableMapOf<UUID, BigDecimal>()
-    private val attempted = mutableMapOf<UUID, MutableSet<LocalDate>>()
-    private val confirmed = mutableMapOf<UUID, MutableSet<LocalDate>>()
+    private val totals = mutableMapOf<UUID, Totals>()
 
-    fun all(): Collection<StandingOrder> = orders.values
-
-    fun view(orderId: UUID): OrderView = OrderView(
-        order = orders[orderId],
-        attemptedDates = (attempted[orderId] ?: emptySet()).toSet(),
-        confirmedDates = (confirmed[orderId] ?: emptySet()).toSet(),
-        postedAmount = posted.getOrDefault(orderId, BigDecimal.ZERO),
-    )
-
-    /** Store a freshly placed order. */
-    fun place(order: StandingOrder) {
-        orders[order.id] = order
+    /** One execution actually confirmed end-to-end (money moved) — resets the machine's streak. */
+    fun recordConfirmed(orderId: UUID, amount: BigDecimal) {
+        totals.computeIfAbsent(orderId) { Totals() }.let {
+            it.confirmed += 1
+            it.confirmedAmount = it.confirmedAmount.add(amount)
+            it.machineStreak = 0
+        }
     }
 
-    /** Store the aggregate after a domain transition (recordExecution/recordFailure/confirmExecution). */
-    fun replace(order: StandingOrder) {
-        orders[order.id] = order
+    /** One attempted execution whose money path failed (decline, write fault, conflict). */
+    fun recordAttemptFailure(orderId: UUID) {
+        totals.computeIfAbsent(orderId) { Totals() }.attemptedFailures += 1
     }
 
-    /** Record one attempt at `(orderId, date)` — the `so-exec-` key's date dimension. */
-    fun recordAttempt(orderId: UUID, date: LocalDate) {
-        attempted.getOrPut(orderId) { mutableSetOf() }.add(date)
+    /** The status machine actually accepted the failure (recordFailure applied, status ACTIVE). */
+    fun recordMachineAcknowledgedFailure(orderId: UUID) {
+        totals.computeIfAbsent(orderId) { Totals() }.let {
+            it.machineAcknowledgedFailures += 1
+            it.machineStreak += 1
+        }
     }
 
-    fun recordConfirmed(orderId: UUID, date: LocalDate) {
-        confirmed.getOrPut(orderId) { mutableSetOf() }.add(date)
-    }
+    fun ids(): Set<UUID> = totals.keys
 
-    /** Record one posted payment journal for [orderId]. */
-    fun recordPosted(orderId: UUID, amount: BigDecimal) {
-        posted[orderId] = posted.getOrDefault(orderId, BigDecimal.ZERO) + amount
-    }
+    fun confirmedCount(orderId: UUID): Int = totals[orderId]?.confirmed ?: 0
+
+    fun confirmedAmount(orderId: UUID): BigDecimal = totals[orderId]?.confirmedAmount ?: BigDecimal.ZERO
+
+    fun attemptedFailureCount(orderId: UUID): Int = totals[orderId]?.attemptedFailures ?: 0
+
+    fun machineAcknowledgedFailureCount(orderId: UUID): Int = totals[orderId]?.machineAcknowledgedFailures ?: 0
+
+    /** The failure streak the machine carries after the last confirmed execution — the exact
+     *  semantics of the real `confirmExecution`, which resets `failureCount` to 0. */
+    fun machineStreak(orderId: UUID): Int = totals[orderId]?.machineStreak ?: 0
 }

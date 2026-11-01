@@ -1,5 +1,299 @@
 # Changelog
 
+## [3.16.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.3...admin-ui-v3.16.0) (2026-11-01)
+
+
+### Features
+
+* **admin-ui:** show synthetic journey verdicts in the evidence matrix ([#14362](https://github.com/JiRaska/open-bank-oss/issues/14362)) ([4509c9a](https://github.com/JiRaska/open-bank-oss/commit/4509c9aaef9ae0f72a20515c5b7618cbeacca667))
+
+## [3.15.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.2...admin-ui-v3.15.3) (2026-10-31)
+
+
+### Bug Fixes
+
+* **admin-ui:** read k6 journey p95 as seconds in Test Intelligence ([#14357](https://github.com/JiRaska/open-bank-oss/issues/14357)) ([1c8f2f1](https://github.com/JiRaska/open-bank-oss/commit/1c8f2f1a60c8ac2a28aea5ab88542752bfebfaad))
+
+## [3.15.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.1...admin-ui-v3.15.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **admin-ui:** accept bilingual topology copy in the content snapshot validator ([#14323](https://github.com/JiRaska/open-bank-oss/issues/14323)) ([f27d366](https://github.com/JiRaska/open-bank-oss/commit/f27d366b1f6aab19a9bd88e1a583ac3425c42193))
+* **admin-ui:** seed sidebar roles from the session cookie to paint operator nav in one pass ([#14319](https://github.com/JiRaska/open-bank-oss/issues/14319)) ([0a52218](https://github.com/JiRaska/open-bank-oss/commit/0a52218b038e25eb4d42aa8f29b6caaba88420a5)), closes [#14295](https://github.com/JiRaska/open-bank-oss/issues/14295)
+
+## [3.15.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.0...admin-ui-v3.15.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **admin-ui:** read FinOps anomalies from Alertmanager's route prefix ([#14279](https://github.com/JiRaska/open-bank-oss/issues/14279)) ([21a23de](https://github.com/JiRaska/open-bank-oss/commit/21a23de382a5b78568b7b5107b216e79e4bafe5e))
+* **product-catalog,admin-ui:** refuse duplicate JSON keys; keep unsaved Expert edits on IR save ([#14287](https://github.com/JiRaska/open-bank-oss/issues/14287)) ([e8c3978](https://github.com/JiRaska/open-bank-oss/commit/e8c3978adaf81c64394827733a0642914f368631))
+* **treasury:** record a posting intent before the ledger call ([#14220](https://github.com/JiRaska/open-bank-oss/issues/14220)) ([059840b](https://github.com/JiRaska/open-bank-oss/commit/059840b74eb1f495df083e12296842ad4dbd4d80))
+
+## [3.15.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.14.0...admin-ui-v3.15.0) (2026-10-30)
+
+
+### Features
+
+* **admin-ui:** make Test Intelligence readable at a glance ([#14272](https://github.com/JiRaska/open-bank-oss/issues/14272)) ([76d73e6](https://github.com/JiRaska/open-bank-oss/commit/76d73e6f2840125b62fdccea3e3ef84af683632a))
+* **admin-ui:** render cluster and regulatory pages bilingually, guard Czech UI literals ([#14277](https://github.com/JiRaska/open-bank-oss/issues/14277)) ([ab7bebc](https://github.com/JiRaska/open-bank-oss/commit/ab7bebc0ef096be7dec8679ea4d8cd3facd10e38))
+* **product-catalog,admin-ui:** Studio product IR editor with server-side lint (ADR-0352 5b, part 1) ([#14253](https://github.com/JiRaska/open-bank-oss/issues/14253)) ([40c80c7](https://github.com/JiRaska/open-bank-oss/commit/40c80c700aba881f05069999c34647b9c2912bf5))
+
+## [3.14.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.13.1...admin-ui-v3.14.0) (2026-10-28)
+
+
+### Features
+
+* **admin-ui:** project new simulation scenarios onto their services (Refs [#667](https://github.com/JiRaska/open-bank-oss/issues/667)) ([#14118](https://github.com/JiRaska/open-bank-oss/issues/14118)) ([f4c4b37](https://github.com/JiRaska/open-bank-oss/commit/f4c4b371b8bfda07a388854eb5c48c86b3f1e6c8))
+
+## [3.13.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.13.0...admin-ui-v3.13.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **admin-ui:** refresh cluster declarations from reviewed content ([#13469](https://github.com/JiRaska/open-bank-oss/issues/13469)) ([44fb070](https://github.com/JiRaska/open-bank-oss/commit/44fb0709c28b94750e3dddbc6c90b826f3495e96))
+
+## [3.13.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.12.2...admin-ui-v3.13.0) (2026-10-27)
+
+
+### Features
+
+* **admin-ui:** feed the trace-contract layer of the Test Intelligence matrix ([#12865](https://github.com/JiRaska/open-bank-oss/issues/12865)) ([97b5086](https://github.com/JiRaska/open-bank-oss/commit/97b5086d5c6e2f67f64d4b6a29d6f2855b590245))
+
+## [3.12.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.12.1...admin-ui-v3.12.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **treasury:** versioned deal saves, override eligibility and a reference-only editor role ([#13756](https://github.com/JiRaska/open-bank-oss/issues/13756)) ([e710754](https://github.com/JiRaska/open-bank-oss/commit/e71075488dcfb88c5deb10d426c00d27e5dfa051))
+
+## [3.12.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.12.0...admin-ui-v3.12.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **agent-service:** preserve PR-scoped owner intent under reviewed policy ([#13798](https://github.com/JiRaska/open-bank-oss/issues/13798)) ([e9a5401](https://github.com/JiRaska/open-bank-oss/commit/e9a540196e0aa6181194adf8f3181386357ddc57))
+
+## [3.12.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.11.0...admin-ui-v3.12.0) (2026-10-24)
+
+
+### Features
+
+* **treasury:** reference data and the cash-flow ledger for the five existing products (ADR-0344 phase 0) ([#13614](https://github.com/JiRaska/open-bank-oss/issues/13614)) ([42eec93](https://github.com/JiRaska/open-bank-oss/commit/42eec93ad9ee5c85728242d9b559515037391274))
+
+
+### Bug Fixes
+
+* **admin-ui:** Camera QR page describes the domain-verified link, not the bare scheme ([#13737](https://github.com/JiRaska/open-bank-oss/issues/13737)) ([4a84a1c](https://github.com/JiRaska/open-bank-oss/commit/4a84a1c77e8da18e73ef20cbc87d5b7573116b4b))
+* **agent-service:** preserve merge actors and authorization evidence ([#13764](https://github.com/JiRaska/open-bank-oss/issues/13764)) ([5715671](https://github.com/JiRaska/open-bank-oss/commit/571567125e6762da9edd6c5d6adabac9848e6720))
+
+## [3.11.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.3...admin-ui-v3.11.0) (2026-10-23)
+
+
+### Features
+
+* **products:** Product as Code phase 2 — openbank-products, signed publish-ir, pinned-revision loader (ADR-0352) ([#13644](https://github.com/JiRaska/open-bank-oss/issues/13644)) ([44b68d0](https://github.com/JiRaska/open-bank-oss/commit/44b68d002817537e5fbb1699522b8b1568b3d0ff))
+
+## [3.10.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.2...admin-ui-v3.10.3) (2026-10-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** honor opaque SDD creditor identifiers when reading mandates ([#13611](https://github.com/JiRaska/open-bank-oss/issues/13611)) ([62e70fd](https://github.com/JiRaska/open-bank-oss/commit/62e70fdb36d48322c7cd7a677208b7e5f8398159))
+* **admin-ui:** observe Karpenter runtime version with honest provenance ([#13592](https://github.com/JiRaska/open-bank-oss/issues/13592)) ([0c41dfa](https://github.com/JiRaska/open-bank-oss/commit/0c41dfad12b0862fcb5ef7babbbc99802d3c5002))
+* **admin-ui:** read published platform declarations independently of images ([#13591](https://github.com/JiRaska/open-bank-oss/issues/13591)) ([15ba450](https://github.com/JiRaska/open-bank-oss/commit/15ba450ee81b0eb0255ff90385db02d3c18cdb28))
+* **admin-ui:** refresh FinOps domain classification from published governance ([#13598](https://github.com/JiRaska/open-bank-oss/issues/13598)) ([e56e860](https://github.com/JiRaska/open-bank-oss/commit/e56e860a1e25af0616df6420946c7234d10899f2))
+* **admin-ui:** refresh repository documentation from reviewed content ([#13607](https://github.com/JiRaska/open-bank-oss/issues/13607)) ([a8de1db](https://github.com/JiRaska/open-bank-oss/commit/a8de1db7b1c8afb7f6f0175b768424be5819c67d))
+* **admin-ui:** resolve staged IaC and published BPMN inventory ([#13590](https://github.com/JiRaska/open-bank-oss/issues/13590)) ([94852ab](https://github.com/JiRaska/open-bank-oss/commit/94852ab2836a638892c56fd2c8a6a86ceb9960bd))
+
+
+### Performance
+
+* **admin-ui:** reuse verified immutable evidence bodies ([#13600](https://github.com/JiRaska/open-bank-oss/issues/13600)) ([9d211e9](https://github.com/JiRaska/open-bank-oss/commit/9d211e9370a14b3ba3b3e5d454b558c48379e14f))
+
+## [3.10.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.1...admin-ui-v3.10.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop running the readiness collector inside the image build ([#13577](https://github.com/JiRaska/open-bank-oss/issues/13577)) ([00c6dfe](https://github.com/JiRaska/open-bank-oss/commit/00c6dfeca7b357d4bca7d72168230c5da12595b9)), closes [#13014](https://github.com/JiRaska/open-bank-oss/issues/13014)
+
+## [3.10.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.0...admin-ui-v3.10.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** correct the Camera QR pilot step for the bank chooser ([#13569](https://github.com/JiRaska/open-bank-oss/issues/13569)) ([c7f52bc](https://github.com/JiRaska/open-bank-oss/commit/c7f52bce3b4a447e9bedad6e676b2cb971da7f5c)), closes [#13541](https://github.com/JiRaska/open-bank-oss/issues/13541)
+
+## [3.10.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.9.1...admin-ui-v3.10.0) (2026-10-22)
+
+
+### Features
+
+* **ledger:** day-close participants — the accounting day waits for product services (ADR-0342) ([#13197](https://github.com/JiRaska/open-bank-oss/issues/13197)) ([cc8b400](https://github.com/JiRaska/open-bank-oss/commit/cc8b40005ac00a2c73142a6890fa146556017950))
+
+## [3.9.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.9.0...admin-ui-v3.9.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** observe ClickHouse and resolve lifecycle release links ([#13497](https://github.com/JiRaska/open-bank-oss/issues/13497)) ([fd7f44d](https://github.com/JiRaska/open-bank-oss/commit/fd7f44dd42c223be3f63eea73360884d451beaad))
+
+
+### Security
+
+* **billing:** redact assessment logs and isolate role tests ([#13549](https://github.com/JiRaska/open-bank-oss/issues/13549)) ([9f80e96](https://github.com/JiRaska/open-bank-oss/commit/9f80e96a47c5abf33749c8b5d7c9bd20c488e8c9))
+
+## [3.9.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.9...admin-ui-v3.9.0) (2026-10-21)
+
+
+### Features
+
+* **admin-ui:** Camera QR docs page — SPAYD the phone camera can read ([#13542](https://github.com/JiRaska/open-bank-oss/issues/13542)) ([12b5a19](https://github.com/JiRaska/open-bank-oss/commit/12b5a19855722ae5ddd838a5a3c9ed39006f1904))
+* **admin-ui:** derive declared platform inventory from sources ([#13498](https://github.com/JiRaska/open-bank-oss/issues/13498)) ([fb129b0](https://github.com/JiRaska/open-bank-oss/commit/fb129b021422c84a0adc49d1d68f7ed039e00393))
+* **product-catalog:** expose schema approval policy; move consumers off pension-approval aliases ([#13496](https://github.com/JiRaska/open-bank-oss/issues/13496)) ([6174564](https://github.com/JiRaska/open-bank-oss/commit/61745645e041c190e49bfe9d01d384a80bc7bce9))
+
+
+### Bug Fixes
+
+* **admin-ui:** derive catalog schema dependency closure ([#13494](https://github.com/JiRaska/open-bank-oss/issues/13494)) ([5fd0448](https://github.com/JiRaska/open-bank-oss/commit/5fd0448dccfbca541d8e02fc43d25873bab12fc2))
+* **admin-ui:** preserve configuration freshness and workload identity ([#13493](https://github.com/JiRaska/open-bank-oss/issues/13493)) ([81c8396](https://github.com/JiRaska/open-bank-oss/commit/81c839601ee918eb216c6311e7a5b71635f5bd94))
+
+## [3.8.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.8...admin-ui-v3.8.9) (2026-10-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive complete inventory and Kafka versions from source evidence ([#13466](https://github.com/JiRaska/open-bank-oss/issues/13466)) ([b3944f4](https://github.com/JiRaska/open-bank-oss/commit/b3944f497cb395f3da82265c4f88dd1451dd4359))
+* **admin-ui:** expose security evidence source and freshness ([#13465](https://github.com/JiRaska/open-bank-oss/issues/13465)) ([9e9545a](https://github.com/JiRaska/open-bank-oss/commit/9e9545a59bccb3b17d6f7deec14a57d6a5fe4505))
+
+## [3.8.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.7...admin-ui-v3.8.8) (2026-10-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** publish bounded evidence and report truthful health freshness ([#13458](https://github.com/JiRaska/open-bank-oss/issues/13458)) ([a911f62](https://github.com/JiRaska/open-bank-oss/commit/a911f62c386791c09b79fc35ceb758764445bdd7))
+
+## [3.8.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.6...admin-ui-v3.8.7) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** let the comms checker reach the four-eyes workbench ([#12884](https://github.com/JiRaska/open-bank-oss/issues/12884)) ([e1b898f](https://github.com/JiRaska/open-bank-oss/commit/e1b898ffbf0ff7c4fa4efb9172eeba1f8cbe4bed))
+
+## [3.8.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.5...admin-ui-v3.8.6) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** refresh operational evidence and restore source-backed views ([#13391](https://github.com/JiRaska/open-bank-oss/issues/13391)) ([e5cfe1a](https://github.com/JiRaska/open-bank-oss/commit/e5cfe1a3bb4898a5dbd4ffc3da3e8790baf88fd9))
+
+## [3.8.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.4...admin-ui-v3.8.5) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** show only the five newest EKS versions ([#13385](https://github.com/JiRaska/open-bank-oss/issues/13385)) ([a64d0f3](https://github.com/JiRaska/open-bank-oss/commit/a64d0f3fd882d9771d757525a7e39154b9484b84))
+
+## [3.8.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.3...admin-ui-v3.8.4) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** isolate operational evidence and enforce delivery boundaries ([#13372](https://github.com/JiRaska/open-bank-oss/issues/13372)) ([9da523d](https://github.com/JiRaska/open-bank-oss/commit/9da523d1f38f3e416e5428ad1ebe7070108474a1))
+
+## [3.8.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.2...admin-ui-v3.8.3) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve unknown costs and skip inactive blob warm-up ([#13200](https://github.com/JiRaska/open-bank-oss/issues/13200)) ([a8c619b](https://github.com/JiRaska/open-bank-oss/commit/a8c619b14dbac8dbea9311ae57dd35e81e409f72))
+
+## [3.8.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.1...admin-ui-v3.8.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve accessible labels with UI dependency updates ([#13329](https://github.com/JiRaska/open-bank-oss/issues/13329)) ([638a27c](https://github.com/JiRaska/open-bank-oss/commit/638a27c6ed541d8f6785af8f8b9571b87d84dcce))
+
+## [3.8.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.0...admin-ui-v3.8.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve health identity across namespaces ([#13356](https://github.com/JiRaska/open-bank-oss/issues/13356)) ([8590616](https://github.com/JiRaska/open-bank-oss/commit/8590616bd329b141332ce43ddd0fa8d83c2f7872))
+
+## [3.8.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.7.1...admin-ui-v3.8.0) (2026-10-19)
+
+
+### Features
+
+* **admin-ui:** publish runtime evidence and verify deployable images ([#13337](https://github.com/JiRaska/open-bank-oss/issues/13337)) ([83a53d7](https://github.com/JiRaska/open-bank-oss/commit/83a53d7c21149e093c569f283c98b10b5b9b0725))
+
+
+### Bug Fixes
+
+* **admin-ui:** distinguish collector failures from service outages ([#13334](https://github.com/JiRaska/open-bank-oss/issues/13334)) ([45aedc3](https://github.com/JiRaska/open-bank-oss/commit/45aedc3427d89028a81162a44fcad6391e5e5bc2))
+
+## [3.7.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.7.0...admin-ui-v3.7.1) (2026-10-18)
+
+
+### Security
+
+* **admin-ui:** remove dynamic data from regulatory error logs ([#13288](https://github.com/JiRaska/open-bank-oss/issues/13288)) ([75d35f2](https://github.com/JiRaska/open-bank-oss/commit/75d35f2207bcec7c5d128fecc55a84a69ea13299))
+
+## [3.7.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.6.0...admin-ui-v3.7.0) (2026-10-18)
+
+
+### Features
+
+* **admin-ui,party:** find clients by name, national ID or birth date instead of UUID; fix state incentives ([#13199](https://github.com/JiRaska/open-bank-oss/issues/13199)) ([3c3f742](https://github.com/JiRaska/open-bank-oss/commit/3c3f742dc0c39af010d9fa2fa8a3a7ad34b74713))
+* **admin-ui:** generate the six catalogue-only regulatory reports ([#13219](https://github.com/JiRaska/open-bank-oss/issues/13219)) ([7d73b53](https://github.com/JiRaska/open-bank-oss/commit/7d73b536e278a558487f4c3af3f05bd7da5302fe))
+
+## [3.6.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.2...admin-ui-v3.6.0) (2026-10-18)
+
+
+### Features
+
+* **admin-ui:** publish Test Intelligence evidence per running commit ([#13208](https://github.com/JiRaska/open-bank-oss/issues/13208)) ([de6d9ac](https://github.com/JiRaska/open-bank-oss/commit/de6d9ac2c8c02ee8d0b9efb42d4092878e2dece8))
+
+
+### Bug Fixes
+
+* **admin-ui:** join Test Intelligence to the running commit behind one cached snapshot ([#13203](https://github.com/JiRaska/open-bank-oss/issues/13203)) ([5b2ac4e](https://github.com/JiRaska/open-bank-oss/commit/5b2ac4ef59e698368cb3c6fcfe0884fe58ab9f29))
+
+## [3.5.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.1...admin-ui-v3.5.2) (2026-10-18)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** drop the inputless weekly sweep and open real tracking issues ([#13155](https://github.com/JiRaska/open-bank-oss/issues/13155)) ([5fd2d53](https://github.com/JiRaska/open-bank-oss/commit/5fd2d5368e48e2f225b0bde1518b52d2b354a209))
+
+## [3.5.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.0...admin-ui-v3.5.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** make DWH reports work against the live ClickHouse ([#13218](https://github.com/JiRaska/open-bank-oss/issues/13218)) ([01ad53e](https://github.com/JiRaska/open-bank-oss/commit/01ad53eac2c28997c671160f384b7988c4320e78))
+
+
+### Security
+
+* **notification:** reserve commstemplate.publish for ROLE_COMMS_APPROVER ([#13133](https://github.com/JiRaska/open-bank-oss/issues/13133)) ([de2b093](https://github.com/JiRaska/open-bank-oss/commit/de2b0936fd079f9affd5f24b4eaf7532c54d6f55))
+
+## [3.5.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.4.2...admin-ui-v3.5.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
+
+### Bug Fixes
+
+* **admin-ui:** request catalog:read so Product Studio can read the v2 catalog ([#12809](https://github.com/JiRaska/open-bank-oss/issues/12809)) ([1ea8f25](https://github.com/JiRaska/open-bank-oss/commit/1ea8f254a717b91dd301c3d11adede531dd30d19))
+
 ## [3.4.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.4.1...admin-ui-v3.4.2) (2026-10-16)
 
 

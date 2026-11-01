@@ -18,3 +18,10 @@ The parser is `RulesYamlSections` from `openbank-libs-runtime`, so the YAML is
 read as data (never regexed) and the two governance controllers cannot drift
 on how they interpret the same file. `RulesYamlSectionsTest` pins the parser
 against the real `rules.yaml` in this repository.
+
+An **empty** live `money_path_services` list is treated as "unavailable", not
+as an answer: `RulesYamlSections` returns an empty set for an absent or renamed
+section, and a 200 response that is not `rules.yaml` parses to exactly that.
+Letting it win would silently downgrade every money-path PR to the default
+approval obligation, so the mirror is used instead (and the divergence logged).
+The fleet always has money-path services; an empty list is never a real state.

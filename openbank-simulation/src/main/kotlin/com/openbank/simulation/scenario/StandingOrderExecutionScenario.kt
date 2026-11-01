@@ -87,7 +87,7 @@ object StandingOrderExecutionScenario {
         if (random.chance(NEW_ORDER_RATE)) {
             placeOrder(world, today, now)
         }
-        world.standingOrders.all()
+        world.standingOrderExecutions.all()
             .filter { it.status == StandingOrderStatus.ACTIVE && !it.nextExecutionDate.isAfter(today) }
             .forEach { executeDue(world, it, now) }
     }
@@ -95,7 +95,7 @@ object StandingOrderExecutionScenario {
     /** Seed a new ACTIVE order on a customer account that has none, due today. */
     private fun placeOrder(world: World, today: LocalDate, now: Instant) {
         val random = world.context.random
-        val busyAccounts = world.standingOrders.all().map { it.debitAccountId }.toSet()
+        val busyAccounts = world.standingOrderExecutions.all().map { it.debitAccountId }.toSet()
         val freeAccount = world.customerAccounts.firstOrNull { it !in busyAccounts } ?: return
         val frequency = if (random.chance(ONCE_ORDER_RATE)) Frequency.ONCE else Frequency.DAILY
         val order = StandingOrder(
@@ -125,7 +125,7 @@ object StandingOrderExecutionScenario {
             createdAt = now,
             updatedAt = now,
         )
-        world.standingOrders.place(order)
+        world.standingOrderExecutions.place(order)
         world.audit.append("standing order ${order.id} placed: ${order.frequency} ${order.amountMinorUnits} minor")
     }
 
@@ -137,17 +137,17 @@ object StandingOrderExecutionScenario {
         // Phase 1 — the sweep: recordExecution advances the schedule BEFORE the payment attempt
         // (its KDoc documents why completing a ONCE order here would fake success on failure).
         val swept = due.recordExecution(due.calculateNextDate(executionDate), now)
-        world.standingOrders.replace(swept)
+        world.standingOrderExecutions.replace(swept)
         world.audit.append("standing order ${due.id} swept for $executionDate (count=${swept.executionCount})")
 
         // Phase 2 — the execution, keyed by (orderId, executionDate) like the so-exec- key. A
         // re-visited pair is a REPLAY, not a new attempt: the rail's idempotency cache answers
         // with the original outcome.
-        if (executionDate in world.standingOrders.view(due.id).attemptedDates) {
+        if (executionDate in world.standingOrderExecutions.view(due.id).attemptedDates) {
             replayCachedOutcome(world, swept, executionDate, now)
             return
         }
-        world.standingOrders.recordAttempt(due.id, executionDate)
+        world.standingOrderExecutions.recordAttempt(due.id, executionDate)
 
         val amount = BigDecimal(swept.amountMinorUnits).movePointLeft(2)
         val source = AccountCurrency(swept.debitAccountId, swept.currency)
@@ -197,22 +197,22 @@ object StandingOrderExecutionScenario {
 
         // Happy path: release the hold, post the confirmation, record the confirmation.
         world.balances.put(world.balances.get(source).releaseReservation(amount))
-        world.standingOrders.recordPosted(swept.id, amount)
-        world.standingOrders.recordConfirmed(swept.id, executionDate)
-        val confirmed = world.standingOrders.view(swept.id).order ?: swept
+        world.standingOrderExecutions.recordPosted(swept.id, amount)
+        world.standingOrderExecutions.recordConfirmed(swept.id, executionDate)
+        val confirmed = world.standingOrderExecutions.view(swept.id).order ?: swept
         if (confirmed.status == StandingOrderStatus.ACTIVE) {
-            world.standingOrders.replace(confirmed.confirmExecution(now))
+            world.standingOrderExecutions.replace(confirmed.confirmExecution(now))
         }
         world.audit.append("standing order ${swept.id} executed for $executionDate: journal posted")
     }
 
     /** A re-delivered due event replays the cached outcome — never a second payment. */
     private fun replayCachedOutcome(world: World, order: StandingOrder, executionDate: LocalDate, now: Instant) {
-        if (executionDate in world.standingOrders.view(order.id).confirmedDates) {
+        if (executionDate in world.standingOrderExecutions.view(order.id).confirmedDates) {
             // The rail answered the replay with the cached 201: confirm again (idempotent for
             // recurring orders; for a ONCE order this is the retry that finally completes it).
             if (order.status == StandingOrderStatus.ACTIVE) {
-                world.standingOrders.replace(order.confirmExecution(now))
+                world.standingOrderExecutions.replace(order.confirmExecution(now))
             }
             world.audit.append("standing order ${order.id} replayed cached success for $executionDate")
         } else {
@@ -227,13 +227,13 @@ object StandingOrderExecutionScenario {
         now: Instant,
         reason: String?,
     ) {
-        val current = world.standingOrders.view(order.id).order ?: order
+        val current = world.standingOrderExecutions.view(order.id).order ?: order
         // recordFailure requires ACTIVE (the sweep's recordExecution may have completed a
         // recurring order past its endDate before the payment failed — that order is done, and
         // there is no failure left to record on it).
         if (current.status == StandingOrderStatus.ACTIVE) {
             val failed = current.recordFailure(now)
-            world.standingOrders.replace(failed)
+            world.standingOrderExecutions.replace(failed)
             world.audit.append("standing order ${order.id} execution $executionDate failed: $reason")
         }
     }

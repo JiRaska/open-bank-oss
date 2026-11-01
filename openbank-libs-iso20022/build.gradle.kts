@@ -30,7 +30,8 @@ repositories {
 
 dependencies {
     api(libs.kotlin.stdlib)
-    implementation(project(":openbank-libs-domain"))
+    // SecuritiesHolding exposes the canonical portfolio quantity basis from libs-domain.
+    api(project(":openbank-libs-domain"))
 
     // NO framework dependencies here — same rule as openbank-libs-domain (ADR-0002, #3670).
 
@@ -58,6 +59,9 @@ kover {
 }
 
 kotlin {
+    // Track the public JVM surface; check/build reject unreviewed ABI drift.
+    @OptIn(org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation::class)
+    abiValidation()
     jvmToolchain(25)
     compilerOptions { freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property") }
 }

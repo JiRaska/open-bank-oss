@@ -42,7 +42,8 @@ class SepaPaymentTransactionServicePactConsumerTest {
           "currencyCode": "EUR",
           "description": "pact contract SEPA payment",
           "valueDate": "2026-01-20",
-          "rail": "SEPA_CT"
+          "rail": "SEPA_CT",
+          "instructionType": "ONE_OFF"
         }
     """.trimIndent()
 
@@ -71,6 +72,15 @@ class SepaPaymentTransactionServicePactConsumerTest {
                 // made all four replays green about it for the life of the contracts.
                 // stringValue, NOT stringType: this is the field the consumer branches on.
                 o.stringValue("status", "COMPLETED")
+                // #13217: SettlementAdapter settles only a booking that matches its request, so the
+                // provider must keep answering with these. Values, not types: they are what is compared.
+                o.stringValue("type", "TRANSFER")
+                o.stringValue("sourceAccountId", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+                o.stringValue("currencyCode", "EUR")
+                o.stringValue("rail", "SEPA_CT")
+                o.stringValue("instructionType", "ONE_OFF")
+                // Compared numerically (compareTo), so the provider's scale is free; the field must exist.
+                o.decimalType("amount", java.math.BigDecimal("250.00"))
             }.build(),
         )
         .toPact()
@@ -89,6 +99,9 @@ class SepaPaymentTransactionServicePactConsumerTest {
 
         assertThat(body.getString("id")).isNotBlank()
         assertThat(body.getString("status")).isEqualTo("COMPLETED")
+        assertThat(body.getString("type")).isEqualTo("TRANSFER")
+        assertThat(body.getString("rail")).isEqualTo("SEPA_CT")
+        assertThat(body.getString("instructionType")).isEqualTo("ONE_OFF")
     }
 
     /**
@@ -97,7 +110,7 @@ class SepaPaymentTransactionServicePactConsumerTest {
      * to catch: nothing else replays this exact request against the real provider.
      *
      * The state name is not free text — it is the literal
-     * `TransactionNegativeAuthPactVerificationTest.NEGATIVE_AUTH_STATE`. transaction-service splits
+     * `TransactionNegativeAuthProviderVerificationTest.NEGATIVE_AUTH_STATE`. transaction-service splits
      * its replay in two because a class-level `@TestSecurity` authenticates every request it makes,
      * so a 401 interaction routed to the positive class would be served a 201 and the pact would
      * fail for a reason that has nothing to do with authz (#8993). This state is what routes the

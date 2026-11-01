@@ -26,8 +26,10 @@ gradle.projectsLoaded { g ->
                 proj.apply(plugin: info.solidsoft.gradle.pitest.PitestPlugin)
                 def ext = proj.extensions.getByName('pitest')
                 ext.junit5PluginVersion = '1.2.3'
-                ext.targetClasses = ['com.openbank.libs.authz.*'] as Set
-                ext.targetTests = ['com.openbank.libs.authz.*'] as Set
+                // Authorization dispatch is shared with feature guards; moving the bridge must
+                // not remove its control-flow mutations from this enforced lane.
+                ext.targetClasses = ['com.openbank.libs.authz.*', 'com.openbank.libs.interceptor.*'] as Set
+                ext.targetTests = ['com.openbank.libs.authz.*', 'com.openbank.libs.flags.*'] as Set
                 // 0 = advisory locally; the pitest.yml pitest-authz job enforces its ratchet
                 // via -Ppitest.mutationThreshold=<n>. Read it explicitly — the plugin's own
                 // project-property resolution loses to an explicitly set extension value.

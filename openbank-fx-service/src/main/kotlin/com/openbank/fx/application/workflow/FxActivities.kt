@@ -4,7 +4,7 @@
 
 package com.openbank.fx.application.workflow
 
-import com.openbank.fx.domain.screening.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningDecision
 import io.temporal.activity.ActivityInterface
 import java.util.UUID
 

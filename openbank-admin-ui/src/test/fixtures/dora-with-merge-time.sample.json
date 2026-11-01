@@ -1,0 +1,11 @@
+{
+  "available": true,
+  "source": "git-first-parent",
+  "windowDays": 30,
+  "collectedAt": "2026-06-03T05:00:00Z",
+  "deploymentCount": 10,
+  "deploymentFrequencyPerDay": 0.33,
+  "leadTimeHours": 5,
+  "leadTimeReason": null,
+  "recentDeployments": []
+}

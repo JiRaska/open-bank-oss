@@ -34,6 +34,19 @@ export type ServiceUnavailable = {
   status?: number
 }
 
+/**
+ * Thrown from a `select` decoder when the BFF answered with an explicit, well-formed
+ * "source unavailable" envelope (e.g. `{ available: false }`). It maps to that kind instead of
+ * the generic contract `error`, so an absent upstream reads as absent — never as a crash, and
+ * never as a verified empty result.
+ */
+export class SourceUnavailable extends Error {
+  constructor(readonly kind: BffFailure) {
+    super(`source unavailable: ${kind}`)
+    this.name = 'SourceUnavailable'
+  }
+}
+
 export interface ServiceResource<T> {
   data: T | null
   loading: boolean
@@ -127,21 +140,27 @@ export function useServiceResource<T = unknown>(
           setLoading(false)
           return
         }
-        const raw = (await res.json()) as unknown
+        // Reading a failed body is transport failure; valid HTTP carrying invalid JSON
+        // is a terminal contract failure and must not trigger cold-pod wake retries.
+        let raw: unknown
+        try {
+          raw = await res.json()
+        } catch (error) {
+          if (cancelled) return
+          if (!error || typeof error !== 'object' || !('name' in error) || error.name !== 'SyntaxError') throw error
+          setUnavailable({ kind: 'error', status: res.status })
+          setWaking(false)
+          setLoading(false)
+          return
+        }
         if (cancelled) return
-        // `select` runs OUTSIDE the transport catch below, deliberately. These pages parse through
-        // a strict client contract (cards is the PCI allow-list boundary), so `select` throws on a
-        // payload the upstream should not have sent. Letting that land in the transport catch
-        // classified a CONTRACT violation as a cold pod: the screen said "the service is waking
-        // up", retried three times, and then reported `unreachable` — sending the operator after
-        // a scaling problem that does not exist while the real fault, a malformed response, was
-        // never named anywhere. A parse failure is `error`: terminal, not retried.
+        // A decoder/schema rejection is terminal regardless of its exception class.
         let parsed: T
         try {
           parsed = (select ? select(raw) : (raw as T))
-        } catch {
+        } catch (error) {
           if (cancelled) return
-          setUnavailable({ kind: 'error', status: res.status })
+          setUnavailable({ kind: error instanceof SourceUnavailable ? error.kind : 'error', status: res.status })
           setWaking(false)
           setLoading(false)
           return
