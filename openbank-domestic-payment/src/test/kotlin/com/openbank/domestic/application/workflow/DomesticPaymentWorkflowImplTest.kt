@@ -11,12 +11,14 @@ import io.mockk.mockk
 import io.mockk.verify
 import io.mockk.verifyOrder
 import io.temporal.client.WorkflowOptions
+import io.temporal.client.WorkflowStub
 import io.temporal.testing.TestWorkflowEnvironment
 import io.temporal.worker.Worker
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.util.UUID
 
 class DomesticPaymentWorkflowImplTest {
@@ -54,6 +56,7 @@ class DomesticPaymentWorkflowImplTest {
         val paymentId = UUID.randomUUID()
         every { activities.screenPayment(paymentId) } returns ScreeningDecision.CLEAR
         every { activities.validatePayment(paymentId) } returns Unit
+        every { activities.fraudGate(paymentId) } returns FraudGateAction.PROCEED
         every { activities.submitScheme(paymentId) } returns DomesticPaymentStatus.SENT_TO_CLEARING
         every { activities.settlePayment(paymentId) } returns DomesticPaymentStatus.SETTLED
 
@@ -63,11 +66,13 @@ class DomesticPaymentWorkflowImplTest {
         // #1917: the workflow defined shadowFraudScore but never called it, so making Temporal the sole
         // orchestrator would have silently dropped ADR-0084 shadow fraud scoring. It now runs between
         // validation and scheme submission, matching the retired legacy DomesticPaymentService flow.
+        // #4403: a run started after the fraud-enforcement marker runs the gate instead.
         verifyOrder {
             activities.validatePayment(paymentId)
-            activities.shadowFraudScore(paymentId)
+            activities.fraudGate(paymentId)
             activities.submitScheme(paymentId)
         }
+        verify(exactly = 0) { activities.shadowFraudScore(any()) }
     }
 
     @Test
@@ -92,12 +97,75 @@ class DomesticPaymentWorkflowImplTest {
         assertThat(result).isEqualTo(DomesticPaymentStatus.RECEIVED)
         verify(exactly = 0) { activities.validatePayment(any()) }
         verify(exactly = 0) { activities.shadowFraudScore(any()) }
+        verify(exactly = 0) { activities.fraudGate(any()) }
+    }
+
+    @Test
+    fun `fraud DECLINE rejects with the fraud cause and never reaches the scheme (#4403)`() {
+        val paymentId = cleared(FraudGateAction.REJECT)
+
+        val result = workflowStub().process(paymentId)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.REJECTED)
+        verify { activities.rejectForFraud(paymentId, FraudRejectCause.DECLINED) }
+        verify(exactly = 0) { activities.rejectPayment(any()) }
+        verify(exactly = 0) { activities.submitScheme(any()) }
+    }
+
+    @Test
+    fun `fraud HOLD with no decision times out into REJECT, never into a pass (#4403)`() {
+        val paymentId = cleared(FraudGateAction.HOLD)
+
+        val result = workflowStub().process(paymentId)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.REJECTED)
+        verify { activities.rejectForFraud(paymentId, FraudRejectCause.HOLD_TIMED_OUT) }
+        verify(exactly = 0) { activities.submitScheme(any()) }
+    }
+
+    @Test
+    fun `fraud HOLD waits, and a RELEASE signal lets it proceed to the scheme (#4403)`() {
+        val paymentId = cleared(FraudGateAction.HOLD)
+        every { activities.submitScheme(paymentId) } returns DomesticPaymentStatus.VALIDATED
+
+        val stub = workflowStub()
+        val run = WorkflowStub.fromTyped(stub)
+        run.start(paymentId)
+        env.sleep(Duration.ofHours(1))
+        verify(exactly = 0) { activities.submitScheme(any()) }
+        stub.resolveFraudHold(FraudReviewDecision.RELEASE)
+
+        assertThat(run.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.VALIDATED)
+        verify(exactly = 1) { activities.submitScheme(paymentId) }
+        verify(exactly = 0) { activities.rejectForFraud(any(), any()) }
+    }
+
+    @Test
+    fun `fraud HOLD rejected by the analyst is REJECTED with REVIEW_REJECTED (#4403)`() {
+        val paymentId = cleared(FraudGateAction.HOLD)
+
+        val stub = workflowStub()
+        val run = WorkflowStub.fromTyped(stub)
+        run.start(paymentId)
+        stub.resolveFraudHold(FraudReviewDecision.REJECT)
+
+        assertThat(run.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.REJECTED)
+        verify { activities.rejectForFraud(paymentId, FraudRejectCause.REVIEW_REJECTED) }
+        verify(exactly = 0) { activities.submitScheme(any()) }
+    }
+
+    private fun cleared(gate: FraudGateAction): UUID {
+        val paymentId = UUID.randomUUID()
+        every { activities.screenPayment(paymentId) } returns ScreeningDecision.CLEAR
+        every { activities.fraudGate(paymentId) } returns gate
+        return paymentId
     }
 
     @Test
     fun `settlement keeps retrying through an outage longer than the shared 10-minute policy (#11666)`() {
         val paymentId = UUID.randomUUID()
         every { activities.screenPayment(paymentId) } returns ScreeningDecision.CLEAR
+        every { activities.fraudGate(paymentId) } returns FraudGateAction.PROCEED
         every { activities.submitScheme(paymentId) } returns DomesticPaymentStatus.SENT_TO_CLEARING
         var calls = 0
         every { activities.settlePayment(paymentId) } answers {

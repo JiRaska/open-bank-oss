@@ -4,8 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  pull_request_review:
-    types: [submitted, dismissed, edited]
 
 permissions:
   contents: read
@@ -18,8 +16,7 @@ concurrency:
   # survived to completion — 9 of 11 CI runs and 9 of 11 Security runs were cancelled on
   # 2026-08-02 (issue #3390). Give each main commit its own lane and never cancel it;
   # PR pushes keep the superseding behaviour, which is what that setting is for.
-  # Review events have their own lane: a review must not cancel the PR push run that
-  # provides required checks (including service builds from a separate workflow).
+  # Review submissions do not change build inputs and do not trigger code CI.
   # The key stays O(1) — a sha or event name, never a list (#3082).
   group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || github.event_name }}
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
@@ -32,7 +29,7 @@ jobs:
     outputs:
       proceed: ${{ steps.admit.outputs.proceed }}
     steps:
-      - if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+      - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # base.sha is frozen on older PRs; admission reads policy and pinned requirements
@@ -94,6 +91,7 @@ jobs:
           python3 .github/scripts/tests/test_select_admin_ui_rbac_tests.py
           python3 .github/scripts/test-ci-ui-verdict.py
           python3 .github/scripts/test-ci-latency-report.py
+          python3 .github/scripts/test-packaged-library-sbom.py
           python3 .github/scripts/test-service-build-artifact.py
           python3 .github/scripts/test-prepare-test-priority.py
           python3 .github/scripts/test-context-deploy-handoff.py
@@ -292,6 +290,7 @@ jobs:
           path: |
             openbank-admin-ui/build/test-intelligence/run.json
             openbank-admin-ui/build/test-results/**/*.xml
+            openbank-admin-ui/build/test-results/e2e/sidebar-navigation-*.json
           retention-days: 14
           overwrite: true
 
@@ -337,7 +336,7 @@ jobs:
     name: Admin UI
     needs: [changes-ui, ui-build, ui-rbac-contract]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 2
     steps:
       - &admin-ui-verdict
@@ -418,7 +417,7 @@ jobs:
     needs: agent-admission
     if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 65
     permissions:
       actions: read
     outputs:
@@ -433,7 +432,11 @@ jobs:
           script: |
             const path = '.github/workflows/ruleset-bypass-evidence.yml';
             const name = `ruleset-bypass-${process.env.GITHUB_RUN_ID}-a${process.env.GITHUB_RUN_ATTEMPT}`;
-            const deadline = Date.now() + 30 * 60 * 1000;
+            // GITHUB_TOKEN quota is 1000/h per REPOSITORY, shared by every job. A proven
+            // exhaustion may extend the wait to the hourly reset, never past the hard cap.
+            const started = Date.now();
+            const hardCap = started + 62 * 60 * 1000;
+            let deadline = started + 30 * 60 * 1000;
             const exhausted = () => new Error('No trusted ruleset evidence for this CI attempt; NOT_EVALUATED');
             const pause = async milliseconds => {
               const remaining = deadline - Date.now();
@@ -454,12 +457,16 @@ jobs:
                   const reset = Number(headers['x-ratelimit-reset']);
                   if (error.status !== 403 || headers['x-ratelimit-remaining'] !== '0' ||
                       !Number.isFinite(reset) || reset <= 0 || quotaRetries++ >= 3) throw error;
-                  await pause(Math.max(1000, reset * 1000 - Date.now() + 1000));
+                  const resume = Math.max(Date.now() + 1000, reset * 1000 + 1000);
+                  if (resume > hardCap) throw exhausted();
+                  deadline = Math.min(hardCap, Math.max(deadline, resume + 60 * 1000));
+                  await pause(resume - Date.now());
                 }
               }
               throw exhausted();
             };
             let workflow;
+            let artifactCache;
             let poll = 0;
             while (Date.now() < deadline) {
               if (!workflow) {
@@ -467,9 +474,36 @@ jobs:
                   ...context.repo, workflow_id: 'ruleset-bypass-evidence.yml', request: {timeout}
                 })));
               }
-              const {data} = await read(timeout => github.rest.actions.listArtifactsForRepo({
-                ...context.repo, name, per_page: 100, request: {timeout}
-              }));
+              // Keep the existing exact-name, first-page (100) scope. Cache only this
+              // receiver invocation's valid response, never a snapshot or producer verdict.
+              const query = {...context.repo, name, per_page: 100};
+              const key = JSON.stringify([query.owner, query.repo, query.name, query.per_page]);
+              let response;
+              try {
+                response = await read(timeout => github.rest.actions.listArtifactsForRepo({
+                  ...query,
+                  ...(artifactCache?.key === key ? {headers: {'if-none-match': artifactCache.etag}} : {}),
+                  request: {timeout}
+                }));
+              } catch (error) {
+                if (error.status !== 304) throw error;
+                response = {status: 304};
+              }
+              if (Date.now() >= deadline) throw exhausted();
+              let data;
+              if (response.status === 304) {
+                if (!artifactCache || artifactCache.key !== key) {
+                  throw new Error('Conditional artifact response has no matching body; NOT_EVALUATED');
+                }
+                data = artifactCache.data;
+              } else {
+                data = response.data;
+                if (response.status !== 200 || !data || !Array.isArray(data.artifacts)) {
+                  throw new Error('Invalid artifact-list response; NOT_EVALUATED');
+                }
+                const etag = response.headers?.etag;
+                artifactCache = typeof etag === 'string' && etag.trim() ? {key, etag, data} : undefined;
+              }
               for (const artifact of data.artifacts) {
                 if (artifact.name !== name || artifact.expired || !artifact.workflow_run) continue;
                 const {data: run} = await read(timeout => github.rest.actions.getWorkflowRun({
@@ -670,7 +704,7 @@ jobs:
       # falls back to EVENT_BASE_SHA if HEAD^1 somehow fails to resolve, so an unexpected event
       # shape degrades to the old (stale but safe) behaviour rather than failing the job.
       - name: resolve PR diff base (current merge-base, not creation-time base.sha)
-        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+        if: github.event_name == 'pull_request'
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
@@ -758,7 +792,7 @@ jobs:
     name: Validate manifests
     needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-rbac-contract]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 2
     steps:
       - name: Verify agent PR admission

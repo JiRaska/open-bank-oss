@@ -8,6 +8,7 @@ import com.openbank.treasury.application.port.out.DealChangedException
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.LedgerUnavailableException
 import com.openbank.treasury.application.port.out.NostroAccountNotFoundException
+import com.openbank.treasury.application.port.out.PortfolioSnapshotMissingException
 import com.openbank.treasury.application.port.out.StatementNotFoundException
 import com.openbank.treasury.domain.model.ActorNotPermittedException
 import com.openbank.treasury.domain.model.FourEyesViolationException
@@ -105,6 +106,11 @@ class ExceptionMappers {
     fun ledgerUnavailable(e: LedgerUnavailableException): Response =
         error(Response.Status.BAD_GATEWAY.statusCode, "LEDGER_UNAVAILABLE", e.message)
 
+    /** ADR-0337 amendment D2: no snapshot for the date is a 409, never an empty list. */
+    @ServerExceptionMapper
+    fun portfolioMissing(e: PortfolioSnapshotMissingException): Response =
+        error(Response.Status.CONFLICT.statusCode, "PORTFOLIO_SNAPSHOT_MISSING", e.message)
+
     @ServerExceptionMapper
     fun conflict(e: IllegalStateException): Response =
         error(Response.Status.CONFLICT.statusCode, "INVALID_STATE", e.message)
@@ -154,6 +160,16 @@ class ExceptionMappers {
     @ServerExceptionMapper
     fun notPermitted(e: ActorNotPermittedException): Response =
         error(Response.Status.FORBIDDEN.statusCode, "ACTOR_NOT_PERMITTED", e.message)
+
+    /** ADR-0315 D4: a derivative or repo whose credit measure needs reference data that is not effective. */
+    @ServerExceptionMapper
+    fun creditMeasureMissing(e: com.openbank.treasury.domain.model.CreditMeasureMissingException): Response =
+        error(UNPROCESSABLE, e.code, e.message)
+
+    /** The line moved past the vetted headroom between the pre-trade check and the locked write. */
+    @ServerExceptionMapper
+    fun correctionLimit(e: com.openbank.treasury.application.port.out.CorrectionLimitBreachedException): Response =
+        error(UNPROCESSABLE, "LIMIT_BREACHED", e.message)
 
     private fun error(status: Int, code: String, message: String?): Response =
         Response.status(status).entity(mapOf("error" to code, "message" to message)).build()

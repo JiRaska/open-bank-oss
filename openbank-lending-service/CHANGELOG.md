@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.44.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.1...lending-service-v0.44.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **lending:** align response Money schemas with the shipped wire shape ([#14265](https://github.com/JiRaska/open-bank-oss/issues/14265)) ([3ce683e](https://github.com/JiRaska/open-bank-oss/commit/3ce683e74337bc1ec5de8db195cfb5310987ea1d))
+
+## [0.44.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.0...lending-service-v0.44.1) (2026-10-28)
+
+
+### Performance
+
+* **lending:** shorten replica convergence test startup wait ([#13038](https://github.com/JiRaska/open-bank-oss/issues/13038)) ([8e77235](https://github.com/JiRaska/open-bank-oss/commit/8e772356e6976b53fcecdbaca2ddbfc9d53a6c79))
+
 ## [0.44.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.43.2...lending-service-v0.44.0) (2026-10-26)
 
 

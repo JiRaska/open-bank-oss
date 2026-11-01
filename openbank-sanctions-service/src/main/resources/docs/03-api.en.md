@@ -2,9 +2,26 @@
 
 ## Base path
 
-- **Production base:** `http://openbank-sanctions-service:8123/api/v1` (in-cluster)
+- **Production base for checks:** `http://openbank-sanctions-service:8123/api/v3` (in-cluster)
+- **List administration and approvals:** remain under `/api/v1` and `/api/v2` as documented below
 - **OpenAPI spec:** [`/q/openapi`](http://localhost:8123/q/openapi)
 - **Swagger UI (dev):** [`/q/swagger-ui`](http://localhost:8123/q/swagger-ui)
+
+### Migrating checks from v1 to v3
+
+`CZ_TERRORISTS` is a new value in screening requests and responses, so the six operations that
+return `SanctionsCheck` have parallel `/api/v3` contracts: list checks, screen, review, hits,
+pending and get by ID. Migrate those calls to v3; list administration, refresh and approval URLs
+are not affected.
+
+The superseded v1 operations return `Deprecation: true`, an RFC 8594 `Sunset` header and a v3
+`Link` with `rel="successor-version"`. Their contract remains fixed during the migration window:
+
+- omitted, null or empty `listTypes` means the original seven lists, excluding `CZ_TERRORISTS`;
+  v3 means all eight lists;
+- v1 rejects an explicit `CZ_TERRORISTS` request and a cross-major idempotent replay with 400;
+- checks containing the new list are hidden from v1 collections, and v1 get/review answers 404
+  before changing them. Use the same operation under v3 to read or review them.
 
 ## Authentication
 
@@ -38,7 +55,7 @@ Rules:
 ### Screen an entity
 
 ```http
-POST /api/v1/sanctions/screen
+POST /api/v3/sanctions/screen
 Content-Type: application/json
 Authorization: Bearer <token>
 
@@ -82,7 +99,7 @@ Content-Type: application/json
       "programs": ["UKRAINE-EO13685"]
     }
   ],
-  "checkedLists": ["OFAC_SDN", "EU_CONSOLIDATED", "UN_CONSOLIDATED", "HM_TREASURY", "FATF_HIGH_RISK", "CNB_DOMESTIC"],
+  "checkedLists": ["OFAC_SDN", "EU_CONSOLIDATED", "UN_CONSOLIDATED", "HM_TREASURY", "FATF_HIGH_RISK", "PEP_GLOBAL", "CNB_DOMESTIC", "CZ_TERRORISTS"],
   "checkedAt": "2026-06-05T10:42:13Z"
 }
 ```
@@ -92,10 +109,22 @@ Content-Type: application/json
 - `POTENTIAL_HIT` → block pending manual compliance review
 - `HIT` or `ESCALATED` → block; do not proceed
 
+**Subject-bound clearance (#11694):**
+- Send the stable party identifier as optional `subjectId`, separately from the per-attempt
+  `idempotencyKey`. A new account-opening attempt uses a new key and is screened against the
+  current lists; only an identical key replays the original result.
+- A `WHITELISTED` review is valid for 90 days (`clearanceExpiresAt`) and only for exactly the same
+  `subjectId`, entity type, name, aliases, date of birth, nationality and identifiers.
+- The clearance covers only the reviewed match identities: `(listType, matchedId)`, or
+  `(listType, matchedName)` when the entry has no external id. A new uncovered hit, changed subject
+  or expired clearance keeps the fresh blocking result.
+- Legacy checks without `subjectId` cannot newly receive `WHITELISTED`. Screen the subject again
+  with its explicit id and review that new check instead.
+
 ### Submit a manual review decision
 
 ```http
-POST /api/v1/sanctions/review
+POST /api/v3/sanctions/review
 Content-Type: application/json
 Authorization: Bearer <token>
 
@@ -112,21 +141,21 @@ Authorization: Bearer <token>
 ### Get a specific check
 
 ```http
-GET /api/v1/sanctions/{id}
+GET /api/v3/sanctions/{id}
 Authorization: Bearer <token>
 ```
 
 ### List all confirmed hits
 
 ```http
-GET /api/v1/sanctions/hits
+GET /api/v3/sanctions/hits
 Authorization: Bearer <token>
 ```
 
 ### List pending reviews
 
 ```http
-GET /api/v1/sanctions/pending
+GET /api/v3/sanctions/pending
 Authorization: Bearer <token>
 ```
 
@@ -160,7 +189,7 @@ POST /api/v1/sanctions/lists/{listType}/refresh
 Authorization: Bearer <token>
 ```
 
-`listType` ∈ `OFAC_SDN | EU_CONSOLIDATED | UN_CONSOLIDATED | HM_TREASURY | FATF_HIGH_RISK | CNB_DOMESTIC`
+`listType` ∈ `OFAC_SDN | EU_CONSOLIDATED | UN_CONSOLIDATED | HM_TREASURY | FATF_HIGH_RISK | CNB_DOMESTIC | CZ_TERRORISTS`
 
 ### Refresh all enabled lists
 
@@ -188,6 +217,7 @@ Authorization: Bearer <token>
 | `HM_TREASURY` | UK HM Treasury | UK Financial Sanctions |
 | `FATF_HIGH_RISK` | FATF | High-risk and monitored jurisdictions |
 | `CNB_DOMESTIC` | Czech Ministry of Foreign Affairs (MZV) | Czech national sanctions list (Act No. 1/2023 Coll.) |
+| `CZ_TERRORISTS` | Czech e-Sbírka | Anti-terrorism designations (Regulation No. 210/2008 Coll.), imported from official SPARQL open data |
 
 ## Error model
 
@@ -221,5 +251,6 @@ Events are append-only; a subsequent review creates a new `sanctions.review.subm
 
 ## Backward compatibility
 
-- API version in URL (`/api/v1/...`). Breaking changes = `/api/v2/...`, v1 runs in parallel for 6 months.
+- API version in URL. A breaking contract change gets a new parallel major; the six v1 check
+  operations are superseded by `/api/v3/...` and remain available for the documented sunset window.
 - Event version in type name (`...v1`). Schema evolution: additive only; breaking = new type + version suffix.

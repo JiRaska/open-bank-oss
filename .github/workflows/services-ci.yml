@@ -181,6 +181,39 @@ jobs:
       - name: Execute the full renderer suite without external network
         run: docker run --rm --network none renderer-tests:local
 
+  deploy-source-freshness:
+    name: Verify exact-head GitOps image source
+    if: github.event_name == 'pull_request' && github.base_ref == 'main' && startsWith(github.head_ref, 'chore/gitops-auto-deploy-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # Run the verifier from the trusted event base, never from the deploy PR.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify immutable candidate image pins
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$HEAD_SHA"
+          python3 .github/scripts/check-deploy-source-freshness.py \
+            --base "$BASE_SHA" --head "$HEAD_SHA"
+          git rev-list "$BASE_SHA..$HEAD_SHA" > "$RUNNER_TEMP/deploy-head-commits"
+          while IFS= read -r commit; do
+            verified=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" --jq '.commit.verification.verified')
+            if [ "$verified" != 'true' ]; then
+              echo "::error::Deploy head contains a commit without a verified signature: $commit"
+              exit 1
+            fi
+          done < "$RUNNER_TEMP/deploy-head-commits"
+
   publication-ready:
     name: Await exact-SHA Admin UI Pact publication
     # Only a hosted runner waits. The broker is private, so the published job's
@@ -430,9 +463,23 @@ jobs:
     secrets:
       PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
 
+  build_pr_openbank_client_account:
+    name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-account') && 'build (openbank-client-account)' || 'Not selected (pr, openbank-client-account)' }}
+    needs: [changes, publication-ready, build_pr_openbank_analytics_sink]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-account') }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    uses: ./.github/workflows/_service-ci-pr.yml
+    with:
+      service: openbank-client-account
+    secrets:
+      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+
   build_pr_openbank_client_product_catalog:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-product-catalog') && 'build (openbank-client-product-catalog)' || 'Not selected (pr, openbank-client-product-catalog)' }}
-    needs: [changes, publication-ready, build_pr_openbank_analytics_sink]
+    needs: [changes, publication-ready, build_pr_openbank_ap2_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-product-catalog') }}
     permissions:
       contents: read
@@ -446,7 +493,7 @@ jobs:
 
   build_pr_openbank_client_transaction:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-transaction') && 'build (openbank-client-transaction)' || 'Not selected (pr, openbank-client-transaction)' }}
-    needs: [changes, publication-ready, build_pr_openbank_ap2_service]
+    needs: [changes, publication-ready, build_pr_openbank_audit_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-transaction') }}
     permissions:
       contents: read
@@ -460,7 +507,7 @@ jobs:
 
   build_pr_openbank_communication_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-communication-service') && 'build (openbank-communication-service)' || 'Not selected (pr, openbank-communication-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_audit_service]
+    needs: [changes, publication-ready, build_pr_openbank_authz_policy_auditor]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-communication-service') }}
     permissions:
       contents: read
@@ -474,7 +521,7 @@ jobs:
 
   build_pr_openbank_consent_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-consent-service') && 'build (openbank-consent-service)' || 'Not selected (pr, openbank-consent-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_authz_policy_auditor]
+    needs: [changes, publication-ready, build_pr_openbank_balance_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-consent-service') }}
     permissions:
       contents: read
@@ -488,7 +535,7 @@ jobs:
 
   build_pr_openbank_context_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-context-service') && 'build (openbank-context-service)' || 'Not selected (pr, openbank-context-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_balance_service]
+    needs: [changes, publication-ready, build_pr_openbank_billing_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-context-service') }}
     permissions:
       contents: read
@@ -502,7 +549,7 @@ jobs:
 
   build_pr_openbank_control_liveness_sentinel:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-control-liveness-sentinel') && 'build (openbank-control-liveness-sentinel)' || 'Not selected (pr, openbank-control-liveness-sentinel)' }}
-    needs: [changes, publication-ready, build_pr_openbank_billing_service]
+    needs: [changes, publication-ready, build_pr_openbank_campaign_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-control-liveness-sentinel') }}
     permissions:
       contents: read
@@ -516,7 +563,7 @@ jobs:
 
   build_pr_openbank_copilot_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-copilot-service') && 'build (openbank-copilot-service)' || 'Not selected (pr, openbank-copilot-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_campaign_service]
+    needs: [changes, publication-ready, build_pr_openbank_card_issuance_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-copilot-service') }}
     permissions:
       contents: read
@@ -530,7 +577,7 @@ jobs:
 
   build_pr_openbank_customer_edge:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-customer-edge') && 'build (openbank-customer-edge)' || 'Not selected (pr, openbank-customer-edge)' }}
-    needs: [changes, publication-ready, build_pr_openbank_card_issuance_service]
+    needs: [changes, publication-ready, build_pr_openbank_card_processing_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-customer-edge') }}
     permissions:
       contents: read
@@ -544,7 +591,7 @@ jobs:
 
   build_pr_openbank_delegation_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-delegation-service') && 'build (openbank-delegation-service)' || 'Not selected (pr, openbank-delegation-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_card_processing_service]
+    needs: [changes, publication-ready, build_pr_openbank_case_coordinator_agent]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-delegation-service') }}
     permissions:
       contents: read
@@ -558,7 +605,7 @@ jobs:
 
   build_pr_openbank_devops_agent:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-devops-agent') && 'build (openbank-devops-agent)' || 'Not selected (pr, openbank-devops-agent)' }}
-    needs: [changes, publication-ready, build_pr_openbank_case_coordinator_agent]
+    needs: [changes, publication-ready, build_pr_openbank_clearing_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-devops-agent') }}
     permissions:
       contents: read
@@ -572,7 +619,7 @@ jobs:
 
   build_pr_openbank_dispute_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-dispute-service') && 'build (openbank-dispute-service)' || 'Not selected (pr, openbank-dispute-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_clearing_service]
+    needs: [changes, publication-ready, build_pr_openbank_clearing_simulator]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-dispute-service') }}
     permissions:
       contents: read
@@ -586,7 +633,7 @@ jobs:
 
   build_pr_openbank_docs_truth_agent:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-docs-truth-agent') && 'build (openbank-docs-truth-agent)' || 'Not selected (pr, openbank-docs-truth-agent)' }}
-    needs: [changes, publication-ready, build_pr_openbank_clearing_simulator]
+    needs: [changes, publication-ready, build_pr_openbank_client_account]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-docs-truth-agent') }}
     permissions:
       contents: read
@@ -1620,9 +1667,23 @@ jobs:
     secrets:
       PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
 
+  build_other_openbank_client_account:
+    name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-account') && 'build (openbank-client-account)' || 'Not selected (other, openbank-client-account)' }}
+    needs: [changes, publication-ready, build_other_openbank_balance_service]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-account') }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    uses: ./.github/workflows/_service-ci.yml
+    with:
+      service: openbank-client-account
+    secrets:
+      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+
   build_other_openbank_client_product_catalog:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-product-catalog') && 'build (openbank-client-product-catalog)' || 'Not selected (other, openbank-client-product-catalog)' }}
-    needs: [changes, publication-ready, build_other_openbank_balance_service]
+    needs: [changes, publication-ready, build_other_openbank_billing_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-product-catalog') }}
     permissions:
       contents: read
@@ -1636,7 +1697,7 @@ jobs:
 
   build_other_openbank_client_transaction:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-transaction') && 'build (openbank-client-transaction)' || 'Not selected (other, openbank-client-transaction)' }}
-    needs: [changes, publication-ready, build_other_openbank_billing_service]
+    needs: [changes, publication-ready, build_other_openbank_campaign_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-transaction') }}
     permissions:
       contents: read
@@ -1650,7 +1711,7 @@ jobs:
 
   build_other_openbank_communication_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-communication-service') && 'build (openbank-communication-service)' || 'Not selected (other, openbank-communication-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_campaign_service]
+    needs: [changes, publication-ready, build_other_openbank_card_issuance_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-communication-service') }}
     permissions:
       contents: read
@@ -1664,7 +1725,7 @@ jobs:
 
   build_other_openbank_consent_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-consent-service') && 'build (openbank-consent-service)' || 'Not selected (other, openbank-consent-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_card_issuance_service]
+    needs: [changes, publication-ready, build_other_openbank_card_processing_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-consent-service') }}
     permissions:
       contents: read
@@ -1678,7 +1739,7 @@ jobs:
 
   build_other_openbank_context_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-context-service') && 'build (openbank-context-service)' || 'Not selected (other, openbank-context-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_card_processing_service]
+    needs: [changes, publication-ready, build_other_openbank_case_coordinator_agent]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-context-service') }}
     permissions:
       contents: read
@@ -1692,7 +1753,7 @@ jobs:
 
   build_other_openbank_control_liveness_sentinel:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-control-liveness-sentinel') && 'build (openbank-control-liveness-sentinel)' || 'Not selected (other, openbank-control-liveness-sentinel)' }}
-    needs: [changes, publication-ready, build_other_openbank_case_coordinator_agent]
+    needs: [changes, publication-ready, build_other_openbank_clearing_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-control-liveness-sentinel') }}
     permissions:
       contents: read
@@ -1706,7 +1767,7 @@ jobs:
 
   build_other_openbank_copilot_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-copilot-service') && 'build (openbank-copilot-service)' || 'Not selected (other, openbank-copilot-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_clearing_service]
+    needs: [changes, publication-ready, build_other_openbank_clearing_simulator]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-copilot-service') }}
     permissions:
       contents: read
@@ -1720,7 +1781,7 @@ jobs:
 
   build_other_openbank_customer_edge:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-customer-edge') && 'build (openbank-customer-edge)' || 'Not selected (other, openbank-customer-edge)' }}
-    needs: [changes, publication-ready, build_other_openbank_clearing_simulator]
+    needs: [changes, publication-ready, build_other_openbank_client_account]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-customer-edge') }}
     permissions:
       contents: read
@@ -2617,7 +2678,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "25"
@@ -2663,6 +2724,7 @@ jobs:
       - publication-ready
       - verification-metadata
       - renderer-tests
+      - deploy-source-freshness
       - build_pr_openbank_account_service
       - build_pr_openbank_agent_service
       - build_pr_openbank_aml_service
@@ -2679,6 +2741,7 @@ jobs:
       - build_pr_openbank_case_coordinator_agent
       - build_pr_openbank_clearing_service
       - build_pr_openbank_clearing_simulator
+      - build_pr_openbank_client_account
       - build_pr_openbank_client_product_catalog
       - build_pr_openbank_client_transaction
       - build_pr_openbank_communication_service
@@ -2764,6 +2827,7 @@ jobs:
       - build_other_openbank_case_coordinator_agent
       - build_other_openbank_clearing_service
       - build_other_openbank_clearing_simulator
+      - build_other_openbank_client_account
       - build_other_openbank_client_product_catalog
       - build_other_openbank_client_transaction
       - build_other_openbank_communication_service
@@ -2859,6 +2923,15 @@ jobs:
 
       - name: Verify individual build-result offline fixtures
         run: python3 .github/scripts/test-check-service-build-results.py ResultsTest RendererSelectionTest
+      - name: Require exact-head GitOps source freshness
+        if: github.event_name == 'pull_request' && github.base_ref == 'main' && startsWith(github.head_ref, 'chore/gitops-auto-deploy-')
+        env:
+          SOURCE_RESULT: ${{ needs.deploy-source-freshness.result }}
+        run: |
+          if [ "$SOURCE_RESULT" != 'success' ]; then
+            echo "::error::GitOps image source freshness was not proven for this PR head."
+            exit 1
+          fi
       - name: Verify no service failed
         run: |
           if [ "${{ needs.changes.result }}" != 'success' ] || [ "${{ needs.changes.outputs.admission }}" != 'true' ]; then

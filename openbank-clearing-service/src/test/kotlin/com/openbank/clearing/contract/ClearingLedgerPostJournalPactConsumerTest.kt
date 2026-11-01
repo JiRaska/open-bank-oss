@@ -79,7 +79,7 @@ class ClearingLedgerPostJournalPactConsumerTest {
 
     /**
      * The refusal half (ADR-0279 #3): with no M2M identity the call must answer 401 before the
-     * handler runs. Replayed by `LedgerNegativeAuthPactVerificationTest`, which boots the provider without a test identity; the
+     * handler runs. Replayed by `LedgerNegativeAuthProviderVerificationTest`, which boots the provider without a test identity; the
      * positive twin filters this state out because its class-level `@TestSecurity` would
      * authenticate the replay and answer 201.
      */

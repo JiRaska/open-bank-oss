@@ -6,6 +6,11 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+// Compile the corporate-facts test double used by this module's consumer Pact tests.
+kotlin.sourceSets.named("consumerPactTest") {
+    kotlin.include("com/openbank/tax/contract/NoCorporateFacts.kt")
+}
+
 dependencies {
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
@@ -35,6 +40,12 @@ dependencies {
     testImplementation(libs.pact.consumer)
 }
 
+// Independent Quarkus boot profiles retain more than the default 512 MiB test heap.
+// The complete real-DB/Kafka suite measured 680 MiB after GC with a 1 GiB cap (#12250).
+tasks.named<Test>("test") {
+    maxHeapSize = "1g"
+}
+
 // Coverage floor (ADR-0020, ratchet-only). This module had no verify{} rule, so koverVerify
 // passed trivially — "ungated" read exactly like "gated". 80.94% LINE (1452/1794) measured
 // locally on 2026-10-17 over this service's own sources (the fleet filter excludes
@@ -50,5 +61,12 @@ kover {
                 }
             }
         }
+    }
+}
+
+// Shared synthetic wire fixture is test-only; it is never packaged in the service runtime.
+sourceSets {
+    test {
+        resources.srcDir(rootProject.file("openbank-libs-domain/src/test/resources/portfolio-contract"))
     }
 }

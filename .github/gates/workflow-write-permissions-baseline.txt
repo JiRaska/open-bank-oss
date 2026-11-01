@@ -54,6 +54,8 @@ ghcr-publish.yml|job:publish|packages
 governance-horizon-watch.yml|job:watch|issues
 image-rescan.yml|job:escalate|issues
 labels.yml|job:sync|issues
+main-red-watch.yml|job:reconcile|contents
+main-red-watch.yml|job:watch|contents
 main-red-watch.yml|job:watch|issues
 merged-past-red-check-watch.yml|job:watch|issues
 pact-verification-reconcile.yml|job:reconcile|actions
@@ -92,6 +94,7 @@ services-ci.yml|job:build_other_openbank_card_processing_service|id-token
 services-ci.yml|job:build_other_openbank_case_coordinator_agent|id-token
 services-ci.yml|job:build_other_openbank_clearing_service|id-token
 services-ci.yml|job:build_other_openbank_clearing_simulator|id-token
+services-ci.yml|job:build_other_openbank_client_account|id-token
 services-ci.yml|job:build_other_openbank_client_product_catalog|id-token
 services-ci.yml|job:build_other_openbank_client_transaction|id-token
 services-ci.yml|job:build_other_openbank_communication_service|id-token
@@ -177,6 +180,7 @@ services-ci.yml|job:build_pr_openbank_card_processing_service|id-token
 services-ci.yml|job:build_pr_openbank_case_coordinator_agent|id-token
 services-ci.yml|job:build_pr_openbank_clearing_service|id-token
 services-ci.yml|job:build_pr_openbank_clearing_simulator|id-token
+services-ci.yml|job:build_pr_openbank_client_account|id-token
 services-ci.yml|job:build_pr_openbank_client_product_catalog|id-token
 services-ci.yml|job:build_pr_openbank_client_transaction|id-token
 services-ci.yml|job:build_pr_openbank_communication_service|id-token

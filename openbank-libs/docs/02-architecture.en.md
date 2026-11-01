@@ -43,6 +43,8 @@ Shared libraries and services use Quarkus **3.40.1.1 LTS** from the same catalog
 
 `openbank-libs-domain` maps `openbank.fx.cnb-policy-rate.published` to `fx-service` in `TopicProducers`. This records the producing service for shared analytics and governance checks; it does not publish or consume the event. The producer is the FX ingestion pipeline, while risk-engine and audit-service consume its facts and audit trail. Keep the mapping in step with a topic rename or ownership change.
 
+`TopicProducers` maps the shared `openbank.oversight-triggers` topic to `multiple-producers`, because both aml-service and sanctions-service publish independent oversight requests to it. Audit-service subscribes to the same topic so those requests become part of the audit trail. The shared mapping attributes ownership; it neither publishes nor consumes events.
+
 ## Build-time producers
 
 `RedisApprovalStoreProducer` (four-eyes `ApprovalStore`, opt-in `openbank.approval.store: redis`) and `OpaPolicyDecisionPointProducer` (OPA sidecar PDP, opt-in `openbank.authz.opa-pdp-producer.enabled: true`) are gated with `@IfBuildProperty`, off when the property is missing. Neither is `@DefaultBean`: a service that opts in and also keeps its own producer fails `quarkusBuild` as an ambiguous dependency. Bean presence matters because `AuthorizeInterceptor` switches four-eyes on when an `ApprovalStore` exists.
@@ -51,6 +53,14 @@ Shared libraries and services use Quarkus **3.40.1.1 LTS** from the same catalog
 
 `PanacheOutboxEntityTraced` (libs-runtime) extends the v2 outbox entity with a nullable `trace_context` column holding the W3C `traceparent` captured by `TraceparentCapture` when the row is written. `OutboxEntry.traceparent` carries it to the dispatcher and `OutboxKafkaHeaders` emits it as the `traceparent` Kafka header. It is opt-in per service together with an `ALTER TABLE ... ADD COLUMN trace_context TEXT` migration; the v1 and v2 bases are unchanged because a mapped column a table lacks fails every SELECT.
 
+## Bank-own transfer rail vocabulary (ADR-0344 phase 1b)
+
+`openbank-libs-iso20022` holds the vocabulary of the bank-own institution-transfer rail, so swift-service and treasury name it the same way:
+- `InstitutionTransferRail` is CERTIS, TARGET2 or SWIFT, each with its currency and pacs.009 clearing system code.
+- `InstitutionTransferStatus` is the rail's lifecycle. Only ACCEPTED, SENT, SETTLED and REJECTED are published (contract 9.2).
+- The pacs.009 builder and reader validate against the bundled `pacs.009.001.08` XSD.
+
+The shared `TopicProducers` table in `openbank-libs-domain` attributes `openbank.swift.institution-transfers` to swift-service, which is how audit-service labels the rows it reads from that topic.
 
 ### Temporal worker pilot
 
