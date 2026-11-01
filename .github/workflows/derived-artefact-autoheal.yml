@@ -238,5 +238,17 @@ jobs:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           PR: ${{ steps.heal_pr.outputs.pull-request-number }}
         run: |
-          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --squash --auto
+          set -euo pipefail
+          GH_REPO="$GITHUB_REPOSITORY"
+          PR_NUMBER="$PR"
+          if ! live_head="$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" | jq -er '
+            select(.state == "open" and .draft == false and
+              (.labels | type == "array") and
+              all(.labels[]; (.name | type == "string") and
+                (.name | test("\\S")) and (.name | ascii_downcase) != "blocked")) |
+            .head.sha | select(type == "string" and test("^[0-9a-f]{40}$"))')"; then
+            echo "PR #${PR_NUMBER} is held or readiness could not be verified; not arming"
+            exit 0
+          fi
+          gh pr merge "$PR" --repo "$GH_REPO" --squash --auto --match-head-commit "$live_head"
           echo "auto-merge armed on heal PR #${PR}"

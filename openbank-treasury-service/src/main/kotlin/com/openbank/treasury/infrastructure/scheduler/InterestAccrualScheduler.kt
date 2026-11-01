@@ -9,13 +9,18 @@ import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.treasury.application.port.`in`.AccrualRun
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
+import com.openbank.treasury.application.port.out.AccountingDayClosedException
 import com.openbank.treasury.application.port.out.CloseJobRunPort
+import com.openbank.treasury.application.port.out.DayCompletionRepository
+import com.openbank.treasury.domain.model.DayStep
+import com.openbank.treasury.domain.model.DayStepRecord
 import com.openbank.treasury.infrastructure.close.TreasuryCloseJobs
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -40,7 +45,7 @@ import java.time.LocalDate
  * `runBlocking` around reactive Panache throws HR000068 (#2148; check-no-runblocking-in-scheduled).
  */
 @ApplicationScoped
-class InterestAccrualScheduler(
+class InterestAccrualScheduler @Inject constructor(
     private val deals: TreasuryDealUseCase,
     private val domainMetrics: DomainMetrics,
     private val clock: Clock,
@@ -49,6 +54,8 @@ class InterestAccrualScheduler(
     private val closeJobRuns: CloseJobRunPort,
     @ConfigProperty(name = "openbank.treasury.accrual.pass-budget") private val passBudget: Duration,
     @ConfigProperty(name = "openbank.treasury.close.lookback-days") private val lookbackDays: Long,
+    /** ADR-0344 D7: each pass records the ACCRUALS step of the bank day it covered; null only in unit tests. */
+    private val dayCompletion: DayCompletionRepository? = null,
 ) {
     private val log: Logger = Logger.getLogger(InterestAccrualScheduler::class.java)
 
@@ -78,10 +85,26 @@ class InterestAccrualScheduler(
         }
         runCatching { deals.accrueInterest(asOf, clock.instant().plus(passBudget)) }
             .onSuccess { r ->
+                runCatching {
+                    dayCompletion?.record(
+                        DayStepRecord.of(
+                            asOf,
+                            DayStep.ACCRUALS,
+                            r.journals,
+                            r.failures.size,
+                            clock.instant(),
+                            refused = r.failures.count { it is AccountingDayClosedException },
+                        ),
+                    )
+                }
+                    .onFailure { log.error("could not record the ACCRUALS day-completion step", it) }
                 r.failures.forEach { log.error("interest accrual could not accrue a deal", it) }
                 if (r.failures.isEmpty() && r.unassessed == 0) liveness?.recordSuccess()
                 if (r.journals > 0) log.infof("interest accrual posted %d journal(s)", r.journals)
                 if (r.unassessed > 0) log.warnf("interest accrual pass budget spent: %d deal(s) left", r.unassessed)
+                if (r.deferred > 0) {
+                    log.infof("interest accrual deferred %d deal(s) with an open posting intent (#13883)", r.deferred)
+                }
                 recordEvidence(asOf, r)
                 if (r.failures.isEmpty() && r.unassessed == 0) healEarlierDays(asOf)
             }
@@ -111,6 +134,7 @@ class InterestAccrualScheduler(
             if (closedDay > 0) "$closedDay ${TreasuryCloseJobs.REASON_DAY_CLOSED}" else null,
             if (otherFailed > 0) "$otherFailed ${TreasuryCloseJobs.REASON_DEAL_FAILED}" else null,
             if (r.unassessed > 0) "${r.unassessed} ${TreasuryCloseJobs.REASON_ACCRUAL_UNFINISHED}" else null,
+            if (r.deferred > 0) "${r.deferred} ${TreasuryCloseJobs.REASON_ACCRUAL_DEFERRED}" else null,
         )
         TreasuryCloseJobs.record(
             closeJobRuns,
@@ -118,7 +142,9 @@ class InterestAccrualScheduler(
             asOf,
             TreasuryCloseJobs.ACCRUAL,
             items = r.deals,
-            refused = r.failures.size + r.unassessed,
+            // #13883: a deferred deal is assessed for liveness and healing (the pass did all it could),
+            // but in the DAY report it is unaccrued, so the day is not reported RAN without it.
+            refused = r.failures.size + r.unassessed + r.deferred,
             reason = reasons.joinToString("; ").ifBlank { null },
         ).awaitSuspending()
     }

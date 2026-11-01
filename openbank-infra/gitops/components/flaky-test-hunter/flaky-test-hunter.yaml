@@ -27,7 +27,7 @@ spec:
         app.kubernetes.io/part-of: flaky-test-hunter
       annotations:
         # Generated with the bundle: subPath mounts require a pod rollout on policy changes.
-        openbank.tech/policy-checksum: "b6c3072111d47d4a"
+        openbank.tech/policy-checksum: "669d4fac549899d6"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -40,7 +40,7 @@ spec:
         - name: flaky-test-hunter
           # Pending first CI build (ADR-0168 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-63c95a17@sha256:f89f814786b3997fddedd767284920437972d2b5cc5eb42e5ea3a2227f7be805
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-d6685693@sha256:f89f814786b3997fddedd767284920437972d2b5cc5eb42e5ea3a2227f7be805
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

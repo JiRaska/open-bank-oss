@@ -21,6 +21,7 @@ import java.time.Duration
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_tax_reporting_scheduler_it")],
+    restrictToAnnotatedClass = true,
 )
 @QuarkusTestResource(StatutoryReturnMessagingTestResource::class)
 @TestProfile(StatutoryReturnDeadlineSchedulerIT.FastDeadlineProfile::class)

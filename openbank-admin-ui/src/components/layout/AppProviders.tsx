@@ -9,6 +9,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { Toaster } from 'sonner'
 import { AgentDock } from '@/components/agent/AgentDock'
 import { SessionProvider } from '@/components/auth/SessionProvider'
+import { InitialRolesProvider } from '@/components/auth/InitialRolesContext'
 import { RumScreenTracker } from '@/components/telemetry/RumScreenTracker'
 import { isPublicSurface } from '@/lib/auth/publicSurface'
 import { LanguageProvider, type Language } from '@/lib/i18n/LanguageContext'
@@ -23,10 +24,12 @@ export function AppProviders({
   children,
   initialLanguage = null,
   initialTheme = 'light',
+  initialRoles = null,
 }: {
   children: React.ReactNode
   initialLanguage?: Language | null
   initialTheme?: Theme
+  initialRoles?: string[] | null
 }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -35,9 +38,11 @@ export function AppProviders({
   const shared = (
     <ThemeProvider initialTheme={initialTheme}>
       <LanguageProvider initialLanguage={initialLanguage} refreshServerContent={refreshServerContent}>
-        {children}
-        {!publicSurface && <AgentDock />}
-        <Toaster richColors position="top-right" />
+        <InitialRolesProvider roles={initialRoles}>
+          {children}
+          {!publicSurface && <AgentDock />}
+          <Toaster richColors position="top-right" />
+        </InitialRolesProvider>
       </LanguageProvider>
     </ThemeProvider>
   )
