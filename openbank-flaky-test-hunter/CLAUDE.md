@@ -18,10 +18,8 @@ Charter: ADR-0168, `openbank-libs/governance/agents.yaml` id `flaky-test-hunter`
   The scan stays reachable through `POST /check/trigger` (operator) and the CI-failure webhook
   for a checkout on a developer machine. Do not add the cron back without giving the pod a
   checkout and the test-results artifacts first.
-- `RunTrigger.SCHEDULED` is kept but `@Deprecated` and never constructed: the report's trigger is
-  part of the Temporal workflow input/result and closed histories are retained 168 h, so removing
-  the value would break reading a past weekly run. Nothing is persisted in Postgres. Delete it (and
-  its `KNOWN_UNEMITTED` entry in `check-scheduled-trigger-emitted.py`) after 2026-10-31.
+- `RunTrigger` has no scheduled value. The deprecated `SCHEDULED` was deleted on 2026-11-01,
+  once the 168 h Temporal retention after the sweep removal had passed.
 
 ## Dispositions
 

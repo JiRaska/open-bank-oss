@@ -1,0 +1,427 @@
+schema_version: 1
+profile_id: cz-current-account-5m-v1
+decision: proposed
+enforcement: none
+adr: ADR-0356
+as_of: 2026-10-28
+description: >-
+  Proposed qualification inputs for five million synthetic Czech current-account
+  clients. These values are targets and assumptions, not measured capacity.
+
+qualification:
+  claim_scope: platform-only-until-bank-rail-and-commercial-approvals
+  expires_after_days: 30
+  invalidated_by_material_change: true
+  measured_results_exist: false
+  required_owner_approvals:
+    - product
+    - payments-operations
+    - sre
+    - security
+    - bank-risk-compliance
+  pending_decisions_block_qualification: true
+  pending_decisions:
+    - named approval owners and signed approval evidence
+    - bank channel model validation of the 50000 reads_per_second assumption
+    - active-dormant-closed-blocked account population percentages
+    - deterministic seed and data-generation version
+    - request payload sizes and history hot/archive placement
+    - user think-time and interactive SCA workload model
+    - journey deadlines and projection convergence bound
+    - external-rail settlement window or explicit platform-only scope
+    - approved infrastructure and operating-cost ceiling
+    - executable full-path scenarios and trusted isolated runner
+
+population:
+  clients: 5000000
+  accounts: 10000000
+  accounts_per_client: 2
+  account_states:
+    active: {count: null, percentage: null}
+    dormant: {count: null, percentage: null}
+    closed: {count: null, percentage: null}
+    blocked: {count: null, percentage: null}
+  identity_kind: synthetic
+  seed:
+    deterministic: true
+    version: pending-owner-approval
+    reconciliation_required: true
+
+business_volume:
+  unit: unique-originated-instruction
+  instructions_per_day: 10000000
+  instructions_per_client_per_day: 2
+  internal_transfer_counting: once-per-instruction-not-per-ledger-leg
+  retries_count_as_new_instruction: false
+  daily_mix:
+    internal_transfer: 0.40
+    outbound_czk: 0.40
+    inbound_czk: 0.20
+  retry_return_reversal: separate_scenarios_and_denominators
+  rates:
+    seconds_per_day: 86400
+    average_instructions_per_second: 115.74074074074075
+    planning_peak_multiplier: 20
+    planning_peak_instructions_per_second: 2314.814814814815
+    soak_peak_instructions_per_second: 2315
+  mix_counts_per_day:
+    internal_transfer: 4000000
+    outbound_czk: 4000000
+    inbound_czk: 2000000
+  status: proposed-inputs-not-observations
+
+reads:
+  target_reads_per_second: 50000
+  channel_model_approval: pending
+  mix:
+    balance: 0.60
+    recent_transaction_history: 0.30
+    bounded_account_or_search: 0.10
+  rates_per_second:
+    balance: 30000
+    recent_transaction_history: 15000
+    bounded_account_or_search: 5000
+  report_each_endpoint_separately: true
+  cache_cases: [cold, warm]
+  pagination: include-deep-cursors
+  authorization_and_policy_path: enabled
+
+history:
+  minimum_model_years: 1
+  model_year_days: 365
+  instructions_per_day: 10000000
+  instructions_total: 3650000000
+  related_records:
+    journal_lines: required-and-counted
+    idempotency_records: required-and-counted
+    projections: required-and-counted
+  report:
+    - hot-and-archive-placement
+    - payload-size-distribution
+    - stored-bytes
+    - indexes
+    - wal-volume
+  sampled_history_qualifies: false
+
+scenarios:
+  normal:
+    required_for_qualification: true
+    instructions_per_day: 10000000
+    reads_per_second: 50000
+    measure_from_intended_arrival: true
+    arrival_model: open-arrival-rate
+    generator_headroom_must_be_proven: true
+  burst:
+    required_for_qualification: true
+    pass_fail: mandatory
+    duration_seconds: 3600
+    valid_new_instructions_per_second: 5000
+    concurrent_reads_per_second: 50000
+    expected_instructions: 18000000
+    intentionally_exceeds_ordinary_daily_model: true
+    applies_normal_latency_targets: true
+    applies_normal_unexpected_failure_fraction_maximum: true
+    financial_oracle_must_pass: true
+    applies_steady_queue_bound: true
+  soak:
+    duration_seconds: 259200
+    duration_hours: 72
+    expected_instructions: 30000000
+    peak_windows_per_day: 3
+    peak_window_duration_seconds: 900
+    peak_instructions_per_second: 2315
+    remaining_daily_instructions: 3749500
+    remaining_daily_duration_seconds: 83700
+    remaining_instructions_per_second: 44.79689366786141
+    include_concurrent_daily_jobs: [backups, retention]
+  skew:
+    repeat_scenarios: [normal, fault]
+    writes_on_hot_accounts_fraction: 0.20
+    hot_account_population_fraction: 0.01
+    separate_contention_sweep: [single-account, omnibus]
+  dependencies:
+    required_real_components: [application-services, authorization-policy, postgresql, kafka, temporal]
+    deterministic_clearing_simulation:
+      allowed: true
+      external_rail_claim_allowed: false
+      resulting_claim_scope: platform-only
+  existing_scenario_links:
+    - id: money-path-write-benchmark
+      definition: perf/k6/money-path-write-benchmark.js
+      role: existing-isolated-write-baseline
+      counts_as_profile_coverage: false
+    - id: money-path-smoke
+      definition: perf/k6/money-path-smoke.js
+      role: existing-read-only-performance-baseline
+      counts_as_profile_coverage: false
+    - id: security-abuse-smoke
+      definition: perf/k6/security-abuse-smoke.js
+      role: negative-security-only
+      counts_as_profile_coverage: false
+  qualification_scenario_ids: []
+  scenario_catalog_status: no-existing-full-path-profile-scenarios
+
+sandbox_campaign:
+  evidence_class: existing-shared-sandbox-fixed-resource-observation
+  qualification_status: not-qualification
+  full_scale_5m_execution: prohibited
+  resource_boundary:
+    additional_provisioning: prohibited
+    deployment_or_rollout_mutation: prohibited
+    replica_hpa_keda_or_nodepool_mutation: prohibited
+  sequence:
+    passive_baseline_before_load: true
+    read_only_baseline_before_any_write_pilot: true
+    existing_read_scenarios_only: true
+    least_privilege_identity_verified: required
+    fixture_ownership_and_taint_verified: required
+  bounded_write_pilot:
+    status: proposed_after_baseline_and_explicit_run_approval
+    preexisting_synthetic_fixtures_only: true
+    ownership_taint_and_reconciliation_verified: required
+    arbitrary_mass_writes: prohibited
+    disable_authentication_or_policy: prohibited
+    run_envelope: frozen_and_approved_before_execution
+    numeric_stop_thresholds: pending_run_specific_approved_envelope
+  stop_conditions:
+    - unexpected-5xx-timeout-or-capacity-rejection
+    - fixture-ownership-taint-or-authentication-anomaly
+    - reconciliation-or-financial-oracle-discrepancy
+    - sustained-queue-lag-or-outbox-age-growth
+    - database-pool-lock-or-resource-saturation
+    - pod-restart-oom-pending-or-capacity-alert
+    - approved-run-envelope-limit-reached
+  evidence_separation:
+    observed_scope: existing-data-and-fixed-current-resources-only
+    modeled_scope: five-million-population-extrapolation-with-explicit-assumptions
+    model_out_of_calibration_or_slo_uncertainty: inconclusive
+    sandbox_observation_qualifies_five_million_target: false
+    all_full_profile_scenarios_claimed_executed: false
+
+latency_targets:
+  normal:
+    durable_instruction_acceptance:
+      percentile: p99
+      maximum_milliseconds: 500
+    internal_transfer_booking:
+      percentile: p99
+      maximum_milliseconds: 2000
+    reads:
+      percentile: p99
+      maximum_milliseconds: 300
+      evaluate_each_read_class_separately: true
+    external_settlement:
+      target: pending-separate-rail-contract
+  post_availability_zone_loss:
+    recovery_deadline_seconds: 300
+    sustained_duration_seconds: 3600
+    minimum_instructions_per_second: 2500
+    minimum_reads_per_second: 25000
+    normal_latency_budgets_apply_after_recovery: true
+
+outcomes:
+  report_counts_separately:
+    - offered
+    - attempted
+    - accepted
+    - rejected
+    - booked
+    - externally_settled
+  latency_statistics: [p50, p95, p99, max]
+  include_worst_window_seconds: 300
+  unexpected_failure_or_timeout_fraction_maximum: 0.001
+  valid_unique_instruction_error_budget:
+    denominator: intended_arrivals_of_valid_unique_instructions
+    denominator_includes: [generator-omissions, client-timeouts, capacity-rejections]
+    count_each_unique_instruction_once: true
+    numerator:
+      - generator-omitted-intended-arrivals
+      - client-timeouts-unresolved-by-journey-deadline
+      - unexpected-server-failures
+      - capacity-driven-429-or-503
+      - accepted-instructions-with-invalid-or-unreconciled-financial-outcome
+    failures_after_deadline_count_as_failures: true
+    timeout_followed_by_successful_idempotent-retry: retain-timeout-in-numerator-and-report-retry-resolution-separately
+  retry_observability:
+    retries_are_new_unique_instructions: false
+    retain_original_instruction_id_and_scoped_idempotency_key: true
+    report_separately:
+      - retry-attempts
+      - duplicate-attempts
+      - delayed-and-out-of-order-events
+      - lost-replies-after-commit
+      - retry-resolution-state-and-age
+    unresolved_retries_at_journey_deadline: fail
+  business_rejections_have_separate_denominator: true
+  negative_security_tests_have_separate_denominator: true
+  capacity_429_or_503_counted_as_success: false
+  every_accepted_id_must_reconcile: true
+  accepted_id_final_states: [completed, explicitly-pending]
+  skips_must_remain_visible: true
+
+financial_oracle:
+  status: required-not-yet-implemented-or-executed
+  evaluate_every_test_instruction: true
+  invariants:
+    - id: balanced-journal-per-currency
+      condition: journal_debits_equal_credits_for_each_currency
+    - id: one-effect-per-scoped-idempotency-key
+      condition: no_more_than_one_financial_effect_per_scoped_key
+    - id: reversal-linkage
+      condition: every_reversal_links_to_the_correct_original_instruction
+    - id: hold-release-once
+      condition: no_duplicate_hold_or_release_effect
+    - id: funds-available
+      condition: no_spending_above_available_funds_or_approved_overdraft
+    - id: projection-rebuild-agreement
+      condition: ledger_agrees_with_rebuilt_projections_after_approved_convergence_bound
+      convergence_bound: pending-owner-approval
+    - id: retry-and-event-ordering
+      condition: concurrent_debits_duplicates_delayed_out_of_order_events_lost_replies_and_retries_reconcile
+      booking_dates: include-cross-date-retries
+    - id: accepted-instruction-completion
+      condition: every_accepted_id_resolves_to_correct_completed_or_explicitly_pending_state_within_approved_journey_deadline
+      journey_deadline: pending-owner-approval
+
+queues:
+  steady_state:
+    observation_window_seconds: 600
+    comparison_scope: same-rate-steady-plateau-only
+    rate_basis: intended-valid-unique-instructions-per-second
+    plateau_rate_must_be_constant_for_entire_comparison: true
+    maximum_growth_seconds_of_offered_work: 1
+    growth_conversion: compare_unfinished_work_counts_after_normalizing_by_the_plateau_offered_rate
+    transition_windows:
+      compare_with_steady_plateau: false
+      report_separately: true
+      include: [ramp-up, ramp-down, rate-change, fault-onset, fault-recovery]
+      fail_on_deadline_or_reconciliation_violation: true
+    unresolved_age_limit: approved-journey-deadline
+    observe:
+      - all-nonterminal-outbox-states
+      - delayed-retries
+      - dead-rows
+      - consumer-lag
+      - workflow-queues
+    zero_eligible_rows_means_zero_outstanding_work: false
+    unexpected_dead_rows: fail
+    unexplained_reconciliation_differences: fail
+  after_arrivals_stop:
+    internal_work_reconciliation_seconds_maximum: 300
+    simulated_external_work_deadline: declared-bounded-settlement-window
+  after_fault_restoration:
+    backlog_returns_to_prefault_age_and_count_envelope_seconds_maximum: 1800
+
+fault_scenarios:
+  - case: application-replica-loss
+    required: true
+    severity: pending-bank-sre-approval
+    injection_duration_seconds: pending-bank-sre-approval
+    recovery_boundary: pending-bank-sre-approval
+  - case: database-primary-loss
+    required: true
+    severity: pending-bank-sre-approval
+    injection_duration_seconds: pending-bank-sre-approval
+    recovery_boundary: pending-bank-sre-approval
+  - case: broker-loss
+    required: true
+    severity: pending-bank-sre-approval
+    injection_duration_seconds: pending-bank-sre-approval
+    recovery_boundary: pending-bank-sre-approval
+  - case: availability-zone-loss
+    required: true
+    recovery_target_ref: latency_targets.post_availability_zone_loss
+    severity: pending-bank-sre-approval
+    injection_duration_seconds: pending-bank-sre-approval
+    recovery_boundary: pending-bank-sre-approval
+  - case: dependency-latency
+    required: true
+    severity: pending-bank-sre-approval
+    injection_duration_seconds: pending-bank-sre-approval
+    recovery_boundary: pending-bank-sre-approval
+  - case: network-partition
+    required: true
+    severity: pending-bank-sre-approval
+    injection_duration_seconds: pending-bank-sre-approval
+    recovery_boundary: pending-bank-sre-approval
+  - case: response-loss-after-commit
+    required: true
+    severity: pending-bank-sre-approval
+    injection_duration_seconds: pending-bank-sre-approval
+    recovery_boundary: pending-bank-sre-approval
+  - case: durability-quorum-loss
+    required: true
+    required_behavior: stop_write_acceptance_without_weakening_durability
+    severity: pending-bank-sre-approval
+    injection_duration_seconds: pending-bank-sre-approval
+    recovery_boundary: pending-bank-sre-approval
+  - case: regional-disaster-recovery
+    requirement_scope: bank-production-qualification
+    platform_only_qualification: out-of-scope
+    bank_production_qualification: required
+    blocked_until: bank-bia-contract-rto-rpo-and-restore-approval
+    severity: pending-bank-sre-approval
+    injection_duration_seconds: pending-bank-sre-approval
+    recovery_boundary: pending-bank-sre-approval
+fault_campaign_contract:
+  approval_required_from: [bank-risk-compliance, sre]
+  approval_state: pending
+  blocks_qualification_until_frozen: true
+  applies_to_every_fault_scenario: true
+  fields_frozen_before_run:
+    severity: pending-bank-sre-approval
+    injection_duration_seconds: pending-bank-sre-approval
+    start_and_stop_boundaries: pending-bank-sre-approval
+    recovery_boundary: pending-bank-sre-approval
+  no_default_severity_or_duration_is_implied: true
+fault_evidence_requirements:
+  - independent-failure-domain-description
+  - full-interruption-and-rejection-interval
+  - acknowledgement-and-replication-durability
+  - quorum-and-failover-fencing
+  - instruction-journal-and-hold-store-reconciliation
+  - kafka-replication-minimum-isr-and-producer-acknowledgements
+  - temporal-persistence
+  - database-pool-state
+  - latency-and-availability-cost
+  - zero-lost-acknowledged-financial-writes
+  - approved-fault-severity-duration-and-injection-boundaries
+  - approved-recovery-boundary-and-observed-recovery-time
+
+evidence_contract:
+  common_envelope: ADR-0273-test-intelligence-run-envelope
+  capacity_manifest: planned-separate-profile-bound-manifest
+  required_identity_bindings:
+    - profile_sha256
+    - source_commit
+    - application_image_digests
+    - effective_configuration_digest
+    - topology_and_failure_domains
+    - dataset_seed_and_generation_version
+    - k6_runtime_image_digest
+    - workflow_run_id_and_attempt
+    - trusted_execution_attestation
+  required_outputs:
+    - raw_latency_distributions_and_worst_windows
+    - offered-attempted-accepted-rejected-booked-settled-counts
+    - financial_oracle_results_and_reconciliation_totals
+    - queue_age_count_lag_and_dead_row_series
+    - plans_and_database_io_wal_resource_and_cost_series
+    - clock_uncertainty_and_observation_timestamps
+  public_summary_must_be_sanitized: true
+  credentials_customer_data_private_endpoints_and_recovery_procedures_allowed: false
+  self_reported_pass_is_attestation: false
+  freshness_days_maximum: 30
+  artifact_retention_is_freshness_policy: false
+  approved_threshold_changes_required: true
+
+commercial_targets:
+  approved_cost_ceiling: null
+  required_reported_metrics:
+    - infrastructure-cost
+    - observability-cost
+    - backup-cost
+    - operational-cost
+    - cost-per-client-per-month-at-stated-utilization
+    - cost-per-1000-completed-instructions-at-stated-utilization
+  qualification_blocked_until_bank-approval: true
