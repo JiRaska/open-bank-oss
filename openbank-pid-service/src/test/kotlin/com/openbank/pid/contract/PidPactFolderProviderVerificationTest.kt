@@ -146,6 +146,12 @@ class PidPactFolderProviderVerificationTest {
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
+        // Negative contract (ADR-0279 #3): an id the caller cannot resolve must answer 404, not 200
+        // and not 500. The recorded pact is happy-path only, so the boundary is pinned here.
+        io.restassured.RestAssured.given()
+            .get("/api/v1/parties/dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+            .then()
+            .statusCode(404)
         context?.target = HttpTestTarget("localhost", testPort.toInt())
         context?.addStateChangeHandlers(this)
     }
