@@ -7,6 +7,7 @@ import com.openbank.engagement.infrastructure.outbox.EngagementOutboxDispatcher
 import com.openbank.engagement.infrastructure.persistence.repository.EngagementOutboxRepositoryImpl
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
@@ -31,7 +32,7 @@ import java.util.UUID
     value = EngagementOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
     restrictToAnnotatedClass = true,
 )
-@QuarkusTestResource(EngagementPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class EngagementOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 
     // The test config leaves the dispatcher off so other ITs own their rows; this suite drives

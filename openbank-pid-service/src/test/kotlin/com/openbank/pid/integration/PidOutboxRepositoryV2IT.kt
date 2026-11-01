@@ -6,9 +6,9 @@ package com.openbank.pid.integration
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepositoryV2
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.outbox.OutboxRepositoryV2ConformanceIT
 import com.openbank.pid.infrastructure.persistence.repository.PidOutboxRepositoryImpl
-import com.openbank.pid.it.PostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
