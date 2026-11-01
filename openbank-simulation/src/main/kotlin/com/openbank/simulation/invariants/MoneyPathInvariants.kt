@@ -8,6 +8,7 @@ import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.delegation.domain.model.SpendWindows
+import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.sdd.domain.lifecycle.MandateLifecycle
@@ -166,6 +167,33 @@ object MoneyPathInvariants {
             world.settlements.forEach { settlement ->
                 if (settlement.status !in terminal) {
                     return Violation(name, "settlement ${settlement.id} stuck in ${settlement.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `DomesticPayment`
+     * driven by [com.openbank.simulation.scenario.DomesticClearingScenario] must reach a
+     * terminal status (SETTLED / REJECTED / RETURNED / CANCELLED) by the time a step has fully
+     * settled — the domestic analogue of [sepaPaymentCompleteness]. A payment left RECEIVED
+     * (never validated), VALIDATED (never dispatched), or SENT_TO_CLEARING (never settled nor
+     * returned) is the silent money-in-flight defect this invariant exists to surface.
+     */
+    val domesticPaymentCompleteness = object : Invariant {
+        private val terminal = setOf(
+            DomesticPaymentStatus.SETTLED,
+            DomesticPaymentStatus.REJECTED,
+            DomesticPaymentStatus.RETURNED,
+            DomesticPaymentStatus.CANCELLED,
+        )
+
+        override val name = "domestic-payment-completeness"
+        override fun check(world: World): Violation? {
+            world.domesticPayments.forEach { payment ->
+                if (payment.status !in terminal) {
+                    return Violation(name, "domestic payment ${payment.id} stuck in ${payment.status}")
                 }
             }
             return null
@@ -608,6 +636,7 @@ object MoneyPathInvariants {
         auditCompleteness,
         sepaPaymentCompleteness,
         settlementCompleteness,
+        domesticPaymentCompleteness,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,

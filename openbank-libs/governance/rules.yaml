@@ -627,7 +627,7 @@ change_requirements:
     # non-nullable field is a real replay break. A ruling plus a 40-finding burn-down is not three
     # days of work, and leaving the date would have failed EVERY PR in the repo via
     # gate-graduation-guard rather than failing this rule.
-    target_enforce_date: "2026-10-31"   # ADR-0144
+    target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-11-01: replay ruling and measured finding burn-down still pending
     # GRADUATION EVIDENCE, CORRECTED 2026-09-05 by a second-agent replay. The first pass
     # recorded "0 findings on 20 commits"; both numbers were wrong and the verdict inverted.
     # Replaying TODAY'S checker as an imported module over the REAL population — the 22 commits
@@ -916,7 +916,7 @@ change_requirements:
       - "or split the src/main change and the non-src/main change into separate commits/PRs when both a release and a non-releasing change are intended"
     gate: release-scope-mismatch
     enforced: advisory
-    target_enforce_date: "2026-10-31"   # ADR-0144; moved 2026-10-01: producer live, false-positive rate unmeasured before --enforce (#11692)
+    target_enforce_date: "2026-11-30"   # ADR-0144; moved 2026-11-01: advisory false-positive measurement still pending (#11692)
     # CI producer is LIVE (advisory): openbank-infra/scripts/check-release-scope-mismatch.py runs
     # in the "Validate manifests" job on every PR, right after release-registration consistency.
     # Classifies from the PR title (the default squash-commit subject). Findings are ::warning

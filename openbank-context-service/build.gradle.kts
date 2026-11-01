@@ -11,6 +11,9 @@ dependencies {
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.smallrye.kafka)
     implementation(libs.quarkus.scheduler)
+    // Fleet observability baseline (ADR-0008): without the extension the service emits no spans
+    // at all, so its trace band in Test Intelligence can never be evidenced.
+    implementation(libs.quarkus.opentelemetry)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(project(":openbank-libs-domain"))
