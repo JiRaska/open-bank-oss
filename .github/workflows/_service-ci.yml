@@ -816,7 +816,7 @@ jobs:
         run: |
           set -euo pipefail
           consumer_args=()
-          if [ -n "$PACT_CONSUMER" ]; then
+          if [ -n "${PACT_CONSUMER:-}" ]; then
             [[ "$PACT_CONSUMER" =~ ^openbank-[a-z0-9-]+$ ]] || {
               echo '::error::Consumer must be an openbank-* module name.'
               exit 1
@@ -825,7 +825,7 @@ jobs:
           fi
           ./gradlew :${{ inputs.service }}:providerPactTest --build-cache \
             --console=plain --stacktrace \
-            "${consumer_args[@]}" \
+            ${consumer_args[@]+"${consumer_args[@]}"} \
             -Dpactbroker.url="${PACT_BROKER_URL:-}" \
             -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
             -Dpactbroker.auth.password="${PACT_BROKER_PASSWORD:-}" \
