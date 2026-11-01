@@ -182,7 +182,7 @@ test_pension_fund_catalog_grant_is_only_read if {
 }
 
 test_pension_fund_scope_does_not_grant_other_clients if {
-	every caller in ["service-account-openbank-services", "service-account-openbank-account", "service-account-other"] {
+	every caller in ["service-account-openbank-services", "service-account-openbank-lending", "service-account-other"] {
 		not decide(machine(caller, ["ROLE_API", "CATALOG_SCOPE_READ"]), "catalog.read").allow
 	}
 }
