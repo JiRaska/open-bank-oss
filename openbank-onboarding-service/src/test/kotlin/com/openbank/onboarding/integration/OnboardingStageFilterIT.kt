@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test
  * distinguishable — the property #8699 asks for by name.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.onboarding.it.OnboardingPostgresTestResource::class)
+@QuarkusTestResource(com.openbank.onboarding.it.PostgresTestResource::class)
 class OnboardingStageFilterIT {
 
     @Test

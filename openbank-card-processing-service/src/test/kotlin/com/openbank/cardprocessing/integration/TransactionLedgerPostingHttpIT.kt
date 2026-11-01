@@ -10,10 +10,11 @@ import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.domain.model.PresentmentChannel
 import com.openbank.cardprocessing.infrastructure.client.TransactionLedgerPostingAdapter
 import com.openbank.cardprocessing.infrastructure.client.TransactionServiceClient
-import com.openbank.cardprocessing.it.PostgresTestResource
 import com.openbank.cardprocessing.it.StubTransactionServiceResource
 import com.openbank.cardprocessing.support.capturePostingLogs
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -35,7 +36,10 @@ import java.util.UUID
  * read FAILED (the gap has to stay visible).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_card_processing_it")],
+)
 @QuarkusTestResource(StubTransactionServiceResource::class, restrictToAnnotatedClass = true)
 @TestProfile(TransactionLedgerPostingHttpIT.Profile::class)
 class TransactionLedgerPostingHttpIT {

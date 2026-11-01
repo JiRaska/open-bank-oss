@@ -38,7 +38,7 @@ import java.util.function.Supplier
  */
 @QuarkusTest
 @QuarkusTestResource(ScaEnrolmentProjectionIT.InMemoryScaChannels::class)
-@QuarkusTestResource(com.openbank.onboarding.it.OnboardingPostgresTestResource::class)
+@QuarkusTestResource(com.openbank.onboarding.it.PostgresTestResource::class)
 class ScaEnrolmentProjectionIT {
 
     class InMemoryScaChannels : io.quarkus.test.common.QuarkusTestResourceLifecycleManager {

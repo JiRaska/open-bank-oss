@@ -8,9 +8,10 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
-import com.openbank.incentive.it.IncentivePostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
@@ -59,7 +60,10 @@ import javax.sql.DataSource
  * other pair in the fleet uses.
  */
 @QuarkusTest
-@QuarkusTestResource(IncentivePostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_incentive_it")],
+)
 @QuarkusTestResource(IncentivePactBrokerProviderVerificationTest.InMemoryKafkaResource::class)
 // #12448: customer-incentive calls are admitted only from customer-edge's own service-account token.
 @TestSecurity(user = "maker@openbank.test", roles = ["ROLE_API"])
