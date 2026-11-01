@@ -527,7 +527,9 @@ class PensionFullLifecycleJourneyE2E {
         assertThat(changed.statusCode).describedAs(changed.body.asString()).isEqualTo(200)
         assertThat(changed.jsonPath().getString("currentStrategy.strategyCode")).isEqualTo("CONSERVATIVE")
 
-        val year = ok(customerGet(retiree, "$FUNDING/$id/tax-years/${LocalDate.now().year}"))
+        // The transfer is booked on the service clock, which the workflow time-skipping above has moved
+        // on; the real clock year differs once the skipped months cross 31 December.
+        val year = ok(customerGet(retiree, "$FUNDING/$id/tax-years/${LocalDate.now(appClock).year}"))
         assertThat(year.getObject("transferIn", BigDecimal::class.java))
             .describedAs("the transferred amount is booked as a TRANSFER_IN contribution")
             .isEqualByComparingTo("250000")
