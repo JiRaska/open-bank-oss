@@ -319,6 +319,12 @@ select_modules() {
     while IFS= read -r f; do
       [ -z "$f" ] && continue
       is_inert_service_path "$f" && continue
+      # pull_request only: the main push keeps its full-fleet run so every deployed SHA has
+      # a green Services CI of its own.
+      if gitops_image_pin_only_change "$f" "$DIFF_BASE"; then
+        echo "Decision: $f changes only container image pins -> inert."
+        continue
+      fi
       case "$f" in
         openbank-libs/governance/*|pacts/*.json|.github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-select-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) continue ;;
         openbank-*/*)
