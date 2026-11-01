@@ -80,9 +80,6 @@ NO_OVERLAY_YET: dict[str, str] = {
     "deployed, so nothing is exposed. No VEX overlay is written yet: dispositions must come from "
     "this service's own resolved runtime classpath, not be copied from a sibling. Delete this "
     "entry in the PR that writes the overlay.",
-    "wealth-service": "#9811 - released in #9771 (ADR-0301 D1) and deployed nowhere, moves no "
-    "money and has no ingress, so nothing is exposed while the dispositions are verified "
-    "against this service's own resolved runtime classpath rather than copied from a sibling.",
     "card-processing-service": "#9849 - new service (ADR-0283 phase 1), no VEX overlay written yet. "
                                "Its dependency set is the ordinary reactive Quarkus stack largely "
                                "shared with services that already carry overlays, but 'largely "
