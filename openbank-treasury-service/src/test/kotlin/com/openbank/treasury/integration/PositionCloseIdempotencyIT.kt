@@ -4,9 +4,9 @@
 
 package com.openbank.treasury.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.treasury.application.port.out.PositionClose
 import com.openbank.treasury.application.port.out.ViewsRepository
-import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
