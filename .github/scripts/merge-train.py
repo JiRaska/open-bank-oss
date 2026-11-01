@@ -175,6 +175,29 @@ NOTICE_PATH_CAP = 20
 RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's inconclusive jobs were re-run once
 CARRIER_YIELD_CONTEXT = "merge-train/carrier-yielded"   # App marker: a green carrier waited one tick for this GREEN holder head
 DEFER_CONTEXT = "merge-train/strict-deferral"   # App marker: this running strict head yielded once to a carrier
+PARALLEL_CONTEXT = "merge-train/parallel-window"  # App marker: fast-lane PRs were posted while THIS head's CI ran
+# Parallel fast lane (ADR-0343 amendment 2026-11-01, #14302). While a strict-lane holder's CI runs, a
+# fast-lane PR that shares NO module, NO file and NO shared build input/namespace with the holder may be
+# posted. The holder keeps its reservation (no train, no other strict update) and is NEVER merged on that
+# head: once green it is update-branched, and it merges only on a head that contains live main with every
+# required context green — the unchanged strict-lane rule. One window per holder: the update's head (its
+# first parent carries PARALLEL_CONTEXT) is a catch-up head and holds the fast lane like today.
+# OFF until services CI can re-verify a pure main-update head incrementally (the catch-up head otherwise
+# re-runs the holder's whole CI, which doubles strict latency); the self-test exercises both settings.
+PARALLEL_FAST_LANE = [False]
+# A parallel fast-lane PR may touch none of these: shared build inputs (every service consumes the libs,
+# build-logic and gradle wiring; `openbank-libs-*` is NOT under the fast lane's `openbank-libs/` prefix),
+# and shared namespaces two disjoint files can still collide in (ADR numbers, gates/rules lists, the
+# release manifest and every other repo-root file).
+PARALLEL_SHARED_PREFIXES = ("openbank-libs", "build-logic/", "gradle/", ".github/", "docs/adr/", "openbank-infra/")
+# Per-module namespaces (Flyway V<n>__, openapi info.version, version.txt) are covered by MODULE
+# disjointness; these names are refused even outside the holder's modules, as belt and braces.
+PARALLEL_NAMESPACE_NAMES = ("openapi.yaml", "version.txt", "CHANGELOG.md", "package.json")
+# Fast lane's turn: after a strict-lane merge, while fast-lane PRs wait, the next update-branch waits one
+# turn (bounded like TRAIN_TURN_S) so the fast lane posts over the moved main between two reservations.
+FAST_TURN_S = 30 * 60
+FAST_TURN_CONTEXT = "merge-train/fast-turn"   # App marker on main's strict-merge commit: "opened <epoch>"
+FAST_TURN_RE = re.compile(r"^opened ([0-9]{1,12})$")
 # Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
 # whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
 # the carrier-attestation rule existed (#12506, #13137 were marked by those defects), so it is NOT
@@ -789,6 +812,31 @@ def fast_lane_eligible(pr_files: list[str], main_files: list[str], other_files: 
     if overlap:
         return False, f"overlaps another candidate: {overlap[0]}"
     return True, "disjoint from main and from the batch, no protected path"
+
+
+def parallel_fast_ok(pr_files: list[str], holder_files: list[str] | None) -> tuple[bool, str]:
+    """May this fast-lane PR be posted while the strict holder's CI runs (PARALLEL_FAST_LANE)? Only when
+    it is disjoint from the holder by module, not merely by file: two disjoint files in one module can
+    still collide in a per-module namespace (`V5__a.sql` and `V5__b.sql`, two `info.version` bumps).
+    Unreadable holder files fail closed. This decides only whether the holder's CI is likely still worth
+    finishing — the holder is re-verified by CI on its updated head before it can merge, whatever this says."""
+    if holder_files is None:
+        return False, "holder's files unreadable"
+    for f in pr_files:
+        if "/" not in f:
+            return False, f"repo-root file {f} (shared namespace)"
+        for pre in PARALLEL_SHARED_PREFIXES:
+            if f.startswith(pre):
+                return False, f"shared build input {f} ({pre})"
+        if f.rsplit("/", 1)[-1] in PARALLEL_NAMESPACE_NAMES:
+            return False, f"shared namespace {f}"
+    overlap = sorted(set(pr_files) & set(holder_files))
+    if overlap:
+        return False, f"overlaps the holder's file {overlap[0]}"
+    mods = sorted({f.split("/", 1)[0] for f in pr_files} & {f.split("/", 1)[0] for f in holder_files if "/" in f})
+    if mods:
+        return False, f"shares module {mods[0]}/ with the holder"
+    return True, "module-disjoint from the holder, no shared build input or namespace"
 
 
 def bisect_size(app: dict[str, tuple[str, str]]) -> int | None:
@@ -2162,9 +2210,10 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required)
     if defer_recovered_main_red(gh, base, main_red, summary):
         return summary
+    parallel = lambda view: parallel_holder(gh, git, base, view, main_red)  # noqa: E731
     holder, timed_out = strict_reservation(git, base, strict, shadow,
                                            fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
-                                           activity=gh.ci_activity)
+                                           activity=gh.ci_activity, parallel=parallel)
     acted = False
     for p in [p for p in gh.open_prs() if is_carrier(p, repo)]:
         sha, branch, carrier = p["head"]["sha"], p["head"]["ref"], p["number"]
@@ -2335,14 +2384,16 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             Pusher(git, branch, gh.remote).delete()
     if acted:  # a carrier was judged: main or member statuses may have changed — read everything again
         base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required)
+        parallel = lambda view: parallel_holder(gh, git, base, view, main_red)  # noqa: E731
         holder, timed_out = strict_reservation(git, base, strict, shadow,
                                                fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
-                                           activity=gh.ci_activity)
+                                               activity=gh.ci_activity, parallel=parallel)
     summary["main_red"] = sorted(main_red)
     fragments = regen_inventory_fragments(regen_text)
     fast, train_waiting = partition(git, base, cands, fragments)
     yield_why = train_turn(gh, git, base, train_waiting,
                            any(is_carrier(p, repo) and carrier_holds_strict(p) for p in gh.open_prs()))
+    yield_why = yield_why or fast_turn(gh, git, base, fast, apps, main_red, carrier_in_flight, shadow)
     if timed_out:
         summary["timed_out"] = timed_out
         # Released: never reserving again on that head, and served after every other strict-lane PR.
@@ -2353,7 +2404,10 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
                 yield_why)
     if summary.get("main_health_deferred"):
         return summary
-    if (holder is not None and not carrier_in_flight and not summary["updated"] and not summary["strict"]
+    holder_current = holder is not None and any(
+        v["number"] == holder and git("merge-base", "--is-ancestor", base, v["head_sha"], check=False).returncode == 0
+        for _st, v in strict)
+    if (holder_current and not carrier_in_flight and not summary["updated"] and not summary["strict"]
             and train_waiting and not main_red and not any(is_carrier(p, repo) for p in gh.open_prs())
             and deferral_state(gh, git, strict, holder) == "open"):
         # Bounded deferral (#13400): the running reservation lets ONE carrier be built from green
@@ -2382,7 +2436,33 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     hold = (f"main reserved for strict-lane #{holder}" if holder is not None
             else "strict-lane update-branch requested" if summary["updated"]
             else "a strict-lane PR merged; main moved" if summary["strict"] else None)
+    hview = next((v for st, v in strict if v["number"] == holder and st == "pending"), None)
+    window = (hview is not None and not summary["updated"] and not summary["strict"] and not main_red
+              and not shadow and parallel_window_open(gh, git, hview))
+    holder_files = None
+    if window:
+        try:   # the one gating diff helper (-z, --no-renames, both paths of a rename); unreadable = closed
+            holder_files = changed_paths(git, f"{base}...{hview['head_sha']}")
+        except (subprocess.CalledProcessError, ValueError):
+            holder_files = None
     for m in fast:
+        if hold and window:
+            ok, why = parallel_fast_ok(m.files, holder_files)
+            if not ok:
+                log(f"#{m.number:>6} fast      held: {hold}, not parallel ({why}) — next tick")
+                continue
+            if gh.app_statuses(hview["head_sha"]).get(PARALLEL_CONTEXT, ("", ""))[0] != "success":
+                gh.post_status(hview["head_sha"], "success",
+                               f"fast lane ran during this head's CI (#{m.number} first); update-branch once green",
+                               context=PARALLEL_CONTEXT)
+            if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success":
+                gh.post_status(m.head_sha, "success",
+                               f"fast lane: disjoint from main {base[:12]}, the batch and strict-lane #{holder}",
+                               source_number=m.number)
+            log(f"#{m.number:>6} fast      parallel to strict-lane #{holder}: {why}")
+            summary["fast"].append(m.number)
+            summary.setdefault("parallel", []).append(m.number)
+            continue
         if hold:
             log(f"#{m.number:>6} fast      held: {hold} — next tick")
             continue
@@ -2521,6 +2601,64 @@ def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now:
     return f"train's turn after a strict-lane merge ({len(train_waiting)} train candidate(s) waiting)"
 
 
+def fast_turn(gh, git, base: str, fast: list, apps: dict, main_red, carrier_in_flight: bool,
+              shadow: bool = False, now: float | None = None) -> str | None:
+    """Why the strict lane must not START a reservation this tick so the fast lane gets one turn, or None.
+    Measured 2026-11-01 (#14302): with ~30 strict PRs queued every strict merge was followed in the very
+    next tick by the next update-branch, so the fast lane was held in every tick but the merge tick.
+    Only fast-lane PRs not yet posted count (a posted one waits on auto-merge, not on us; red, draft and
+    unarmed PRs are never candidates). No turn while main is red or a carrier is in flight. The turn is
+    keyed to main's head being a strict-lane merge: ANY other commit on main (a fast merge, a train, a
+    foreign push) ends it. Its cap runs from the App's own `merge-train/fast-turn` marker on that commit,
+    written when the turn opens, never from the commit time; an unreadable marker opens a new one."""
+    waiting = [m for m in fast if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success"]
+    if not waiting or main_red or carrier_in_flight or not last_merge_was_strict(gh, git, base):
+        return None
+    now = time.time() if now is None else now
+    m = FAST_TURN_RE.fullmatch(gh.app_statuses(base).get(FAST_TURN_CONTEXT, ("", ""))[1] or "")
+    if m is None:
+        if shadow:
+            return None
+        try:   # a failed marker write must never abort the settle tick: no turn this tick
+            gh.post_status(base, "success", f"opened {int(now)}", context=FAST_TURN_CONTEXT)
+        except (SystemExit, Exception) as e:  # noqa: BLE001 — post_status exits on any non-201
+            log(f"::warning::fast turn: marker not written ({type(e).__name__}: {e}) — no turn this tick")
+            return None
+        opened = int(now)
+    else:
+        opened = int(m.group(1))
+    if now - opened > FAST_TURN_S or now < opened:
+        return None
+    return f"fast lane's turn after a strict-lane merge ({len(waiting)} fast-lane PR(s) waiting)"
+
+
+def parallel_window_open(gh, git, view: dict) -> bool:
+    """The holder's head may run a parallel fast lane: the feature is on and this head is not itself the
+    catch-up update of a head that already had its window (first parent carries PARALLEL_CONTEXT)."""
+    if not PARALLEL_FAST_LANE[0]:
+        return False
+    parents = git("rev-list", "--parents", "-n", "1", view["head_sha"], check=False).stdout.split()
+    return not any(gh.app_statuses(sha).get(PARALLEL_CONTEXT, ("", ""))[0] == "success" for sha in parents[1:2])
+
+
+def parallel_holder(gh, git, base: str, view: dict, main_red=None) -> bool:
+    """A strict head BEHIND main still holds its reservation when its window was used on this exact head
+    (PARALLEL_CONTEXT) and everything main gained since its merge-base passes parallel_fast_ok against it.
+    Anything else that moved main (a train, a foreign merge, an overlapping change) ends that: the head
+    falls back to the ordinary behind-main handling."""
+    head = view["head_sha"]
+    if (not PARALLEL_FAST_LANE[0] or main_red
+            or gh.app_statuses(head).get(PARALLEL_CONTEXT, ("", ""))[0] != "success"):
+        return False
+    mb = git("merge-base", base, head, check=False).stdout.strip()
+    if not mb:
+        return False
+    try:
+        return parallel_fast_ok(changed_paths(git, mb, base), changed_paths(git, f"{base}...{head}"))[0]
+    except subprocess.CalledProcessError:
+        return False   # unreadable: not a holder, the ordinary behind-main handling applies
+
+
 def reservation_expired(git, head: str, now: float, activity=None, green: bool = False) -> str | None:
     """Why the reservation on `head` is over, or None while its CI is live (ADR-0343, #13400).
     Expired when the head is future-dated (the committer time is author-supplied, #13485), older
@@ -2602,7 +2740,7 @@ def record_deferral(gh, git, repo: str, base: str, carrier_branch: str) -> list[
 
 
 def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: float | None = None,
-                       fixes: dict | None = None, activity=None) -> tuple[int | None, list[int]]:
+                       fixes: dict | None = None, activity=None, parallel=None) -> tuple[int | None, list[int]]:
     """(holder, timed_out). The holder is the oldest strict-lane PR whose head already contains live
     main and whose CI is still running with nothing failed — or has just gone green, so it merges this
     tick: main is reserved for it, so neither the
@@ -2622,7 +2760,10 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
         if state not in ("pending", "green"):
             continue
         if git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0:
-            continue
+            # Behind only by parallel fast-lane merges (parallel_holder): still the holder, never merged
+            # from here — strict_lane update-branches it once green.
+            if not (parallel and holder is None and state in ("pending", "green") and parallel(view)):
+                continue
         if state == "green" and shadow:
             continue  # shadow never merges it, so it must not hold anything
         why = reservation_expired(git, head, now, activity, green=state == "green")
@@ -2797,6 +2938,15 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         current = git("merge-base", "--is-ancestor", base, head, check=False).returncode == 0
         if current and state == "pending" and n in (timed_out or []):
             continue
+        behind_holder = PARALLEL_FAST_LANE[0] and n == holder and not current
+        if behind_holder and state == "pending":
+            # Parallel window (PARALLEL_FAST_LANE): main moved only by module-disjoint fast-lane merges.
+            # Its CI still finishes; it is updated once green and merges only on the updated head.
+            log(f"#{n:>6} strict    CI running behind disjoint fast-lane merges: main reserved for it, "
+                f"update-branch once green")
+            summary["in_flight"] = True
+            updated = True
+            continue
         fix = fixes.get(n)
         if fix and state == "green" and not main_health_checked:
             main_health_checked = True
@@ -2820,9 +2970,9 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
                 ctxs = sorted(main_red)
                 log(f"#{n:>6} strict    behind main, not updated: {main_red_reason(ctxs, main_red)}")
                 continue
-            if updated or shadow:
+            if (updated and not behind_holder) or shadow:
                 continue
-            if yield_why:
+            if yield_why and not behind_holder:
                 log(f"#{n:>6} strict    behind main, not updated: {yield_why} — next tick")
                 updated = True  # one log line: no younger strict PR is updated either
                 continue
@@ -2880,6 +3030,10 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
             log(f"#{n:>6} strict    fix for {', '.join(fix)} red on main {base[:12]}: combined head verified, merging")
         else:
             desc = f"strict lane: green on an up-to-date head over main {base[:12]}"
+        if git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0:
+            # Fail closed (never an assert: -O strips it, and a crash would end the whole tick).
+            log(f"::warning::#{n:>6} strict    head does not contain main {base[:12]} at merge time — skipped")
+            continue
         gh.post_status(head, "success", desc, source_number=n)
         merged = gh.merge(n, head)
         if not merged:
@@ -3408,6 +3562,14 @@ def _synthetic_origin(root: str) -> None:
     pr("pX", {"docs/adr/0001-x.md": "x\n"})
     pr("pF", {"svc/fast.txt": "f\n"})
     pr("pT", {SYN_BASELINE: "loosened\n"})
+    # Parallel fast lane (#14302): a strict holder with a gate script AND a service module, and fast-lane
+    # PRs that are file-overlapping, module-sharing (same Flyway version), lib-touching, or fully disjoint.
+    pr("pH", {".github/scripts/h.py": "h\n", "svch/db/migration/V5__h.sql": "h\n", "svch/o.txt": "h\n"})
+    pr("pO", {"svch/o.txt": "o\n"})
+    pr("pC", {"svch/db/migration/V5__c.sql": "c\n"})
+    pr("pLb", {"openbank-libs-runtime/l.kt": "l\n"})
+    pr("pZ", {"svcz/z.txt": "z\n"})
+    pr("pP", {"svcp/p.txt": "p\n"})
     # Review 6: a generator whose NAME carries a newline, and a module shadowing `yaml` next to the
     # heredoc script. Each leaves a marker if it is ever executed.
     pr("pN", {SYN_NEWLINE_GENERATOR: f"touch {os.path.join(os.path.dirname(root), 'newline-gen-ran')}\n", "docs/n.md": "n\n"})
@@ -3790,6 +3952,19 @@ def self_test() -> int:
         check(f"fast lane: {f} does NOT qualify", not fast_lane_eligible([f], [], [], frags)[0])
     check("fast lane: overlap with main or the batch does NOT qualify",
           not fast_lane_eligible(["a"], ["a"], [], frags)[0] and not fast_lane_eligible(["a"], [], ["a"], frags)[0])
+    hold_f = [".github/scripts/h.py", "svch/db/migration/V5__h.sql", "svch/o.txt"]
+    check("parallel: a module-disjoint fast-lane PR may run beside the holder",
+          parallel_fast_ok(["svcz/src/main/kotlin/Z.kt"], hold_f)[0])
+    for f, label in (("svch/o.txt", "an overlapping file"),
+                     ("svch/db/migration/V5__c.sql", "the same module (Flyway V5__ collision)"),
+                     ("openbank-libs-runtime/x.kt", "an openbank-libs-* lib the holder's services consume"),
+                     ("openbank-libs/x.kt", "openbank-libs/"), ("build-logic/x.kts", "build-logic"),
+                     ("gradle/libs.versions.toml", "gradle wiring"),
+                     ("svcq/src/main/resources/openapi.yaml", "an openapi.yaml (info.version namespace)"),
+                     ("svcq/version.txt", "a version.txt"), (".release-please-manifest.json", "a repo-root file"),
+                     ("docs/adr/0400-x.md", "an ADR number"), (".github/gates/gates.yaml", "gates.yaml")):
+        check(f"parallel: {label} is held (must-fail negative)", not parallel_fast_ok([f], hold_f)[0], f)
+    check("parallel: unreadable holder files fail closed", not parallel_fast_ok(["svcz/z.txt"], None)[0])
     mk = lambda *ns: [Member(n, "", "", "a" * 40, "", "") for n in ns]  # noqa: E731
     check("batch: default size", [m.number for m in select_batch(mk(1, 2, 3), {}, 2)] == [1, 2])
     check("batch: a bisect size on an applied member caps it", batch_cap(mk(1, 2, 3, 4), {1: 2}, 8) == 2)
@@ -4037,7 +4212,8 @@ def self_test() -> int:
             gh = FakeGitHub(origin, root)
             base0 = gh.main_sha()
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
-                       "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62, "pK": 38, "pM": 39}
+                       "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62, "pK": 38, "pM": 39,
+                       "pH": 71, "pO": 72, "pC": 73, "pLb": 74, "pZ": 75, "pP": 77}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -5148,6 +5324,124 @@ def self_test() -> int:
                   gh.merged == [35], f"{s} merged={gh.merged}")
             reset()
 
+            # PARALLEL FAST LANE (#14302). Holder pH (a gate script + module svch) is up to date with its CI
+            # running. With the feature ON, only the module-disjoint pZ is posted; pO (same file), pC (same
+            # module: V5__ collision) and pLb (openbank-libs-runtime) are held. The holder keeps the
+            # reservation behind the fast merge, is update-branched once green, gets no second window on the
+            # catch-up head, and merges only on that verified, up-to-date head.
+            def pstatus(n):
+                return gh.app_statuses(gh.prs[n]["head"]["sha"]).get(STATUS_CONTEXT, ("", ""))[0]
+
+            def parallel_setup():
+                gh.updates.clear()
+                open_only("pH")
+                gh.head_checks[gh.prs[71]["head"]["sha"]] = {"gates (data)": None}
+                open_only("pO", "pC", "pLb", "pZ")
+
+            PARALLEL_FAST_LANE[0] = False
+            try:
+                parallel_setup()
+                s = settle_now()
+                check("parallel OFF (today): the disjoint fast-lane PR is held during the reservation",
+                      75 not in s["fast"] and pstatus(75) != "success" and s["in_flight"], f"{s}")
+                gh.head_checks.clear()
+                reset()
+                # Whole-summary equality: flag OFF must equal the code with every window path forced inert.
+                # (Fails if any parallel branch acts while the flag is off.)
+                parallel_setup()
+                s_off = settle_now()
+                gh.head_checks.clear()
+                reset()
+                saved_pw = (globals()["parallel_window_open"], globals()["parallel_holder"])
+                globals()["parallel_window_open"] = lambda *a, **k: False
+                globals()["parallel_holder"] = lambda *a, **k: False
+                try:
+                    parallel_setup()
+                    s_base = settle_now()
+                finally:
+                    globals()["parallel_window_open"], globals()["parallel_holder"] = saved_pw
+                check("parallel OFF: the whole settle summary equals the inert baseline", s_off == s_base,
+                      f"{s_off} != {s_base}")
+                gh.head_checks.clear()
+                reset()
+                PARALLEL_FAST_LANE[0] = True
+                parallel_setup()
+                s = mode_settle(gh, Git(clone("settle")), "o/r", True)
+                check("parallel: shadow mode posts nothing in the window",
+                      s["fast"] == [] and pstatus(75) != "success"
+                      and not gh.app_statuses(gh.prs[71]["head"]["sha"]).get(PARALLEL_CONTEXT), f"{s}")
+                gh.head_checks.clear()
+                reset()
+                parallel_setup()
+                gh.main_override = {"gates (data)": "failure"}
+                s = settle_now()
+                check("parallel: no window while main is red", 75 not in s["fast"] and pstatus(75) != "success", f"{s}")
+                gh.main_override = {}
+                gh.head_checks.clear()
+                reset()
+                parallel_setup()
+                open_only("pP")
+                h0 = gh.prs[71]["head"]["sha"]
+                s = settle_now()
+                check("parallel: a disjoint fast-lane PR is posted during a running strict reservation",
+                      75 in s["fast"] and pstatus(75) == "success"
+                      and gh.app_statuses(h0).get(PARALLEL_CONTEXT, ("", ""))[0] == "success", f"{s}")
+                check("parallel: a second disjoint PR rides the same window, one marker on the holder",
+                      s["fast"] == [75, 77] and sum(1 for r in gh.statuses.get(h0, []) if r[0] == PARALLEL_CONTEXT) == 1,
+                      f"{s} {gh.statuses.get(h0)}")
+                gh.prs[77]["state"] = "closed"
+                check("parallel: an overlapping-file fast-lane PR is held", pstatus(72) != "success", f"{s}")
+                check("parallel: a same-module (V5__ namespace) fast-lane PR is held", pstatus(73) != "success", f"{s}")
+                check("parallel: a lib-touching fast-lane PR is held", pstatus(74) != "success", f"{s}")
+                check("parallel: the reservation still holds trains and the holder is neither merged nor updated",
+                      s["in_flight"] and gh.merged == [] and gh.updates == [], f"{s} {gh.updates}")
+                gh.merge(75, gh.prs[75]["head"]["sha"])          # GitHub auto-merge acts on the fast status
+                pv = {"number": 71, "head_sha": h0}
+                pg = Git(clone("probe"))
+                pg("fetch", "-q", "origin", f"+refs/heads/{gh.prs[71]['head']['ref']}:refs/x/h", check=False)
+                live = gh.main_sha()
+                check("parallel: a behind holder holds only while main is green",
+                      parallel_holder(gh, pg, live, pv) and not parallel_holder(gh, pg, live, pv, {"gates (data)": "c" * 40}))
+                s = settle_now()
+                check("parallel: behind only by the disjoint merge, the running holder keeps main reserved",
+                      s["in_flight"] and gh.updates == [] and 71 not in gh.merged and not s["fast"], f"{s} {gh.updates}")
+                fg = Git(clone("probe"))
+                fg("fetch", "-q", "origin", f"+refs/heads/{gh.prs[71]['head']['ref']}:refs/x/h", check=False)
+                fg("checkout", "-q", "-b", "foreign", "origin/main")
+                pathlib.Path(fg.workdir, "svch").mkdir(exist_ok=True)
+                pathlib.Path(fg.workdir, "svch", "o.txt").write_text("foreign\n")
+                fg("add", "-A")
+                fg("-c", "user.email=x@y", "-c", "user.name=x", "commit", "-qm", "foreign")
+                fhead = fg("rev-parse", "HEAD").stdout.strip()
+                check("parallel: a non-fast merge touching the holder's module mid-window ends the hold",
+                      not parallel_holder(gh, fg, fhead, pv))
+                gh.head_checks.clear()                            # holder CI goes green on its OLD head
+                s = settle_now()
+                check("parallel: a green holder behind main is update-branched, NOT merged on its unverified tree",
+                      gh.updates == [71] and 71 not in gh.merged and not strict_desc(71)[0], f"{s} {gh.updates}")
+                h1 = gh.prs[71]["head"]["sha"]
+                gh.head_checks[h1] = {"gates (data)": None}       # catch-up CI running on the combined head
+                gh.g("checkout", "-q", "-f", "-B", "pZ2", "main")
+                pathlib.Path(origin, "svcy").mkdir(exist_ok=True)
+                pathlib.Path(origin, "svcy", "y.txt").write_text("y\n")
+                gh.g("add", "-A")
+                gh.g("commit", "-qm", "pZ2")
+                gh.g("checkout", "-q", "-f", "main")
+                gh.add_pr(76, "pZ2", "2026-01-76")
+                s = settle_now()
+                check("parallel: the catch-up head gets no second window (a disjoint PR is held)",
+                      76 not in s["fast"] and s["in_flight"] and 71 not in gh.merged, f"{s}")
+                gh.head_checks.clear()
+                s = settle_now()
+                check("parallel: the holder merges only on its up-to-date head, green on every required context",
+                      71 in gh.merged and gh.app_statuses(h1).get(STATUS_CONTEXT, ("", ""))[1].startswith(
+                          "strict lane: green on an up-to-date head"), f"{s}")
+            finally:
+                PARALLEL_FAST_LANE[0] = False
+                gh.head_checks.clear()
+                gh.updates.clear()
+                reset()
+
             # GREEN CARRIER FIRST (#13400): a train whose CI went green while a strict-lane reservation
             # is active merges at once — before strict_lane runs — instead of being held and then voided
             # by the strict merge (carrier #13853 held for #13806, rebuilt as #13857; #13790 by #13679).
@@ -5458,6 +5752,180 @@ def self_test() -> int:
                       f"{s} updates={gh.updates}")
             finally:
                 TRAIN_TURN_S = saved_turn
+            gh.updates.clear()
+            reset()
+
+            # FAST LANE'S TURN (#14302): "fast held: main reserved for strict-lane #14377" on every tick but
+            # the merge tick — the next strict update-branch always came first. After a strict merge with a
+            # fast-lane PR waiting, the fast lane posts and no update-branch is issued; a fast merge (main's
+            # head no longer a strict merge) or FAST_TURN_S ends the turn. Fails on code without fast_turn.
+            global FAST_TURN_S
+            open_only("pW", "pW2")
+            settle_now()                                   # pW merges; pW2 is behind
+            open_only("pF")                                # a fast-lane PR is waiting
+            gh.updates.clear()
+            s = settle_now()
+            check("fast turn: right after a strict merge the waiting fast lane posts, no update-branch",
+                  gh.merged == [35] and gh.updates == [] and s["fast"] == [34]
+                  and gh.app_statuses(gh.prs[34]["head"]["sha"]).get(STATUS_CONTEXT, ("", ""))[0] == "success",
+                  f"{s} merged={gh.merged} updates={gh.updates}")
+            gh.merge(34, gh.prs[34]["head"]["sha"])       # auto-merge acts on the fast status
+            s = settle_now()
+            check("fast turn: ends at the fast merge — the strict lane updates in the next tick",
+                  gh.updates == [36], f"{s} updates={gh.updates}")
+            gh.updates.clear()
+            reset()
+            open_only("pW", "pW2")
+            settle_now()
+            open_only("pF")
+            gh.updates.clear()
+            saved_fast = FAST_TURN_S
+            FAST_TURN_S = -1
+            try:
+                s = settle_now()
+                check("fast turn: bounded — expired, the strict lane updates and the fast lane is held",
+                      gh.updates == [36] and s["fast"] == [], f"{s} updates={gh.updates}")
+            finally:
+                FAST_TURN_S = saved_fast
+            gh.updates.clear()
+            reset()
+            # Only UNPOSTED fast PRs keep the turn: one posted PR that auto-merge has not acted on (stuck)
+            # must not cost the strict lane the whole cap. Fails on the old any-PR-in-`fast` rule.
+            open_only("pW", "pW2")
+            settle_now()
+            open_only("pF")
+            gh.updates.clear()
+            settle_now()                                   # turn: pF posted
+            s = settle_now()                               # pF posted but not merged: nothing left to wait for
+            check("fast turn: ends once every waiting fast PR is posted (a stuck PR holds nothing)",
+                  gh.updates == [36], f"{s} updates={gh.updates}")
+            gh.updates.clear()
+            reset()
+            # A red fast PR is no candidate: no turn at all.
+            open_only("pW", "pW2")
+            settle_now()
+            open_only("pF")
+            gh.head_checks[gh.prs[34]["head"]["sha"]] = {"gates (data)": "failure"}
+            gh.updates.clear()
+            s = settle_now()
+            check("fast turn: a red fast PR opens no turn", gh.updates == [36], f"{s} updates={gh.updates}")
+            gh.head_checks.clear()
+            gh.updates.clear()
+            reset()
+            open_only("pW", "pW2")
+            settle_now()
+            open_only("pF")
+            gh.prs[34]["draft"] = True
+            gh.updates.clear()
+            s = settle_now()
+            check("fast turn: a draft fast PR opens no turn", gh.updates == [36], f"{s} updates={gh.updates}")
+            gh.prs[34]["draft"] = False
+            gh.updates.clear()
+            reset()
+            # The cap runs from the App's turn marker, not from the commit time.
+            open_only("pW", "pW2")
+            settle_now()
+            open_only("pF")
+            gh.post_status(gh.main_sha(), "success", f"opened {int(time.time()) - FAST_TURN_S - 1}",
+                           context=FAST_TURN_CONTEXT)
+            gh.updates.clear()
+            s = settle_now()
+            check("fast turn: capped from its own marker (opened > FAST_TURN_S ago -> strict updates)",
+                  gh.updates == [36] and s["fast"] == [], f"{s} updates={gh.updates}")
+            gh.post_status(gh.main_sha(), "success", f"opened {int(time.time())}", context=FAST_TURN_CONTEXT,
+                           creator="intruder")
+            check("fast turn: a marker not written by the App is ignored",
+                  gh.app_statuses(gh.main_sha()).get(FAST_TURN_CONTEXT, ("", ""))[1] != f"opened {int(time.time())}")
+            gh.updates.clear()
+            reset()
+            # A non-strict commit on main ends the turn.
+            open_only("pW", "pW2")
+            settle_now()
+            open_only("pF")
+            pathlib.Path(origin, "other.txt").write_text("x\n")
+            gh.g("add", "-A")
+            gh.g("commit", "-qm", "foreign")
+            gh.updates.clear()
+            s = settle_now()
+            check("fast turn: a non-strict head on main ends the turn", gh.updates == [36], f"{s} updates={gh.updates}")
+            gh.updates.clear()
+            reset()
+            # A failing marker write (post_status exits on non-201) ends no tick: no turn, the strict lane runs.
+            open_only("pW", "pW2")
+            settle_now()
+            open_only("pF")
+            gh.updates.clear()
+            real_post = gh.post_status
+
+            def failing_post(sha, state, description, context=STATUS_CONTEXT, *a, **k):
+                if context == FAST_TURN_CONTEXT:
+                    raise SystemExit("HTTP 403")
+                return real_post(sha, state, description, context, *a, **k)
+            gh.post_status = failing_post
+            try:
+                s = settle_now()
+                ok1 = gh.updates == [36]
+                s2 = settle_now()                          # the updated holder is green: it merges
+            finally:
+                del gh.post_status
+            check("fast turn: a failing marker write does not abort the tick; the strict holder still merges",
+                  ok1 and 36 in gh.merged, f"{s} {s2} updates={gh.updates} merged={gh.merged}")
+            gh.updates.clear()
+            reset()
+            # An UNARMED fast PR is no candidate: no turn.
+            open_only("pW", "pW2")
+            settle_now()
+            open_only("pF")
+            gh.prs[34]["auto_merge"] = None
+            gh.updates.clear()
+            s = settle_now()
+            check("fast turn: an unarmed fast PR opens no turn", gh.updates == [36], f"{s} updates={gh.updates}")
+            gh.updates.clear()
+            reset()
+            # Fail-closed merge guard: ancestry re-read at merge time; a violation skips, never crashes.
+            open_only("pW")
+            sg = Git(clone("settle"))
+            calls = {"n": 0}
+            real_call = Git.__call__
+
+            def flaky(self, *a, check=True, auth=False):
+                if a[:2] == ("merge-base", "--is-ancestor") and a[3] == gh.prs[35]["head"]["sha"]:
+                    calls["n"] += 1
+                    if calls["n"] > 1:
+                        return subprocess.CompletedProcess(a, 1, "", "")
+                return real_call(self, *a, check=check, auth=auth)
+            Git.__call__ = flaky
+            try:
+                s = mode_settle(gh, sg, "o/r", False)
+                ok2 = 35 not in gh.merged
+            except BaseException as e:  # noqa: BLE001
+                ok2, s = False, repr(e)
+            finally:
+                Git.__call__ = real_call
+            check("strict lane: a head not containing main at merge time is skipped, the tick survives",
+                  ok2 and calls["n"] > 1, f"{s} calls={calls}")
+            reset()
+            # main red: never a turn (direct call, so the strict lane's own main-red rule cannot mask it).
+            open_only("pW", "pW2")
+            settle_now()
+            tg = Git(clone("probe"))
+            fm = [Member(34, "", "", gh.prs[34]["head"]["sha"] if 34 in gh.prs else "a" * 40, "", "")]
+            check("fast turn: main red guard is explicit",
+                  fast_turn(gh, tg, gh.main_sha(), fm, {}, {"gates (data)": "c" * 40}, False) is None)
+            check("fast turn: a carrier in flight -> no turn",
+                  fast_turn(gh, tg, gh.main_sha(), fm, {}, {}, True) is None)
+            check("fast turn: green main, no carrier -> a turn (control)",
+                  fast_turn(gh, tg, gh.main_sha(), fm, {}, {}, False) is not None)
+            gh.updates.clear()
+            reset()
+            # train_turn takes precedence: with a train candidate waiting no fast-turn marker is ever opened.
+            open_only("pW", "pW2")
+            settle_now()
+            open_only("pF", "p1")
+            gh.updates.clear()
+            s = settle_now()
+            check("fast turn: the train's turn takes precedence (no fast-turn marker opened)",
+                  gh.updates == [] and not gh.app_statuses(gh.main_sha()).get(FAST_TURN_CONTEXT), f"{s}")
             gh.updates.clear()
             reset()
 

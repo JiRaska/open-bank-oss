@@ -478,7 +478,7 @@ class SourceIntentBoundaryTest(unittest.TestCase):
                      patch.object(train, "partition", return_value=([member], [])), \
                      patch.object(train, "train_turn", return_value=None), \
                      patch.object(train, "api", return_value=(201, {})) as api:
-                    train.mode_settle(real, Mock(), "owner/repo", False)
+                    train.mode_settle(real, Mock(return_value=Mock(stdout="")), "owner/repo", False)
                     if armed:
                         api.assert_called_once()
                         self.assertEqual("success", api.call_args.args[2]["state"])
