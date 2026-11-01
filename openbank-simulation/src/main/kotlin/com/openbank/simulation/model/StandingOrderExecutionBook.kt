@@ -24,7 +24,7 @@ import java.util.UUID
  *   due event is a *replay of the same attempt*, not a new one — the property that keeps a
  *   stuck ONCE order (issue #12839) from becoming many payments.
  */
-class StandingOrderBook {
+class StandingOrderExecutionBook {
 
     /** The read-only query side: everything the invariant and the replay path need, per order. */
     data class OrderView(
