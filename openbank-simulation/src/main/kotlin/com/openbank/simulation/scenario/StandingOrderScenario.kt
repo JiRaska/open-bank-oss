@@ -132,9 +132,10 @@ object StandingOrderScenario {
         //    logged warning, not a crash (StandingOrderDueConsumer) — so mirror that exactly:
         //    confirm only an order still ACTIVE, otherwise keep the recordExecution result.
         world.balances.put(world.balances.get(source).releaseReservation(amount))
-        val confirmed = if (claimed.status == StandingOrderStatus.ACTIVE) claimed.confirmExecution(now) else claimed
+        val machineConfirms = claimed.status == StandingOrderStatus.ACTIVE
+        val confirmed = if (machineConfirms) claimed.confirmExecution(now) else claimed
         world.standingOrders[index] = confirmed
-        world.standingOrdersBook.recordConfirmed(order.id, amount)
+        world.standingOrdersBook.recordConfirmed(order.id, amount, machineConfirmed = machineConfirms)
         world.audit.append("standing order ${order.id} execution ${claimed.executionCount} confirmed")
     }
 
