@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.infrastructure.observability
 
+import com.openbank.clients.transaction.UnsettledOutcome
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.prometheus.PrometheusConfig
 import io.micrometer.prometheus.PrometheusMeterRegistry
@@ -25,13 +26,13 @@ class SepaSettlementMetricsTest {
             assertThat(meter.id.tags.map { it.key }).containsExactlyInAnyOrder("rail", "outcome")
             assertThat(meter.id.getTag("rail")).isEqualTo("SEPA")
             assertThat(meter.id.getTag("outcome"))
-                .isIn(SepaSettlementMetrics.Outcome.entries.map { it.label })
+                .isIn(UnsettledOutcome.entries.map { it.label })
             assertThat(registry.get(meter.id.name).tags(meter.id.tags).counter().count()).isZero()
         }
         assertThat(registry.scrape()).contains(
             """openbank_payment_unsettled_total{outcome="mismatch",rail="SEPA",} 0.0""",
         )
-        metrics.unsettled(SepaSettlementMetrics.Outcome.CONFLICT)
+        metrics.unsettled(UnsettledOutcome.CONFLICT)
         assertThat(registry.scrape()).contains(
             """openbank_payment_unsettled_total{outcome="conflict",rail="SEPA",} 1.0""",
         )
@@ -43,7 +44,7 @@ class SepaSettlementMetricsTest {
         metrics.registryInstance = mockk<Instance<MeterRegistry>> { every { isResolvable } returns false }
         assertThatCode {
             metrics.register()
-            metrics.unsettled(SepaSettlementMetrics.Outcome.MISMATCH)
+            metrics.unsettled(UnsettledOutcome.MISMATCH)
         }.doesNotThrowAnyException()
     }
 }

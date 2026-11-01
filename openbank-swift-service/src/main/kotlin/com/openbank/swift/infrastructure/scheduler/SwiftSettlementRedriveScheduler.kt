@@ -59,8 +59,8 @@ class SwiftSettlementRedriveScheduler(
         service.due(batchSize).forEach { id ->
             try {
                 when (service.redrive(id)) {
-                    Result.EXHAUSTED -> metrics.unsettled(SwiftSettlementMetrics.Outcome.REDRIVE_EXHAUSTED)
-                    Result.LATE_COMPLETION -> metrics.unsettled(SwiftSettlementMetrics.Outcome.LATE_COMPLETION)
+                    Result.EXHAUSTED -> metrics.unsettled(SwiftSettlementMetrics.SwiftOutcome.REDRIVE_EXHAUSTED)
+                    Result.LATE_COMPLETION -> metrics.unsettled(SwiftSettlementMetrics.SwiftOutcome.LATE_COMPLETION)
                     else -> Unit
                 }
             } catch (ex: CancellationException) {
@@ -69,7 +69,7 @@ class SwiftSettlementRedriveScheduler(
                 // observed-by: openbank_payment_unsettled_total{outcome="redrive-error"} and the open booking
                 // clock (SwiftBookingUnsettled). One message's database error must not abort the batch; its
                 // claim lapses with the lease and the next tick retries it.
-                metrics.unsettled(SwiftSettlementMetrics.Outcome.REDRIVE_ERROR)
+                metrics.unsettled(SwiftSettlementMetrics.SwiftOutcome.REDRIVE_ERROR)
                 log.errorf(ex, "Settlement re-drive of SWIFT message %s failed; continuing the sweep", id)
             }
         }
