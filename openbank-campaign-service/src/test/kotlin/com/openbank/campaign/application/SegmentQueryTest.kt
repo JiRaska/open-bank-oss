@@ -27,9 +27,12 @@ class SegmentQueryTest {
 
     private var evaluated: Segment? = null
     private val evaluation = object : SegmentEvaluationPort {
-        override suspend fun evaluate(segment: Segment): List<UUID> {
+        override suspend fun page(segment: Segment, after: UUID?, limit: Int) =
+            com.openbank.campaign.application.port.out.SegmentPage(emptyList(), null)
+
+        override suspend fun count(segment: Segment): Long {
             evaluated = segment
-            return cohort
+            return cohort.size.toLong()
         }
 
         override suspend fun matches(segment: Segment, partyId: UUID): Boolean = partyId in cohort
@@ -62,7 +65,7 @@ class SegmentQueryTest {
         val preview = query.preview("actives", 1)
 
         assertNotNull(preview)
-        assertEquals(3, preview!!.size)
+        assertEquals(3L, preview!!.size)
         // assertSame, not assertEquals: Segment is a data class, so a rebuilt copy carrying the
         // same rules would satisfy structural equality and this test would pass against exactly
         // the "preview computed a different way" it exists to rule out.

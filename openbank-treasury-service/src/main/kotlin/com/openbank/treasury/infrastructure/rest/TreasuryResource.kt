@@ -4,21 +4,36 @@
 
 package com.openbank.treasury.infrastructure.rest
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.security.Roles
+import com.openbank.treasury.application.port.`in`.CashFlowUseCase
 import com.openbank.treasury.application.port.`in`.DraftDealCommand
+import com.openbank.treasury.application.port.`in`.TreasuryCalendarEvent
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
+import com.openbank.treasury.application.port.`in`.TreasuryEventType
+import com.openbank.treasury.application.port.out.DayCompletionRepository
+import com.openbank.treasury.application.port.out.PositionClose
+import com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
+import com.openbank.treasury.application.port.out.SavedFilter
+import com.openbank.treasury.application.port.out.ViewsRepository
 import com.openbank.treasury.domain.model.Actor
+import com.openbank.treasury.domain.model.ActorType
+import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxTerms
+import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -43,8 +58,8 @@ import java.util.UUID
 @Path("/api/v1/treasury")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed(Roles.ADMIN, DEALER, APPROVER, SENIOR_APPROVER)
-@Suppress("TooManyFunctions")
+@RolesAllowed(Roles.ADMIN, DEALER, APPROVER, SENIOR_APPROVER, BACK_OFFICE)
+@Suppress("TooManyFunctions", "LargeClass")
 class TreasuryResource {
 
     @Inject
@@ -64,12 +79,241 @@ class TreasuryResource {
 
     private fun actor(): Actor = Actor.fromPrincipalName(identity.principal.name)
 
+    @Inject
+    lateinit var cashFlows: CashFlowUseCase
+
+    @Inject
+    lateinit var views: ViewsRepository
+
+    @Inject
+    lateinit var dayCompletion: DayCompletionRepository
+
+    @Inject
+    lateinit var objectMapper: ObjectMapper
+
     @GET
     @Path("/deals")
-    @Operation(summary = "Dealer blotter: list deals, optionally filtered by state")
+    @Operation(summary = "Dealer blotter: list deals, filtered; X-Total-Count carries the match count")
     @Authorize(action = "treasury.deal.read")
-    suspend fun list(@QueryParam("state") state: DealState?): List<DealResponse> =
-        deals.list(state).map { DealResponse.from(it) }
+    @Suppress("LongParameterList")
+    suspend fun list(
+        @QueryParam("state") state: DealState?,
+        @QueryParam("instrument") instrument: String?,
+        @QueryParam("bookId") bookId: String?,
+        @QueryParam("counterpartyId") counterpartyId: String?,
+        @QueryParam("currency") currency: String?,
+        @QueryParam("kind") kind: String?,
+        @QueryParam("hideMatured") hideMatured: Boolean?,
+        @QueryParam("hideAuthorised") hideAuthorised: Boolean?,
+        @QueryParam("text") text: String?,
+        @QueryParam("tradeDateFrom") tradeDateFrom: LocalDate?,
+        @QueryParam("tradeDateTo") tradeDateTo: LocalDate?,
+        @QueryParam("maturityFrom") maturityFrom: LocalDate?,
+        @QueryParam("maturityTo") maturityTo: LocalDate?,
+    ): Response {
+        val filter = DealFilter(
+            state, instrument?.let(ProductType::valueOf), bookId, counterpartyId, currency,
+            kind?.let(DealKind::valueOf), hideMatured == true, hideAuthorised == true, text,
+            tradeDateFrom, tradeDateTo, maturityFrom, maturityTo,
+        )
+        val rows = deals.list(state).filter(filter::matches).map { DealResponse.from(it) }
+        return Response.ok(rows).header("X-Total-Count", rows.size).build()
+    }
+
+    @GET
+    @Path("/deals/export")
+    @Produces(MediaType.APPLICATION_JSON, "text/csv")
+    @Operation(summary = "Export deals as CSV or JSON: all, or a selection of ids; STANDARD or REGULATORY layout")
+    @Authorize(action = "treasury.deal.read")
+    suspend fun export(
+        @QueryParam("format") format: String?,
+        @QueryParam("scope") scope: String?,
+        @QueryParam("layout") layout: String?,
+        @QueryParam("ids") ids: String?,
+    ): Response {
+        val fmt = (format ?: "json").lowercase()
+        require(fmt in setOf("json", "csv")) { "format must be csv or json" }
+        val lay = DealExport.Layout.valueOf((layout ?: "STANDARD").uppercase())
+        val rows = when (scope ?: "all") {
+            "all" -> deals.list(null)
+            "selection" -> {
+                val wanted = requireNotNull(ids?.takeIf { it.isNotBlank() }) { "scope=selection needs ids" }
+                    .split(',').map { UUID.fromString(it.trim()) }.toSet()
+                deals.list(null).filter { it.id in wanted }
+            }
+            else -> throw IllegalArgumentException("scope must be all or selection")
+        }
+        val table = DealExport.rows(rows, lay)
+        return if (fmt == "csv") {
+            Response.ok(DealExport.csv(table), "text/csv").build()
+        } else {
+            Response.ok(table, MediaType.APPLICATION_JSON).build()
+        }
+    }
+
+    @GET
+    @Path("/deals/{id}/history")
+    @Operation(summary = "The deal's timeline and its versions")
+    @Authorize(action = "treasury.deal.read", resource = "#id")
+    suspend fun history(@PathParam("id") id: UUID): Map<String, Any> {
+        val deal = deals.get(id).deal
+        return mapOf(
+            "dealId" to id,
+            "transitions" to DealResponse.from(deal).history,
+            "versions" to cashFlows.versions(id).map(DealVersionDto::from),
+        )
+    }
+
+    @GET
+    @Path("/cash-flow-overrides")
+    @Operation(summary = "The four-eyes override queue across deals (default PENDING, oldest first, at most `limit`)")
+    @Authorize(action = "treasury.cashflow.read")
+    suspend fun overrideQueue(
+        @QueryParam("status") status: String?,
+        @QueryParam("limit") limit: Int?,
+    ): List<CashFlowOverrideDto> = cashFlows.overrideQueue(
+        status?.let { com.openbank.treasury.domain.cashflow.OverrideStatus.valueOf(it) }
+            ?: com.openbank.treasury.domain.cashflow.OverrideStatus.PENDING,
+        limit ?: DEFAULT_QUEUE,
+    ).map(CashFlowOverrideDto::from)
+
+    @GET
+    @Path("/deals/{id}/journals")
+    @Operation(
+        summary = "The journals the ledger accepted for the deal: event, idempotency key, journal id (ADR-0344 D7)",
+    )
+    @Authorize(action = "treasury.deal.read", resource = "#id")
+    suspend fun journals(@PathParam("id") id: UUID): List<JournalRefResponse> =
+        deals.get(id).journals.map { JournalRefResponse(it.event.key, it.idempotencyKey, it.journalId, it.postedAt) }
+
+    @GET
+    @Path("/day-completion/{date}")
+    @Operation(
+        summary = "The treasury accounting day's completion record: every step with its last outcome (ADR-0344 D7)",
+    )
+    @Authorize(action = "treasury.deal.read")
+    suspend fun dayCompletion(@PathParam("date") date: LocalDate): DayCompletionResponse =
+        DayCompletionResponse.from(date, dayCompletion.day(date))
+
+    @GET
+    @Path("/posting-rules")
+    @Operation(summary = "The posting-rule matrix: (product, event, IFRS 9 category) to journal template (ADR-0344 D7)")
+    @Authorize(action = "treasury.reference.read")
+    fun postingRules(): List<PostingRuleDto> = deals.postingRules().map(PostingRuleDto::from)
+
+    @GET
+    @Path("/deals/{id}/versions")
+    @Operation(summary = "The deal's versions with a summary of what changed")
+    @Authorize(action = "treasury.deal.read", resource = "#id")
+    suspend fun versions(@PathParam("id") id: UUID): List<DealVersionDto> =
+        cashFlows.versions(id).map(DealVersionDto::from)
+
+    @POST
+    @Path("/deals/{id}/schedule-preview")
+    @RolesAllowed(DEALER, BACK_OFFICE)
+    @Operation(summary = "Generate the cash-flow ledger the deal would have now, without storing it")
+    @Authorize(action = "treasury.deal.preview", resource = "#id")
+    suspend fun preview(@PathParam("id") id: UUID): CashFlowLedgerDto = CashFlowLedgerDto.from(cashFlows.preview(id))
+
+    @POST
+    @Path("/deals/{id}/send-confirmation")
+    @RolesAllowed(BACK_OFFICE, APPROVER)
+    @Operation(summary = "Record that the bank's confirmation was sent (never by the deal's creator or submitter)")
+    @Authorize(action = "treasury.deal.send-confirmation", resource = "#id")
+    suspend fun sendConfirmation(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: SendConfirmationRequest?,
+    ): DealResponse =
+        DealResponse.from(deals.sendConfirmation(id, request?.documentId, request?.channel, actor(), requireKey(key)))
+
+    @GET
+    @Path("/calendar")
+    @Operation(summary = "Treasury events between two dates: refixings, payments, maturities, settlements")
+    @Authorize(action = "treasury.calendar.read")
+    suspend fun calendar(
+        @QueryParam("from") from: LocalDate?,
+        @QueryParam("to") to: LocalDate?,
+        @QueryParam("bookId") bookId: String?,
+        @QueryParam("types") types: String?,
+    ): List<TreasuryCalendarEvent> = cashFlows.calendar(
+        requireNotNull(from) { "query parameter 'from' is required" },
+        requireNotNull(to) { "query parameter 'to' is required" },
+        bookId,
+        types?.split(',')?.map { TreasuryEventType.valueOf(it.trim()) }?.toSet(),
+    )
+
+    @POST
+    @Path("/positions/close-of-day")
+    @RolesAllowed(BACK_OFFICE)
+    @Operation(summary = "Record a close-of-day position snapshot")
+    @Authorize(action = "treasury.position.close")
+    suspend fun closeOfDay(@HeaderParam("Idempotency-Key") key: String?, request: PositionCloseRequest): Response =
+        close(requireKey(key), request, special = false)
+
+    @POST
+    @Path("/positions/close-of-day/special")
+    @RolesAllowed(BACK_OFFICE)
+    @Operation(summary = "Record a special (out-of-cycle or scenario) position close")
+    @Authorize(action = "treasury.position.close")
+    suspend fun closeSpecial(@HeaderParam("Idempotency-Key") key: String?, request: PositionCloseRequest): Response =
+        close(requireKey(key), request, special = true)
+
+    private suspend fun close(key: String, request: PositionCloseRequest, special: Boolean): Response {
+        val date = requireNotNull(request.date) { "date is required" }
+        val a = actor()
+        require(a.type == ActorType.HUMAN) { "only a person records a position close" }
+        val report = deals.positions(date)
+        val close = views.recordClose(
+            PositionClose(
+                snapshotId = Ids.newId(),
+                date = date,
+                bookId = request.bookId,
+                scenario = request.scenario,
+                special = special,
+                closedBy = a.id,
+                closedAt = java.time.Instant.now(),
+                positionsJson = objectMapper.writeValueAsString(PositionsResponse.from(report)),
+            ),
+            key,
+        )
+        return Response.status(Response.Status.CREATED).entity(PositionCloseResponse.from(close, objectMapper)).build()
+    }
+
+    @GET
+    @Path("/views/deal-filters")
+    @Operation(summary = "The caller's saved blotter filters")
+    @Authorize(action = "treasury.deal.read")
+    suspend fun filters(): List<SavedFilterDto> = views.filters(actor().id).map {
+        SavedFilterDto.from(it, objectMapper)
+    }
+
+    @POST
+    @Path("/views/deal-filters")
+    @Operation(summary = "Save (or replace by name) one of the caller's blotter filters")
+    @Authorize(action = "treasury.deal.read")
+    suspend fun saveFilter(request: SavedFilterDto): Response {
+        val name = requireNotNull(request.name?.takeIf { it.isNotBlank() && it.length <= MAX_FILTER_NAME }) {
+            "name is required (1..$MAX_FILTER_NAME)"
+        }
+        val filter = requireNotNull(request.filter?.takeIf { it.isObject }) { "filter must be a JSON object" }
+        val saved = views.saveFilter(SavedFilter(actor().id, name, filter.toString(), java.time.Instant.now()))
+        return Response.status(Response.Status.CREATED).entity(SavedFilterDto.from(saved, objectMapper)).build()
+    }
+
+    @DELETE
+    @Path("/views/deal-filters/{name}")
+    @Operation(summary = "Delete one of the caller's saved filters")
+    @Authorize(action = "treasury.deal.read")
+    suspend fun deleteFilter(@PathParam("name") name: String): Response = if (views.deleteFilter(
+            actor().id,
+            name,
+        )
+    ) {
+        Response.noContent().build()
+    } else {
+        Response.status(Response.Status.NOT_FOUND).build()
+    }
 
     @POST
     @Path("/deals")
@@ -80,6 +324,23 @@ class TreasuryResource {
     )
     @Authorize(action = "treasury.deal.draft")
     suspend fun draft(@HeaderParam("Idempotency-Key") key: String?, request: DraftDealRequest): Response {
+        val deal = deals.draft(commandOf(request), actor(), requireKey(key))
+        return Response.status(Response.Status.CREATED).entity(DealResponse.from(deal)).build()
+    }
+
+    @PUT
+    @Path("/deals/{id}")
+    @RolesAllowed(DEALER)
+    @Operation(summary = "New terms for a DRAFT deal (a human, or the agent that drafted it); the terms version grows")
+    @Authorize(action = "treasury.deal.draft", resource = "#id")
+    suspend fun editDraft(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: DraftDealRequest,
+    ): DealResponse = DealResponse.from(deals.editDraft(id, commandOf(request), actor(), requireKey(key)))
+
+    @Suppress("CyclomaticComplexMethod") // optional v2 fields falling back to the legacy flat ones
+    private fun commandOf(request: DraftDealRequest): DraftDealCommand {
         val product = requireNotNull(request.product) { "product is required" }
         val fx = if (product == ProductType.FX_SPOT) {
             FxTerms.fromCurrencies(
@@ -96,27 +357,35 @@ class TreasuryResource {
             }
             null
         }
-        val deal = deals.draft(
-            DraftDealCommand(
-                product = product,
-                counterpartyId = requireNotNull(request.counterpartyId) { "counterpartyId is required" },
-                currency = fx?.first ?: requireNotNull(request.currency) { "currency is required" },
-                principal = requireNotNull(request.principal) { "principal is required" },
-                rate = requireNotNull(request.rate) { "rate is required" },
-                tradeDate = request.tradeDate,
-                valueDate = request.valueDate,
-                maturityDate = request.maturityDate,
-                rationale = request.rationale,
-                inputs = request.inputs?.let { node ->
-                    require(node.isObject) { "inputs must be a JSON object" }
-                    node.toString()
-                },
-                fxSide = fx?.second,
-            ),
-            actor(),
-            requireKey(key),
+        val legs = request.legs.orEmpty().map { it.toDomain() }
+        // ADR-0344 D2: a leg-described product's flat fields come from its first leg when not given.
+        val first = legs.firstOrNull().takeIf { !product.legacy }
+        return DraftDealCommand(
+            product = product,
+            counterpartyId = requireNotNull(request.counterpartyId) { "counterpartyId is required" },
+            currency = requireNotNull(fx?.first ?: request.currency ?: first?.currency) { "currency is required" },
+            principal = requireNotNull(
+                request.principal
+                    ?: first?.let { f -> legs.filter { it.currency == f.currency }.maxOf { it.notional } },
+            ) { "principal is required" },
+            rate = requireNotNull(request.rate ?: first?.let { it.rate.rate ?: java.math.BigDecimal.ZERO }) {
+                "rate is required"
+            },
+            tradeDate =
+            request.tradeDate
+                ?: request.tradeDateTime?.atZone(java.time.ZoneId.of("Europe/Prague"))?.toLocalDate(),
+            valueDate = request.valueDate ?: first?.let { legs.minOf { l -> l.accrualStart } },
+            maturityDate = request.maturityDate ?: first?.let { legs.maxOf { l -> l.accrualEnd } },
+            kind = request.kind ?: DealKind.ACTUAL,
+            legs = if (product.legacy) emptyList() else legs,
+            header = headerOf(request),
+            rationale = request.rationale,
+            inputs = request.inputs?.let { node ->
+                require(node.isObject) { "inputs must be a JSON object" }
+                node.toString()
+            },
+            fxSide = fx?.second,
         )
-        return Response.status(Response.Status.CREATED).entity(DealResponse.from(deal)).build()
     }
 
     @GET
@@ -227,6 +496,52 @@ class TreasuryResource {
         deals.reverse(id, requireNotNull(request.reason) { "reason is required" }, actor(), requireKey(key))
             .let { view(id) }
 
+    /**
+     * #13883: an operator closes the OPEN posting intent of a deal's settlement, maturity or reversal
+     * that cannot complete, releasing its day's close hold. Its own OPA action
+     * (`treasury.posting-intent.close`, approvers only, never an agent); the domain refuses a
+     * non-person and, four eyes, the posting's own actor and the deal's approver (422). Who and why
+     * are recorded on the intent and appended to its history. 404 when no OPEN intent exists; 409
+     * POSTING_IN_FLIGHT when it may still be posting (younger than the grace, or claimed).
+     */
+    @POST
+    @Path("/deals/{id}/posting-intent/close")
+    @RolesAllowed(APPROVER)
+    @Operation(summary = "Close a deal's open posting intent that cannot complete (operator, audited)")
+    @Authorize(action = "treasury.posting-intent.close", resource = "#id")
+    suspend fun closePostingIntent(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: ClosePostingIntentRequest?,
+    ): Response {
+        val idempotencyKey = requireKey(key)
+        requireNotNull(request) { "a request body is required" }
+        val event = requireNotNull(request.event) { "event is required" }
+        require(event in CLOSABLE_EVENTS) { "event must be one of $CLOSABLE_EVENTS" }
+        val reason = requireNotNull(request.reason) { "reason is required" }
+        return when (deals.closePostingIntent(id, PostingEvent.valueOf(event), reason, actor(), idempotencyKey)) {
+            PostingIntentCloseOutcome.CLOSED -> Response.noContent().build()
+            PostingIntentCloseOutcome.NOT_OPEN -> Response.status(Response.Status.NOT_FOUND)
+                .entity(mapOf("error" to "NOT_FOUND", "message" to "no open posting intent for $event on deal $id"))
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+            // Resolved by the service (a replay is CLOSED, a reuse 400); listed for exhaustiveness.
+            PostingIntentCloseOutcome.DUPLICATE_KEY -> throw IllegalArgumentException(
+                "Idempotency-Key already used for a different request",
+            )
+            PostingIntentCloseOutcome.IN_FLIGHT -> Response.status(Response.Status.CONFLICT)
+                .entity(
+                    mapOf(
+                        "error" to "POSTING_IN_FLIGHT",
+                        "message" to "the $event posting on deal $id may still be in flight (younger than the " +
+                            "grace period, or claimed by the reconciler); retry in a few minutes",
+                    ),
+                )
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+        }
+    }
+
     @GET
     @Path("/counterparties")
     @Operation(summary = "Counterparty limits with current exposure and headroom per currency")
@@ -261,3 +576,24 @@ const val APPROVER = "ROLE_TREASURY_APPROVER"
 
 /** ADR-0315 D4: overrides a counterparty-limit breach. Never the same person who books the deal. */
 const val SENIOR_APPROVER = "ROLE_TREASURY_SENIOR_APPROVER"
+
+private const val MAX_FILTER_NAME = 64
+private const val DEFAULT_QUEUE = 100
+
+/** ADR-0344 D3: proposes reference-data changes. Never approves them (that is [APPROVER]). */
+const val REFERENCE_EDITOR = "ROLE_TREASURY_REFERENCE_EDITOR"
+
+/**
+ * ADR-0344 D4/D10: back office — proposes cash-flow overrides and reference-data changes. Never
+ * approves either (that is [APPROVER]), so no single role both writes and activates.
+ */
+const val BACK_OFFICE = "ROLE_TREASURY_BACK_OFFICE"
+
+/**
+ * ADR-0344 D6: releases a proposed own-account payment to the rail. Never the deal's creator or a
+ * term author (the domain), never an AI agent, and no other treasury role releases.
+ */
+const val PAYMENT_RELEASER = "ROLE_TREASURY_PAYMENT_RELEASER"
+
+/** The lifecycle events that record a posting intent (#13883). */
+private val CLOSABLE_EVENTS = setOf("SETTLED", "MATURED", "REVERSED")

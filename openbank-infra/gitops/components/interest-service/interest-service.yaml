@@ -25,7 +25,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-interest-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "82d66bb6913b24bb"
+        openbank.tech/policy-checksum: "914003c2ed5493b0"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -79,6 +79,12 @@ spec:
                   key: ca.password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
+            # ADR-0352 phase 3: the product-IR shadow verifies revision signatures with OpenBao Transit
+            # `verify`. Declared here so gen-network-policies.py derives the interest -> vault:8200 edge.
+            # Verification stays at the application default `disabled` (nothing compared, counted) until
+            # interest's verify-only role exists; then set INTEREST_PRODUCT_SHADOW_VERIFICATION_MODE=openbao.
+            - name: INTEREST_PRODUCT_SHADOW_VERIFICATION_OPENBAO_ADDRESS
+              value: https://openbao.vault.svc:8200
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:

@@ -40,4 +40,25 @@ class CardClearingEntity {
 
     @Column(name = "applied_at")
     lateinit var appliedAt: Instant
+
+    @Column(name = "posting_status")
+    var postingStatus: String = "PENDING"
+
+    @Column(name = "posting_attempts")
+    var postingAttempts: Int = 0
+
+    @Column(name = "posting_last_error")
+    var postingLastError: String? = null
+
+    @Column(name = "posting_last_attempt_at")
+    var postingLastAttemptAt: Instant? = null
+
+    @Column(name = "posting_next_attempt_at")
+    var postingNextAttemptAt: Instant? = null
+
+    @Column(name = "posting_claim_token")
+    var postingClaimToken: UUID? = null
+
+    @Column(name = "posting_transaction_id")
+    var postingTransactionId: UUID? = null
 }

@@ -6,6 +6,7 @@ package com.openbank.libs.persistence.outbox
 
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -57,6 +58,9 @@ class AbstractOutboxOldestAgeGaugeTest {
         gauge.register()
 
         assertThat(supplier.captured().toLong()).isEqualTo(0L)
+        // A cold read must not hit the repository at all — the supplier must serve the cached
+        // zero, not query per scrape.
+        coVerify(exactly = 0) { repo.oldestProcessableAge(any()) }
 
         runBlocking { gauge.refresh(now) }
 

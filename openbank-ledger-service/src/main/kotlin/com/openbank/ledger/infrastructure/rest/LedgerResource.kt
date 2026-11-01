@@ -17,6 +17,7 @@ import com.openbank.ledger.application.port.`in`.ReplayBookedChangesCommand
 import com.openbank.ledger.application.port.`in`.ReplayBookedChangesResult
 import com.openbank.ledger.application.port.`in`.ReplayBookedChangesUseCase
 import com.openbank.ledger.application.port.`in`.ReverseJournalCommand
+import com.openbank.ledger.application.usecase.AccountingClassService
 import com.openbank.ledger.domain.model.AccountCurrencyBalance
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
@@ -28,6 +29,7 @@ import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
+import com.openbank.libs.web.SyntheticTaintContext
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
@@ -65,7 +67,19 @@ class LedgerResource(
     private val clock: Clock,
     private val ledgerUseCase: LedgerUseCase,
     private val replayUseCase: ReplayBookedChangesUseCase,
+    private val accountingClasses: AccountingClassService,
 ) {
+
+    @jakarta.inject.Inject
+    private lateinit var callerIdentity: io.quarkus.security.identity.SecurityIdentity
+
+    /**
+     * Request-scoped taint decision, written by [com.openbank.libs.web.SyntheticTaintRequestFilter]
+     * on the CDI request context so a suspended resource method still sees it after the coroutine
+     * dispatch (#14058). The raw `ContainerRequestContext` property is kept only as a fallback read.
+     */
+    @jakarta.inject.Inject
+    private lateinit var taintContext: SyntheticTaintContext
 
     @GET
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
@@ -195,11 +209,17 @@ class LedgerResource(
             entryDate = LocalDate.parse(request.entryDate),
             valueDate = LocalDate.parse(request.valueDate),
             description = request.description,
-            lines = request.requireLines().map { it.toCommand() },
+            lines = request.requireLines().map { it.toCommand(accountingClasses) },
             postedBy = request.createdBy,
-            // The filter sets this property only after authenticating a configured canary
-            // principal. Never accept a caller-supplied header or coroutine MDC as synthetic.
-            synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
+            // Both values carry the filter's authenticated trust decision; either true value wins.
+            // The property is a fallback when the holder is false, not when CDI is inactive.
+            // Never classify from a raw header or coroutine MDC. Controlled property-loss tests
+            // establish this read's role, not the older deployed image's loss mechanism.
+            synthetic = taintContext.tainted || requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
+            origin = request.origin?.let { origin ->
+                check(!callerIdentity.isAnonymous) { "authenticated journal submitter is required" }
+                origin.toDomain(callerIdentity.principal.name)
+            },
         )
         val outcome = ledgerUseCase.postJournalWithOutcome(command)
         val entry = outcome.entry
@@ -248,8 +268,16 @@ class LedgerResource(
     }
 }
 
+/**
+ * A leg names its GL account in exactly one of two ways: `glAccountId` (the chart, as before) or
+ * `accountingClass` + `accountingRole` (ADR-0341 D3), which the ledger resolves through its own
+ * accountingClass -> GL map using the leg's `currencyCode`. A product service that posts by class
+ * carries no literal account; both or neither is a 400.
+ */
 data class PostJournalLineRequest(
-    val glAccountId: UUID,
+    val glAccountId: UUID? = null,
+    val accountingClass: String? = null,
+    val accountingRole: String? = null,
     val side: String,
     val amount: BigDecimal,
     val currencyCode: String,
@@ -258,8 +286,8 @@ data class PostJournalLineRequest(
     val baseCurrencyCode: String,
     val subAccountId: UUID? = null,
 ) {
-    fun toCommand() = JournalLineRequest(
-        glAccountId = glAccountId,
+    suspend fun toCommand(classes: AccountingClassService) = JournalLineRequest(
+        glAccountId = resolveGlAccount(classes),
         side = JournalSide.valueOf(side),
         amount = amount,
         currencyCode = currencyCode,
@@ -268,6 +296,18 @@ data class PostJournalLineRequest(
         baseCurrencyCode = baseCurrencyCode,
         subAccountId = subAccountId,
     )
+
+    private suspend fun resolveGlAccount(classes: AccountingClassService): UUID {
+        val byClass = accountingClass != null || accountingRole != null
+        require(glAccountId == null || !byClass) {
+            "a journal line names its account by glAccountId OR by accountingClass+accountingRole, not both"
+        }
+        if (glAccountId != null) return glAccountId
+        require(accountingClass != null && accountingRole != null) {
+            "a journal line needs glAccountId, or both accountingClass and accountingRole"
+        }
+        return classes.resolve(accountingClass, accountingRole, currencyCode).glAccountId
+    }
 }
 
 data class PostJournalRequest(
@@ -286,6 +326,7 @@ data class PostJournalRequest(
      * Writing the type honestly is what makes [requireLines] reachable instead of dead code.
      */
     val lines: List<PostJournalLineRequest?>,
+    val origin: JournalOriginInput? = null,
 ) {
     /**
      * The lines, with every element proven present.

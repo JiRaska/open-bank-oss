@@ -90,6 +90,11 @@
   so the gate prints `SUBJECTS=UNRESOLVED` (`gatelib.subjects_unresolved`) and run-gates.py skips
   the floor for that run only, saying so in the output — a silent pass there is indistinguishable
   from a gate that really looked.
+  For security checks such as `ruleset-bypass-actors`, use the runner's explicit
+  `GATE_VERDICT=NOT_EVALUATED` marker **and a non-zero exit** (#13448). `SUBJECTS=UNRESOLVED`
+  alone only skips the floor; exit zero still renders PASS. Count readable protection rulesets
+  as subjects: an empty actor list is valid, an unreadable list is not evidence, and no active
+  protection ruleset must fail. Preserve the distinction in the roster and JSON regressions.
 
 - **An advisory gate's "these findings are all benign" note is an unverified claim, and advisory
   mode is what removes the pressure to check it.** The repo already knows a gate that has only ever
@@ -326,7 +331,9 @@
   as declaration-only with `EXPOSE` the single live field (#3016), so the tidy fix for a stale
   `FROM` looks like deleting it. It is not:
   `openbank-admin-ui/scripts/generate-cluster-topology.mjs` parses
-  `openbank-ledger-service/Dockerfile` in `imageFacts()` and renders the base image into the
+  `.github/workflows/Dockerfile.deploy` in `imageFacts()` (it read `openbank-ledger-service/Dockerfile`
+  until the port-only stubs were removed — the container port now comes from `quarkus.http.port` via
+  `.github/scripts/service-port.py`) and renders the base image into the
   /docs/cluster dossier (ADR-0081) — and when it cannot parse one it falls back to a HARDCODED
   `eclipse-temurin:25-jre-alpine` literal, so removing the declaration would have resurrected the
   fiction in the UI instead of retiring it (#3354, #3630). A second reader that is a *generator
@@ -444,32 +451,37 @@
   `GH_TOKEN`; `set -e` ended the step there. Gate `workflow-gh-token-declared` matches the
   COMMAND position, not the substring — an echoed `gh workflow run …` remediation is not a call.
 
-### main-protection: the bypass has two halves, and only one had a reader
-- **`rulesets/rule-suites` (the bypass LOG) is private and rejects fine-grained tokens;
-  `rulesets/{id}` (the bypass CONFIG) is world-readable.** Same feature, opposite access, and it
-  decides what kind of control each half can carry. The log needs a **classic** PAT with `repo`
-  (or a GitHub App token with Administration:read) — a fine-grained token holding
-  `Read access to administration and metadata` still answers `403 Resource not accessible by
-  personal access token`, and the 403 names no permission, so it reads like a scope problem
-  forever (#4791). A workflow `GITHUB_TOKEN` can never read it: `permissions:` has no
-  `administration:` key, and declaring one makes GitHub refuse to parse the whole workflow (zero
-  jobs, every push). Because of that the log half can only ever be a scheduled watch
-  (`merged-past-red-check-watch.yml`, #4240) — never a required check. The config half needs no
-  token at all and therefore can be one (`ruleset-bypass-actors`, Refs #4828).
-- **Detection and prevention are different halves, and the fleet had only detection.** The watch
-  names a merge that already went past a failing required check, up to twelve hours late. Who is
-  *permitted* to do that is one field, `bypass_actors` — today a single entry, RepositoryRole#5
-  (`admin`), `bypass_mode: pull_request`. Nothing in CI can stop that override: GitHub evaluates
-  the bypass at merge time, after every check has reported. What CI *can* do is notice the surface
-  being widened — a bot, a team, or an existing entry flipped to `always` (which additionally
-  permits a **direct push** to `main`) — which otherwise produces no diff, no PR and no red check
-  anywhere. Widening it is a Settings edit; after the gate it is a reviewed commit.
-- **`bypass_mode` must be compared, not just the actor id.** `pull_request` -> `always` keeps the
-  same `actor_id` and is the difference between "can merge a PR past a red check" and "can push
-  straight to main". A comparison keyed on the id alone calls that clean.
-- **Every agent here runs as an identity that CAN bypass.** `current_user_can_bypass` reads
-  `pull_requests_only`, not `never`, for the owner credentials `gh` is authenticated with — which
-  is why the prompt-level prohibition on override flags is load-bearing rather than belt-and-braces.
+### main-protection: bypass evidence and credential isolation
+- **Public ruleset metadata is not readable bypass configuration.** GitHub omits
+  `bypass_actors` unless the caller can write the ruleset. Missing, denied or malformed
+  evidence is `NOT_EVALUATED` with non-zero exit; only a verified empty list is clean.
+  The subject floor counts readable active protection rulesets covering main, not actors.
+- **The privileged reader runs from main, never from PR code.**
+  `ruleset-bypass-evidence.yml` listens for CI `workflow_run: in_progress` (including
+  reruns). It has no checkout, cache, PR artifact input or shell execution. It mints an
+  installation token for this repository with only `Administration:write` and implicit
+  `Metadata:read`, performs GETs, revokes its own token and only then publishes data. A revocation failure
+  blocks publication; cleanup runs even when the read fails. This is the minimum access GitHub documents for the field; it is not a bypass
+  grant. Missing installation permission fails minting; there is no PAT fallback.
+- **CI receives data using only `Actions:read`.** It verifies producer workflow id/path,
+  `workflow_run` event and successful completion before downloading the artifact. Both
+  producer attempt and target CI run/attempt are bound in the payload. Missing, expired,
+  wrong-producer or old-attempt evidence blocks validation. Gate shards retain their
+  ordinary read-only `GITHUB_TOKEN`; they never receive the App key or installation token.
+- **Bootstrap the collector through review before enabling its consumer.** GitHub starts
+  `workflow_run` workflows only once their file exists on the default branch. Merge the
+  collector-only PR through normal review, then rerun #13797 and inspect its real App
+  mint, collector and gate JSON. If the installation lacks `Administration:write`, an
+  owner must review that access separately; do not expand an existing App blindly, since
+  other workflows may mint tokens with all its installed permissions. No required check
+  or review may be bypassed to bootstrap this path. Revert the consumer before removing
+  the collector; missing evidence must continue to fail closed. Rerun the whole CI
+  workflow to collect fresh attempt-bound evidence, rather than only its failed jobs.
+- **The bypass history endpoint is a separate control.**
+  `merged-past-red-check-watch.yml` reads `rulesets/rule-suites` after a merge; its existing
+  credential is not a substitute for the narrowly scoped configuration reader. Detection
+  does not prevent GitHub from evaluating a configured bypass at merge time. Actor id,
+  type and `bypass_mode` must all be compared (`pull_request` and `always` differ).
 
 ### CI / bot commit signing
 - **What signs a bot commit is the *endpoint*, not the token — and `main-protection` enforces

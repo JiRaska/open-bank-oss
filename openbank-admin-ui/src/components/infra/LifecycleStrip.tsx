@@ -16,7 +16,14 @@ export type Urgency = 'current' | 'patch-available' | 'major-available' | 'vulne
 
 export interface CompLifecycle {
   id: string
-  running: { version: string | null; source: string }
+  running: {
+    version: string | null
+    source: string
+    observedAt?: string | null
+    versions?: { version: string; count: number; observedAt: string }[]
+    mixed?: boolean
+  }
+  declared?: { version: string | null; source: string | null }
   lifecycle:
     | {
         available: boolean
@@ -106,14 +113,40 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
     <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'grid', gap: 6 }}>
       {/* version + urgency */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Verze', 'Version')}</span>
+        <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Běžící', 'Running')}</span>
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }} title={data.running.source}>
-          {running ?? t('neznámá', 'unknown')}
+          {data.running.mixed
+            ? t('smíšené verze', 'mixed versions')
+            : running ?? t('neznámá', 'unknown')}
         </span>
+        {data.running.mixed && (
+          <span style={{ fontSize: 11, color: 'var(--warning-text)', fontFamily: 'monospace' }}>
+            {data.running.versions?.map(({ version, count }) => version + ' (' + count + ')').join(' · ')}
+          </span>
+        )}
+        {data.declared?.version && (
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }} title={data.declared.source ?? undefined}>
+            {t('GitOps deklaruje', 'GitOps declares')} <code>{data.declared.version}</code>
+          </span>
+        )}
         <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: u.color, background: u.bg, border: `1px solid ${u.color}33`, padding: '2px 8px', borderRadius: 20 }}>
           {t(u.cs, u.en)}
         </span>
       </div>
+      {data.running.observedAt && (
+        <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
+          {data.running.source === 'prometheus-workload-image-digest'
+            ? t('Identita běžícího obrazu zjištěna', 'Running image identity observed')
+            : data.running.source === 'prometheus-runtime-build-info'
+              ? t('Běhová verze z build-info změřena', 'Runtime build version measured')
+              : t('Obraz běžícího workloadu změřen', 'Running workload image measured')}: {new Date(data.running.observedAt).toLocaleTimeString(dateLocale)}
+        </div>
+      )}
+      {data.running.mixed && (
+        <div style={{ fontSize: 10, color: 'var(--warning-text)' }}>
+          {t('Napříč sledovanými workloady běží více verzí; souhrnné hodnocení životního cyklu není dostupné.', 'Multiple versions are running across observed workloads; an aggregate lifecycle verdict is unavailable.')}
+        </div>
+      )}
 
       {/* lifecycle line */}
       {has ? (
@@ -140,7 +173,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
           )}
         </div>
       ) : (
-        <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{t('Lifecycle data: N/A (žádný veřejný feed)', 'Lifecycle data: N/A (no public feed)')}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{t('Životní cyklus zatím není pro tuto komponentu nakonfigurován', 'Lifecycle tracking is not configured for this component')}</div>
       )}
 
       {/* CVE line */}

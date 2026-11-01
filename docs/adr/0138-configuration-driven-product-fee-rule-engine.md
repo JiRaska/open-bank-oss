@@ -33,6 +33,8 @@ summary: "Fee waivers move to a configuration-driven rule engine: a closed white
   does **not** fit the phase-1 grammar `<attribute-phrase> <op> <number> [currency]` — it is a
   temporal/event predicate, not a comparison — so phase 3 has to extend the vocabulary, not merely
   reuse the evaluator as this ADR's "Deferred" section assumed.
+  **Taken over by ADR-0352 (2026-10-22):** the bonus predicate becomes part of the typed product IR
+  (event-history predicates), and the phase-1 waiver grammar migrates into that IR unchanged.
 
 ## Context
 

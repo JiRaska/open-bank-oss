@@ -104,15 +104,22 @@ class ActingForResolver(
     fun profilesOfStrict(agent: UUID, deadlineNanos: Long): List<Map<String, Any?>> =
         profilesOfStrictWithin(agent, deadlineNanos)
 
+    internal fun profilesOfStrict(agent: UUID, deadlineNanos: Long, nanoTime: () -> Long): List<Map<String, Any?>> =
+        profilesOfStrictWithin(agent, deadlineNanos, nanoTime)
+
     @Suppress("ThrowsCount") // Each malformed mandate response must fail the aggregate closed.
-    private fun profilesOfStrictWithin(agent: UUID, deadlineNanos: Long?): List<Map<String, Any?>> {
+    private fun profilesOfStrictWithin(
+        agent: UUID,
+        deadlineNanos: Long?,
+        nanoTime: () -> Long = System::nanoTime,
+    ): List<Map<String, Any?>> {
         if (!enabled) return emptyList()
         val response = try {
             val url = "$partyServiceUrl/api/v1/parties/$agent/acting-for"
             if (deadlineNanos == null) {
                 upstream.get(url, agent.toString())
             } else {
-                val remaining = deadlineNanos - System.nanoTime()
+                val remaining = deadlineNanos - nanoTime()
                 if (remaining <= 0) throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
                 upstream.get(url, agent.toString(), TimeUnit.NANOSECONDS.toMillis(remaining).coerceAtLeast(1))
             }
@@ -127,7 +134,7 @@ class ActingForResolver(
             ?.takeIf { it.isArray }
             ?: throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
         return node.map { profile ->
-            if (deadlineNanos != null && System.nanoTime() >= deadlineNanos) {
+            if (deadlineNanos != null && nanoTime() >= deadlineNanos) {
                 throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
             }
             val id = runCatching { UUID.fromString(profile.path("partyId").asText()) }.getOrNull()

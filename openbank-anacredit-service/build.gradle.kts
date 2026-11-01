@@ -7,15 +7,7 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
 
@@ -33,7 +25,6 @@ dependencies {
 
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
-    implementation(libs.quarkus.oidc)
 
     // Persistence: reactive Panache + Postgres + Flyway, the fleet standard (ADR-0037 v2, mirrors
     // openbank-product-catalog). openbank-libs is reactive, so a blocking ORM cannot index its
@@ -48,11 +39,8 @@ dependencies {
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)

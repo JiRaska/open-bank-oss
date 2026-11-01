@@ -1,6 +1,6 @@
 # openbank-onboarding-service — agent notes
 
-Onboarding read-model and four-eyes approval cockpit (**ADR-0068**), port **8130**. Hexagonal
+Onboarding read-model for the admin-UI cockpit (**ADR-0068**; the four-eyes approval queue is not hosted here yet), port **8130**. Hexagonal
 per ADR-0002. Not a money-path service — single approval sufficient.
 
 ## What it does
@@ -12,8 +12,8 @@ this service to display where each applicant is in the funnel (`funnel_stage`).
 Key concepts:
 - One `onboarding_records` row per party. Created on `PARTY_CREATED`; updated on KYC/SCA events.
 - `funnel_stage` drives the admin-UI board column (PENDING_KYC, KYC_IN_PROGRESS, PENDING_SCA, …).
-- `four-eyes` gate: state transitions that require two-operator approval are gated here before
-  the downstream command is issued to `party-service`.
+- No four-eyes gate lives in this service: the override control is in the owning service
+  (ADR-0068 §5) and is only observed here.
 
 ## Database — applied migrations + rollback notes
 
@@ -31,11 +31,11 @@ failed with "relation does not exist". V2 adds the correctly-named sequence.
 
 ## Layout
 
-- `domain/model/` — `OnboardingRecord`, `FunnelStage`, events
-- `application/` — `OnboardingService`, `FourEyesGate`
-- `infrastructure/persistence/` — `OnboardingRecordRepository` (reactive Panache)
-- `infrastructure/messaging/` — Kafka consumer for party/KYC/SCA events
-- `infrastructure/rest/` — `OnboardingResource`
+- `domain/model/` — `OnboardingRecord`, `BusinessOnboardingRecord`, `OnboardingEvent`, `ProjectionResult`
+- `application/` — `OnboardingProjectionService`, `BusinessOnboardingProjectionService`; ports `OnboardingRepository`, `OnboardingUseCase` (in `OnboardingQueries.kt`)
+- `infrastructure/persistence/` — `OnboardingRepositoryImpl` (reactive Panache)
+- `infrastructure/kafka/` — `OnboardingEventConsumer` (party/KYC/SCA events), `BusinessOnboardingEventConsumer`
+- `infrastructure/rest/` — `OnboardingResource`, `BusinessOnboardingResource`
 
 ## Build / test
 

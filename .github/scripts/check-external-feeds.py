@@ -296,6 +296,7 @@ NOT_PROBED = [
     ("https://sandbox.api.mastercard.com", "Mastercard developer sandbox; every call is OAuth 1.0a signed, so an unauthenticated probe cannot reach a verdict"),
     ("https://integrate.api.nvidia.com/v1", "authenticated LLM gateway; needs a key"),
     ("https://s3.eu-north-1.amazonaws.com", "AWS endpoint, reached with SigV4 credentials"),
+    ("https://openbank-sandbox-test-evidence.s3.eu-north-1.amazonaws.com", "our own Test Intelligence evidence bucket (#13201); readable only through the cluster VPC endpoint, so a probe from CI cannot reach a verdict"),
     ("https://kc.open-bank.tech/realms/openbank-customers", "our own Keycloak realm, covered by its own probes"),
     ("https://pid.open-bank.tech", "our own PID issuer, covered by its own probes"),
     # Governance rules.yaml live source (governance-auditor / control-liveness-sentinel): this is

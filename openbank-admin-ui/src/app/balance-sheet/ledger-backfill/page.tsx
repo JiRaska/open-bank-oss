@@ -21,7 +21,7 @@ import { useSession } from 'next-auth/react'
 import { BookOpen, RefreshCw } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { PageHeader, ShortId, StatCard, StatusBadge } from '@/components/ui'
 import type { Tone } from '@/components/ui/tone'
 import { backfillUrl, getJson, sendJson, type WriteResult } from '@/components/balance-sheet/api'
 import {
@@ -272,7 +272,7 @@ function LedgerBackfill() {
             <tbody>
               {execution.execution.loans.map(l => (
                 <tr key={l.loanId}>
-                  <td>{l.loanId}</td>
+                  <td><ShortId value={l.loanId} copyLabel={t('Kopírovat ID úvěru', 'Copy loan ID')} /></td>
                   <td><StatusBadge status={l.status} tone={l.status === 'POSTED' ? 'success' : 'danger'} /></td>
                   <td style={{ textAlign: 'right' }}>{`${l.legsPosted} / ${l.legsTotal}`}</td>
                 </tr>

@@ -269,7 +269,7 @@ export default function InfraTopologyPage() {
             </button>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button type="button" onClick={() => setFlow(v => !v)} aria-pressed={flow} aria-label={t(flow ? 'Pozastavit tok dat' : 'Spustit tok dat', flow ? 'Pause data flow' : 'Start data flow')} title={t('Přepnout tok dat', 'Toggle data flow')}
             style={{
               display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
@@ -279,10 +279,10 @@ export default function InfraTopologyPage() {
             }}>
             {flow ? <Pause aria-hidden="true" size={13} /> : <Play aria-hidden="true" size={13} />}{t('Tok dat', 'Data flow')}
           </button>
-          <button type="button" onClick={load} disabled={isChecking} aria-busy={isChecking} aria-label={t('Obnovit stav infrastruktury', 'Refresh infrastructure status')} className="btn btn-secondary"
+          <button type="button" onClick={load} disabled={isChecking} aria-busy={isChecking} aria-label={isChecking ? t('Zjišťuji…', 'Checking...') : t('Obnovit stav infrastruktury', 'Refresh infrastructure status')} className="btn btn-secondary"
             style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
             <RefreshCw aria-hidden="true" size={14} className={isChecking ? 'animate-spin' : ''} />
-            {isChecking ? t('Zjišťuji…', 'Checking...') : t('Obnovit stav', 'Refresh Status')}
+            {isChecking ? t('Zjišťuji…', 'Checking...') : t('Obnovit stav infrastruktury', 'Refresh infrastructure status')}
           </button>
         </div>
       </div>

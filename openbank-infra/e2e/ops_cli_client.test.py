@@ -45,9 +45,12 @@ def findings(clients):
     }.items():
         if attributes.get(key) != value:
             errors.append(f"attributes.{key}: expected {value!r}, got {attributes.get(key)!r}")
-    required_scopes = {"openid", "profile", "email", "roles"}
-    if not required_scopes.issubset(client.get("defaultClientScopes") or []):
-        errors.append("defaultClientScopes must include openid, profile, email and roles")
+    default_scopes = client.get("defaultClientScopes") or []
+    required_scopes = {"profile", "email", "roles"}
+    if not required_scopes.issubset(default_scopes):
+        errors.append("defaultClientScopes must include profile, email and roles")
+    if "openid" in default_scopes or "openid" in (client.get("optionalClientScopes") or []):
+        errors.append("openid is requested by the OIDC flow, not assigned as a client scope")
     return errors
 
 
@@ -79,9 +82,12 @@ def self_test():
         changed = copy.deepcopy(client)
         changed["attributes"][key] = value
         assert findings([changed]), f"unsafe {key} change escaped"
+    changed = copy.deepcopy(client)
+    changed["defaultClientScopes"] = ["openid", *changed["defaultClientScopes"]]
+    assert findings([changed]), "reserved openid protocol scope was accepted as a client scope"
     assert findings([]), "missing client escaped"
     assert findings([client, client]), "duplicate client escaped"
-    print("ops-cli-client: 14 negative controls and one committed positive control passed")
+    print("ops-cli-client: 15 negative controls and one committed positive control passed")
 
 
 if __name__ == "__main__":

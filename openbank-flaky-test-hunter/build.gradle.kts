@@ -8,19 +8,9 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.rest.client.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
-    implementation(libs.quarkus.scheduler)
     // Persistence: reactive Panache + Postgres + Flyway, the fleet standard (openbank-libs is built on
     // reactive Panache, so a service that depends on it must use reactive too — a blocking ORM cannot
     // index the libs reactive entities). The Uni results are bridged to the suspend ports via the
@@ -40,13 +30,10 @@ dependencies {
     implementation(project(":openbank-libs"))
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.testcontainers.postgresql)
-    testImplementation(libs.rest.assured.kotlin)
     // Git-pact for the Admin UI's bounded operator trigger (ADR-0063): the
     // consumer shape and provider replay protect the 202/workflowId contract.
     testImplementation(libs.pact.consumer)
@@ -65,6 +52,13 @@ tasks.named<Copy>("processResources") {
     from(rootProject.file("openbank-libs/governance/prompts/flaky-test-hunter")) {
         include("*.md")
         into("governance-prompts/flaky-test-hunter")
+    }
+    // ADR-0031 D9 phase 3: package the agent charters so the PR-path policy gate can re-verify the
+    // flaky-test-hunter charter in-process, deny-by-default, without a network call. Derived from
+    // openbank-libs/governance/agents.yaml — never hand-edit the packaged copy.
+    from(rootProject.file("openbank-libs/governance")) {
+        include("agents.yaml")
+        into("governance-charters")
     }
 }
 

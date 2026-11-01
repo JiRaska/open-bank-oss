@@ -121,6 +121,14 @@ data class SignedTerm(val datapoint: String, val sign: Int) {
     }
 }
 
+/**
+ * One line of a return's legal artefact (ADR-0340) — e.g. one reportable account on a CRS/FATCA
+ * return. [fields] carry exactly the line-schema fields declared by the return definition
+ * (enforced at assemble time), rendered verbatim. Lines are part of the attested content: the
+ * content hash covers them, so what is approved and submitted is exactly what was assembled.
+ */
+data class ReturnLine(val fields: Map<String, String?>)
+
 /** Arithmetic that must hold between a return's datapoints before it may be assembled. */
 sealed interface ValidationRule {
     val id: String
@@ -145,12 +153,18 @@ data class ReturnDefinition(
     val datapoints: List<String>,
     val rules: List<ValidationRule>,
     val legalBasis: String,
+    /**
+     * The field ids every [ReturnLine] of this return must carry, in catalogue order (ADR-0340).
+     * Empty for figure-only returns (the pension catalogue) — those assemble with no lines.
+     */
+    val lineSchema: List<String> = emptyList(),
 ) {
     init {
         requireValid(code.isNotBlank()) { "return code must not be blank" }
         requireValid(deadlineDaysAfterPeriodEnd > 0) { "$code: deadline must be after the period end" }
         requireValid(datapoints.isNotEmpty()) { "$code: a return with no datapoints reports nothing" }
         requireValid(datapoints.toSet().size == datapoints.size) { "$code: duplicate datapoint ids" }
+        requireValid(lineSchema.toSet().size == lineSchema.size) { "$code: duplicate line-schema fields" }
         val known = datapoints.toSet()
         rules.forEach { rule ->
             val referenced = when (rule) {
@@ -240,6 +254,11 @@ data class StatutoryReturn(
     val revision: Int,
     val status: ReturnStatus,
     val datapoints: Map<String, BigDecimal>,
+    /**
+     * The return's line-level legal artefact (ADR-0340), empty for figure-only returns. Immutable
+     * once stored — a correction is a new revision, never an edit of attested lines.
+     */
+    val lines: List<ReturnLine> = emptyList(),
     val contentHash: String,
     val dueDate: LocalDate,
     val assembledBy: String,
@@ -281,7 +300,8 @@ data class StatutoryReturn(
         }
         requireValid(reference.isNotBlank()) { "A submission reference is required" }
         requireValid(by.isNotBlank()) { "Submission requires an actor" }
-        val recomputed = contentHash(catalogueId, catalogueVersion, returnCode, entityId, period, revision, datapoints)
+        val recomputed =
+            contentHash(catalogueId, catalogueVersion, returnCode, entityId, period, revision, datapoints, lines)
         if (attestedHash == null || recomputed != attestedHash) {
             throw TaxConflictException(
                 "$returnCode ${period.label}: content does not match the attested hash — refusing to submit unattested figures",
@@ -309,6 +329,7 @@ data class StatutoryReturn(
             period: ReportingPeriod,
             revision: Int,
             values: Map<String, BigDecimal>,
+            lines: List<ReturnLine> = emptyList(),
             by: String,
             at: Instant,
         ): StatutoryReturn {
@@ -316,7 +337,7 @@ data class StatutoryReturn(
                 "${definition.code} is ${definition.periodicity}, not ${period.periodicity}"
             }
             requireValid(by.isNotBlank()) { "Assembly requires an actor" }
-            val findings = definition.validate(values)
+            val findings = definition.validate(values) + validateLines(definition, lines)
             if (findings.isNotEmpty()) throw ReturnValidationException(findings)
             return StatutoryReturn(
                 id = Ids.newId(),
@@ -328,6 +349,7 @@ data class StatutoryReturn(
                 revision = revision,
                 status = ReturnStatus.ASSEMBLED,
                 datapoints = values.toSortedMap(),
+                lines = lines,
                 contentHash = contentHash(
                     catalogue.id,
                     catalogue.version,
@@ -336,11 +358,43 @@ data class StatutoryReturn(
                     period,
                     revision,
                     values,
+                    lines,
                 ),
                 dueDate = definition.dueDate(period),
                 assembledBy = by,
                 assembledAt = at,
             )
+        }
+
+        /**
+         * Line-shape findings, same style as datapoint findings: a line whose fields do not match
+         * the catalogue's line schema is a catalogue/assembly defect, never silently stored.
+         */
+        private fun validateLines(definition: ReturnDefinition, lines: List<ReturnLine>): List<ValidationFinding> {
+            if (definition.lineSchema.isEmpty()) {
+                return if (lines.isEmpty()) {
+                    emptyList()
+                } else {
+                    listOf(
+                        ValidationFinding(
+                            "SCHEMA",
+                            "${definition.code}: return has no line schema but ${lines.size} line(s)",
+                        ),
+                    )
+                }
+            }
+            val expected = definition.lineSchema.toSet()
+            return lines.mapIndexedNotNull { index, line ->
+                val actual = line.fields.keys
+                when {
+                    actual != expected ->
+                        ValidationFinding(
+                            "SCHEMA",
+                            "${definition.code}: line $index fields $actual do not match schema $expected",
+                        )
+                    else -> null
+                }
+            }
         }
 
         /** Canonical, order-independent, scale-independent rendering of the attested content. */
@@ -353,6 +407,7 @@ data class StatutoryReturn(
             period: ReportingPeriod,
             revision: Int,
             values: Map<String, BigDecimal>,
+            lines: List<ReturnLine> = emptyList(),
         ): String = buildString {
             append("catalogue=").append(catalogueId).append('@').append(catalogueVersion).append('\n')
             append("return=").append(returnCode).append('\n')
@@ -361,6 +416,16 @@ data class StatutoryReturn(
             append("revision=").append(revision).append('\n')
             values.toSortedMap().forEach { (k, v) ->
                 append(k).append('=').append(v.stripTrailingZeros().toPlainString()).append('\n')
+            }
+            // Lines render only when a return carries them, so figure-only returns (pension) hash
+            // exactly as before the line concept existed.
+            if (lines.isNotEmpty()) {
+                append("lines=").append(lines.size).append('\n')
+                lines.forEachIndexed { index, line ->
+                    line.fields.toSortedMap().forEach { (k, v) ->
+                        append("line[").append(index).append("].").append(k).append('=').append(v).append('\n')
+                    }
+                }
             }
         }
 
@@ -373,6 +438,7 @@ data class StatutoryReturn(
             period: ReportingPeriod,
             revision: Int,
             values: Map<String, BigDecimal>,
+            lines: List<ReturnLine> = emptyList(),
         ): String = MessageDigest.getInstance("SHA-256")
             .digest(
                 canonicalContent(
@@ -383,6 +449,7 @@ data class StatutoryReturn(
                     period,
                     revision,
                     values,
+                    lines,
                 ).toByteArray(),
             )
             .joinToString("") { "%02x".format(it) }

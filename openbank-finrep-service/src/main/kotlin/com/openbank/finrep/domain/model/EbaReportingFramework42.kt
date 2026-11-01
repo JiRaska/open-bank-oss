@@ -8,4 +8,7 @@ object EbaReportingFramework42 {
     const val REPORTING_FRAMEWORK_VERSION = "4.2"
     const val DPM_VERSION = "4.2.1"
     const val TAXONOMY_VERSION = "4.2.0.0"
+
+    /** Emitted cells whose datapoint id still needs verification against the annotated templates. */
+    val UNVERIFIED_DATAPOINT_CELLS: Set<String> = emptySet()
 }

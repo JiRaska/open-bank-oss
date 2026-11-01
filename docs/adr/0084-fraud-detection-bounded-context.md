@@ -116,6 +116,22 @@ summary: "A new openbank-fraud-service scores payments in real time, returning A
 > `FraudScoreOutcome.synthetic`, the `openbank_fraud_scoring_degraded` gauge and the
 > `openbank_fraud_scoring_outcomes_total` counters now separate the two, on every rail.
 
+> **Update 2026-10-30 — §4.2 enforcement returns as a workflow decision (issue #4403).** On the
+> domestic rail only, `DomesticPaymentWorkflow` now runs a `fraudGate` activity that returns
+> `PROCEED|HOLD|REJECT`, gated for in-flight runs by `Workflow.getVersion("fraud-enforcement")`. The
+> flag `openbank.domestic.fraud.enforcement-enabled` (default `false`) is read by that activity, so
+> the shadow posture is unchanged until it is turned on. With it on the gate fails closed: only a real
+> ALLOW proceeds, DECLINE rejects as `FRAUD_SUSPECTED`, and every other verdict, including any
+> synthetic one, holds the payment for a review case. A hold is released only by a workflow signal;
+> no decision within 48 h rejects it. `openbank_fraud_enforcement_decisions_total{decision,mode}` is
+> the calibration input before the flip. The other three scored surfaces stay shadow-only.
+
+> **Amendment 2026-10-24:** [ADR-0354](0354-financial-crime-as-code-governed-packs-and-learning.md)
+> changes only section 3 strategy authoring and the corresponding UI-editable-engine rejection:
+> reviewed bounded packs replace code-defined business strategies after a tested migration.
+> This ADR still establishes fraud-service, verdicts, enrichment and rollout boundaries.
+> No runtime behavior changes with the amendment.
+
 ## Context
 
 The platform has a **regulatory screening gate** (ADR-0032: synchronous sanctions/AML screening
