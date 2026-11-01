@@ -40,6 +40,7 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
 
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
