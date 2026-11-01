@@ -7,6 +7,7 @@ package com.openbank.risk.integration
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.domain.Fixtures
@@ -14,7 +15,6 @@ import com.openbank.risk.domain.Fixtures.lendingLoan
 import com.openbank.risk.domain.Fixtures.sl
 import com.openbank.risk.domain.Fixtures.tb
 import com.openbank.risk.domain.model.LedgerInputs
-import com.openbank.risk.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity

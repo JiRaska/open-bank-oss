@@ -12,8 +12,8 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.treasury.integration.TreasuryDealApiIT
-import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import org.eclipse.microprofile.config.inject.ConfigProperty

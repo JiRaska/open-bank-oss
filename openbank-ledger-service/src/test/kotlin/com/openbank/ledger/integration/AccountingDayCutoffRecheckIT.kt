@@ -13,9 +13,9 @@ import com.openbank.ledger.domain.model.LedgerConflictException
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
 import com.openbank.ledger.infrastructure.schedule.TieOutScheduler
-import com.openbank.ledger.it.PostgresTestResource
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile

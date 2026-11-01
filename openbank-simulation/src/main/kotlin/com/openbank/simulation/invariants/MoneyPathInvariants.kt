@@ -8,12 +8,14 @@ import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.delegation.domain.model.SpendWindows
+import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.sdd.domain.lifecycle.MandateLifecycle
 import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SequenceType
 import com.openbank.sepa.domain.model.SepaPaymentStatus
+import com.openbank.sepainstant.domain.model.SctInstStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.DelegationSpendBook
@@ -166,6 +168,60 @@ object MoneyPathInvariants {
             world.settlements.forEach { settlement ->
                 if (settlement.status !in terminal) {
                     return Violation(name, "settlement ${settlement.id} stuck in ${settlement.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `DomesticPayment`
+     * driven by [com.openbank.simulation.scenario.DomesticClearingScenario] must reach a
+     * terminal status (SETTLED / REJECTED / RETURNED / CANCELLED) by the time a step has fully
+     * settled — the domestic analogue of [sepaPaymentCompleteness]. A payment left RECEIVED
+     * (never validated), VALIDATED (never dispatched), or SENT_TO_CLEARING (never settled nor
+     * returned) is the silent money-in-flight defect this invariant exists to surface.
+     */
+    val domesticPaymentCompleteness = object : Invariant {
+        private val terminal = setOf(
+            DomesticPaymentStatus.SETTLED,
+            DomesticPaymentStatus.REJECTED,
+            DomesticPaymentStatus.RETURNED,
+            DomesticPaymentStatus.CANCELLED,
+        )
+
+        override val name = "domestic-payment-completeness"
+        override fun check(world: World): Violation? {
+            world.domesticPayments.forEach { payment ->
+                if (payment.status !in terminal) {
+                    return Violation(name, "domestic payment ${payment.id} stuck in ${payment.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `SctInstPayment`
+     * driven by [com.openbank.simulation.scenario.SctInstSettlementScenario] must reach a
+     * terminal status (SETTLED / REJECTED / RECALLED / TIMEOUT) by the time a step has fully
+     * settled — the instant-payment analogue of [sepaPaymentCompleteness]. A payment left
+     * PENDING (screening hold that never decided) or PROCESSING (scheme submission that never
+     * settled) is the silent money-in-flight defect this invariant exists to surface.
+     */
+    val sctInstPaymentCompleteness = object : Invariant {
+        private val terminal = setOf(
+            SctInstStatus.SETTLED,
+            SctInstStatus.REJECTED,
+            SctInstStatus.RECALLED,
+            SctInstStatus.TIMEOUT,
+        )
+
+        override val name = "sct-inst-payment-completeness"
+        override fun check(world: World): Violation? {
+            world.sctInstPayments.forEach { payment ->
+                if (payment.status !in terminal) {
+                    return Violation(name, "sct-inst payment ${payment.id} stuck in ${payment.status}")
                 }
             }
             return null
@@ -608,6 +664,8 @@ object MoneyPathInvariants {
         auditCompleteness,
         sepaPaymentCompleteness,
         settlementCompleteness,
+        domesticPaymentCompleteness,
+        sctInstPaymentCompleteness,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,

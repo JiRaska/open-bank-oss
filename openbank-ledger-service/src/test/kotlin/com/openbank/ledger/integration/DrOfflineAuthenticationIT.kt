@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 package com.openbank.ledger.integration
 
-import com.openbank.ledger.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile

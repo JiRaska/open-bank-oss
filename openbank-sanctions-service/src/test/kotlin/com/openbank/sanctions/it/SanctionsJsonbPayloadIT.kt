@@ -5,6 +5,7 @@ package com.openbank.sanctions.it
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsRepositoryImpl

@@ -3,10 +3,10 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.statement.application.port.`in`.RunCloseUseCase
 import com.openbank.statement.domain.model.CloseRun
 import com.openbank.statement.domain.model.CloseTrigger
-import com.openbank.statement.it.PostgresTestResource
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
