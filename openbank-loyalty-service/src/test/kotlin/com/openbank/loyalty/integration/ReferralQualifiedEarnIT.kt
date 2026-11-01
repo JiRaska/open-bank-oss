@@ -4,8 +4,9 @@
 
 package com.openbank.loyalty.integration
 
-import com.openbank.loyalty.it.LoyaltyPostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import io.smallrye.reactive.messaging.memory.InMemorySource
@@ -29,7 +30,7 @@ import javax.sql.DataSource
  * happened" is observed after the consumer provably moved past it rather than before it ran.
  */
 @QuarkusTest
-@QuarkusTestResource(LoyaltyPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class, initArgs = [ResourceArg(name = "db", value = "openbank_loyalty_it")])
 class ReferralQualifiedEarnIT {
     @Inject
     lateinit var dataSource: DataSource
