@@ -1443,6 +1443,51 @@ def mode_owner_approval(gh, number: int, head: str, decision: str) -> None:
     log(f"owner decision: {decision} PR #{number} at {head}")
 
 
+LINKED_ISSUES_QUERY = ("query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){"
+                       "pullRequest(number:$n){closingIssuesReferences(first:50){nodes{number state "
+                       "repository{nameWithOwner}}}}}}")
+
+
+def close_linked_issues(repo: str, n: int, sha: str) -> list[int]:
+    """Close the issues PR `n` links with `Closes #N` (#14510). GitHub records the link but emits no
+    close when an App merges, so the train does it. Same-repository, still-OPEN issues only (so a
+    re-run is a no-op); every failure is logged and swallowed — the merge already happened and must
+    never be reported as failed because of this. Returns the issue numbers it closed."""
+    closed: list[int] = []
+    try:
+        owner, name = repo.split("/", 1)
+        code, data = api("POST", "/graphql", {"query": LINKED_ISSUES_QUERY,
+                                              "variables": {"owner": owner, "name": name, "n": int(n)}})
+        nodes = (((((data or {}).get("data") or {}).get("repository") or {}).get("pullRequest") or {})
+                 .get("closingIssuesReferences") or {}).get("nodes") if code == 200 and isinstance(data, dict) else None
+        if nodes is None:
+            log(f"::warning::#{n}: could not read linked issues ({code}); none closed")
+            return closed
+        for node in nodes:
+            if not isinstance(node, dict) or node.get("state") != "OPEN":
+                continue
+            if (node.get("repository") or {}).get("nameWithOwner") != repo or type(node.get("number")) is not int:
+                continue
+            i = node["number"]
+            try:
+                c, _ = api("POST", f"/repos/{repo}/issues/{i}/comments",
+                           {"body": f"Closed by #{int(n)} ({sha}) — merged by the merge train."})
+                if c != 201:
+                    log(f"::warning::#{n}: comment on issue #{i} -> {c} (needs issues:write); not closed")
+                    continue
+                c, _ = api("PATCH", f"/repos/{repo}/issues/{i}", {"state": "closed", "state_reason": "completed"})
+                if c == 200:
+                    closed.append(i)
+                    log(f"#{n}: closed linked issue #{i}")
+                else:
+                    log(f"::warning::#{n}: close issue #{i} -> {c} (needs issues:write)")
+            except Exception as e:  # noqa: BLE001 — never fail the merge job over an issue
+                log(f"::warning::#{n}: closing issue #{i} failed: {type(e).__name__}: {e}")
+    except Exception as e:  # noqa: BLE001
+        log(f"::warning::#{n}: linked-issue close skipped: {type(e).__name__}: {e}")
+    return closed
+
+
 class GitHub:
     """Every GitHub read and write. The self-test substitutes a fake with the same methods."""
 
@@ -1605,7 +1650,10 @@ class GitHub:
             log(f"::notice::#{n} source intent or head changed — not merged")
             return None
         code, data = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/merge", {"merge_method": "squash", "sha": head})
-        return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
+        sha = data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
+        if sha:
+            close_linked_issues(self.repo, n, sha)
+        return sha
 
     def rerun_inconclusive(self, sha: str, contexts: list[str]) -> bool:
         """Retry once per run, including CI's attempt-bound evidence ancestor. The caller keeps the
