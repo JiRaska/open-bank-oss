@@ -4,7 +4,7 @@
 
 package com.openbank.treasury.integration
 
-import com.openbank.treasury.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.treasury.portfolio.withSyntheticPortfolioIsins
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest

@@ -5,6 +5,7 @@
 package com.openbank.sanctions.it
 
 import com.openbank.libs.testing.audit.AuditEventTime
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.sanctions.application.port.`in`.ReviewCommand
 import com.openbank.sanctions.application.port.`in`.SanctionsUseCase
 import com.openbank.sanctions.domain.model.EntityType
