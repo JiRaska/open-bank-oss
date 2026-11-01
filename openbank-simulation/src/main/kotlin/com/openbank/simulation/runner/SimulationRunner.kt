@@ -8,11 +8,13 @@ import com.openbank.simulation.engine.FaultProfile
 import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.Invariant
 import com.openbank.simulation.invariants.MoneyPathInvariants
+import com.openbank.simulation.scenario.ClearingCycleScenario
 import com.openbank.simulation.scenario.DelegatedSpendScenario
 import com.openbank.simulation.scenario.DomesticClearingScenario
 import com.openbank.simulation.scenario.FeeBillingScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
+import com.openbank.simulation.scenario.SctInstSettlementScenario
 import com.openbank.simulation.scenario.SddCollectionScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
 import com.openbank.simulation.scenario.StandingOrderScenario
@@ -63,6 +65,13 @@ class SimulationRunner(
             // Czech domestic clearing domain-class binding into the same seeded run so it
             // shares the fault profile and is checked by the same invariant sweep every step.
             DomesticClearingScenario.step(world)
+            // clearing-cycle domain-class binding into the same seeded run so it shares the
+            // fault profile and is checked by the same invariant sweep every step.
+            ClearingCycleScenario.step(world)
+            // Issue #14366 (Test Intelligence simulation gap, money path): interleave the SEPA
+            // INSTANT + settlement domain-class binding into the same seeded run so it shares
+            // the fault profile and is checked by the same invariant sweep every step.
+            SctInstSettlementScenario.step(world)
             context.scheduler.drain()
             // ADR-0143 phase 2d/2e: interleave the billing fee-charge (+ seeded reversal) path
             // so MoneyPathInvariants.billingFeeConservation is actually exercised every step,

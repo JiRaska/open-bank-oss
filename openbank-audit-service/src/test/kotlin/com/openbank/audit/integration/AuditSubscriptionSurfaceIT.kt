@@ -4,8 +4,8 @@
 package com.openbank.audit.integration
 
 import com.openbank.audit.application.TopicAttribution
-import com.openbank.audit.it.PostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest

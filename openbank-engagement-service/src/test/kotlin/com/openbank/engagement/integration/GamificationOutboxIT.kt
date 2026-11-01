@@ -5,6 +5,7 @@
 package com.openbank.engagement.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -23,7 +24,7 @@ import java.util.UUID
 
 /**
  * Proves ADR-0220 D3's gamification award actually reaches the transactional outbox with the
- * required audit-attribution shape — real Postgres (`EngagementPostgresTestResource`), real HTTP
+ * required audit-attribution shape — real Postgres (`PostgresTestResource`), real HTTP
  * request (`RecordEngagementEventUseCase`'s Hibernate Reactive Panache repositories need a real
  * Vert.x context, same reasoning `SurfaceRestContractIT`'s own KDoc documents), real transaction:
  * the award row and its outbox row are asserted from the SAME commit the REST call produced, not
@@ -35,7 +36,7 @@ import java.util.UUID
 @QuarkusTest
 @TestSecurity(user = "edge@openbank.test", roles = ["ROLE_OPERATOR"])
 @QuarkusTestResource(SurfaceRestContractIT.NoKafkaResource::class)
-@QuarkusTestResource(EngagementPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class GamificationOutboxIT {
 
     private val mapper = ObjectMapper()

@@ -4,6 +4,7 @@
 package com.openbank.statement.integration
 
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.statement.domain.model.BalanceAnchor
 import com.openbank.statement.domain.model.CreditDebit
 import com.openbank.statement.domain.model.PeriodCloseStatus
@@ -14,7 +15,6 @@ import com.openbank.statement.domain.model.StatementPeriod
 import com.openbank.statement.domain.model.StatementSnapshot
 import com.openbank.statement.domain.render.StatementRenderer
 import com.openbank.statement.infrastructure.persistence.repository.StatementPeriodRepositoryImpl
-import com.openbank.statement.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
