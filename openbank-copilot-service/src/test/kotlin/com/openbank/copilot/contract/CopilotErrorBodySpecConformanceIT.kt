@@ -51,8 +51,11 @@ class CopilotErrorBodySpecConformanceIT {
     @Test
     fun `the documented 401 schema rejects the shared envelope if only ErrorResponse were listed`() {
         val shared = mapOf(
-            "traceId" to "t", "status" to 401, "code" to "UNAUTHORIZED",
-            "message" to "m", "timestamp" to "2026-01-01T00:00:00Z",
+            "traceId" to "t",
+            "status" to 401,
+            "code" to "UNAUTHORIZED",
+            "message" to "m",
+            "timestamp" to "2026-01-01T00:00:00Z",
         )
         val errorResponse = documentedSchemas("/copilot/chat", 501).single()
         assertThat(violations(shared, errorResponse)).contains("error is required")
