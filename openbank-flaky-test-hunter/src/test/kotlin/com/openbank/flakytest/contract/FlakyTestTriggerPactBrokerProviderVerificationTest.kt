@@ -10,9 +10,9 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
-import com.openbank.flakytest.PostgresTestResource
 import com.openbank.flakytest.application.usecase.FlakyTestHunterService
 import com.openbank.flakytest.domain.model.RunTrigger
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
