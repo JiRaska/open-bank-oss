@@ -22,6 +22,11 @@ on:
       ref:
         required: true
         type: string
+      consumer:
+        description: "Optional consumer name; blank verifies every consumer."
+        required: false
+        default: ""
+        type: string
     secrets:
       PACT_BROKER_PASSWORD:
         required: true
@@ -46,7 +51,12 @@ on:
         # then overlays the provider's src/test from ref F — only when P and F are byte-identical
         # in every production build input of the service (prove-pact-provider-version.sh, #11597);
         # otherwise only explicitly named provider-state fixtures are imported from F.
-        description: "Provider version P to publish. Blank = ref; distinct P takes <svc>/src/test from ref F if production-identical, else Ledger/Balance/Account/Transaction/Party use their fixed named fixture bundle from F."
+        description: "Provider version P to publish. Blank = ref; distinct P takes <svc>/src/test from ref F if production-identical, else Ledger/Balance/Account/Transaction/Party/Clearing/SEPA Instant use their fixed named fixture bundle from F."
+        required: false
+        default: ""
+        type: string
+      consumer:
+        description: "Optional consumer name, e.g. openbank-agent-service; blank verifies every consumer."
         required: false
         default: ""
         type: string
@@ -99,6 +109,7 @@ jobs:
       service: ${{ inputs.service }}
       ref: ${{ inputs.ref }}
       provider_version: ${{ inputs.provider_version }}
+      consumer: ${{ inputs.consumer }}
       # A maintainer explicitly requested a provider proof. A no-op consumer-only outcome
       # would otherwise make this workflow green without publishing the promised evidence.
       require_provider_pact_test: true
