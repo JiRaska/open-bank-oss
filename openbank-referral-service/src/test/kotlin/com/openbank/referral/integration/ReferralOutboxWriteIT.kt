@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 package com.openbank.referral.integration
 
-import com.openbank.referral.it.ReferralPostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -40,7 +40,7 @@ import javax.sql.DataSource
  */
 @QuarkusTest
 @QuarkusTestResource(ReferralOutboxWriteIT.DispatcherOffResource::class)
-@QuarkusTestResource(ReferralPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "checker@openbank.test", roles = ["ROLE_OPERATOR"])
 class ReferralOutboxWriteIT {
 
