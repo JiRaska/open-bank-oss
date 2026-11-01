@@ -4,7 +4,7 @@
 
 package com.openbank.simulation.invariants
 
-import com.openbank.fx.domain.screening.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningDecision
 import com.openbank.simulation.engine.FaultProfile
 import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.runner.SimulationConfig

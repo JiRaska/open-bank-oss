@@ -127,10 +127,11 @@ dependencies {
     // the cross-border rail. The domain package is framework-free (ADR-0002).
     implementation(project(":openbank-swift-service"))
 
-    // ADR-0032 §B: the harness also drives the REAL fx-service screening domain — the pure,
-    // framework-free `ScreeningPolicy` verdict over a conversion's screened names (BLOCK / REVIEW
-    // / CLEAR with the 0.85 potential-hit block threshold mirrored from sanctions' isHighRisk).
-    implementation(project(":openbank-fx-service"))
+    // ADR-0032 §B: the harness also drives the REAL screening domain — the pure, framework-free
+    // `ScreeningPolicy` verdict over a conversion's screened names (BLOCK / REVIEW / CLEAR with
+    // the 0.85 potential-hit block threshold mirrored from sanctions' isHighRisk). It moved from
+    // fx-service into the shared financial-crime library (#13773), so the dependency follows it.
+    implementation(project(":openbank-libs-fincrime"))
 
     // The harness also drives the REAL card-processing domain — the `CardAuthorization`
     // aggregate (a derived, never-stored held amount) and the pure `AuthorizationLifecycle`

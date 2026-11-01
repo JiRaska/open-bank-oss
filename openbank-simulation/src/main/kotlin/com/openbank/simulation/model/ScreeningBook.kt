@@ -4,13 +4,13 @@
 
 package com.openbank.simulation.model
 
-import com.openbank.fx.domain.screening.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningDecision
 import java.util.UUID
 
 /**
  * Simulated FX screening state (ADR-0032 §B, issue #667 shape): every conversion records two
  * independent facts — the verdict the REAL
- * [com.openbank.fx.domain.screening.ScreeningPolicy] rendered over its screened names, and what
+ * [com.openbank.libs.fincrime.ScreeningPolicy] rendered over its screened names, and what
  * the payment path actually did with the conversion — so
  * `MoneyPathInvariants.screeningDispositionIntegrity` can assert they never disagree:
  *

@@ -141,7 +141,9 @@ class StandingOrderExecutionConservationInvariantTest {
         w.standingOrderExecutions.recordPosted(id, BigDecimal("50.00"))
         // The defect shape from issue #12839: the payment went through (confirmed, posted) but
         // the order never completed — it stays ACTIVE and would be re-due on the next sweep.
-        w.standingOrderExecutions.replace(w.standingOrderExecutions.view(id).order!!.copy(status = StandingOrderStatus.ACTIVE))
+        w.standingOrderExecutions.replace(
+            w.standingOrderExecutions.view(id).order!!.copy(status = StandingOrderStatus.ACTIVE),
+        )
 
         assertThat(MoneyPathInvariants.standingOrderExecutionConservation.check(w))
             .isNotNull()

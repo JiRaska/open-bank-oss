@@ -4,17 +4,17 @@
 
 package com.openbank.simulation.scenario
 
-import com.openbank.fx.domain.screening.ScreeningDecision
-import com.openbank.fx.domain.screening.ScreeningMatchStatus
-import com.openbank.fx.domain.screening.ScreeningPolicy
-import com.openbank.fx.domain.screening.ScreeningResult
-import com.openbank.fx.domain.screening.ScreeningRole
+import com.openbank.libs.fincrime.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningPolicy
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.simulation.runner.World
 
 /**
  * Issue #667 shape (ADR-0100 "build on the real system"): one step of the FX conversion
  * sanctions-screening path — modelled directly against the REAL
- * [com.openbank.fx.domain.screening.ScreeningPolicy] (ADR-0032 §B), the pure, framework-free
+ * [com.openbank.libs.fincrime.ScreeningPolicy] (ADR-0032 §B), the pure, framework-free
  * verdict function over a conversion's screened names. The screening HTTP client and the OPA
  * wiring are ports and cannot run inside the pure-JVM harness (same reasoning documented on
  * [StatementCloseScenario]), so this scenario generates the screened-name results the real
