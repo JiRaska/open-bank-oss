@@ -24,6 +24,9 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // Consumer-driven contract test: the referral.qualified.v1 message contract this service
+    // earns Lístky from (ADR-0310 D3).
+    testImplementation(libs.pact.consumer)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
