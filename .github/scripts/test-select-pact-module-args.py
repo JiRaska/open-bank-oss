@@ -13,13 +13,13 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 GROUP = ["--rerun", "--tests", "*.contract.*PactConsumerTest"]
-ALL = [":openbank-a-service:test", *GROUP, ":openbank-b-service:test", *GROUP, ":openbank-c-service:test", *GROUP]
+ALL = [":openbank-a-service:consumerPactTest", *GROUP, ":openbank-b-service:consumerPactTest", *GROUP, ":openbank-c-service:consumerPactTest", *GROUP]
 
 
 class SelectTest(unittest.TestCase):
     def test_selects_only_listed_modules_in_derived_order(self):
         self.assertEqual(MODULE.select_args(ALL, ["openbank-c-service", "openbank-a-service"]),
-                         [":openbank-a-service:test", *GROUP, ":openbank-c-service:test", *GROUP])
+                         [":openbank-a-service:consumerPactTest", *GROUP, ":openbank-c-service:consumerPactTest", *GROUP])
 
     def test_module_without_consumer_test_selects_nothing(self):
         self.assertEqual(MODULE.select_args(ALL, ["openbank-z-service"]), [])
@@ -33,6 +33,11 @@ class SelectTest(unittest.TestCase):
             MODULE.select_args(ALL, ["openbank-a-service; rm -rf /"])
         with self.assertRaises(ValueError):
             MODULE.select_args([], ["openbank-a-service"])
+        # The pre-#2291 `:test` task shape must stay rejected: derive-pact-drift-scope.sh
+        # emits the dedicated :consumerPactTest task, and a stale shape here silently
+        # deselects every listed module (the empty-scope archive path).
+        with self.assertRaises(ValueError):
+            MODULE.select_args([":openbank-a-service:test", *GROUP], ["openbank-a-service"])
 
 
 if __name__ == "__main__":

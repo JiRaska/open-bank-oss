@@ -26,11 +26,14 @@ def select_args(lines: list[str], modules: list[str]) -> list[str]:
     if not groups:
         raise ValueError("derived Gradle scope is empty")
     seen: set[str] = set()
-    wanted = {f":{module}:test" for module in modules}
+    # derive-pact-drift-scope.sh emits the dedicated :consumerPactTest task (it disables
+    # up-to-date/cache reuse so direct invocations regenerate contracts — #2291, #2309);
+    # shard-pact-gradle-args.py validates the same shape.
+    wanted = {f":{module}:consumerPactTest" for module in modules}
     selected: list[str] = []
     for group in groups:
         task, rerun, tests, pattern = group
-        if not task.startswith(":") or not task.endswith(":test"):
+        if not task.startswith(":") or not task.endswith(":consumerPactTest"):
             raise ValueError(f"unexpected Gradle task: {task}")
         if (rerun, tests, pattern) != ("--rerun", "--tests", "*.contract.*PactConsumerTest"):
             raise ValueError(f"unexpected Gradle test arguments: {group}")
