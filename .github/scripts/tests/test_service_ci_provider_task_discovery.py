@@ -215,6 +215,7 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             self.assertIn("-Dpactbroker.auth.password=", provider_call)
             self.assertIn("-Dpact.verifier.publishResults=true", provider_call)
             self.assertIn("-Dpact.provider.version=fixture-provider-version", provider_call)
+            self.assertNotIn("-Dpactbroker.consumers=", provider_call)
             self.assertNotIn(":test", provider_call)
 
     def test_consumer_only_discovery_never_invokes_provider_task(self):

@@ -18,6 +18,11 @@ name: _service-ci-pr
         required: false
         default: ''
         type: string
+      consumer:
+        description: Optional consumer name; blank verifies every consumer.
+        required: false
+        default: ''
+        type: string
       require_provider_pact_test:
         description: Fail when this targeted verification has no providerPactTest.
         required: false
