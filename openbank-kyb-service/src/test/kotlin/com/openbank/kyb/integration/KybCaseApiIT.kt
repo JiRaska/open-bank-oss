@@ -6,9 +6,9 @@ package com.openbank.kyb.integration
 
 import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.RepresentationAttestation
-import com.openbank.kyb.it.PostgresTestResource
 import com.openbank.kyb.it.StubDocumentGateway
 import com.openbank.kyb.it.StubPartyGateway
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
