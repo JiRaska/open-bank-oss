@@ -53,6 +53,15 @@
 #     exits non-zero so no `Enable auto-merge` step after it runs. If the hold cannot be transferred
 #     the held PR is left OPEN. The durable, service-scoped hold remains `rules.yaml: deploy_holds`
 #     (check-deploy-holds.py); this closes the gap for a hold expressed only on the PR.
+#   * An ARMED predecessor rides; the survivor waits. A deploy PR with auto-merge enabled has already
+#     been through CI, the deploy window and (for admin-ui) the merge train. Closing it in favour of
+#     a newer, unarmed PR restarts that whole cycle, and on a busy day the next build lands before the
+#     cycle completes — so every armed PR was closed and NOTHING deployed for hours (2026-10-30:
+#     #14316 -> #14328 -> #14334, each closed armed). It is left open; the window arms the survivor
+#     only after the armed one has merged (one armed PR per kind), and the main push from that merge
+#     rebuilds against the new pin, so the survivor's now-conflicting line is superseded in turn.
+#     The cost: an armed PR whose pin later proves wrong is no longer closed by its successor;
+#     disarm it by hand (disable its auto-merge) or record a deploy hold on main.
 #   * A comment is left on every PR it closes. A silent close of someone's PR is not acceptable even
 #     when the PR is bot-generated: the next person to look must find out why from the PR itself.
 #
@@ -360,7 +369,7 @@ run() {
     echo "::error::supersede: could not read #$KEEP's changed-file list; refusing coverage-based closes."
   fi
 
-  while IFS=$'\t' read -r n ref held; do
+  while IFS=$'\t' read -r n ref held armed; do
     [ -n "$n" ] || continue
     other_sha="$(sha_of_branch "$ref" "$PREFIX")"
     # Holds are decided ONCE, before any verdict, because the block below must apply on every
@@ -436,6 +445,11 @@ run() {
         echo "::warning::supersede: cannot establish that #$KEEP supersedes #$n (keep=${KEEP_SHA:-?} other=${other_sha:-?}, unrelated or unparsable) — leaving #$n OPEN."
         ;;
       CLOSE)
+        if [ "${armed:-0}" = "1" ]; then
+          skipped=$((skipped + 1))
+          echo "::notice::supersede: #$KEEP supersedes #$n, but #$n is already armed — it rides to merge; #$KEEP waits for the next window."
+          continue
+        fi
         if [ "$carries_rules" -eq 1 ]; then
           if ! legacy="$(unmigrated_branch_holds "$n")"; then
             owner_held=$((owner_held + 1)); skipped=$((skipped + 1))
@@ -737,6 +751,24 @@ HOOK
     echo "SELF-TEST FAIL case 6: #7320 was not closed despite #7327's superset diff; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 6 OK (ancestor and superset files -> #7320 closed)"
+  fi
+
+  # case 50 — an ARMED predecessor is never closed: it has already cleared CI and the window, and
+  # closing it restarts the cycle for a PR that is not armed (#14316/#14328/#14334). rc stays 0 —
+  # the survivor is not unsafe, only second in line.
+  out="$(run "$P" 6222 "$NEW" "$(printf '6225\t%s%s\t0\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || contains_text "$out" 'would close #6225' \
+     || ! contains_text "$out" '#6225 is already armed'; then
+    echo "SELF-TEST FAIL case 50: armed predecessor not left to ride; rc=$rc"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 50 OK (armed predecessor left open, rc=0)"
+  fi
+  # case 51 — the same pair unarmed (explicit 0) is still closed: the guard keys on the flag only.
+  out="$(run "$P" 6222 "$NEW" "$(printf '6225\t%s%s\t0\t0' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || ! contains_text "$out" 'would close #6225'; then
+    echo "SELF-TEST FAIL case 51: unarmed predecessor was not closed; rc=$rc"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 51 OK (unarmed predecessor closed)"
   fi
 
   # case 8 — the same pair WITHOUT a hold is ordinary: closed, rc 0, nothing inherited.
@@ -1145,13 +1177,13 @@ fi
 # script would then print "nothing to close" and exit 0 — a broken probe reporting a clean result,
 # which is the failure mode this repo has been bitten by repeatedly.
 PAIRS="$(gh pr list --repo "$REPO" --state open --limit 200 \
-    --json number,headRefName,headRepositoryOwner,createdAt,isDraft,labels \
+    --json number,headRefName,headRepositoryOwner,createdAt,isDraft,labels,autoMergeRequest \
     --jq "[.[]
            | select(.headRefName | startswith(\"$PREFIX\"))
            | select(.number != ($KEEP | tonumber))
            | select(.headRepositoryOwner.login == \"${REPO%%/*}\")]
           | sort_by(.createdAt)
-          | .[] | \"\(.number)\t\(.headRefName)\t\(if .isDraft or ([.labels[].name] | index(\"blocked\")) then 1 else 0 end)\"")"
+          | .[] | \"\(.number)\t\(.headRefName)\t\(if .isDraft or ([.labels[].name] | index(\"blocked\")) then 1 else 0 end)\t\(if .autoMergeRequest then 1 else 0 end)\"")"
 
 run "$PREFIX" "$KEEP" "$KEEP_SHA" "$PAIRS"
 exit $?
