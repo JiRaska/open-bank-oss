@@ -7,9 +7,9 @@ admin-ui-deploy.yml|job:build-push|pull-requests
 # Dataset-only OIDC publisher; IAM limits writes to Gate Health snapshots and its CAS selector.
 admin-ui-evidence.yml|job:publish|id-token
 agent-review.yml|job:review|pull-requests
-alert-rca-weekly.yml|job:review|contents
-alert-rca-weekly.yml|job:review|issues
-alert-rca-weekly.yml|job:review|pull-requests
+alert-rca-weekly.yml|job:publish|contents
+alert-rca-weekly.yml|job:publish|issues
+alert-rca-weekly.yml|job:publish|pull-requests
 api-contract-post-merge.yml|job:raise-issue|issues
 auto-deploy-red-watch.yml|job:watch|issues
 auto-deploy.yml|job:build-push|contents
@@ -76,8 +76,8 @@ scorecard.yml|job:analysis|id-token
 scorecard.yml|job:analysis|security-events
 security.yml|job:codeql|security-events
 security.yml|job:trivy|security-events
-service-build-stall-watch.yml|job:watch|actions
-service-build-stall-watch.yml|job:watch|issues
+service-build-stall-watch.yml|job:mutate|actions
+service-build-stall-watch.yml|job:mutate|issues
 services-ci.yml|job:build_other_openbank_account_service|id-token
 services-ci.yml|job:build_other_openbank_agent_service|id-token
 services-ci.yml|job:build_other_openbank_aml_service|id-token
