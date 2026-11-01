@@ -8,6 +8,7 @@ import com.openbank.billing.application.port.out.BillingAssessmentRepository
 import com.openbank.billing.domain.BillingAssessment
 import com.openbank.billing.infrastructure.scheduler.BillingCycleScheduler
 import com.openbank.billing.it.PostgresRedisTestResource
+import com.openbank.libs.domain.calendar.AccountingClock
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -81,8 +82,16 @@ class BillingCycleSweepVertxContextIT {
         CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
     }
 
+    /**
+     * The sweep derives its cycle from the Prague accounting day ([AccountingClock.bank]), not from
+     * the injected clock's own zone. `LocalDate.now(clock)` is the clock-zone date, so for the hour
+     * either side of Prague midnight on the last day of a month (23:13Z on 2026-10-31 in CI) the test
+     * looked for cycle 2026-10 while the sweep wrote 2026-11 and the wait timed out.
+     */
+    private fun accountingToday(): LocalDate = AccountingClock.bank(clock).today()
+
     private fun assessment(): BillingAssessment? = onVertxContext {
-        assessments.findExisting(BillingCycleScheduler.cycleIdFor(LocalDate.now(clock)), ACCOUNT_ID, CURRENCY)
+        assessments.findExisting(BillingCycleScheduler.cycleIdFor(accountingToday()), ACCOUNT_ID, CURRENCY)
     }
 
     @Test
