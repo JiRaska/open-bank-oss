@@ -88,6 +88,13 @@ class CaseCoordinatorPactBrokerProviderVerificationTest {
     @State("a closed case with a thread exists")
     fun seedClosedCase() = seedCase(status = "CLOSED", contestedRate = "0.5")
 
+    @State(KILL_SWITCH_INACTIVE_STATE)
+    fun stateNoActiveKillSwitch() {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement("DELETE FROM case_kill_switch").use { it.executeUpdate() }
+        }
+    }
+
     @State(NEGATIVE_AUTH_STATE)
     fun stateNoValidIdentity() {
         // Intentionally empty: the state IS the absence of an authenticated identity, which the

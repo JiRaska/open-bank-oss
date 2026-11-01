@@ -1,5 +1,36 @@
 # Changelog
 
+## [3.16.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.3...admin-ui-v3.16.0) (2026-11-01)
+
+
+### Features
+
+* **admin-ui:** show synthetic journey verdicts in the evidence matrix ([#14362](https://github.com/JiRaska/open-bank-oss/issues/14362)) ([4509c9a](https://github.com/JiRaska/open-bank-oss/commit/4509c9aaef9ae0f72a20515c5b7618cbeacca667))
+
+## [3.15.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.2...admin-ui-v3.15.3) (2026-10-31)
+
+
+### Bug Fixes
+
+* **admin-ui:** read k6 journey p95 as seconds in Test Intelligence ([#14357](https://github.com/JiRaska/open-bank-oss/issues/14357)) ([1c8f2f1](https://github.com/JiRaska/open-bank-oss/commit/1c8f2f1a60c8ac2a28aea5ab88542752bfebfaad))
+
+## [3.15.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.1...admin-ui-v3.15.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **admin-ui:** accept bilingual topology copy in the content snapshot validator ([#14323](https://github.com/JiRaska/open-bank-oss/issues/14323)) ([f27d366](https://github.com/JiRaska/open-bank-oss/commit/f27d366b1f6aab19a9bd88e1a583ac3425c42193))
+* **admin-ui:** seed sidebar roles from the session cookie to paint operator nav in one pass ([#14319](https://github.com/JiRaska/open-bank-oss/issues/14319)) ([0a52218](https://github.com/JiRaska/open-bank-oss/commit/0a52218b038e25eb4d42aa8f29b6caaba88420a5)), closes [#14295](https://github.com/JiRaska/open-bank-oss/issues/14295)
+
+## [3.15.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.0...admin-ui-v3.15.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **admin-ui:** read FinOps anomalies from Alertmanager's route prefix ([#14279](https://github.com/JiRaska/open-bank-oss/issues/14279)) ([21a23de](https://github.com/JiRaska/open-bank-oss/commit/21a23de382a5b78568b7b5107b216e79e4bafe5e))
+* **product-catalog,admin-ui:** refuse duplicate JSON keys; keep unsaved Expert edits on IR save ([#14287](https://github.com/JiRaska/open-bank-oss/issues/14287)) ([e8c3978](https://github.com/JiRaska/open-bank-oss/commit/e8c3978adaf81c64394827733a0642914f368631))
+* **treasury:** record a posting intent before the ledger call ([#14220](https://github.com/JiRaska/open-bank-oss/issues/14220)) ([059840b](https://github.com/JiRaska/open-bank-oss/commit/059840b74eb1f495df083e12296842ad4dbd4d80))
+
 ## [3.15.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.14.0...admin-ui-v3.15.0) (2026-10-30)
 
 

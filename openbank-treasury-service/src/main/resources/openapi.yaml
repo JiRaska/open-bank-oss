@@ -65,7 +65,9 @@ info:
   #         (collateral is always valued at the bank's price, never the deal's). GET
   #         /day-completion/{date}, close-of-day position snapshots (/positions/close-of-day,
   #         ROLE_TREASURY_BACK_OFFICE) and saved blotter filters (/views/deal-filters).
-  version: 1.23.0
+  # 1.24.0: additive — POST /deals/{id}/posting-intent/close (operator close of a lifecycle posting
+  #         intent that cannot complete; ADR-0344 / #13883 intent-first posting).
+  version: 1.24.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -424,6 +426,68 @@ paths:
         '409': { $ref: '#/components/responses/InvalidState' }
         '422':
           description: FOUR_EYES_VIOLATION (the creator may not reverse their own deal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/treasury/deals/{id}/posting-intent/close:
+    post:
+      tags: [Treasury]
+      operationId: closePostingIntent
+      summary: Close a deal's open posting intent that cannot complete (operator, audited)
+      description: >-
+        #13883. Settle, mature and reverse record a posting intent before posting to the ledger; an
+        OPEN intent holds its value day's close report. When it cannot complete, an operator closes
+        it with a reason (recorded with who closed it), which releases the hold. Same authority as
+        reversing the deal, and a person only.
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: |
+            Client-generated, one per close decision, stable across retries (1..128 characters).
+            Recorded on the close's append-only history row with a fingerprint of the request
+            (deal, event, actor, reason, closed intent). A replay of the same close answers as
+            the close did (204; 409 if a re-issue has since reopened the intent); the same key
+            on a different request is 400.
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClosePostingIntentRequest'
+      responses:
+        '204':
+          description: The intent was closed
+        '400':
+          description: >-
+            Missing or invalid event or reason; missing or invalid Idempotency-Key; or the
+            Idempotency-Key was already used for a different request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: No OPEN posting intent for that event on the deal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            POSTING_IN_FLIGHT. The intent may still be posting (younger than the grace period,
+            or claimed by the reconciler), or this is a replay of a close whose intent a re-issue
+            has since reopened; retry later.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: FOUR_EYES_VIOLATION (the posting's own actor or the deal's approver)
           content:
             application/json:
               schema:
@@ -1939,6 +2003,12 @@ components:
           type: [string, 'null']
           maxLength: 200
           description: The counterparty's confirmation reference, recorded on the deal's timeline.
+    ClosePostingIntentRequest:
+      type: object
+      required: [event, reason]
+      properties:
+        event: { type: string, enum: [SETTLED, MATURED, REVERSED] }
+        reason: { type: string, minLength: 1 }
     ReasonRequest:
       type: object
       required: [reason]

@@ -58,7 +58,7 @@ import java.util.UUID
  * model and real portability adapter to pin field mapping and empty-history behavior.
  *
  * The negative half is recorded in the same pact: a caller with no valid M2M identity is refused
- * with 401 (ADR-0279 #3), served by `TransactionNegativeAuthPactVerificationTest`.
+ * with 401 (ADR-0279 #3), served by `TransactionNegativeAuthProviderVerificationTest`.
  *
  * IMPORTANT - regenerate on change: re-run this test
  * (`./gradlew :openbank-party-service:test --tests "*PartyTransactionListPactConsumerTest*"`) and
