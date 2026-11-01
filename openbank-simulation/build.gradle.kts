@@ -80,6 +80,14 @@ dependencies {
     // than a re-model of the clearing cycle. The domain package is framework-free (ADR-0002),
     // so only the domain POJOs land on the classpath, not a runtime.
     implementation(project(":openbank-clearing-service"))
+
+    // Issue #14366 (Test Intelligence simulation gap, money path): the harness also drives the
+    // REAL pension-service domain — the PensionContract lifecycle (every edge listed in
+    // ContractStatus), the append-only Contribution credit (idempotent by paymentId) and the
+    // statutory StateContributionReturn obligation with its CzStateContributionCalendar deadlines
+    // (ZDPS §18) — rather than a re-model of any of them. The domain packages are framework-free
+    // (ADR-0002), so only the domain POJOs land on the classpath, not a runtime.
+    implementation(project(":openbank-pension-service"))
     // REAL `SctInstPayment` aggregate (sepa-instant) and the REAL scheme rule that guards it
     // (`SctInstSchemeRules.requireSchemeCurrency` — SCT Inst is euro-only, EPC rulebook), rather
     // than a re-model of either. The domain package is framework-free (ADR-0002 — no

@@ -13,6 +13,8 @@ import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.libs.domain.money.Money
+import com.openbank.pension.domain.model.ContractStatus
+import com.openbank.pension.domain.statecontribution.ReturnStatus
 import com.openbank.sdd.domain.lifecycle.MandateLifecycle
 import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SequenceType
@@ -30,6 +32,7 @@ import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -257,6 +260,59 @@ object MoneyPathInvariants {
      * PENDING (screening hold that never decided) or PROCESSING (scheme submission that never
      * settled) is the silent money-in-flight defect this invariant exists to surface.
      */
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `PensionContract`
+     * driven by [com.openbank.simulation.scenario.PensionLifecycleScenario] must be either a
+     * legitimately open contract (ACTIVE / SUSPENDED) or a terminal one (PAID_OUT /
+     * TRANSFERRED_OUT / CLOSED) once a step has fully settled — never left DRAFT (never
+     * submitted), PENDING_ACTIVATION (submitted, never funded) or TERMINATING (exit requested,
+     * never concluded). A contract parked mid-flight is the silent money-in-flight defect this
+     * invariant exists to surface; the open/terminal sets mirror the REAL
+     * `ContractStatus` transition table.
+     */
+    val pensionContractCompleteness = object : Invariant {
+        private val settled = setOf(
+            ContractStatus.ACTIVE,
+            ContractStatus.SUSPENDED,
+            ContractStatus.PAID_OUT,
+            ContractStatus.TRANSFERRED_OUT,
+            ContractStatus.CLOSED,
+        )
+
+        override val name = "pension-contract-completeness"
+        override fun check(world: World): Violation? {
+            world.pensionContracts.forEach { contract ->
+                if (contract.status !in settled) {
+                    return Violation(name, "pension contract ${contract.id} stuck in ${contract.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every statutory
+     * `StateContributionReturn` obligation must be SETTLED once its real statutory deadline has
+     * passed — the deadline the scenario computed with the REAL `CzStateContributionCalendar`
+     * (ZDPS §18). A return left DUE/REPORTED/CONFIRMED past `dueBy` is a missed statutory
+     * obligation to the agency: real money the platform owes with a regulatory clock on it.
+     */
+    val pensionReturnTimeliness = object : Invariant {
+        override val name = "pension-return-timeliness"
+        override fun check(world: World): Violation? {
+            val today = world.context.clock.instant().atZone(ZoneOffset.UTC).toLocalDate()
+            world.pensionReturns.forEach { obligation ->
+                if (obligation.status != ReturnStatus.SETTLED && obligation.overdue(today)) {
+                    return Violation(
+                        name,
+                        "pension return ${obligation.id} ${obligation.status} past dueBy ${obligation.dueBy}",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
     val sctInstPaymentCompleteness = object : Invariant {
         private val terminal = setOf(
             SctInstStatus.SETTLED,
@@ -715,6 +771,8 @@ object MoneyPathInvariants {
         domesticPaymentCompleteness,
         clearingCompleteness,
         sctInstPaymentCompleteness,
+        pensionContractCompleteness,
+        pensionReturnTimeliness,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,
