@@ -2619,7 +2619,11 @@ def fast_turn(gh, git, base: str, fast: list, apps: dict, main_red, carrier_in_f
     if m is None:
         if shadow:
             return None
-        gh.post_status(base, "success", f"opened {int(now)}", context=FAST_TURN_CONTEXT)
+        try:   # a failed marker write must never abort the settle tick: no turn this tick
+            gh.post_status(base, "success", f"opened {int(now)}", context=FAST_TURN_CONTEXT)
+        except (SystemExit, Exception) as e:  # noqa: BLE001 — post_status exits on any non-201
+            log(f"::warning::fast turn: marker not written ({type(e).__name__}: {e}) — no turn this tick")
+            return None
         opened = int(now)
     else:
         opened = int(m.group(1))
@@ -3026,7 +3030,10 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
             log(f"#{n:>6} strict    fix for {', '.join(fix)} red on main {base[:12]}: combined head verified, merging")
         else:
             desc = f"strict lane: green on an up-to-date head over main {base[:12]}"
-        assert current, "strict lane never merges a head that does not contain live main"
+        if git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0:
+            # Fail closed (never an assert: -O strips it, and a crash would end the whole tick).
+            log(f"::warning::#{n:>6} strict    head does not contain main {base[:12]} at merge time — skipped")
+            continue
         gh.post_status(head, "success", desc, source_number=n)
         merged = gh.merge(n, head)
         if not merged:
@@ -5842,6 +5849,61 @@ def self_test() -> int:
             s = settle_now()
             check("fast turn: a non-strict head on main ends the turn", gh.updates == [36], f"{s} updates={gh.updates}")
             gh.updates.clear()
+            reset()
+            # A failing marker write (post_status exits on non-201) ends no tick: no turn, the strict lane runs.
+            open_only("pW", "pW2")
+            settle_now()
+            open_only("pF")
+            gh.updates.clear()
+            real_post = gh.post_status
+
+            def failing_post(sha, state, description, context=STATUS_CONTEXT, *a, **k):
+                if context == FAST_TURN_CONTEXT:
+                    raise SystemExit("HTTP 403")
+                return real_post(sha, state, description, context, *a, **k)
+            gh.post_status = failing_post
+            try:
+                s = settle_now()
+                ok1 = gh.updates == [36]
+                s2 = settle_now()                          # the updated holder is green: it merges
+            finally:
+                del gh.post_status
+            check("fast turn: a failing marker write does not abort the tick; the strict holder still merges",
+                  ok1 and 36 in gh.merged, f"{s} {s2} updates={gh.updates} merged={gh.merged}")
+            gh.updates.clear()
+            reset()
+            # An UNARMED fast PR is no candidate: no turn.
+            open_only("pW", "pW2")
+            settle_now()
+            open_only("pF")
+            gh.prs[34]["auto_merge"] = None
+            gh.updates.clear()
+            s = settle_now()
+            check("fast turn: an unarmed fast PR opens no turn", gh.updates == [36], f"{s} updates={gh.updates}")
+            gh.updates.clear()
+            reset()
+            # Fail-closed merge guard: ancestry re-read at merge time; a violation skips, never crashes.
+            open_only("pW")
+            sg = Git(clone("settle"))
+            calls = {"n": 0}
+            real_call = Git.__call__
+
+            def flaky(self, *a, check=True, auth=False):
+                if a[:2] == ("merge-base", "--is-ancestor") and a[3] == gh.prs[35]["head"]["sha"]:
+                    calls["n"] += 1
+                    if calls["n"] > 1:
+                        return subprocess.CompletedProcess(a, 1, "", "")
+                return real_call(self, *a, check=check, auth=auth)
+            Git.__call__ = flaky
+            try:
+                s = mode_settle(gh, sg, "o/r", False)
+                ok2 = 35 not in gh.merged
+            except BaseException as e:  # noqa: BLE001
+                ok2, s = False, repr(e)
+            finally:
+                Git.__call__ = real_call
+            check("strict lane: a head not containing main at merge time is skipped, the tick survives",
+                  ok2 and calls["n"] > 1, f"{s} calls={calls}")
             reset()
             # main red: never a turn (direct call, so the strict lane's own main-red rule cannot mask it).
             open_only("pW", "pW2")
