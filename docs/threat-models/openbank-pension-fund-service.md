@@ -24,11 +24,12 @@ contact data.
 
 ## Trust boundaries
 
-1. Fund administrators call `/api/v1/funds`, `/navs`, `/strategies` and `/strategy-changes` with
+1. Fund administrators call `/api/v2/funds`, `/navs`, `/strategies` and `/strategy-changes` (v1
+   retained as deprecated aliases until the sunset) with
    their OWN bearer token. RBAC per method (`@RolesAllowed`, ROLE_OPERATOR / ROLE_ADMIN to write,
    plus ROLE_AUDITOR / ROLE_API to read), then OPA (`pension_fund_rest_ext.rego`: writes for real
    staff only, every `service-account-` excluded), then the domain (four-eyes).
-2. `/api/v1/contracts/{contractId}/*` is the unit-register surface pension-service calls through
+2. `/api/v2/contracts/{contractId}/*` (deprecated v1 alias retained) is the unit-register surface pension-service calls through
    its FundAdministrationPort (ADR-0334 §1). Only real staff and pension-service's own client
    (`service-account-openbank-pension`) may read holdings or place orders. The read action is
    `pension-fund.holding.inspect`, deliberately not a `.read`/`.list` verb: base rest.rego's
@@ -49,7 +50,7 @@ contact data.
 4. Market prices enter through `MarketPricePort`. The shipped adapter (`StubMarketPriceAdapter`)
    knows no prices, so every position must be priced in the request by the calculating
    administrator; an unpriced position is refused, never valued at an invented number.
-5. `/api/v1/reporting/funds/{fundId}/period-figures` (#12425) is the period-end read model
+5. `/api/v2/reporting/funds/{fundId}/period-figures` (#12425; deprecated v1 alias retained) is the period-end read model
    tax-reporting-service assembles the ČNB returns from. Aggregate only — sums and counts, no
    contract id. `pension-fund.reporting.inspect` is admitted for real staff and for
    tax-reporting-service's OWN client (`service-account-openbank-tax-reporting`, ROLE_API) alone,
