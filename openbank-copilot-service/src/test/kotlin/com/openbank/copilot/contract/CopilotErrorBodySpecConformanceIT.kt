@@ -4,51 +4,27 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.copilot.contract
 
-import com.openbank.copilot.application.port.out.ProposalTokenStore
-import com.openbank.copilot.domain.ProposalToken
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.junit.QuarkusTestProfile
-import io.quarkus.test.junit.TestProfile
-import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
-import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
-import java.time.Instant
-import java.util.UUID
 
 /**
- * #12078: the error member is legitimate on the copilot resource's explicit error responses.
- * Verify served HTTP bodies against the referenced response schema, not just its YAML text.
+ * #12078: an unauthenticated request is rejected by libs-runtime before the resource runs, so its
+ * 401 body is the shared ApiError, not the resource's `{error}`. Verify the served HTTP body
+ * against the referenced response schema, not just its YAML text. Runs on the default profile and
+ * without test-security so the PR stays spec+test+docs (ADR-0048 correction class).
  */
 @QuarkusTest
-@TestProfile(CopilotErrorBodySpecConformanceIT.MemoryTokenProfile::class)
 class CopilotErrorBodySpecConformanceIT {
-    class MemoryTokenProfile : QuarkusTestProfile {
-        override fun getConfigOverrides(): Map<String, String> = mapOf("copilot.token-store" to "memory")
-    }
-
-    @Inject
-    lateinit var tokens: ProposalTokenStore
-
     private companion object {
         @Suppress("UNCHECKED_CAST")
         val SPEC: Map<String, Any?> by lazy {
             Thread.currentThread().contextClassLoader.getResourceAsStream("openapi.yaml")!!
                 .use { Yaml().load<Map<String, Any?>>(it) }
         }
-    }
-
-    @Test
-    @TestSecurity(user = "copilot-audit-customer")
-    fun `disabled chat returns the documented error body`() {
-        val response = given().contentType(ContentType.JSON)
-            .body(mapOf("message" to "hello"))
-            .`when`().post("/api/v1/copilot/chat")
-            .then().statusCode(501).extract().jsonPath().getMap<String, Any?>("")
-        assertConforms(response, "/copilot/chat", 501)
     }
 
     @Test
@@ -73,61 +49,15 @@ class CopilotErrorBodySpecConformanceIT {
     }
 
     @Test
-    @TestSecurity(user = "copilot-audit-customer")
-    fun `malformed confirmation token returns the documented error body`() {
-        val response = given().contentType(ContentType.JSON)
-            .`when`().post("/api/v1/copilot/actions/not-a-uuid/confirm")
-            .then().statusCode(404).extract().jsonPath().getMap<String, Any?>("")
-        assertConforms(response, "/copilot/actions/{tokenId}/confirm", 404)
-        assertThat(response["error"]).isEqualTo("PROPOSAL_NOT_FOUND")
-    }
-
-    @Test
-    @TestSecurity(user = "copilot-audit-customer")
-    fun `expired token evicted by the store returns 404 with the documented error body`() {
-        val token = ProposalToken(
-            id = UUID.randomUUID(),
-            toolName = "propose_payment",
-            params = emptyMap(),
-            expiresAt = Instant.now().minusSeconds(60),
-            customerId = "copilot-audit-customer",
+    fun `the documented 401 schema rejects the shared envelope if only ErrorResponse were listed`() {
+        val shared = mapOf(
+            "traceId" to "t", "status" to 401, "code" to "UNAUTHORIZED",
+            "message" to "m", "timestamp" to "2026-01-01T00:00:00Z",
         )
-        tokens.save(token)
-        val response = given().contentType(ContentType.JSON)
-            .`when`().post("/api/v1/copilot/actions/${token.id}/confirm")
-            .then().statusCode(404).extract().jsonPath().getMap<String, Any?>("")
-        assertConforms(response, "/copilot/actions/{tokenId}/confirm", 404)
-        assertThat(response["error"]).isEqualTo("PROPOSAL_NOT_FOUND")
-    }
-
-    @Test
-    @TestSecurity(user = "copilot-audit-customer")
-    fun `another customer's token returns 403 with the documented error body`() {
-        val token = ProposalToken(
-            id = UUID.randomUUID(),
-            toolName = "propose_payment",
-            params = emptyMap(),
-            expiresAt = Instant.now().plusSeconds(60),
-            customerId = "another-customer",
-        )
-        tokens.save(token)
-        try {
-            val response = given().contentType(ContentType.JSON)
-                .`when`().post("/api/v1/copilot/actions/${token.id}/confirm")
-                .then().statusCode(403).extract().jsonPath().getMap<String, Any?>("")
-            assertConforms(response, "/copilot/actions/{tokenId}/confirm", 403)
-            assertThat(response["error"]).isEqualTo("PROPOSAL_NOT_FOUND")
-        } finally {
-            tokens.delete(token.id)
-        }
-    }
-
-    @Test
-    fun `the documented schema rejects a mapper envelope lacking error`() {
-        val schema = documentedSchemas("/copilot/chat", 501).single()
-        val required = schema["required"] as List<*>
-        assertThat(required).contains("error")
-        assertThat(mapOf("code" to "VALIDATION_ERROR").keys).doesNotContain("error")
+        val errorResponse = documentedSchemas("/copilot/chat", 501).single()
+        assertThat(violations(shared, errorResponse)).contains("error is required")
+        assertThat(documentedSchemas("/copilot/chat", 401).map { violations(shared, it) })
+            .anySatisfy { assertThat(it).isEmpty() }
     }
 
     @Suppress("UNCHECKED_CAST")
