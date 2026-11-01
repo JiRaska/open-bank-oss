@@ -15,6 +15,7 @@ import com.openbank.sdd.domain.lifecycle.MandateLifecycle
 import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SequenceType
 import com.openbank.sepa.domain.model.SepaPaymentStatus
+import com.openbank.sepainstant.domain.model.SctInstStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.DelegationSpendBook
@@ -194,6 +195,33 @@ object MoneyPathInvariants {
             world.domesticPayments.forEach { payment ->
                 if (payment.status !in terminal) {
                     return Violation(name, "domestic payment ${payment.id} stuck in ${payment.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `SctInstPayment`
+     * driven by [com.openbank.simulation.scenario.SctInstSettlementScenario] must reach a
+     * terminal status (SETTLED / REJECTED / RECALLED / TIMEOUT) by the time a step has fully
+     * settled — the instant-payment analogue of [sepaPaymentCompleteness]. A payment left
+     * PENDING (screening hold that never decided) or PROCESSING (scheme submission that never
+     * settled) is the silent money-in-flight defect this invariant exists to surface.
+     */
+    val sctInstPaymentCompleteness = object : Invariant {
+        private val terminal = setOf(
+            SctInstStatus.SETTLED,
+            SctInstStatus.REJECTED,
+            SctInstStatus.RECALLED,
+            SctInstStatus.TIMEOUT,
+        )
+
+        override val name = "sct-inst-payment-completeness"
+        override fun check(world: World): Violation? {
+            world.sctInstPayments.forEach { payment ->
+                if (payment.status !in terminal) {
+                    return Violation(name, "sct-inst payment ${payment.id} stuck in ${payment.status}")
                 }
             }
             return null
@@ -637,6 +665,7 @@ object MoneyPathInvariants {
         sepaPaymentCompleteness,
         settlementCompleteness,
         domesticPaymentCompleteness,
+        sctInstPaymentCompleteness,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,
