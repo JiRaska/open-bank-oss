@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { localize, type Bilingual, type Localized } from '@/lib/i18n/bilingual'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
@@ -22,20 +23,25 @@ import {
 
 type Status = 'live' | 'partial' | 'planned'
 
-interface Namespace { name: string; group: string; role: string; declared: boolean }
-interface Group { id: string; label: string; labelEn: string; color: string; icon: string; blurb: string }
-interface Layer { id: string; label: string; icon: string; status: Status; analogy: string; summary: string; controls: string[]; adr: string[]; detailRoute?: string }
-interface AnatomyStep { id: string; label: string; status: Status; detail: string; adr: string[] }
-interface PvR { item: string; plan: string; reality: string; status: Status }
-interface Topology {
+// Wire shape: user-visible text arrives as { cs, en } (scripts/generate-cluster-topology.mjs);
+// the page resolves it once per language via localize() and renders plain strings.
+interface NamespaceWire { name: string; group: string; role: Bilingual; declared: boolean }
+interface GroupWire { id: string; label: string; labelEn: string; color: string; icon: string; blurb: Bilingual }
+interface LayerWire { id: string; label: Bilingual; icon: string; status: Status; analogy: Bilingual; summary: Bilingual; controls: string[]; adr: string[]; detailRoute?: string }
+interface AnatomyStepWire { id: string; label: Bilingual; status: Status; detail: Bilingual; adr: string[] }
+interface PvRWire { item: Bilingual; plan: Bilingual; reality: Bilingual; status: Status }
+interface TopologyWire {
   generatedAt: string | null
   counts: { namespaces?: number; networkPolicies?: number; externalSecrets?: number; clusterPolicies?: number }
-  groups: Group[]
-  namespaces: Namespace[]
-  securityLayers: Layer[]
-  imageAnatomy: { multiStage?: boolean; buildBase?: string; runtimeBase?: string; steps: AnatomyStep[] }
-  planVsReality: PvR[]
+  groups: GroupWire[]
+  namespaces: NamespaceWire[]
+  securityLayers: LayerWire[]
+  imageAnatomy: { multiStage?: boolean; buildBase?: string; runtimeBase?: string; steps: AnatomyStepWire[] }
+  planVsReality: PvRWire[]
 }
+type Topology = Localized<TopologyWire>
+type Namespace = Localized<NamespaceWire>
+type Layer = Localized<LayerWire>
 
 const STATUS: Record<Status, { cs: string; en: string; color: string; bg: string; border: string; Icon: React.ElementType }> = {
   live: { cs: 'Deklarováno', en: 'Declared', color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
@@ -156,7 +162,8 @@ function ContainerAnatomy({ anatomy, lang }: { anatomy: Topology['imageAnatomy']
 export default function ClusterDossierPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const [topo, setTopo] = useState<Topology | null>(null)
+  const [rawTopo, setTopo] = useState<TopologyWire | null>(null)
+  const topo = useMemo<Topology | null>(() => (rawTopo ? localize(rawTopo, language) : null), [rawTopo, language])
   const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeLayer, setActiveLayer] = useState<string | null | undefined>(undefined)
@@ -171,7 +178,7 @@ export default function ClusterDossierPage() {
     try {
       const r = await fetch('/api/cluster/topology', { cache: 'no-store', signal: controller.signal })
       if (!r.ok) throw new Error('Cluster topology is unavailable')
-      const response = await r.json() as Topology & { source?: string; contentSource?: ContentSourceMetadata }
+      const response = await r.json() as TopologyWire & { source?: string; contentSource?: ContentSourceMetadata }
       const d = response
       if (activeRequest.current !== controller || controller.signal.aborted) return
       if (d.source === 'unavailable' || !Array.isArray(d.groups) || !Array.isArray(d.namespaces)

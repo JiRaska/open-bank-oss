@@ -5,9 +5,9 @@
 package com.openbank.treasury.integration
 
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.treasury.domain.marketdata.IndexObservation
 import com.openbank.treasury.domain.marketdata.ObservationSource
-import com.openbank.treasury.it.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest

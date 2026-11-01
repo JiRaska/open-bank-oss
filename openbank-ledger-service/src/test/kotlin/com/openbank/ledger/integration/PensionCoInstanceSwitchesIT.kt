@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.ledger.integration
 
-import com.openbank.ledger.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.agroal.api.AgroalDataSource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.scheduler.Scheduler

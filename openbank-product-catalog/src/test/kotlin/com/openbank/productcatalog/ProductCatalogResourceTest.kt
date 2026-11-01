@@ -63,7 +63,10 @@ class ProductCatalogResourceTest {
 
     @Test
     fun `GET unknown product returns 404`() {
-        Given { this } When { get("/api/v1/products/does-not-exist") } Then { statusCode(404) }
+        Given { this } When { get("/api/v1/products/does-not-exist") } Then {
+            statusCode(404)
+            body("error", equalTo("Product does-not-exist not found"))
+        }
     }
 
     @Test

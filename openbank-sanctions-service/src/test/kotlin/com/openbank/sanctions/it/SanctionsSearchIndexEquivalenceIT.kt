@@ -4,6 +4,7 @@
 
 package com.openbank.sanctions.it
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.SanctionsEntry
 import com.openbank.sanctions.domain.model.SanctionsListType

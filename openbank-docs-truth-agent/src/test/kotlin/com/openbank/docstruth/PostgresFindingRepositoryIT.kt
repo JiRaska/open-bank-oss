@@ -11,6 +11,7 @@ import com.openbank.docstruth.domain.model.FindingSeverity
 import com.openbank.docstruth.domain.model.FindingStatus
 import com.openbank.docstruth.infrastructure.persistence.PostgresFindingRepository
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport

@@ -132,6 +132,16 @@ production ownership approval. It uses synthetic data and simulated external col
 It does not prove simultaneous deployment isolation with real OIDC/OPA tokens, real settlement
 or a fully connected production money path. Those capabilities remain in #12472 and #12479.
 
+## Contract testing (consumer pacts)
+
+The consumer pact test `PensionFundPactConsumerTest` compiles in the isolated
+`consumerPactTest` source set, which by design compiles only `**/*PactConsumerTest.kt`
+plus helpers each service explicitly includes (CI isolation, see the
+`openbank.quarkus-service` convention). Its in-memory fund-order plan backend
+(`InMemoryFundOrderPlans`) therefore must stay listed in the
+`consumerPactTest` include in `build.gradle.kts`; without it,
+`compileConsumerPactTestKotlin` fails with an unresolved reference.
+
 ## Operational metrics
 
 The management metrics endpoint exposes pension transition and outcome counters, including
@@ -159,3 +169,7 @@ validate outgoing requests and parse the documented offer examples.
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Local dev messaging
+
+The `%dev` profile has no messaging override. `smallrye-in-memory` is a test-only dependency, so in dev the channels keep the `smallrye-kafka` connector and Quarkus Kafka Dev Services starts the broker. Only the `%test` profile uses the in-memory connector (#13175).

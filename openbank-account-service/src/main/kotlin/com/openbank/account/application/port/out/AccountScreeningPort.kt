@@ -37,6 +37,9 @@ data class SanctionsScreenResult(val status: String, val matchScore: Double, val
  * and the account MUST NOT be opened (ADR-0032 §C).
  */
 interface AccountSanctionsScreeningPort {
-    /** Screen [name] against global sanctions lists. [idempotencyKey] deduplicates concurrent opens. */
-    suspend fun screen(name: String, idempotencyKey: String): SanctionsScreenResult
+    /**
+     * Screen [name] against global sanctions lists. [idempotencyKey] identifies this attempt;
+     * [subjectId] binds any compliance clearance to the party independently of that key.
+     */
+    suspend fun screen(name: String, idempotencyKey: String, subjectId: String): SanctionsScreenResult
 }

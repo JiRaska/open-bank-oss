@@ -5,12 +5,15 @@
 package com.openbank.sanctions.it
 
 import com.openbank.libs.testing.audit.AuditEventTime
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.sanctions.application.port.`in`.ReviewCommand
 import com.openbank.sanctions.application.port.`in`.SanctionsUseCase
 import com.openbank.sanctions.domain.model.EntityType
+import com.openbank.sanctions.domain.model.MatchType
 import com.openbank.sanctions.domain.model.SanctionsCheck
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
 import com.openbank.sanctions.domain.model.SanctionsListType
+import com.openbank.sanctions.domain.model.SanctionsMatch
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsRepositoryImpl
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -134,6 +137,44 @@ class SanctionsReviewUpdateIT {
         assertThat(storedStatus(stored.id))
             .describedAs("the transition must be durable, not just present on the returned object")
             .isEqualTo("CLEAR")
+    }
+
+    @Test
+    fun `whitelisted subject and clearance expiry survive Postgres and the clearance query`() {
+        val subjectId = "33333333-3333-4333-8333-333333333333"
+        val stored = onEventLoop {
+            repository.saveWithEvent(
+                hit("review-key-whitelist").copy(
+                    subjectId = subjectId,
+                    matches = listOf(
+                        SanctionsMatch(
+                            listType = SanctionsListType.OFAC_SDN,
+                            matchType = MatchType.FUZZY,
+                            matchScore = 0.9,
+                            matchedName = "Screened Subject",
+                            matchedId = "ofac-test-1",
+                            listEntryDate = null,
+                            programs = listOf("TEST"),
+                        ),
+                    ),
+                ),
+                "SanctionChecked",
+            )
+        }
+
+        onEventLoop {
+            useCase.review(
+                ReviewCommand(stored.id, "operator-1", "false positive", SanctionsCheckStatus.WHITELISTED),
+            )
+        }
+
+        val loaded = requireNotNull(onEventLoop { repository.findById(stored.id) })
+        assertThat(loaded.subjectId).isEqualTo(subjectId)
+        assertThat(loaded.clearanceExpiresAt)
+            .isEqualTo(loaded.reviewedAt!!.plus(java.time.Duration.ofDays(90)))
+        val clearances = onEventLoop { repository.findWhitelistsForSubject(subjectId) }
+        assertThat(clearances.map { it.id }).containsExactly(stored.id)
+        assertThat(clearances.single().clearanceExpiresAt).isEqualTo(loaded.clearanceExpiresAt)
     }
 
     @Test

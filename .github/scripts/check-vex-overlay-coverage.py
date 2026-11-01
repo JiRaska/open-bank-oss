@@ -83,11 +83,6 @@ NO_OVERLAY_YET: dict[str, str] = {
     "wealth-service": "#9811 - released in #9771 (ADR-0301 D1) and deployed nowhere, moves no "
     "money and has no ingress, so nothing is exposed while the dispositions are verified "
     "against this service's own resolved runtime classpath rather than copied from a sibling.",
-    "loyalty-service": "#8830 - released in #8807 and not deployed anywhere, so nothing is exposed "
-                       "today. Its dependency set is the ordinary Quarkus reactive stack and is "
-                       "largely shared with services that already have overlays, but nobody has "
-                       "diffed it yet. Writing dispositions from that assumption rather than from "
-                       "the resolved artifacts is the fabrication this gate's own header refuses.",
     "card-processing-service": "#9849 - new service (ADR-0283 phase 1), no VEX overlay written yet. "
                                "Its dependency set is the ordinary reactive Quarkus stack largely "
                                "shared with services that already carry overlays, but 'largely "

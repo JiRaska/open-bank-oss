@@ -318,6 +318,19 @@ def check(root: pathlib.Path):
         if status != "active":
             continue
 
+        # Test Intelligence projects a journey's verdict onto the components it `covers`; an
+        # active journey covering nothing is a green or red run no component's matrix row can
+        # show (2026-10-31: 8 of 9 active journeys declared no `covers`, so the matrix read
+        # "synthetic 0/74" while nine journeys ran). Every name must be a real component dir.
+        covers = entry.get("covers")
+        if (not isinstance(covers, list) or not covers
+                or not all(isinstance(name, str) and name for name in covers)
+                or len(covers) != len(set(covers))):
+            findings.append(f"{jid}: active journeys need a non-empty, unique `covers` list of components")
+        else:
+            for name in covers:
+                if not re.fullmatch(r"openbank-[a-z0-9-]+", name) or not (root / name).is_dir():
+                    findings.append(f"{jid}: covers names {name!r}, which is not a component directory")
         runtime_note = entry.get("runtime_note")
         if runtime_note is not None and (not isinstance(runtime_note, str) or not runtime_note.strip()):
             findings.append(f"{jid}: runtime_note must be a non-empty string when declared")
@@ -396,6 +409,7 @@ journeys:
     money_moving: false
     cronjob: openbank-infra/gitops/components/observability/cronjob-journey-demo.yaml
     schedule: "*/5 * * * *"
+    covers: [openbank-demo-service]
     falsification: point it at a dead host
   - id: later
     title: Later
@@ -457,6 +471,7 @@ journeys:
     workflow: .github/workflows/browser-synthetic.yml
     workflow_name: Browser synthetic
     schedule: "13 */2 * * *"
+    covers: [openbank-demo-service]
     falsification: remove the SSO boundary
 """
 
@@ -470,6 +485,7 @@ on:
 
 def write_tree(root: pathlib.Path, catalog: str, cronjob: str, rules: str, cronjob_name="cronjob-journey-demo.yaml", workflow=None):
     (root / "openbank-libs/governance").mkdir(parents=True, exist_ok=True)
+    (root / "openbank-demo-service").mkdir(exist_ok=True)
     (root / COMPONENTS / "observability").mkdir(parents=True, exist_ok=True)
     (root / CATALOG).write_text(catalog, encoding="utf-8")
     if cronjob is not None:
@@ -497,6 +513,12 @@ def self_test():
             ok = got == expect_finding
             cases.append((label, ok, findings or ([fatal] if fatal else [])))
 
+    run("an active journey covering no component is flagged",
+        SELF_TEST_CATALOG_OK.replace("    covers: [openbank-demo-service]\n", "", 1),
+        SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=True)
+    run("an active journey covering a non-existent component is flagged",
+        SELF_TEST_CATALOG_OK.replace("covers: [openbank-demo-service]", "covers: [openbank-ghost-service]", 1),
+        SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=True)
     run("control: a consistent catalog is clean",
         SELF_TEST_CATALOG_OK, SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=False)
 
