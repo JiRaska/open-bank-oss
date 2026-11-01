@@ -7,7 +7,7 @@ package com.openbank.kyc.integration
 import com.openbank.kyc.application.port.out.PartyDirectoryPage
 import com.openbank.kyc.application.port.out.PartyDirectoryPort
 import com.openbank.kyc.application.port.out.PartySummary
-import com.openbank.kyc.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.composite.CompositeMeterRegistry
 import io.micrometer.prometheus.PrometheusMeterRegistry

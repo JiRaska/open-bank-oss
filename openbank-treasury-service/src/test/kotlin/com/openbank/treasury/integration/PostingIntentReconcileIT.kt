@@ -5,11 +5,11 @@
 package com.openbank.treasury.integration
 
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.treasury.application.port.`in`.IntentReconciliation
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.application.port.out.DayJournalPostings
 import com.openbank.treasury.application.port.out.TreasuryCloseEvidencePort
-import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
