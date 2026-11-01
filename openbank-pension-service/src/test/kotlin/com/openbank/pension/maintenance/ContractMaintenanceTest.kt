@@ -239,6 +239,9 @@ class ContractMaintenanceTest {
         override suspend fun findByIdempotencyKey(participantPartyId: UUID, idempotencyKey: String) = null
         override suspend fun findByParticipant(participantPartyId: UUID, limit: Int) = rows.values.toList()
         override suspend fun findByStatus(status: ContractStatus?, limit: Int) = rows.values.toList()
+
+        override suspend fun search(query: String, status: ContractStatus?, limit: Int) =
+            throw UnsupportedOperationException("not needed")
     }
 
     private class Store(val repo: Repo) : ContractChangeStore {

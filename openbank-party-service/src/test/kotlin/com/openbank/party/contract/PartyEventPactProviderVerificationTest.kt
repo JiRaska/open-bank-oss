@@ -22,6 +22,7 @@ import com.openbank.party.application.port.`in`.PartyAmlProfileUseCase
 import com.openbank.party.application.port.`in`.PartyUseCase
 import com.openbank.party.application.port.out.PartyRepository
 import com.openbank.party.domain.model.AccountPurpose
+import com.openbank.party.domain.model.Address
 import com.openbank.party.domain.model.AmlProfileDeclaration
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.ExpectedMonthlyTurnover
@@ -40,6 +41,7 @@ import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import com.openbank.party.domain.model.PepDeclaration
 import com.openbank.party.domain.model.TaxResidency
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -53,6 +55,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
@@ -177,6 +180,12 @@ class PartyEventPactProviderVerificationTest {
             context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }
         if (anonymous) {
             testIdentityAssociation.setTestIdentity(null)
+        }
+        // Mirror of the git-pact twin (ADR-0340 B1): the tax-facts route's in-code guard admits
+        // ONLY the verified service-account-openbank-tax-reporting identity, so the replay must
+        // present exactly that instead of the class-level pact-verifier identity.
+        if (context.interaction.providerStates.any { it.name == TAX_FACTS_STATE }) {
+            testIdentityAssociation.setTestIdentity(taxReportingIdentity())
         }
         context.verifyInteraction()
     }
@@ -442,6 +451,47 @@ class PartyEventPactProviderVerificationTest {
         )
     }
 
+    /**
+     * The document-service render leg: RAMCOVA_SMLOUVA's `{{party.address}}` placeholder is filled
+     * from this response, so the pact requires a full postal address (line1, city, postalCode,
+     * countryCode). Seeded as a COMPANY — a legal-entity counterparty is the realistic contract
+     * render, and it keeps the row clear of the individuals the KYC-expiry and tax-profile states
+     * insert. A dedicated id: adding an address to [VOP_NAME_PARTY_ID] would leak a new field into
+     * vop's replayed response, which its matchers do not forbid but also did not ask for.
+     */
+    @State("a party exists with a registered address")
+    fun partyExistsWithRegisteredAddress() = runOnVertxContext {
+        // Idempotent for the same reason as the states above: pact-jvm 4.7.3 invokes each @State
+        // setup callback twice per interaction, and this one inserts with a fixed id.
+        if (partyRepository.findById(DOCUMENT_ADDRESS_PARTY_ID) != null) return@runOnVertxContext
+        partyRepository.save(
+            Party(
+                id = DOCUMENT_ADDRESS_PARTY_ID,
+                partyType = PartyType.COMPANY,
+                status = PartyStatus.ACTIVE,
+                legalName = "Pact Verify Address Company a.s.",
+                tradingName = null,
+                dateOfBirth = null,
+                nationality = null,
+                taxId = null,
+                registrationNumber = null,
+                email = "pact-verify-address@example.com",
+                phone = null,
+                address = Address(
+                    line1 = "Pact Avenue 12",
+                    line2 = null,
+                    city = "Prague",
+                    postalCode = "110 00",
+                    countryCode = "CZ",
+                ),
+                kycStatus = KycStatus.APPROVED,
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+                amlStatus = AmlStatus.NOT_SCREENED,
+            ),
+        )
+    }
+
     @State("an active human mandate exists for an active company")
     fun activeHumanMandateExistsForActiveCompany() {
         partyExistsWithLegalAndTradingName()
@@ -483,6 +533,8 @@ class PartyEventPactProviderVerificationTest {
     }
 
     companion object {
+        /** Must equal DocumentPartyPactConsumerTest.PACT_PARTY_ID and the folder twin. */
+        private val DOCUMENT_ADDRESS_PARTY_ID = UUID.fromString("e2e2e2e2-f3f3-4a4a-9b5b-c6c6c6c6c6c6")
         private val FIXED_PARTY_ID = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         /** Must equal `PartyNameLookupPactConsumerTest.PACT_PARTY_ID` (openbank-vop-service). */
@@ -496,6 +548,12 @@ class PartyEventPactProviderVerificationTest {
 
         /** Must match PartyTaxProfilePactConsumerTest.NEGATIVE_AUTH_STATE (ADR-0279 #3 401 leg). */
         private const val NEGATIVE_AUTH_STATE = "no valid caller identity is presented"
+
+        /** Must match TaxReportingPartyPactConsumerTest.STATE (ADR-0340 B1, the TIN boundary). */
+        private const val TAX_FACTS_STATE = "a reportable party has declared a tax-residency profile with a TIN"
+
+        /** Must match TaxReportingPartyPactConsumerTest.PARTY_ID. */
+        private val TAX_REPORTING_PARTY_ID = UUID.fromString("62000000-0000-0000-0000-000000000062")
     }
 
     /**
@@ -563,5 +621,76 @@ class PartyEventPactProviderVerificationTest {
                 amlStatus = AmlStatus.CLEARED,
             ),
         )
+    }
+
+    /**
+     * Mirror of the git-pact twin's handler (ADR-0340 B1) — see there for the seeding rationale.
+     * DE is declared FIRST because the contract pins taxResidencies[0] = DE + TIN (array matching
+     * is ordered; the resource answers in declaration order).
+     */
+    @State(TAX_FACTS_STATE)
+    fun reportablePartyWithTaxResidencyProfile() = runOnVertxContext {
+        if (partyRepository.findById(TAX_REPORTING_PARTY_ID) == null) {
+            partyRepository.save(
+                Party(
+                    id = TAX_REPORTING_PARTY_ID,
+                    partyType = PartyType.INDIVIDUAL,
+                    status = PartyStatus.ACTIVE,
+                    legalName = "Pact Tax Resident",
+                    tradingName = null,
+                    dateOfBirth = null,
+                    nationality = null,
+                    taxId = null,
+                    registrationNumber = null,
+                    email = "pact-tax-resident@pact.openbank.invalid",
+                    phone = null,
+                    address = null,
+                    kycStatus = KycStatus.APPROVED,
+                    createdAt = Instant.now(),
+                    updatedAt = Instant.now(),
+                    amlStatus = AmlStatus.CLEARED,
+                ),
+            )
+        }
+        if (partyAmlProfileUseCase.getAmlProfile(TAX_REPORTING_PARTY_ID) != null) {
+            return@runOnVertxContext
+        }
+        partyAmlProfileUseCase.declareAmlProfile(
+            DeclareAmlProfileCommand(
+                partyId = TAX_REPORTING_PARTY_ID,
+                declaration = AmlProfileDeclaration(
+                    purposes = setOf(AccountPurpose.SAVINGS),
+                    purposeNote = null,
+                    incomeSources = setOf(IncomeSource.EMPLOYMENT),
+                    incomeNote = null,
+                    occupation = Occupation.EMPLOYED,
+                    occupationNote = null,
+                    expectedMonthlyTurnover = ExpectedMonthlyTurnover.UP_TO_30K,
+                    cashIntensive = false,
+                    pep = PepDeclaration(isPep = false, category = null, detail = null),
+                    taxResidencies = listOf(TaxResidency("DE", "123456789"), TaxResidency("CZ", null)),
+                    usPerson = false,
+                    truthful = true,
+                ),
+                declaredBy = "pact-verifier",
+            ),
+        )
+    }
+
+    /** Mirror of the git-pact twin — the verified service-account JWT the in-code guard admits. */
+    private fun taxReportingIdentity(): QuarkusSecurityIdentity {
+        val name = "service-account-openbank-tax-reporting"
+        val jwt = object : JsonWebToken {
+            private val claims = mapOf(
+                "azp" to "openbank-tax-reporting",
+                "preferred_username" to name,
+                "sub" to "tax-reporting-sa-subject",
+            )
+
+            override fun getName(): String = name
+            override fun getClaimNames(): Set<String> = claims.keys
+            override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+        }
+        return QuarkusSecurityIdentity.builder().setPrincipal(jwt).addRole("ROLE_API").build()
     }
 }

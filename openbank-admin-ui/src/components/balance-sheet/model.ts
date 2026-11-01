@@ -5,6 +5,11 @@
 // Pure derivations for the "Balance sheet & risk" section (#10618). No React, no fetch — every
 // rule the pages rely on is here so it can be unit-tested against the wire contracts.
 import { BUCKETS, type BackfillRequest, type CurrencyFlows, type CurrencyGap, type CurrencyLiquidity, type Irrbb } from './contracts'
+import { principalNameFromToken } from '@/lib/auth/principal'
+import { bankToday, isIsoDate } from '@/lib/format/bankDate'
+
+// Keep these exports for existing balance-sheet consumers while the helpers live in shared code.
+export { principalNameFromToken, bankToday, isIsoDate }
 
 /** Curve indices risk-engine accepts (CurveIndex.kt). An unknown one is a 400 there. */
 export const CURVE_INDICES = ['CZEONIA', 'PRIBOR_1M', 'PRIBOR_3M', 'PRIBOR_6M', 'ESTR', 'EURIBOR_3M'] as const
@@ -37,30 +42,6 @@ export function cumulativeGap(rows: LadderRow[]): number[] {
 }
 
 // ── Identity: who the backend will record as maker / checker ──────────────────────────────────
-
-/**
- * The name Quarkus OIDC takes as the principal of a bearer token (default `principal-claim`
- * resolution: `upn`, then `preferred_username`, then `sub`). LedgerBackfillService records THIS as
- * `proposedBy`/`decidedBy`, so comparing against it — not the display name — is what makes the
- * UI's "you proposed this" check agree with the server's four-eyes check. Returns null for an
- * absent or unreadable token; the page then relies on the backend 422 alone.
- */
-export function principalNameFromToken(token: string | null | undefined): string | null {
-  if (!token) return null
-  const part = token.split('.')[1]
-  if (!part) return null
-  try {
-    const b64 = part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '=')
-    const claims = JSON.parse(atob(b64)) as Record<string, unknown>
-    for (const key of ['upn', 'preferred_username', 'sub']) {
-      const v = claims[key]
-      if (typeof v === 'string' && v.length > 0) return v
-    }
-    return null
-  } catch {
-    return null
-  }
-}
 
 export type BackfillActions = {
   canDecide: boolean
@@ -130,18 +111,6 @@ export function parseQuotes(text: string): QuoteParse {
   if (errors.length) return { ok: false, errors }
   if (count === 0) return { ok: false, errors: [{ line: 0, code: 'empty' }] }
   return { ok: true, curves, count }
-}
-
-/** An ISO date (YYYY-MM-DD) that is a real calendar day. */
-export function isIsoDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
-  const d = new Date(`${value}T00:00:00Z`)
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value
-}
-
-/** Today in Europe/Prague as YYYY-MM-DD — the bank's accounting day, which the backfill cut-over must not precede. */
-export function bankToday(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)
 }
 
 // ── IRRBB ─────────────────────────────────────────────────────────────────────────────────────

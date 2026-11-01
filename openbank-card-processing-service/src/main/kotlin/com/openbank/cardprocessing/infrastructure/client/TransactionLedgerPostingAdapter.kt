@@ -4,12 +4,22 @@
 
 package com.openbank.cardprocessing.infrastructure.client
 
+import com.fasterxml.jackson.core.JsonParseException
+import com.fasterxml.jackson.databind.exc.MismatchedInputException
 import com.openbank.cardprocessing.application.port.out.LedgerPostingPort
 import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.application.port.out.PostingResult
 import com.openbank.cardprocessing.domain.model.CardAuthorization
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.TransactionHttpException
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.calendar.AccountingClock
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.ProcessingException
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
@@ -20,6 +30,8 @@ import java.time.Clock
 import java.util.Base64
 import java.util.Currency
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Posts a cleared presentment as a `CARD`-rail debit through transaction-service.
@@ -47,6 +59,11 @@ class TransactionLedgerPostingAdapter(
 ) : LedgerPostingPort {
 
     private val log = Logger.getLogger(TransactionLedgerPostingAdapter::class.java)
+    private val lastDisabledWarnAt = AtomicLong(0)
+    private val suppressedDisabledWarns = AtomicInteger(0)
+
+    // The single place a transaction-service answer is classified (ADR-0319); never call the raw client.
+    private val transactions = TransactionClient(client)
 
     override suspend fun postClearedSpend(
         authorization: CardAuthorization,
@@ -55,16 +72,11 @@ class TransactionLedgerPostingAdapter(
     ): PostingResult {
         if (!postingEnabled) {
             // Loud, and its own outcome value. A quiet skip is the failure mode the enum exists for.
-            log.warnf(
-                "ledger posting DISABLED — card spend %d %s on authorization %s is NOT in the books",
-                clearedAmountMinorUnits,
-                authorization.currencyCode,
-                authorization.id,
-            )
+            warnDisabled(clearedAmountMinorUnits, authorization)
             return PostingResult(PostingOutcome.SKIPPED_DISABLED, null, DISABLED_DETAIL)
         }
         return try {
-            val response = client.initiate(
+            val outcome = transactions.initiate(
                 InitiateTransactionRequest(
                     // Derived from the clearing, not random: transaction-service dedupes on it, so
                     // a retried clearing must present the same key or the customer is debited twice.
@@ -75,20 +87,77 @@ class TransactionLedgerPostingAdapter(
                     amount = toMajorUnits(clearedAmountMinorUnits, authorization.currencyCode),
                     currencyCode = authorization.currencyCode,
                     description = authorization.merchantName,
-                    valueDate = AccountingClock(clock).today().toString(),
+                    valueDate = AccountingClock(clock).today(),
                     rail = RAIL_CARD,
                     instructionType = INSTRUCTION_ONE_OFF,
                 ),
-            )
-            PostingResult(PostingOutcome.POSTED, response.id, response.status)
+            ).awaitSuspending()
+            when (outcome) {
+                // The write facade has proven a readable COMPLETED transaction, not merely HTTP 2xx.
+                is TransactionCallOutcome.HttpSuccess ->
+                    PostingResult(PostingOutcome.POSTED, outcome.body?.id, outcome.body?.status ?: BOOKED_DETAIL)
+
+                TransactionCallOutcome.Conflict -> {
+                    log.errorf("ledger posting for authorization %s answered 409", authorization.id)
+                    PostingResult(PostingOutcome.FAILED, null, CONFLICT_DETAIL)
+                }
+
+                is TransactionCallOutcome.Rejected -> failedHttpPosting(authorization.id, outcome.status)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: TransactionHttpException) {
+            failedHttpPosting(authorization.id, e.status)
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-            // Deliberately broad: this runs AFTER the clearing has committed, so no exception from
-            // here may propagate and undo a fact the acquirer has already asserted. The FAILED
-            // outcome is what makes the gap visible instead of swallowed.
-            log.errorf(e, "ledger posting failed for authorization %s", authorization.id)
-            PostingResult(PostingOutcome.FAILED, null, e.message)
+            // Unproven completion is not a settlement verdict: the debit may or may not be booked. It must NOT be
+            // rethrown (this runs after the clearing committed and nobody retries the caller) and must
+            // not be called POSTED or FAILED: it is UNKNOWN and counted; the LedgerPostingRedriver posts it
+            // again under the same key.
+            if (isUncertainResponse(e)) {
+                log.warnf(
+                    "ledger posting for authorization %s has unproven transaction completion",
+                    authorization.id,
+                )
+                return PostingResult(PostingOutcome.UNKNOWN, null, UNCERTAIN_DETAIL)
+            }
+            // Ordinary failures become a visible outcome after the clearing has committed.
+            // Cancellation deliberately propagates above; it cannot undo that committed row,
+            // whose unchanged idempotency key remains available to the durable re-driver.
+            log.errorf(
+                "ledger posting failed for authorization %s (failureType=%s)",
+                authorization.id,
+                e.javaClass.simpleName,
+            )
+            PostingResult(PostingOutcome.FAILED, null, "POSTING_FAILED")
         }
     }
+
+    private fun failedHttpPosting(authorizationId: UUID, status: Int): PostingResult {
+        log.errorf("ledger posting failed for authorization %s (HTTP %d)", authorizationId, status)
+        return PostingResult(PostingOutcome.FAILED, null, "HTTP $status")
+    }
+
+    /** Loud, but once a minute with a count: a re-driver sweeping a backlog must not log one line per row. */
+    private fun warnDisabled(clearedAmountMinorUnits: Long, authorization: CardAuthorization) {
+        val now = System.currentTimeMillis()
+        val last = lastDisabledWarnAt.get()
+        if (now - last < DISABLED_WARN_INTERVAL_MILLIS || !lastDisabledWarnAt.compareAndSet(last, now)) {
+            suppressedDisabledWarns.incrementAndGet()
+            return
+        }
+        log.warnf(
+            "ledger posting DISABLED — card spend %d %s on authorization %s is NOT in the books " +
+                "(%d similar warning(s) suppressed in the last minute)",
+            clearedAmountMinorUnits,
+            authorization.currencyCode,
+            authorization.id,
+            suppressedDisabledWarns.getAndSet(0),
+        )
+    }
+
+    private fun isUncertainResponse(e: Throwable): Boolean = e is TransactionCompletionUncertainException ||
+        e is ProcessingException ||
+        generateSequence(e) { it.cause }.any { it is MismatchedInputException || it is JsonParseException }
 
     private fun toMajorUnits(minorUnits: Long, currencyCode: String): BigDecimal {
         val digits = runCatching { Currency.getInstance(currencyCode.uppercase()).defaultFractionDigits }
@@ -101,6 +170,10 @@ class TransactionLedgerPostingAdapter(
         const val TYPE_DEBIT = "DEBIT"
         const val RAIL_CARD = "CARD"
         const val INSTRUCTION_ONE_OFF = "ONE_OFF"
+        const val BOOKED_DETAIL = "transaction completion confirmed"
+        const val CONFLICT_DETAIL = "transaction-service answered 409"
+        const val UNCERTAIN_DETAIL = "transaction completion unproven; booking unknown"
+        const val DISABLED_WARN_INTERVAL_MILLIS = 60_000L
         const val DISABLED_DETAIL = "openbank.card-processing.ledger-posting-enabled=false"
 
         /** Only reached for a code `Currency` does not know; two digits is the majority shape. */

@@ -8,6 +8,7 @@ import { useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
+import { useInitialRoles } from '@/components/auth/InitialRolesContext'
 import {
   Activity,
   FilePlus,
@@ -23,6 +24,7 @@ import {
   BarChart3,
   Bell,
   Bluetooth,
+  QrCode,
   BookOpen,
   Bot,
   Boxes,
@@ -198,6 +200,7 @@ const opsNav: NavItem[] = [
   // Notifications (what we send) rather than under the agent cockpit: the audience is the
   // contact centre and back-office, not agent operators.
   { nameCs: 'Komunikační studio',    nameEn: 'Communication Studio', href: '/communication', icon: MessagesSquare, permission: 'communication:view' },
+  { nameCs: 'Šablony zpráv',          nameEn: 'Message templates', href: '/communication/notification-templates', icon: Bell, permission: 'communication:templates:view' },
   { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]
@@ -208,6 +211,7 @@ const docsNav: NavItem[] = [
   { nameCs: 'Aplikace',       nameEn: 'Customer App',       href: '/docs/customer-app', icon: Smartphone, permission: 'docs:view' },
   { nameCs: 'Identita & dedup', nameEn: 'Identity & Dedup',  href: '/docs/identity-dedup', icon: Fingerprint, permission: 'docs:view' },
   { nameCs: 'QRlessPay',      nameEn: 'QRlessPay',          href: '/docs/qrlesspay',   icon: Bluetooth,  permission: 'docs:view' },
+  { nameCs: 'QR fotoaparátem', nameEn: 'Camera QR',        href: '/docs/spayd-uri',   icon: QrCode,     permission: 'docs:view' },
   { nameCs: 'Senzory',        nameEn: 'Sensors',            href: '/docs/sensors',     icon: Radar,      permission: 'docs:view' },
   { nameCs: 'Správa dokumentů', nameEn: 'Document Management', href: '/docs/document-management', icon: FileSignature, permission: 'docs:view' },
   { nameCs: 'Cloud architektura', nameEn: 'Cloud Architecture', href: '/docs/cloud-architecture', icon: Cloud, permission: 'docs:view' },
@@ -270,8 +274,14 @@ const ALL_NAV: NavItem[] = [
 export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const pathname = usePathname()
   const { data: session } = useSession()
+  const initialRoles = useInitialRoles()
   const { t, language } = useLanguage()
-  const roles: string[] = session?.user?.roles ?? []
+  // The server already rendered this shell with the operator's roles (RootLayout reads
+  // the session cookie); until the client useSession() round-trip resolves, derive the
+  // SAME roles so hydration matches and the nav never re-paints under the user (the
+  // admin-operator-access journey measured a stable 0.12+ workspace CLS from that
+  // re-paint). When the session lands with identical roles the re-render is a no-op.
+  const roles: string[] = session?.user?.roles ?? initialRoles ?? []
   const roleSignature = roles.join('\u0000')
   const filter = (items: NavItem[]) => items.filter(i => !i.permission || hasPermission(roles, i.permission))
   const isLocked = (item: NavItem) =>

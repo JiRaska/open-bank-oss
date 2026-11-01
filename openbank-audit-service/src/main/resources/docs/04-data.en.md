@@ -70,3 +70,8 @@ See [06 — Compliance](./06-compliance.md) for the lawful-basis and erasure ana
 
 - **10 years**, enforced two ways: a per-row `retention_until = occurred_at + INTERVAL '10 years'` set by the `trg_audit_retention` trigger, and the service property `openbank.gdpr.audit-retention-days: 3650`.
 - Deletion before `retention_until` is not just policy — the DB-level delete rule blocks it entirely. Purge after expiry is an operational concern (a separate, audited maintenance job), not an ad-hoc `DELETE`.
+
+
+## Bank-own transfer rail status (ADR-0344 phase 1b)
+
+audit-service also reads `openbank.swift.institution-transfers`, swift-service's status of each bank-own transfer. It is money-path: each status is a transfer the rail executed. Rows are attributed to `swift-service` through the shared `TopicProducers` table, and the audit KafkaUser holds Read on the topic (`kafka-audit-mtls.yaml`).

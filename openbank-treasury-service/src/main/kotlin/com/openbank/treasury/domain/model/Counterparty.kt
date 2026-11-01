@@ -6,7 +6,8 @@ package com.openbank.treasury.domain.model
 
 import java.math.BigDecimal
 
-enum class CounterpartyKind { BANK, CENTRAL_BANK }
+/** CORPORATE and ISSUER arrive with the ADR-0344 D3 counterparty records. */
+enum class CounterpartyKind { BANK, CENTRAL_BANK, CORPORATE, ISSUER }
 
 /**
  * Counterparty master (ADR-0315 D4). A limit is per counterparty AND per currency and caps the
@@ -46,12 +47,17 @@ data class LimitCheck(
          * A borrowing consumes no credit limit, so its check carries a zero deal amount. An FX spot
          * is checked against the CZK limit by its CZK equivalent ([Deal.limitCurrency]/[Deal.limitAmount]).
          */
-        fun of(counterparty: Counterparty, deal: Deal, exposureBefore: BigDecimal) = LimitCheck(
+        fun of(
+            counterparty: Counterparty,
+            deal: Deal,
+            exposureBefore: BigDecimal,
+            dealAmount: BigDecimal = deal.limitAmount,
+        ) = LimitCheck(
             counterpartyId = counterparty.id,
             currency = deal.limitCurrency,
             limit = counterparty.limitFor(deal.limitCurrency),
             exposureBefore = exposureBefore,
-            dealAmount = deal.limitAmount,
+            dealAmount = dealAmount,
         )
     }
 }

@@ -93,6 +93,30 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
+    # NOT drift — the wire spelling of an ABSENT value (ADR-0344 D4). A stored cash-flow row whose
+    # floating rate is not known yet has no rate source: `rateSource` is null in the domain, exactly
+    # as libs-finance's own `ProjectedCashFlow.rateSource`, and is published and stored as MISSING
+    # (treasury `RateSourceWire`). MISSING is not a source a rate can come from, so it is not a
+    # value of libs-finance's `RateSource`; the spec is right to carry it.
+    "openbank-treasury-service:FIXED,MISSING,OBSERVED,PROJECTED,RATE_UNTIL_FIRST_FIXING":
+        "ADR-0344 D4 — cash-flow `rateSource`: NOT drift. MISSING is the wire form of no rate yet "
+        "(null RateSource), treasury RateSourceWire.",
+    # MIS-PAIRINGS (ADR-0352, #668): the product IR `Cadence` (libs-domain com.openbank.libs.product.ir,
+    # DAILY..ON_EVENT) is a product-behaviour vocabulary consumed by no customer-edge endpoint. These
+    # three customer-edge enums (a standing-order frequency, a savings-goal frequency and a deposit
+    # interest-payment frequency) share 3-4 calendar words with it; they model other concepts.
+    "openbank-customer-edge:ANNUALLY,BIWEEKLY,DAILY,MONTHLY,ONCE,QUARTERLY,WEEKLY":
+        "#668 — mis-pairing: a payment frequency vs the product IR Cadence.",
+    "openbank-customer-edge:ANNUALLY,MONTHLY,QUARTERLY":
+        "#668 — mis-pairing: a three-value frequency vs the product IR Cadence.",
+    "openbank-customer-edge:ANNUAL,AT_MATURITY,MONTHLY,QUARTERLY,SEMI_ANNUAL":
+        "#668 — mis-pairing: a deposit interest-payment frequency vs the product IR Cadence.",
+    # ADR-0344 D1: treasury's leg `Frequency` is libs-finance's frequency vocabulary
+    # (`com.openbank.libs.finance.schedule.Frequency`, a sealed class parsed from exactly these names,
+    # not a Kotlin enum), so the gate finds no enum to pair it with and falls back to the product IR
+    # Cadence it shares calendar words with.
+    "openbank-treasury-service:ANNUAL,DAILY,MONTHLY,ONCE,QUARTERLY,SEMI_ANNUAL,WEEKLY":
+        "ADR-0344 D1 — mis-pairing: a leg frequency (libs-finance Frequency names) vs the product IR Cadence.",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
     # values are the `channel` of the app-interaction attribution response
     # (GET /api/v1/campaigns/interactions/{interactionRef}/attribution), which resolves ONLY an
@@ -114,6 +138,13 @@ BASELINE: dict[str, str] = {
     "openbank-delegation-service:EXECUTED,PROPOSED,REJECTED":
         "#5962 — lifecycle approval state: deliberate subset of libs ProposalState; decide is "
         "atomic, APPROVED/WITHDRAWN are unpersistable by construction.",
+    # NOT drift — a DELIBERATE SUBSET (ADR-0353 D4). fraud-service's verdict is the shared
+    # openbank-libs-fincrime `FraudVerdict`, whose UNKNOWN is what a CONSUMER reads when an answer
+    # cannot be parsed (#4403). fraud-service never renders it (`RuleHit` rejects it) and never emits
+    # it (`toResponse` fails closed), so the spec is right to omit it.
+    "openbank-fraud-service:ALLOW,CHALLENGE,DECLINE,REVIEW":
+        "ADR-0353 D4 — fraud verdict: NOT drift. UNKNOWN is consumer-only; RuleHit and the score "
+        "response refuse it, so the endpoint cannot produce it.",
     # MIS-PAIRINGS, surfaced when the scan began including openbank-libs-* (#7984): three
     # customer-edge spec enums clear the threshold against shared libs enums on 2-3 coincidental
     # values. FAILED/PENDING (a screening verdict vs OutboxStatus), APPROVED/REJECTED (a task
@@ -233,6 +264,11 @@ BASELINE: dict[str, str] = {
     "openbank-statement-service:RECONCILIATION,UNKNOWN,UPSTREAM":
         "#5962 — CloseFailure.reason: NOT drift. A deliberate subset of CloseFailureReason; "
         "NOT_VIABLE is skipped rather than recorded, on both paths, so no CloseFailure can carry it.",
+    # NOT drift — the frozen v1 response/request vocabulary. CZ_TERRORISTS is deliberately served
+    # only by the parallel v3 operations; the complete eight-value enum pairs exactly and needs no
+    # exception. The v1 resource independently enforces the same seven-value allow-list (#10760).
+    "openbank-sanctions-service:CNB_DOMESTIC,EU_CONSOLIDATED,FATF_HIGH_RISK,HM_TREASURY,OFAC_SDN,PEP_GLOBAL,UN_CONSOLIDATED":
+        "#10760 — v1 SanctionsListType: deliberate compatibility subset; CZ_TERRORISTS is v3-only.",
 }
 
 SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")

@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -85,11 +70,6 @@ quarkus:
       connect-timeout: 2000
       read-timeout: 5000
       scope: jakarta.inject.Singleton
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
   # Outbound M2M token for the account-service partyId lookup (ContactPolicyGate-style pattern
@@ -123,7 +103,7 @@ mp:
         # group.id / auto.offset.reset / dead-letter-queue.topic are deliberately NOT set as YAML
         # keys here — see openbank-infra/gitops/components/fraud-service/fraud-service-msg-override.yaml
         # (loaded via QUARKUS_CONFIG_LOCATIONS) for why and where they're set instead, matching the
-        # pattern already established for transaction-service's payment-scheme-accepted channel.
+        # pattern already established for card-issuance-service's party-events-in channel.
         #
         # Correction (round 2): an earlier version of this comment first cited nonexistent issues
         # #2649/#2659, then over-corrected to claim PR #685's original env-var fix was
@@ -184,10 +164,17 @@ mp:
         transaction-signal:
           connector: smallrye-kafka
           enabled: false
+      outgoing:
+        fraud-outbox-out:
+          enabled: false
   openbank:
     outbox:
       dispatch-enabled: false
 openbank:
+  fraud:
+    streams-shadow:
+      enabled: false
+      partitions: 1
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:

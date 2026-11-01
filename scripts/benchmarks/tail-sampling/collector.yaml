@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# Isolated synthetic pilot for Collector contrib 0.161.0. No production endpoint.
+# Metrics see every accepted span; only the trace-file branch is sampled.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+connectors:
+  forward/tail: {}
+  span_metrics:
+    namespace: traces_spanmetrics
+    histogram:
+      unit: s
+      explicit:
+        buckets: [100ms, 250ms, 500ms, 1s, 2s, 5s]
+    metrics_flush_interval: 1s
+    aggregation_temporality: AGGREGATION_TEMPORALITY_CUMULATIVE
+    aggregation_cardinality_limit: 1000
+    exemplars:
+      enabled: false
+  service_graph:
+    latency_histogram_buckets: [100ms, 250ms, 500ms, 1s, 2s, 5s]
+    metrics_flush_interval: 1s
+    store:
+      ttl: 10s
+      max_items: 1000
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 192
+    spike_limit_mib: 48
+  tail_sampling:
+    decision_wait: 5s
+    num_traces: 1000
+    expected_new_traces_per_sec: 100
+    maximum_trace_size_bytes: 524288
+    decision_cache:
+      sampled_cache_size: 10000
+      non_sampled_cache_size: 10000
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: slow
+        type: latency
+        latency:
+          threshold_ms: 1000
+      # Deterministic acceptance: no healthy trace may enter the sampled file.
+      - name: baseline
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 0
+  batch:
+    timeout: 1s
+  transform/tempo_names:
+    error_mode: propagate
+    metric_statements:
+      - context: metric
+        statements:
+          - set(metric.name, "traces_spanmetrics_calls_total") where metric.name == "traces_spanmetrics.calls"
+          - set(metric.name, "traces_spanmetrics_latency") where metric.name == "traces_spanmetrics.duration"
+      - context: datapoint
+        statements:
+          - set(datapoint.attributes["service"], datapoint.attributes["service.name"]) where datapoint.attributes["service.name"] != nil
+          - delete_key(datapoint.attributes, "service.name")
+
+exporters:
+  prometheus/pilot:
+    endpoint: 0.0.0.0:8889
+    translation_strategy: UnderscoreEscapingWithoutSuffixes
+  file/sampled:
+    path: /evidence/traces.json
+    format: json
+    flush_interval: 1s
+
+service:
+  telemetry:
+    metrics:
+      level: detailed
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+  pipelines:
+    traces/input:
+      receivers: [otlp]
+      processors: [memory_limiter]
+      exporters: [span_metrics, service_graph, forward/tail]
+    traces/sampled:
+      receivers: [forward/tail]
+      processors: [tail_sampling, batch]
+      exporters: [file/sampled]
+    metrics/complete_input:
+      receivers: [span_metrics, service_graph]
+      processors: [transform/tempo_names]
+      exporters: [prometheus/pilot]

@@ -40,9 +40,10 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 
 | Method & path | Scope | Notes |
 |---|---|---|
-| `GET /accounts` | `accounts:read` | list the caller's accounts |
+| `GET /accounts` | `accounts:read` | list the caller's accounts; optional `cursor` query parameter (forwarded unchanged to account-service). Accounts shared with the caller (ACTIVE delegation grants with read capability) are appended to `data` on the first page only (no `cursor`), marked `sharedWithMe: true`, and raise `pagination.totalCount`; they sit outside cursor pagination |
 | `GET /accounts/{accountId}` | `accounts:read` | 403 if not owner |
-| `GET /balances/{accountId}` | `accounts:read` | 403 if not owner |
+| `GET /balances/{accountId}` | `accounts:read` | 403 if not owner; answers `{"balances": [...]}`, one entry per currency (not a bare array) |
+| `GET, PUT /balances/{accountId}/{currency}/low-balance-alert` | `accounts:read` / `accounts:write` | Owner only; PUT sets `enabled`, `threshold`, `rearmMargin`; GET is 404 until configured. Delivery is default-off and inbox-only. |
 | `GET /transactions?accountId=&limit=&cursor=` | `accounts:read` | ownership-enforced; `cursor` URL-encoded |
 | `GET /statements/{accountId}` | `accounts:read` | period-close list |
 | `GET /statements/{accountId}/{currency}/{legalSequence}?format=` | `accounts:read` | render camt.053 / MT940 / PDF; format & currency allow-listed |
@@ -182,6 +183,7 @@ The communication upstream is supplied through `COMMUNICATION_SERVICE_URL` at ru
 
 - `GET /products` projects catalog retirement offerings; `POST /simulations` returns an illustrative projection, without binding a contract. Simulations use a fresh upstream key.
 - `POST /applications` and `POST /transfers-in` start onboarding. Birth date and residency come from the party record; an incomplete profile returns 422 `PARTY_PROFILE_INCOMPLETE`.
+- Opening an application takes no provider from the app: the edge supplies the deployment's configured provider legal entity (`OPENBANK_EDGE_PENSION_PROVIDER_ENTITY_ID`, which must equal pension-service's own) alongside the birth date and residency it reads from the party record. A `providerEntityId` sent by the app is ignored. When none is configured, both application and transfer-in creation return the documented JSON `error` and `code` fields with 503 `PENSION_PROVIDER_NOT_CONFIGURED` before anything goes upstream.
 - Applications expose detail, recommendation, questionnaire, strategy selection, KID acceptance, signing and withdrawal. Signing forwards the challenge to pension-service, which consumes it against the application evidence.
 - Contracts expose detail, pause/resume, strategy election, payment reference, contribution mandates (set-up and cancel) and tax summary (which carries the state-contribution status per tax year).
 - `CustomerPensionChangeResource` adds the follow-up flows of `docs/ux/pension-client-flows.md` (pension-service API 1.2.0): the questionnaire (question set, draft, profile, warnings and their acknowledgement), contribution-schedule and beneficiary preview and change, annual and payout statements, payout eligibility, and annuity offers, selection and cancellation.
@@ -202,3 +204,7 @@ Question ids and option codes must each contain 1–64 ASCII letters, digits, un
 periods or hyphens; option values must be strings. Free text, arrays and numeric
 answers are rejected rather than forwarded as scored answers. The edge rebuilds
 the outgoing body from the accepted fields and preserves the submitted answer order.
+
+## Notification page contract
+
+`GET /notifications` returns `{ items, total, unreadCount, page, size }` (`PersonalNotificationPage`). The edge always forwards the token party to notification-service, so `total` and `unreadCount` cover that party's whole history (never negative) rather than the returned page, and `unreadCount` is never null here, unlike the unscoped operator list upstream. `limit` is clamped to 1–100 (default 20) and `page` to 0 or more before the upstream call; `size` echoes the applied limit. Items are metadata only: the rendered body is never returned, and `subject`, `sentAt`, `visibleAt`, `readAt` and `templateRevision` may be null.

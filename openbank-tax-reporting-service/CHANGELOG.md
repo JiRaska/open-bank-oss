@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.47.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.46.0...tax-reporting-service-v0.47.0) (2026-10-28)
+
+
+### Features
+
+* **treasury:** custodian portfolio statements and the period-end portfolio for tax reporting ([#13992](https://github.com/JiRaska/open-bank-oss/issues/13992)) ([c82147c](https://github.com/JiRaska/open-bank-oss/commit/c82147c20901a6fe7c6f5d6639f0f8cb54e82c4e))
+
+## [0.46.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.45.1...tax-reporting-service-v0.46.0) (2026-10-16)
+
+
+### Features
+
+* **tax-reporting:** CRS/FATCA information-exchange return family (ADR-0340) ([#13007](https://github.com/JiRaska/open-bank-oss/issues/13007)) ([8c85a90](https://github.com/JiRaska/open-bank-oss/commit/8c85a903f2511f6b0a421611d24bbe63f1ab3dc1))
+
 ## [0.45.1](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.45.0...tax-reporting-service-v0.45.1) (2026-10-14)
 
 

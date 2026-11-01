@@ -571,6 +571,7 @@ class CustomerEdgePensionPactConsumerTest {
             catalogUrl = "http://127.0.0.1:9"
             scaServiceUrl = "http://127.0.0.1:${tokenStub.address.port}"
             partyServiceUrl = "http://127.0.0.1:${tokenStub.address.port}"
+            providerEntityId = { PROVIDER_ID }
         }
     }
 

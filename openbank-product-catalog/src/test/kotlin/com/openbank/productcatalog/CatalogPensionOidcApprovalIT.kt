@@ -83,7 +83,9 @@ class CatalogPensionOidcApprovalIT {
     @Order(1)
     @TestSecurity(user = "catalog-seed-operator", roles = ["ROLE_OPERATOR"])
     fun `seed a draft with an actor distinct from both human approvers`() {
-        val fixture = requireNotNull(javaClass.getResourceAsStream("/retirement-pack/cz-illustrative-offerings.json"))
+        val fixture = requireNotNull(
+            javaClass.getResourceAsStream("/catalog-seeds/retirement/cz-illustrative-offerings.json"),
+        )
             .use {
                 ObjectMapper().readTree(it)["offerings"].first { offering ->
                     offering["attributes"]["productLine"].asText() == "DIP"
@@ -140,7 +142,7 @@ class CatalogPensionOidcApprovalIT {
         approve(path, "LEGAL_COUNSEL", missingScope, 403)
         dataSource.connection.use { connection ->
             connection.prepareStatement(
-                "SELECT role, issuer, subject FROM pension_revision_approvals WHERE revision_id = ? ORDER BY role",
+                "SELECT role, issuer, subject FROM catalog_revision_role_approvals WHERE revision_id = ? ORDER BY role",
             ).use { statement ->
                 statement.setObject(1, revisionId)
                 statement.executeQuery().use { rows ->

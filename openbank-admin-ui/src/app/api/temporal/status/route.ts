@@ -173,10 +173,10 @@ export async function GET() {
       degraded: failed.length > 0,
       metrics: temporalDeployed === true ? {
         workflows: {
-          scheduled1h: Math.round(workflowsScheduled ?? 0),
-          completed1h: Math.round(workflowsCompleted ?? 0),
-          failed1h: Math.round(workflowsFailed ?? 0),
-          timedOut1h: Math.round(workflowsTimedOut ?? 0),
+          scheduled1h: workflowsScheduledQ.error === null ? Math.round(workflowsScheduled ?? 0) : null,
+          completed1h: workflowsCompletedQ.error === null ? Math.round(workflowsCompleted ?? 0) : null,
+          failed1h: workflowsFailedQ.error === null ? Math.round(workflowsFailed ?? 0) : null,
+          timedOut1h: workflowsTimedOutQ.error === null ? Math.round(workflowsTimedOut ?? 0) : null,
         },
         latency: {
           activityScheduleToStartMs: activityScheduleLatencyP50 !== null
@@ -199,11 +199,11 @@ export async function GET() {
           slotsUsed: workerTaskSlotsUsed !== null ? Math.round(workerTaskSlotsUsed) : null,
         },
         namespaces: activeNamespaces.length > 0 ? activeNamespaces : ['openbank-default'],
-        workflowTypes: workflowTypes.map(row => ({
+        workflowTypes: workflowTypesQ.error === null ? workflowTypes.map(row => ({
           namespace: row.labels.namespace ?? 'unknown',
           workflowType: row.labels.workflow_type ?? 'unknown',
           completed1h: Math.round(row.value),
-        })).filter(row => row.workflowType !== 'unknown'),
+        })).filter(row => row.workflowType !== 'unknown') : null,
       } : null,
     }, { headers: { 'Cache-Control': 'no-store' } })
   } finally {

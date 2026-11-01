@@ -109,11 +109,16 @@ The customer (customers-realm) token is **never forwarded** — upstreams valida
 - **Singleton `HttpClient`** for the application lifetime — one shared connection pool, no per-request thread/fd leak.
 - **HTTP/1.1 forced** — the JDK default (HTTP/2 over cleartext h2c) breaks POST-with-body during the upgrade handshake against the in-cluster servers, surfacing as spurious 502s.
 - **Explicit timeouts** — connect timeout on the builder (`connect-timeout-ms`, default 5000), per-request timeout (`request-timeout-ms`, default 10000).
+- **Unified notification inbox deadline** — the merged party feed shares one 10 s aggregate deadline; each upstream read gets only the time still remaining, so sequential synthetic reads shrink their per-call timeout instead of running in fresh waves. The deadline reads an injected monotonic ticker (`System::nanoTime` in production), which lets tests drive it in virtual time. The strict mandate-inventory lookup shares the caller’s deadline for its upstream read and profile parsing. It refuses an already expired budget before sending a request; an unavailable lookup fails the whole inbox closed rather than returning a personal-only result. Its internal test overload also accepts a monotonic ticker, while the public overloads continue using `System::nanoTime`.
 - **`@ConfigProperty` field injection (not constructor params)** — Kotlin constructor default values shadow Arc injection, which silently left the client secret `""` → every token fetch 401. Field injection runs after construction and applies config reliably.
 - **M2M token cache** — `client_credentials` token cached until 60 s before expiry; refresh is `@Synchronized`.
 - **Operation variants** — `get` (JSON), `getRaw` (preserves upstream Content-Type for camt.053 XML / MT940 / PDF, read as `ByteArray` to avoid charset corruption), `post` (idempotency-aware), `postAnonymous` (onboarding, no party header).
 - **Failure mode** — any transport exception degrades to a JSON `502 {"error":"upstream unavailable"}`.
 - **Synthetic taint (ADR-0252)** — every upstream request is built by `upstreamRequest()`, which adds `x-openbank-synthetic: true` when the edge's own inbound filter accepted the request as synthetic (MDC or OTel baggage, both set only for a principal in `openbank.synthetic.trusted-principals`). A client-supplied header is never copied. The token request is the one exception. `UpstreamClientSyntheticTaintTest` pins both the behaviour and the single entry point.
+
+## Unified notification inbox deadline
+
+The combined notification inbox (`UnifiedNotificationInbox`) uses one monotonic aggregate deadline of 10 seconds (`UNIFIED_NOTIFICATION_TIMEOUT_SECONDS`) for all party feeds. Synthetic requests stay sequential on the caller thread to preserve taint; each upstream request receives only the remaining deadline budget. Ordinary requests read party feeds concurrently (at most 16 in flight per replica, 128 queued) under the same deadline. When the deadline expires, no later party call starts and the inbox fails closed with `502 {"code":"NOTIFICATIONS_UNAVAILABLE"}` and no partial results.
 
 ## Ownership / IDOR model
 

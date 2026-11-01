@@ -39,8 +39,8 @@ test('rejects malformed loyalty evidence and recovers with verified customer dat
 
   await page.goto('/loyalty')
   await page.getByRole('button', { name: /Customer|Klient/ }).click()
-  await page.getByLabel(/Customer UUID|UUID klienta/).fill(PARTY_ID)
-  const submit = page.getByRole('button', { name: /Look up|Vyhledat/ })
+  await page.getByLabel(/Search parties|Vyhledat stranu/).fill(PARTY_ID)
+  const submit = page.getByRole('search').getByRole('button', { name: /Search|Vyhledat/ })
 
   await submit.click()
   await expect(page.getByText(/Loyalty-service is not responding|Loyalty-service neodpovídá/)).toBeVisible()

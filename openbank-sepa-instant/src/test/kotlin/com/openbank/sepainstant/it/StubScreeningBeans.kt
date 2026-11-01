@@ -4,6 +4,9 @@
 
 package com.openbank.sepainstant.it
 
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.sepainstant.application.port.out.AmlCasePort
 import com.openbank.sepainstant.application.port.out.OpenAmlCaseCommand
 import com.openbank.sepainstant.application.port.out.SanctionsScreeningPort
@@ -12,9 +15,6 @@ import com.openbank.sepainstant.application.port.out.SchemeSubmissionOutcome
 import com.openbank.sepainstant.application.port.out.SettlementOutcome
 import com.openbank.sepainstant.application.port.out.SettlementPort
 import com.openbank.sepainstant.domain.model.SctInstPayment
-import com.openbank.sepainstant.domain.screening.ScreeningMatchStatus
-import com.openbank.sepainstant.domain.screening.ScreeningResult
-import com.openbank.sepainstant.domain.screening.ScreeningRole
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped

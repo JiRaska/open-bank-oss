@@ -90,6 +90,8 @@ sequenceDiagram
 
 Každý přechod životního cyklu emituje `card.status_changed.v1` nesoucí `previousStatus`, `newStatus`, `reason`, `changedBy` (= `X-Operator-Id`) a `occurredAt`. Vydání emituje `card.issued.v1`. Tyto tečou přes outbox do audit pipeline pro tamper-evident dlouhodobou retenci.
 
+Čtení zabezpečených údajů karty také zapíše auditní záznam o přístupu s požadovanou identitou operátora. Identita zůstává bezeztrátově zachována v uvozovaném poli logfmt; řídicí znaky se escapují, aby nemohly rozdělit ani přidat auditní pole. PAN a CVV se nezaznamenávají.
+
 ## Bezpečnostní kontroly
 
 - ✅ AuthN: Keycloak OIDC, Bearer JWT

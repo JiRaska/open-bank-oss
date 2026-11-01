@@ -14,7 +14,7 @@
 import { Fragment, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import type { PlainCitation } from '@/lib/risk/labels'
+import type { PlainCitation } from '@/lib/risk/contracts'
 
 export type CategoryColumn = { key: string; header: string; numeric?: boolean }
 export type CategoryRow = {

@@ -11,7 +11,7 @@ import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { StatusBadge } from '@/components/ui'
+import { ShortId, StatusBadge } from '@/components/ui'
 import { parseLedgerJournalPage, type LedgerJournalPage } from '@/lib/ledger/ledgerJournalContract'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { LEDGER_INSIGHTS } from '@/components/insights/catalog'
@@ -244,7 +244,7 @@ export default function LedgerPage() {
                         </button>
                       </td>
                       <td><span className="mono" style={{ fontSize: '12px', fontWeight: 500 }}>{entry.entryNumber ?? '—'}</span></td>
-                      <td><span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{entry.transactionId.slice(0, 8)}…</span></td>
+                      <td><ShortId value={entry.transactionId} copyLabel={t('Kopírovat ID transakce', 'Copy transaction ID')} /></td>
                       <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entry.entryDate}</span></td>
                       <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entry.valueDate}</span></td>
                       <td><StatusBadge status={entry.status} /></td>
@@ -288,10 +288,10 @@ export default function LedgerPage() {
                                 {entry.lines.map(line => (
                                   <tr key={line.id} style={{ borderTop: '1px solid var(--border)' }}>
                                     <td style={{ padding: '6px 12px 6px 0' }}>
-                                      <span className="mono" style={{ fontSize: '11px' }}>{line.glAccountId.slice(0, 8)}…</span>
+                                      <ShortId value={line.glAccountId} copyLabel={t('Kopírovat ID účtu', 'Copy account ID')} />
                                     </td>
                                     <td style={{ padding: '6px 12px 6px 0' }}>
-                                      <span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{line.subAccountId ? `${line.subAccountId.slice(0, 8)}…` : '—'}</span>
+                                      <ShortId value={line.subAccountId} copyLabel={t('Kopírovat ID podúčtu', 'Copy sub-account ID')} />
                                     </td>
                                     <td style={{ padding: '6px 12px 6px 0' }}>
                                       <span style={{

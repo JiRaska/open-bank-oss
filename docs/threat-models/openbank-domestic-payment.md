@@ -119,6 +119,39 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-30** — **Fraud enforcement restored as a workflow decision, default off (#4403, ADR-0084 §4.2).**
+  New runs of `DomesticPaymentWorkflow` (behind the `fraud-enforcement` `Workflow.getVersion` marker;
+  runs started earlier replay the shadow-only step) call a `fraudGate` activity that returns
+  `PROCEED|HOLD|REJECT`. The flag `openbank.domestic.fraud.enforcement-enabled` is read by that
+  activity and defaults to `false`; while false every payment proceeds exactly as before and the
+  would-be decision is only counted (`openbank_fraud_enforcement_decisions_total{decision,mode="shadow"}`).
+  With it on: a real ALLOW proceeds; DECLINE rejects with `FRAUD_SUSPECTED` (not `SANCTIONS_HIT`);
+  CHALLENGE, REVIEW, UNKNOWN and **any synthetic verdict, ALLOW included,** hold the payment before
+  scheme submission and open a `FRAUD_REVIEW` case in the existing AML case store. A hold is released
+  only by the `resolveFraudHold(RELEASE)` workflow signal; `REJECT`, or no signal within 48 h, rejects
+  the payment. **Fail closed**: a hold never expires into a pass, and a case that fails to open still
+  ends in rejection on timeout. **Tipping-off**: the fraud reject path sends no customer notification and
+  writes no `rejectDetail`; the cause is in the log and in
+  `openbank_fraud_enforcement_rejections_total{cause}` only. **STRIDE**: integrity/availability risk of
+  a miscalibrated verdict holding or rejecting a legitimate payment (mitigated by the default-off flag and
+  shadow calibration on the decision metric first); elevation risk on the release signal, which only a
+  Temporal client can send (no HTTP surface added). No new trust boundary, endpoint, DB change or event
+  schema change. **Residual**: nothing yet sends the signal when an analyst closes the case, so with
+  the flag on every held payment is rejected at 48 h; wiring case resolution to the signal is a
+  follow-up before the flag is turned on. Rollback: set the flag to `false` (new holds stop at once;
+  payments already waiting keep waiting for their signal or timeout) or revert the PR.
+
+- **2026-10-24** — **Screening, AML case severity and fraud verdict types come from `openbank-libs-fincrime` (ADR-0353, #13435/#13439).** The local copies of `ScreeningPolicy`, `ScreeningMatchStatus`, `ScreeningDecision`, `ScreeningRole`, `ScreeningResult`, the AML case risk level enum (now `AmlCaseSeverity`) and `FraudVerdict` are deleted; the rail uses the one shared definition its producers (sanctions, aml, fraud) also use. Decision logic, the 0.85 block threshold and both fail-closed wire mappings (unknown sanctions status ⇒ ESCALATED ⇒ BLOCK; unknown fraud verdict ⇒ UNKNOWN, never ALLOW) are unchanged — the adapters now call the shared parsers. No wire, DB or Pact change. Rollback: revert the PR.
+- **2026-10-24** — **No `PmtTpInf` on the domestic pacs.008, by decision (#13663).** `openbank-libs-iso20022` gained an optional payment-type block; `SchemeGatewayAdapter` passes `paymentTypeInformation = null` explicitly instead of inheriting it. The EPC service level `SEPA` applies to EUR SEPA schemes, not to a domestic clearing transfer, so sending it would misdescribe the payment. The emitted XML is byte-identical to before. **Residual:** the domestic scheme's own priority or instant code (`DomesticPaymentPriority.INSTANT`) is still not stated on the wire; adding it needs the domestic scheme's code list, not an EPC code.
+- **2026-10-15** — **Outbound account-service edge: request-derived values no longer reach logs** (CodeQL
+  505/506, PR #12717). `AccountServiceClient` — the outbound client edge to account-service — logged the
+  IBAN or account id, plus the full throwable, whenever a party/account lookup failed. The warn lines now
+  carry only the HTTP status or the exception class name, so a log reader at this trust boundary no longer
+  sees a debtor/creditor identifier or a stack trace that embeds one. **STRIDE-I:** shrinks information
+  disclosure at the outbound edge; the failure semantics (404 → `null`, other faults → external) are
+  unchanged, so no surface, caller, principal or privilege moved. Mitigated by
+  `AccountServiceClientLogPrivacyTest`.
+
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `domestic_payment_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-30** — Fraud verdict mapping (#4403 prerequisite, PR #11614). `FraudScoringAdapter.mapVerdict`
@@ -132,7 +165,7 @@ not change any existing request's outcome until explicitly flipped.
   Mitigated by `FraudScoringAdapterTest` (an unrecognised and a blank verdict are `UNKNOWN`, never
   a clean `ALLOW`; red against the old mapper).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -350,7 +383,7 @@ not change any existing request's outcome until explicitly flipped.
   sequence); verified by a sandbox canary (worker registers + polls `openbank-domestic-payments`, real
   payments complete via Temporal end-to-end).
 - **2026-07-08** — ADR-0155 rollout (issue #413): wired the four-eyes maker-checker mechanism
-  piloted on sepa-payment. New `ApprovalConfig` (`ApprovalStore` via `RedisApprovalStore`) and
+  piloted on sepa-payment. New ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`) (`ApprovalStore` via `RedisApprovalStore`) and
   new checker-facing endpoint `PATCH /api/v1/domestic-payments/approvals/{id}`
   (`@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")`,
   `@Authorize(action="domestic-payment.approval.decide")`). Two new exception mappers
@@ -366,7 +399,7 @@ not change any existing request's outcome until explicitly flipped.
   mitigated by `DomesticPaymentOutboxBacklogGaugeTest`. No DB change; rollback = revert the commit.
 - **2026-05-30** — Added `domestic_payments_seq`, `domestic_payment_outbox_seq` (Hibernate fix).
   Additive DDL only — no new flow/surface/boundary. Risk class = **availability**, mitigated by
-  `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 - **2026-06-17** — ADR-0084 fraud shadow scoring (observe-only). New outbound trust boundary:
   `domestic-payment → fraud-service (POST /api/v1/fraud/score, OIDC client-credentials)`.
   **Shadow = fail-open and never-enforce**: `DomesticPaymentService.scoreFraudShadow()` wraps the
@@ -555,7 +588,7 @@ not change any existing request's outcome until explicitly flipped.
   guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
   the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
   `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
-  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  codes and JSON field names are unchanged; ApprovalResourceMappingTest (since replaced by the shared `ApprovalEndpointConformance` suite) covers the mapping.
   **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
@@ -775,3 +808,14 @@ cutover, revert caller URLs and policies before removing the listener.
   with a verified interactive human token (`ServiceAccountIdentity.isHumanStaff`). A machine
   token that holds a staff role in some realm resolves to `Undeclared` and fails closed.
 - **Rollback:** reverting the class restores name-based matching; no schema or data change.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-22** — **Transaction-service edge moved to the generated client; bookings bound to the request (#13224, #13217, #13225).** `SettlementAdapter` calls transaction-service through the shared `TransactionClient` facade over the generated `TransactionsApi` (ADR-0319). **Spoofing:** the bearer is no longer minted by hand. `TransactionServiceClient` carries `@OidcClientFilter("m2m")`, so it is the same named Keycloak client `openbank-domestic-payment` with the same grant (`transaction.create`). `DomesticTransactionClientWorkerThreadIT` proves that the m2m bearer reaches the wire from a non-Vert.x thread through the activity wrapper. **Tampering / repudiation:** settlement is confirmed only by HTTP 201 with a COMPLETED transaction whose type, source and (when requested) target account, amount, currency, rail and instruction type match the request. Every other answer fails the activity, so Temporal retries and the payment stays SENT_TO_CLEARING. A 409 no longer reads as "already booked". Uncertain completions retry under the same `domestic-settlement-<paymentId>` key and never produce a second booking. No new endpoint, caller, privilege, credential or event. Rollback: revert the commit.
+
+- **2026-10-23** — **Durable outbound booking visibility (#13623, source candidate).** The existing revision check and row lock atomically record first booking-due time at accepted `SENT_TO_CLEARING` with its status/outbox write. No transaction-service call occurs under that lock. Only the activity's strictly validated completed transaction identity reaches the dedicated completion write; proof, identity, `SETTLED` and outbox commit together. Generic lifecycle writes preserve pending markers and cannot certify coverage. Existing nullable coverage remains unknown in every historical business state without backfill; bypassing tracking cannot make later terminal states appear proven. Metrics expose tracked pending age as a lower bound and unknown coverage separately, with only a bounded rail label. No payment/account/transaction identifier is a metric label. Retry identity, authorization, business transition rules and the existing stranded gauge are unchanged. **Limits:** source/test additions do not establish runtime compatibility or historical reconciliation; SLA thresholds and recovery policy remain pending. **Rollback:** roll back readers/writers while retaining V19 columns and booking evidence; do not drop/truncate evidence or rotate keys to clear pending work.
+
+- **2026-10-23** — **Unsettled-booking alert and operator re-drive (#13623).** `DomesticPaymentBookingUnsettled` pages when the oldest open booking clock passes 1h (≈12 capped Temporal retries), so a deterministic transaction-service answer (replayed mismatch, FAILED, 409) no longer waits out the 7-day schedule-to-close unseen. Runbook `docs/runbooks/0032-payment-rail-unsettled-booking.md`: read the row under `domestic-settlement-<paymentId>` in transaction-db (read-only), then reconcile, reverse (four-eyes `transaction.reverse`) or re-drive by Temporal reset to just before the `settlePayment` activity, which is re-entrant for `SENT_TO_CLEARING` and never resubmits to clearing. **Threats addressed:** silent loss (an unbooked outbound payment now pages); double booking stays impossible because the key never changes. **Residual:** no in-band reconciliation marker after an out-of-band correction; such a payment is silenced with a ticket. Alert labels carry no identifiers. No code, authorization or retry-policy change in this service.
+

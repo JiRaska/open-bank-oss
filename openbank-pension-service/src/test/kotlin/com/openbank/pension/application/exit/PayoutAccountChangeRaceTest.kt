@@ -215,5 +215,8 @@ class PayoutAccountChangeRaceTest {
             rows.values.filter { it.participantPartyId == participantPartyId }.take(limit)
         override suspend fun findByStatus(status: ContractStatus?, limit: Int) =
             rows.values.filter { status == null || it.status == status }.take(limit)
+
+        override suspend fun search(query: String, status: ContractStatus?, limit: Int) =
+            throw UnsupportedOperationException("not needed")
     }
 }

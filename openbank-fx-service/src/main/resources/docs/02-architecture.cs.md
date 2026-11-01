@@ -62,7 +62,7 @@ com.openbank.fx/
 ├── domain/                    ◄── jádro — bez frameworkových závislostí
 │   ├── model/                 FxRate, FxConversion, RateType, RateSource, FxConversionStatus
 │   ├── cnb/                   CnbFixing, CnbFixingRate, CnbFixingParser (čistý parser)
-│   ├── screening/             ScreeningPolicy (čisté decide()), ScreeningResult/Decision
+│   ├── screening/             (moved to openbank-libs-fincrime, ADR-0353)
 │   └── event/                 FxRatePublished, FxConversionExecuted
 │
 ├── application/               ◄── orchestrace use-casů

@@ -83,3 +83,28 @@ Auditní konzument odebírá `openbank.fx.cnb-policy-rate.published` spolu s ost
 ## Identita volajícího na mTLS listeneru
 
 Auditní API v produkci používá bearer autentizaci na HTTP i mTLS listeneru. Důvěryhodný klientský certifikát je podmínkou TLS spojení, ale nenahrazuje bearer token volajícího. Bez bearer přihlašovacích údajů API vrací HTTP 401; role endpointu a OPA nadále rozhodují, co smí přihlášený volající číst. Test parity listenerů načítá produkční konfiguraci a přes skutečné HTTP ověřuje přístup bez certifikátu, pouze s certifikátem i s platným bearer tokenem.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Přepsání consumer group pro Kafka
+
+Consumer group id a offset reset pro Kafka kanály této služby nejsou v `application.yaml` nastaveny jako YAML klíče, protože SmallRye Config uvozuje klíče s tečkou a konektor je nikdy nenačte. Dodává je ConfigMap s přepsáním ve formě properties souboru, načítaný přes `QUARKUS_CONFIG_LOCATIONS`. Referenčním vzorem je kanál `party-events-in` ve službě card-issuance-service; komentáře v `application.yaml` na něj odkazují. Jde pouze o změnu dokumentace a komentářů. Žádná hodnota konfigurace ani chování za běhu se nemění.
+
+## Platby treasury a vlastní převody banky v auditním proudu
+
+Konzument odebírá také `openbank.treasury.payments` (uvolnění vlastních plateb banky, připsané
+treasury-service) a `openbank.swift.institution-transfers` (stav vlastních převodů: ACCEPTED, SENT,
+SETTLED, REJECTED, připsané swift-service). Obě témata jsou na peněžní cestě. Nové téma nemá
+potvrzený offset, první odběr ho proto čte od začátku retence.
+
+## Proud provenience agentů (D5)
+
+Kanál `agent-audit-events-in` odebírá téma `openbank.agent.audit.events` s AI-atribučními událostmi z agent-service a připisuje je do auditního úložiště. Nasazený Deployment nastavuje `AUDIT_AGENT_AUDIT_KAFKA_ENABLED=true`; výchozí hodnota v `application.yaml` zůstává `false`, takže lokální běh a testy bez brokeru zůstávají fail-closed. Consumer group je `audit-service-agent-provenance` a offset reset `earliest`, obojí z override ConfigMapy.
+
+`AgentAuditConsumer` potvrdí záznam až po commitu do auditního úložiště. Při chybě dělá NACK místo rethrow, protože handler používá ruční potvrzování a vyhozená výjimka by zrušila Kafka zdroj místo zaparkování záznamu. Kanál používá `failure-strategy: dead-letter-queue` s tématem `openbank.dlq.audit.agent-audit-events-in`. Opakované doručení již uloženého id události se deduplikuje.

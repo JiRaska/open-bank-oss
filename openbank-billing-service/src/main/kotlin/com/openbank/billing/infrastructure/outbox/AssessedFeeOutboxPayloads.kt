@@ -47,6 +47,8 @@ internal object AssessedFeeOutboxPayloads {
             amount = fee.chargedAmount.toPlainString(),
             currency = fee.currency,
             description = "Fee charge: ${fee.feeName}",
+            accountingClass = fee.accountingClass,
+            productRevisionId = fee.productRevisionId?.toString(),
         ),
     )
 
@@ -60,6 +62,7 @@ internal object AssessedFeeOutboxPayloads {
             amount = fee.chargedAmount.toPlainString(),
             currency = fee.currency,
             reason = reason,
+            accountingClass = fee.accountingClass,
         ),
     )
 
@@ -81,6 +84,9 @@ private data class FeePostIntentWirePayload(
     val amount: String,
     val currency: String,
     val description: String,
+    /** ADR-0341 D3; null only for a row written by a release that predates the pin. */
+    val accountingClass: String? = null,
+    val productRevisionId: String? = null,
 )
 
 /** The `billing.fee.reversal-intent.v1` outbox payload shape — see [FeePostIntentWirePayload]. */
@@ -94,4 +100,5 @@ private data class FeeReversalIntentWirePayload(
     val amount: String,
     val currency: String,
     val reason: String,
+    val accountingClass: String? = null,
 )

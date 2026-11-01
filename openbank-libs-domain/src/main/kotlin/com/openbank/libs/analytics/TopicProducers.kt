@@ -53,12 +53,18 @@ object TopicProducers {
         "openbank.sepa.payment.events" to "sepa-payment",
         "openbank.statement.event" to "statement-service",
         "openbank.sanctions.screening.event" to "sanctions-service",
+        // Both producers stamp a required sourceService in every valid trigger. Never guess one of
+        // them from this shared topic if a malformed record omits that producer declaration.
+        "openbank.oversight-triggers" to "multiple-producers",
         "openbank.sepa.instant.events" to "sepa-instant",
         "openbank.fx.conversion.completed" to "fx-service",
         "openbank.fx.fixing.published" to "fx-service",
         "openbank.fx.cnb-policy-rate.published" to "fx-service",
         "openbank.documents.document.event" to "document-service",
         "openbank.payments.swift.event" to "swift-service",
+        // Contract 9.2: bank-own (financial-institution) transfer status, swift-service's outbox
+        // (swift-institution-transfers-out). The payload carries no sourceService field.
+        "openbank.swift.institution-transfers" to "swift-service",
         "openbank.lending.events" to "lending-service",
         // Issue #5338: audit-service was not subscribed to this topic at all (absent from both
         // this table and application.yaml's topics list), so SCA device enrollment
@@ -128,6 +134,8 @@ object TopicProducers {
         // treasury-events-out. Its payloads also carry "sourceService": "treasury-service", so the
         // rows resolve AttributionSource.EVENT; this entry is the fallback and the coverage fact.
         "openbank.treasury.deal.events" to "treasury-service",
+        // ADR-0344 contract 9.1: treasury.payment.released.v1, written by treasury-service's outbox.
+        "openbank.treasury.payments" to "treasury-service",
         // #8792: the four topics analytics-sink subscribes to that audit-service does not, added
         // when this table became the shared definition. Same rule as every row above — read off the
         // module that DECLARES the outgoing channel, not from the topic segment, which would have
