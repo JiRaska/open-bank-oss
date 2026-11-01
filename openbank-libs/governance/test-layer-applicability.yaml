@@ -1,0 +1,153 @@
+# SPDX-License-Identifier: Apache-2.0
+# Which components SHOULD own e2e, trace and simulation evidence (ADR-0273).
+#
+# Without this register the Test Intelligence matrix divides by every component, so "7/74 e2e"
+# cannot tell a missing suite from a component the layer does not apply to. The collector reads
+# this file and reports, per layer: applicable, not applicable, with evidence and missing.
+#
+# Rules, applied by collect-test-intelligence.mjs and enforced by check-test-layer-applicability.py:
+# - A component that already publishes evidence for a layer always counts as applicable.
+# - Every money-path component (rules.yaml: money_path_services) is applicable on EVERY layer.
+#   The only way out is an `exclude` entry with a reason.
+# - trace: `derive: cross-service` also makes applicable every released component whose src/main
+#   declares a Kafka channel or a @RegisterRestClient.
+# - Other components are applicable only when listed under `include`.
+# Every include/exclude entry names a real component and carries a reason.
+version: 1
+layers:
+  e2e:
+    rule: The component has a UI or owns a customer- or TPP-facing journey across services.
+    # No `derive`: every money-path component is listed under include or exclude.
+    include:
+      - component: openbank-admin-ui
+        reason: Operator UI; the Playwright journeys are its evidence.
+      - component: openbank-customer-edge
+        reason: Customer channel BFF; every app journey enters through it.
+      - component: openbank-onboarding-service
+        reason: Customer onboarding journey (KYC, party, account opening) end to end.
+      - component: openbank-psd2-service
+        reason: TPP-facing AIS/PIS journey under consent and SCA.
+      - component: openbank-sepa-payment
+        reason: Customer SEPA credit transfer journey (initiation to settlement).
+      - component: openbank-sepa-instant
+        reason: Customer instant-payment journey with its 10-second scheme deadline.
+      - component: openbank-card-processing-service
+        reason: Card authorisation journey from scheme message to ledger hold.
+      - component: openbank-account-service
+        reason: Customer account opening and servicing; owns an E2E suite.
+      - component: openbank-balance-service
+        reason: Customer balance view after a posting; owns an E2E suite.
+      - component: openbank-ledger-service
+        reason: Posting journey behind every customer payment; owns an E2E suite.
+      - component: openbank-domestic-payment
+        reason: Customer domestic payment journey; owns an E2E suite.
+      - component: openbank-fx-service
+        reason: Customer currency conversion journey; owns an E2E suite.
+      - component: openbank-pension-service
+        reason: Customer pension contribution journey; owns E2E suites.
+      - component: openbank-transaction-service
+        reason: Payment orchestration every customer transfer runs through.
+      - component: openbank-lending-service
+        reason: Customer loan application to disbursement.
+      - component: openbank-standing-order-service
+        reason: Customer creates and runs a standing order.
+      - component: openbank-delegation-service
+        reason: Customer grants and uses a delegated spend mandate.
+      - component: openbank-card-issuance-service
+        reason: Customer card ordering and activation.
+      - component: openbank-consent-service
+        reason: Customer grants and revokes TPP consent.
+      - component: openbank-sca-service
+        reason: Customer strong authentication step inside payment journeys.
+      - component: openbank-sdd-service
+        reason: Customer direct-debit mandate set-up and collection.
+    exclude:
+      - component: openbank-swift-service
+        reason: Bank-to-bank MT103 leg; the customer journey enters through transaction-service.
+      - component: openbank-vop-service
+        reason: Payee-name check inside the payment journeys; no surface of its own.
+      - component: openbank-clearing-service
+        reason: Back-office batch clearing; no customer or TPP surface. The payment journeys that feed it carry the e2e.
+      - component: openbank-settlement-service
+        reason: Back-office settlement cycle; no customer or TPP surface.
+      - component: openbank-sanctions-service
+        reason: Screening decision called by payment services; exercised inside their journeys.
+      - component: openbank-fraud-service
+        reason: Scoring decision called by payment services; exercised inside their journeys.
+      - component: openbank-treasury-service
+        reason: Dealer back-office; no customer or TPP surface.
+      - component: openbank-interest-service
+        reason: Scheduled accrual with no user-driven journey; covered by simulation instead.
+      - component: openbank-billing-service
+        reason: Scheduled fee charging with no user-driven journey; covered by simulation instead.
+      - component: openbank-pension-fund-service
+        reason: Fund administration back-office; the customer journey is in openbank-pension-service.
+  trace:
+    rule: The component takes part in a cross-service flow (Kafka or outbound REST), or is money-path.
+    derive: cross-service
+    include: []
+    exclude:
+      - component: openbank-clearing-simulator
+        reason: Stand-in for an external clearing scheme in tests; it is not a fleet participant.
+  simulation:
+    rule: The component runs a business process with time, sequencing or money effects that openbank-simulation can sweep.
+    include:
+      - component: openbank-ledger-service
+        reason: Double-entry posting invariants.
+      - component: openbank-transaction-service
+        reason: Payment saga sequencing.
+      - component: openbank-sepa-payment
+        reason: SEPA credit transfer lifecycle.
+      - component: openbank-settlement-service
+        reason: Settlement cycles.
+      - component: openbank-billing-service
+        reason: Fee charging cycles.
+      - component: openbank-interest-service
+        reason: Interest accrual and capitalisation over time.
+      - component: openbank-statement-service
+        reason: Statement period close.
+      - component: openbank-lending-service
+        reason: Loan lifecycle and ECL calibration.
+      - component: openbank-standing-order-service
+        reason: Scheduled execution sweep.
+      - component: openbank-sdd-service
+        reason: Direct-debit collection cycles.
+      - component: openbank-delegation-service
+        reason: Spend ceilings and reservations.
+      - component: openbank-swift-service
+        reason: Cross-border MT103 lifecycle.
+      - component: openbank-sepa-instant
+        reason: Instant payment under the scheme timeout.
+      - component: openbank-domestic-payment
+        reason: Domestic clearing-cycle payments.
+      - component: openbank-clearing-service
+        reason: Clearing batch cut-offs.
+      - component: openbank-fx-service
+        reason: Rate validity windows and conversions.
+      - component: openbank-card-processing-service
+        reason: Authorisation holds, clearing and reversals.
+      - component: openbank-treasury-service
+        reason: Nostro positions and deal settlement.
+      - component: openbank-pension-service
+        reason: Contribution and payout cycles.
+      - component: openbank-card-issuance-service
+        reason: Card lifecycle (issue, activate, expire, replace).
+      - component: openbank-pension-fund-service
+        reason: Fund valuation and unit allocation cycles.
+    exclude:
+      - component: openbank-account-service
+        reason: Request-driven account state; its money effects are swept through the ledger scenario.
+      - component: openbank-balance-service
+        reason: Projection of ledger postings; the ledger sweep covers its invariants.
+      - component: openbank-sca-service
+        reason: Stateless authentication decision per request; no time-driven process to sweep.
+      - component: openbank-consent-service
+        reason: Consent state changes are request-driven; no time-driven process to sweep.
+      - component: openbank-fraud-service
+        reason: Per-request scoring decision; no time-driven process to sweep.
+      - component: openbank-sanctions-service
+        reason: Per-request screening decision; no time-driven process to sweep.
+      - component: openbank-vop-service
+        reason: Per-request payee-name check; no time-driven process to sweep.
+      - component: openbank-psd2-service
+        reason: TPP API gateway; the payment processes it starts are simulated in their owning services.

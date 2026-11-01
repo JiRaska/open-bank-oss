@@ -136,6 +136,20 @@ gates:
     run: |
       python3 .github/scripts/check-trace-contract-evidence.py
 
+  - id: test-layer-applicability
+    name: "Test-layer applicability register names real components, reasons every exclusion and lists every money-path service (ADR-0273, enforced)"
+    group: kotlin
+    mode: enforced
+    min_subjects: 40   # 61 include/exclude entries on 2026-10-31
+    budget_seconds: 10
+    rationale: "openbank-libs/governance/test-layer-applicability.yaml is the denominator of the Test Intelligence e2e/trace/simulation layers, so a component it leaves out reads as not applicable rather than missing. That is where a missing test can be laundered: an unlisted money-path service, a misspelled component, or an exclusion with no reason. The collector only warns; this gate fails, and its self-test feeds each of those shapes and must see findings."
+    review_after: "2027-10-31"
+    selftest: python3 .github/scripts/check-test-layer-applicability.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-test-layer-applicability.py"]
+    run: |
+      python3 .github/scripts/check-test-layer-applicability.py
+
   - id: pitest-threshold-single-source
     name: "pitest.yml reads one mutation threshold in every lane (enforced)"
     group: lint

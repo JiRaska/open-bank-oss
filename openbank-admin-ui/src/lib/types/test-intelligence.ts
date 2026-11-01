@@ -350,6 +350,23 @@ export interface ClientExperienceEvidence {
   blocker: string | null
 }
 
+export interface TestLayerCoverage {
+  kind: 'e2e' | 'trace' | 'simulation'
+  rule: string | null
+  applicable: number
+  notApplicable: number
+  present: number
+  unproven: number
+  missing: number
+  components: Array<{
+    component: string
+    moneyPath: boolean
+    applicable: boolean
+    status: 'present' | 'unproven' | 'missing' | 'not-applicable'
+    reason: string | null
+  }>
+}
+
 export interface TestIntelligenceReport {
   schemaVersion: 1
   /** Added by the route at request time; absent in the on-disk/CI file. */
@@ -365,6 +382,8 @@ export interface TestIntelligenceReport {
   clientExperiences: ClientExperienceEvidence[]
   requiredControls?: RequiredTestControl[]
   platformCapabilities?: TestPlatformCapability[]
+  /** Per-layer denominator from openbank-libs/governance/test-layer-applicability.yaml. */
+  layerCoverage?: TestLayerCoverage[]
   /**
    * Build-time derived ADR-0148 record/replay posture. This is deliberately neither a CI
    * test result nor a runtime agent-health signal: it says which registered charters have a

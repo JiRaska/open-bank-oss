@@ -137,6 +137,91 @@ def trusted_deploy_run(run: dict, repo_slug: str) -> bool:
     )
 
 
+# Synthetic journey producers and the envelope prefix each one uploads. Their verdicts are
+# runtime observations, not build evidence: the only path that used to stage them was the
+# admin-ui BUILD (admin-ui-deploy.yml "Stage immutable per-attempt Test Intelligence
+# history"), so whenever no admin-ui build ran the published snapshot re-served the last
+# build's verdict. Measured 2026-10-31: a 07:45Z snapshot showed admin-operator-access red
+# from 00:40Z although the 05:31Z and 06:22Z runs had passed.
+SYNTHETIC_PRODUCERS = (
+    (".github/workflows/admin-ui-browser-synthetic.yml", "test-intelligence-run-openbank-admin-ui-"),
+    (".github/workflows/synthetic-journeys.yml", "test-intelligence-run-openbank-platform-"),
+)
+# Enough completed runs for collect-test-intelligence.mjs to tell a fresh failure from a
+# recovery (retainActionableFailure) without downloading the whole 30-day history.
+SYNTHETIC_RUNS = 6
+SYNTHETIC_HISTORY_DIR = "openbank-admin-ui/test-run-history"
+
+
+def trusted_synthetic_run(run: dict, repo_slug: str, expected_path: str) -> bool:
+    repository = run.get("head_repository")
+    repository_name = repository.get("full_name") if isinstance(repository, dict) else repository
+    return (
+        run.get("event") in {"push", "schedule", "workflow_dispatch"}
+        and run.get("head_branch") == "main"
+        and run.get("path") == expected_path
+        and run.get("status") == "completed"
+        and repository_name == repo_slug
+        and isinstance(run.get("head_sha"), str)
+        and re.fullmatch(r"[0-9a-f]{40}", run["head_sha"]) is not None
+    )
+
+
+def synthetic_payloads(repo_slug: str, fetch_json, fetch_bytes) -> tuple[dict[str, bytes], list[str]]:
+    """Envelopes of the latest trusted main synthetic runs, keyed by staging path.
+
+    A producer that cannot be read is a WARNING, never an empty success: the snapshot then
+    falls back to the seed's verdict and says so, instead of silently showing it as fresh."""
+    payloads: dict[str, bytes] = {}
+    warnings: list[str] = []
+    for workflow, prefix in SYNTHETIC_PRODUCERS:
+        name = PurePosixPath(workflow).name
+        try:
+            listing = fetch_json(f"{API_ORIGIN}/repos/{repo_slug}/actions/workflows/{name}/runs"
+                                 f"?branch=main&status=completed&per_page={SYNTHETIC_RUNS}")
+            runs = listing.get("workflow_runs") if isinstance(listing, dict) else None
+            if not isinstance(runs, list):
+                raise CollectionError("workflow response has no workflow_runs list")
+            staged = 0
+            for run in runs[:SYNTHETIC_RUNS]:
+                if not isinstance(run, dict) or not trusted_synthetic_run(run, repo_slug, workflow):
+                    continue
+                inventory = fetch_json(f"{API_ORIGIN}/repos/{repo_slug}/actions/runs/{run['id']}/artifacts?per_page={PER_PAGE}")
+                artifacts = inventory.get("artifacts") if isinstance(inventory, dict) else None
+                if not isinstance(artifacts, list):
+                    raise CollectionError("artifact response has no artifacts list")
+                for artifact in artifacts:
+                    artifact_name = artifact.get("name") if isinstance(artifact, dict) else None
+                    if (not isinstance(artifact_name, str) or not artifact_name.startswith(prefix)
+                            or artifact.get("expired") is not False
+                            or not re.fullmatch(r"[A-Za-z0-9._-]+", artifact_name)
+                            or type(artifact.get("id")) is not int):
+                        continue
+                    try:
+                        envelope = ENVELOPES.extract(fetch_bytes(
+                            f"{API_ORIGIN}/repos/{repo_slug}/actions/artifacts/{artifact['id']}/zip"))
+                        # Bind the envelope to the run it was downloaded from: an artifact
+                        # carrying another run's provenance is not this run's observation.
+                        claimed = json.loads(envelope)["run"]
+                        commit = claimed.get("commit")
+                        if (str(claimed.get("id")) != str(run["id"]) or not isinstance(commit, str)
+                                or len(commit) < 7 or not run["head_sha"].startswith(commit)):
+                            raise ValueError("envelope provenance differs from its producing run")
+                    except (CollectionError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
+                        # One unreadable artifact rejects only itself; the producer's other
+                        # runs are still read, so the snapshot keeps every verdict it can prove.
+                        warnings.append(f"synthetic envelope {artifact_name} rejected: {exc}")
+                        continue
+                    payloads[f"{SYNTHETIC_HISTORY_DIR}/{artifact_name}.json"] = envelope
+                    staged += 1
+            if staged == 0:
+                warnings.append(f"No trusted main synthetic envelope was available from {name}; "
+                                "its journey verdicts are carried from the last aggregate, not observed now.")
+        except CollectionError as exc:
+            warnings.append(f"synthetic producer {name} unreadable ({exc}); journey verdicts are carried, not fresh.")
+    return payloads, warnings
+
+
 def safe_archive_members(archive: bytes) -> list[tuple[zipfile.ZipInfo, PurePosixPath]]:
     try:
         zipped = zipfile.ZipFile(io.BytesIO(archive))
@@ -592,7 +677,7 @@ def performance_authority(core: dict, staging: dict, repo_slug: str) -> set[str]
 
 def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
             fetch_page=None, fetch_run=None, fetch_attempt=None, fetch_archive=None,
-            seed=SEED_UNSET, run_collector=None, performance_stage=None) -> dict:
+            seed=SEED_UNSET, run_collector=None, performance_stage=None, synthetic_stage=None) -> dict:
     components = repo_components(repo)
     if not token:
         raise CollectionError("GITHUB_TOKEN is required to read trusted CI artifacts")
@@ -754,7 +839,14 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
             raise CollectionError(f"performance artifact collection failed: {exc}") from exc
         stage_payloads(performance["payloads"])
 
-        warnings = list(performance["warnings"])
+        if synthetic_stage:
+            synthetic, synthetic_warnings = synthetic_stage()
+        else:
+            synthetic, synthetic_warnings = synthetic_payloads(
+                repo_slug, lambda url: api_json(url, token), lambda url: api_bytes(url, token))
+        stage_payloads(synthetic)
+
+        warnings = list(performance["warnings"]) + synthetic_warnings
         if absent:
             warnings.append("No retained trusted main run envelope was available for: " + ", ".join(absent) + ". Their execution evidence is unknown, not passed.")
         if seed_report is None:
