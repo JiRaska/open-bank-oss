@@ -383,7 +383,7 @@ _Also tagged `kubernetes`: 0027 0041 0051 0057 0077 0083 0151 0159 0173 0177 032
 ## gitops
 
 - **[0236](0236-deployed-main-drift-watch.md)** · Deployed == main drift watch · `shipped` · Compare every deployed sandbox-<sha> image pin against version.txt on main daily; drift older than 7 days escalates onto one deduped issue per service. Declaration lane blocks malformed pins at merge.
-- **[0358](0358-image-pins-live-on-a-bot-owned-deploy-branch-not-in-main.md)** · Image pins live on a bot-owned deploy branch, not in main _(proposed)_ · `planned` · Image pins move out of main into a bot-owned deploy/sandbox branch read by multi-source ArgoCD Applications; manifests stay on main, so a deploy no longer merges a PR, never moves main and never waits on the merge train.
+- **[0358](0358-image-pins-live-on-a-bot-owned-deploy-branch-not-in-main.md)** · Image pins live on a bot-owned deploy branch, not in main _(proposed)_ · `partial` · Image pins move to a bot-owned deploy/sandbox branch as a verified copy of main's manifests plus a kustomize image override; a deploy no longer merges a PR, never moves main and never waits on the merge train.
 
 _Also tagged `gitops`: 0010 0027 0060 0098 0277 0324 0357_
 

@@ -81,12 +81,14 @@ def findings(name, doc):
         events = doc.get('on', doc.get(True, {}))
         if events.get('workflow_run', {}).get('branches') != ['main']:
             errors.append('workflow_run must reject non-main branches at the trigger')
-    if name == 'admin-ui-deploy.yml':
+    if name == 'admin-ui-deploy.yml' and 'build-push' in jobs:
         steps = [step for job in jobs.values() for step in job.get('steps', [])]
-        create_pr = next((step for step in steps if step.get('id') == 'gitops_pr'), {})
-        if create_pr.get('uses', '').startswith('peter-evans/create-pull-request@') and \
-                create_pr.get('with', {}).get('base') != 'main':
-            errors.append('GitOps pull request must declare base: main for exact-SHA checkout')
+        # ADR-0358: the pin is written to deploy/sandbox only as a signed App commit; the
+        # ruleset admits nothing else, and GitHub signs createCommitOnBranch only for an App.
+        pin = next((step for step in steps if step.get('id') == 'pin'), {})
+        if 'publish-deploy-pin.py deploy' not in pin.get('run', '') or \
+                pin.get('env', {}).get('DEPLOY_PIN_TOKEN') != '${{ steps.app_token.outputs.token }}':
+            errors.append('deploy pin must be written by publish-deploy-pin.py with the GitHub App token')
     if name in ('agent-issue-worker.yml', 'agent-pr-steward.yml'):
         worker = jobs.get('worker', jobs.get('steward', {}))
         if "github.event_name != 'pull_request'" not in worker.get('if', ''):
