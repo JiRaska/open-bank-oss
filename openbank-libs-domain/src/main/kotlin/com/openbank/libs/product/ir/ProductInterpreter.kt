@@ -219,6 +219,14 @@ class ProductInterpreter(private val arithmetic: ProductArithmetic) {
             when (penalty.kind) {
                 PenaltyKind.RATE -> {
                     val amount = arithmetic.penaltyByRate(posting.amount, penalty.rate!!, currency, postingRounding)
+                    // The penalty is charged to the deposit too, so a withdrawal that leaves less than
+                    // the penalty would overdraw it. Refuse it rather than cap the penalty: a cap would
+                    // let a full withdrawal before maturity escape the penalty entirely.
+                    if ((state.balance - posting.amount - amount).signum() < 0) {
+                        emit(Instruction.Reject(ruleId, revision.revisionHash, revision.irVersion, INSUFFICIENT_FUNDS))
+                        rejected = true
+                        return
+                    }
                     if (amount.signum() > 0) {
                         post(
                             ruleId,
@@ -251,5 +259,6 @@ class ProductInterpreter(private val arithmetic: ProductArithmetic) {
     companion object {
         const val PARAM_RATE = "interest.rate"
         const val PARAM_BONUS_RATE = "interest.bonus.rate"
+        private const val INSUFFICIENT_FUNDS = "INSUFFICIENT_FUNDS"
     }
 }
