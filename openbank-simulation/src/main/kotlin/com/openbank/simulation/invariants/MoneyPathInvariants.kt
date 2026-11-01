@@ -4,6 +4,8 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.cardprocessing.domain.model.AuthorizationStatus
+import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.SpendReservation
@@ -270,6 +272,75 @@ object MoneyPathInvariants {
             world.sctInstPayments.forEach { payment ->
                 if (payment.status !in terminal) {
                     return Violation(name, "sct-inst payment ${payment.id} stuck in ${payment.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `CardAuthorization`
+     * driven by [com.openbank.simulation.scenario.CardClearingScenario] must be internally
+     * consistent and never a stale hold — (1) `clearedAmountMinorUnits` never exceeds the
+     * authorised amount, (2) a decline carries its reason exactly when the status is DECLINED
+     * (the status exists to keep a refused customer answerable from the row), and (3) no hold
+     * outlives its own `expiresAt`: an APPROVED / PARTIALLY_CLEARED authorisation whose expiry
+     * has passed is a permanent freeze on money the customer cannot spend — the silent
+     * money-in-flight defect this invariant exists to surface. A hold still inside its window
+     * is legitimate and passes.
+     */
+    val cardAuthorizationCompleteness = object : Invariant {
+        override val name = "card-authorization-completeness"
+        override fun check(world: World): Violation? {
+            val now = world.context.clock.instant()
+            world.cardAuthorizations.forEach { authorization ->
+                if (authorization.clearedAmountMinorUnits > authorization.amountMinorUnits) {
+                    return Violation(
+                        name,
+                        "card ${authorization.id} cleared ${authorization.clearedAmountMinorUnits}" +
+                            " of ${authorization.amountMinorUnits}",
+                    )
+                }
+                if ((authorization.status == AuthorizationStatus.DECLINED) != (authorization.declineReason != null)) {
+                    return Violation(
+                        name,
+                        "card ${authorization.id} status ${authorization.status} with declineReason" +
+                            " ${authorization.declineReason}",
+                    )
+                }
+                if (authorization.status.holdsFunds && now.isAfter(authorization.expiresAt)) {
+                    return Violation(
+                        name,
+                        "card ${authorization.id} holds ${authorization.heldAmountMinorUnits}" +
+                            " past its expiresAt ${authorization.expiresAt}",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): per authorisation, the Σ of
+     * presentment amounts the scenario posted through the REAL `AuthorizationLifecycle.clear`
+     * must equal the authorisation's own `clearedAmountMinorUnits` — a clearing that posted
+     * twice, or a presentment the aggregate silently lost, breaks the equality for exactly the
+     * authorisation it belongs to. Posted amounts are keyed per authorisation (same convention
+     * as [swiftMoneyConservation]), so a reversal or an unrelated posting cannot mask a gap.
+     */
+    val cardClearingConservation = object : Invariant {
+        override val name = "card-clearing-conservation"
+        override fun check(world: World): Violation? {
+            world.cardClearings.postedIds().forEach { authorizationId ->
+                val authorization: CardAuthorization? =
+                    world.cardAuthorizations.firstOrNull { it.id == authorizationId }
+                val posted = world.cardClearings.postedAmount(authorizationId)
+                if (authorization == null || authorization.clearedAmountMinorUnits != posted) {
+                    return Violation(
+                        name,
+                        "card $authorizationId posted $posted but cleared" +
+                            " ${authorization?.clearedAmountMinorUnits ?: "unknown authorization"}",
+                    )
                 }
             }
             return null
@@ -715,6 +786,8 @@ object MoneyPathInvariants {
         domesticPaymentCompleteness,
         clearingCompleteness,
         sctInstPaymentCompleteness,
+        cardAuthorizationCompleteness,
+        cardClearingConservation,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,

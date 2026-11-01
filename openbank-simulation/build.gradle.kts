@@ -86,6 +86,14 @@ dependencies {
     // jakarta/quarkus imports), so only the domain POJOs land on the classpath, not a runtime.
     implementation(project(":openbank-sepa-instant"))
 
+    // Issue #14366 (Test Intelligence simulation gap, money path): the harness also drives the
+    // REAL card-processing domain — the `CardAuthorization` aggregate (derived
+    // heldAmount/effectiveSpend holds) and the pure `AuthorizationLifecycle` policy
+    // (clear/reverse/expire, refusals as values rather than exceptions) — rather than a re-model
+    // of either. The domain package is framework-free (ADR-0002), so only the domain POJOs land
+    // on the classpath, not a runtime.
+    implementation(project(":openbank-card-processing-service"))
+
     // ADR-0143 phase 2d: the harness drives the REAL billing-service domain value objects
     // (AssessedFee, FeeJournalCommand, FeeReversalCommand — com.openbank.billing.domain) so
     // FeeBillingScenario exercises the exact idempotency-key/GL-direction shape production

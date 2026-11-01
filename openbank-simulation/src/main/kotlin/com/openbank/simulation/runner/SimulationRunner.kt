@@ -8,6 +8,7 @@ import com.openbank.simulation.engine.FaultProfile
 import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.Invariant
 import com.openbank.simulation.invariants.MoneyPathInvariants
+import com.openbank.simulation.scenario.CardClearingScenario
 import com.openbank.simulation.scenario.ClearingCycleScenario
 import com.openbank.simulation.scenario.DelegatedSpendScenario
 import com.openbank.simulation.scenario.DomesticClearingScenario
@@ -72,6 +73,13 @@ class SimulationRunner(
             // INSTANT + settlement domain-class binding into the same seeded run so it shares
             // the fault profile and is checked by the same invariant sweep every step.
             SctInstSettlementScenario.step(world)
+            context.scheduler.drain()
+            // Issue #14366 (Test Intelligence simulation gap, money path): interleave the
+            // card-presentment path — REAL CardAuthorization lifecycle through the REAL
+            // AuthorizationLifecycle policy (clear/reverse/expire, refusals as values) — so it
+            // shares the fault profile and is checked by the cardAuthorizationCompleteness /
+            // cardClearingConservation invariants.
+            CardClearingScenario.step(world)
             context.scheduler.drain()
             // ADR-0143 phase 2d/2e: interleave the billing fee-charge (+ seeded reversal) path
             // so MoneyPathInvariants.billingFeeConservation is actually exercised every step,
