@@ -2127,7 +2127,7 @@ dependencies:
     # Review date moved to 2026-11-15 in #12980; strict activation remains separate (#11686).
     # Daily drift does not prove strict CodeQL/SBOM resolution or an executed Dependabot
     # refresh. Verify those lane proofs before the independently reviewed strict flip.
-    target_enforce_date: "2026-11-15"   # ADR-0144
+    target_enforce_date: "2026-12-15"   # ADR-0144; moved 2026-11-01: strict-lane proofs in #11686 still open (#14442)
     ci_producer: "gradle.properties org.gradle.dependency.verification=lenient + .github/workflows/dependabot-verification-metadata.yml"
 
 # ---------------------------------------------------------------------------------------
@@ -2474,7 +2474,7 @@ perf_gate:
     - "weekly scheduled run reports into perf-reports-* artifact"
   gate: perf-gate
   enforced: advisory
-  target_enforce_date: "2026-11-01"
+  target_enforce_date: "2026-12-01"   # ADR-0144; moved 2026-11-01: 5 of the last 10 perf-gate runs failed (2026-10-31), not stable enough to block (#14442)
   ci_producer: ".github/workflows/perf-gate.yml"
 
 
@@ -4078,7 +4078,7 @@ pr_file_overlap:
   # date below is the review point for the CLASSIFIER (are the reports still true and
   # actionable), not a promise to flip --enforce.
   enforced: advisory
-  target_enforce_date: "2026-11-01"   # ADR-0144 — review the classifier, not a flip to enforce
+  target_enforce_date: "2026-12-01"   # ADR-0144 — review the classifier, not a flip to enforce; moved 2026-11-01, deliberately never enforced (#14442)
   # CI producer is LIVE (advisory): .github/scripts/check-pr-file-overlap.py runs in the
   # `gates (lint)` shard on every pull_request. It compares the BLOB SHA of each overlapping
   # file at both PR heads, so an overlap where the content already agrees is reported as
