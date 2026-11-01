@@ -76,7 +76,7 @@ a high-risk system (credit decisioning) ships. What is open is the article-by-ar
 | Art. 9  Risk management system | HITL approval queue (ADR-0031 D4) + kill switch (D7); deny-by-default OPA charter. | control exists; evidence pack open |
 | Art. 10 Data & data governance | PII masking (defaults.pii=masked); data_scope is least-privilege per charter. | control exists; evidence pack open |
 | Art. 11 Technical documentation | This ADR-0148 mapping + the charter in agents.yaml + the model card (ADR-0141). | control exists; evidence pack open |
-| Art. 12 Record-keeping / logging | AI-attributed AuditEvent per action with model_id/model_version/prompt_hash (ADR-0031 D5, ADR-0086 chain). | control exists; evidence pack open |
+| Art. 12 Record-keeping / logging | AI-attributed AuditEvent per action with model_id/model_version/prompt_hash (ADR-0031 D5, ADR-0086 chain); ADR-0031 phase 3 adds the recorded-human-merge evidence (agent_merge_record + agent.pr.merged, attested per runbook 0018). | control exists; evidence pack open |
 | Art. 13 Transparency to deployers | Charter + prompt registry (ADR-0148) make each agent's inputs/behaviour inspectable. | control exists; evidence pack open |
 | Art. 14 Human oversight | requires_human on every write; approver_must_differ_from author (segregation of duties). | control exists; evidence pack open |
 | Art. 15 Accuracy, robustness, cybersecurity | Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt; SPIFFE identity. | control exists; evidence pack open |
@@ -112,7 +112,7 @@ not deployed.
 
 ## Provenance
 
-- Source: `openbank-libs/governance/agents.yaml` (sha256 `7790b6353c493d35…`, 21 charters)
+- Source: `openbank-libs/governance/agents.yaml` (sha256 `961a102d86eb27fb…`, 21 charters)
 - Source: `openbank-libs/governance/ml-systems.yaml` (sha256 `9cd5cb5b20918520…`, 4 non-agent systems)
 - Related: ADR-0031 (agent governance), ADR-0084 (fraud scoring plane), ADR-0139/0140
   (ML decisioning platform), ADR-0141 (model registry), ADR-0142 (credit decisioning),

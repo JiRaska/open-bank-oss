@@ -35,7 +35,7 @@ steps:
     label: Výpočet úroku
     lane: core
     apis:
-      - POST /api/v1/interest/calculate
+      - POST /api/v1/interest/accrue/all
     relatedServices:
       - interest-service
   - id: post
@@ -44,8 +44,6 @@ steps:
     y: 100
     label: Journal Entry
     lane: core
-    apis:
-      - POST /api/v1/ledger/post
     relatedServices:
       - ledger-service
   - id: balance
@@ -54,8 +52,6 @@ steps:
     y: 100
     label: Update Balance
     lane: core
-    apis:
-      - PUT /api/v1/balance/update
     relatedServices:
       - balance-service
   - id: notify
@@ -64,8 +60,6 @@ steps:
     y: 100
     label: Notifikace
     lane: platform
-    apis:
-      - POST /api/v1/notifications
     relatedServices:
       - notification-service
     consumes:

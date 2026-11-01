@@ -208,9 +208,11 @@ export const authOptions: NextAuthConfig = {
       clientSecret: CLIENT_SECRET,
       issuer: KEYCLOAK_ISSUER,
       // These optional client scopes are requested for the Admin UI session. Neither
-      // scope grants an approval alone: catalog also requires the separate named
-      // human realm role for that exact decision.
-      authorization: { params: { scope: 'openid profile email pension:legal-approve pension:product-approve' } },
+      // pension scope grants an approval alone: catalog also requires the separate named
+      // human realm role for that exact decision. catalog:read is what the Product
+      // Studio / catalog v2 API answers with (403 without it) and what AuthGuard
+      // maps to CATALOG_SCOPE_READ.
+      authorization: { params: { scope: 'openid profile email catalog:read pension:legal-approve pension:product-approve' } },
       // Route every server-side OIDC fetch (discovery/token/userinfo/JWKS) to the
       // in-cluster Keycloak Service. `wellKnown` is intentionally omitted: Auth.js
       // v5 ignores it for discovery, so the rewrite below is the actual mechanism.

@@ -88,7 +88,12 @@ describe('PID quick-create recovery', () => {
     let syncAttempts = 0
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (init?.method !== 'POST') return json([])
+      if (init?.method !== 'POST') return json({
+        partyId: PARTY_ID,
+        status: 'ACTIVE',
+        createdAt: '2026-10-19T10:30:00Z',
+        externalId: { type: 'BANKID_SUB', value: 'bankid|recoverable-subject', verifiedAt: '2026-10-19T10:30:00Z' },
+      })
       requests.push(url)
       if (url.endsWith('/api/v1/parties')) return json({ id: PARTY_ID }, 201)
       if (url.endsWith(`/api/v1/parties/${PARTY_ID}/sync/bankid`)) {
@@ -105,7 +110,7 @@ describe('PID quick-create recovery', () => {
     const form = await openAndFillQuickCreate()
 
     await act(async () => { fireEvent.submit(form) })
-    await waitFor(() => expect(screen.getByText(new RegExp(`Record created \\(ID: ${PARTY_ID}\\)`))).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Record created, but BankID sync failed temporarily/)).toBeInTheDocument())
 
     const retry = screen.getByRole('button', { name: 'Retry BankID sync' })
     expect(document.getElementById('pid-bankid-sub')).toBeDisabled()
@@ -122,7 +127,12 @@ describe('PID quick-create recovery', () => {
     let syncAttempts = 0
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (init?.method !== 'POST') return json([])
+      if (init?.method !== 'POST') return json({
+        partyId: PARTY_ID,
+        status: 'ACTIVE',
+        createdAt: '2026-10-19T10:30:00Z',
+        externalId: { type: 'BANKID_SUB', value: 'bankid|recoverable-subject', verifiedAt: '2026-10-19T10:30:00Z' },
+      })
       if (url.endsWith('/api/v1/parties')) return createResponse.promise
       if (url.endsWith(`/api/v1/parties/${PARTY_ID}/sync/bankid`)) {
         syncBodies.push(JSON.parse(String(init.body)))

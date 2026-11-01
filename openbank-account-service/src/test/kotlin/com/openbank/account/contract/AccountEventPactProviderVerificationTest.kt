@@ -177,7 +177,31 @@ class AccountEventPactProviderVerificationTest {
         if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
             testIdentityAssociation.setTestIdentity(null)
         }
+        // ADR-0340 B1 (mirror of the git-pact twin): the CRS/FATCA roster replay must present the
+        // verified service-account-openbank-tax-reporting identity — rego admits account.list
+        // for that principal only.
+        if (context != null && context.interaction.description.contains("CRS FATCA")) {
+            testIdentityAssociation.setTestIdentity(taxReportingIdentity())
+        }
         context?.verifyInteraction()
+    }
+
+    /** Mirror of the git-pact twin's helper (ADR-0340 B1) — see there for the claim shape. */
+    private fun taxReportingIdentity(): io.quarkus.security.runtime.QuarkusSecurityIdentity {
+        val name = "service-account-openbank-tax-reporting"
+        val jwt = object : org.eclipse.microprofile.jwt.JsonWebToken {
+            private val claims = mapOf(
+                "azp" to "openbank-tax-reporting",
+                "preferred_username" to name,
+                "sub" to "tax-reporting-sa-subject",
+            )
+
+            override fun getName(): String = name
+            override fun getClaimNames(): Set<String> = claims.keys
+            override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+        }
+        return io.quarkus.security.runtime.QuarkusSecurityIdentity.builder().setPrincipal(jwt)
+            .addRole("ROLE_API").build()
     }
 
     @State(NEGATIVE_AUTH_STATE)
@@ -200,6 +224,12 @@ class AccountEventPactProviderVerificationTest {
     @State("no account exists for the IBAN")
     fun noAccountForIban() {
         // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
+    }
+
+    @State("no account exists for the requested account")
+    fun noAccountForRequestedAccount() {
+        // Deliberately empty: AmlAccountOwnershipPactConsumerTest's 404 leg requests a UUID no
+        // state in this class ever seeds, so the provider's real not-found path answers.
     }
 
     @State("an account has been created")
@@ -334,6 +364,12 @@ class AccountEventPactProviderVerificationTest {
     @State("no account exists for the unknown IBAN")
     fun noAccountForUnknownIban() {
         // Intentionally empty.
+    }
+
+    /** Empty-party list state, matching the folder twin: the requested party is never seeded. */
+    @State("no account exists for the requested party")
+    fun noAccountForRequestedParty() {
+        // No seed: the requested party id is one this provider test never creates.
     }
 
     /** Mirror of the git-pact twin's handler — see there for why the findById guard is needed. */

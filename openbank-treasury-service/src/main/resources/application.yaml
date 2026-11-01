@@ -139,11 +139,28 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
 
 openbank:
+  authz:
+    # libs-runtime OpaPolicyDecisionPointProducer (replaced this service's own AuthzProducer;
+    # same opa.url / opa.path / opa.timeout-ms keys and defaults). BUILD-time switch.
+    opa-pdp-producer:
+      enabled: true
   outbox:
     # Defaults to FALSE fleet-wide. Without this line no treasury.deal.* event ever leaves
     # treasury_outbox: no error, attempt_count stays 0, the audit trail stays empty.
     dispatch-enabled: true
   treasury:
+    ledger:
+      # ADR-0341 D3 rollout switch. false (default): journal legs carry the explicit glAccountId an
+      # older ledger understands, so deploying treasury BEFORE the ledger that serves accounting
+      # classes cannot fail a posting. true: legs name an accountingClass and the ledger resolves the
+      # account. Flip to true only after the ledger carrying migration V32 is live; then delete the
+      # LegacyGlChart shim. A reversal always names the original posting's account either way.
+      post-by-class: ${OPENBANK_TREASURY_LEDGER_POST_BY_CLASS:false}
+    fixing:
+      # ADR-0344 D5: the hourly fixing pass for the accounting day (re-runs are harmless). It fixes
+      # only from ACTIVE (four-eyes approved) observations that pass the quality gate; a blocked
+      # index-date opens a fixing case and fixes nothing.
+      enabled: ${OPENBANK_TREASURY_FIXING_ENABLED:true}
     confirmation:
       # ADR-0315 D2: a deal settles only once CONFIRMED (counterparty confirmation received). The
       # simulated market confirms every BOOKED deal first, so the sandbox lifecycle is unchanged.
@@ -210,6 +227,23 @@ openbank:
       # least this amount in its own currency (0 = any amount).
       break-alert-age-days: ${OPENBANK_TREASURY_NOSTRO_BREAK_ALERT_AGE_DAYS:3}
       break-alert-min-amount: ${OPENBANK_TREASURY_NOSTRO_BREAK_ALERT_MIN_AMOUNT:0}
+    portfolio:
+      # ADR-0337 amendment: the custodian's semt.002 statement of holdings (PSP 34-12 PS). Only the
+      # treasury-pension-co deployment keeps a portfolio: it sets the entity and its safekeeping
+      # account(s) in its own configuration. Without an entity every upload is refused and every
+      # period-end read answers 409 — the bank's own treasury keeps no portfolio here. Set
+      # OPENBANK_TREASURY_PORTFOLIO_ENTITY and OPENBANK_TREASURY_PORTFOLIO_SAFEKEEPING_ACCOUNTS
+      # on that deployment (both deliberately absent here: no default entity exists).
+      # Instrument class per CFI PREFIX (ISO 10962; longest prefix wins). A CFI no prefix covers
+      # refuses the WHOLE statement at upload — a holding is never classified by guess.
+      # DB debt requires an explicit reviewed debt-classes-by-isin entry (empty by default).
+      # CFI alone cannot distinguish a government issuer from a corporate issuer.
+      cfi-classes:
+        DY: MONEY_MARKET
+        ES: EQUITY
+        EP: EQUITY
+        CI: FUND_UNITS
+        CE: FUND_UNITS
     nostro-breaks:
       # Hourly sweep: re-reconcile statements of the last 31 days (a late ledger booking resolves
       # its break), then age every open break and alert once on those over the threshold.
@@ -220,6 +254,29 @@ openbank:
       # Hourly and idempotent per day, so a missed pass is caught up by the next one.
       enabled: ${OPENBANK_TREASURY_ACCRUAL_ENABLED:true}
       interval: 1h
+      # ADR-0342: a pass stops starting deals once this is spent (the rest accrue next pass, and the
+      # day is recorded REFUSED until a complete pass). The day-close reporter's stale threshold for
+      # the in-flight marker is DERIVED from it (TreasuryCloseJobs.staleAfter = budget + 30m), never
+      # configured separately.
+      pass-budget: PT20M
+    posting-intent:
+      # #13883: re-run settle/mature/reverse posts whose intent is still OPEN (a crash between the
+      # ledger's answer and the local commit) under the same journal key. Intents younger than grace
+      # are left to the command still in flight.
+      reconcile-enabled: ${OPENBANK_TREASURY_POSTING_INTENT_RECONCILE_ENABLED:true}
+      reconcile-cron: "0 */5 * * * ?"
+      grace: PT2M
+      # Older than this (age, not the calendar), an intent is NOT resumed as its stored actor
+      # (whose authority may have lapsed): it stays OPEN, alerts, and an operator re-issues or closes it.
+      max-resume-age: PT4H
+      # Intents one reconciler pass claims (escalated ones are never claimed again).
+      claim-batch: 100
+    close:
+      # ADR-0342 day-close participation (TreasuryCloseParticipationScheduler): every hour, in
+      # Europe/Prague, re-offer the last lookback-days completed accounting days to the ledger as
+      # participant `treasury`, on treasury's own m2m identity (ledger.close.participate).
+      report-cron: "0 40 * * * ?"
+      lookback-days: 3
     fx-spot:
       rate-check:
         # #10896: flag (never block) an FX spot deal whose dealer-entered rate deviates from
@@ -240,7 +297,7 @@ openbank:
 opa:
   url: "${OPA_URL:http://localhost:8181}"
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
-  timeout: "${OPA_TIMEOUT:PT0.5S}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
 
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"
@@ -249,6 +306,34 @@ authz:
 
 "%prod":
   quarkus:
+    http:
+      # East-west mTLS on the 8443 listener (ADR-0337: tax-reporting reads the pension company's
+      # portfolio from the treasury-pension-co instance). `quarkus.http.ssl.client-auth` is a
+      # BUILD-TIME property: the container env cannot set it, so it lives in the file the image is
+      # built from. Under `%prod` only: with `quarkus.http.ssl.*` set and no certificate Quarkus
+      # refuses to start, which would break every dev run and @QuarkusTest. In the cluster BOTH
+      # deployments supply the certificate files (treasury-pension-co: treasury-service-internal-tls;
+      # the bank's treasury: treasury-internal-tls, server usage added for exactly this). The bank
+      # treasury's certificate wiring ships in the SAME change as this setting, so no deploy order
+      # can leave an image requiring a certificate its manifest does not supply.
+      ssl:
+        client-auth: required
+      # Keep the plain-HTTP port (8160): with client-auth REQUIRED Quarkus otherwise drops the HTTP
+      # listener, and the readiness probe and admin-ui's staff path use it. Runtime property, #10441.
+      insecure-requests: enabled
+      # Listener parity (ADR-0337): with client-auth on, Quarkus ALSO registers its mTLS
+      # authentication mechanism, which turns a trusted client certificate into a SecurityIdentity
+      # of its own — on 8443 only. The API must be authenticated identically on both listeners, by
+      # the OIDC bearer OPA decides on, so /api/* accepts the bearer mechanism ONLY; the certificate
+      # stays transport authentication. Measured: without this, a trusted certificate with no bearer
+      # reached the handler as an authenticated principal (403 from authz, not 401).
+      # ListenerAuthParityIT holds both listeners to 401 without a bearer.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
     # ledger-service's 8443 listener is private-CA mTLS with client auth REQUIRED; the
     # treasury-internal-tls certificate is mounted at /mnt/ledger-tls in the cluster only.
     tls:
@@ -308,3 +393,10 @@ authz:
         enabled: false
       accrual:
         enabled: false
+      posting-intent:
+        # Tests drive reconcilePostingIntents directly; the cron never fires.
+        reconcile-cron: "0 0 0 1 1 ? 2099"
+      close:
+        # A valid cron that never fires (scheduler-cron-syntax refuses 'off'); the CronIT profile
+        # switches it to every second.
+        report-cron: "0 0 0 1 1 ? 2099"

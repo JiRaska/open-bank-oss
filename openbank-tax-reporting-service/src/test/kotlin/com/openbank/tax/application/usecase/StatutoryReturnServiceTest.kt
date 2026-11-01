@@ -7,6 +7,7 @@ package com.openbank.tax.application.usecase
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import com.openbank.tax.application.port.out.ReturnAssemblyData
 import com.openbank.tax.application.port.out.ReturnCatalogueSource
 import com.openbank.tax.application.port.out.ReturnDataPort
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
@@ -94,7 +95,7 @@ class StatutoryReturnServiceTest {
             definition: ReturnDefinition,
             entityId: String,
             period: ReportingPeriod,
-        ) = values ?: throw ReturnDataUnavailableException("unbound")
+        ) = ReturnAssemblyData(values ?: throw ReturnDataUnavailableException("unbound"))
     }
 
     private val repo = InMemoryRepo()

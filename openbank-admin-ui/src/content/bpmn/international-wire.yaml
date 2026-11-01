@@ -26,7 +26,7 @@ steps:
     label: FX Konverze
     lane: core
     apis:
-      - GET /api/v1/fx/rate
+      - GET /api/v1/fx/rates/{base}/{quote}
     relatedServices:
       - fx-service
   - id: aml
@@ -57,9 +57,9 @@ steps:
     label: Debit
     lane: core
     apis:
-      - POST /api/v1/accounts/debit
+      - POST /api/v1/balances/{accountId}/debit
     relatedServices:
-      - account-service
+      - balance-service
   - id: swift
     type: task
     x: 700
@@ -67,7 +67,7 @@ steps:
     label: MT103 Generování
     lane: payment
     apis:
-      - POST /api/v1/swift/outward
+      - POST /api/v1/swift
     relatedServices:
       - swift-service
   - id: clearing
@@ -77,7 +77,7 @@ steps:
     label: Nostro Settlement
     lane: payment
     apis:
-      - POST /api/v1/clearing/settle
+      - POST /api/v1/clearing/batches/{id}/settle
     relatedServices:
       - clearing-service
   - id: end

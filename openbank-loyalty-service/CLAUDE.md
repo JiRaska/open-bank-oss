@@ -10,7 +10,7 @@ the reviewed `BenefitCatalog`, expiring after a published period. Four absences 
 the definition of electronic money, and each is a property of the code rather than a policy
 someone remembers:
 
-- **No cash-out.** `Leaves` has no conversion toward any monetary type. `LeafDomainTest` asserts
+- **No cash-out.** `Leaves` has no conversion toward any monetary type. `LeavesTest` (in `LeafDomainTest.kt`) asserts
   the absence by reflection, because a KDoc is not a control.
 - **No price in any currency.** `Benefit` has no currency or amount field, asserted the same way.
 - **No transfer between parties.** There is no path in this service that moves value from one

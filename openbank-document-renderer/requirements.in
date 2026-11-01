@@ -9,6 +9,10 @@
 # a patched release is correct hygiene and satisfies the dependency-review CI gate.
 weasyprint==70.0
 
+# WOFF2 font decoding uses Brotli via fonttools[woff]. Keep the fixed
+# decoder floor explicit (GHSA-9v8h-qqgm-4m35); the generated lock pins hashes.
+brotli>=1.2.1
+
 # Pinned so the Dockerfile's `pip install --upgrade pip` step is itself
 # hash-verifiable (Scorecard Pinned-Dependencies) instead of floating to
 # whatever pip resolves as "latest" at build time.

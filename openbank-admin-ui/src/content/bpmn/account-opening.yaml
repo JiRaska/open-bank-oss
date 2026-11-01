@@ -3,117 +3,135 @@
 # BPMN process diagram (ADR-0019/0029). Authored as data; validated by
 # src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
 
-name: Account Opening
-desc: Proces otevření nového bankovního účtu od žádosti po aktivaci
-regulation: CNB Vyhláška 163/2014 + AML 5AMLD
+name: Retail Account Onboarding
+desc: Event-driven retail onboarding. KYC, AML, party activation, and account creation are owned by their services.
+regulation: ADR-0069 + ADR-0267
 services:
+  - customer-edge
   - party-service
   - kyc-service
   - aml-service
   - account-service
-  - notification-service
 steps:
   - id: start
     type: start
     x: 60
     y: 100
-    label: Žádost
-  - id: id-check
+    label: Customer registers
+  - id: register
     type: task
-    x: 180
+    x: 200
     y: 100
-    label: Ověření identity (KYC)
-    lane: compliance
+    label: Register party
+    lane: identity
     apis:
-      - POST /api/v1/kyc/verify
+      - POST /customer/v1/onboarding/register
     relatedServices:
-      - kyc-service
+      - customer-edge
       - party-service
     emits:
-      - openbank.kyc.events
+      - openbank.party.events
+  - id: kyc
+    type: task
+    x: 410
+    y: 35
+    label: Open KYC case
+    lane: kyc
+    relatedServices:
+      - kyc-service
     consumes:
       - openbank.party.events
+    emits:
+      - openbank.kyc.events
   - id: aml
     type: task
-    x: 340
-    y: 100
-    label: AML Screening
-    lane: compliance
-    apis:
-      - POST /api/v1/aml/screen
+    x: 410
+    y: 165
+    label: Open AML case
+    lane: aml
     relatedServices:
       - aml-service
-    emits:
-      - openbank.aml.events
     consumes:
       - openbank.party.events
-  - id: gw1
-    type: gateway
-    x: 480
-    y: 100
-    label: Schváleno?
-  - id: reject
-    type: end-err
-    x: 480
-    y: 220
-    label: Zamítnuto
-  - id: create
+    emits:
+      - openbank.aml.events
+  - id: pending-account
     type: task
-    x: 600
-    y: 100
-    label: Vytvoření účtu
+    x: 410
+    y: 265
+    label: Create pending accounts
     lane: core
-    apis:
-      - POST /api/v1/accounts
     relatedServices:
       - account-service
+    consumes:
+      - openbank.party.events
     emits:
       - openbank.accounts.account.created
-  - id: iban
-    type: task
-    x: 740
+  - id: activation-gate
+    type: gateway
+    x: 660
     y: 100
-    label: Přidělení IBAN
-    lane: core
-    apis:
-      - POST /api/v1/accounts/{id}/iban
-    relatedServices:
-      - account-service
-  - id: notify
+    label: KYC + AML approved?
+  - id: party-activation
     type: task
-    x: 880
+    x: 820
     y: 100
-    label: Notifikace
-    lane: platform
-    apis:
-      - POST /api/v1/notifications
+    label: Party activation gate
+    lane: identity
     relatedServices:
-      - notification-service
+      - party-service
     consumes:
-      - openbank.notification.requests
-  - id: end
-    type: end
+      - openbank.kyc.events
+      - openbank.aml.events
+    emits:
+      - openbank.party.events
+  - id: activate-account
+    type: task
     x: 980
     y: 100
-    label: Aktivní
+    label: Activate pending accounts
+    lane: core
+    relatedServices:
+      - account-service
+    consumes:
+      - openbank.party.events
+  - id: end
+    type: end
+    x: 1080
+    y: 100
+    label: Accounts active
 flows:
   - from: start
-    to: id-check
-  - from: id-check
-    to: aml
-  - from: aml
-    to: gw1
-  - from: gw1
-    to: reject
-    label: Ne
-  - from: gw1
-    to: create
-    label: Ano
-  - from: create
-    to: iban
-  - from: iban
-    to: notify
+    to: register
+  - from: register
+    to: kyc
     kind: async
-    topic: openbank.notification.requests
-  - from: notify
+    topic: openbank.party.events
+  - from: register
+    to: aml
+    kind: async
+    topic: openbank.party.events
+  - from: register
+    to: pending-account
+    kind: async
+    topic: openbank.party.events
+  - from: kyc
+    to: activation-gate
+    kind: async
+    topic: openbank.kyc.events
+  - from: aml
+    to: activation-gate
+    kind: async
+    topic: openbank.aml.events
+  - from: activation-gate
+    to: party-activation
+  - from: party-activation
+    to: activate-account
+    kind: async
+    topic: openbank.party.events
+  - from: pending-account
+    to: activate-account
+    kind: async
+    topic: openbank.party.events
+  - from: activate-account
     to: end

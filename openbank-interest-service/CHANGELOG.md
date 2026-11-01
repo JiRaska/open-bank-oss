@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.26.1...interest-service-v0.27.0) (2026-10-30)
+
+
+### Features
+
+* **interest:** product-IR shadow comparator, shadow mode only (ADR-0352 phase 3) ([#14174](https://github.com/JiRaska/open-bank-oss/issues/14174)) ([b0ad31a](https://github.com/JiRaska/open-bank-oss/commit/b0ad31a4250e8a9ca79d99105ead97a9fa7694f4))
+
+## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.26.0...interest-service-v0.26.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **ledger:** capture source-linked journal history snapshots with idempotent capture ([#13763](https://github.com/JiRaska/open-bank-oss/issues/13763)) ([c7d103c](https://github.com/JiRaska/open-bank-oss/commit/c7d103c9f9482c8725af567a770a2ad1cf5f5cad))
+
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.25.0...interest-service-v0.26.0) (2026-10-22)
+
+
+### Features
+
+* **interest:** turn catalog sync on, pin each account to its revision ([#13202](https://github.com/JiRaska/open-bank-oss/issues/13202)) ([b0f3d18](https://github.com/JiRaska/open-bank-oss/commit/b0f3d18d0a90b272f38b7f2ae266d821e28204aa))
+
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.24.1...interest-service-v0.25.0) (2026-10-22)
+
+
+### Features
+
+* **ledger:** day-close participants — the accounting day waits for product services (ADR-0342) ([#13197](https://github.com/JiRaska/open-bank-oss/issues/13197)) ([cc8b400](https://github.com/JiRaska/open-bank-oss/commit/cc8b40005ac00a2c73142a6890fa146556017950))
+
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.24.0...interest-service-v0.24.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **account:** preserve booking proof across transaction client consumers ([#13222](https://github.com/JiRaska/open-bank-oss/issues/13222)) ([427ce5a](https://github.com/JiRaska/open-bank-oss/commit/427ce5a055719d8e5f0cc805f44b581b9bf5c55f))
+
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.23.0...interest-service-v0.24.0) (2026-10-18)
+
+
+### Features
+
+* **interest:** give interest-service its own catalog read grant ([#13181](https://github.com/JiRaska/open-bank-oss/issues/13181)) ([c90df18](https://github.com/JiRaska/open-bank-oss/commit/c90df18b680a81902a3c5bb197f2f05daf6167df))
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.22.1...interest-service-v0.23.0) (2026-10-16)
 
 

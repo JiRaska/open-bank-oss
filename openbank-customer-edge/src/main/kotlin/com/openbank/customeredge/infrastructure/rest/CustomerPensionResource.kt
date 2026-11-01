@@ -21,6 +21,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.LocalDate
 import java.util.UUID
@@ -74,6 +75,18 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
 
     @ConfigProperty(name = "openbank.edge.sca-service-url")
     lateinit var scaServiceUrl: String
+
+    /**
+     * The provider legal entity this deployment's pension-service accepts (its own
+     * `openbank.pension.provider-entity-id`). The customer never chooses the provider and no route
+     * discloses it, so the edge supplies it like the birth date and residency — never from the app.
+     * Absent or blank means not configured: an application is then refused before anything goes
+     * upstream. Read at call time rather than injected: an injection point is validated at boot,
+     * and an unset or empty value would stop the whole edge from starting for one pension route.
+     */
+    internal var providerEntityId: () -> String? = {
+        ConfigProvider.getConfig().getOptionalValue(PROVIDER_ENTITY_ID_KEY, String::class.java).orElse(null)
+    }
 
     /** Published DPS/DIP offerings from the product catalog's retirement pack. */
     @GET
@@ -569,13 +582,19 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
     /** Rule 2: birth date and residency from the party record, then the application upstream. */
     private fun openApplication(url: String, input: Map<String, Any?>, key: String?): Response {
         val idempotencyKey = requiredKey(key) ?: return keyRequired()
+        val provider = providerEntityId()?.trim()?.takeIf { it.isNotEmpty() } ?: return EdgeJson.error(
+            SERVICE_UNAVAILABLE,
+            "pension onboarding is not configured with a provider in this environment",
+            mapOf("code" to "PENSION_PROVIDER_NOT_CONFIGURED"),
+        )
         val party = party()
         val facts = participantFacts(party) ?: return EdgeJson.error(
             UNPROCESSABLE,
             "the customer profile has no birth date or residency country",
             mapOf("code" to "PARTY_PROFILE_INCOMPLETE"),
         )
-        val response = upstream.post(url, party.toString(), json(input + facts), idempotencyKey)
+        val body = input + facts + ("providerEntityId" to provider)
+        val response = upstream.post(url, party.toString(), json(body), idempotencyKey)
         return if (response.status == CREATED) passThrough(response) else failure(response)
     }
 
@@ -671,6 +690,8 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
         const val NOT_FOUND = 404
         const val UNPROCESSABLE = 422
         const val BAD_GATEWAY = 502
+        const val SERVICE_UNAVAILABLE = 503
+        const val PROVIDER_ENTITY_ID_KEY = "openbank.edge.pension.provider-entity-id"
         val COUNTRY = Regex("^[A-Z]{2}$")
 
         fun uuid(raw: String?): UUID? = raw?.let { runCatching { UUID.fromString(it) }.getOrNull() }

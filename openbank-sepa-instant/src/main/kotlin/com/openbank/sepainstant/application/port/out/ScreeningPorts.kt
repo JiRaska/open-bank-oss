@@ -4,8 +4,9 @@
 
 package com.openbank.sepainstant.application.port.out
 
-import com.openbank.sepainstant.domain.screening.ScreeningResult
-import com.openbank.sepainstant.domain.screening.ScreeningRole
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import io.smallrye.mutiny.Uni
 import java.util.UUID
 
@@ -25,18 +26,16 @@ interface SanctionsScreeningPort {
 }
 
 /** Risk grading of an opened AML case, mirrors aml-service `AmlRiskLevel`. */
-enum class AmlCaseRiskLevel { LOW, MEDIUM, HIGH, CRITICAL }
-
 /** Everything the use-case knows at the payment boundary to open an AML case. */
 data class OpenAmlCaseCommand(
     val idempotencyKey: String,
     val paymentId: UUID,
     val debtorAccountId: UUID,
     val customerReference: String,
-    val riskLevel: AmlCaseRiskLevel,
+    val riskLevel: AmlCaseSeverity,
     val alertCode: String,
     val alertDetail: String?,
-    val matchedEntity: String?
+    val matchedEntity: String?,
 )
 
 /**

@@ -10,7 +10,7 @@ the money path; the `deny` tool tier (`money.transfer`, `money.post.ledger`, `gh
 `gh.pr.approve`, `secrets.read.raw`) is hard-forbidden for every charter.
 
 - **Status:** Draft (first pass; opened with the ADR-0031 D3 identity-binding change)
-- **Last reviewed:** 2026-06-28
+- **Last reviewed:** 2026-10-24 (merge-execution evidence boundary)
 - **Owner:** agent-service CODEOWNERS
 - **Related ADRs:** ADR-0031 (AI agent governance — this service), ADR-0080 (security hardening /
   pentest follow-ups), ADR-0034 (unified OPA authz), ADR-0002 (hexagonal), ADR-0008 (OTel),
@@ -48,6 +48,11 @@ operator ──bearer──▶ admin-ui BFF ──bearer + X-Agent-Id──▶ /
                                                                         ▼
                                                               audit-service → audit_entries
                                                               (append-only, hash-chained)
+
+GitHub Actions (record-agent-merge, ARC runner) ──client_credentials bearer (ROLE_MERGE_RECORDER,
+  5-min TTL, minted per run)──▶ POST /api/v1/agent-merge-records ──▶ MergeRecordService
+  ──▶ agent_merge_record (Postgres, UNIQUE pr_number = redelivery dedupe)
+  └──▶ AuditEventPublisher (same durable outbox, actorType=HUMAN under the merging human)
 ```
 
 Trust boundaries: (a) browser→BFF (NextAuth session), (b) BFF→agent-service (Keycloak bearer),
@@ -60,8 +65,45 @@ agent-service→`openbank-communication-service`, client-credentials, read-only
 (PublishedStyleProvider, ADR-0285 D5) — fetches the published style for the `ui-assistant`
 persona, cached with a short TTL, no baseline fallback (see T-I3). NOT wired into
 `AgentChatService.systemPrompt()` or `CatalogReviewService` yet (infrastructure only).
+(g) GitHub Actions→agent-service (record-agent-merge, ADR-0031 phase 3): a CI pipeline outside the
+cluster identity boundary authenticates as a Keycloak client-credentials client carrying exactly
+`ROLE_MERGE_RECORDER` — the only principal that may write `agent_merge_record` rows. The token is
+minted per run (5-minute realm TTL), travels in a 0600 header file, and the endpoint is fail-closed:
+an unauthenticated/rejected POST fails the workflow run loudly instead of skipping. In-cluster
+reachability is enforced by NetworkPolicy (the recorder path is covered by the agent-service netpol)
+and the workflow runs on an ARC runner inside the cluster, so the service URL never leaves the
+private DNS zone.
 
 ## 2. STRIDE
+
+### Workload identity pilot (ADR-0177)
+
+The additional boundary is Kubernetes ServiceAccount issuer → Keycloak → service
+bearer token. The stock OIDC provider is hidden on browser login pages. The pilot
+uses native JWT Authorization Grant followed by standard RFC 8693 token exchange,
+with an explicitly provisioned workload user holding only `ROLE_API`.
+
+- **Spoofing / confused deputy:** validate the issuer's JWKS signature with `RS256`,
+  require the sole audience `keycloak`, an enabled federation link and a client
+  explicitly allowed to use that issuer. Unknown subjects must not be provisioned
+  as a side effect of authentication. Validate wrong audience using a genuinely
+  signed assertion; corrupting a JWT proves only signature checking.
+- **Replay:** projected ServiceAccount assertions are reusable bearer credentials
+  during kubelet rotation. Keep them inside the pod, enforce assertion age and
+  expiration, cap the issued token by assertion expiration and request no refresh
+  token. Theft during that bounded window remains a risk. Offline JWKS validation
+  does not provide immediate pod-deletion revocation; issued tokens expire naturally.
+- **Elevation of privilege:** preserve the workload user and `ROLE_API` through
+  standard exchange. Do not add operator/admin roles or enable legacy external
+  exchange to make a failed test pass. OPA still authorizes individual actions.
+- **Availability / rollback:** existing client credentials remain the fallback;
+  the service consumer is a later flag-gated rollout. Revert the pilot client's
+  JWT grant attributes to disable the new path without deleting the IdP or users.
+
+Evidence: `openbank-infra/e2e/keycloak_workload_identity_test.py` exercises a real
+throwaway Keycloak with synthetic signatures: both positive stages, unknown
+identity, unauthorized client, wrong/multiple audiences, expiry, signature failure,
+browser-provider hiding and the unchanged client-credentials fallback.
 
 ### Spoofing
 
@@ -129,6 +171,46 @@ persona, cached with a short TTL, no baseline fallback (see T-I3). NOT wired int
     but not joinable to the resource, and `audit_entries` is append-only so it can never be
     corrected. Measured by `AgentAuditEventPersistenceIT`, which asserts the sentinel rather than
     agreeing with it silently.
+- **T-R3 (ADR-0031 phase 3) — merge-evidence repudiation.** `POST /api/v1/agent-merge-records` exists
+  alongside the additive `POST /api/v1/agent-merge-records/app` for App execution,
+  precisely to close the "an agent merged its own PR and nobody can prove a human decided" gap: the
+  record of WHO merged an agent-authored PR enters out-of-band (the `record-agent-merge` CI workflow),
+  and the agent has no write tool to self-report. Ingest is audited once as `agent.pr.merged` under
+  the actual executor: `HUMAN` for direct human merges, `SERVICE` for the trusted GitHub App. The
+  approving human is separate authorization evidence, never substituted into the executor.
+  **Spoofing controls (trust
+  boundary g):** `@RolesAllowed("ROLE_MERGE_RECORDER")` — not `ROLE_ADMIN`, not `ROLE_OPERATOR`; a
+  dedicated role on the merge-evidence API, proven by negative IT tests (ROLE_ADMIN-only token →
+  403). It may ingest, read schema capability, and read back one committed PR record; it cannot
+  enumerate the oversight list or access unrelated resources. The credential is minted per run from a client secret held in GitHub secrets and
+  scoped to the recorder job only. **Tampering controls:** `pr_number UNIQUE` + `ON CONFLICT DO
+  NOTHING` makes webhook redelivery idempotent — a replayed POST returns the stored row with
+  `inserted=false` and emits no second audit event, so the evidence cannot be inflated by re-sending;
+  conflicting App executor/head/authorization evidence returns 409. Runtime/checksum audit failures roll back the merge row in the same transaction, so a merge that
+  cannot be audited is not recorded as if it were (`AgentMergeRecordApiIT`). **Residual:** the
+  recorder authenticates with a shared client secret, so anyone with GitHub secret read access in
+  this repo can forge a merge record — mitigations are repo-level (secret scoping, branch protection,
+  and the fact that the recorder's own writes land in the same hash-chained trail they extend, where
+  a forgery would collide with GitHub's own merge history on dispute) and the workflow is observable
+  (fail-closed, tracking issue on failure). A stolen recorder credential still cannot write anything
+  else: the role is restricted to merge evidence. **Authorization provenance:** App merges under the `codex/` exclusion
+  require the latest trusted premerge decision on the exact head, a successful main owner workflow
+  and successful writer job; revocation, foreign identity, missing evidence and API errors fail
+  closed. Bounded historical reconstruction is explicitly PR-scoped, with actual request and
+  immutable merged-event references; it never certifies SHA approval or historical compliance.
+  Later non-codex PR-scoped intent uses a separate `POLICY_PR_AUTO_MERGE` proof: the
+  canonical merge's first-parent policy blob must be explicitly reviewed and digest-verified,
+  its recognized prefix rule must allow the branch, and the complete owner-request/merge-event
+  timeline must match. Unknown policy source, mixed proof families, and exact-head revocation
+  fail closed. Policy context does not attest executed workflow source or full historical
+  compliance. The additive `/app-policy` endpoint and optional `policyAuthorization` response
+  preserve the old closed wire enum; the backend rejects codex downgrades and policy-SHA retry
+  conflicts. The producer requires the dedicated capability flag before new-proof writes.
+  The producer verifies backend schema capability before writing and independently reads committed
+  evidence back. Timestamp bounds reject future observations; retries preserve the original
+  historical observation. HTTP/Postgres/outbox regressions cover these properties in
+  `AgentMergeRecordApiIT`; proof-validator negatives and real HTTP redirect-isolation regressions
+  are enforced by `.github/scripts/test-merge-authorization-proof.py`.
 
 ### Information disclosure
 
@@ -184,6 +266,12 @@ persona, cached with a short TTL, no baseline fallback (see T-I3). NOT wired int
 
 ## 4. Change log
 
+- **2026-10-16 (#12883):** ADR-0031 phase 3 merge-evidence ingest. New inbound trust boundary (g):
+  GitHub Actions `record-agent-merge` → `POST /api/v1/agent-merge-records` with a per-run
+  client_credentials token scoped to a dedicated `ROLE_MERGE_RECORDER` realm role (least privilege —
+  `ROLE_ADMIN` is rejected by design). New STRIDE entry T-R3 (repudiation: who merged an
+  agent-authored PR, evidenced out-of-band, idempotent by `pr_number UNIQUE`, audited once as
+  `agent.pr.merged` / `HUMAN`). Attestation runbook: `docs/runbooks/0018`.
 - **2026-09-21 (#10383):** Removed PublishedStyleProvider, PublishedStylePort and
   CommunicationStyleClient/CommunicationStyleAdapter — zero production consumers, and the
   client's URL was never supplied in gitops (it fell back to localhost). Trust boundary (f) no

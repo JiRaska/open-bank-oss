@@ -1,13 +1,13 @@
 {
   "schema": "openbank.infra-lifecycle/v1",
   "source": "endoflife.date + GitOps image tags — ADR-0079",
-  "generatedAt": "2026-09-28T06:45:33.000Z",
+  "generatedAt": "2026-10-20T22:56:39.000Z",
   "components": [
     {
       "id": "postgres",
       "eolProduct": "postgresql",
       "versionSource": "gitops",
-      "gitopsVersion": "18.1",
+      "gitopsVersion": "18.6",
       "releaseNotes": "https://www.postgresql.org/docs/release/{version}/",
       "lifecycle": {
         "cycles": [
@@ -305,6 +305,227 @@
       }
     },
     {
+      "id": "clickhouse",
+      "eolProduct": "clickhouse",
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": "https://github.com/ClickHouse/ClickHouse/releases",
+      "lifecycle": {
+        "cycles": [
+          {
+            "cycle": "26.9",
+            "releaseDate": "2026-09-21",
+            "eol": false,
+            "latest": "26.9.22.3",
+            "latestReleaseDate": "2026-10-19",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "26.8",
+            "releaseDate": "2026-08-27",
+            "eol": "2027-08-27",
+            "latest": "26.8.31.2",
+            "latestReleaseDate": "2026-10-19",
+            "lts": true,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "26.7",
+            "releaseDate": "2026-07-22",
+            "eol": false,
+            "latest": "26.7.34.3",
+            "latestReleaseDate": "2026-10-18",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "26.6",
+            "releaseDate": "2026-06-25",
+            "eol": "2026-09-21",
+            "latest": "26.6.8.7",
+            "latestReleaseDate": "2026-09-16",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "26.5",
+            "releaseDate": "2026-05-21",
+            "eol": "2026-08-27",
+            "latest": "26.5.7.64",
+            "latestReleaseDate": "2026-08-19",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "26.4",
+            "releaseDate": "2026-05-05",
+            "eol": "2026-07-22",
+            "latest": "26.4.5.143",
+            "latestReleaseDate": "2026-07-22",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "26.3",
+            "releaseDate": "2026-03-26",
+            "eol": "2027-03-26",
+            "latest": "26.3.56.2",
+            "latestReleaseDate": "2026-10-19",
+            "lts": true,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "26.2",
+            "releaseDate": "2026-02-27",
+            "eol": "2026-05-21",
+            "latest": "26.2.19.43",
+            "latestReleaseDate": "2026-05-22",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "26.1",
+            "releaseDate": "2026-01-30",
+            "eol": "2026-05-05",
+            "latest": "26.1.12.23",
+            "latestReleaseDate": "2026-05-11",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "25.12",
+            "releaseDate": "2025-12-18",
+            "eol": "2026-03-26",
+            "latest": "25.12.12.1",
+            "latestReleaseDate": "2026-05-01",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "25.11",
+            "releaseDate": "2025-11-27",
+            "eol": "2026-02-27",
+            "latest": "25.11.9.34",
+            "latestReleaseDate": "2026-02-17",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "25.10",
+            "releaseDate": "2025-11-01",
+            "eol": "2026-01-30",
+            "latest": "25.10.7.6",
+            "latestReleaseDate": "2026-04-30",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "25.9",
+            "releaseDate": "2025-09-27",
+            "eol": "2025-12-18",
+            "latest": "25.9.7.56",
+            "latestReleaseDate": "2025-12-19",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "25.8",
+            "releaseDate": "2025-08-29",
+            "eol": "2026-08-29",
+            "latest": "25.8.33.6",
+            "latestReleaseDate": "2026-08-26",
+            "lts": true,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "25.7",
+            "releaseDate": "2025-07-29",
+            "eol": "2025-11-01",
+            "latest": "25.7.8.71",
+            "latestReleaseDate": "2025-10-14",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "25.6",
+            "releaseDate": "2025-06-26",
+            "eol": "2025-09-27",
+            "latest": "25.6.13.41",
+            "latestReleaseDate": "2025-10-14",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "25.5",
+            "releaseDate": "2025-05-22",
+            "eol": "2025-08-29",
+            "latest": "25.5.11.15",
+            "latestReleaseDate": "2025-10-15",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "25.4",
+            "releaseDate": "2025-04-22",
+            "eol": "2025-07-29",
+            "latest": "25.4.13.22",
+            "latestReleaseDate": "2025-07-24",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "25.3",
+            "releaseDate": "2025-03-20",
+            "eol": "2026-03-20",
+            "latest": "25.3.14.14",
+            "latestReleaseDate": "2026-02-02",
+            "lts": true,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "25.2",
+            "releaseDate": "2025-02-28",
+            "eol": "2025-05-22",
+            "latest": "25.2.2.39",
+            "latestReleaseDate": "2025-03-13",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
+            "cycle": "25.1",
+            "releaseDate": "2025-01-28",
+            "eol": "2025-04-22",
+            "latest": "25.1.8.25",
+            "latestReleaseDate": "2025-03-13",
+            "lts": false,
+            "support": null,
+            "link": null
+          }
+        ]
+      }
+    },
+    {
       "id": "kafka",
       "eolProduct": "apache-kafka",
       "versionSource": "unknown",
@@ -326,8 +547,8 @@
             "cycle": "4.2",
             "releaseDate": "2026-02-17",
             "eol": false,
-            "latest": "4.2.1",
-            "latestReleaseDate": "2026-05-28",
+            "latest": "4.2.2",
+            "latestReleaseDate": "2026-09-28",
             "lts": false,
             "support": null,
             "link": null
@@ -624,11 +845,21 @@
       "lifecycle": {
         "cycles": [
           {
+            "cycle": "26.8",
+            "releaseDate": "2026-10-01",
+            "eol": false,
+            "latest": "26.8.1",
+            "latestReleaseDate": "2026-10-13",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
             "cycle": "26.7",
             "releaseDate": "2026-07-09",
-            "eol": false,
-            "latest": "26.7.4",
-            "latestReleaseDate": "2026-09-16",
+            "eol": "2026-10-01",
+            "latest": "26.7.5",
+            "latestReleaseDate": "2026-09-30",
             "lts": false,
             "support": null,
             "link": null
@@ -899,8 +1130,8 @@
     {
       "id": "valkey",
       "eolProduct": "valkey",
-      "versionSource": "gitops",
-      "gitopsVersion": "8",
+      "versionSource": "unknown",
+      "gitopsVersion": null,
       "releaseNotes": "https://github.com/valkey-io/valkey/releases",
       "lifecycle": {
         "cycles": [
@@ -969,8 +1200,8 @@
             "cycle": "2.7",
             "releaseDate": "2026-09-23",
             "eol": false,
-            "latest": "2.7.0",
-            "latestReleaseDate": "2026-09-23",
+            "latest": "2.7.1",
+            "latestReleaseDate": "2026-10-01",
             "lts": false,
             "support": null,
             "link": null
@@ -978,9 +1209,9 @@
           {
             "cycle": "2.6",
             "releaseDate": "2026-07-14",
-            "eol": "2026-09-23",
-            "latest": "2.6.3",
-            "latestReleaseDate": "2026-09-23",
+            "eol": "2026-10-01",
+            "latest": "2.6.4",
+            "latestReleaseDate": "2026-10-01",
             "lts": false,
             "support": null,
             "link": null
@@ -1068,8 +1299,8 @@
             "cycle": "13.2",
             "releaseDate": "2026-08-18",
             "eol": "2027-05-18",
-            "latest": "13.2.2",
-            "latestReleaseDate": "2026-09-15",
+            "latest": "13.2.4",
+            "latestReleaseDate": "2026-10-13",
             "lts": false,
             "support": true,
             "link": null
@@ -1078,8 +1309,8 @@
             "cycle": "13.1",
             "releaseDate": "2026-06-23",
             "eol": "2027-03-20",
-            "latest": "13.1.6",
-            "latestReleaseDate": "2026-09-15",
+            "latest": "13.1.8",
+            "latestReleaseDate": "2026-10-13",
             "lts": false,
             "support": "2026-08-18",
             "link": null
@@ -1088,8 +1319,8 @@
             "cycle": "13.0",
             "releaseDate": "2026-04-14",
             "eol": "2027-01-09",
-            "latest": "13.0.9",
-            "latestReleaseDate": "2026-09-15",
+            "latest": "13.0.11",
+            "latestReleaseDate": "2026-10-13",
             "lts": false,
             "support": "2026-06-22",
             "link": null
@@ -1098,8 +1329,8 @@
             "cycle": "12.4",
             "releaseDate": "2026-02-24",
             "eol": "2027-05-24",
-            "latest": "12.4.11",
-            "latestReleaseDate": "2026-09-15",
+            "latest": "12.4.13",
+            "latestReleaseDate": "2026-10-13",
             "lts": false,
             "support": "2026-04-17",
             "link": null
@@ -1389,8 +1620,8 @@
             "cycle": "3.13",
             "releaseDate": "2026-07-01",
             "eol": "2027-07-31",
-            "latest": "3.13.3",
-            "latestReleaseDate": "2026-09-07",
+            "latest": "3.13.4",
+            "latestReleaseDate": "2026-09-29",
             "lts": true,
             "support": null,
             "link": null
@@ -1750,8 +1981,8 @@
             "cycle": "3.6",
             "releaseDate": "2025-11-17",
             "eol": false,
-            "latest": "3.6.17",
-            "latestReleaseDate": "2026-09-09",
+            "latest": "3.6.18",
+            "latestReleaseDate": "2026-10-15",
             "lts": false,
             "support": null,
             "link": null
@@ -1819,7 +2050,7 @@
           {
             "cycle": "2.9",
             "releaseDate": "2023-09-06",
-            "eol": false,
+            "eol": "2025-11-07",
             "latest": "2.9.17",
             "latestReleaseDate": "2025-11-07",
             "lts": false,
@@ -2027,6 +2258,94 @@
       "versionSource": "gitops",
       "gitopsVersion": "1.5.0",
       "releaseNotes": "https://github.com/kafbat/kafka-ui/releases",
+      "lifecycle": null
+    },
+    {
+      "id": "alertmanager",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "otel-collector",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "pyrra",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "goalert",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "ntfy",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "temporal",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "keda",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "argocd",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "kyverno",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "cert-manager",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "karpenter",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
       "lifecycle": null
     }
   ]

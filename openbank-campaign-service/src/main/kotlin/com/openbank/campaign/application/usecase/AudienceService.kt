@@ -23,7 +23,7 @@ data class AudienceSummary(
     val approvedBy: String?,
 )
 
-data class AudienceReach(val name: String, val version: Int, val size: Int, val asOf: Instant)
+data class AudienceReach(val name: String, val version: Int, val size: Long, val asOf: Instant)
 
 /**
  * Governs the authoring lifecycle around the existing closed segment DSL.
@@ -74,6 +74,6 @@ class AudienceService(
 
     suspend fun preview(name: String, version: Int): AudienceReach? {
         val audience = audiences.load(name, version) ?: return null
-        return AudienceReach(name, version, evaluation.evaluate(audience.segment).size, clock.instant())
+        return AudienceReach(name, version, evaluation.count(audience.segment), clock.instant())
     }
 }

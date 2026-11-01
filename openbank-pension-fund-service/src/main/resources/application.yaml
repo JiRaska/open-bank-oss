@@ -89,6 +89,11 @@ quarkus:
     enabled: false
 
 openbank:
+  authz:
+    # libs-runtime OpaPolicyDecisionPointProducer (replaced this service's own AuthzProducer;
+    # same opa.url / opa.path / opa.timeout-ms keys and defaults). BUILD-time switch.
+    opa-pdp-producer:
+      enabled: true
   pension-fund:
     strategy-change:
       # Days between approval (participants notified) and the earliest effective date. A
@@ -107,9 +112,7 @@ openbank:
 opa:
   url: "${OPA_URL:http://localhost:8181}"
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
-  # A Duration, not a millisecond Long: see AuthzProducer for why the Kotlin field cannot carry
-  # an initializer, which a primitive would need.
-  timeout: "${OPA_TIMEOUT:PT0.5S}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
 
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"

@@ -56,7 +56,7 @@ class InterestWorkflowLivenessTest {
             override fun accrue(request: AccrualRequest): Uni<InterestAccrual> = error("unused")
             override fun accrueAll(date: LocalDate): Uni<Int> = Uni.createFrom().item(2)
         }
-        val scheduler = InterestAccrualScheduler(useCase, clock, metricsOver(registry))
+        val scheduler = InterestAccrualScheduler(useCase, clock, metricsOver(registry), RecordingCloseJobRuns())
 
         scheduler.onStart(StartupEvent())
 
@@ -86,7 +86,7 @@ class InterestWorkflowLivenessTest {
             override fun accrueAll(date: LocalDate): Uni<Int> =
                 Uni.createFrom().failure(IllegalStateException("db down"))
         }
-        val scheduler = InterestAccrualScheduler(useCase, clock, metricsOver(registry))
+        val scheduler = InterestAccrualScheduler(useCase, clock, metricsOver(registry), RecordingCloseJobRuns())
         scheduler.onStart(StartupEvent())
 
         scheduler.runDailyAccrual().await().indefinitely()
@@ -109,7 +109,7 @@ class InterestWorkflowLivenessTest {
             override fun capitalizeAll(toDate: LocalDate): Uni<Int> = Uni.createFrom().item(3)
             override fun recoverOutstandingClaims(): Uni<Int> = Uni.createFrom().item(0)
         }
-        val scheduler = InterestCapitalizationScheduler(useCase, clock, metricsOver(registry))
+        val scheduler = InterestCapitalizationScheduler(useCase, clock, metricsOver(registry), RecordingCloseJobRuns())
 
         scheduler.onStart(StartupEvent())
 
@@ -144,7 +144,7 @@ class InterestWorkflowLivenessTest {
                 Uni.createFrom().failure(IllegalStateException("ledger down"))
             override fun recoverOutstandingClaims(): Uni<Int> = Uni.createFrom().item(0)
         }
-        val scheduler = InterestCapitalizationScheduler(useCase, clock, metricsOver(registry))
+        val scheduler = InterestCapitalizationScheduler(useCase, clock, metricsOver(registry), RecordingCloseJobRuns())
         scheduler.onStart(StartupEvent())
 
         scheduler.runMonthlyCapitalization().await().indefinitely()

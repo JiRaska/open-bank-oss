@@ -72,10 +72,15 @@ jobs:
       # reads this so a registry throttle never files a supply-chain gap ticket.
       status: ${{ steps.gate.outputs.status }}
     env:
+      # Fresh public-default trust only; custom/preseeded state fails closed.
+      FLEET_ATTEST_TUF_CACHE_MODE: isolated-default
       AWS_REGION: eu-north-1
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Hermetic bounded-worker controls (no registry access)
+        run: python3 .github/scripts/test-fleet-attestation-workers.py
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0

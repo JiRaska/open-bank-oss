@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.swift.infrastructure.observability
+
+import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.MeterRegistry
+import io.quarkus.runtime.Startup
+import jakarta.annotation.PostConstruct
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.inject.Instance
+import jakarta.inject.Inject
+
+/** Attempts with no proven booking; no payment identity or provider text is a metric label. */
+@Startup
+@ApplicationScoped
+class SwiftSettlementMetrics {
+    @Inject
+    lateinit var registryInstance: Instance<MeterRegistry>
+
+    private var counters: Map<Outcome, Counter> = emptyMap()
+
+    @PostConstruct
+    fun register() {
+        if (registryInstance.isResolvable) bindTo(registryInstance.get())
+    }
+
+    /** Zero means no observed unsettled attempts since process start, not proof of successful bookings. */
+    fun bindTo(registry: MeterRegistry) {
+        counters = Outcome.entries.associateWith { outcome ->
+            registry.counter(METRIC, "rail", "SWIFT", "outcome", outcome.label)
+        }
+    }
+
+    fun unsettled(outcome: Outcome) {
+        counters[outcome]?.increment()
+    }
+
+    enum class Outcome(val label: String) {
+        MISMATCH("mismatch"),
+
+        // A FAILED response, including a replay; this label does not prove the request was replayed.
+        FAILED_REPLAY("failed-replay"),
+        CONFLICT("conflict"),
+        UNEXPECTED_STATUS("unexpected-status"),
+        TRANSPORT_ERROR("transport-error"),
+
+        // #13686: the re-drive gave up on a message; it is no longer retried and its booking clock stays open.
+        REDRIVE_EXHAUSTED("redrive-exhausted"),
+
+        // #13686: stored data no attempt can fix (unparseable 32A value date); nothing was sent.
+        BAD_DATA("bad-data"),
+
+        // #13686: one message's re-drive failed outside settlement (e.g. a database error); the sweep went on.
+        REDRIVE_ERROR("redrive-error"),
+
+        // #13686: a re-drive's booking was proven after it lost its claim (stall past the lease). The proof is
+        // recorded; this is not an unsettled booking but a signal to check any manual remediation in between.
+        LATE_COMPLETION("late-completion"),
+    }
+
+    companion object {
+        const val METRIC = "openbank.payment.unsettled"
+    }
+}

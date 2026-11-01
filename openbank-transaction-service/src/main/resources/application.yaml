@@ -5,22 +5,6 @@ quarkus:
   http:
     port: 8102
 
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
-
   datasource:
     db-kind: postgresql
     username: openbank
@@ -97,11 +81,6 @@ quarkus:
       connect-timeout: 2000
       read-timeout: 3000
 
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -120,32 +99,6 @@ mp:
         ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
-    incoming:
-      payment-scheme-accepted:
-        connector: smallrye-kafka
-        topic: payment.scheme-accepted
-        group.id: transaction-scheme-accepted-cg
-        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        # NOTE: this dotted key never actually resolves via YAML flattening (SmallRye
-        # quotes any leaf map key containing a literal dot, so this only registers as
-        # "auto.offset.reset" verbatim, not the plain property KafkaConnectorIncomingConfiguration
-        # reads) — same bug as group.id/dead-letter-queue.topic below. Kept here (rather than
-        # removed) so local dev/test still gets `earliest`; the deployed value actually comes
-        # from the transaction-service-msg-override ConfigMap in gitops (issue #686).
-        auto.offset.reset: earliest
-        # DLQ ensures processing failures on this money-path consumer are retried out-of-band
-        # rather than silently dropped (ignore) or stalling the partition (fail).
-        failure-strategy: dead-letter-queue
-        # #5745: NESTED, not `dead-letter-queue.topic:`. The dotted spelling this replaces
-        # registered as ..."dead-letter-queue.topic" (quotes included) and the connector never
-        # read it — so on a workstation and in every test this money-path channel silently fell
-        # back to SmallRye's implicit `dead-letter-topic-payment-scheme-accepted`. Only the
-        # deployed pod got the right name, from the transaction-service-msg-override ConfigMap
-        # (which stays, unchanged: same value, and it is what production actually reads). Same
-        # value here, now resolving everywhere. Proven both directions by
-        # openbank-aml-service's DeadLetterQueueConfigResolutionTest.
-        dead-letter-queue:
-          topic: payment.scheme-accepted.dlq
     outgoing:
       transaction-events-out:
         connector: smallrye-kafka
@@ -171,6 +124,11 @@ mp:
       enabled: false
 
 openbank:
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:

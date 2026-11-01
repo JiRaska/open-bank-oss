@@ -192,7 +192,34 @@ class AccountPactFolderProviderVerificationTest {
         if (context != null && context.interaction.description.endsWith("no caller identity")) {
             testIdentityAssociation.setTestIdentity(null)
         }
+        // ADR-0340 B1 (mirror of the party twin): the CRS/FATCA roster replay must present the
+        // verified service-account-openbank-tax-reporting identity — rego admits account.list
+        // for that principal only, so the class-level pact-verifier identity would answer 403.
+        if (context != null && context.interaction.description.contains("CRS FATCA")) {
+            testIdentityAssociation.setTestIdentity(taxReportingIdentity())
+        }
         context?.verifyInteraction()
+    }
+
+    /**
+     * The replay identity for the CRS/FATCA roster interaction: the verified service-account JWT
+     * the rego rule admits (#12448 — name bound to the service-account username, azp present).
+     */
+    private fun taxReportingIdentity(): io.quarkus.security.runtime.QuarkusSecurityIdentity {
+        val name = "service-account-openbank-tax-reporting"
+        val jwt = object : org.eclipse.microprofile.jwt.JsonWebToken {
+            private val claims = mapOf(
+                "azp" to "openbank-tax-reporting",
+                "preferred_username" to name,
+                "sub" to "tax-reporting-sa-subject",
+            )
+
+            override fun getName(): String = name
+            override fun getClaimNames(): Set<String> = claims.keys
+            override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+        }
+        return io.quarkus.security.runtime.QuarkusSecurityIdentity.builder().setPrincipal(jwt)
+            .addRole("ROLE_API").build()
     }
 
     /**
@@ -205,6 +232,12 @@ class AccountPactFolderProviderVerificationTest {
     @State("no account exists for the IBAN")
     fun noAccountForIban() {
         // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
+    }
+
+    @State("no account exists for the requested account")
+    fun noAccountForRequestedAccount() {
+        // Deliberately empty: AmlAccountOwnershipPactConsumerTest's 404 leg requests a UUID no
+        // state in this class ever seeds, so the provider's real not-found path answers.
     }
 
     @State("an account has been created")
@@ -350,6 +383,18 @@ class AccountPactFolderProviderVerificationTest {
     @State("no account exists for the unknown IBAN")
     fun noAccountForUnknownIban() {
         // Intentionally empty.
+    }
+
+    /**
+     * party-service's merge-guard empty-page leg (pact: "no account exists for the requested
+     * party"). Deliberately no seed: the pact addresses a party id this test never creates, and
+     * the handler must EXIST (with this exact name, matching PartyAccountListPactConsumerTest)
+     * because the class-level [PactFilter] drops stateless interactions from the git replay —
+     * an interaction that declares no providerState never runs here at all.
+     */
+    @State("no account exists for the requested party")
+    fun noAccountForRequestedParty() {
+        // No seed: the requested party id is one this provider test never creates.
     }
 
     /**

@@ -101,7 +101,16 @@ data class LedgerNostroLine(
     val amount: BigDecimal,
     val currency: String,
     val description: String?,
-)
+    /**
+     * The journal's value date. Treasury books a late posting in the ledger's open day (entryDate) and
+     * values it on its economic day (ADR-0342, #13882), so this — not entryDate — is the day the
+     * correspondent booked the movement. Null when the ledger did not answer one.
+     */
+    val valueDate: LocalDate? = null,
+) {
+    /** The day this line is reconciled under: its value date, else its entry date. */
+    val reconciledDate: LocalDate get() = valueDate ?: entryDate
+}
 
 enum class MatchType {
     /** Amount, direction, date AND reference agree. */
@@ -211,7 +220,7 @@ object NostroMatcher {
     private fun sameMovement(entry: StatementEntry, line: LedgerNostroLine): Boolean =
         entry.amount.compareTo(line.amount) == 0 &&
             entry.currency == line.currency &&
-            entry.bookingDate == line.entryDate &&
+            entry.bookingDate == line.reconciledDate &&
             (entry.direction == StatementDirection.CRDT) == (line.side == Side.DEBIT)
 
     private fun referenceAgrees(entry: StatementEntry, line: LedgerNostroLine): Boolean {

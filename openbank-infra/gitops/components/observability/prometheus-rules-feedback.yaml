@@ -5,7 +5,7 @@
 # confusing", and wrong for a bug report — nobody watches a ClickHouse table at 22:00.
 #
 # These rules alert on the COUNTER, never on the content. customer-edge increments
-#   feedback_submissions_total{category, screenshot_status}
+#   openbank_feedback_submissions_total{category, screenshot_status}
 # and both labels are closed allow-lists (BUG|IDEA|CONFUSING, NONE|STORED|STORE_FAILED), so the
 # alert payload carries no free text, no screenshot and no party — the comment is personal data
 # and must not travel into Alertmanager/Slack/GoAlert. To read what a customer actually wrote,
@@ -32,9 +32,9 @@ spec:
         # deliberately only for BUG: ideas and confusion are product input, not an incident.
         - alert: ScreenFeedbackBugReported
           expr: |
-            increase(feedback_submissions_total{category="BUG"}[15m]) > 0
-            or (feedback_submissions_total{category="BUG"}
-                unless feedback_submissions_total{category="BUG"} offset 15m)
+            increase(openbank_feedback_submissions_total{category="BUG"}[15m]) > 0
+            or (openbank_feedback_submissions_total{category="BUG"}
+                unless openbank_feedback_submissions_total{category="BUG"} offset 15m)
           for: 0m
           labels:
             severity: info
@@ -52,7 +52,7 @@ spec:
         # screen for everyone. Distinct from the per-report alert so it can be routed louder.
         - alert: ScreenFeedbackSpike
           expr: |
-            sum(increase(feedback_submissions_total[1h])) > 10
+            sum(increase(openbank_feedback_submissions_total[1h])) > 10
           for: 5m
           labels:
             severity: warning
@@ -71,9 +71,9 @@ spec:
         # is broken — the submission survives, the evidence does not.
         - alert: ScreenFeedbackScreenshotStoreFailing
           expr: |
-            increase(feedback_submissions_total{screenshot_status="STORE_FAILED"}[30m]) > 0
-            or (feedback_submissions_total{screenshot_status="STORE_FAILED"}
-                unless feedback_submissions_total{screenshot_status="STORE_FAILED"} offset 30m)
+            increase(openbank_feedback_submissions_total{screenshot_status="STORE_FAILED"}[30m]) > 0
+            or (openbank_feedback_submissions_total{screenshot_status="STORE_FAILED"}
+                unless openbank_feedback_submissions_total{screenshot_status="STORE_FAILED"} offset 30m)
           for: 0m
           labels:
             severity: warning

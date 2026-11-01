@@ -34,3 +34,19 @@ Configured values:
 - `max-size: 20`
 
 
+
+## Pricing request bounds
+
+`POST /api/v1/risk/pricing` (the stateless pricing request) is bounded so one request
+cannot buy unbounded work:
+
+- at most 8 legs, each spanning at most 50 years, no frequency finer than daily, and at most
+  2,000 periods per leg;
+- `paymentLagBusinessDays` and `rate.fixingLagBusinessDays` of 0 to 30 business days. The
+  calendar walks a lag one business day at a time, so an unbounded lag is unbounded work;
+- a request past `openbank.risk.pricing.timeout` answers 503 `COMPUTATION_TIMEOUT`. The
+  deadline is also checked once per leg while the legs are prepared, not only while they are
+  priced, so a many-leg request cannot overrun it unnoticed.
+
+A breach of any bound is a 400. A deal that is already booked is not subject to the lag and
+leg-count bounds: it is stored as unvaluable if it cannot be priced, never rejected or dropped.
