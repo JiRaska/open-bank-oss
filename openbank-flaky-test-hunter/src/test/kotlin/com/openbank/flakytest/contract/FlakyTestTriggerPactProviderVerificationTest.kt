@@ -9,6 +9,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.flakytest.application.usecase.FlakyTestHunterService
 import com.openbank.flakytest.domain.model.RunTrigger
@@ -29,6 +30,9 @@ import org.junit.jupiter.api.extension.ExtendWith
 @Provider("openbank-flaky-test-hunter")
 @PactFolder("../pacts")
 @TestSecurity(user = "pact-admin", roles = ["ROLE_ADMIN"])
+// The missing-identity interaction (401) is replayed by FlakyTestTriggerNegativeAuthProviderVerificationTest,
+// which boots without @TestSecurity; under this class's identity it would be authenticated and fail.
+@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
 class FlakyTestTriggerPactProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port")

@@ -49,6 +49,37 @@
         },
         "status": 202
       }
+    },
+    {
+      "description": "reject a flaky-test workflow trigger with no identity",
+      "providerStates": [
+        {
+          "name": "no identity is presented"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Idempotency-Key": "flaky-test-hunter-operator-manual-2026-08-18"
+        },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^flaky-test-hunter-operator-manual-\\d{4}-\\d{2}-\\d{2}$"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/flaky-test-hunter/check/trigger-async-idempotent"
+      },
+      "response": {
+        "status": 401
+      }
     }
   ],
   "metadata": {
