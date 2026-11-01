@@ -27,6 +27,11 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '82d51b27e40de7e15fb7d3180cc9baaad6ebde40',
     # Independently reviewed canonical first-parent source: #13904.
     '6d20261e47cf64d423ac251e236f70e88db61461',
+    # Independently reviewed canonical first-parent source: #14186.
+    'f1dad9057e095ae790dfe89819e24ae6692e8064',
+    # Independently reviewed canonical first-parent source shared by #14150, #14182,
+    # #14220, #14233, #14235, #14240, #14253, #14262, #14265, #14272 and #14277.
+    'c5fa389c9724b4998f1c82b0281fc164194ca98b',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}

@@ -5,9 +5,10 @@
 # of copilot-ingress.yaml. copilot-service still validates the customer session bearer itself
 # (OIDC resource server, ADR-0089); this file carries only the edge controls.
 #
-# HELD OUT OF DNS. The route carries `external-dns.kubernetes.io/controller:
-# gateway-api-cutover-pending`, which external-dns skips, so copilot.open-bank.tech keeps
-# resolving to ingress-nginx. Three steps, each its own change, in this order:
+# IN DNS since the cutover: external-dns publishes copilot.open-bank.tech from this route,
+# pointing at the Gateway's NLB. copilot-ingress.yaml now carries
+# `external-dns.kubernetes.io/controller: gateway-api-cutover-pending` and keeps serving on
+# ingress-nginx as the rollback (swap the annotation back). The three steps were:
 #   1. this file — the Certificate, the ReferenceGrant, the route and its policy;
 #   2. the Gateway's https-copilot listener (envoy-gateway/gateway.yaml), once the grant is
 #      live — switching a listener in the same sync as its grant left langfuse's listener
@@ -85,9 +86,6 @@ kind: HTTPRoute
 metadata:
   name: copilot
   namespace: platform
-  annotations:
-    # Held out of DNS until the cutover change (step 3 above).
-    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
 spec:
   parentRefs:
     - name: edge
