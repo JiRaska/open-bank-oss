@@ -64,6 +64,13 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
+// User-visible topology copy is bilingual since #14277 ({ cs, en }); snapshots published
+// before that carry a plain string. Both shapes stay valid so older published content reads.
+function text(value: unknown): value is string | { cs: string; en: string } {
+  return nonEmptyString(value)
+    || (record(value) && nonEmptyString(value.cs) && nonEmptyString(value.en))
+}
+
 function validDetailRoute(value: unknown): boolean {
   if (typeof value !== 'string' || /[\\\u0000-\u001f]/.test(value)) return false
   if (value.startsWith('#')) return /^#[A-Za-z][A-Za-z0-9_-]*$/.test(value)
@@ -247,21 +254,21 @@ function validClusterTopology(value: unknown, nowMs = Date.now()): value is Reco
   for (const group of value.groups) {
     if (!record(group) || !nonEmptyString(group.id) || groupIds.has(group.id)
       || !nonEmptyString(group.label) || !nonEmptyString(group.labelEn) || !nonEmptyString(group.color)
-      || !nonEmptyString(group.icon) || !nonEmptyString(group.blurb)) return false
+      || !nonEmptyString(group.icon) || !text(group.blurb)) return false
     groupIds.add(group.id)
   }
   const namespaceNames = new Set<string>()
   for (const namespace of value.namespaces) {
     if (!record(namespace) || !nonEmptyString(namespace.name) || namespaceNames.has(namespace.name)
-      || typeof namespace.group !== 'string' || !groupIds.has(namespace.group) || !nonEmptyString(namespace.role)
+      || typeof namespace.group !== 'string' || !groupIds.has(namespace.group) || !text(namespace.role)
       || typeof namespace.declared !== 'boolean') return false
     namespaceNames.add(namespace.name)
   }
   const validStatus = (status: unknown) => typeof status === 'string' && ['live', 'partial', 'planned'].includes(status)
   const layerIds = new Set<string>()
   for (const layer of value.securityLayers) {
-    if (!record(layer) || !nonEmptyString(layer.id) || !nonEmptyString(layer.label) || !validStatus(layer.status)
-      || layerIds.has(layer.id) || !nonEmptyString(layer.icon) || !nonEmptyString(layer.analogy) || !nonEmptyString(layer.summary)
+    if (!record(layer) || !nonEmptyString(layer.id) || !text(layer.label) || !validStatus(layer.status)
+      || layerIds.has(layer.id) || !nonEmptyString(layer.icon) || !text(layer.analogy) || !text(layer.summary)
       || !Array.isArray(layer.controls) || !layer.controls.every(nonEmptyString)
       || !Array.isArray(layer.adr) || !layer.adr.every(nonEmptyString)
       || !(layer.detailRoute === undefined || validDetailRoute(layer.detailRoute))) return false
@@ -269,16 +276,18 @@ function validClusterTopology(value: unknown, nowMs = Date.now()): value is Reco
   }
   const stepIds = new Set<string>()
   for (const step of value.imageAnatomy.steps) {
-    if (!record(step) || !nonEmptyString(step.id) || !nonEmptyString(step.label) || !validStatus(step.status)
-      || stepIds.has(step.id) || !nonEmptyString(step.detail)
+    if (!record(step) || !nonEmptyString(step.id) || !text(step.label) || !validStatus(step.status)
+      || stepIds.has(step.id) || !text(step.detail)
       || !Array.isArray(step.adr) || !step.adr.every(nonEmptyString)) return false
     stepIds.add(step.id)
   }
   const planItems = new Set<string>()
   for (const row of value.planVsReality) {
-    if (!record(row) || !nonEmptyString(row.item) || planItems.has(row.item)
-      || !nonEmptyString(row.plan) || !nonEmptyString(row.reality) || !validStatus(row.status)) return false
-    planItems.add(row.item)
+    // Bilingual item names key on the Czech text — it is the unique identifier in the curated data.
+    const itemKey = typeof row.item === 'string' ? row.item : row.item.cs
+    if (!record(row) || !text(row.item) || planItems.has(itemKey)
+      || !text(row.plan) || !text(row.reality) || !validStatus(row.status)) return false
+    planItems.add(itemKey)
   }
   return counts.namespaces === value.namespaces.length
 }

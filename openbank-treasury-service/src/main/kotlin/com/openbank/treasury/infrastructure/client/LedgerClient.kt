@@ -5,13 +5,16 @@
 package com.openbank.treasury.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonInclude
+import com.openbank.libs.close.AccountingDayClosed
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.web.SyntheticTaintClientFilter
+import com.openbank.treasury.application.port.out.AccountingDayClosedException
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.PostedJournal
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.ResolvedAccount
 import com.openbank.treasury.domain.model.Side
+import com.openbank.treasury.infrastructure.close.TreasuryCloseJobs
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -21,6 +24,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
@@ -136,9 +140,31 @@ class LedgerPostingAdapter @Inject constructor(
             },
             createdBy = SYSTEM_ACTOR,
         )
-        val response = client.postJournal(request).awaitSuspending()
+        val response = try {
+            client.postJournal(request).awaitSuspending()
+        } catch (e: WebApplicationException) {
+            val status = e.response?.status ?: 0
+            val body = runCatching { e.response?.readEntity(String::class.java) }.getOrNull()
+            if (AccountingDayClosed.isClosedDayRejection(status, body)) {
+                throw AccountingDayClosedException(
+                    "ledger day ${request.entryDate} is closed: ${spec.idempotencyKey} (value $valueDate) refused",
+                    e,
+                )
+            }
+            throw e
+        }
         return PostedJournal(response.id, resolvedAccounts(spec, response))
     }
+
+    /**
+     * #13883 (#14220 review): definitive ONLY for the ledger's coded `409 ACCOUNTING_DAY_CLOSED`, which
+     * `LedgerService.postJournalInternal` raises after its idempotency replay check found no journal
+     * under the key. Every other answer is unknown: a bare status (400/401/403/404, a gateway's 4xx)
+     * says nothing about the key, and the ledger's other post refusals (GL validation 422, frozen or
+     * closed period 409) carry no error code to tell them from a proxy's. The journal API has no
+     * lookup by idempotency key, so absence cannot be confirmed any other way.
+     */
+    override fun isDefinitiveRefusal(failure: Throwable): Boolean = TreasuryCloseJobs.isClosedDayRejection(failure)
 
     /**
      * Where each leg landed, from the ledger's own answer (on an idempotent replay: the ORIGINAL

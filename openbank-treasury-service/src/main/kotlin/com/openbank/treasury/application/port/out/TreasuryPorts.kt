@@ -6,6 +6,7 @@ package com.openbank.treasury.application.port.out
 
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
+import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CurveSetView
 import com.openbank.treasury.domain.model.Deal
@@ -15,6 +16,7 @@ import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ResolvedAccount
 import io.smallrye.mutiny.Uni
 import java.math.BigDecimal
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -24,6 +26,13 @@ class DealNotFoundException(dealId: UUID) : NoSuchElementException("deal $dealId
 
 /** A deal write was computed from a copy older than the stored row. Mapped to 409 DEAL_CHANGED. */
 class DealChangedException(message: String) : IllegalStateException(message)
+
+/**
+ * The ledger refused a posting because its accounting day no longer accepts postings (`409
+ * ACCOUNTING_DAY_CLOSED`, ADR-0342 D4): a close outcome the day's record reports as REFUSED, never
+ * a retryable error.
+ */
+class AccountingDayClosedException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
 /** Raised when a deal names a counterparty not in the master. Mapped to 400 via IllegalArgumentException. */
 class UnknownCounterpartyException(id: String) : IllegalArgumentException("unknown counterparty '$id'")
@@ -68,6 +77,20 @@ interface DealRepository {
         schedule: ScheduleWrite? = null,
         /** Further outbox events of the same change (e.g. treasury.cashflow.generated). */
         extraEvents: List<DealEvent> = emptyList(),
+        /**
+         * #13883: an unposted reversal's claim. In the SAME transaction as the state change it must
+         * still be OPEN (locked FOR UPDATE; else [DealChangedException], nothing written) and is then
+         * released (REFUSED: no journal exists under it), so a claim released by a reconciler can
+         * never be followed by the state change it was guarding.
+         */
+        releaseClaim: String? = null,
+        /**
+         * A limit-consuming write (submit, approve): in the SAME transaction, after locking the deal
+         * row, take the (counterparty, limit currency) line lock and re-measure the others' exposure;
+         * past [ExposureGuard.maxOthers] it refuses (CorrectionLimitBreachedException, 422) instead of
+         * committing a joint breach.
+         */
+        limitGuard: ExposureGuard? = null,
     ): Deal
 
     /** The command previously recorded under [key], if any. */
@@ -133,6 +156,160 @@ interface LedgerPostingPort {
      * legs were ORIGINALLY resolved to.
      */
     suspend fun post(spec: JournalSpec, valueDate: LocalDate, description: String): PostedJournal
+
+    /**
+     * True only when [failure] (thrown by [post]) is an EXPLICIT ledger business refusal raised after
+     * the ledger's idempotency replay check found no journal under the key (#13883). Anything else
+     * (no answer, 5xx, 400/401/403/404, a 4xx without a known ledger error code) is unknown and
+     * false: the ledger may hold the journal, and the intent stays open.
+     */
+    fun isDefinitiveRefusal(failure: Throwable): Boolean = false
+}
+
+/** The lifecycle command a posting intent belongs to (#13883). */
+enum class PostingIntentAction { SETTLE, MATURE, REVERSE, ACCRUE }
+
+/**
+ * OPEN = decided and not applied; COMPLETED = applied with its state change; REFUSED = the ledger's
+ * coded refusal of a first attempt (no journal exists); CLOSED_BY_OPERATOR = a person released the
+ * hold. A journal MAY exist under a CLOSED_BY_OPERATOR key, so a re-issue keeps its first value day.
+ */
+enum class PostingIntentStatus { OPEN, COMPLETED, REFUSED, CLOSED_BY_OPERATOR }
+
+/**
+ * A ledger post treasury decided to make (#13883), written BEFORE the ledger is contacted and keyed
+ * by the journal's idempotency key. It carries what the reconciler needs to re-run the command.
+ */
+data class PostingIntent(
+    val idempotencyKey: String,
+    val dealId: UUID,
+    val event: PostingEvent,
+    val action: PostingIntentAction,
+    val valueDate: LocalDate,
+    val actor: Actor,
+    val reason: String? = null,
+    val commandKey: String? = null,
+    val createdAt: Instant,
+    val attempts: Int = 0,
+    val lastError: String? = null,
+    val status: PostingIntentStatus = PostingIntentStatus.OPEN,
+    /**
+     * True when THIS call created the intent or reopened a REFUSED one, i.e. no earlier attempt of it
+     * can have reached the ledger. Only a fresh intent may be closed REFUSED on a ledger refusal.
+     */
+    val fresh: Boolean = false,
+)
+
+/** What an operator's close did (#13883): closed it, found none OPEN, or found it still in flight. */
+enum class PostingIntentCloseOutcome {
+    CLOSED,
+    NOT_OPEN,
+    IN_FLIGHT,
+
+    /** The Idempotency-Key was recorded by another close meanwhile (unique on the history row). */
+    DUPLICATE_KEY,
+}
+
+/** An operator close as recorded under its Idempotency-Key, with the closed intent's CURRENT status. */
+data class RecordedClose(val intentKey: String, val fingerprint: String, val intentStatus: PostingIntentStatus)
+
+/** OPEN intents at a glance, for the gauges: how many, and since when the oldest has waited. */
+data class OpenIntentSummary(val count: Int, val oldestCreatedAt: Instant?)
+
+/**
+ * Posting intents (#13883). An intent is COMPLETED by [DealRepository.save] in the transaction that
+ * stores the journal and the state change; while it is OPEN it holds its value day's close report.
+ */
+@Suppress("TooManyFunctions")
+interface PostingIntentPort {
+    /**
+     * Records [intent] if its key has none yet, or reopens one closed REFUSED as a new attempt by
+     * this caller (its value day included: a refused post left no journal); returns the stored intent
+     * with [PostingIntent.fresh] set. A CLOSED_BY_OPERATOR intent is reopened NOT fresh with its first
+     * value day (a journal may exist). An OPEN or COMPLETED intent is returned as stored, not fresh.
+     * Every transition appends to the intent's history.
+     *
+     * Null when the deal already has another OPEN reversal, maturity or accrual-day intent: the
+     * database admits one at a time per deal, and the caller that comes second must not post.
+     */
+    suspend fun open(intent: PostingIntent): PostingIntent?
+
+    /** The ledger's coded refusal of a fresh intent: closes it, and it no longer holds its day. */
+    suspend fun refuse(key: String, reason: String)
+
+    /** A reconciliation attempt failed: counted with its cause, claim released, still OPEN. */
+    suspend fun failed(key: String, error: String)
+
+    /**
+     * Too old to resume as its stored actor: marked escalated (cause recorded, claim released), still
+     * OPEN and holding its day, and never claimed again, so it cannot starve resumable intents.
+     */
+    suspend fun escalate(key: String, reason: String)
+
+    /**
+     * Claims OPEN, non-escalated intents created before [cutoff] that no live claim holds, oldest first, at most
+     * [limit], leasing them for [lease] (`FOR UPDATE SKIP LOCKED`): two reconcilers never take one row.
+     */
+    suspend fun claimOpen(cutoff: Instant, lease: Duration, limit: Int): List<PostingIntent>
+
+    /** OPEN intents of one deal. */
+    suspend fun openFor(dealId: UUID): List<PostingIntent>
+
+    /** Intents of one deal that may hold an unapplied journal: OPEN or CLOSED_BY_OPERATOR. */
+    suspend fun unresolvedFor(dealId: UUID): List<PostingIntent>
+
+    /**
+     * True while the deal must not accrue (#14220 review): it has an OPEN intent, or a reversal or
+     * maturity intent an operator CLOSED. A closed one may have a journal in the ledger that
+     * treasury never applied (the deal still reads SETTLED); accruing past it would post interest
+     * no reversal offsets. The deal stays deferred until the command is re-issued and completes.
+     */
+    suspend fun blocksAccrual(dealId: UUID): Boolean
+
+    suspend fun summary(): OpenIntentSummary
+
+    /**
+     * An operator closes an OPEN intent that cannot complete: CLOSED_BY_OPERATOR, with who and why
+     * recorded on the row and appended to its history. NOT_OPEN when no OPEN intent has [key];
+     * IN_FLIGHT when it may still be posting: created at or after [createdBefore], or under a live claim.
+     */
+    suspend fun closeByOperator(
+        key: String,
+        actor: Actor,
+        reason: String,
+        createdBefore: Instant,
+        /** The client's Idempotency-Key, recorded with the close (unique). */
+        commandKey: String? = null,
+        /** The request fingerprint a replay under [commandKey] must match. */
+        fingerprint: String? = null,
+    ): PostingIntentCloseOutcome
+
+    /** The close recorded under [commandKey] (its intent, fingerprint and the intent's status now), or null. */
+    suspend fun closedBy(commandKey: String): RecordedClose?
+
+    companion object {
+        /** No intent store: the pre-#13883 behaviour. Unit tests of the lifecycle alone only. */
+        val NONE = object : PostingIntentPort {
+            override suspend fun open(intent: PostingIntent): PostingIntent? = intent.copy(fresh = true)
+            override suspend fun refuse(key: String, reason: String) = Unit
+            override suspend fun failed(key: String, error: String) = Unit
+            override suspend fun escalate(key: String, reason: String) = Unit
+            override suspend fun claimOpen(cutoff: Instant, lease: Duration, limit: Int) = emptyList<PostingIntent>()
+            override suspend fun openFor(dealId: UUID) = emptyList<PostingIntent>()
+            override suspend fun unresolvedFor(dealId: UUID) = emptyList<PostingIntent>()
+            override suspend fun blocksAccrual(dealId: UUID) = false
+            override suspend fun summary() = OpenIntentSummary(0, null)
+            override suspend fun closeByOperator(
+                key: String,
+                actor: Actor,
+                reason: String,
+                createdBefore: Instant,
+                commandKey: String?,
+                fingerprint: String?,
+            ) = PostingIntentCloseOutcome.NOT_OPEN
+            override suspend fun closedBy(commandKey: String): RecordedClose? = null
+        }
+    }
 }
 
 /**
@@ -171,6 +348,16 @@ fun interface CurveSetPort {
 /** This service's outbox table; `persistInTransaction` chains inside the aggregate's transaction. */
 interface TreasuryOutboxRepository : OutboxRepository {
     fun persistInTransaction(message: OutboxMessage): Uni<Void>
+}
+
+/** ADR-0344 D7: the per-accounting-day completion record each treasury run writes. */
+interface DayCompletionRepository {
+    suspend fun record(r: com.openbank.treasury.domain.model.DayStepRecord)
+
+    suspend fun day(date: LocalDate): List<com.openbank.treasury.domain.model.DayStepRecord>
+
+    /** Every recorded step of the days in [from]..[to] (inclusive): the day-close reporter's input. */
+    suspend fun between(from: LocalDate, to: LocalDate): List<com.openbank.treasury.domain.model.DayStepRecord>
 }
 
 /** A journal the ledger holds for a posted [JournalSpec]: its id and where each leg landed. */

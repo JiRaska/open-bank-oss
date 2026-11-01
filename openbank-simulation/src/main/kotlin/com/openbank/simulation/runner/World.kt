@@ -6,6 +6,7 @@ package com.openbank.simulation.runner
 
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.SpendReservation
+import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.sdd.domain.model.SddMandate
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.settlement.domain.model.Settlement
@@ -62,6 +63,12 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // here so the Layer-3 invariants can assert every one reaches a terminal state.
     val sepaPayments = mutableListOf<SepaPayment>()
     val settlements = mutableListOf<Settlement>()
+
+    // Issue #14366 (Test Intelligence simulation gap, money path): the REAL `DomesticPayment`
+    // (domestic-payment) domain aggregate driven by DomesticClearingScenario, kept here so the
+    // Layer-3 invariants can assert every domestic payment reaches a terminal state. Same
+    // convention as sepaPayments/settlements above.
+    val domesticPayments = mutableListOf<DomesticPayment>()
 
     // ADR-0143 phase 2d/2e: the billing fee-conservation invariant's state (Σ fees assessed == Σ
     // fee journals posted per cycle/account/fee/currency). Populated by FeeBillingScenario every

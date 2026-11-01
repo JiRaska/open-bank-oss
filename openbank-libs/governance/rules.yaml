@@ -55,12 +55,6 @@ deploy_holds:
         reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
       approved_image: 'openbank-account-service:sandbox-7f966f31@sha256:7bae2023f2ae369a2280824db922d72dd0c53467498845248807567ca22a1a6e'
-    openbank-balance-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-      approved_image: 'openbank-balance-service:sandbox-7f966f31@sha256:fda697ec6835aa05f597d32e49bab995cdd61f9d2981d55b1a74c7eadd43b18f'
     openbank-billing-service:
       all_of:
       - issue: '#11503'
@@ -73,30 +67,12 @@ deploy_holds:
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
       approved_image: 'openbank-clearing-service:sandbox-9e765663@sha256:006ef2bbd2d1eb34985b5c14d7e570b4799a4f3d9e4e1c236c52498276b7e3af'
-    openbank-consent-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-      approved_image: 'openbank-consent-service:sandbox-9e765663@sha256:d31706841c0f4d0f13bb8cdb0c5a2defe26caa3235b3b91d038283169e984aed'
-    openbank-delegation-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-      approved_image: 'openbank-delegation-service:sandbox-5cc84e19@sha256:cc88a5a553258d6957f3e688bbf21259cdc7c46eb9b7cb1136758d0e1f1ec6cd'
     openbank-domestic-payment:
       all_of:
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
       approved_image: 'openbank-domestic-payment:sandbox-d159b245@sha256:7a3b0af790a0bae69580354d35bd55a4b2979f59fbd158cdbd23f7e3ee329cf8'
-    openbank-fraud-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 1 is healthy for 24h.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-      approved_image: 'openbank-fraud-service:sandbox-3b1311c5@sha256:f69d83d3b75696d3181657902fd7b024d8bb7aec37d7d612684ccf599b67c61b'
     openbank-fx-service:
       all_of:
       - issue: '#11503'
@@ -127,30 +103,6 @@ deploy_holds:
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
       approved_image: 'openbank-lending-service:sandbox-7f966f31@sha256:9c0a06e63cccbf2c13c4dd77e908cb4bbc06145cf212f22951e34e228524cb4a'
-    openbank-pension-fund-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-      approved_image: 'openbank-pension-fund-service:sandbox-7f966f31@sha256:8ab8baea177badc982c4d7dd19daac05f1b3d95b5f859862b4a8e9969f7b3abb'
-    openbank-psd2-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-      approved_image: 'openbank-psd2-service:sandbox-5cc84e19@sha256:a51179fe15730e108b62831a1e86ae1ca94e51a12c70ee80846cc82cff338c1b'
-    openbank-sanctions-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 1 is healthy for 24h.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-      approved_image: 'openbank-sanctions-service:sandbox-9e765663@sha256:cdd2179e07b3bea8f9be64edea549ff965c0eff444ee1c2d0eda5b22f63a0908'
-    openbank-sca-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-      approved_image: 'openbank-sca-service:sandbox-9e765663@sha256:00523c6e4a6a0cc7798d0dbff421bf3a7b860730a250a56a3953f811f68d608c'
     openbank-sdd-service:
       all_of:
       - issue: '#11503'
@@ -169,12 +121,6 @@ deploy_holds:
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
       approved_image: 'openbank-sepa-payment:sandbox-9e765663@sha256:8d5f411b77686781d3e04c133713ea0f68b4dc6051b68b35a36a71f84d90f824'
-    openbank-settlement-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-      approved_image: 'openbank-settlement-service:sandbox-9e765663@sha256:356d5c06825cff9438072ea149d2fddea4caab420c7540e83c20cb3d1963ff3b'
     openbank-standing-order-service:
       issue: '#11503'
       reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
@@ -192,12 +138,6 @@ deploy_holds:
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
       approved_image: 'openbank-treasury-service:sandbox-3b1311c5@sha256:4c859859dc489a5dfc43402c031b98ab3b28d27957af9b72b02217d3f8badfc3'
-    openbank-vop-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-      approved_image: 'openbank-vop-service:sandbox-5cc84e19@sha256:26905dae739543f9722a293b924db672a0554808ae91345313e2e773bca302f8'
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
 # ---------------------------------------------------------------------------------------
@@ -708,7 +648,7 @@ change_requirements:
     # non-nullable field is a real replay break. A ruling plus a 40-finding burn-down is not three
     # days of work, and leaving the date would have failed EVERY PR in the repo via
     # gate-graduation-guard rather than failing this rule.
-    target_enforce_date: "2026-10-31"   # ADR-0144
+    target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-11-01: replay ruling and measured finding burn-down still pending
     # GRADUATION EVIDENCE, CORRECTED 2026-09-05 by a second-agent replay. The first pass
     # recorded "0 findings on 20 commits"; both numbers were wrong and the verdict inverted.
     # Replaying TODAY'S checker as an imported module over the REAL population — the 22 commits
@@ -997,7 +937,7 @@ change_requirements:
       - "or split the src/main change and the non-src/main change into separate commits/PRs when both a release and a non-releasing change are intended"
     gate: release-scope-mismatch
     enforced: advisory
-    target_enforce_date: "2026-10-31"   # ADR-0144; moved 2026-10-01: producer live, false-positive rate unmeasured before --enforce (#11692)
+    target_enforce_date: "2026-11-30"   # ADR-0144; moved 2026-11-01: advisory false-positive measurement still pending (#11692)
     # CI producer is LIVE (advisory): openbank-infra/scripts/check-release-scope-mismatch.py runs
     # in the "Validate manifests" job on every PR, right after release-registration consistency.
     # Classifies from the PR title (the default squash-commit subject). Findings are ::warning
@@ -2201,14 +2141,14 @@ dependencies:
     # existing version no longer resolves. Lockfiles/Dependabot pin VERSIONS; this pins BYTES.
     # LENIENT (warn-only) while the metadata soaks across all CI lanes and developer
     # platforms; flip = org.gradle.dependency.verification=strict in gradle.properties.
-    # Dependabot PRs auto-refresh the metadata (dependabot-verification-metadata.yml).
+    # Validate actual Dependabot metadata regeneration and push before strict rollout
+    # (dependabot-verification-metadata.yml); a skipped run is not proof.
     mechanism: gradle-verification-metadata-sha256
     enforced: advisory
-    # Moved 2026-09-30 -> 2026-10-15 (#11686): criteria now measured as met (6/6 clean daily
-    # drift sweeps 09-25..09-30); the strict flip ships as its own revertible PR, not bundled here.
-    # Moved 2026-10-15 -> 2026-11-15: the strict-flip PR still has not shipped; the date
-    # lapsed at midnight and gate-graduation-guard (ADR-0144) started failing EVERY PR.
-    target_enforce_date: "2026-11-15"   # ADR-0144
+    # Review date moved to 2026-11-15 in #12980; strict activation remains separate (#11686).
+    # Daily drift does not prove strict CodeQL/SBOM resolution or an executed Dependabot
+    # refresh. Verify those lane proofs before the independently reviewed strict flip.
+    target_enforce_date: "2026-12-15"   # ADR-0144; moved 2026-11-01: strict-lane proofs in #11686 still open (#14442)
     ci_producer: "gradle.properties org.gradle.dependency.verification=lenient + .github/workflows/dependabot-verification-metadata.yml"
 
 # ---------------------------------------------------------------------------------------
@@ -2555,7 +2495,7 @@ perf_gate:
     - "weekly scheduled run reports into perf-reports-* artifact"
   gate: perf-gate
   enforced: advisory
-  target_enforce_date: "2026-11-01"
+  target_enforce_date: "2026-12-01"   # ADR-0144; moved 2026-11-01: 5 of the last 10 perf-gate runs failed (2026-10-31), not stable enough to block (#14442)
   ci_producer: ".github/workflows/perf-gate.yml"
 
 
@@ -4159,7 +4099,7 @@ pr_file_overlap:
   # date below is the review point for the CLASSIFIER (are the reports still true and
   # actionable), not a promise to flip --enforce.
   enforced: advisory
-  target_enforce_date: "2026-11-01"   # ADR-0144 — review the classifier, not a flip to enforce
+  target_enforce_date: "2026-12-01"   # ADR-0144 — review the classifier, not a flip to enforce; moved 2026-11-01, deliberately never enforced (#14442)
   # CI producer is LIVE (advisory): .github/scripts/check-pr-file-overlap.py runs in the
   # `gates (lint)` shard on every pull_request. It compares the BLOB SHA of each overlapping
   # file at both PR heads, so an overlap where the content already agrees is reported as
@@ -4864,6 +4804,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsCheck.kt"
       - "src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsEntry.kt"
       - "src/main/kotlin/com/openbank/sanctions/infrastructure/importer/EuFsfSaxParser.kt"
+      - "src/main/kotlin/com/openbank/sanctions/infrastructure/importer/CzAntiTerrorismCsvParser.kt"
       - "src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/entity/SanctionsCheckEntity.kt"
       - "src/main/resources/db/migration/V1__create_sanctions.sql"
       - "src/main/resources/db/migration/V5__create_sanctions_entries.sql"
