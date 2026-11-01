@@ -14,6 +14,7 @@ import com.openbank.simulation.scenario.DomesticClearingScenario
 import com.openbank.simulation.scenario.FeeBillingScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
+import com.openbank.simulation.scenario.PensionLifecycleScenario
 import com.openbank.simulation.scenario.SctInstSettlementScenario
 import com.openbank.simulation.scenario.SddCollectionScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
@@ -68,6 +69,13 @@ class SimulationRunner(
             // clearing-cycle domain-class binding into the same seeded run so it shares the
             // fault profile and is checked by the same invariant sweep every step.
             ClearingCycleScenario.step(world)
+            // Issue #14366 (Test Intelligence simulation gap, money path): interleave the
+            // pension lifecycle path — REAL PensionContract lifecycle, append-only Contribution
+            // credits and statutory StateContributionReturn obligations — so it shares the fault
+            // profile and is checked by the pensionContractCompleteness /
+            // pensionReturnTimeliness invariants.
+            PensionLifecycleScenario.step(world)
+            context.scheduler.drain()
             // Issue #14366 (Test Intelligence simulation gap, money path): interleave the SEPA
             // INSTANT + settlement domain-class binding into the same seeded run so it shares
             // the fault profile and is checked by the same invariant sweep every step.
