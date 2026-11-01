@@ -47,7 +47,7 @@ Generally **not applicable** to corporate registry data. The only field that cou
 
 ### Data flows out
 - → **psd2-service** (synchronous API): authorization decision (`tppId`, `authorized`, `roles`, `reason`). No customer PII.
-- → **Kafka** `openbank.tpp.registry.event` (intra-OpenBank, e.g. audit): registration/blacklist events **once wired** — currently the outbox transport exists but no events are emitted.
+- → **Kafka** `openbank.tpp.registry.event` (intra-OpenBank): `TPP_REGISTERED` / `TPP_BLACKLISTED` events from the transactional outbox, consumed by audit-service onto the audit trail (#13177). No customer PII.
 
 No data leaves the EU/EEA region.
 

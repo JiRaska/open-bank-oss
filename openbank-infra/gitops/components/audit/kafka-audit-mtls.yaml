@@ -208,6 +208,14 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # #13177: tpp-registry-service holds Write on this topic, so it is ACL-guarded and the
+      # audit trail needs an explicit Read grant to receive TPP register changes.
+      - resource:
+          type: topic
+          name: openbank.tpp.registry.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       - resource:
           type: topic
           name: openbank.sepa.instant.events
