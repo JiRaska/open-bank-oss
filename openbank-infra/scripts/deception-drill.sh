@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Deception drill (ADR-0357): fire every tripwire once, on purpose, and measure how long each
+# Deception drill (ADR-0359): fire every tripwire once, on purpose, and measure how long each
 # takes to reach its alerting state. A detection control is only as real as its last
 # known-positive; this script is that known-positive, and its output is the MTTD evidence.
 #

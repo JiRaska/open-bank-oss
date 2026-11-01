@@ -11,7 +11,7 @@ followup: "#14163 — layers 0-1 and the drill ship; regional EventBridge covera
 summary: "Deception is a layered programme on existing telemetry: edge decoys, then cloud and cluster honeytokens whose any use is an alert, each mapped to ATT&CK, gated as wired and powerless, and proven by a timed drill. Under 1 USD/month."
 ---
 
-# ADR-0357 — Deception and detection-validation programme: edge decoys, honeytokens, timed drills
+# ADR-0359 — Deception and detection-validation programme: edge decoys, honeytokens, timed drills
 
 ## Context
 

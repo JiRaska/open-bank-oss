@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-Honeytokens must stay wired to a tripwire, and must stay powerless (ADR-0357, phase 1).
+Honeytokens must stay wired to a tripwire, and must stay powerless (ADR-0359, phase 1).
 
 A honeytoken fails in two silent ways, and this gate catches both.
 

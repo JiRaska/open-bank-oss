@@ -1,4 +1,4 @@
-# Deception programme, phase 1: cloud and cluster honeytokens (ADR-0357).
+# Deception programme, phase 1: cloud and cluster honeytokens (ADR-0359).
 #
 # WHY. Edge decoys (gitops observability/httproute-edge-decoys.yaml) see scanners, which every
 # public host sees. What separates a nuisance from an incident is what happens AFTER initial
@@ -41,7 +41,7 @@ locals {
   canary_user_name = "svc-backup-replication"
   deception_tags = {
     Purpose = "deception-honeytoken"
-    Adr     = "0357"
+    Adr     = "0359"
   }
 }
 
@@ -164,7 +164,7 @@ locals {
     }
   })
   canary_input_template = <<-EOT
-    "HONEYTOKEN USED (ADR-0357): the canary AWS key <key> (user ${local.canary_user_name}) called <source>:<event> in <region> from <ip> (<ua>) at <time>. No legitimate process holds this key: treat as credential compromise. Find where it leaked from the placement list in #14163, rotate anything stored alongside it, and open an incident."
+    "HONEYTOKEN USED (ADR-0359): the canary AWS key <key> (user ${local.canary_user_name}) called <source>:<event> in <region> from <ip> (<ua>) at <time>. No legitimate process holds this key: treat as credential compromise. Find where it leaked from the placement list in #14163, rotate anything stored alongside it, and open an incident."
   EOT
   canary_input_paths = {
     key    = "$.detail.userIdentity.accessKeyId"
@@ -179,7 +179,7 @@ locals {
 
 resource "aws_cloudwatch_event_rule" "canary_key_used" {
   name          = "openbank-honeytoken-canary-key-used"
-  description   = "ADR-0357: any API call signed by the canary access key."
+  description   = "ADR-0359: any API call signed by the canary access key."
   event_pattern = local.canary_event_pattern
   state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
   tags          = local.deception_tags
@@ -197,7 +197,7 @@ resource "aws_cloudwatch_event_target" "canary_key_used" {
 resource "aws_cloudwatch_event_rule" "canary_key_used_us_east_1" {
   provider      = aws.us_east_1
   name          = "openbank-honeytoken-canary-key-used"
-  description   = "ADR-0357: any API call signed by the canary access key (global endpoints)."
+  description   = "ADR-0359: any API call signed by the canary access key (global endpoints)."
   event_pattern = local.canary_event_pattern
   state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
   tags          = local.deception_tags
@@ -240,7 +240,7 @@ resource "aws_cloudwatch_log_metric_filter" "honey_sa_used" {
 
 resource "aws_cloudwatch_metric_alarm" "honey_sa_used" {
   alarm_name          = "openbank-honeytoken-sa-used"
-  alarm_description   = "HONEYTOKEN USED (ADR-0357): a request authenticated as system:serviceaccount:arc-runners:deploy-prod reached the EKS API. Nothing legitimate holds this token. Query the EKS audit log for user.username = that SA to get sourceIPs, userAgent and the attempted verbs, then treat the pod or host it came from as compromised."
+  alarm_description   = "HONEYTOKEN USED (ADR-0359): a request authenticated as system:serviceaccount:arc-runners:deploy-prod reached the EKS API. Nothing legitimate holds this token. Query the EKS audit log for user.username = that SA to get sourceIPs, userAgent and the attempted verbs, then treat the pod or host it came from as compromised."
   namespace           = "OpenBank/Deception"
   metric_name         = "HoneytokenServiceAccountUsed"
   statistic           = "Sum"
