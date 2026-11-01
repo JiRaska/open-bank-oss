@@ -5,10 +5,10 @@ package com.openbank.notification.integration
 
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
 import com.openbank.notification.infrastructure.outbox.NotificationOutboxDispatcher
 import com.openbank.notification.infrastructure.persistence.repository.NotificationOutboxRepositoryImpl
-import com.openbank.notification.it.PostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager

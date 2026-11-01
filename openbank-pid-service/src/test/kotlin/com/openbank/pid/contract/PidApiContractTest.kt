@@ -6,6 +6,7 @@ package com.openbank.pid.contract
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.agroal.api.AgroalDataSource
 import io.quarkus.arc.Arc
 import io.quarkus.test.common.QuarkusTestResource
@@ -101,7 +102,7 @@ import jakarta.enterprise.inject.Any as CdiAny
  */
 @QuarkusTest
 @QuarkusTestResource(PidApiContractTest.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.pid.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class PidApiContractTest {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
