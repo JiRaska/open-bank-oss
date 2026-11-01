@@ -7,8 +7,8 @@ import com.openbank.ledger.infrastructure.schedule.AccountingDayScheduler
 import com.openbank.ledger.infrastructure.schedule.FxRevaluationScheduler
 import com.openbank.ledger.infrastructure.schedule.TieOutFreshnessWatchdog
 import com.openbank.ledger.infrastructure.schedule.TieOutScheduler
-import com.openbank.ledger.it.PostgresTestResource
 import com.openbank.libs.observability.WorkflowLivenessMetrics
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest

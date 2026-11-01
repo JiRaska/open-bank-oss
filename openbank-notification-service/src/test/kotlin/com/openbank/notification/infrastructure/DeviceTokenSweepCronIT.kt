@@ -1,7 +1,7 @@
 package com.openbank.notification.infrastructure
 
 import com.openbank.libs.observability.WorkflowLivenessMetrics
-import com.openbank.notification.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
