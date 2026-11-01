@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Deploy window: at most one bot deploy commit lands on main per window.
+"""Deploy window: at most one bot deploy commit PER KIND (gitops / admin-ui) lands on main per window.
 
 WHY. `main-protection` requires PR branches to be up to date with main. Every bot deploy
 commit (`chore(gitops): auto-deploy ...`, `chore(admin-ui): deploy ...`) therefore makes every
@@ -14,7 +14,7 @@ moment a deploy PR's auto-merge is ARMED does:
                 never arm directly, because independent reads can both see no armed PR.
   * `flush`   — the sole auto-merge writer, called by deploy-window-flush.yml after either
                 deploy workflow completes and on a short recovery cron. Picks the OLDEST deferred
-                deploy PR once the window has elapsed and nothing is armed. The caller re-runs
+                deploy PR of each kind once that kind's window has elapsed and nothing of that kind is armed. The caller re-runs
                 supersede-deploy-prs.sh (ancestry + coverage) on it before arming.
                 A successful manual producer run expedites only its matching PR.
   * `carry`   — called by auto-deploy.yml's rewrite step. Re-applies the image pins of every
@@ -90,36 +90,60 @@ def manual_deploy_head(event: dict) -> str | None:
     return producer[1] + sha
 
 
-def flush(prs: list[dict], now: int, last_deploy: int | None, window: int,
-          manual_head: str | None = None) -> dict | None:
-    """Return the deferred PR to arm now, or None. prs: [{number, head, created_at, armed}]."""
+def _kind(head: str) -> str:
+    return next(x for x in DEPLOY_PREFIXES if head.startswith(x))
+
+
+def flush_candidates(prs: list[dict], now: int, last_deploy: int | None | dict[str, int | None],
+                     window: int, manual_head: str | None = None) -> list[dict]:
+    """Deferred PRs the caller may try to arm, in order; it arms the first that supersede admits.
+
+    Each deploy kind (gitops / admin-ui) is its own LANE: its own window, measured from its own
+    last deploy commit, and its own single-armed-PR guard. One kind never waits on the other.
+    2026-10-24..30 a held, then stale, gitops PR refused the shared lane on every run and
+    admin-ui deployed 9 times in 10 days against 51 in the 19 before (#14238 follow-up).
+    `last_deploy` is either one epoch shared by both kinds (legacy callers, self-tests) or a
+    {prefix: epoch} map from last_deploy_by_kind.
+    """
     # Explicit maintainer intent outranks both the timer and manual producer completion.
     # Draft/blocked repairs also defer: only closing the PR or removing the label releases it.
     if any(p.get("repair_priority") and p.get("state", "open") == "open" for p in prs):
-        return None
+        return []
     deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES)]
-    if any(p.get("armed") for p in deploy):
-        return None
-    pending = sorted((p for p in deploy if not p.get("armed")), key=lambda p: (p["created_at"], p["number"]))
+    armed_kinds = {_kind(p["head"]) for p in deploy if p.get("armed")}
+    pending = sorted((p for p in deploy if not p.get("armed") and _kind(p["head"]) not in armed_kinds),
+                     key=lambda p: (p["created_at"], p["number"]))
     if not pending:
-        return None
+        return []
     if manual_head:
         manual = next((p for p in pending if p["head"] == manual_head), None)
         if manual:
             # A newer PR of the same kind may already supersede this run. Never expedite a
             # stale pin merely because its source workflow was manually dispatched.
-            kind = next(x for x in DEPLOY_PREFIXES if manual_head.startswith(x))
-            newest = [p for p in pending if p["head"].startswith(kind)][-1]
+            newest = [p for p in pending if p["head"].startswith(_kind(manual_head))][-1]
             if newest is manual:
-                return manual
-    verdict, _ = decide("flush", now, last_deploy, False, window)
-    if verdict != "ARM":
-        return None
-    # The kind (gitops / admin-ui) that has waited longest goes first, and within it the NEWEST
-    # PR is armed: it carries every older pin of its kind, so supersede-deploy-prs.sh closes the
-    # older ones. Arming the oldest instead would hit supersede's STALE_KEEP refusal forever.
-    prefix = next(x for x in DEPLOY_PREFIXES if pending[0]["head"].startswith(x))
-    return [p for p in pending if p["head"].startswith(prefix)][-1]
+                return [manual]
+
+    def lane_open(kind: str) -> bool:
+        last = last_deploy.get(kind) if isinstance(last_deploy, dict) else last_deploy
+        return decide("flush", now, last, False, window)[0] == "ARM"
+
+    # The kind that has waited longest goes first, and within each kind the NEWEST PR is offered:
+    # it carries every older pin of its kind, so supersede-deploy-prs.sh closes the older ones.
+    # Arming the oldest instead would hit supersede's STALE_KEEP refusal forever.
+    kinds = []
+    for p in pending:
+        kind = _kind(p["head"])
+        if kind not in kinds and lane_open(kind):
+            kinds.append(kind)
+    return [[p for p in pending if p["head"].startswith(k)][-1] for k in kinds]
+
+
+def flush(prs: list[dict], now: int, last_deploy: int | None | dict[str, int | None], window: int,
+          manual_head: str | None = None) -> dict | None:
+    """Return the first deferred PR to try, or None. prs: [{number, head, created_at, armed}]."""
+    cands = flush_candidates(prs, now, last_deploy, window, manual_head)
+    return cands[0] if cands else None
 
 
 def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
@@ -206,12 +230,44 @@ def verify_pins(diff: str, fresh: Callable[[str, str], bool]) -> list[str]:
     return []
 
 
+def select_candidate(cands: list[dict], verify: Callable[[dict], list[str]],
+                     supersede: Callable[[dict], int]) -> dict | None:
+    """First candidate that passes freshness verify and supersede, or None.
+
+    Any per-kind refusal falls through to the next kind: kinds are independent, and a refused
+    PR is never armed. 2026-10-24..29 an owner hold, and from 2026-10-30 a stale audit-service
+    pin, refused the gitops kind on every run while admin-ui was never tried.
+    """
+    for c in cands:
+        stale = verify(c) if c["head"].startswith(DEPLOY_PREFIXES[0]) else []
+        if stale:
+            for pin in stale:
+                print(f"::error::stale GitOps image pin in #{c['number']}: {pin}", file=sys.stderr)
+        else:
+            rc = supersede(c)
+            if rc == 0:
+                return c
+            print(f"::warning::supersede refused #{c['number']} (rc {rc})", file=sys.stderr)
+        print(f"::warning::deploy PR #{c['number']} not armable - trying the next deploy kind.", file=sys.stderr)
+    return None
+
+
 def last_deploy_from_commits(commits: list[dict]) -> int | None:
     """commits: [{message, epoch}] newest-first, as the caller reads them from main."""
     for c in commits:
         if c["message"].startswith(DEPLOY_SUBJECTS):
             return int(c["epoch"])
     return None
+
+
+def last_deploy_by_kind(commits: list[dict]) -> dict[str, int | None]:
+    """{deploy-branch prefix: epoch of that kind's newest deploy commit}, per-lane windows."""
+    out: dict[str, int | None] = {p: None for p in DEPLOY_PREFIXES}
+    for c in commits:
+        for prefix, subject in zip(DEPLOY_PREFIXES, DEPLOY_SUBJECTS, strict=True):
+            if out[prefix] is None and c["message"].startswith(subject):
+                out[prefix] = int(c["epoch"])
+    return out
 
 
 # ── self-test ─────────────────────────────────────────────────────────────────────────────────
@@ -246,8 +302,48 @@ def self_test() -> int:
     prs2 = prs + [{"number": 14, "head": "chore/admin-ui-deploy-d", "created_at": "2026-09-30T10:09:00Z", "armed": False}]
     pick = flush(prs2, T, T - W, W)
     check("flush arms the NEWEST PR of that kind (it supersedes the older)", pick is not None and pick["number"] == 14)
-    check("flush never arms a second PR while one is armed",
-          flush(prs + [{"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}], T, None, W) is None)
+    # Head-of-line blocking (2026-10-24..29): an owner hold refused the gitops kind on every run
+    # and admin-ui was never tried. A refused kind must leave the other kind as the next candidate.
+    cands = flush_candidates(prs2, T, T - W, W)
+    check("flush offers every kind, longest-waiting first, newest within each",
+          [p["number"] for p in cands] == [14, 12])
+    check("candidates are empty while the window is closed", flush_candidates(prs2, T, T - 60, W) == [])
+    check("flush() is the head of flush_candidates()", flush(prs2, T, T - W, W) is cands[0])
+    cand_g = {"number": 12, "head": DEPLOY_PREFIXES[0] + "b"}
+    cand_a = {"number": 11, "head": DEPLOY_PREFIXES[1] + "a"}
+    tried = []
+    def sup(rc_by_number):
+        return lambda c: (tried.append(c["number"]), rc_by_number.get(c["number"], 0))[1]
+    check("stale gitops pin falls through to admin-ui (never runs supersede on the stale PR)",
+          select_candidate([cand_g, cand_a], lambda c: ["openbank-audit-service:sandbox-x"], sup({}))
+          is cand_a and tried == [11])
+    check("owner-hold refusal falls through to admin-ui",
+          select_candidate([cand_g, cand_a], lambda c: [], sup({12: 3})) is cand_a)
+    check("any supersede refusal falls through (rollback rc 1)",
+          select_candidate([cand_g, cand_a], lambda c: [], sup({12: 1})) is cand_a)
+    check("every kind refused -> nothing armed",
+          select_candidate([cand_g, cand_a], lambda c: ["x"], sup({11: 1})) is None)
+    check("first armable candidate wins, later kinds untouched",
+          select_candidate([cand_a, cand_g], lambda c: ["x"], sup({})) is cand_a)
+    # Independent lanes: a kind's armed PR or recent deploy never holds the OTHER kind.
+    g_armed = {"number": 40, "head": DEPLOY_PREFIXES[0] + "x", "created_at": "2026-09-30T09:00:00Z", "armed": True}
+    check("armed gitops PR does not block admin-ui (lanes are independent)",
+          [p["number"] for p in flush_candidates(prs2 + [g_armed], T, T - W, W)] == [14])
+    lanes = {DEPLOY_PREFIXES[0]: T - 60, DEPLOY_PREFIXES[1]: T - W}
+    check("recent gitops deploy closes only the gitops window",
+          [p["number"] for p in flush_candidates(prs2, T, lanes, W)] == [14])
+    check("each lane is measured from its own last deploy commit",
+          last_deploy_by_kind([{"message": "chore(gitops): auto-deploy x", "epoch": 9},
+                               {"message": "fix(a): y", "epoch": 8},
+                               {"message": "chore(admin-ui): deploy z", "epoch": 7},
+                               {"message": "chore(gitops): auto-deploy w", "epoch": 6}])
+          == {DEPLOY_PREFIXES[0]: 9, DEPLOY_PREFIXES[1]: 7})
+    a_armed = {"number": 41, "head": DEPLOY_PREFIXES[1] + "y", "created_at": "2026-09-30T09:00:00Z", "armed": True}
+    check("a second PR of an ARMED kind is never offered",
+          [p["number"] for p in flush_candidates(prs2 + [a_armed], T, T - W, W)] == [12])
+    check("flush never arms a second PR of a kind while one of that kind is armed",
+          flush([prs[1], {"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}],
+                T, None, W) is None)
     repair = {"number": 30, "head": "fix/repair", "created_at": "a", "armed": False,
               "state": "open", "repair_priority": True, "draft": True, "blocked": True}
     check("explicit open draft/blocked repair defers elapsed timer",
@@ -273,14 +369,24 @@ def self_test() -> int:
                                   "head_repository": {"full_name": "example/open-bank"}}}
         paths = {name: os.path.join(d, name + ".json") for name in ("prs", "commits", "event")}
         def run_fixture(prs_fixture, event_fixture):
-            for name, value in (("prs", prs_fixture), ("commits", [{"message": DEPLOY_SUBJECTS[0] + "old", "epoch": T - 60}]),
+            for name, value in (("prs", prs_fixture), ("commits", [{"message": s + "old", "epoch": T - 60} for s in DEPLOY_SUBJECTS]),
                                 ("event", event_fixture)):
                 with open(paths[name], "w", encoding="utf-8") as out:
                     json.dump(value, out)
             result = subprocess.run([sys.executable, __file__, "flush", "--prs-json", paths["prs"],
                                      "--commits-json", paths["commits"], "--event-json", paths["event"],
                                      "--now", str(T), "--window", str(W)], capture_output=True, text=True)
-            return result.returncode, result.stdout
+            # The arm/arm_head lines are asserted exactly; the candidates line separately below.
+            return result.returncode, "".join(l for l in result.stdout.splitlines(True)
+                                              if not l.startswith("candidates="))
+        def fixture_candidates(prs_fixture, event_fixture):
+            run_fixture(prs_fixture, event_fixture)
+            result = subprocess.run([sys.executable, __file__, "flush", "--prs-json", paths["prs"],
+                                     "--commits-json", paths["commits"], "--event-json", paths["event"],
+                                     "--now", str(T + W), "--window", str(W)], capture_output=True, text=True)
+            return [l for l in result.stdout.splitlines() if l.startswith("candidates=")]
+        check("CLI emits both kinds as candidates so a held kind cannot starve the other",
+              fixture_candidates(prs, {}) == ["candidates=11:chore/admin-ui-deploy-a 12:chore/gitops-auto-deploy-b"])
         check("manual producer completion expedites only its matching PR inside the window",
               run_fixture(prs + [manual_pr], event) == (0, "arm=21\narm_head=" + manual_pr["head"] + "\n"))
         sibling = {**manual_pr, "number": 22, "head": DEPLOY_PREFIXES[0] + sha + "-run102"}
@@ -388,6 +494,9 @@ def main() -> int:
     c = sub.add_parser("carry")
     c.add_argument("--root", default=".")
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
+    sel = sub.add_parser("select", help="arm-candidate fall-through: verify + supersede per kind")
+    sel.add_argument("--root", default=".")
+    sel.add_argument("--candidates", required=True, help="space-separated number:head pairs from flush")
     v = sub.add_parser("verify")
     v.add_argument("--root", default=".")
     for p in (d, f):
@@ -403,16 +512,50 @@ def main() -> int:
         print(f"::notice::deploy window: {verdict} — {why}", file=sys.stderr)
         return 0
     if a.cmd == "flush":
-        last = last_deploy_from_commits(json.load(open(a.commits_json)))
+        last = last_deploy_by_kind(json.load(open(a.commits_json)))
         manual_head = manual_deploy_head(json.load(open(a.event_json))) if a.event_json else None
-        pick = flush(json.load(open(a.prs_json)), a.now, last, a.window, manual_head)
-        print(f"arm={pick['number'] if pick else ''}")
-        print(f"arm_head={pick['head'] if pick else ''}")
+        cands = flush_candidates(json.load(open(a.prs_json)), a.now, last, a.window, manual_head)
+        print(f"arm={cands[0]['number'] if cands else ''}")
+        print(f"arm_head={cands[0]['head'] if cands else ''}")
+        # number:head pairs in order; the workflow falls through to the next on a hold refusal.
+        print("candidates=" + " ".join(f"{p['number']}:{p['head']}" for p in cands))
         return 0
     if a.cmd == "carry":
         for line in carry(a.root, sys.stdin.read(), set(a.skip_images.split()),
                           lambda image, tag: image_source_is_current(a.root, image, tag)):
             print(f"  [carried] {line}")
+        return 0
+    if a.cmd == "select":
+        repo = os.environ["GITHUB_REPOSITORY"]
+        cands = []
+        for pair in a.candidates.split():
+            number, _, head = pair.partition(":")
+            if not number.isdigit() or not head.startswith(DEPLOY_PREFIXES):
+                print(f"::error::unexpected deploy candidate {pair}", file=sys.stderr)
+                return 1
+            cands.append({"number": int(number), "head": head})
+
+        def verify(c):
+            # An unreadable diff refuses THIS kind only; raising here would abort the
+            # fall-through and re-create the head-of-line block this command exists to remove.
+            read = subprocess.run(["gh", "pr", "diff", str(c["number"]), "--repo", repo],
+                                  capture_output=True, text=True)
+            if read.returncode != 0:
+                return [f"diff of #{c['number']} unreadable (gh rc {read.returncode})"]
+            diff = read.stdout
+            return verify_pins(diff, lambda image, tag: image_source_is_current(a.root, image, tag))
+
+        def supersede(c):
+            prefix = next(x for x in DEPLOY_PREFIXES if c["head"].startswith(x))
+            # stdout -> stderr: this command's own stdout is the step's GITHUB_OUTPUT.
+            return subprocess.run(["bash", ".github/scripts/supersede-deploy-prs.sh", prefix, str(c["number"])],
+                                  stdout=sys.stderr).returncode
+
+        pick = select_candidate(cands, verify, supersede)
+        if pick is None:
+            print("::error::every deploy kind was refused - nothing armed.", file=sys.stderr)
+            return 1
+        print(f"arm={pick['number']}")
         return 0
     if a.cmd == "verify":
         stale = verify_pins(sys.stdin.read(),
