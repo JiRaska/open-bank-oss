@@ -76,9 +76,24 @@ is_ancestor() {
     git merge-base --is-ancestor "$1" "$2"
     return
   fi
-  local status
-  status="$(gh api "repos/${REPO}/compare/${1}...${2}" --jq .status 2>/dev/null)" || return 1
-  [ "$status" = "ahead" ] || [ "$status" = "identical" ]
+  # Only a definitive verdict ends the loop. A transport error, rate limit or malformed answer
+  # is "could not look": retried, then still LAGGING (fail-closed), never read as current. The
+  # old single attempt turned one transient API failure into a red main (sca-service 2026-10-31,
+  # the same pin had passed 70/0 twice in the preceding 30 minutes).
+  local status attempt=1 max="${PDP_ROLLOUT_API_ATTEMPTS:-4}"
+  while :; do
+    if status="$(gh api "repos/${REPO}/compare/${1}...${2}" --jq .status 2>/dev/null)"; then
+      case "$status" in
+        ahead|identical) return 0 ;;
+        behind|diverged) return 1 ;;
+      esac
+    fi
+    [ "$attempt" -ge "$max" ] && break
+    sleep "$(( attempt * ${PDP_ROLLOUT_RETRY_SLEEP:-3} ))"
+    attempt=$((attempt + 1))
+  done
+  echo "::warning::compare ${1:0:10}...${2:0:10} unresolved after ${max} attempts; counting as LAGGING" >&2
+  return 1
 }
 
 # Services whose image embeds libs-runtime: the same derivation Auto deploy uses to rebuild them.
@@ -221,6 +236,28 @@ selftest() {
     API=1
     marker="$(marker_commit)"
     [ "$marker" = "$shipped" ] || { echo "selftest FAIL: API marker does not follow canonical main" >&2; f=1; }
+    unset -f gh
+    # Transient compare-API failures: retried, but a never-answering API stays LAGGING.
+    export PDP_ROLLOUT_RETRY_SLEEP=0
+    calls="$tmp/calls"; : > "$calls"
+    gh() {
+      echo x >> "$calls"
+      case "$MOCK" in
+        flaky) [ "$(wc -l < "$calls")" -ge 3 ] && echo ahead || return 1 ;;
+        down) return 1 ;;
+        junk) echo "" ;;
+        behind) echo behind ;;
+      esac
+    }
+    MOCK=flaky; is_ancestor aaa bbb || { echo "selftest FAIL: transient API errors not retried" >&2; f=1; }
+    : > "$calls"; MOCK=down
+    if is_ancestor aaa bbb 2>/dev/null; then echo "selftest FAIL: dead API read as current" >&2; f=1; fi
+    [ "$(wc -l < "$calls")" -eq 4 ] || { echo "selftest FAIL: retry bound not honoured" >&2; f=1; }
+    : > "$calls"; MOCK=junk
+    if is_ancestor aaa bbb 2>/dev/null; then echo "selftest FAIL: empty verdict read as current" >&2; f=1; fi
+    : > "$calls"; MOCK=behind
+    if is_ancestor aaa bbb; then echo "selftest FAIL: behind read as current" >&2; f=1; fi
+    [ "$(wc -l < "$calls")" -eq 1 ] || { echo "selftest FAIL: definitive verdict was retried" >&2; f=1; }
     unset -f gh
     API=0
     exit "$f"
