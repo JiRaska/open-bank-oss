@@ -22,7 +22,7 @@ import java.util.UUID
 /**
  * The observable distributed shape of a unit order.
  *
- * `POST /api/v1/contracts/{contractId}/orders` places a participant's unit order by INSERTing the
+ * `POST /api/v2/contracts/{contractId}/orders` places a participant's unit order by INSERTing the
  * `unit_orders` row — the pending instruction NAV settlement later executes, so the row IS the
  * pension-fund money write at request time (the reservation/dedup properties of the outgoing leg
  * are pinned separately by [OutgoingReservationIT]). The spans asserted here are the service's
@@ -57,16 +57,17 @@ class PensionFundTraceContractIT {
     private fun createFund(): UUID {
         val isin = "TR" + UUID.randomUUID().toString().replace("-", "").take(9).uppercase() + "0"
         val id: String = Given {
+            header("Idempotency-Key", UUID.randomUUID().toString())
             contentType("application/json")
             body(
                 """{"name":"Trace test","isin":"$isin","lei":"315700ABCDEF12345678",
                     "depositaryReference":"TEST-DEP","custodyAccountReference":"TEST-CUST",
                     "currency":"CZK","riskClass":3,"mandatoryConservative":false,
-                    "managementFeeRate":0,"launchNavPerUnit":1}
+                    "productRevisionId":"00000000-0000-0000-0000-000000000001","launchNavPerUnit":1}
                 """.trimIndent(),
             )
         } When {
-            post("/api/v1/funds")
+            post("/api/v2/funds")
         } Then {
             statusCode(201)
         } Extract {
@@ -85,18 +86,18 @@ class PensionFundTraceContractIT {
             header("Idempotency-Key", "trace-it-${System.nanoTime()}")
             body("""{"fundId":"$fund","type":"SUBSCRIBE","amount":1000.00}""")
         } When {
-            post("/api/v1/contracts/$contract/orders")
+            post("/api/v2/contracts/$contract/orders")
         } Then {
             statusCode(202)
             body("id", notNullValue())
         }
 
         exporter.contract()
-            .requiresSpan("POST /api/v1/contracts/{contractId}/orders")
-            .requiresAttribute("POST /api/v1/contracts/{contractId}/orders", "http.response.status_code")
+            .requiresSpan("POST /api/v2/contracts/{contractId}/orders")
+            .requiresAttribute("POST /api/v2/contracts/{contractId}/orders", "http.response.status_code")
             .requiresAttribute("INSERT unit_orders", "db.sql.table")
             .requiresSameTrace(
-                "POST /api/v1/contracts/{contractId}/orders",
+                "POST /api/v2/contracts/{contractId}/orders",
                 "INSERT unit_orders",
             )
             .hasNoErrorSpan()
